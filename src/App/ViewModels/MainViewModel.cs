@@ -42,9 +42,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     // Device selection can change repeatedly while the native stop operation
     // is still restoring the previous phone's normal USB configuration.
     // Serialize those transitions and let only the newest selection win.
-    private readonly SemaphoreSlim _deviceSwitchGate = new(1, 1);
     private readonly SemaphoreSlim _logGate = new(1, 1);
     private readonly CaptureShutdownCoordinator _shutdownCoordinator = new();
+    private readonly Dictionary<string, DeviceCaptureState> _deviceSessions =
+        new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
     private DeviceViewModel? _selectedDevice;
     private string _environmentStatus = string.Empty;
@@ -52,13 +53,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private string _driverState = string.Empty;
     private bool _isCapturing;
     private bool _isBusy;
-    private bool _isSwitchingDevice;
     private string? _activeCaptureUdid;
     // Unlike _activeCaptureUdid, this survives a terminal/error status until
     // StopCapture has actually joined the native session and sent HPA0/HPD0.
     // It prevents a device switch from abandoning a failed/starting session.
     private readonly CaptureSessionOwnership _captureSession = new();
-    private int _selectionRevision;
     private int _manualRefreshPending;
     // Installation can restart the device node programmatically, but the
     // libusb0 filter is only considered ready for this GUI after a real
@@ -136,7 +135,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public string EnvironmentStatus { get => _environmentStatus; private set => Set(ref _environmentStatus, value); }
     public string CaptureStatus { get => _captureStatus; private set => Set(ref _captureStatus, value); }
     public string DriverState { get => _driverState; private set => Set(ref _driverState, value); }
-    public bool HasCaptureSession => _captureSession.HasSession;
+    private DeviceCaptureState? CurrentDeviceSession => SelectedDevice is null ? null :
+        _deviceSessions.GetValueOrDefault(SelectedDevice.Udid);
+    public ulong CurrentSessionHandle => CurrentDeviceSession?.Handle ?? 0;
+    public bool HasCaptureSession => CurrentDeviceSession?.HasSession == true;
+    private bool AnyDeviceSession => _deviceSessions.Values.Any(session => session.HasSession);
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) { StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); } } }
     public bool IsBusy
     {
@@ -150,7 +153,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             InstallDriverCommand.NotifyCanExecuteChanged();
         }
     }
-    private bool IsOperationBusy => IsBusy || _isSwitchingDevice;
+    private bool IsOperationBusy => IsBusy;
     public string DeviceCount => LocalizationService.Format("DeviceCountFormat", Devices.Count);
     public string SelectedName => SelectedDevice?.DisplayName ?? LocalizationService.Get("NoDeviceSelected");
     public string SelectedModel => SelectedDevice?.ModelDisplay ?? "—";
@@ -179,6 +182,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             if (value is null) return;
             if (!Set(ref _selectedResolutionPreset, value)) return;
+            if (CurrentDeviceSession is { } session)
+            {
+                session.RenderWidth = value.Width;
+                session.RenderHeight = value.Height;
+            }
             SetSettingsStatus("PendingSettingsLocalFormat", value, SelectedFrameRate);
             OnPropertyChanged(nameof(TargetResolutionDisplay));
         }
@@ -190,6 +198,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         set
         {
             if (!Set(ref _selectedFrameRate, value)) return;
+            if (CurrentDeviceSession is { } session) session.FrameRate = value;
             SetSettingsStatus("PendingSettingsFormat", SelectedResolutionPreset, value);
             OnPropertyChanged(nameof(TargetFpsDisplay));
         }
@@ -202,7 +211,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             var clamped = Math.Clamp(value, 0, 100);
             if (!Set(ref _playbackVolume, clamped)) return;
-            var result = _core.SetAudioVolume(clamped / 100.0);
+            if (CurrentDeviceSession is { } session) session.Volume = clamped;
+            var result = CurrentSessionHandle != 0
+                ? InvokeDeviceSetting(() => _core.SetDeviceAudioVolume(CurrentSessionHandle, clamped / 100.0))
+                : _core.SetAudioVolume(clamped / 100.0);
             if (!result.Success) SetRawSettingsStatus(result.Message);
         }
     }
@@ -213,7 +225,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         set
         {
             if (!Set(ref _playAudio, value)) return;
-            var result = _core.SetAudioEnabled(value);
+            if (CurrentDeviceSession is { } session) session.PlayAudio = value;
+            var result = CurrentSessionHandle != 0
+                ? InvokeDeviceSetting(() => _core.SetDeviceAudioEnabled(CurrentSessionHandle, value))
+                : _core.SetAudioEnabled(value);
             if (result.Success)
                 SetSettingsStatus(value ? "AudioPlaybackEnabled" : "AudioPlaybackMuted");
             else SetRawSettingsStatus(result.Message);
@@ -222,6 +237,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     // Kept as a compatibility alias for older XAML and start options.
     public bool CaptureAudio { get => PlayAudio; set => PlayAudio = value; }
+
+    private static (bool Success, string Message) InvokeDeviceSetting(Action action)
+    {
+        try { action(); return (true, string.Empty); }
+        catch (Exception error) { return (false, error.Message); }
+    }
     public string SettingsStatus { get => _settingsStatus; private set => Set(ref _settingsStatus, value); }
     public string TargetResolutionDisplay => LocalizationService.Format(
         "RenderLimitFormat", SelectedResolutionPreset.Label);
@@ -253,7 +274,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             () => SelectedDevice is not null && !_driverReplug.IsPending(SelectedDevice.Udid) &&
                   !HasCaptureSession && !IsCapturing && !IsOperationBusy);
         StopCommand = new RelayCommand(() => _ = StopAsync(),
-            () => (IsCapturing || _captureSession.HasSession) && !IsOperationBusy);
+            () => HasCaptureSession && !IsOperationBusy);
         // A manual refresh is guaranteed to run after a short in-flight poll;
         // timer refreshes remain best-effort and never build up a queue.
         RefreshCommand = new RelayCommand(() => _ = RefreshAsync(forceDeviceEnumeration: true));
@@ -295,9 +316,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             // appears without interrupting the active libusb0 capture. It
             // deliberately skips GetEnvironment(), whose global USB probe is
             // unnecessary here and unsafe to run beside a live libusb0 handle.
-            if (IsCapturing && !forceDeviceEnumeration)
+            if (AnyDeviceSession && !forceDeviceEnumeration)
             {
-                var activeCapture = await Task.Run(_core.GetCaptureStatus);
+                var activeCapture = await Task.Run(GetSelectedCaptureStatus);
                 ApplyCaptureStatus(activeCapture);
                 return;
             }
@@ -305,15 +326,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             NativeEnvironmentInfo? environment = null;
             IReadOnlyList<NativeDeviceInfo> nativeDevices;
             NativeCaptureStatus capture;
-            if (IsCapturing)
+            if (AnyDeviceSession)
             {
                 (nativeDevices, capture) = await Task.Run(() =>
-                    (_core.GetDevices(), _core.GetCaptureStatus()));
+                    (_core.GetDevices(), GetSelectedCaptureStatus()));
             }
             else
             {
                 var result = await Task.Run(() =>
-                    (_core.GetEnvironment(), _core.GetDevices(), _core.GetCaptureStatus()));
+                    (_core.GetEnvironment(), _core.GetDevices(), GetSelectedCaptureStatus()));
                 environment = result.Item1;
                 nativeDevices = result.Item2;
                 capture = result.Item3;
@@ -339,6 +360,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             var currentSelectionUdid = SelectedDevice?.Udid;
             ReconcileDevices(devices, currentSelectionUdid, captureActive);
             ApplyCaptureStatus(capture);
+            await PollBackgroundSessionErrorsAsync();
 
             if (forceDeviceEnumeration)
                 AddUiLog($"device refresh: discovered={devices.Count} visible={Devices.Count} " +
@@ -373,6 +395,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             var activeCard = Devices.FirstOrDefault(device =>
                 DeviceViewModel.UdidEquals(device.Udid, _activeCaptureUdid));
             if (activeCard is not null) desired.Add(activeCard);
+        }
+        foreach (var sessionUdid in _deviceSessions.Values
+                     .Where(session => session.HasSession).Select(session => session.Udid))
+        {
+            if (desired.Any(device => DeviceViewModel.UdidEquals(device.Udid, sessionUdid))) continue;
+            var retained = Devices.FirstOrDefault(device =>
+                DeviceViewModel.UdidEquals(device.Udid, sessionUdid));
+            if (retained is not null) desired.Add(retained);
         }
 
         TrackDriverReplugCycle(desired);
@@ -426,30 +456,34 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (ReferenceEquals(_selectedDevice, value)) return;
         _selectedDevice = value;
         OnPropertyChanged(nameof(SelectedDevice));
-        CaptureStatus = value?.StatusDisplay ?? LocalizationService.Get("StatusWaitingDevice");
+        var session = CurrentDeviceSession;
+        _activeCaptureUdid = session?.HasSession == true ? value?.Udid : null;
+        IsCapturing = session?.HasSession == true;
+        SetCaptureSessionOwner(_activeCaptureUdid);
+        NativeCore.SelectPreviewSession(session?.Handle ?? 0);
+        OnPropertyChanged(nameof(CurrentSessionHandle));
+        if (session is not null)
+        {
+            SelectedFrameRate = session.FrameRate;
+            PlaybackVolume = session.Volume;
+            PlayAudio = session.PlayAudio;
+            SelectedResolutionPreset = ResolutionPresets.FirstOrDefault(preset =>
+                preset.Width == session.RenderWidth && preset.Height == session.RenderHeight)
+                ?? ResolutionPresets[0];
+        }
+        CaptureStatus = session?.HasSession == true
+            ? LocalizationService.Get("CaptureStreaming")
+            : value?.StatusDisplay ?? LocalizationService.Get("StatusWaitingDevice");
         NotifySelectedDeviceProperties();
         StartCommand.NotifyCanExecuteChanged();
+        StopCommand.NotifyCanExecuteChanged();
+        ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
 
         // A transient null can be published by WPF while a ListBox item is
         // being moved. Let the already queued transition observe the changed
         // selection and release its busy state instead of orphaning it behind
         // a revision that has no corresponding task.
-        var revision = value is null && _isSwitchingDevice
-            ? Volatile.Read(ref _selectionRevision)
-            : Interlocked.Increment(ref _selectionRevision);
-        var differentFromActive = value is not null &&
-            _captureSession.RequiresStopBeforeSwitch(value.Udid);
-        if (scheduleCaptureSwitch && value is not null &&
-            (differentFromActive || _isSwitchingDevice))
-        {
-            SetSwitchingDevice(true);
-            CaptureStatus = LocalizationService.Format("SwitchingDeviceFormat", value.DisplayName);
-            AddUiLog($"device switch requested: from={_activeCaptureUdid ?? "-"} to={value.Udid}");
-            _ = SwitchSelectedDeviceAsync(value, revision);
-            return;
-        }
-
-        if (scheduleCaptureSwitch && !IsCapturing && !_isSwitchingDevice)
+        if (scheduleCaptureSwitch && !HasCaptureSession)
             UpdateSelectedDriverStatus();
     }
 
@@ -460,112 +494,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedOs));
         OnPropertyChanged(nameof(SelectedUdid));
         OnPropertyChanged(nameof(SelectedConnection));
-    }
-
-    private async Task SwitchSelectedDeviceAsync(DeviceViewModel target, int revision)
-    {
-        await _deviceSwitchGate.WaitAsync();
-        var coreGateHeld = false;
-        var stoppedPreviousCapture = false;
-        var previousActiveUdid = _activeCaptureUdid;
-        var previousSessionUdid = _captureSession.OwnerUdid;
-        try
-        {
-            if (_disposed || revision != Volatile.Read(ref _selectionRevision)) return;
-            await _coreGate.WaitAsync();
-            coreGateHeld = true;
-            if (_disposed || revision != Volatile.Read(ref _selectionRevision)) return;
-            if (!ReferenceEquals(SelectedDevice, target) &&
-                !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, target.Udid)) return;
-
-            if (_captureSession.RequiresStopBeforeSwitch(target.Udid))
-            {
-                CaptureStatus = LocalizationService.Format("SwitchingDeviceFormat", target.DisplayName);
-                AddUiLog($"device switch stopping QuickTime session: owner={_captureSession.OwnerUdid}");
-                await Task.Run(_core.StopCapture);
-                stoppedPreviousCapture = true;
-                // StopCapture is synchronous: once it returns the native
-                // worker has joined and shutdown_usb has sent HPA0/HPD0.
-                SetCaptureSessionOwner(null);
-                _activeCaptureUdid = null;
-                IsCapturing = false;
-                var status = await Task.Run(_core.GetCaptureStatus);
-                ApplyCaptureStatus(status);
-                ResetPreviewState();
-                AddUiLog($"device switch released previous capture; next={target.Udid}");
-            }
-
-            if (revision != Volatile.Read(ref _selectionRevision)) return;
-            if (_captureSession.HasSession)
-            {
-                // A rapid A -> B -> A selection can supersede the queued B
-                // transition before it starts. Keep A streaming and avoid the
-                // legacy libusb0 driver probe while A's capture handle is live.
-                var currentStatus = await Task.Run(_core.GetCaptureStatus);
-                ApplyCaptureStatus(currentStatus);
-            }
-            else
-            {
-                UpdateSelectedDriverStatus();
-                CaptureStatus = target.StatusDisplay;
-            }
-            if (stoppedPreviousCapture)
-                AddUiLog($"device switch ready: selected={target.Udid}; press Start to mirror");
-        }
-        catch (Exception error)
-        {
-            if (stoppedPreviousCapture)
-            {
-                SetCaptureSessionOwner(null);
-                _activeCaptureUdid = null;
-                IsCapturing = false;
-                ResetPreviewState();
-            }
-            if (!stoppedPreviousCapture) try
-            {
-                var status = coreGateHeld ? _core.GetCaptureStatus() : default;
-                if (coreGateHeld && IsActiveCaptureState(status.State))
-                {
-                    _activeCaptureUdid = previousActiveUdid;
-                    SetCaptureSessionOwner(previousSessionUdid);
-                    ApplyCaptureStatus(status);
-                }
-                else
-                {
-                    _activeCaptureUdid = null;
-                    SetCaptureSessionOwner(null);
-                    IsCapturing = false;
-                    ResetPreviewState();
-                }
-            }
-            catch
-            {
-                // If status recovery itself fails, retain an active-session
-                // affordance so the user can still press Stop and retry the
-                // native cleanup instead of being stranded with no controls.
-                _activeCaptureUdid = previousActiveUdid;
-                SetCaptureSessionOwner(previousSessionUdid);
-                IsCapturing = previousActiveUdid is not null;
-            }
-            CaptureStatus = LocalizationService.Format("SwitchDeviceFailedFormat", error.Message);
-            AddUiLog($"device switch failed: {error.Message}");
-        }
-        finally
-        {
-            if (coreGateHeld) _coreGate.Release();
-            if (revision == Volatile.Read(ref _selectionRevision)) SetSwitchingDevice(false);
-            _deviceSwitchGate.Release();
-        }
-    }
-
-    private void SetSwitchingDevice(bool value)
-    {
-        if (_isSwitchingDevice == value) return;
-        _isSwitchingDevice = value;
-        StartCommand.NotifyCanExecuteChanged();
-        StopCommand.NotifyCanExecuteChanged();
-        ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
-        InstallDriverCommand.NotifyCanExecuteChanged();
     }
 
     private void SetCaptureSessionOwner(string? udid)
@@ -596,6 +524,41 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private static bool IsActiveCaptureState(CaptureState state) => state is
         CaptureState.ActivatingUsb or CaptureState.WaitingForDevice or
         CaptureState.Handshaking or CaptureState.Streaming or CaptureState.Stopping;
+
+    private NativeCaptureStatus GetSelectedCaptureStatus()
+    {
+        var handle = CurrentSessionHandle;
+        return handle != 0 ? _core.GetDeviceSessionStatus(handle) : new NativeCaptureStatus
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeCaptureStatus>(),
+            State = CaptureState.Idle,
+            Message = string.Empty,
+        };
+    }
+
+    private async Task PollBackgroundSessionErrorsAsync()
+    {
+        foreach (var state in _deviceSessions.Values.Where(value =>
+                     value.Handle != 0 && value.Handle != CurrentSessionHandle).ToArray())
+        {
+            NativeCaptureStatus status;
+            try { status = await Task.Run(() => _core.GetDeviceSessionStatus(state.Handle)); }
+            catch { continue; }
+            state.LastStatus = new NativeCaptureStatusSnapshot
+            {
+                Width = status.Width,
+                Height = status.Height,
+                Fps = status.Fps,
+                LatencyMs = status.LatencyMs,
+            };
+            if (status.State != CaptureState.Error || state.ErrorShown) continue;
+            state.ErrorShown = true;
+            var name = Devices.FirstOrDefault(device =>
+                DeviceViewModel.UdidEquals(device.Udid, state.Udid))?.DisplayName ?? state.Udid;
+            MessageBox.Show(status.Message, LocalizationService.Format(
+                "DeviceCaptureErrorTitleFormat", name), MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void ResetPreviewState()
     {
@@ -635,19 +598,34 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _renderedFrames = 0;
             _renderClock.Restart();
             _lastFpsUpdateTicks = 0;
-            var preference = _core.SetVideoPreferences(
-                SelectedResolutionPreset.Width, SelectedResolutionPreset.Height, (uint)SelectedFrameRate);
-            _core.SetAudioVolume(PlaybackVolume / 100.0);
-            _core.SetAudioEnabled(PlayAudio);
+            var preference = (Success: true, Message: LocalizationService.Get("VideoPreferencesApplied"));
             // Own the session before the native start call can block in USB
             // activation. A device click or window close during that interval
             // must still queue an explicit stop for this exact phone, and the
             // top action changes to its red stop state immediately.
+            var state = _deviceSessions.GetValueOrDefault(device.Udid) ?? new DeviceCaptureState
+            {
+                Udid = device.Udid,
+                RenderWidth = SelectedResolutionPreset.Width,
+                RenderHeight = SelectedResolutionPreset.Height,
+                FrameRate = SelectedFrameRate,
+                PlayAudio = PlayAudio,
+                Volume = PlaybackVolume,
+            };
+            _deviceSessions[device.Udid] = state;
+            state.IsStarting = true;
             SetCaptureSessionOwner(device.Udid);
-            var result = await Task.Run(() => _core.StartCapture(device.Udid, PlayAudio));
-            IsCapturing = result.Success;
-            _activeCaptureUdid = result.Success ? device.Udid : null;
-            SetCaptureSessionOwner(result.Success ? device.Udid : null);
+            var created = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
+                state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
+                state.PlayAudio, state.Volume / 100.0));
+            state.IsStarting = false;
+            state.Handle = created.Success ? created.Handle : 0;
+            var result = (created.Success, created.Message);
+            IsCapturing = created.Success;
+            _activeCaptureUdid = created.Success ? device.Udid : null;
+            SetCaptureSessionOwner(created.Success ? device.Udid : null);
+            NativeCore.SelectPreviewSession(state.Handle);
+            OnPropertyChanged(nameof(CurrentSessionHandle));
             CaptureStatus = result.Message;
             if (preference.Success)
                 SetSettingsStatus("AppliedRenderFormat", SelectedResolutionPreset, SelectedFrameRate);
@@ -683,7 +661,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (_disposed) return;
             var width = SelectedResolutionPreset.Width;
             var height = SelectedResolutionPreset.Height;
-            var preference = _core.SetVideoPreferences(width, height, (uint)SelectedFrameRate);
+            var preference = CurrentSessionHandle != 0
+                ? _core.SetDeviceVideoPreferences(CurrentSessionHandle, width, height, (uint)SelectedFrameRate)
+                : _core.SetVideoPreferences(width, height, (uint)SelectedFrameRate);
             SetRawSettingsStatus(preference.Message);
             AddUiLog(LocalizationService.Format("AppliedRenderLogFormat",
                 SelectedResolutionPreset.Label, SelectedFrameRate, preference.Message));
@@ -704,7 +684,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task StopAsync()
     {
-        if (_disposed || (!IsCapturing && !_captureSession.HasSession) || IsOperationBusy) return;
+        if (_disposed || !HasCaptureSession || IsOperationBusy) return;
         IsBusy = true;
         var gateHeld = false;
         CaptureStatus = LocalizationService.Get("CaptureStopping");
@@ -715,9 +695,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (_disposed) return;
             // Native stop waits for USB release packets and configuration
             // restore. Keep that wait off the WPF UI thread.
-            await Task.Run(() => _core.StopCapture());
-            var status = await Task.Run(_core.GetCaptureStatus);
-            ApplyCaptureStatus(status);
+            var state = CurrentDeviceSession;
+            if (state is null || state.Handle == 0) return;
+            var handle = state.Handle;
+            await Task.Run(() => _core.StopDeviceSession(handle));
+            _core.DestroyDeviceSession(handle);
+            state.Handle = 0;
+            NativeCore.SelectPreviewSession(0);
+            OnPropertyChanged(nameof(CurrentSessionHandle));
             SetCaptureSessionOwner(null);
             _activeCaptureUdid = null;
             IsCapturing = false;
@@ -793,6 +778,67 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     {
         AddLogLine($"{DateTime.Now:HH:mm:ss.fff} [UI] {message}");
         PublishLogText();
+    }
+
+    internal ulong GetDeviceSessionHandle(string udid) =>
+        _deviceSessions.GetValueOrDefault(udid)?.Handle ?? 0;
+
+    internal async Task<(bool Success, ulong Handle, string Message)> StartBackgroundSessionAsync(
+        DeviceViewModel device)
+    {
+        await _coreGate.WaitAsync();
+        try
+        {
+            if (_deviceSessions.TryGetValue(device.Udid, out var existing) && existing.Handle != 0)
+                return (true, existing.Handle, string.Empty);
+            var state = existing ?? new DeviceCaptureState
+            {
+                Udid = device.Udid,
+                RenderWidth = 0,
+                RenderHeight = 0,
+                FrameRate = 60,
+                PlayAudio = false,
+                Volume = 100,
+            };
+            _deviceSessions[device.Udid] = state;
+            var result = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
+                state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
+                playAudio: false, state.Volume / 100.0));
+            state.Handle = result.Success ? result.Handle : 0;
+            if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
+            {
+                IsCapturing = result.Success;
+                _activeCaptureUdid = result.Success ? device.Udid : null;
+                SetCaptureSessionOwner(_activeCaptureUdid);
+                NativeCore.SelectPreviewSession(state.Handle);
+                OnPropertyChanged(nameof(CurrentSessionHandle));
+            }
+            return result;
+        }
+        finally { _coreGate.Release(); }
+    }
+
+    internal async Task StopDeviceSessionAsync(string udid)
+    {
+        await _coreGate.WaitAsync();
+        try
+        {
+            if (!_deviceSessions.TryGetValue(udid, out var state) || state.Handle == 0) return;
+            var handle = state.Handle;
+            await Task.Run(() => _core.StopDeviceSession(handle));
+            _core.DestroyDeviceSession(handle);
+            state.Handle = 0;
+            if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
+            {
+                NativeCore.SelectPreviewSession(0);
+                IsCapturing = false;
+                _activeCaptureUdid = null;
+                SetCaptureSessionOwner(null);
+                OnPropertyChanged(nameof(CurrentSessionHandle));
+                ResetPreviewState();
+            }
+        }
+        finally { _coreGate.Release(); }
     }
 
     internal string CaptureScreenshot(string path) =>
@@ -1162,22 +1208,28 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _disposed = true;
         LocalizationService.LanguageChanged -= OnLanguageChanged;
         DisposePreviewBuffers();
-        await _deviceSwitchGate.WaitAsync();
         await _coreGate.WaitAsync();
         await _logGate.WaitAsync();
         try
         {
-            // The native core owns one QuickTime session at a time. Every
-            // prior owner was stopped synchronously during selection switch;
-            // this unconditional, idempotent stop releases whichever session
-            // may still exist (including activation/handshake/error states)
-            // before im_shutdown performs its final defensive cleanup.
             await _shutdownCoordinator.StopAndDisposeOnceAsync(
                 async () =>
                 {
                     try
                     {
-                        AddUiLog($"application shutdown stopping QuickTime session: owner={_captureSession.OwnerUdid ?? "unknown"}");
+                        foreach (var session in _deviceSessions.Values.Where(value => value.Handle != 0).ToArray())
+                        {
+                            var handle = session.Handle;
+                            AddUiLog($"application shutdown stopping device session: udid={session.Udid} handle={handle}");
+                            try { await Task.Run(() => _core.StopDeviceSession(handle)); }
+                            finally
+                            {
+                                _core.DestroyDeviceSession(handle);
+                                session.Handle = 0;
+                            }
+                        }
+                        // Defensive cleanup for a legacy session created by an
+                        // older component in the same process.
                         await Task.Run(_core.StopCapture);
                     }
                     finally
@@ -1193,10 +1245,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             _logGate.Release();
             _coreGate.Release();
-            _deviceSwitchGate.Release();
             _logGate.Dispose();
             _coreGate.Dispose();
-            _deviceSwitchGate.Dispose();
         }
     }
 

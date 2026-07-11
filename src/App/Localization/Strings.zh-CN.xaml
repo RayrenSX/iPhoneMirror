@@ -14,6 +14,12 @@
     <system:String x:Key="DeviceAlreadyMirroring">该设备已在主预览中投屏</system:String>
     <system:String x:Key="SimultaneousMirrorStartedFormat">已为 {0} 打开同时投屏窗口</system:String>
     <system:String x:Key="SimultaneousMirrorFailedFormat">同时投屏启动失败：{0}</system:String>
+    <system:String x:Key="DeviceCaptureErrorTitleFormat">{0} 投屏错误</system:String>
+    <system:String x:Key="IndependentWindowPin">置顶</system:String>
+    <system:String x:Key="IndependentWindowUnpin">取消置顶</system:String>
+    <system:String x:Key="IndependentWindowFix">固定窗口</system:String>
+    <system:String x:Key="IndependentWindowUnfix">取消固定</system:String>
+    <system:String x:Key="IndependentWindowClose">关闭</system:String>
     <system:String x:Key="KeepUnlocked">连接后请保持 Apple 设备解锁</system:String>
     <system:String x:Key="PreviewLabel">预览</system:String>
     <system:String x:Key="ResolutionLabel">分辨率</system:String>
@@ -45,7 +51,7 @@
     <system:String x:Key="StopMirroring">暂停投屏</system:String>
     <system:String x:Key="DriverTrustHelp">驱动与信任帮助</system:String>
     <system:String x:Key="FooterLocalUsb">本地 USB，不使用 Wi‑Fi / AirPlay</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 0.3 Preview 3</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 0.3 Preview 4</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">正在检查 Apple USB 环境…</system:String>
     <system:String x:Key="StatusWaitingDevice">等待设备连接</system:String>

@@ -19,8 +19,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _logTimer;
-    private readonly PreviewWindowManager _previewWindows = new();
-    private readonly SecondaryMirrorProcessManager _secondaryMirrors = new();
+    private readonly MultiDevicePreviewManager _secondaryMirrors;
     private readonly SemaphoreSlim _screenshotGate = new(1, 1);
     private bool _isFullScreen;
     private WindowStyle _restoreWindowStyle;
@@ -32,6 +31,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _viewModel = new MainViewModel();
+        _secondaryMirrors = new MultiDevicePreviewManager(_viewModel);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -60,7 +60,6 @@ public partial class MainWindow : Window
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _refreshTimer.Stop();
         _logTimer.Stop();
-        _previewWindows.Dispose();
         _secondaryMirrors.Dispose();
         try
         {
@@ -81,18 +80,12 @@ public partial class MainWindow : Window
 
     private void OnRefreshPreviewClick(object sender, RoutedEventArgs e) => RefreshPreview();
 
-    private void OnMirrorSimultaneouslyClick(object sender, RoutedEventArgs e)
+    private async void OnMirrorSimultaneouslyClick(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem item ||
             ItemsControl.ItemsControlFromItemContainer(item) is not ContextMenu menu ||
             menu.PlacementTarget is not FrameworkElement { DataContext: Models.DeviceViewModel device }) return;
-        if (Models.DeviceViewModel.UdidEquals(device.Udid, _viewModel.SelectedDevice?.Udid) &&
-            _viewModel.HasCaptureSession)
-        {
-            _viewModel.AddUiLog(LocalizationService.Get("DeviceAlreadyMirroring"));
-            return;
-        }
-        var result = _secondaryMirrors.Show(device);
+        var result = await _secondaryMirrors.ShowAsync(device);
         _viewModel.AddUiLog(result.Success
             ? LocalizationService.Format("SimultaneousMirrorStartedFormat", device.DisplayName)
             : LocalizationService.Format("SimultaneousMirrorFailedFormat", result.Message));
@@ -115,18 +108,23 @@ public partial class MainWindow : Window
 
     private void RefreshPreview()
     {
-        var refreshed = _previewWindows.IsOpen ? _previewWindows.Refresh() : MainPreviewHost.ForceRefresh();
+        var refreshed = _secondaryMirrors.IsOpen(_viewModel.SelectedDevice)
+            ? _secondaryMirrors.Refresh(_viewModel.SelectedDevice)
+            : MainPreviewHost.ForceRefresh();
         _viewModel.AddUiLog(LocalizationService.Get(
             refreshed ? "PreviewRefreshed" : "PreviewRefreshFailed"));
     }
 
-    private void OnPreviewWindowClick(object sender, RoutedEventArgs e)
+    private async void OnPreviewWindowClick(object sender, RoutedEventArgs e)
     {
         try
         {
-            _previewWindows.UpdateSourceSize(
+            var device = _viewModel.SelectedDevice;
+            if (device is null) return;
+            var result = await _secondaryMirrors.ShowAsync(device);
+            if (!result.Success) throw new InvalidOperationException(result.Message);
+            _secondaryMirrors.UpdateDevice(device,
                 _viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight);
-            _previewWindows.Show();
             _viewModel.AddUiLog(LocalizationService.Get("PreviewWindowOpened"));
         }
         catch (Exception error)
@@ -135,13 +133,16 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnObsWindowClick(object sender, RoutedEventArgs e)
+    private async void OnObsWindowClick(object sender, RoutedEventArgs e)
     {
         try
         {
-            _previewWindows.UpdateSourceSize(
+            var device = _viewModel.SelectedDevice;
+            if (device is null) return;
+            var result = await _secondaryMirrors.ShowAsync(device);
+            if (!result.Success) throw new InvalidOperationException(result.Message);
+            _secondaryMirrors.UpdateDevice(device,
                 _viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight);
-            _previewWindows.Show();
         }
         catch (Exception error)
         {
@@ -167,23 +168,28 @@ public partial class MainWindow : Window
         // to the final height notification avoids resizing twice per frame-
         // format/orientation change.
         if (e.PropertyName is nameof(MainViewModel.SourceVideoHeight) or
-            nameof(MainViewModel.SelectedDevice) or nameof(MainViewModel.SelectedModel))
+            nameof(MainViewModel.SelectedDevice) or nameof(MainViewModel.SelectedModel) or
+            nameof(MainViewModel.CurrentSessionHandle))
         {
-            _previewWindows.UpdateSourceDevice(
-                _viewModel.SelectedDevice?.ProductType,
+            _secondaryMirrors.UpdateDevice(
+                _viewModel.SelectedDevice,
                 _viewModel.SourceVideoWidth,
                 _viewModel.SourceVideoHeight);
+            if (e.PropertyName is nameof(MainViewModel.SelectedDevice) or
+                nameof(MainViewModel.CurrentSessionHandle))
+                Dispatcher.BeginInvoke(DispatcherPriority.Render, MainPreviewHost.Activate);
         }
     }
 
-    private void OnFullScreenClick(object sender, RoutedEventArgs e) => ToggleActiveFullScreen();
+    private void OnFullScreenClick(object sender, RoutedEventArgs e) => _ = ToggleActiveFullScreenAsync();
 
-    private void ToggleActiveFullScreen()
+    private async Task ToggleActiveFullScreenAsync()
     {
         try
         {
-            if (_previewWindows.IsOpen)
-                _previewWindows.ToggleFullScreen();
+            if (_secondaryMirrors.IsOpen(_viewModel.SelectedDevice) &&
+                _viewModel.SelectedDevice is { } device)
+                _ = await _secondaryMirrors.ToggleFullScreenAsync(device);
             else
                 ToggleFullScreen();
         }
@@ -292,7 +298,7 @@ public partial class MainWindow : Window
     {
         var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
         var shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
-        if (e.Key == Key.F11) ToggleActiveFullScreen();
+        if (e.Key == Key.F11) _ = ToggleActiveFullScreenAsync();
         else if (e.Key == Key.Escape && _isFullScreen) ToggleFullScreen();
         else if (e.Key == Key.F5) _ = _viewModel.RefreshAsync(forceDeviceEnumeration: true);
         else if (ctrl && e.Key == Key.R) RefreshPreview();

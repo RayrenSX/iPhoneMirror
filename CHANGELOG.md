@@ -3,6 +3,41 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
+## [0.3.0-preview.4] - 2026-07-11
+
+### Added
+
+- Add a versioned native multi-session API. Every connected device now owns an
+  independent USB capture, decoder, audio state, rendering preferences and status handle.
+- Treat the left device list as persistent tabs: selecting another device changes only the
+  homepage preview and control target while all other capture sessions remain active.
+- Support multiple detached preview windows at once, including simultaneous homepage and
+  detached rendering for the same device.
+- Add a matching black-and-white context menu to detached windows with always-on-top,
+  window lock/unlock and close actions. Detached windows are always on top by default.
+- Show background-device capture failures in a dedicated error dialog named for that device.
+
+### Changed
+
+- Route Start/Stop, resolution, frame rate, audio, refresh, screenshot, fullscreen and OBS
+  actions to the currently selected device session.
+- Preserve each device's resolution limit, target frame rate, audio toggle and volume when
+  switching tabs.
+- Closing a detached preview now removes only that HWND renderer. The USB capture remains
+  active for instant return to its device tab; use the red Stop button to end that session.
+- Closing the application still stops and destroys every remaining device session and sends
+  the QuickTime shutdown messages to each device.
+
+### Fixed
+
+- Fix the homepage becoming black after switching from the legacy renderer to a device session.
+- Fix opening a second detached preview replacing the first device's window.
+- Fix closing one device window corrupting or pausing another device session.
+- Fix a closed detached window causing its device tab to return in a stopped state.
+- Fix the detached-window context menu not opening with a physical mouse right-click on the
+  custom borderless frame.
+- Make Lock Window disable both moving and resizing while keeping the context menu available.
+
 ## [0.3.0-preview.3] - 2026-07-11
 
 ### Added
@@ -68,7 +103,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.3...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.4...HEAD
+[0.3.0-preview.4]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.4
 [0.3.0-preview.3]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.3
 [0.3.0-preview.2]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.2
 [0.3.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.1

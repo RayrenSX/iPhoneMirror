@@ -104,6 +104,13 @@ await shutdown.StopAndDisposeOnceAsync(
     () => { shutdownOrder.Add("duplicate-dispose"); return Task.CompletedTask; });
 Sequence(["stop", "dispose"], shutdownOrder, "window close cleanup is ordered and idempotent");
 
+var deviceA = new DeviceCaptureState { Udid = "phone-a", Handle = 11, FrameRate = 60, Volume = 80 };
+var deviceB = new DeviceCaptureState { Udid = "phone-b", Handle = 22, FrameRate = 30, Volume = 25 };
+deviceB.FrameRate = 24;
+Equal((ulong)11, deviceA.Handle, "switching device does not release first session");
+Equal(60, deviceA.FrameRate, "device A settings remain independent");
+Equal(24, deviceB.FrameRate, "device B settings update independently");
+
 // Even when explicit stop fails, im_shutdown/dispose remains a mandatory
 // defensive cleanup path.
 var failureOrder = new List<string>();

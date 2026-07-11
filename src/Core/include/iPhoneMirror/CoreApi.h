@@ -17,7 +17,8 @@
 
 namespace iPhoneMirror {
 
-constexpr std::uint32_t ApiVersion = 8;
+constexpr std::uint32_t ApiVersion = 9;
+using SessionHandle = std::uint64_t;
 constexpr std::size_t MaxUdid = 128;
 constexpr std::size_t MaxName = 128;
 constexpr std::size_t MaxProductType = 64;
@@ -217,6 +218,37 @@ IM_API std::int32_t IM_CALL im_set_video_preferences(
     std::uint32_t max_fps);
 IM_API std::int32_t IM_CALL im_set_audio_enabled(std::int32_t enabled);
 IM_API std::int32_t IM_CALL im_set_audio_volume(float volume);
+
+// Multi-device API. Each handle owns one independent USB capture session and
+// may be attached/detached from an HWND without stopping its background stream.
+IM_API std::int32_t IM_CALL im_session_create(
+    const wchar_t* udid, const iPhoneMirror::CaptureOptions* options,
+    iPhoneMirror::SessionHandle* handle);
+IM_API std::int32_t IM_CALL im_session_stop(iPhoneMirror::SessionHandle handle);
+IM_API void IM_CALL im_session_destroy(iPhoneMirror::SessionHandle handle);
+IM_API std::int32_t IM_CALL im_session_get_status(
+    iPhoneMirror::SessionHandle handle, iPhoneMirror::CaptureStatus* status);
+IM_API std::int32_t IM_CALL im_session_attach_preview(
+    iPhoneMirror::SessionHandle handle, void* hwnd);
+IM_API void IM_CALL im_session_detach_preview(iPhoneMirror::SessionHandle handle, void* hwnd);
+IM_API std::int32_t IM_CALL im_session_set_video_preferences(
+    iPhoneMirror::SessionHandle handle, std::uint32_t max_width,
+    std::uint32_t max_height, std::uint32_t max_fps);
+IM_API std::int32_t IM_CALL im_session_set_audio_enabled(
+    iPhoneMirror::SessionHandle handle, std::int32_t enabled);
+IM_API std::int32_t IM_CALL im_session_set_audio_volume(
+    iPhoneMirror::SessionHandle handle, float volume);
+IM_API std::int32_t IM_CALL im_session_set_corner_profile(
+    iPhoneMirror::SessionHandle handle, float normalized_radius,
+    float curve_exponent);
+IM_API std::int32_t IM_CALL im_session_get_latest_video_timestamp(
+    iPhoneMirror::SessionHandle handle, std::int64_t* timestamp_100ns);
+IM_API std::int32_t IM_CALL im_session_copy_latest_video_frame(
+    iPhoneMirror::SessionHandle handle, iPhoneMirror::VideoFrameInfo* info,
+    std::uint8_t* buffer, std::uint32_t* buffer_size,
+    std::uint32_t max_width, std::uint32_t max_height);
+IM_API std::int32_t IM_CALL im_session_force_preview_refresh(
+    iPhoneMirror::SessionHandle handle);
 
 
 IM_API const wchar_t* IM_CALL im_last_error();

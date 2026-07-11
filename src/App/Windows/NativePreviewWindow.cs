@@ -1,7 +1,12 @@
 using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using IPhoneMirror.App.Controls;
+using IPhoneMirror.App.Interop;
+using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Windows;
@@ -17,7 +22,12 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private const int WmNcCalcSize = 0x0083;
     private const int WmNcHitTest = 0x0084;
+    private const int WmContextMenu = 0x007B;
     private const int WmNcLeftButtonDoubleClick = 0x00A3;
+    private const int WmNcRightButtonUp = 0x00A5;
+    private const int WmNcRightButtonDown = 0x00A4;
+    private const int WmRightButtonDown = 0x0204;
+    private const int WmRightButtonUp = 0x0205;
     private const int WmClose = 0x0010;
     private const int WmEraseBackground = 0x0014;
     private const int WmSetIcon = 0x0080;
@@ -59,6 +69,8 @@ internal sealed class NativePreviewWindow : IDisposable
     private const uint SwpFrameChanged = 0x0020;
     private const uint SwpShowWindow = 0x0040;
     private const uint MonitorDefaultToNearest = 2;
+    private static readonly nint HwndTopMost = new(-1);
+    private static readonly nint HwndNoTopMost = new(-2);
 
     private const int DwmWindowCornerPreference = 33;
     private const int DwmBorderColor = 34;
@@ -67,18 +79,51 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private readonly HwndSource _source;
     private readonly AspectRatioWindowController _aspectController;
+    private readonly Func<nint, bool> _attachPreview;
+    private readonly Action<nint> _detachPreview;
+    private readonly Func<nint, bool> _refreshPreview;
+    private readonly ContextMenu _contextMenu;
+    private readonly MenuItem _topMostItem;
+    private readonly MenuItem _fixedItem;
     private nint _handle;
     private bool _attached;
     private bool _isFullScreen;
     private bool _disposed;
     private bool _closeQueued;
+    private bool _isTopMost = true;
+    private bool _isFixed;
     private nint _largeIcon;
     private nint _smallIcon;
     private WindowRect _restoreRectangle;
     private nint _restoreStyle;
 
-    private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string? title = null)
+    private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string? title = null,
+        Func<nint, bool>? attachPreview = null, Action<nint>? detachPreview = null,
+        Func<nint, bool>? refreshPreview = null)
     {
+        _attachPreview = attachPreview ?? PreviewAttachmentCoordinator.Activate;
+        _detachPreview = detachPreview ?? PreviewAttachmentCoordinator.Unregister;
+        _refreshPreview = refreshPreview ?? PreviewAttachmentCoordinator.Refresh;
+        _contextMenu = new ContextMenu
+        {
+            Style = (Style)Application.Current.FindResource("DeviceContextMenuStyle"),
+            Placement = PlacementMode.MousePoint,
+        };
+        var itemStyle = (Style)Application.Current.FindResource("DeviceMenuItemStyle");
+        _topMostItem = new MenuItem { Style = itemStyle };
+        _topMostItem.Click += (_, _) => ToggleTopMost();
+        _fixedItem = new MenuItem { Style = itemStyle };
+        _fixedItem.Click += (_, _) => ToggleFixedWindow();
+        var closeItem = new MenuItem
+        {
+            Header = LocalizationService.Get("IndependentWindowClose"),
+            Style = itemStyle,
+        };
+        closeItem.Click += (_, _) => QueueClose();
+        _contextMenu.Items.Add(_topMostItem);
+        _contextMenu.Items.Add(_fixedItem);
+        _contextMenu.Items.Add(closeItem);
+        UpdateContextMenuLabels();
         var windowTitle = string.IsNullOrWhiteSpace(title) ? StableTitle : title;
         var parameters = new HwndSourceParameters(windowTitle)
         {
@@ -136,7 +181,7 @@ internal sealed class NativePreviewWindow : IDisposable
         try
         {
             candidate = new NativePreviewWindow(sourceWidth, sourceHeight, title);
-            if (!PreviewAttachmentCoordinator.Activate(candidate._handle))
+            if (!candidate._attachPreview(candidate._handle))
             {
                 candidate.Dispose();
                 return false;
@@ -144,6 +189,39 @@ internal sealed class NativePreviewWindow : IDisposable
 
             candidate._attached = true;
             _ = ShowWindow(candidate._handle, SwShow);
+            _ = SetWindowPos(candidate._handle, HwndTopMost, 0, 0, 0, 0,
+                SwpNoSize | SwpNoMove | SwpNoActivate);
+            _ = SetForegroundWindow(candidate._handle);
+            window = candidate;
+            return true;
+        }
+        catch
+        {
+            candidate?.Dispose();
+            return false;
+        }
+    }
+
+    internal static bool TryCreateAndShowForSession(ulong handle, uint sourceWidth,
+        uint sourceHeight, string title, out NativePreviewWindow? window)
+    {
+        window = null;
+        NativePreviewWindow? candidate = null;
+        try
+        {
+            candidate = new NativePreviewWindow(sourceWidth, sourceHeight, title,
+                hwnd => NativeCore.AttachDevicePreview(handle, hwnd),
+                hwnd => NativeCore.DetachDevicePreview(handle, hwnd),
+                hwnd => NativeCore.AttachDevicePreview(handle, hwnd));
+            if (!candidate._attachPreview(candidate._handle))
+            {
+                candidate.Dispose();
+                return false;
+            }
+            candidate._attached = true;
+            _ = ShowWindow(candidate._handle, SwShow);
+            _ = SetWindowPos(candidate._handle, HwndTopMost, 0, 0, 0, 0,
+                SwpNoSize | SwpNoMove | SwpNoActivate);
             _ = SetForegroundWindow(candidate._handle);
             window = candidate;
             return true;
@@ -160,16 +238,16 @@ internal sealed class NativePreviewWindow : IDisposable
         if (_disposed || _handle == 0) return;
         if (IsIconic(_handle)) _ = ShowWindow(_handle, SwRestore);
         else _ = ShowWindow(_handle, SwShow);
-        if (!_attached && PreviewAttachmentCoordinator.Activate(_handle))
+        if (!_attached && _attachPreview(_handle))
             _attached = true;
         else if (_attached)
-            _ = PreviewAttachmentCoordinator.Activate(_handle);
+            _ = _attachPreview(_handle);
         _ = SetForegroundWindow(_handle);
         _ = SetFocus(_handle);
     }
 
     internal bool RefreshPreview() => !_disposed && _handle != 0 &&
-        PreviewAttachmentCoordinator.Refresh(_handle);
+        _refreshPreview(_handle);
 
     internal void SetSourceDimensions(uint width, uint height) =>
         _aspectController.SetSourceDimensions(width, height);
@@ -228,7 +306,15 @@ internal sealed class NativePreviewWindow : IDisposable
                 return 0;
             case WmNcHitTest:
                 handled = true;
-                return _isFullScreen ? HtClient : HitTestWindow(lParam);
+                return _isFullScreen || _isFixed ? HtClient : HitTestWindow(lParam);
+            case WmContextMenu:
+            case WmNcRightButtonDown:
+            case WmNcRightButtonUp:
+            case WmRightButtonDown:
+            case WmRightButtonUp:
+                handled = true;
+                ShowContextMenu();
+                return 0;
             case WmNcLeftButtonDoubleClick when wParam.ToInt32() == HtCaption:
                 handled = true;
                 _source.Dispatcher.BeginInvoke(DispatcherPriority.Input, ToggleFullScreen);
@@ -294,6 +380,43 @@ internal sealed class NativePreviewWindow : IDisposable
         _source.Dispatcher.BeginInvoke(DispatcherPriority.Send, Dispose);
     }
 
+    private void ShowContextMenu()
+    {
+        if (_disposed) return;
+        UpdateContextMenuLabels();
+        _contextMenu.IsOpen = true;
+    }
+
+    private void UpdateContextMenuLabels()
+    {
+        _topMostItem.Header = LocalizationService.Get(
+            _isTopMost ? "IndependentWindowUnpin" : "IndependentWindowPin");
+        _fixedItem.Header = LocalizationService.Get(
+            _isFixed ? "IndependentWindowUnfix" : "IndependentWindowFix");
+    }
+
+    private void ToggleTopMost()
+    {
+        if (_disposed || _handle == 0) return;
+        _isTopMost = !_isTopMost;
+        _ = SetWindowPos(_handle, _isTopMost ? HwndTopMost : HwndNoTopMost,
+            0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        UpdateContextMenuLabels();
+    }
+
+    private void ToggleFixedWindow()
+    {
+        if (_disposed || _handle == 0 || _isFullScreen) return;
+        _isFixed = !_isFixed;
+        var style = GetWindowLongPtrW(_handle, GwlStyle).ToInt64();
+        style = _isFixed ? style & ~WsThickFrame : style | WsThickFrame;
+        _ = SetWindowLongPtrW(_handle, GwlStyle, (nint)style);
+        _ = SetWindowPos(_handle, 0, 0, 0, 0, 0,
+            SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+        if (!_isFixed) _aspectController.Reflow();
+        UpdateContextMenuLabels();
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -302,7 +425,7 @@ internal sealed class NativePreviewWindow : IDisposable
         _aspectController.Dispose();
         if (_attached && _handle != 0)
         {
-            PreviewAttachmentCoordinator.Unregister(_handle);
+            _detachPreview(_handle);
             _attached = false;
         }
         _source.RemoveHook(WindowProcedure);

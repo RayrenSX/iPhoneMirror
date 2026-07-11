@@ -13,6 +13,7 @@
     <Compile Include="..\App\Services\CaptureShutdownCoordinator.cs" Link="CaptureShutdownCoordinator.cs" />
     <Compile Include="..\App\Services\DriverReplugTracker.cs" Link="DriverReplugTracker.cs" />
     <Compile Include="..\App\Models\DeviceCornerProfile.cs" Link="DeviceCornerProfile.cs" />
+    <Compile Include="..\App\Models\DeviceCaptureState.cs" Link="DeviceCaptureState.cs" />
     <Compile Include="..\App\Services\DeviceCornerProfileResolver.cs" Link="DeviceCornerProfileResolver.cs" />
   </ItemGroup>
 </Project>

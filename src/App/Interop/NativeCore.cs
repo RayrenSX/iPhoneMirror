@@ -96,6 +96,19 @@ internal struct NativeVideoFrameInfo
     public long Timestamp100Ns;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeCaptureOptions
+{
+    public uint StructSize;
+    public uint ApiVersion;
+    public uint RequestedWidth;
+    public uint RequestedHeight;
+    public uint TargetFps;
+    public int PlayAudio;
+    public float AudioVolume;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 5)] public uint[] Reserved;
+}
+
 public sealed record VideoFrame(uint Width, uint Height, uint Stride, long Timestamp100Ns, byte[] Pixels);
 
 internal sealed class NativeCore : IDisposable
@@ -166,19 +179,85 @@ internal sealed class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_set_preview_corner_profile(float normalizedRadius, float curveExponent);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    private static extern int im_session_create([MarshalAs(UnmanagedType.LPWStr)] string udid,
+        ref NativeCaptureOptions options, out ulong handle);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_stop(ulong handle);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void im_session_destroy(ulong handle);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_get_status(ulong handle, ref NativeCaptureStatus status);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_attach_preview(ulong handle, nint hwnd);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void im_session_detach_preview(ulong handle, nint hwnd);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_video_preferences(ulong handle, uint width, uint height, uint fps);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_audio_enabled(ulong handle, int enabled);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_audio_volume(ulong handle, float volume);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_corner_profile(ulong handle, float radius, float exponent);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_get_latest_video_timestamp(ulong handle, out long timestamp);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_copy_latest_video_frame(ulong handle,
+        ref NativeVideoFrameInfo info, [Out] byte[]? buffer, ref uint bufferSize,
+        uint maxWidth, uint maxHeight);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_force_preview_refresh(ulong handle);
+
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern nint im_last_error();
 
-    internal static bool AttachPreviewWindow(nint hwnd) =>
-        hwnd != 0 && im_attach_preview_window(hwnd) == 0;
+    private static long _selectedPreviewSession;
+    private static nint _selectedPreviewWindow;
 
-    internal static void DetachPreviewWindow() => im_detach_preview_window();
+    internal static void SelectPreviewSession(ulong handle)
+    {
+        var previous = unchecked((ulong)Interlocked.Exchange(ref _selectedPreviewSession,
+            unchecked((long)handle)));
+        if (previous != 0 && previous != handle && _selectedPreviewWindow != 0)
+            im_session_detach_preview(previous, _selectedPreviewWindow);
+        else if (previous == 0 && handle != 0) im_detach_preview_window();
+    }
+
+    internal static bool AttachPreviewWindow(nint hwnd)
+    {
+        if (hwnd == 0) return false;
+        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
+        var attached = handle != 0 ? im_session_attach_preview(handle, hwnd) == 0
+            : im_attach_preview_window(hwnd) == 0;
+        if (attached) _selectedPreviewWindow = hwnd;
+        return attached;
+    }
+
+    internal static void DetachPreviewWindow()
+    {
+        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
+        if (handle != 0 && _selectedPreviewWindow != 0)
+            im_session_detach_preview(handle, _selectedPreviewWindow);
+        else im_detach_preview_window();
+        _selectedPreviewWindow = 0;
+    }
+
+    internal static bool AttachDevicePreview(ulong handle, nint hwnd) =>
+        handle != 0 && hwnd != 0 && im_session_attach_preview(handle, hwnd) == 0;
+
+    internal static void DetachDevicePreview(ulong handle, nint hwnd)
+    {
+        if (handle != 0 && hwnd != 0) im_session_detach_preview(handle, hwnd);
+    }
 
     internal static bool ForcePreviewRefresh()
     {
         try
         {
-            return im_force_preview_refresh() == 0;
+            var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
+            return (handle != 0 ? im_session_force_preview_refresh(handle)
+                : im_force_preview_refresh()) == 0;
         }
         catch (EntryPointNotFoundException)
         {
@@ -190,6 +269,8 @@ internal sealed class NativeCore : IDisposable
     {
         try
         {
+            var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
+            if (handle != 0) return SetDeviceCornerProfile(handle, normalizedRadius, curveExponent);
             return im_set_preview_corner_profile(
                 Math.Clamp((float)normalizedRadius, 0.0f, 0.5f),
                 Math.Clamp((float)curveExponent, 1.5f, 8.0f)) == 0;
@@ -282,6 +363,76 @@ internal sealed class NativeCore : IDisposable
             : (false, GetLastError(LocalizationService.Get("CannotStartCapture")));
     }
 
+    public (bool Success, ulong Handle, string Message) CreateDeviceSession(string udid,
+        uint width, uint height, uint fps, bool playAudio, double volume)
+    {
+        var options = new NativeCaptureOptions
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
+            ApiVersion = 9,
+            RequestedWidth = width,
+            RequestedHeight = height,
+            TargetFps = fps,
+            PlayAudio = playAudio ? 1 : 0,
+            AudioVolume = Math.Clamp((float)volume, 0, 1),
+            Reserved = new uint[5],
+        };
+        var result = im_session_create(udid, ref options, out var handle);
+        return result == 0
+            ? (true, handle, LocalizationService.Get("CaptureStarted"))
+            : (false, 0, GetLastError(LocalizationService.Get("CannotStartCapture")));
+    }
+
+    public void StopDeviceSession(ulong handle)
+    {
+        if (handle == 0) return;
+        var result = im_session_stop(handle);
+        if (result != 0) throw new InvalidOperationException(GetLastError(
+            LocalizationService.Get("StopFailedFormat")));
+    }
+
+    public void DestroyDeviceSession(ulong handle)
+    {
+        if (handle != 0) im_session_destroy(handle);
+    }
+
+    public NativeCaptureStatus GetDeviceSessionStatus(ulong handle)
+    {
+        var status = new NativeCaptureStatus
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeCaptureStatus>(),
+            Message = string.Empty,
+        };
+        var result = im_session_get_status(handle, ref status);
+        if (result != 0) throw new InvalidOperationException(GetLastError(
+            LocalizationService.Get("ReadCaptureStatusFailed")));
+        return status;
+    }
+
+    public (bool Success, string Message) SetDeviceVideoPreferences(ulong handle,
+        uint width, uint height, uint fps)
+    {
+        var result = im_session_set_video_preferences(handle, width, height, fps);
+        return result == 0 ? (true, LocalizationService.Get("VideoPreferencesApplied"))
+            : (false, GetLastError(LocalizationService.Get("VideoPreferencesUpdateFailed")));
+    }
+
+    public void SetDeviceAudioEnabled(ulong handle, bool enabled)
+    {
+        if (im_session_set_audio_enabled(handle, enabled ? 1 : 0) != 0)
+            throw new InvalidOperationException(GetLastError(LocalizationService.Get("AudioStateUpdateFailed")));
+    }
+
+    public void SetDeviceAudioVolume(ulong handle, double volume)
+    {
+        if (im_session_set_audio_volume(handle, Math.Clamp((float)volume, 0, 1)) != 0)
+            throw new InvalidOperationException(GetLastError(LocalizationService.Get("AudioVolumeUpdateFailed")));
+    }
+
+    internal static bool SetDeviceCornerProfile(ulong handle, double radius, double exponent) =>
+        handle != 0 && im_session_set_corner_profile(handle,
+            Math.Clamp((float)radius, 0, 0.5f), Math.Clamp((float)exponent, 1.5f, 8)) == 0;
+
     public void StopCapture() => im_stop_capture();
 
     public (bool Success, string Message) SetAudioEnabled(bool enabled)
@@ -345,7 +496,11 @@ internal sealed class NativeCore : IDisposable
 
     public long GetLatestVideoTimestamp()
     {
-        var result = im_get_latest_video_timestamp(out var timestamp);
+        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
+        long timestamp;
+        var result = handle != 0
+            ? im_session_get_latest_video_timestamp(handle, out timestamp)
+            : im_get_latest_video_timestamp(out timestamp);
         return result == 0 ? timestamp : 0;
     }
 
@@ -353,12 +508,17 @@ internal sealed class NativeCore : IDisposable
     {
         var info = new NativeVideoFrameInfo { StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>() };
         uint size = (uint)(_frameBuffer?.Length ?? 0);
-        var result = im_copy_latest_video_frame(ref info, _frameBuffer, ref size);
+        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
+        var result = handle != 0
+            ? im_session_copy_latest_video_frame(handle, ref info, _frameBuffer, ref size, 0, 0)
+            : im_copy_latest_video_frame(ref info, _frameBuffer, ref size);
         if (result == (int)NativeResult.BufferTooSmall)
         {
             _frameBuffer = new byte[size];
             info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
-            result = im_copy_latest_video_frame(ref info, _frameBuffer, ref size);
+            result = handle != 0
+                ? im_session_copy_latest_video_frame(handle, ref info, _frameBuffer, ref size, 0, 0)
+                : im_copy_latest_video_frame(ref info, _frameBuffer, ref size);
         }
         if (result != 0 || _frameBuffer is null) return null;
         return new VideoFrame(info.Width, info.Height, info.Stride, info.Timestamp100Ns, _frameBuffer);
@@ -368,12 +528,17 @@ internal sealed class NativeCore : IDisposable
     {
         var info = new NativeVideoFrameInfo { StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>() };
         uint size = (uint)(_frameBuffer?.Length ?? 0);
-        var result = im_copy_latest_video_frame_scaled(ref info, _frameBuffer, ref size, maxWidth, maxHeight);
+        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
+        var result = handle != 0
+            ? im_session_copy_latest_video_frame(handle, ref info, _frameBuffer, ref size, maxWidth, maxHeight)
+            : im_copy_latest_video_frame_scaled(ref info, _frameBuffer, ref size, maxWidth, maxHeight);
         if (result == (int)NativeResult.BufferTooSmall)
         {
             _frameBuffer = new byte[size];
             info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
-            result = im_copy_latest_video_frame_scaled(ref info, _frameBuffer, ref size, maxWidth, maxHeight);
+            result = handle != 0
+                ? im_session_copy_latest_video_frame(handle, ref info, _frameBuffer, ref size, maxWidth, maxHeight)
+                : im_copy_latest_video_frame_scaled(ref info, _frameBuffer, ref size, maxWidth, maxHeight);
         }
         if (result != 0 || _frameBuffer is null) return null;
         return new VideoFrame(info.Width, info.Height, info.Stride, info.Timestamp100Ns, _frameBuffer);
