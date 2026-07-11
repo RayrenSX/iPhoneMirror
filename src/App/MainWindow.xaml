@@ -205,7 +205,69 @@
                                    HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12"/>
                     </Grid>
                     <ListBox x:Name="DeviceListBox" Grid.Row="2" ItemsSource="{Binding Devices}"
-                             SelectedItem="{Binding SelectedDevice, Mode=TwoWay}">
+                             SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                             PreviewMouseRightButtonDown="OnDeviceListRightButtonDown">
+                        <ListBox.Resources>
+                            <Style TargetType="ContextMenu">
+                                <Setter Property="Background" Value="#151515"/>
+                                <Setter Property="Foreground" Value="#F2F2F2"/>
+                                <Setter Property="BorderBrush" Value="#3A3A3A"/>
+                                <Setter Property="BorderThickness" Value="1"/>
+                                <Setter Property="Padding" Value="5"/>
+                                <Setter Property="HasDropShadow" Value="True"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ContextMenu">
+                                            <Border Background="{TemplateBinding Background}"
+                                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                                    CornerRadius="7" Padding="{TemplateBinding Padding}">
+                                                <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                            <Style TargetType="MenuItem">
+                                <Setter Property="Foreground" Value="#F2F2F2"/>
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="FontFamily" Value="Segoe UI"/>
+                                <Setter Property="FontSize" Value="13"/>
+                                <Setter Property="Padding" Value="14,9"/>
+                                <Setter Property="MinWidth" Value="150"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="MenuItem">
+                                            <Border x:Name="MenuRoot" Background="{TemplateBinding Background}"
+                                                    CornerRadius="5" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter ContentSource="Header"
+                                                                  TextElement.Foreground="{TemplateBinding Foreground}"
+                                                                  VerticalAlignment="Center"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsHighlighted" Value="True">
+                                                    <Setter TargetName="MenuRoot" Property="Background" Value="#292929"/>
+                                                </Trigger>
+                                                <Trigger Property="IsEnabled" Value="False">
+                                                    <Setter Property="Opacity" Value="0.4"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                            <ContextMenu x:Key="DeviceContextMenu" Placement="MousePoint">
+                                <MenuItem Header="{DynamicResource MirrorSimultaneously}"
+                                          Click="OnMirrorSimultaneouslyClick"/>
+                            </ContextMenu>
+                        </ListBox.Resources>
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem"
+                                   BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                <Setter Property="ContextMenu" Value="{StaticResource DeviceContextMenu}"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid>

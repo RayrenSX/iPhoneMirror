@@ -29,7 +29,10 @@ struct SessionOptions {
     // preview/recording sinks can cap presentation without destabilising the
     // private USB handshake.
     std::uint32_t target_fps{60};
-    bool demo_mode{true};
+    // Valeria is Apple's showroom/status-bar override (9:41, full battery).
+    // QuickTime enables it for demonstrations, but a mirroring application
+    // should preserve the phone's real status bar by default.
+    bool demo_mode{false};
     bool request_audio{true};
     bool advertise_hevc_444{false};
 };

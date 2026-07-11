@@ -77,9 +77,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private WindowRect _restoreRectangle;
     private nint _restoreStyle;
 
-    private NativePreviewWindow(uint sourceWidth, uint sourceHeight)
+    private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string? title = null)
     {
-        var parameters = new HwndSourceParameters(StableTitle)
+        var windowTitle = string.IsNullOrWhiteSpace(title) ? StableTitle : title;
+        var parameters = new HwndSourceParameters(windowTitle)
         {
             Width = 720,
             Height = 900,
@@ -95,7 +96,7 @@ internal sealed class NativePreviewWindow : IDisposable
         if (_handle == 0) throw new InvalidOperationException(
             "Could not create the native preview window.");
 
-        _ = SetWindowTextW(_handle, StableTitle);
+        _ = SetWindowTextW(_handle, windowTitle);
         ApplyApplicationIcons();
         var cornerPreference = DwmDoNotRound;
         _ = DwmSetWindowAttribute(_handle, DwmWindowCornerPreference,
@@ -125,12 +126,16 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal static bool TryCreateAndShow(uint sourceWidth, uint sourceHeight,
         out NativePreviewWindow? window)
+        => TryCreateAndShow(sourceWidth, sourceHeight, null, out window);
+
+    internal static bool TryCreateAndShow(uint sourceWidth, uint sourceHeight,
+        string? title, out NativePreviewWindow? window)
     {
         window = null;
         NativePreviewWindow? candidate = null;
         try
         {
-            candidate = new NativePreviewWindow(sourceWidth, sourceHeight);
+            candidate = new NativePreviewWindow(sourceWidth, sourceHeight, title);
             if (!PreviewAttachmentCoordinator.Activate(candidate._handle))
             {
                 candidate.Dispose();

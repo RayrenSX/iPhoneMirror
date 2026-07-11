@@ -1,6 +1,7 @@
 using System.Windows;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Windows;
 
 namespace IPhoneMirror.App;
 
@@ -16,6 +17,12 @@ public partial class App : Application
         }
         LocalizationService.Initialize();
         base.OnStartup(e);
+        if (SecondaryMirrorMode.TryParse(e.Args, out var request))
+        {
+            MainWindow = new SecondaryMirrorWindow(request);
+            MainWindow.Show();
+            return;
+        }
         MainWindow = new MainWindow();
         MainWindow.Show();
     }

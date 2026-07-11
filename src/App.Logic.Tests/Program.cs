@@ -58,6 +58,12 @@ Equal("rectangular",
 Equal("iphone-notch",
     DeviceCornerProfileResolver.Resolve("iPhone17,5", 1170, 2532).Id,
     "iPhone 16e retains notch profile");
+Equal("iphone-12-mini",
+    DeviceCornerProfileResolver.Resolve("iPhone13,1", 1080, 2340).Id,
+    "iPhone 12 mini has a tighter device-specific curve");
+Equal("iphone-13-mini",
+    DeviceCornerProfileResolver.Resolve("iPhone14,4", 1080, 2340).Id,
+    "iPhone 13 mini has a device-specific curve");
 Equal("ipad-pro-rounded",
     DeviceCornerProfileResolver.Resolve("iPad8,1", 1668, 2388).Id,
     "2018 iPad Pro profile");
@@ -84,6 +90,7 @@ Equal("rectangular",
     "ambiguous geometry does not clip");
 Equal(0, DeviceCornerProfile.Rectangular.GetGdiRadius(1206),
     "rectangular fallback radius");
+
 
 // Closing must explicitly stop the QuickTime session before core disposal,
 // and repeated close notifications must not send a second shutdown sequence.

@@ -3,6 +3,33 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
+## [0.3.0-preview.3] - 2026-07-11
+
+### Added
+
+- Add a device-card context menu with **Mirror simultaneously**, allowing another
+  connected iPhone or iPad to run in its own isolated USB capture and native preview window.
+- Track secondary mirror processes by UDID, prevent duplicate sessions, and close every
+  secondary session with the main application.
+- Add device-specific display-outline fits for iPhone 12 mini, iPhone 13 mini,
+  standard iPhone 12/13 models, and Max variants.
+
+### Fixed
+
+- Disable Apple's `Valeria` demonstration status bar so a mirrored device keeps its real
+  time, battery, and carrier instead of displaying January 9 at 9:41.
+- Prevent right-clicking another device from changing the active selection and stopping
+  the current mirror session.
+- Restore the styled device cards after adding the context menu.
+- Replace the native light context menu with a readable black-and-white rounded menu.
+
+### Notes
+
+- Secondary simultaneous windows are muted by default to avoid playing two device audio
+  streams over one Windows output endpoint.
+- Display corner coefficients are visual fits based on Apple product-bezel resources;
+  Apple does not publish numeric display-corner radii.
+
 ## [0.3.0-preview.2] - 2026-07-11
 
 ### Changed
@@ -41,6 +68,7 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.2...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.3...HEAD
+[0.3.0-preview.3]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.3
 [0.3.0-preview.2]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.2
 [0.3.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.1

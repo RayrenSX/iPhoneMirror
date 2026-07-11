@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
@@ -19,6 +20,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _logTimer;
     private readonly PreviewWindowManager _previewWindows = new();
+    private readonly SecondaryMirrorProcessManager _secondaryMirrors = new();
     private readonly SemaphoreSlim _screenshotGate = new(1, 1);
     private bool _isFullScreen;
     private WindowStyle _restoreWindowStyle;
@@ -59,6 +61,7 @@ public partial class MainWindow : Window
         _refreshTimer.Stop();
         _logTimer.Stop();
         _previewWindows.Dispose();
+        _secondaryMirrors.Dispose();
         try
         {
             await _viewModel.ShutdownAsync();
@@ -77,6 +80,38 @@ public partial class MainWindow : Window
     }
 
     private void OnRefreshPreviewClick(object sender, RoutedEventArgs e) => RefreshPreview();
+
+    private void OnMirrorSimultaneouslyClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item ||
+            ItemsControl.ItemsControlFromItemContainer(item) is not ContextMenu menu ||
+            menu.PlacementTarget is not FrameworkElement { DataContext: Models.DeviceViewModel device }) return;
+        if (Models.DeviceViewModel.UdidEquals(device.Udid, _viewModel.SelectedDevice?.Udid) &&
+            _viewModel.HasCaptureSession)
+        {
+            _viewModel.AddUiLog(LocalizationService.Get("DeviceAlreadyMirroring"));
+            return;
+        }
+        var result = _secondaryMirrors.Show(device);
+        _viewModel.AddUiLog(result.Success
+            ? LocalizationService.Format("SimultaneousMirrorStartedFormat", device.DisplayName)
+            : LocalizationService.Format("SimultaneousMirrorFailedFormat", result.Message));
+    }
+
+    private void OnDeviceListRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        DependencyObject? current = e.OriginalSource as DependencyObject;
+        while (current is not null && current is not ListBoxItem)
+            current = VisualTreeHelper.GetParent(current);
+        if (current is not ListBoxItem item || item.ContextMenu is null) return;
+
+        // WPF selects a ListBoxItem on right-click before opening its menu.
+        // That would stop the current phone as a normal device switch. Open
+        // the item's menu ourselves and leave the active selection untouched.
+        e.Handled = true;
+        item.ContextMenu.PlacementTarget = item;
+        item.ContextMenu.IsOpen = true;
+    }
 
     private void RefreshPreview()
     {

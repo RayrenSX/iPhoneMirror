@@ -10,6 +10,10 @@
 
     <system:String x:Key="DevicesTitle">Devices</system:String>
     <system:String x:Key="RefreshDevices">Refresh devices</system:String>
+    <system:String x:Key="MirrorSimultaneously">Mirror simultaneously</system:String>
+    <system:String x:Key="DeviceAlreadyMirroring">This device is already mirrored in the main preview</system:String>
+    <system:String x:Key="SimultaneousMirrorStartedFormat">Opened a simultaneous mirror window for {0}</system:String>
+    <system:String x:Key="SimultaneousMirrorFailedFormat">Could not start simultaneous mirroring: {0}</system:String>
     <system:String x:Key="KeepUnlocked">Keep the Apple device unlocked after connecting</system:String>
     <system:String x:Key="PreviewLabel">Preview</system:String>
     <system:String x:Key="ResolutionLabel">Resolution</system:String>
@@ -41,7 +45,7 @@
     <system:String x:Key="StopMirroring">Stop mirroring</system:String>
     <system:String x:Key="DriverTrustHelp">Driver and trust help</system:String>
     <system:String x:Key="FooterLocalUsb">Local USB only — no Wi‑Fi or AirPlay</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 0.3 Preview 2</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 0.3 Preview 3</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">Checking the Apple USB environment…</system:String>
     <system:String x:Key="StatusWaitingDevice">Waiting for a device</system:String>

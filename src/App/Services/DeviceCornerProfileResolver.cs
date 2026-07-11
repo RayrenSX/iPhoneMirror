@@ -19,6 +19,14 @@ internal static class DeviceCornerProfileResolver
         "iphone-x", true, 0.1460, 2.15, 0.1320);
     internal static readonly DeviceCornerProfile IPhoneNotch = new(
         "iphone-notch", true, 0.1580, 2.25, 0.1420);
+    internal static readonly DeviceCornerProfile IPhone12Mini = new(
+        "iphone-12-mini", true, 0.1180, 2.18, 0.1080);
+    internal static readonly DeviceCornerProfile IPhone13Mini = new(
+        "iphone-13-mini", true, 0.1240, 2.20, 0.1130);
+    internal static readonly DeviceCornerProfile IPhone12Standard = new(
+        "iphone-12-standard", true, 0.1390, 2.22, 0.1260);
+    internal static readonly DeviceCornerProfile IPhone12Max = new(
+        "iphone-12-max", true, 0.1320, 2.22, 0.1200);
     internal static readonly DeviceCornerProfile IPhoneDynamicIsland = new(
         "iphone-dynamic-island", true, 0.1784, 2.36, 0.1583);
     internal static readonly DeviceCornerProfile IPadPro = new(
@@ -72,6 +80,21 @@ internal static class DeviceCornerProfileResolver
         if (major == 10) return minor is 3 or 6
             ? IPhoneX
             : DeviceCornerProfile.Rectangular;
+
+        if (major == 13) return minor switch
+        {
+            1 => IPhone12Mini,
+            2 or 3 => IPhone12Standard,
+            4 => IPhone12Max,
+            _ => IPhoneNotch,
+        };
+        if (major == 14) return minor switch
+        {
+            4 => IPhone13Mini,
+            3 or 5 or 7 or 8 => IPhone12Standard,
+            2 => IPhone12Max,
+            _ => IPhoneNotch,
+        };
 
         // ProductType iPhone15,* starts with iPhone 14 Pro and is the first
         // all-Dynamic-Island generation. Later identifiers inherit that fit.

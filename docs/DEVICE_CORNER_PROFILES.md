@@ -8,7 +8,8 @@ to the decoded frame aspect ratio while model metadata is unavailable.
 Profiles are grouped into:
 
 - rectangular Home-button iPhone/iPad displays;
-- iPhone X, later notched iPhones, and Dynamic Island iPhones;
+- iPhone X, separate iPhone 12/13 mini, standard and Max fits, later notched
+  iPhones, and Dynamic Island iPhones;
 - rounded iPad Pro, Air, mini, and all-screen base iPad displays.
 
 The renderer stores radius as a fraction of the short edge, so rotation and
@@ -24,6 +25,7 @@ rounded corners and publish the rectangular pixel resolution. Apple also
 publishes device-specific Product Bezel artwork in its Design Resources:
 
 - <https://developer.apple.com/design/resources/>
+- <https://support.apple.com/111877> (iPhone 12 mini, 2340 x 1080)
 - <https://support.apple.com/125089> (iPhone 17, 2622 x 1206)
 - <https://support.apple.com/122240> (iPad (A16), 2360 x 1640)
 
