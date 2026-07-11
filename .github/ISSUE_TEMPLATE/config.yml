@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/RayrenSX/iPhoneMirror/security/advisories/new
+    about: Report driver, elevation, privacy and memory-safety issues privately.
+  - name: Usage and support guide
+    url: https://github.com/RayrenSX/iPhoneMirror/blob/main/SUPPORT.md
+    about: Check setup requirements and support guidance before filing a bug.

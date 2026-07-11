@@ -41,7 +41,7 @@
     <system:String x:Key="StopMirroring">Stop</system:String>
     <system:String x:Key="DriverTrustHelp">Driver and trust help</system:String>
     <system:String x:Key="FooterLocalUsb">Local USB only — no Wi‑Fi or AirPlay</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 0.3</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 0.3 Preview 1</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">Checking the Apple USB environment…</system:String>
     <system:String x:Key="StatusWaitingDevice">Waiting for a device</system:String>

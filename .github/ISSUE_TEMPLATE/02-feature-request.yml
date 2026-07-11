@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest an improvement to iPhoneMirror
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the user-visible result, not only an implementation.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - USB / device discovery
+        - Video / decoder / rendering
+        - Audio
+        - OBS / output
+        - Driver installation
+        - User interface
+        - Documentation / build
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope confirmation
+      options:
+        - label: This request is for wired USB capture and does not require remote-control bypasses.
+          required: true

@@ -1,0 +1,91 @@
+name: Bug report
+description: Report a reproducible iPhoneMirror problem
+title: "[Bug]: "
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve iPhoneMirror. Remove UDIDs, device names,
+        account details and personal screen content before submitting. Do not
+        attach raw USB captures or pairing records.
+  - type: input
+    id: version
+    attributes:
+      label: iPhoneMirror version
+      placeholder: v0.3.0-preview.1
+    validations:
+      required: true
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows version
+      options:
+        - Windows 11 x64
+        - Windows 10 x64
+        - Other / unknown
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: iPhone ProductType and iOS version
+      description: ProductType is useful; do not enter the UDID.
+      placeholder: iPhone18,3 / iOS 26.5.2
+    validations:
+      required: true
+  - type: dropdown
+    id: apple-support
+    attributes:
+      label: Apple Windows component
+      options:
+        - Apple Devices (Microsoft Store)
+        - iTunes / Apple Mobile Device Support
+        - Both
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: driver-state
+    attributes:
+      label: Driver state shown by iPhoneMirror
+      placeholder: Ready / reconnect required / missing / error text
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Connect and unlock the phone
+        2. Select the device
+        3. Click Start
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized log excerpt
+      description: Remove UDIDs, device names, user paths and personal data.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed private identifiers and personal content from this report.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

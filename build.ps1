@@ -48,10 +48,14 @@ try {
     if (-not $NoPublish -and (Test-Path 'src/App/iPhoneMirror.App.csproj')) {
         $NativeDll = Join-Path $Root "build/native/src/Core/$Configuration/iPhoneMirror.Core.dll"
         $AppNative = Join-Path $Root 'src/App/native'
+        $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
         New-Item -ItemType Directory -Force -Path $AppNative | Out-Null
         Copy-Item $NativeDll (Join-Path $AppNative 'iPhoneMirror.Core.dll') -Force
         Copy-Item (Join-Path $Root 'third_party/libusb/bin/x64/libusb-1.0.dll') `
             (Join-Path $AppNative 'libusb-1.0.dll') -Force
+        if (Test-Path -LiteralPath $PublishRoot) {
+            Remove-Item -LiteralPath $PublishRoot -Recurse -Force
+        }
         dotnet publish src/App/iPhoneMirror.App.csproj `
             --configuration $Configuration `
             --runtime win-x64 `
@@ -59,7 +63,6 @@ try {
             --output outputs/iPhoneMirror
         if ($LASTEXITCODE -ne 0) { throw "WPF publish failed: $LASTEXITCODE" }
 
-        $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
         foreach ($forbidden in @(
             (Join-Path $PublishRoot 'Drivers\InstallIPhoneFilter.ps1'),
             (Join-Path $PublishRoot 'UsbDkHelper.dll')
@@ -73,6 +76,10 @@ try {
             'iPhoneMirror.exe',
             'iPhoneMirror.Core.dll',
             'README.md',
+            'README.en.md',
+            'LICENSE',
+            'CHANGELOG.md',
+            'THIRD_PARTY_NOTICES.md',
             'Drivers\THIRD-PARTY-NOTICES.txt',
             'Drivers\libusb-win32-1.2.6.0\COPYING_GPL.txt',
             'Drivers\libusb-win32-1.2.6.0\COPYING_LGPL.txt',

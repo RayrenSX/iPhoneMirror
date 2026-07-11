@@ -1,4 +1,5 @@
 set(IPHONEMIRROR_CORE_SOURCES
+    resources/iPhoneMirror.Core.rc
     src/CoreApi.cpp
     src/Logging.cpp
     src/Protocol/Plist.cpp

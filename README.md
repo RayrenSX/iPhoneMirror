@@ -1,157 +1,190 @@
-# iPhoneMirror
+<p align="center">
+  <img src="src/App/Assets/iPhoneMirror.png" width="112" alt="iPhoneMirror icon">
+</p>
 
-iPhoneMirror 是一个面向 Windows 10/11 x64 的 iPhone USB 有线投屏工具。它直接读取 Apple QuickTime Screen Capture 的 H.264 与 PCM 数据，不使用 Wi-Fi 或 AirPlay。
+<h1 align="center">iPhoneMirror</h1>
 
-当前版本是可运行的 0.2 开发预览版，已经完成真实 iPhone 的设备发现、信任检查、USB 协议握手、低延迟解码、系统音频播放、原生预览和 OBS 窗口捕获。
+<p align="center">
+  Windows 上通过 USB 数据线进行低延迟 iPhone 屏幕与系统声音采集。<br>
+  Low-latency wired iPhone screen and system-audio capture for Windows.
+</p>
 
-## 已实现
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
 
-- Apple usbmux/Lockdown 设备发现、UDID、设备名、ProductType、iOS 版本和信任状态
-- 多设备列表和按 UDID 精确选择
-- QuickTime USB configuration 激活、PING/同步时钟、HPD/HPA 会话与完整停止流程
-- CoreMedia `CMSampleBuffer`、AVCC H.264、48 kHz 双声道 PCM 解析
-- Media Foundation 低延迟 H.264 解码
-- D3D11/DirectComposition 原生预览与 WPF 控制界面
-- Windows WASAPI 系统音频播放、静音和 0–100% 音量
-- 原生、1080p、720p、540p 四档本地渲染上限
-- 24/30/60/120 FPS 本地呈现上限
-- 全屏、无标题栏独立预览、等比例缩放、自动横竖屏、截图和实时日志
-- OBS Window Capture 专用预览窗口
-- 每台 iPhone 的 libusb0 过滤驱动检测与一键管理员安装
+<p align="center">
+  <a href="https://github.com/RayrenSX/iPhoneMirror/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/RayrenSX/iPhoneMirror?include_prereleases&sort=semver"></a>
+  <a href="https://github.com/RayrenSX/iPhoneMirror/actions/workflows/windows-build.yml"><img alt="Windows build" src="https://github.com/RayrenSX/iPhoneMirror/actions/workflows/windows-build.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-black.svg"></a>
+  <img alt="Windows 10 and 11 x64" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4">
+</p>
 
-尚未完成：Media Foundation 虚拟摄像头、正式安装包与商业代码签名。OBS 当前使用窗口捕获。
+> [!IMPORTANT]
+> 当前是公开预览版。程序尚未进行商业 Authenticode 签名，Windows 可能显示
+> SmartScreen 或“未知发布者”提示。Apple Screen Capture 是私有协议，未来 iOS
+> 更新可能需要同步适配。
 
-## 快速使用
+## 下载
 
-1. 安装 Microsoft Store 版 Apple Devices，或包含 Apple Mobile Device Support 的 iTunes 桌面版。
-2. 用 USB 数据线连接 iPhone，解锁并在手机上选择“信任此电脑”。
-3. 运行 `outputs\iPhoneMirror\iPhoneMirror.exe`。
-4. 选择设备并点击“开始投屏”。
-5. 如果当前 iPhone 尚未安装采集过滤器，软件会说明变更范围并请求 UAC 管理员授权。
-6. 驱动安装后若界面提示重插，只需拔下这台 iPhone，等待两秒再重新连接并解锁。
+前往 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 下载最新的
+`iPhoneMirror-*-win-x64.zip`，解压后运行 `iPhoneMirror.exe`。发布包自带 .NET
+运行时，无需另外安装 .NET Desktop Runtime。
 
-不要使用 Zadig 把 Apple 父设备替换成 WinUSB/libusb。iPhoneMirror 只在 Apple `usbccgp` 父设备上追加 `libusb0` UpperFilter；它不会替换 Apple 驱动，也不会修改 WPD/usbmux 子接口。
+目标电脑仍需要以下任一 Apple 官方组件：
 
-## 每设备驱动安装
+- Microsoft Store 版 **Apple Devices**；或
+- 含 Apple Mobile Device Support 的 iTunes 桌面版。
 
-Windows 会为不同 iPhone 创建不同的 USB 设备实例，因此过滤器必须按手机实例安装。程序执行以下检查：
+## 能做什么
 
-- 将 GUI 中选择的 UDID 映射到当前在线的 Apple USB 父实例
-- 要求父设备服务仍为 `usbccgp`
-- 使用完整设备实例 ID，而不是宽泛的 VID/PID
-- 校验内置 libusb-win32 1.2.6 文件哈希与内核驱动签名
-- 保存父设备和直属子接口的 UpperFilters 快照
-- 只向目标父实例添加 `libusb0`
-- 验证 AppleLowerFilter、父驱动、子接口过滤器和 PnP 状态未被破坏
-- 用原生核心按目标 UDID 验证 libusb0 确实能够打开这台手机
-- 失败时恢复设备过滤器快照
+| 功能 | 当前实现 |
+|---|---|
+| 有线投屏 | USB 直连，不依赖 Wi-Fi 或 AirPlay |
+| 视频 | CoreMedia/AVCC H.264、Media Foundation 低延迟解码 |
+| 渲染 | D3D11/DirectComposition 原生预览，减少 WPF 拷贝与撕裂 |
+| 音频 | 48 kHz 双声道 PCM，WASAPI 播放、静音与音量控制 |
+| 设备 | UDID、设备名称、ProductType、iOS、信任状态、多设备切换 |
+| 画面 | 原生/1080p/720p/540p 本地渲染上限，24/30/60/120 FPS 上限 |
+| 预览 | 主窗口、无标题独立窗口、全屏、横竖屏、等比例缩放 |
+| OBS | 稳定标题的专用预览窗口，可直接使用 Window Capture |
+| 工具 | 截图、强制刷新、快捷键、实时日志、中英文界面 |
+| 驱动 | 按 iPhone 实例精确安装 libusb0 UpperFilter，带验证与失败回滚 |
 
-管理员逻辑由 `iPhoneMirror.exe` 自身的编译型 Helper 执行，不会发布或提升 PowerShell 脚本。操作日志和回滚快照位于：
+分辨率和 FPS 选项只限制本地渲染，不会降低 USB 上传输的原始画面质量。
+
+## 快速开始
+
+1. 安装并启动 Apple Devices 或 Apple Mobile Device Support。
+2. 使用数据线连接 iPhone，保持解锁，并在手机上选择“信任此电脑”。
+3. 解压 Release 包，运行 `iPhoneMirror.exe`。
+4. 在左侧选择设备，点击“开始投屏”。
+5. 若该 iPhone 首次使用，程序会说明驱动变更范围并请求一次 UAC 授权。
+6. 驱动安装完成后如有提示，只需重插这一台 iPhone 并保持解锁。
+
+> [!WARNING]
+> 不要使用 Zadig 把 Apple 父设备替换为 WinUSB/libusb。iPhoneMirror 只在目标
+> Apple `usbccgp` 设备实例上增加 `libusb0` UpperFilter，不替换 Apple 驱动，
+> 也不修改 WPD/usbmux 子接口。
+
+## OBS
+
+1. 在 iPhoneMirror 中打开“OBS 专用窗口”。
+2. OBS → 来源 → 窗口采集。
+3. 选择 `iPhoneMirror OBS Preview`。
+4. Windows 11 推荐使用 Windows Graphics Capture。
+
+OBS 30.1+ 还可以通过“应用程序音频捕获”选择 `iPhoneMirror.exe`。更多说明见
+[OBS 输出文档](docs/OBS_OUTPUT.md)。
+
+## 快捷键
+
+| 快捷键 | 操作 |
+|---|---|
+| `F11` / `Esc` | 进入/退出全屏 |
+| `F5` | 刷新设备 |
+| `Ctrl+R` | 强制重绘 |
+| `Ctrl+Shift+P` | 打开独立预览 |
+| `Ctrl+L` | 显示/隐藏实时日志 |
+| `Ctrl+M` | 静音/恢复 |
+| `Ctrl+S` | 截图 |
+
+## 已验证设备
+
+| ProductType / iOS | 原生画面 | 真机结果 |
+|---|---:|---|
+| `iPhone18,3` / iOS 26.5.2 | 1206×2622 | 约 58.6 FPS，常规解码 3–5 ms，48 kHz 双声道 PCM |
+| `iPhone13,1` / iOS 18.7.8 | 1082×2340 | 约 58.9 FPS，常规解码 3–6 ms，48 kHz 双声道 PCM |
+
+这些结果仅表示上述实机组合已验证，不构成对所有 iPhone/iOS 版本的兼容性保证。
+
+## 从源码构建
+
+要求：
+
+- Windows 10/11 x64
+- Visual Studio 2026 Build Tools：MSVC、Windows SDK、CMake
+- .NET 10 SDK 与 Windows Desktop 工作负载
+
+```powershell
+git clone https://github.com/RayrenSX/iPhoneMirror.git
+cd iPhoneMirror
+./build.ps1 -Configuration Release
+```
+
+脚本会构建 C++20 核心、运行协议测试并发布自包含 WPF 应用：
+
+```text
+outputs/iPhoneMirror/iPhoneMirror.exe
+outputs/iPhoneMirror/iPhoneMirror.Core.dll
+outputs/iPhoneMirror/Drivers/
+```
+
+只构建并运行核心测试：
+
+```powershell
+./build.ps1 -Configuration Debug -NoPublish
+```
+
+## 架构
+
+```text
+iPhone
+  │ USB / usbmux / Lockdown
+  ▼
+QuickTime Screen Capture session
+  ├─ CoreMedia + AVCC H.264 ─► Media Foundation ─► D3D11 preview
+  └─ 48 kHz PCM             ─► WASAPI audio
+                                      │
+                                      └─► WPF controls / OBS window
+```
+
+- [协议说明](docs/PROTOCOL.md)
+- [软件架构](docs/ARCHITECTURE.md)
+- [D3D11 渲染](docs/D3D11_RENDERING.md)
+- [音频输出](docs/WASAPI_AUDIO.md)
+
+## 驱动安全边界
+
+Windows 会为不同 iPhone 创建不同设备实例，因此过滤驱动需要按手机安装。程序会：
+
+- 将当前选中 UDID 映射到在线 Apple USB 父设备；
+- 验证父服务仍为 `usbccgp`；
+- 校验内置驱动文件 SHA-256 与上游签名；
+- 只修改目标实例的 UpperFilters；
+- 验证 AppleLowerFilter、子接口与 PnP 状态；
+- 失败时恢复过滤器快照。
+
+操作日志和回滚快照位于：
 
 ```text
 C:\ProgramData\iPhoneMirror\DriverOperations
 C:\ProgramData\iPhoneMirror\DriverBackups
 ```
 
-开发预览版尚未进行商业 Authenticode 代码签名，因此 UAC 仍可能显示“未知发布者”。正式发行前必须签名主程序/Helper，并安装到受保护的 Program Files 目录。
+## 当前限制
 
-## OBS
+- 还没有 Media Foundation 虚拟摄像头；OBS 当前使用窗口采集。
+- 主程序和提权 Helper 尚未商业签名。
+- 完全没有 libusb0 的干净 Win10/Win11 环境仍需更广泛验证。
+- QuickTime Screen Capture 并非 Apple 公开、稳定的第三方 API。
+- 本项目不提供对 iPhone 的触控或远程控制。
 
-1. 在 iPhoneMirror 中打开“OBS 专用窗口”。
-2. OBS → 来源 → 窗口捕获。
-3. 选择 `iPhoneMirror OBS Preview`。
-4. Windows 11 推荐使用 Windows Graphics Capture。
+## 参与项目
 
-OBS 30.1+ 还可使用“应用程序音频捕获”选择 `iPhoneMirror.exe`。详细说明见 [docs/OBS_OUTPUT.md](docs/OBS_OUTPUT.md)。
+提交问题前请阅读 [支持说明](SUPPORT.md)。开发贡献请阅读
+[CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请使用仓库的
+[私密漏洞报告](https://github.com/RayrenSX/iPhoneMirror/security/advisories/new)，不要公开粘贴
+UDID、配对记录或完整 USB 抓包。
 
-## 快捷键
+## 许可与致谢
 
-- `F11`：全屏
-- `Esc`：退出全屏
-- `F5`：刷新设备
-- `Ctrl+R`：强制重绘
-- `Ctrl+Shift+P`：独立预览
-- `Ctrl+L`：实时日志
-- `Ctrl+M`：静音/恢复
-- `Ctrl+S`：截图
+iPhoneMirror 自有代码采用 [MIT License](LICENSE)。随源码和发布包分发的第三方组件
+仍受各自许可证约束，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。其中
+libusb-win32 内核驱动为 GPLv3，发布包同时提供对应上游源码与完整许可证文本。
 
-## 构建
-
-开发环境：
-
-- Windows 10/11 x64
-- Visual Studio Build Tools（MSVC、Windows SDK、CMake）
-- .NET 10 SDK 与 Windows Desktop 工作负载
-
-PowerShell：
-
-```powershell
-.\build.ps1 -Configuration Release
-```
-
-构建脚本会编译 C++20 核心、执行 CTest，并发布自包含 x64 GUI：
-
-```text
-outputs\iPhoneMirror\iPhoneMirror.exe
-outputs\iPhoneMirror\iPhoneMirror.Core.dll
-outputs\iPhoneMirror\Drivers\
-```
-
-GUI 本身不要求目标电脑预装 .NET Desktop Runtime，但 Apple Mobile Device Support 仍是必要的系统依赖。
-
-## 测试
-
-运行原生测试：
-
-```powershell
-.\build.ps1 -Configuration Debug -NoPublish
-```
-
-命令行真机采集：
-
-```powershell
-python .\scripts\diagnose.py --capture <UDID> --seconds 15 `
-  --save-frame .\outputs\diagnostics\frame.png
-```
-
-GUI 冒烟测试：
-
-```powershell
-.\scripts\gui_smoke.ps1 -ResolutionIndex 3 -FrameRateIndex 3 -StreamSeconds 16
-```
-
-### 已验证设备
-
-| ProductType / iOS | 原生画面 | 实测结果 |
-|---|---:|---|
-| `iPhone18,3` / iOS 26.5.2 | 1206×2622 | 约 58.6 FPS，常规解码 3–5 ms，48 kHz 双声道 PCM |
-| `iPhone13,1` / iOS 18.7.8 | 1082×2340 | 约 58.9 FPS，常规解码 3–6 ms，48 kHz 双声道 PCM |
-
-`iPhone13,1` 已完成两轮无需重插的连续“启动 → 采集 → 停止 → 再次识别”。停止后 active USB configuration 恢复为 3，usbmux/Lockdown 可自动重新连接。
-
-本轮测试证明的是：在电脑已有全局 libusb0 1.2.6 服务时，为一台全新的 iPhone 设备实例精确挂载过滤器并完成采集。完全没有 libusb0 服务和系统文件的干净 Windows 首次安装路径，仍需在 Win10/Win11 VM（含内存完整性开/关）中单独验证。
-
-## 项目结构
-
-```text
-iPhoneMirror/
-├─ src/Core/          C++20 USB、协议、CoreMedia、解码、音频与渲染
-├─ src/App/           WPF/.NET 10 GUI 与编译型驱动 Helper
-├─ docs/              协议、架构和 OBS 文档
-├─ scripts/           诊断和真机测试脚本
-├─ third_party/       libusb 等依赖与许可证
-├─ build.ps1          一键构建、测试和发布
-└─ outputs/           发布物与诊断输出
-```
-
-协议与架构说明：
-
-- [docs/PROTOCOL.md](docs/PROTOCOL.md)
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-
-参考项目：
+协议研究参考：
 
 - [danielpaulus/quicktime_video_hack](https://github.com/danielpaulus/quicktime_video_hack)
 - [chotgpt/quicktime_video_hack_windows](https://github.com/chotgpt/quicktime_video_hack_windows)
 
-libusb-win32 1.2.6 按其许可证随发布物提供 GPL/LGPL 文本、作者信息、第三方声明和完整对应源码包。协议测试夹具的来源及许可见 `src/Core/tests/fixtures/README.md` 与 `THIRD_PARTY_NOTICES.md`。
+Apple、iPhone、iOS、QuickTime 是 Apple Inc. 的商标。本项目与 Apple Inc. 无隶属、赞助
+或认可关系。

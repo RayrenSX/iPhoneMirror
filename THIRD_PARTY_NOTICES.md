@@ -2,6 +2,8 @@
 
 This file describes third-party material intentionally included in the source
 tree or release package. Each component remains under its upstream license.
+The root MIT License applies only to original iPhoneMirror material and does
+not replace, narrow or relicense any component listed below.
 
 ## quicktime_video_hack protocol fixtures
 
