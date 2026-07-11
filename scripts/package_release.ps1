@@ -62,7 +62,7 @@ try {
 
         & $SbomToolPath generate `
             -b $PackageRoot `
-            -bc $Root `
+            -bc (Join-Path $Root 'src') `
             -pn iPhoneMirror `
             -pv $Version `
             -ps RayrenSX `
@@ -72,6 +72,72 @@ try {
         $GeneratedSbom = Get-ChildItem -LiteralPath $PackageRoot -Recurse `
             -Filter 'manifest.spdx.json' | Select-Object -First 1
         if (-not $GeneratedSbom) { throw 'SBOM tool did not produce manifest.spdx.json.' }
+
+        # Component Detector understands the .NET graph but cannot infer the
+        # licenses of the native binaries deliberately vendored with this
+        # Windows package. Add those aggregate components explicitly so the
+        # machine-readable SBOM matches THIRD_PARTY_NOTICES.md.
+        $Sbom = Get-Content -LiteralPath $GeneratedSbom.FullName -Raw | ConvertFrom-Json
+        $RootPackage = $Sbom.packages | Where-Object { $_.SPDXID -eq 'SPDXRef-RootPackage' }
+        if (-not $RootPackage) { throw 'Generated SBOM has no root package.' }
+        $RootPackage.licenseDeclared =
+            'MIT AND LGPL-2.1-or-later AND GPL-3.0-only AND LGPL-3.0-only'
+        $RootPackage.licenseConcluded = 'NOASSERTION'
+        $RootPackage.copyrightText = 'Copyright (c) 2026 RayrenSX and third-party contributors'
+
+        $NativePackages = @(
+            [PSCustomObject][ordered]@{
+                name = 'libusb'
+                SPDXID = 'SPDXRef-Package-libusb-1.0.29'
+                downloadLocation = 'https://github.com/libusb/libusb/releases/tag/v1.0.29'
+                filesAnalyzed = $false
+                licenseConcluded = 'LGPL-2.1-or-later'
+                licenseDeclared = 'LGPL-2.1-or-later'
+                copyrightText = 'NOASSERTION'
+                versionInfo = '1.0.29'
+                supplier = 'Organization: libusb project'
+                externalRefs = @([PSCustomObject][ordered]@{
+                    referenceCategory = 'PACKAGE-MANAGER'
+                    referenceType = 'purl'
+                    referenceLocator = 'pkg:github/libusb/libusb@v1.0.29'
+                })
+            },
+            [PSCustomObject][ordered]@{
+                name = 'libusb-win32 kernel driver'
+                SPDXID = 'SPDXRef-Package-libusb-win32-driver-1.2.6.0'
+                downloadLocation = 'https://sourceforge.net/projects/libusb-win32/files/libusb-win32-releases/1.2.6.0/'
+                filesAnalyzed = $false
+                licenseConcluded = 'GPL-3.0-only'
+                licenseDeclared = 'GPL-3.0-only'
+                copyrightText = 'NOASSERTION'
+                versionInfo = '1.2.6.0'
+                supplier = 'Organization: libusb-win32 project'
+            },
+            [PSCustomObject][ordered]@{
+                name = 'libusb-win32 library and installer'
+                SPDXID = 'SPDXRef-Package-libusb-win32-library-1.2.6.0'
+                downloadLocation = 'https://sourceforge.net/projects/libusb-win32/files/libusb-win32-releases/1.2.6.0/'
+                filesAnalyzed = $false
+                licenseConcluded = 'LGPL-3.0-only'
+                licenseDeclared = 'LGPL-3.0-only'
+                copyrightText = 'NOASSERTION'
+                versionInfo = '1.2.6.0'
+                supplier = 'Organization: libusb-win32 project'
+            }
+        )
+        foreach ($NativePackage in $NativePackages) {
+            if (-not ($Sbom.packages | Where-Object { $_.SPDXID -eq $NativePackage.SPDXID })) {
+                $Sbom.packages += $NativePackage
+                $Sbom.relationships += [PSCustomObject][ordered]@{
+                    relationshipType = 'DEPENDS_ON'
+                    relatedSpdxElement = $NativePackage.SPDXID
+                    spdxElementId = 'SPDXRef-RootPackage'
+                }
+            }
+        }
+
+        [IO.File]::WriteAllText($GeneratedSbom.FullName,
+            ($Sbom | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
         Copy-Item -LiteralPath $GeneratedSbom.FullName -Destination $SbomAsset -Force
     }
 
