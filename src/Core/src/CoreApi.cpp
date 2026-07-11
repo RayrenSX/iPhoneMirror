@@ -30,6 +30,8 @@ iPhoneMirror::device::DeviceManager device_manager;
 std::unique_ptr<iPhoneMirror::capture::CaptureSession> capture_session;
 std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer> preview_renderer;
 iPhoneMirror::capture::CapturePreferences capture_preferences;
+float preview_corner_radius{0.1784F};
+float preview_corner_exponent{2.36F};
 
 std::shared_ptr<const iPhoneMirror::media::DecodedFrame> latest_preview_frame() {
     std::scoped_lock lock(state_mutex);
@@ -602,6 +604,8 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
     std::uint32_t target_fps{};
     std::uint32_t render_max_width{};
     std::uint32_t render_max_height{};
+    float corner_radius{};
+    float corner_exponent{};
     {
         std::scoped_lock lock(state_mutex);
         if (!initialized) {
@@ -610,6 +614,8 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
         target_fps = capture_session ? capture_session->target_fps() : capture_preferences.target_fps;
         render_max_width = capture_preferences.render_max_width;
         render_max_height = capture_preferences.render_max_height;
+        corner_radius = preview_corner_radius;
+        corner_exponent = preview_corner_exponent;
         previous = std::move(preview_renderer);
     }
     previous.reset();
@@ -618,6 +624,7 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
             window, latest_preview_frame);
         renderer->set_render_size_limit(render_max_width, render_max_height);
         renderer->set_max_fps(target_fps);
+        renderer->set_corner_profile(corner_radius, corner_exponent);
         std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer> displaced;
         bool installed{};
         {
@@ -632,6 +639,7 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
                 renderer->set_render_size_limit(
                     capture_preferences.render_max_width,
                     capture_preferences.render_max_height);
+                renderer->set_corner_profile(preview_corner_radius, preview_corner_exponent);
                 displaced = std::move(preview_renderer);
                 preview_renderer = std::move(renderer);
                 last_error.clear();
@@ -668,6 +676,30 @@ std::int32_t IM_CALL im_force_preview_refresh() {
     }
     preview_renderer->request_refresh();
     iPhoneMirror::logging::write("preview refresh requested");
+    last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_set_preview_corner_profile(float normalized_radius,
+    float curve_exponent) {
+    if (!std::isfinite(normalized_radius) || !std::isfinite(curve_exponent) ||
+        normalized_radius < 0.0F || normalized_radius > 0.5F ||
+        curve_exponent < 1.5F || curve_exponent > 8.0F) {
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"预览圆角参数无效");
+    }
+    std::scoped_lock lock(state_mutex);
+    if (!initialized) {
+        return fail(iPhoneMirror::Result::NotInitialized, L"核心尚未初始化");
+    }
+    preview_corner_radius = normalized_radius;
+    preview_corner_exponent = curve_exponent;
+    if (preview_renderer) {
+        preview_renderer->set_corner_profile(normalized_radius, curve_exponent);
+    }
+    iPhoneMirror::logging::write(std::format(
+        "preview corner_profile radius={:.5f} exponent={:.3f} enabled={}",
+        normalized_radius, curve_exponent, normalized_radius > 0.0F));
     last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }

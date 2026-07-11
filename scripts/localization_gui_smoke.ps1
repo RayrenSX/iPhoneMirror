@@ -95,14 +95,14 @@ try {
     Select-Index $language 2
     $process.Refresh()
     $englishTitle = $process.MainWindowTitle
-    $englishStart = (Find-ById $window 'StartCaptureButton').Current.Name
+    $englishStart = (Find-ById $window 'CaptureActionButton').Current.Name
     $englishImage = Join-Path $Output 'ui-monochrome-en.png'
     Save-Window $process.MainWindowHandle $englishImage
 
     Select-Index $language 1
     $process.Refresh()
     $chineseTitle = $process.MainWindowTitle
-    $chineseStart = (Find-ById $window 'StartCaptureButton').Current.Name
+    $chineseStart = (Find-ById $window 'CaptureActionButton').Current.Name
     $chineseImage = Join-Path $Output 'ui-monochrome-zh.png'
     Save-Window $process.MainWindowHandle $chineseImage
 

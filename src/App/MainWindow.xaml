@@ -19,6 +19,8 @@
         </Style>
         <Style TargetType="ListBoxItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="AutomationProperties.AutomationId" Value="{Binding Udid}"/>
+            <Setter Property="AutomationProperties.Name" Value="{Binding DisplayName}"/>
             <Setter Property="Margin" Value="0,0,0,10"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -32,13 +34,13 @@
                             <ContentPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                <Setter TargetName="Card" Property="Background" Value="#242424"/>
-                            </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Card" Property="Background" Value="#202020"/>
                                 <Setter TargetName="Card" Property="BorderBrush" Value="#5A5A5A"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Card" Property="Background" Value="#242424"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -80,6 +82,59 @@
             <Setter Property="MinHeight" Value="36"/>
             <Setter Property="Padding" Value="8,7"/>
         </Style>
+        <Style x:Key="CaptureActionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="132"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="Background" Value="#F2F2F2"/>
+            <Setter Property="BorderBrush" Value="#F2F2F2"/>
+            <Setter Property="Foreground" Value="#0D0D0D"/>
+            <Setter Property="Content" Value="{DynamicResource StartMirroring}"/>
+            <Setter Property="Command" Value="{Binding StartCommand}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ActionRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <TextBlock Text="{TemplateBinding Content}"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ActionRoot" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ActionRoot" Property="Opacity" Value="0.72"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="ActionRoot" Property="BorderBrush" Value="White"/>
+                                <Setter TargetName="ActionRoot" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ActionRoot" Property="Opacity" Value="0.34"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasCaptureSession}" Value="True">
+                    <Setter Property="Background" Value="#C93645"/>
+                    <Setter Property="BorderBrush" Value="#C93645"/>
+                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Content" Value="{DynamicResource StopMirroring}"/>
+                    <Setter Property="Command" Value="{Binding StopCommand}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid x:Name="RootLayout" Margin="24">
@@ -94,7 +149,9 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="18"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel>
@@ -102,7 +159,16 @@
                 <TextBlock Text="{DynamicResource AppSubtitle}" Foreground="{StaticResource MutedTextBrush}"
                            FontSize="12" Margin="0,4,0,0"/>
             </StackPanel>
-            <ComboBox x:Name="LanguageComboBox" Grid.Column="1" Width="142" MinHeight="34"
+            <Border Grid.Column="1" Padding="0" VerticalAlignment="Center"
+                    Background="Transparent" BorderThickness="0" MaxWidth="360">
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="6" Height="6" Fill="{StaticResource WarningBrush}" Margin="0,0,8,0"/>
+                    <TextBlock Text="{Binding DriverState}" FontSize="12" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </Border>
+            <ComboBox x:Name="LanguageComboBox" Grid.Column="3" Width="142" Height="40"
+                      VerticalAlignment="Center"
                       SelectedValue="{Binding SelectedLanguage, Mode=TwoWay}"
                       SelectedValuePath="Tag"
                       ToolTip="{DynamicResource LanguageToolTip}">
@@ -110,16 +176,13 @@
                 <ComboBoxItem Tag="zh-CN" Content="{DynamicResource LanguageChinese}"/>
                 <ComboBoxItem Tag="en-US" Content="{DynamicResource LanguageEnglish}"/>
             </ComboBox>
-            <Border Grid.Column="3" Padding="0" VerticalAlignment="Center"
-                    Background="Transparent" BorderThickness="0">
-                <StackPanel Orientation="Horizontal">
-                    <Ellipse Width="6" Height="6" Fill="{StaticResource WarningBrush}" Margin="0,0,8,0"/>
-                    <TextBlock Text="{Binding DriverState}" FontSize="12" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Border>
+            <Button x:Name="CaptureActionButton" Grid.Column="5"
+                    AutomationProperties.AutomationId="CaptureActionButton"
+                    Style="{StaticResource CaptureActionButton}"
+                    VerticalAlignment="Center"/>
         </Grid>
 
-        <Grid x:Name="MainContentGrid" Grid.Row="2">
+        <Grid x:Name="MainContentGrid" Grid.Row="2" UseLayoutRounding="True">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="DeviceColumn" Width="300"/>
                 <ColumnDefinition x:Name="LeftGapColumn" Width="18"/>
@@ -196,24 +259,105 @@
                 </Border>
 
                 <Border x:Name="PreviewPanel" Grid.Row="2" Background="#050505" BorderBrush="{StaticResource BorderBrush}"
-                        BorderThickness="1" CornerRadius="8" ClipToBounds="True">
+                        BorderThickness="1" CornerRadius="8" ClipToBounds="True"
+                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                        MinWidth="0" MinHeight="300" SnapsToDevicePixels="True">
                     <Grid>
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
-                            <Border Width="84" Height="126" CornerRadius="12" BorderThickness="2"
-                                    BorderBrush="#666666" HorizontalAlignment="Center">
-                                <Grid>
-                                    <Border Width="30" Height="4" CornerRadius="2" Background="#666666"
-                                            VerticalAlignment="Top" Margin="0,8,0,0"/>
-                                    <TextBlock Text="USB" Foreground="{StaticResource MutedTextBrush}" FontWeight="SemiBold" FontSize="12"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Grid>
-                            </Border>
-                            <TextBlock Text="{Binding SelectedName}" FontSize="20" FontWeight="SemiBold"
-                                       TextAlignment="Center" Margin="0,20,0,0"/>
-                            <TextBlock Text="{Binding CaptureStatus}" Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="12" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0"/>
-                        </StackPanel>
-                        <controls:NativePreviewHost x:Name="MainPreviewHost"/>
+                        <Grid>
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCapturing}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+
+                            <StackPanel x:Name="WaitingForDeviceState"
+                                        AutomationProperties.AutomationId="WaitingForDeviceState"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedDevice}" Value="{x:Null}">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <Border Width="92" Height="92" CornerRadius="46"
+                                        Background="#111111" BorderBrush="#3C3C3C" BorderThickness="1"
+                                        HorizontalAlignment="Center">
+                                    <Grid>
+                                        <Path Width="38" Height="48"
+                                              Data="M13,2 L25,2 C31,2 35,6 35,12 L35,36 C35,42 31,46 25,46 L13,46 C7,46 3,42 3,36 L3,12 C3,6 7,2 13,2 Z M15,7 L23,7"
+                                              Stroke="#A3A3A3" StrokeThickness="2"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                              Stretch="Uniform"/>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Text="{DynamicResource StatusWaitingDevice}"
+                                           FontSize="21" FontWeight="SemiBold" TextAlignment="Center"
+                                           Margin="0,20,0,0"/>
+                                <TextBlock Text="{DynamicResource KeepUnlocked}"
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="12"
+                                           TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel x:Name="ReadyToMirrorState"
+                                        AutomationProperties.AutomationId="ReadyToMirrorState"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedDevice}" Value="{x:Null}">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <Border Width="84" Height="126" CornerRadius="12" BorderThickness="2"
+                                        BorderBrush="#666666" HorizontalAlignment="Center">
+                                    <Grid>
+                                        <Border Width="30" Height="4" CornerRadius="2" Background="#666666"
+                                                VerticalAlignment="Top" Margin="0,8,0,0"/>
+                                        <TextBlock Text="USB" Foreground="{StaticResource MutedTextBrush}"
+                                                   FontWeight="SemiBold" FontSize="12"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Text="{Binding SelectedName}" FontSize="20" FontWeight="SemiBold"
+                                           TextAlignment="Center" Margin="0,20,0,0"/>
+                                <TextBlock Text="{Binding CaptureStatus}" Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="12" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                        <controls:NativePreviewHost x:Name="MainPreviewHost">
+                            <controls:NativePreviewHost.Style>
+                                <Style TargetType="{x:Type controls:NativePreviewHost}">
+                                    <!-- Keep a live 1 px native target while the WPF connection state
+                                         is shown. Recreating an HwndHost at capture time can briefly
+                                         attach the renderer at the wrong size. -->
+                                    <Setter Property="Width" Value="1"/>
+                                    <Setter Property="Height" Value="1"/>
+                                    <Setter Property="HorizontalAlignment" Value="Left"/>
+                                    <Setter Property="VerticalAlignment" Value="Top"/>
+                                    <Setter Property="IsHitTestVisible" Value="False"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCapturing}" Value="True">
+                                            <Setter Property="Width" Value="Auto"/>
+                                            <Setter Property="Height" Value="Auto"/>
+                                            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                            <Setter Property="VerticalAlignment" Value="Stretch"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </controls:NativePreviewHost.Style>
+                        </controls:NativePreviewHost>
                     </Grid>
                 </Border>
 
@@ -315,6 +459,7 @@
                                 </StackPanel>
                                 <TextBlock Text="UDID" Style="{StaticResource DetailLabel}" Margin="0,9,0,3"/>
                                 <TextBlock Text="{Binding SelectedUdid}" FontFamily="Consolas" FontSize="9"
+                                           AutomationProperties.AutomationId="SelectedDeviceUdidText"
                                            Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
@@ -394,15 +539,10 @@
 
                         <Border Style="{StaticResource ControlSectionCard}">
                             <StackPanel>
-                                <TextBlock Text="{DynamicResource ProjectionActions}" Style="{StaticResource ControlSectionTitle}" Margin="0,0,0,10"/>
-                                <Button x:Name="StartCaptureButton" Content="{DynamicResource StartMirroring}"
-                                        Command="{Binding StartCommand}" Style="{StaticResource PrimaryButton}"/>
-                                <Button x:Name="StopCaptureButton" Content="{DynamicResource StopMirroring}" Command="{Binding StopCommand}"
-                                         Background="#181818" BorderBrush="#565656" Margin="0,9,0,0"/>
                                 <Button x:Name="InstallDriverButton" Content="{Binding DriverInstallButtonText}"
                                         Command="{Binding InstallDriverCommand}"
                                         Visibility="{Binding DriverInstallVisibility}"
-                                        Style="{StaticResource ToolButton}" Margin="0,9,0,0"/>
+                                        Style="{StaticResource ToolButton}"/>
                                 <Button Content="{DynamicResource DriverTrustHelp}" Command="{Binding DriverHelpCommand}"
                                         Style="{StaticResource ToolButton}" Margin="0,9,0,0"/>
                             </StackPanel>

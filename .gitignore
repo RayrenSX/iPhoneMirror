@@ -14,8 +14,8 @@ packages/
 build/
 out/
 outputs/
-src/App/bin/
-src/App/obj/
+src/**/bin/
+src/**/obj/
 src/App/native/
 CMakeUserPresets.json
 *.pdb

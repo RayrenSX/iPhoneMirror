@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -62,6 +63,12 @@ public partial class MainWindow : Window
         {
             await _viewModel.ShutdownAsync();
         }
+        catch (Exception error)
+        {
+            // Window shutdown must complete even if a broken USB stack reports
+            // an error after the explicit stop/dispose attempts have run.
+            Debug.WriteLine($"iPhoneMirror shutdown cleanup failed: {error}");
+        }
         finally
         {
             _allowClose = true;
@@ -124,9 +131,14 @@ public partial class MainWindow : Window
         // Width is raised before height as one atomic status update. Listening
         // to the final height notification avoids resizing twice per frame-
         // format/orientation change.
-        if (e.PropertyName == nameof(MainViewModel.SourceVideoHeight))
-            _previewWindows.UpdateSourceSize(
-                _viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight);
+        if (e.PropertyName is nameof(MainViewModel.SourceVideoHeight) or
+            nameof(MainViewModel.SelectedDevice) or nameof(MainViewModel.SelectedModel))
+        {
+            _previewWindows.UpdateSourceDevice(
+                _viewModel.SelectedDevice?.ProductType,
+                _viewModel.SourceVideoWidth,
+                _viewModel.SourceVideoHeight);
+        }
     }
 
     private void OnFullScreenClick(object sender, RoutedEventArgs e) => ToggleActiveFullScreen();

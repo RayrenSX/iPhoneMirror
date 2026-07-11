@@ -17,7 +17,7 @@
 
 namespace iPhoneMirror {
 
-constexpr std::uint32_t ApiVersion = 7;
+constexpr std::uint32_t ApiVersion = 8;
 constexpr std::size_t MaxUdid = 128;
 constexpr std::size_t MaxName = 128;
 constexpr std::size_t MaxProductType = 64;
@@ -197,6 +197,13 @@ IM_API void IM_CALL im_detach_preview_window();
 // This is useful after a display-mode/layout change or an occluded window is
 // restored. It returns CaptureBackendUnavailable when no preview is attached.
 IM_API std::int32_t IM_CALL im_force_preview_refresh();
+// Sets the display-outline fit used by a borderless top-level preview.
+// normalized_radius is relative to the short edge (0 disables clipping).
+// curve_exponent controls the continuous superellipse and must be [1.5, 8].
+// The setting is retained across preview-window reattachment.
+IM_API std::int32_t IM_CALL im_set_preview_corner_profile(
+    float normalized_radius,
+    float curve_exponent);
 
 // Controls may be changed while capture is active. Audio changes take effect
 // on the next WASAPI render buffer. max_width/max_height and max_fps are local

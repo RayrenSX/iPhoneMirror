@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -21,6 +22,11 @@ using Microsoft::WRL::ComPtr;
 
 namespace iPhoneMirror::renderer {
 namespace {
+
+std::uint64_t pack_corner_profile(float normalized_radius, float curve_exponent) noexcept {
+    return (static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(normalized_radius)) << 32U) |
+        std::bit_cast<std::uint32_t>(curve_exponent);
+}
 
 void check(HRESULT result, const char* operation) {
     if (FAILED(result)) {
@@ -89,9 +95,9 @@ cbuffer ShapeConstants : register(b0) {
 float cornerCoverage(float2 pixel) {
     if (cornerEnabled < 0.5) return 1.0;
 
-    // Values are fitted from Apple's official 1206x2622 Product Bezel screen
-    // mask (radius 215.1 px, exponent 2.36). fwidth creates sub-pixel coverage
-    // instead of the binary stair steps produced by an HRGN.
+    // The GUI resolves a device-family visual fit from ProductType. fwidth
+    // creates sub-pixel coverage instead of the binary stair steps produced
+    // by an HRGN fallback.
     float radius = max(cornerRadius, 1.0);
     float2 halfSize = outputSize * 0.5;
     float2 corner = max(abs(pixel - halfSize) - (halfSize - radius), 0.0) / radius;
@@ -183,6 +189,9 @@ struct D3D11PreviewRenderer::Impl {
     // Packed as width in the high dword and height in the low dword so the
     // render thread never observes a mixed pair during a live preset change.
     std::atomic_uint64_t render_size_limit{};
+    // Radius/exponent are published as one atomic value so a live device
+    // switch cannot render one frame using a mixed profile.
+    std::atomic_uint64_t corner_profile{pack_corner_profile(0.1784F, 2.36F)};
     std::uint32_t scheduled_fps{};
     std::chrono::steady_clock::time_point next_present_due{};
 
@@ -315,9 +324,14 @@ struct D3D11PreviewRenderer::Impl {
         ShapeConstantData values{};
         values.output_width = static_cast<float>(width);
         values.output_height = static_cast<float>(height);
-        values.corner_radius = static_cast<float>(std::min(width, height)) * 0.1784F;
-        values.corner_exponent = 2.36F;
-        values.corner_enabled = enabled ? 1.0F : 0.0F;
+        const auto packed_profile = corner_profile.load(std::memory_order_relaxed);
+        const auto normalized_radius = std::bit_cast<float>(
+            static_cast<std::uint32_t>(packed_profile >> 32U));
+        const auto curve_exponent = std::bit_cast<float>(
+            static_cast<std::uint32_t>(packed_profile & 0xFFFFFFFFU));
+        values.corner_radius = static_cast<float>(std::min(width, height)) * normalized_radius;
+        values.corner_exponent = curve_exponent;
+        values.corner_enabled = enabled && normalized_radius > 0.0F ? 1.0F : 0.0F;
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context->Map(shape_constants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped),
@@ -728,6 +742,16 @@ void D3D11PreviewRenderer::set_render_size_limit(std::uint32_t width,
     if (!impl_) return;
     const auto packed = (static_cast<std::uint64_t>(width) << 32U) | height;
     impl_->render_size_limit.store(packed, std::memory_order_relaxed);
+    impl_->refresh_requested.store(true, std::memory_order_release);
+}
+
+void D3D11PreviewRenderer::set_corner_profile(float normalized_radius,
+    float curve_exponent) noexcept {
+    if (!impl_) return;
+    normalized_radius = std::clamp(normalized_radius, 0.0F, 0.5F);
+    curve_exponent = std::clamp(curve_exponent, 1.5F, 8.0F);
+    impl_->corner_profile.store(pack_corner_profile(normalized_radius, curve_exponent),
+        std::memory_order_relaxed);
     impl_->refresh_requested.store(true, std::memory_order_release);
 }
 

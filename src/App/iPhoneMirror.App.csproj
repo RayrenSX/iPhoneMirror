@@ -74,5 +74,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+    <Content Include="..\..\docs\DEVICE_CORNER_PROFILES.md" Condition="Exists('..\..\docs\DEVICE_CORNER_PROFILES.md')">
+      <Link>docs\DEVICE_CORNER_PROFILES.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 </Project>

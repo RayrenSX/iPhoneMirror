@@ -30,6 +30,10 @@ public:
     // Limits the local GPU intermediate render texture while leaving the
     // decoded/USB source untouched. (0,0) uses native source resolution.
     void set_render_size_limit(std::uint32_t width, std::uint32_t height) noexcept;
+    // Configures the top-level preview's continuous display outline. Radius is
+    // normalized to the short edge; zero disables clipping. Child/main-window
+    // previews remain rectangular because their WPF panel owns that shape.
+    void set_corner_profile(float normalized_radius, float curve_exponent) noexcept;
 
 private:
     struct Impl;

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using IPhoneMirror.App.Models;
 
 namespace IPhoneMirror.App.Windows;
 
@@ -46,6 +47,8 @@ public sealed partial class PreviewWindow : Window
     private int _lastRegionRadius = -1;
     private nint _windowHandle;
     private HwndSource? _windowSource;
+    private DeviceCornerProfile _cornerProfile =
+        new("iphone-default", true, 0.1784, 2.36, 0.1583);
 
     internal PreviewWindow()
     {
@@ -68,6 +71,13 @@ public sealed partial class PreviewWindow : Window
     internal bool IsFullScreen => _isFullScreen;
 
     internal bool RefreshPreview() => PreviewHost.ForceRefresh();
+
+    internal void SetCornerProfile(DeviceCornerProfile profile)
+    {
+        if (_cornerProfile == profile) return;
+        _cornerProfile = profile;
+        QueueWindowShapeUpdate();
+    }
 
     internal void ToggleFullScreen()
     {
@@ -208,14 +218,17 @@ public sealed partial class PreviewWindow : Window
 
         var width = Math.Max(1, bounds.Right - bounds.Left);
         var height = Math.Max(1, bounds.Bottom - bounds.Top);
+        if (!_cornerProfile.IsRounded)
+        {
+            ClearWindowRegion();
+            return;
+        }
         var dpi = GetDpiForWindow(_windowHandle);
         var scale = dpi == 0 ? 1.0 : dpi / 96.0;
-        // A circular fit of Apple's 1:1 iPhone 17 Pro Product Bezel screen
-        // mask measures 15.83% of the short edge.  The preferred composition
-        // renderer uses the more accurate continuous curve; this is its GDI
-        // fallback for systems where DirectComposition cannot be created.
-        var radius = Math.Max((int)Math.Round(Math.Min(width, height) * 0.1583),
-            (int)Math.Round(28 * scale));
+        // HRGN supports only a circular round-rectangle. The preferred native
+        // composition path uses the profile's continuous superellipse; this
+        // profile-specific radius is the closest GDI fallback.
+        var radius = _cornerProfile.GetGdiRadius(Math.Min(width, height), scale);
         if (width == _lastRegionWidth && height == _lastRegionHeight &&
             radius == _lastRegionRadius) return;
 

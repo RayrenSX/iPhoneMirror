@@ -89,6 +89,15 @@ try {
     $window = [System.Windows.Automation.AutomationElement]::FromHandle(
         $process.MainWindowHandle)
 
+    $language = Find-ById $window 'LanguageComboBox'
+    $captureAction = Find-ById $window 'CaptureActionButton'
+    $languageBounds = $language.Current.BoundingRectangle
+    $actionBounds = $captureAction.Current.BoundingRectangle
+    if ([Math]::Abs($languageBounds.Top - $actionBounds.Top) -gt 1.5 -or
+        [Math]::Abs($languageBounds.Height - $actionBounds.Height) -gt 1.5) {
+        throw "Header controls are not aligned: language=$languageBounds action=$actionBounds"
+    }
+
     $mainPath = Join-Path $OutputDirectory 'ui-polish-main.png'
     Save-WindowCapture $process.MainWindowHandle $mainPath
 
@@ -105,6 +114,8 @@ try {
         Main = $mainPath
         DropDown = $dropdownPath
         ResolutionName = $combo.Current.Name
+        HeaderControlHeight = $actionBounds.Height
+        HeaderAlignmentDelta = [Math]::Abs($languageBounds.Top - $actionBounds.Top)
         ProcessAlive = -not $process.HasExited
     }
 }

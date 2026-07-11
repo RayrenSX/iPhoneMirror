@@ -44,6 +44,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     // Serialize those transitions and let only the newest selection win.
     private readonly SemaphoreSlim _deviceSwitchGate = new(1, 1);
     private readonly SemaphoreSlim _logGate = new(1, 1);
+    private readonly CaptureShutdownCoordinator _shutdownCoordinator = new();
     private bool _disposed;
     private DeviceViewModel? _selectedDevice;
     private string _environmentStatus = string.Empty;
@@ -53,8 +54,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private bool _isBusy;
     private bool _isSwitchingDevice;
     private string? _activeCaptureUdid;
+    // Unlike _activeCaptureUdid, this survives a terminal/error status until
+    // StopCapture has actually joined the native session and sent HPA0/HPD0.
+    // It prevents a device switch from abandoning a failed/starting session.
+    private readonly CaptureSessionOwnership _captureSession = new();
     private int _selectionRevision;
     private int _manualRefreshPending;
+    // Installation can restart the device node programmatically, but the
+    // libusb0 filter is only considered ready for this GUI after a real
+    // unplug/replug cycle has been observed for the exact UDID.
+    private readonly DriverReplugTracker _driverReplug = new();
     private ImageSource? _previewSource;
     // WPF's compositor can retain an ImageSource for more than one render
     // pass.  Reusing the immediately previous WriteableBitmap therefore lets
@@ -127,6 +136,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public string EnvironmentStatus { get => _environmentStatus; private set => Set(ref _environmentStatus, value); }
     public string CaptureStatus { get => _captureStatus; private set => Set(ref _captureStatus, value); }
     public string DriverState { get => _driverState; private set => Set(ref _driverState, value); }
+    public bool HasCaptureSession => _captureSession.HasSession;
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) { StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); } } }
     public bool IsBusy
     {
@@ -218,8 +228,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public string TargetFpsDisplay => LocalizationService.Format("TargetFpsFormat", SelectedFrameRate);
     public string LogText { get => _logText; private set => Set(ref _logText, value); }
     public string LogPathDisplay => _logPath;
-    public Visibility DriverInstallVisibility => _filterDriverStatus.State is
-        IPhoneFilterDriverState.Missing or IPhoneFilterDriverState.PackageMissing
+    public Visibility DriverInstallVisibility => !_driverReplug.IsPending(SelectedDevice?.Udid) &&
+        _filterDriverStatus.State is IPhoneFilterDriverState.Missing or
+            IPhoneFilterDriverState.PackageMissing
             ? Visibility.Visible : Visibility.Collapsed;
     public string DriverInstallButtonText => LocalizationService.Get(
         _filterDriverStatus.State == IPhoneFilterDriverState.PackageMissing
@@ -239,15 +250,17 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _core = new NativeCore();
         _selectedResolutionPreset = ResolutionPresets[0];
         StartCommand = new RelayCommand(() => _ = StartAsync(),
-            () => SelectedDevice is not null && !IsCapturing && !IsOperationBusy);
+            () => SelectedDevice is not null && !_driverReplug.IsPending(SelectedDevice.Udid) &&
+                  !HasCaptureSession && !IsCapturing && !IsOperationBusy);
         StopCommand = new RelayCommand(() => _ = StopAsync(),
-            () => IsCapturing && !IsOperationBusy);
+            () => (IsCapturing || _captureSession.HasSession) && !IsOperationBusy);
         // A manual refresh is guaranteed to run after a short in-flight poll;
         // timer refreshes remain best-effort and never build up a queue.
         RefreshCommand = new RelayCommand(() => _ = RefreshAsync(forceDeviceEnumeration: true));
         DriverHelpCommand = new RelayCommand(ShowDriverHelp);
         InstallDriverCommand = new RelayCommand(() => _ = InstallSelectedDriverAsync(),
-            () => !IsOperationBusy && !IsCapturing && _filterDriverStatus.CanInstall);
+            () => !IsOperationBusy && !IsCapturing &&
+                  !_driverReplug.IsPending(SelectedDevice?.Udid) && _filterDriverStatus.CanInstall);
         ApplyVideoSettingsCommand = new RelayCommand(() => _ = ApplyVideoSettingsAsync(),
             () => !IsOperationBusy);
         ClearLogCommand = new RelayCommand(ClearVisibleLog);
@@ -289,7 +302,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            var previousUdid = SelectedDevice?.Udid;
             NativeEnvironmentInfo? environment = null;
             IReadOnlyList<NativeDeviceInfo> nativeDevices;
             NativeCaptureStatus capture;
@@ -320,7 +332,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 .Select(group => group.First())
                 .ToList();
             var captureActive = IsActiveCaptureState(capture.State);
-            ReconcileDevices(devices, previousUdid, captureActive);
+            // Device discovery runs off the UI thread and can overlap a real
+            // user click. A selection captured before that await is stale and
+            // used to snap the highlight back to the old phone when the poll
+            // completes. Read the current UDID only when applying the result.
+            var currentSelectionUdid = SelectedDevice?.Udid;
+            ReconcileDevices(devices, currentSelectionUdid, captureActive);
             ApplyCaptureStatus(capture);
 
             if (forceDeviceEnumeration)
@@ -358,42 +375,39 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (activeCard is not null) desired.Add(activeCard);
         }
 
+        TrackDriverReplugCycle(desired);
+
+        var desiredByUdid = desired
+            .GroupBy(device => device.Udid, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(),
+                StringComparer.OrdinalIgnoreCase);
         var previousCount = Devices.Count;
-        for (var desiredIndex = 0; desiredIndex < desired.Count; ++desiredIndex)
+
+        // Preserve the order and identity of every existing card. usbmux does
+        // not guarantee enumeration order; moving items to match each poll
+        // makes WPF publish transient selection changes and the highlight
+        // appears to jump between phones. New devices are appended once.
+        foreach (var existing in Devices.ToArray())
         {
-            var incoming = desired[desiredIndex];
-            var existingIndex = -1;
-            for (var index = 0; index < Devices.Count; ++index)
-            {
-                if (!DeviceViewModel.UdidEquals(Devices[index].Udid, incoming.Udid)) continue;
-                existingIndex = index;
-                break;
-            }
-
-            if (existingIndex < 0)
-            {
-                Devices.Insert(desiredIndex, incoming);
-                continue;
-            }
-
-            var existing = Devices[existingIndex];
-            if (!ReferenceEquals(existing, incoming)) existing.UpdateFrom(incoming);
-            if (existingIndex != desiredIndex) Devices.Move(existingIndex, desiredIndex);
+            if (desiredByUdid.TryGetValue(existing.Udid, out var incoming) &&
+                !ReferenceEquals(existing, incoming)) existing.UpdateFrom(incoming);
         }
+        var stableOrder = StableDeviceSelection.MergeVisibleOrder(
+            Devices.Select(device => device.Udid), desired.Select(device => device.Udid));
+        foreach (var udid in stableOrder)
+            if (!Devices.Any(existing => DeviceViewModel.UdidEquals(existing.Udid, udid)))
+                Devices.Add(desiredByUdid[udid]);
 
-        var desiredUdids = desired.Select(device => device.Udid)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         for (var index = Devices.Count - 1; index >= 0; --index)
         {
-            if (!desiredUdids.Contains(Devices[index].Udid)) Devices.RemoveAt(index);
+            if (!desiredByUdid.ContainsKey(Devices[index].Udid)) Devices.RemoveAt(index);
         }
         if (previousCount != Devices.Count) OnPropertyChanged(nameof(DeviceCount));
 
+        var nextUdid = StableDeviceSelection.ChooseUdid(
+            Devices.Select(device => device.Udid), previousSelectionUdid, _activeCaptureUdid);
         var nextSelection = Devices.FirstOrDefault(device =>
-                DeviceViewModel.UdidEquals(device.Udid, previousSelectionUdid))
-            ?? Devices.FirstOrDefault(device =>
-                DeviceViewModel.UdidEquals(device.Udid, _activeCaptureUdid))
-            ?? Devices.FirstOrDefault();
+            DeviceViewModel.UdidEquals(device.Udid, nextUdid));
         SetSelectedDevice(nextSelection, scheduleCaptureSwitch: false);
         NotifySelectedDeviceProperties();
 
@@ -405,6 +419,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void SetSelectedDevice(DeviceViewModel? value, bool scheduleCaptureSwitch)
     {
+        // Collection notifications can cause a two-way ListBox binding to
+        // offer null even though the selected stable item is still present.
+        // It is not a user selection and must not supersede the real UDID.
+        if (value is null && _selectedDevice is not null && Devices.Contains(_selectedDevice)) return;
         if (ReferenceEquals(_selectedDevice, value)) return;
         _selectedDevice = value;
         OnPropertyChanged(nameof(SelectedDevice));
@@ -419,8 +437,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         var revision = value is null && _isSwitchingDevice
             ? Volatile.Read(ref _selectionRevision)
             : Interlocked.Increment(ref _selectionRevision);
-        var differentFromActive = IsCapturing && value is not null &&
-            !DeviceViewModel.UdidEquals(value.Udid, _activeCaptureUdid);
+        var differentFromActive = value is not null &&
+            _captureSession.RequiresStopBeforeSwitch(value.Udid);
         if (scheduleCaptureSwitch && value is not null &&
             (differentFromActive || _isSwitchingDevice))
         {
@@ -450,6 +468,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         var coreGateHeld = false;
         var stoppedPreviousCapture = false;
         var previousActiveUdid = _activeCaptureUdid;
+        var previousSessionUdid = _captureSession.OwnerUdid;
         try
         {
             if (_disposed || revision != Volatile.Read(ref _selectionRevision)) return;
@@ -459,38 +478,62 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (!ReferenceEquals(SelectedDevice, target) &&
                 !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, target.Udid)) return;
 
-            if (IsCapturing && !DeviceViewModel.UdidEquals(_activeCaptureUdid, target.Udid))
+            if (_captureSession.RequiresStopBeforeSwitch(target.Udid))
             {
                 CaptureStatus = LocalizationService.Format("SwitchingDeviceFormat", target.DisplayName);
+                AddUiLog($"device switch stopping QuickTime session: owner={_captureSession.OwnerUdid}");
                 await Task.Run(_core.StopCapture);
                 stoppedPreviousCapture = true;
-                var status = await Task.Run(_core.GetCaptureStatus);
-                ApplyCaptureStatus(status);
+                // StopCapture is synchronous: once it returns the native
+                // worker has joined and shutdown_usb has sent HPA0/HPD0.
+                SetCaptureSessionOwner(null);
                 _activeCaptureUdid = null;
                 IsCapturing = false;
+                var status = await Task.Run(_core.GetCaptureStatus);
+                ApplyCaptureStatus(status);
                 ResetPreviewState();
                 AddUiLog($"device switch released previous capture; next={target.Udid}");
             }
 
             if (revision != Volatile.Read(ref _selectionRevision)) return;
-            UpdateSelectedDriverStatus();
-            CaptureStatus = target.StatusDisplay;
+            if (_captureSession.HasSession)
+            {
+                // A rapid A -> B -> A selection can supersede the queued B
+                // transition before it starts. Keep A streaming and avoid the
+                // legacy libusb0 driver probe while A's capture handle is live.
+                var currentStatus = await Task.Run(_core.GetCaptureStatus);
+                ApplyCaptureStatus(currentStatus);
+            }
+            else
+            {
+                UpdateSelectedDriverStatus();
+                CaptureStatus = target.StatusDisplay;
+            }
             if (stoppedPreviousCapture)
                 AddUiLog($"device switch ready: selected={target.Udid}; press Start to mirror");
         }
         catch (Exception error)
         {
-            try
+            if (stoppedPreviousCapture)
+            {
+                SetCaptureSessionOwner(null);
+                _activeCaptureUdid = null;
+                IsCapturing = false;
+                ResetPreviewState();
+            }
+            if (!stoppedPreviousCapture) try
             {
                 var status = coreGateHeld ? _core.GetCaptureStatus() : default;
                 if (coreGateHeld && IsActiveCaptureState(status.State))
                 {
                     _activeCaptureUdid = previousActiveUdid;
+                    SetCaptureSessionOwner(previousSessionUdid);
                     ApplyCaptureStatus(status);
                 }
                 else
                 {
                     _activeCaptureUdid = null;
+                    SetCaptureSessionOwner(null);
                     IsCapturing = false;
                     ResetPreviewState();
                 }
@@ -501,6 +544,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 // affordance so the user can still press Stop and retry the
                 // native cleanup instead of being stranded with no controls.
                 _activeCaptureUdid = previousActiveUdid;
+                SetCaptureSessionOwner(previousSessionUdid);
                 IsCapturing = previousActiveUdid is not null;
             }
             CaptureStatus = LocalizationService.Format("SwitchDeviceFailedFormat", error.Message);
@@ -521,6 +565,31 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         StartCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
         ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
+        InstallDriverCommand.NotifyCanExecuteChanged();
+    }
+
+    private void SetCaptureSessionOwner(string? udid)
+    {
+        if (!_captureSession.SetOwner(udid)) return;
+        OnPropertyChanged(nameof(HasCaptureSession));
+        StartCommand.NotifyCanExecuteChanged();
+        StopCommand.NotifyCanExecuteChanged();
+    }
+
+    private void TrackDriverReplugCycle(IReadOnlyList<DeviceViewModel> discovered)
+    {
+        if (!_driverReplug.Any) return;
+        foreach (var udid in _driverReplug.ObservePresent(discovered.Select(device => device.Udid)))
+        {
+            AddUiLog(LocalizationService.Format("DriverReplugDetectedFormat", udid));
+            NotifyDriverReplugStateChanged();
+        }
+    }
+
+    private void NotifyDriverReplugStateChanged()
+    {
+        OnPropertyChanged(nameof(DriverInstallVisibility));
+        StartCommand.NotifyCanExecuteChanged();
         InstallDriverCommand.NotifyCanExecuteChanged();
     }
 
@@ -546,7 +615,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task StartAsync()
     {
-        if (_disposed || SelectedDevice is null || IsOperationBusy) return;
+        if (_disposed || SelectedDevice is null || HasCaptureSession || IsOperationBusy) return;
         IsBusy = true;
         var gateHeld = false;
         try
@@ -570,9 +639,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 SelectedResolutionPreset.Width, SelectedResolutionPreset.Height, (uint)SelectedFrameRate);
             _core.SetAudioVolume(PlaybackVolume / 100.0);
             _core.SetAudioEnabled(PlayAudio);
+            // Own the session before the native start call can block in USB
+            // activation. A device click or window close during that interval
+            // must still queue an explicit stop for this exact phone, and the
+            // top action changes to its red stop state immediately.
+            SetCaptureSessionOwner(device.Udid);
             var result = await Task.Run(() => _core.StartCapture(device.Udid, PlayAudio));
             IsCapturing = result.Success;
             _activeCaptureUdid = result.Success ? device.Udid : null;
+            SetCaptureSessionOwner(result.Success ? device.Udid : null);
             CaptureStatus = result.Message;
             if (preference.Success)
                 SetSettingsStatus("AppliedRenderFormat", SelectedResolutionPreset, SelectedFrameRate);
@@ -584,6 +659,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception error)
         {
             _activeCaptureUdid = null;
+            SetCaptureSessionOwner(null);
             IsCapturing = false;
             CaptureStatus = LocalizationService.Format("StartFailedFormat", error.Message);
             AddUiLog(CaptureStatus);
@@ -628,7 +704,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task StopAsync()
     {
-        if (_disposed || !IsCapturing || IsOperationBusy) return;
+        if (_disposed || (!IsCapturing && !_captureSession.HasSession) || IsOperationBusy) return;
         IsBusy = true;
         var gateHeld = false;
         CaptureStatus = LocalizationService.Get("CaptureStopping");
@@ -642,18 +718,17 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             await Task.Run(() => _core.StopCapture());
             var status = await Task.Run(_core.GetCaptureStatus);
             ApplyCaptureStatus(status);
-            if (status.State != CaptureState.Error)
-            {
-                _activeCaptureUdid = null;
-                IsCapturing = false;
-                CaptureStatus = LocalizationService.Get("CaptureStopped");
-                ResetPreviewState();
-            }
+            SetCaptureSessionOwner(null);
+            _activeCaptureUdid = null;
+            IsCapturing = false;
+            CaptureStatus = LocalizationService.Get("CaptureStopped");
+            ResetPreviewState();
             AddUiLog(LocalizationService.Get("StopSessionReleased"));
         }
         catch (Exception error)
         {
             _activeCaptureUdid = null;
+            SetCaptureSessionOwner(null);
             IsCapturing = false;
             ResetPreviewState();
             CaptureStatus = LocalizationService.Format("StopFailedFormat", error.Message);
@@ -816,6 +891,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private void ApplySelectedDriverState()
     {
         if (SelectedDevice is null) return;
+        if (_driverReplug.IsPending(SelectedDevice.Udid))
+        {
+            DriverState = LocalizationService.Get("DriverReplugRequired");
+            return;
+        }
         DriverState = _filterDriverStatus.State switch
         {
             IPhoneFilterDriverState.Ready => LocalizationService.Format(
@@ -849,6 +929,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     {
         var device = SelectedDevice;
         if (device is null) return false;
+        if (_driverReplug.IsPending(device.Udid))
+        {
+            CaptureStatus = LocalizationService.Get("DriverReplugRequired");
+            AddUiLog(LocalizationService.Get("DriverReplugRequired"));
+            return false;
+        }
         UpdateSelectedDriverStatus();
         if (_filterDriverStatus.CanStartCapture)
         {
@@ -893,25 +979,17 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             return false;
         }
 
-        if (result.RequiresReplug)
-        {
-            CaptureStatus = LocalizationService.Get("DriverReplugRequired");
-            UpdateSelectedDriverStatus();
-            return false;
-        }
-
-        // The parent is restarted by the helper. Give Apple usbmux and the
-        // filter backend a moment to observe the same re-enumeration before
-        // starting QuickTime activation.
-        await Task.Delay(1200);
-        UpdateSelectedDriverStatus();
-        if (!_filterDriverStatus.CanStartCapture)
-        {
-            CaptureStatus = LocalizationService.Get("DriverReplugRequired");
-            return false;
-        }
-        CaptureStatus = LocalizationService.Get("DriverInstallComplete");
-        return true;
+        // Require and observe a physical unplug/replug after every actual
+        // installation. A successful SetupAPI restart is not sufficient for
+        // every Apple USB stack/phone combination, especially with two phones.
+        _driverReplug.MarkInstalled(device.Udid);
+        NotifyDriverReplugStateChanged();
+        CaptureStatus = LocalizationService.Get("DriverReplugRequired");
+        DriverState = LocalizationService.Get("DriverReplugRequired");
+        MessageBox.Show(LocalizationService.Get("DriverReplugRequired"),
+            LocalizationService.Get("DriverInstallTitle"), MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        return false;
     }
 
     private static string GetCaptureStatusText(NativeCaptureStatus status) => status.State switch
@@ -1089,7 +1167,27 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         await _logGate.WaitAsync();
         try
         {
-            await Task.Run(_core.Dispose);
+            // The native core owns one QuickTime session at a time. Every
+            // prior owner was stopped synchronously during selection switch;
+            // this unconditional, idempotent stop releases whichever session
+            // may still exist (including activation/handshake/error states)
+            // before im_shutdown performs its final defensive cleanup.
+            await _shutdownCoordinator.StopAndDisposeOnceAsync(
+                async () =>
+                {
+                    try
+                    {
+                        AddUiLog($"application shutdown stopping QuickTime session: owner={_captureSession.OwnerUdid ?? "unknown"}");
+                        await Task.Run(_core.StopCapture);
+                    }
+                    finally
+                    {
+                        SetCaptureSessionOwner(null);
+                        _activeCaptureUdid = null;
+                        IsCapturing = false;
+                    }
+                },
+                () => Task.Run(_core.Dispose));
         }
         finally
         {

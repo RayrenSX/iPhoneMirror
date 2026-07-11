@@ -97,7 +97,8 @@ try {
         [System.Windows.Automation.RangeValuePattern]::Pattern)
     $range.SetValue(35)
 
-    Invoke-Element (Wait-ById $window 'StartCaptureButton')
+    $captureAction = Wait-ById $window 'CaptureActionButton'
+    Invoke-Element $captureAction
     Start-Sleep -Seconds 7
 
     $audio = Wait-ById $window 'AudioPlaybackCheckBox'
@@ -112,7 +113,10 @@ try {
     Invoke-Element (Wait-ById $window 'RefreshPreviewButton')
     Invoke-Element (Wait-ById $window 'ScreenshotButton')
     Start-Sleep -Seconds 2
-    Invoke-Element (Wait-ById $window 'StopCaptureButton')
+    # The same top-right control changes from Start to the red stop state.
+    # Resolve it again because WPF can recreate an automation peer when a
+    # command/style trigger changes.
+    Invoke-Element (Wait-ById $window 'CaptureActionButton')
     Start-Sleep -Seconds 3
 }
 finally {

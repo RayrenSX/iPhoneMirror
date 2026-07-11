@@ -41,9 +41,9 @@ desktop iTunes package containing Apple Mobile Device Support.
 | Video | CoreMedia/AVCC H.264 and low-latency Media Foundation decode |
 | Rendering | Native D3D11/DirectComposition preview |
 | Audio | 48 kHz stereo PCM with WASAPI playback, mute and volume |
-| Devices | UDID metadata, trust status, multi-device refresh and safe switching |
+| Devices | iPhone/iPad metadata, trust status, stable refresh and safe switching |
 | Quality | Native/1080p/720p/540p local limits and 24/30/60/120 FPS limits |
-| Preview | Main, detached, full-screen and aspect-locked rotated windows |
+| Preview | Main, detached, full-screen, rotation, aspect lock and device-aware corners |
 | OBS | Stable-title dedicated window for Window Capture |
 | Tools | Screenshot, force refresh, shortcuts, live logs, Chinese and English UI |
 | Driver | Per-device libusb0 UpperFilter installation with verification and rollback |
@@ -54,11 +54,15 @@ original USB stream quality.
 ## Quick start
 
 1. Install and start Apple Devices or Apple Mobile Device Support.
-2. Connect the iPhone over USB, unlock it and choose **Trust This Computer**.
+2. Connect the iPhone or iPad over USB, unlock it and choose **Trust This Computer**.
 3. Extract the Release ZIP and run `iPhoneMirror.exe`.
 4. Select the phone and click **Start Mirroring**.
-5. On first use for that phone, review the scoped driver change and approve UAC.
-6. Reconnect only that iPhone if the application requests it.
+5. On first use for that device, review the scoped driver change and approve UAC.
+6. After installation, unplug the cable, wait for its card to disappear, then reconnect it unlocked.
+
+Selecting another device first sends the QuickTime stop controls to the prior
+session and restores its normal USB configuration. Closing the main window runs
+the same cleanup path.
 
 > [!WARNING]
 > Do not use Zadig to replace the Apple parent driver with WinUSB/libusb.
@@ -108,7 +112,8 @@ QuickTime Screen Capture session
 ```
 
 See [protocol](docs/PROTOCOL.md), [architecture](docs/ARCHITECTURE.md),
-[D3D11 rendering](docs/D3D11_RENDERING.md) and
+[D3D11 rendering](docs/D3D11_RENDERING.md),
+[device corner profiles](docs/DEVICE_CORNER_PROFILES.md) and
 [WASAPI audio](docs/WASAPI_AUDIO.md) documentation.
 
 ## Current limitations

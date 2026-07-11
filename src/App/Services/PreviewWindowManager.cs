@@ -1,4 +1,6 @@
 using System.Windows;
+using IPhoneMirror.App.Interop;
+using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Windows;
 
 namespace IPhoneMirror.App.Services;
@@ -13,11 +15,15 @@ internal sealed class PreviewWindowManager : IDisposable
     // replace this immediately after the first decoded format/status update.
     private uint _sourceWidth = 1206;
     private uint _sourceHeight = 2622;
+    private string _productType = string.Empty;
+    private DeviceCornerProfile _cornerProfile =
+        DeviceCornerProfileResolver.Resolve(null, 1206, 2622);
 
     internal bool IsOpen => _nativeWindow is not null || _fallbackWindow is not null;
 
     internal void Show(Window? owner = null)
     {
+        ApplyCornerProfile();
         if (_nativeWindow is not null)
         {
             _nativeWindow.Activate();
@@ -43,6 +49,7 @@ internal sealed class PreviewWindowManager : IDisposable
         }
 
         var window = new PreviewWindow();
+        window.SetCornerProfile(_cornerProfile);
         var aspectController = new AspectRatioWindowController(window, _sourceWidth, _sourceHeight);
         // Intentionally do not set Window.Owner. An owned WPF window is hidden
         // when the main window is minimized, which makes OBS Window Capture
@@ -65,9 +72,42 @@ internal sealed class PreviewWindowManager : IDisposable
         if (width == 0 || height == 0) return;
         _sourceWidth = width;
         _sourceHeight = height;
+        UpdateCornerProfile();
         _nativeWindow?.SetSourceDimensions(width, height);
         _aspectController?.SetSourceDimensions(width, height);
     }
+
+    /// <summary>
+    /// Updates both capture geometry and Apple's stable hardware identifier.
+    /// ProductType produces the most accurate family fit; frame geometry is a
+    /// forward-compatible fallback while Lockdown is still loading metadata.
+    /// </summary>
+    internal void UpdateSourceDevice(string? productType, uint width, uint height)
+    {
+        _productType = productType?.Trim() ?? string.Empty;
+        if (width != 0 && height != 0)
+        {
+            _sourceWidth = width;
+            _sourceHeight = height;
+            _nativeWindow?.SetSourceDimensions(width, height);
+            _aspectController?.SetSourceDimensions(width, height);
+        }
+        UpdateCornerProfile();
+    }
+
+    private void UpdateCornerProfile()
+    {
+        var profile = DeviceCornerProfileResolver.Resolve(
+            _productType, _sourceWidth, _sourceHeight);
+        if (profile == _cornerProfile) return;
+        _cornerProfile = profile;
+        ApplyCornerProfile();
+        _fallbackWindow?.SetCornerProfile(profile);
+    }
+
+    private void ApplyCornerProfile() => NativeCore.SetPreviewCornerProfile(
+        _cornerProfile.IsRounded ? _cornerProfile.RadiusRatio : 0.0,
+        _cornerProfile.CurveExponent);
 
     internal void ToggleFullScreen(Window? owner = null)
     {

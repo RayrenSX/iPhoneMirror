@@ -3,6 +3,19 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
+## [Unreleased]
+
+### Changed
+
+- Keep multi-device list order and selection stable across asynchronous usbmux refreshes.
+- Stop the previous QuickTime USB session before switching devices and explicitly stop the
+  app-owned session during window shutdown.
+- Require a visible unplug/reconnect cycle after per-device filter installation.
+- Replace separate side-panel start/stop controls with one aligned header action and restore
+  the waiting/ready preview states.
+- Match detached iPhone and iPad preview corners from ProductType with a conservative
+  resolution fallback for unknown future models.
+
 ## [0.3.0-preview.1] - 2026-07-11
 
 First public preview.
@@ -28,4 +41,5 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.1...HEAD
 [0.3.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.1

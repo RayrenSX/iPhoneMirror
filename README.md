@@ -42,9 +42,9 @@
 | 视频 | CoreMedia/AVCC H.264、Media Foundation 低延迟解码 |
 | 渲染 | D3D11/DirectComposition 原生预览，减少 WPF 拷贝与撕裂 |
 | 音频 | 48 kHz 双声道 PCM，WASAPI 播放、静音与音量控制 |
-| 设备 | UDID、设备名称、ProductType、iOS、信任状态、多设备切换 |
+| 设备 | iPhone/iPad、UDID、ProductType、系统版本、信任状态、稳定多设备切换 |
 | 画面 | 原生/1080p/720p/540p 本地渲染上限，24/30/60/120 FPS 上限 |
-| 预览 | 主窗口、无标题独立窗口、全屏、横竖屏、等比例缩放 |
+| 预览 | 主窗口、无标题独立窗口、全屏、横竖屏、等比例缩放、按型号匹配屏幕圆角 |
 | OBS | 稳定标题的专用预览窗口，可直接使用 Window Capture |
 | 工具 | 截图、强制刷新、快捷键、实时日志、中英文界面 |
 | 驱动 | 按 iPhone 实例精确安装 libusb0 UpperFilter，带验证与失败回滚 |
@@ -54,11 +54,14 @@
 ## 快速开始
 
 1. 安装并启动 Apple Devices 或 Apple Mobile Device Support。
-2. 使用数据线连接 iPhone，保持解锁，并在手机上选择“信任此电脑”。
+2. 使用数据线连接 iPhone 或 iPad，保持解锁，并在设备上选择“信任此电脑”。
 3. 解压 Release 包，运行 `iPhoneMirror.exe`。
 4. 在左侧选择设备，点击“开始投屏”。
-5. 若该 iPhone 首次使用，程序会说明驱动变更范围并请求一次 UAC 授权。
-6. 驱动安装完成后如有提示，只需重插这一台 iPhone 并保持解锁。
+5. 若该设备首次使用，程序会说明驱动变更范围并请求一次 UAC 授权。
+6. 驱动安装完成后，拔下数据线，等左侧设备卡片消失，再重新连接并保持解锁。
+
+切换到另一台设备时，程序会先向上一台设备发送 QuickTime 结束控制并恢复普通
+USB 配置；关闭主窗口也会执行同一清理流程。
 
 > [!WARNING]
 > 不要使用 Zadig 把 Apple 父设备替换为 WinUSB/libusb。iPhoneMirror 只在目标
@@ -140,11 +143,12 @@ QuickTime Screen Capture session
 - [协议说明](docs/PROTOCOL.md)
 - [软件架构](docs/ARCHITECTURE.md)
 - [D3D11 渲染](docs/D3D11_RENDERING.md)
+- [设备圆角配置](docs/DEVICE_CORNER_PROFILES.md)
 - [音频输出](docs/WASAPI_AUDIO.md)
 
 ## 驱动安全边界
 
-Windows 会为不同 iPhone 创建不同设备实例，因此过滤驱动需要按手机安装。程序会：
+Windows 会为不同 iPhone/iPad 创建不同设备实例，因此过滤驱动需要按设备安装。程序会：
 
 - 将当前选中 UDID 映射到在线 Apple USB 父设备；
 - 验证父服务仍为 `usbccgp`；

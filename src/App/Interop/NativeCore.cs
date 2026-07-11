@@ -164,6 +164,9 @@ internal sealed class NativeCore : IDisposable
     private static extern int im_force_preview_refresh();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_set_preview_corner_profile(float normalizedRadius, float curveExponent);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern nint im_last_error();
 
     internal static bool AttachPreviewWindow(nint hwnd) =>
@@ -179,6 +182,22 @@ internal sealed class NativeCore : IDisposable
         }
         catch (EntryPointNotFoundException)
         {
+            return false;
+        }
+    }
+
+    internal static bool SetPreviewCornerProfile(double normalizedRadius, double curveExponent)
+    {
+        try
+        {
+            return im_set_preview_corner_profile(
+                Math.Clamp((float)normalizedRadius, 0.0f, 0.5f),
+                Math.Clamp((float)curveExponent, 1.5f, 8.0f)) == 0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // A mismatched older native DLL should keep rendering with its
+            // historical iPhone curve instead of crashing the GUI.
             return false;
         }
     }

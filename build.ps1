@@ -43,6 +43,10 @@ try {
         }
         & $CTest --test-dir build/native -C $TestConfiguration --output-on-failure
         if ($LASTEXITCODE -ne 0) { throw "Native tests failed: $LASTEXITCODE" }
+
+        dotnet run --project src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj `
+            --configuration $Configuration
+        if ($LASTEXITCODE -ne 0) { throw "App logic tests failed: $LASTEXITCODE" }
     }
 
     if (-not $NoPublish -and (Test-Path 'src/App/iPhoneMirror.App.csproj')) {
