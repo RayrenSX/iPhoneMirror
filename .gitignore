@@ -1,0 +1,54 @@
+# IDE and local agent state
+.vs/
+.idea/
+.vscode/
+.agents/
+.codex/
+*.user
+*.suo
+
+# Dependency/build caches and generated binaries
+.nuget/
+.dotnet/
+packages/
+build/
+out/
+outputs/
+src/App/bin/
+src/App/obj/
+src/App/native/
+CMakeUserPresets.json
+*.pdb
+*.ilk
+*.obj
+*.tlog
+*.lastbuildstate
+*.exp
+
+# Logs, crash dumps, captures and Python caches
+*.log
+*.dmp
+*.mdmp
+*.etl
+*.pcap
+*.pcapng
+*.tmp
+*.bak
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Never publish local signing credentials
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+.env
+.env.*
+!.env.example
+
+# Windows metadata
+Thumbs.db
+Desktop.ini

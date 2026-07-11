@@ -1,0 +1,86 @@
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
+using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Interop;
+
+namespace IPhoneMirror.App.Controls;
+
+internal sealed class NativePreviewHost : HwndHost
+{
+    private const int WmNcHitTest = 0x0084;
+    private const int HtTransparent = -1;
+    private const int WsChild = 0x40000000;
+    private const int WsVisible = 0x10000000;
+    private const int WsClipSiblings = 0x04000000;
+    private const int WsClipChildren = 0x02000000;
+    private nint _window;
+
+    public NativePreviewHost()
+    {
+    }
+
+    protected override HandleRef BuildWindowCore(HandleRef hwndParent)
+    {
+        _window = CreateWindowExW(0, "STATIC", string.Empty,
+            WsChild | WsVisible | WsClipSiblings | WsClipChildren,
+            0, 0, 1, 1, hwndParent.Handle, 0, 0, 0);
+        if (_window == 0) throw new InvalidOperationException(
+            LocalizationService.Get("PreviewChildCreateFailed"));
+        if (!Activate())
+        {
+            DestroyWindow(_window);
+            _window = 0;
+            throw new InvalidOperationException(LocalizationService.Get("PreviewRendererAttachFailed"));
+        }
+        return new HandleRef(this, _window);
+    }
+
+    /// <summary>
+    /// Makes this host the single native preview target.  The native renderer
+    /// intentionally owns one swap chain, so main/fullscreen/OBS windows hand
+    /// ownership to each other instead of rendering the same frame twice.
+    /// </summary>
+    internal bool Activate()
+    {
+        if (_window == 0) return false;
+        return PreviewAttachmentCoordinator.Activate(_window);
+    }
+
+    internal bool ForceRefresh()
+    {
+        if (_window == 0) return false;
+        // Prefer a cheap re-present of the newest decoded frame. Older core
+        // builds do not expose that entry point, so retain reattachment as a
+        // compatibility fallback.
+        return PreviewAttachmentCoordinator.Refresh(_window);
+    }
+
+    protected override void DestroyWindowCore(HandleRef hwnd)
+    {
+        PreviewAttachmentCoordinator.Unregister(hwnd.Handle);
+        if (hwnd.Handle != 0) DestroyWindow(hwnd.Handle);
+        _window = 0;
+    }
+
+    protected override nint WndProc(nint hwnd, int message, nint wParam, nint lParam,
+        ref bool handled)
+    {
+        if (message == WmNcHitTest)
+        {
+            // Let the borderless top-level PreviewWindow own drag/resize hit
+            // testing even though this native child covers the whole client.
+            handled = true;
+            return HtTransparent;
+        }
+        return base.WndProc(hwnd, message, wParam, lParam, ref handled);
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint CreateWindowExW(int exStyle, string className, string windowName,
+        int style, int x, int y, int width, int height, nint parent, nint menu,
+        nint instance, nint parameter);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyWindow(nint window);
+}
