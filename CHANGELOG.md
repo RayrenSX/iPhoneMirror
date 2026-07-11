@@ -3,7 +3,7 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
-## [Unreleased]
+## [0.3.0-preview.2] - 2026-07-11
 
 ### Changed
 
@@ -41,5 +41,6 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.1...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.2...HEAD
+[0.3.0-preview.2]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.2
 [0.3.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.1
