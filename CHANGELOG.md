@@ -3,6 +3,14 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
+## [0.5.0-preview.2] - 2026-07-12
+
+### Fixed
+
+- Preserve the detached window's remove-corners choice across focus, resize and source-size updates.
+- Retry advanced USB session replacement after complete QuickTime teardown and verify streaming state
+  before reporting the new session as connected.
+
 ## [0.5.0-preview.1] - 2026-07-12
 
 ### Added
@@ -128,7 +136,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.1...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.2...HEAD
+[0.5.0-preview.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.1...v0.5.0-preview.2
 [0.5.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.4...v0.5.0-preview.1
 [0.3.0-preview.4]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.4
 [0.3.0-preview.3]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.3

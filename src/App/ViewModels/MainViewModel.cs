@@ -1180,17 +1180,52 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             // libusb0 restores the phone's normal configuration during the
             // stop path. Give Windows and the Apple USB stack a complete
             // re-enumeration window before opening QuickTime again.
-            await Task.Delay(1500);
-            var created = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
-                state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
-                state.PlayAudio, state.Volume / 100.0,
-                state.AdvancedUsbWidth, state.AdvancedUsbHeight));
-            state.Handle = created.Success ? created.Handle : 0;
-            OnPropertyChanged(nameof(HasCaptureSession));
-            IsCapturing = created.Success;
-            NativeCore.SelectPreviewSession(state.Handle);
-            OnPropertyChanged(nameof(CurrentSessionHandle));
-            SetRawSettingsStatus(created.Success ? "Advanced USB request applied" : created.Message);
+            Exception? lastFailure = null;
+            (bool Success, ulong Handle, string Message) created = (false, 0, "");
+            for (var attempt = 1; attempt <= 3; attempt++)
+            {
+                await Task.Delay(attempt == 1 ? 1500 : 2500);
+                created = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
+                    state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
+                    state.PlayAudio, state.Volume / 100.0,
+                    state.AdvancedUsbWidth, state.AdvancedUsbHeight));
+                if (!created.Success)
+                {
+                    lastFailure = new InvalidOperationException(created.Message);
+                    continue;
+                }
+
+                state.Handle = created.Handle;
+                OnPropertyChanged(nameof(HasCaptureSession));
+                var deadline = DateTime.UtcNow.AddSeconds(6);
+                var ready = false;
+                while (DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(250);
+                    NativeCaptureStatus status;
+                    try { status = await Task.Run(() => _core.GetDeviceSessionStatus(created.Handle)); }
+                    catch (Exception error) { lastFailure = error; break; }
+                    if (status.State == CaptureState.Streaming) { ready = true; break; }
+                    if (status.State == CaptureState.Error || status.State == CaptureState.Stopped)
+                    {
+                        lastFailure = new InvalidOperationException(status.Message);
+                        break;
+                    }
+                }
+                if (ready)
+                {
+                    IsCapturing = true;
+                    NativeCore.SelectPreviewSession(state.Handle);
+                    OnPropertyChanged(nameof(CurrentSessionHandle));
+                    SetRawSettingsStatus("Advanced USB request applied");
+                    return;
+                }
+                try { await Task.Run(() => _core.StopDeviceSession(created.Handle)); } catch { }
+                _core.DestroyDeviceSession(created.Handle);
+                state.Handle = 0;
+                OnPropertyChanged(nameof(HasCaptureSession));
+            }
+            throw lastFailure ?? new InvalidOperationException(created.Message);
         }
         catch (Exception error)
         {

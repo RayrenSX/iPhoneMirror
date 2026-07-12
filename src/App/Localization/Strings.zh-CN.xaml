@@ -55,7 +55,7 @@
     <system:String x:Key="StopMirroring">暂停投屏</system:String>
     <system:String x:Key="DriverTrustHelp">驱动与信任帮助</system:String>
     <system:String x:Key="FooterLocalUsb">本地 USB，不使用 Wi‑Fi / AirPlay</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 0.5 Preview 1</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 0.5 Preview 2</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">正在检查 Apple USB 环境…</system:String>
     <system:String x:Key="StatusWaitingDevice">等待设备连接</system:String>

@@ -67,11 +67,10 @@ internal sealed class MultiDevicePreviewManager(MainViewModel viewModel) : IDisp
         if (device is null) return;
         if (_windows.TryGetValue(device.Udid, out var window) && width != 0 && height != 0)
             window.SetSourceDimensions(width, height);
-        var handle = viewModel.GetDeviceSessionHandle(device.Udid);
-        if (handle == 0) return;
-        var profile = DeviceCornerProfileResolver.Resolve(device.ProductType, width, height);
-        _ = Interop.NativeCore.SetDeviceCornerProfile(handle,
-            profile.IsRounded ? profile.RadiusRatio : 0, profile.CurveExponent);
+        // Do not re-apply the model default here. The detached window owns
+        // the user's per-window corner override (including "remove corners");
+        // applying the profile on every size/status notification would undo
+        // that menu choice as soon as the window is focused or resized.
     }
 
     public void Dispose()
