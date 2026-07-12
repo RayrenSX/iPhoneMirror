@@ -108,7 +108,8 @@ try {
     Start-Sleep -Milliseconds 600
     $toggle.Toggle()
 
-    Invoke-Element (Wait-ById $window 'ObsWindowButton')
+    # The detached preview is also the OBS Window Capture surface.
+    Invoke-Element (Wait-ById $window 'PreviewWindowButton')
     Start-Sleep -Seconds $StreamSeconds
     Invoke-Element (Wait-ById $window 'RefreshPreviewButton')
     Invoke-Element (Wait-ById $window 'ScreenshotButton')

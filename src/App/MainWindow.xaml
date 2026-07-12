@@ -196,6 +196,8 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="12"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="12"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
@@ -204,7 +206,27 @@
                         <TextBlock Text="{Binding DeviceCount}" Foreground="{StaticResource MutedTextBrush}"
                                    HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12"/>
                     </Grid>
-                    <ListBox x:Name="DeviceListBox" Grid.Row="2" ItemsSource="{Binding Devices}"
+                    <Border Grid.Row="2" Style="{StaticResource ControlSectionCard}" Margin="0" Padding="12">
+                        <StackPanel>
+                            <Grid>
+                                <TextBlock Text="{DynamicResource CurrentDevice}" Style="{StaticResource ControlSectionTitle}"/>
+                                <TextBlock Text="{Binding SelectedConnection}" HorizontalAlignment="Right"
+                                           Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
+                            </Grid>
+                            <TextBlock Text="{Binding SelectedName}" FontSize="15" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" Margin="0,9,0,0"/>
+                            <TextBlock Text="{Binding SelectedModel}" Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="11" Margin="0,3,0,0"/>
+                            <TextBlock Text="{Binding SelectedOs}" Foreground="{StaticResource MutedTextBrush}" FontSize="11"/>
+                            <TextBlock Text="{Binding SelectedUdid}" FontFamily="Consolas" FontSize="9"
+                                       AutomationProperties.AutomationId="SelectedDeviceUdidText"
+                                       Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis"
+                                       Margin="0,7,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Row="3" Height="1" Background="{StaticResource BorderSoftBrush}"
+                            VerticalAlignment="Center" Margin="2,0"/>
+                    <ListBox x:Name="DeviceListBox" Grid.Row="4" ItemsSource="{Binding Devices}"
                              SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
                              PreviewMouseRightButtonDown="OnDeviceListRightButtonDown">
                         <ListBox.Resources>
@@ -294,7 +316,7 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <StackPanel Grid.Row="3">
+                    <StackPanel Grid.Row="5">
                         <Button x:Name="RefreshDevicesButton"
                                 Content="{DynamicResource RefreshDevices}" Command="{Binding RefreshCommand}"
                                 Background="{StaticResource PanelAltBrush}"/>
@@ -323,7 +345,7 @@
                 <Border x:Name="PreviewPanel" Grid.Row="2" Background="#050505" BorderBrush="{StaticResource BorderBrush}"
                         BorderThickness="1" CornerRadius="8" ClipToBounds="True"
                         HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                        MinWidth="0" MinHeight="300" SnapsToDevicePixels="True">
+                        MinWidth="0" MinHeight="0" SnapsToDevicePixels="True">
                     <Grid>
                         <Grid>
                             <Grid.Style>
@@ -488,7 +510,7 @@
                                          Foreground="#D7D7D7" Background="Transparent" BorderThickness="0"
                                          Padding="10" TextWrapping="NoWrap"
                                          SelectionBrush="{StaticResource AccentBrush}" SelectionOpacity="0.35"
-                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                          TextChanged="OnLogTextChanged"/>
                             </Border>
                         </Grid>
@@ -503,7 +525,7 @@
                     <StackPanel Margin="0,0,7,0">
                         <TextBlock Text="{DynamicResource ControlTitle}" FontSize="16" FontWeight="SemiBold"/>
 
-                        <Border Style="{StaticResource ControlSectionCard}">
+                        <Border Style="{StaticResource ControlSectionCard}" Visibility="Collapsed">
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="{DynamicResource CurrentDevice}" Style="{StaticResource ControlSectionTitle}"/>
@@ -593,9 +615,6 @@
                                 <TextBlock Text="{DynamicResource ObsWindowHelp}"
                                            Foreground="{StaticResource MutedTextBrush}" FontSize="9"
                                            TextWrapping="Wrap" Margin="0,9,0,0"/>
-                                <Button x:Name="ObsWindowButton" Content="{DynamicResource OpenObsWindow}"
-                                        Click="OnObsWindowClick" Style="{StaticResource ToolButton}"
-                                        Margin="0,9,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -607,6 +626,9 @@
                                         Style="{StaticResource ToolButton}"/>
                                 <Button Content="{DynamicResource DriverTrustHelp}" Command="{Binding DriverHelpCommand}"
                                         Style="{StaticResource ToolButton}" Margin="0,9,0,0"/>
+                                <Button Content="{DynamicResource AdvancedSettings}" Command="{Binding AdvancedSettingsCommand}"
+                                        Visibility="{Binding AdvancedSettingsVisibility}"
+                                        Style="{StaticResource ToolButton}" Margin="0,9,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -617,7 +639,8 @@
         <Grid x:Name="FooterPanel" Grid.Row="3" Margin="0,16,0,0">
             <TextBlock Text="{DynamicResource FooterLocalUsb}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
             <TextBlock Text="{DynamicResource FooterVersion}" Foreground="{StaticResource MutedTextBrush}"
-                       FontSize="10" HorizontalAlignment="Right"/>
+                       FontSize="10" HorizontalAlignment="Right" Cursor="Hand"
+                       MouseLeftButtonDown="OnVersionClick"/>
         </Grid>
     </Grid>
 </Window>

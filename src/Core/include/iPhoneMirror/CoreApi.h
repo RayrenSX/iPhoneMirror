@@ -117,10 +117,9 @@ struct VideoFrameInfo {
 };
 
 // Versioned capture preferences used by im_start_capture_with_options.
-// requested_width/requested_height are retained as ABI field names, but they
-// are LOCAL preview-render limits: they never change HPD1 DisplaySize or the
-// H.264 stream sent over USB.  The pair (0,0) keeps the decoded/native size;
-// target_fps == 0 disables the local presentation cap.
+// requested_width/requested_height are local preview-render limits. The first
+// two reserved words are used by the opt-in advanced GUI mode as an explicit
+// USB HPD1 request; both must be non-zero to activate that override.
 struct CaptureOptions {
     std::uint32_t struct_size;
     std::uint32_t api_version;
@@ -249,6 +248,11 @@ IM_API std::int32_t IM_CALL im_session_copy_latest_video_frame(
     std::uint32_t max_width, std::uint32_t max_height);
 IM_API std::int32_t IM_CALL im_session_force_preview_refresh(
     iPhoneMirror::SessionHandle handle);
+IM_API std::int32_t IM_CALL im_session_set_window_corner_profile(
+    iPhoneMirror::SessionHandle handle, void* hwnd, float normalized_radius,
+    float curve_exponent);
+IM_API std::int32_t IM_CALL im_session_set_window_rotation(
+    iPhoneMirror::SessionHandle handle, void* hwnd, std::int32_t quarter_turns);
 
 
 IM_API const wchar_t* IM_CALL im_last_error();

@@ -347,6 +347,14 @@ void test_capture_preflight_without_device() {
 } // namespace
 
 int main() {
+    {
+        const iPhoneMirror::quicktime::SessionOptions native_options;
+        check(native_options.requested_width == 1206 && native_options.requested_height == 2622,
+            "default HPD1 requests the verified native portrait tier");
+        check(!native_options.request_native_display_size,
+            "default HPD1 includes the verified native DisplaySize");
+        check(!native_options.demo_mode, "default HPD1 preserves the real status bar");
+    }
     try {
         test_plist();
         test_quicktime_framing();

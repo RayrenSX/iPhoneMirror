@@ -89,8 +89,17 @@ cbuffer ShapeConstants : register(b0) {
     float cornerRadius;
     float cornerExponent;
     float cornerEnabled;
-    float3 shapePadding;
+    float rotationQuarterTurns;
+    float2 shapePadding;
 };
+
+float2 rotateUv(float2 uv) {
+    int turns = ((int)round(rotationQuarterTurns) % 4 + 4) % 4;
+    if (turns == 1) return float2(uv.y, 1.0 - uv.x);
+    if (turns == 2) return float2(1.0 - uv.x, 1.0 - uv.y);
+    if (turns == 3) return float2(1.0 - uv.y, uv.x);
+    return uv;
+}
 
 float cornerCoverage(float2 pixel) {
     if (cornerEnabled < 0.5) return 1.0;
@@ -114,6 +123,7 @@ float4 premultiplyForCorner(float3 rgb, float2 pixel) {
 }
 
 float4 nv12Main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
+    uv = rotateUv(uv);
     float y = max(0.0, yPlane.Sample(linearSampler, uv) - (16.0 / 255.0)) * 1.16438356;
     float2 chroma = uvPlane.Sample(linearSampler, uv) - float2(0.5, 0.5);
     float3 rgb;
@@ -124,7 +134,7 @@ float4 nv12Main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGE
 }
 
 float4 copyMain(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
-    return premultiplyForCorner(image.Sample(linearSampler, uv).rgb, position.xy);
+    return premultiplyForCorner(image.Sample(linearSampler, rotateUv(uv)).rgb, position.xy);
 }
 
 float4 maskMain(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
@@ -141,7 +151,8 @@ struct D3D11PreviewRenderer::Impl {
         float corner_radius{};
         float corner_exponent{2.36F};
         float corner_enabled{};
-        float padding[3]{};
+        float rotation_quarter_turns{};
+        float padding[2]{};
     };
 
     HWND window{};
@@ -192,6 +203,7 @@ struct D3D11PreviewRenderer::Impl {
     // Radius/exponent are published as one atomic value so a live device
     // switch cannot render one frame using a mixed profile.
     std::atomic_uint64_t corner_profile{pack_corner_profile(0.1784F, 2.36F)};
+    std::atomic_int rotation_quarter_turns{};
     std::uint32_t scheduled_fps{};
     std::chrono::steady_clock::time_point next_present_due{};
 
@@ -320,7 +332,7 @@ struct D3D11PreviewRenderer::Impl {
             "CreateRenderTargetView");
     }
 
-    void update_shape_constants(UINT width, UINT height, bool enabled) {
+    void update_shape_constants(UINT width, UINT height, bool enabled, int rotation = 0) {
         ShapeConstantData values{};
         values.output_width = static_cast<float>(width);
         values.output_height = static_cast<float>(height);
@@ -332,6 +344,7 @@ struct D3D11PreviewRenderer::Impl {
         values.corner_radius = static_cast<float>(std::min(width, height)) * normalized_radius;
         values.corner_exponent = curve_exponent;
         values.corner_enabled = enabled && normalized_radius > 0.0F ? 1.0F : 0.0F;
+        values.rotation_quarter_turns = static_cast<float>(rotation);
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context->Map(shape_constants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped),
@@ -346,8 +359,8 @@ struct D3D11PreviewRenderer::Impl {
         // instead of maximizing the HWND, so IsZoomed alone is insufficient.
         // Normal composition windows retain the frame solely for hit-tested
         // resizing; full-screen and maximized surfaces must remain rectangular.
-        const auto style = GetWindowLongPtrW(window, GWL_STYLE);
-        return composition_mode && (style & WS_THICKFRAME) != 0 && !IsZoomed(window);
+        return composition_mode && !IsZoomed(window) &&
+            GetPropW(window, L"iPhoneMirrorFullScreen") == nullptr;
     }
 
     void draw_black_background(bool rounded) {
@@ -529,7 +542,11 @@ struct D3D11PreviewRenderer::Impl {
         if (target_width == 0 || target_height == 0) return;
         upload(frame);
 
-        const float source_aspect = static_cast<float>(frame.width) / frame.height;
+        const auto turns = ((rotation_quarter_turns.load(std::memory_order_relaxed) % 4) + 4) % 4;
+        const bool swaps_axes = (turns & 1) != 0;
+        const float source_aspect = swaps_axes
+            ? static_cast<float>(frame.height) / frame.width
+            : static_cast<float>(frame.width) / frame.height;
         const float target_aspect = static_cast<float>(target_width) / target_height;
         D3D11_VIEWPORT viewport{};
         if (target_aspect > source_aspect) {
@@ -545,7 +562,8 @@ struct D3D11PreviewRenderer::Impl {
         viewport.MaxDepth = 1;
 
         const auto packed_limit = render_size_limit.load(std::memory_order_relaxed);
-        const auto [limited_width, limited_height] = limited_render_size(frame);
+        auto [limited_width, limited_height] = limited_render_size(frame);
+        if (swaps_axes) std::swap(limited_width, limited_height);
         const bool cap_reduces_source = limited_width < frame.width || limited_height < frame.height;
         const bool use_limited_pass = packed_limit != 0 && cap_reduces_source &&
             (viewport.Width > static_cast<float>(limited_width) + 0.5F ||
@@ -577,12 +595,12 @@ struct D3D11PreviewRenderer::Impl {
         const auto rounded = rounded_window_enabled();
         const auto draw_nv12 = [&](const D3D11_VIEWPORT& draw_viewport,
                                    UINT output_width, UINT output_height,
-                                   bool apply_corner) {
+                                   bool apply_corner, int rotation) {
             context->RSSetViewports(1, &draw_viewport);
             context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             context->VSSetShader(vertex_shader.Get(), nullptr, 0);
             context->PSSetShader(pixel_shader.Get(), nullptr, 0);
-            update_shape_constants(output_width, output_height, apply_corner);
+            update_shape_constants(output_width, output_height, apply_corner, rotation);
             ID3D11ShaderResourceView* nv12_views[] = {y_view.Get(), uv_view.Get()};
             context->PSSetShaderResources(0, 2, nv12_views);
             context->PSSetSamplers(0, 1, sampler.GetAddressOf());
@@ -594,7 +612,7 @@ struct D3D11PreviewRenderer::Impl {
             context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
             context->ClearRenderTargetView(target.Get(), composition_mode ? transparent : black);
             if (composition_mode) draw_black_background(rounded);
-            draw_nv12(viewport, target_width, target_height, rounded);
+            draw_nv12(viewport, target_width, target_height, rounded, turns);
         } else {
             ensure_render_texture(limited_width, limited_height);
             context->OMSetRenderTargets(1, render_target.GetAddressOf(), nullptr);
@@ -604,7 +622,7 @@ struct D3D11PreviewRenderer::Impl {
             limited_viewport.Height = static_cast<float>(limited_height);
             limited_viewport.MinDepth = 0;
             limited_viewport.MaxDepth = 1;
-            draw_nv12(limited_viewport, limited_width, limited_height, false);
+            draw_nv12(limited_viewport, limited_width, limited_height, false, turns);
 
             // A resource must not remain bound as an RTV when it becomes the
             // SRV for the copy pass; explicit unbinding avoids a driver-side
@@ -752,6 +770,12 @@ void D3D11PreviewRenderer::set_corner_profile(float normalized_radius,
     curve_exponent = std::clamp(curve_exponent, 1.5F, 8.0F);
     impl_->corner_profile.store(pack_corner_profile(normalized_radius, curve_exponent),
         std::memory_order_relaxed);
+    impl_->refresh_requested.store(true, std::memory_order_release);
+}
+
+void D3D11PreviewRenderer::set_rotation(std::int32_t quarter_turns) noexcept {
+    if (!impl_) return;
+    impl_->rotation_quarter_turns.store(quarter_turns, std::memory_order_relaxed);
     impl_->refresh_requested.store(true, std::memory_order_release);
 }
 

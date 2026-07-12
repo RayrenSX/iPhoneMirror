@@ -3,6 +3,31 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
+## [0.5.0-preview.1] - 2026-07-12
+
+### Added
+
+- Add per-device advanced mode, unlocked by clicking the footer version five times, with
+  direct QuickTime HPD1 USB resolution requests and immediate session restart.
+- Add polished standalone advanced-settings and driver/trust-help windows.
+- Add per-device native-resolution probing, runtime orientation renegotiation, and recovery
+  rules for persistent low-resolution or black video streams with active audio.
+- Add detached-window corner toggles and independent left/right rotation controls.
+
+### Changed
+
+- Move current-device details above the left device list and separate them visually.
+- Use the detached preview as the single OBS Window Capture surface and remove the duplicate
+  OBS-specific window button.
+- Update application, assembly, package and UI versions to 0.5 Preview 1.
+
+### Fixed
+
+- Recover stale QuickTime USB configuration 5 without restarting the application.
+- Refresh the top Start/Stop button immediately after a device session changes state.
+- Preserve independent multi-device preview, rotation, rendering and advanced USB settings.
+- Improve source FPS reporting, orientation handling, rounded preview clipping and log layout.
+
 ## [0.3.0-preview.4] - 2026-07-11
 
 ### Added
@@ -103,7 +128,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.4...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.1...HEAD
+[0.5.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.4...v0.5.0-preview.1
 [0.3.0-preview.4]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.4
 [0.3.0-preview.3]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.3
 [0.3.0-preview.2]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.2

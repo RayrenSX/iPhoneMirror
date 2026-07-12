@@ -208,6 +208,12 @@ internal sealed class NativeCore : IDisposable
         uint maxWidth, uint maxHeight);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_force_preview_refresh(ulong handle);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_window_corner_profile(ulong handle, nint hwnd,
+        float radius, float exponent);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_window_rotation(ulong handle, nint hwnd,
+        int quarterTurns);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern nint im_last_error();
@@ -250,6 +256,14 @@ internal sealed class NativeCore : IDisposable
     {
         if (handle != 0 && hwnd != 0) im_session_detach_preview(handle, hwnd);
     }
+
+    internal static bool SetDeviceWindowCornerProfile(ulong handle, nint hwnd,
+        double radius, double exponent) => handle != 0 && hwnd != 0 &&
+        im_session_set_window_corner_profile(handle, hwnd,
+            Math.Clamp((float)radius, 0, 0.5f), Math.Clamp((float)exponent, 1.5f, 8)) == 0;
+
+    internal static bool SetDeviceWindowRotation(ulong handle, nint hwnd, int turns) =>
+        handle != 0 && hwnd != 0 && im_session_set_window_rotation(handle, hwnd, turns) == 0;
 
     internal static bool ForcePreviewRefresh()
     {
@@ -364,7 +378,8 @@ internal sealed class NativeCore : IDisposable
     }
 
     public (bool Success, ulong Handle, string Message) CreateDeviceSession(string udid,
-        uint width, uint height, uint fps, bool playAudio, double volume)
+        uint width, uint height, uint fps, bool playAudio, double volume,
+        uint usbWidth = 0, uint usbHeight = 0)
     {
         var options = new NativeCaptureOptions
         {
@@ -377,6 +392,8 @@ internal sealed class NativeCore : IDisposable
             AudioVolume = Math.Clamp((float)volume, 0, 1),
             Reserved = new uint[5],
         };
+        options.Reserved[0] = usbWidth;
+        options.Reserved[1] = usbHeight;
         var result = im_session_create(udid, ref options, out var handle);
         return result == 0
             ? (true, handle, LocalizationService.Get("CaptureStarted"))

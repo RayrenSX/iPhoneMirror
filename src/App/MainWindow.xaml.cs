@@ -26,6 +26,8 @@ public partial class MainWindow : Window
     private WindowState _restoreWindowState;
     private bool _shutdownStarted;
     private bool _allowClose;
+    private int _versionClickCount;
+    private DateTime _lastVersionClickUtc;
 
     public MainWindow()
     {
@@ -34,6 +36,7 @@ public partial class MainWindow : Window
         _secondaryMirrors = new MultiDevicePreviewManager(_viewModel);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.DeviceVideoSizeChanged += OnDeviceVideoSizeChanged;
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _refreshTimer.Tick += (_, _) => _ = _viewModel.RefreshAsync();
         _logTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -58,6 +61,7 @@ public partial class MainWindow : Window
         if (_shutdownStarted) return;
         _shutdownStarted = true;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _viewModel.DeviceVideoSizeChanged -= OnDeviceVideoSizeChanged;
         _refreshTimer.Stop();
         _logTimer.Stop();
         _secondaryMirrors.Dispose();
@@ -79,6 +83,17 @@ public partial class MainWindow : Window
     }
 
     private void OnRefreshPreviewClick(object sender, RoutedEventArgs e) => RefreshPreview();
+
+    private void OnVersionClick(object sender, MouseButtonEventArgs e)
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _lastVersionClickUtc).TotalSeconds > 2) _versionClickCount = 0;
+        _lastVersionClickUtc = now;
+        if (++_versionClickCount < 5) return;
+        _versionClickCount = 0;
+        _viewModel.EnableAdvancedMode();
+        _viewModel.AddUiLog(LocalizationService.Get("AdvancedModeEnabled"));
+    }
 
     private async void OnMirrorSimultaneouslyClick(object sender, RoutedEventArgs e)
     {
@@ -133,35 +148,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnObsWindowClick(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var device = _viewModel.SelectedDevice;
-            if (device is null) return;
-            var result = await _secondaryMirrors.ShowAsync(device);
-            if (!result.Success) throw new InvalidOperationException(result.Message);
-            _secondaryMirrors.UpdateDevice(device,
-                _viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight);
-        }
-        catch (Exception error)
-        {
-            _viewModel.AddUiLog(LocalizationService.Format("ObsWindowOpenFailedFormat", error.Message));
-            return;
-        }
-        try
-        {
-            Clipboard.SetText("iPhoneMirror OBS Preview");
-            _viewModel.AddUiLog(LocalizationService.Get("ObsWindowOpened"));
-        }
-        catch (ExternalException error)
-        {
-            // Another process can temporarily hold the Win32 clipboard. The
-            // preview is already usable, so never terminate the application.
-            _viewModel.AddUiLog(LocalizationService.Format("ObsTitleCopyFailedFormat", error.Message));
-        }
-    }
-
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         // Width is raised before height as one atomic status update. Listening
@@ -180,6 +166,9 @@ public partial class MainWindow : Window
                 Dispatcher.BeginInvoke(DispatcherPriority.Render, MainPreviewHost.Activate);
         }
     }
+
+    private void OnDeviceVideoSizeChanged(string udid, uint width, uint height) =>
+        _secondaryMirrors.UpdateDevice(udid, width, height);
 
     private void OnFullScreenClick(object sender, RoutedEventArgs e) => _ = ToggleActiveFullScreenAsync();
 

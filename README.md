@@ -45,7 +45,7 @@
 | 设备 | iPhone/iPad、UDID、ProductType、系统版本、信任状态、稳定多设备切换 |
 | 画面 | 原生/1080p/720p/540p 本地渲染上限，24/30/60/120 FPS 上限 |
 | 预览 | 主窗口、无标题独立窗口、全屏、横竖屏、等比例缩放、按型号匹配屏幕圆角 |
-| OBS | 稳定标题的专用预览窗口，可直接使用 Window Capture |
+| OBS | 独立窗口可直接使用 Window Capture，无重复的专用窗口入口 |
 | 工具 | 截图、强制刷新、快捷键、实时日志、中英文界面 |
 | 驱动 | 按 iPhone 实例精确安装 libusb0 UpperFilter，带验证与失败回滚 |
 
@@ -70,7 +70,7 @@ USB 配置；关闭主窗口也会执行同一清理流程。
 
 ## OBS
 
-1. 在 iPhoneMirror 中打开“OBS 专用窗口”。
+1. 在 iPhoneMirror 中打开“独立窗口”。
 2. OBS → 来源 → 窗口采集。
 3. 选择 `iPhoneMirror OBS Preview`。
 4. Windows 11 推荐使用 Windows Graphics Capture。

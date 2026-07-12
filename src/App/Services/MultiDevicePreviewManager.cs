@@ -10,6 +10,8 @@ internal sealed class MultiDevicePreviewManager(MainViewModel viewModel) : IDisp
 {
     private readonly Dictionary<string, NativePreviewWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DeviceViewModel> _devices =
+        new(StringComparer.OrdinalIgnoreCase);
 
     internal bool IsOpen(DeviceViewModel? device) => device is not null &&
         _windows.ContainsKey(device.Udid);
@@ -24,23 +26,29 @@ internal sealed class MultiDevicePreviewManager(MainViewModel viewModel) : IDisp
         var started = await viewModel.StartBackgroundSessionAsync(device);
         if (!started.Success) return (false, started.Message);
         var profile = DeviceCornerProfileResolver.Resolve(device.ProductType, 1206, 2622);
+        var cornerRadius = profile.IsRounded ? profile.RadiusRatio : 0;
         _ = Interop.NativeCore.SetDeviceCornerProfile(started.Handle,
-            profile.IsRounded ? profile.RadiusRatio : 0, profile.CurveExponent);
+            cornerRadius, profile.CurveExponent);
         if (!NativePreviewWindow.TryCreateAndShowForSession(started.Handle, 1206, 2622,
-                $"iPhoneMirror — {device.DisplayName}", out var window) || window is null)
+                $"iPhoneMirror — {device.DisplayName}", cornerRadius, profile.CurveExponent,
+                out var window) || window is null)
         {
             await viewModel.StopDeviceSessionAsync(device.Udid);
             return (false, LocalizationService.Get("PreviewRendererAttachFailed"));
         }
         _windows[device.Udid] = window;
+        _devices[device.Udid] = device;
         window.Closed += (_, _) =>
         {
             _windows.Remove(device.Udid);
-            // Closing a view only detaches this HWND. The device session stays
-            // alive for instant tab switching and can be stopped explicitly
-            // from the selected device's red Stop button.
+            _devices.Remove(device.Udid);
         };
         return (true, string.Empty);
+    }
+
+    internal void UpdateDevice(string udid, uint width, uint height)
+    {
+        if (_devices.TryGetValue(udid, out var device)) UpdateDevice(device, width, height);
     }
 
     internal bool Refresh(DeviceViewModel? device) => device is not null &&
@@ -70,5 +78,6 @@ internal sealed class MultiDevicePreviewManager(MainViewModel viewModel) : IDisp
     {
         foreach (var window in _windows.Values.ToArray()) window.Dispose();
         _windows.Clear();
+        _devices.Clear();
     }
 }

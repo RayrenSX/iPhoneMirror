@@ -55,6 +55,20 @@ internal sealed class NativePreviewHost : HwndHost
         return PreviewAttachmentCoordinator.Refresh(_window);
     }
 
+    protected override void OnWindowPositionChanged(System.Windows.Rect rcBoundingBox)
+    {
+        base.OnWindowPositionChanged(rcBoundingBox);
+        if (_window == 0) return;
+        var width = Math.Max(1, (int)Math.Round(rcBoundingBox.Width));
+        var height = Math.Max(1, (int)Math.Round(rcBoundingBox.Height));
+        var dpi = GetDpiForWindow(_window);
+        var radius = Math.Max(2, (int)Math.Round(10.0 * (dpi == 0 ? 1.0 : dpi / 96.0)));
+        var region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
+        if (region == 0) return;
+        // SetWindowRgn owns the region after success.
+        if (SetWindowRgn(_window, region, true) == 0) _ = DeleteObject(region);
+    }
+
     protected override void DestroyWindowCore(HandleRef hwnd)
     {
         PreviewAttachmentCoordinator.Unregister(hwnd.Handle);
@@ -83,4 +97,18 @@ internal sealed class NativePreviewHost : HwndHost
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint window);
+
+    [DllImport("gdi32.dll")]
+    private static extern nint CreateRoundRectRgn(int left, int top, int right, int bottom,
+        int ellipseWidth, int ellipseHeight);
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowRgn(nint window, nint region, [MarshalAs(UnmanagedType.Bool)] bool redraw);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteObject(nint value);
 }

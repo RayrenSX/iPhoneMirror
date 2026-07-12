@@ -20,6 +20,10 @@
     <system:String x:Key="IndependentWindowFix">Lock window</system:String>
     <system:String x:Key="IndependentWindowUnfix">Unlock window</system:String>
     <system:String x:Key="IndependentWindowClose">Close</system:String>
+    <system:String x:Key="IndependentWindowRemoveCorners">Remove rounded corners</system:String>
+    <system:String x:Key="IndependentWindowKeepCorners">Keep rounded corners</system:String>
+    <system:String x:Key="IndependentWindowRotateLeft">Rotate left</system:String>
+    <system:String x:Key="IndependentWindowRotateRight">Rotate right</system:String>
     <system:String x:Key="KeepUnlocked">Keep the Apple device unlocked after connecting</system:String>
     <system:String x:Key="PreviewLabel">Preview</system:String>
     <system:String x:Key="ResolutionLabel">Resolution</system:String>
@@ -44,14 +48,14 @@
     <system:String x:Key="FullScreenPreview">Full-screen preview</system:String>
     <system:String x:Key="SeparateWindow">Preview window</system:String>
     <system:String x:Key="Screenshot">Screenshot</system:String>
-    <system:String x:Key="ObsWindowHelp">Add Window Capture in OBS and select iPhoneMirror OBS Preview.</system:String>
+    <system:String x:Key="ObsWindowHelp">Use the detached window directly with OBS Window Capture.</system:String>
     <system:String x:Key="OpenObsWindow">Open OBS preview window</system:String>
     <system:String x:Key="ProjectionActions">Mirroring</system:String>
     <system:String x:Key="StartMirroring">Start mirroring</system:String>
     <system:String x:Key="StopMirroring">Stop mirroring</system:String>
     <system:String x:Key="DriverTrustHelp">Driver and trust help</system:String>
     <system:String x:Key="FooterLocalUsb">Local USB only — no Wi‑Fi or AirPlay</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 0.3 Preview 4</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 0.5 Preview 1</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">Checking the Apple USB environment…</system:String>
     <system:String x:Key="StatusWaitingDevice">Waiting for a device</system:String>
@@ -165,4 +169,24 @@
 
     <system:String x:Key="DriverHelpTitle">iPhoneMirror driver and trust help</system:String>
     <system:String x:Key="DriverHelpBody">1. Install Apple Devices from Microsoft Store, or desktop iTunes, to obtain Apple Mobile Device Support.&#10;&#10;2. Unlock the iPhone or iPad and choose “Trust This Computer.”&#10;&#10;3. The hidden QuickTime USB configuration requires a compatible filter driver. iPhoneMirror does not replace the official Apple driver.</system:String>
+    <system:String x:Key="DriverHelpIntro">Complete these three checks for reliable USB mirroring.</system:String>
+    <system:String x:Key="Close">Close</system:String>
+    <system:String x:Key="Apply">Apply</system:String>
+    <system:String x:Key="AdvancedSettings">Advanced settings</system:String>
+    <system:String x:Key="AdvancedSettingsTitle">Advanced USB settings</system:String>
+    <system:String x:Key="AdvancedSettingsIntro">This setting applies only to the selected device and writes the QuickTime USB resolution request directly.</system:String>
+    <system:String x:Key="AdvancedUsbResolution">USB request resolution</system:String>
+    <system:String x:Key="AdvancedUsbResolutionHelp">Enter a value such as 1920×1080. Apply ignores normal preview presets; disabling advanced mode restores them.</system:String>
+    <system:String x:Key="WidthLabel">Width</system:String>
+    <system:String x:Key="HeightLabel">Height</system:String>
+    <system:String x:Key="DisableAdvancedMode">Disable advanced mode</system:String>
+    <system:String x:Key="AdvancedResolutionInvalid">Enter valid width and height values from 16 to 8192.</system:String>
+    <system:String x:Key="AdvancedModeEnabled">Advanced mode enabled</system:String>
+    <system:String x:Key="AdvancedModeDisabled">Advanced mode disabled; normal presets restored</system:String>
+    <system:String x:Key="DriverHelpAppleTitle">Install Apple device support</system:String>
+    <system:String x:Key="DriverHelpAppleBody">Install Apple Devices from Microsoft Store, or install desktop iTunes.</system:String>
+    <system:String x:Key="DriverHelpTrustTitle">Unlock and trust this computer</system:String>
+    <system:String x:Key="DriverHelpTrustBody">Keep the device unlocked, connect USB, and choose “Trust This Computer” on the iPhone or iPad.</system:String>
+    <system:String x:Key="DriverHelpFilterTitle">Install the capture filter for this device</system:String>
+    <system:String x:Key="DriverHelpFilterBody">Use the install button in the main window. After elevation completes, unplug and reconnect this device. The official Apple driver is preserved.</system:String>
 </ResourceDictionary>

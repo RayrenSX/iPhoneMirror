@@ -85,6 +85,12 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly ContextMenu _contextMenu;
     private readonly MenuItem _topMostItem;
     private readonly MenuItem _fixedItem;
+    private readonly MenuItem _cornerItem;
+    private readonly ulong _sessionHandle;
+    private readonly double _cornerRadius;
+    private readonly double _cornerExponent;
+    private uint _sourceWidth;
+    private uint _sourceHeight;
     private nint _handle;
     private bool _attached;
     private bool _isFullScreen;
@@ -92,6 +98,8 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool _closeQueued;
     private bool _isTopMost = true;
     private bool _isFixed;
+    private bool _cornersEnabled = true;
+    private int _rotation;
     private nint _largeIcon;
     private nint _smallIcon;
     private WindowRect _restoreRectangle;
@@ -99,11 +107,17 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string? title = null,
         Func<nint, bool>? attachPreview = null, Action<nint>? detachPreview = null,
-        Func<nint, bool>? refreshPreview = null)
+        Func<nint, bool>? refreshPreview = null, ulong sessionHandle = 0,
+        double cornerRadius = 0, double cornerExponent = 2.0)
     {
         _attachPreview = attachPreview ?? PreviewAttachmentCoordinator.Activate;
         _detachPreview = detachPreview ?? PreviewAttachmentCoordinator.Unregister;
         _refreshPreview = refreshPreview ?? PreviewAttachmentCoordinator.Refresh;
+        _sessionHandle = sessionHandle;
+        _cornerRadius = cornerRadius;
+        _cornerExponent = cornerExponent;
+        _sourceWidth = sourceWidth;
+        _sourceHeight = sourceHeight;
         _contextMenu = new ContextMenu
         {
             Style = (Style)Application.Current.FindResource("DeviceContextMenuStyle"),
@@ -114,6 +128,18 @@ internal sealed class NativePreviewWindow : IDisposable
         _topMostItem.Click += (_, _) => ToggleTopMost();
         _fixedItem = new MenuItem { Style = itemStyle };
         _fixedItem.Click += (_, _) => ToggleFixedWindow();
+        _cornerItem = new MenuItem { Style = itemStyle };
+        _cornerItem.Click += (_, _) => ToggleCorners();
+        var rotateLeftItem = new MenuItem
+        {
+            Header = LocalizationService.Get("IndependentWindowRotateLeft"), Style = itemStyle,
+        };
+        rotateLeftItem.Click += (_, _) => Rotate(-1);
+        var rotateRightItem = new MenuItem
+        {
+            Header = LocalizationService.Get("IndependentWindowRotateRight"), Style = itemStyle,
+        };
+        rotateRightItem.Click += (_, _) => Rotate(1);
         var closeItem = new MenuItem
         {
             Header = LocalizationService.Get("IndependentWindowClose"),
@@ -122,6 +148,9 @@ internal sealed class NativePreviewWindow : IDisposable
         closeItem.Click += (_, _) => QueueClose();
         _contextMenu.Items.Add(_topMostItem);
         _contextMenu.Items.Add(_fixedItem);
+        _contextMenu.Items.Add(_cornerItem);
+        _contextMenu.Items.Add(rotateLeftItem);
+        _contextMenu.Items.Add(rotateRightItem);
         _contextMenu.Items.Add(closeItem);
         UpdateContextMenuLabels();
         var windowTitle = string.IsNullOrWhiteSpace(title) ? StableTitle : title;
@@ -203,7 +232,8 @@ internal sealed class NativePreviewWindow : IDisposable
     }
 
     internal static bool TryCreateAndShowForSession(ulong handle, uint sourceWidth,
-        uint sourceHeight, string title, out NativePreviewWindow? window)
+        uint sourceHeight, string title, double cornerRadius, double cornerExponent,
+        out NativePreviewWindow? window)
     {
         window = null;
         NativePreviewWindow? candidate = null;
@@ -212,7 +242,8 @@ internal sealed class NativePreviewWindow : IDisposable
             candidate = new NativePreviewWindow(sourceWidth, sourceHeight, title,
                 hwnd => NativeCore.AttachDevicePreview(handle, hwnd),
                 hwnd => NativeCore.DetachDevicePreview(handle, hwnd),
-                hwnd => NativeCore.AttachDevicePreview(handle, hwnd));
+                hwnd => NativeCore.AttachDevicePreview(handle, hwnd),
+                handle, cornerRadius, cornerExponent);
             if (!candidate._attachPreview(candidate._handle))
             {
                 candidate.Dispose();
@@ -249,8 +280,12 @@ internal sealed class NativePreviewWindow : IDisposable
     internal bool RefreshPreview() => !_disposed && _handle != 0 &&
         _refreshPreview(_handle);
 
-    internal void SetSourceDimensions(uint width, uint height) =>
-        _aspectController.SetSourceDimensions(width, height);
+    internal void SetSourceDimensions(uint width, uint height)
+    {
+        _sourceWidth = width;
+        _sourceHeight = height;
+        ApplyRotatedDimensions();
+    }
 
     internal void ToggleFullScreen()
     {
@@ -258,6 +293,7 @@ internal sealed class NativePreviewWindow : IDisposable
         if (_isFullScreen)
         {
             _isFullScreen = false;
+            _ = RemovePropW(_handle, "iPhoneMirrorFullScreen");
             _ = SetWindowLongPtrW(_handle, GwlStyle, _restoreStyle);
             _ = SetWindowPos(_handle, 0, _restoreRectangle.Left, _restoreRectangle.Top,
                 Math.Max(1, _restoreRectangle.Right - _restoreRectangle.Left),
@@ -275,6 +311,7 @@ internal sealed class NativePreviewWindow : IDisposable
 
         _restoreStyle = GetWindowLongPtrW(_handle, GwlStyle);
         _isFullScreen = true;
+        _ = SetPropW(_handle, "iPhoneMirrorFullScreen", (nint)1);
         var fullScreenStyle = (nint)(_restoreStyle.ToInt64() & ~WsThickFrame);
         _ = SetWindowLongPtrW(_handle, GwlStyle, fullScreenStyle);
         _ = SetWindowPos(_handle, 0, monitorInfo.Monitor.Left, monitorInfo.Monitor.Top,
@@ -393,6 +430,8 @@ internal sealed class NativePreviewWindow : IDisposable
             _isTopMost ? "IndependentWindowUnpin" : "IndependentWindowPin");
         _fixedItem.Header = LocalizationService.Get(
             _isFixed ? "IndependentWindowUnfix" : "IndependentWindowFix");
+        _cornerItem.Header = LocalizationService.Get(
+            _cornersEnabled ? "IndependentWindowRemoveCorners" : "IndependentWindowKeepCorners");
     }
 
     private void ToggleTopMost()
@@ -415,6 +454,32 @@ internal sealed class NativePreviewWindow : IDisposable
             SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
         if (!_isFixed) _aspectController.Reflow();
         UpdateContextMenuLabels();
+    }
+
+    private void ToggleCorners()
+    {
+        if (_sessionHandle == 0 || _handle == 0) return;
+        _cornersEnabled = !_cornersEnabled;
+        _ = NativeCore.SetDeviceWindowCornerProfile(_sessionHandle, _handle,
+            _cornersEnabled ? _cornerRadius : 0, _cornerExponent);
+        UpdateContextMenuLabels();
+    }
+
+    private void Rotate(int delta)
+    {
+        if (_sessionHandle == 0 || _handle == 0) return;
+        _rotation = ((_rotation + delta) % 4 + 4) % 4;
+        _ = NativeCore.SetDeviceWindowRotation(_sessionHandle, _handle, _rotation);
+        ApplyRotatedDimensions();
+    }
+
+    private void ApplyRotatedDimensions()
+    {
+        if (_sourceWidth == 0 || _sourceHeight == 0) return;
+        if ((_rotation & 1) != 0)
+            _aspectController.SetSourceDimensions(_sourceHeight, _sourceWidth);
+        else
+            _aspectController.SetSourceDimensions(_sourceWidth, _sourceHeight);
     }
 
     public void Dispose()
@@ -462,6 +527,13 @@ internal sealed class NativePreviewWindow : IDisposable
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetPropW(nint window, string name, nint data);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint RemovePropW(nint window, string name);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern uint ExtractIconExW(string file, int iconIndex,

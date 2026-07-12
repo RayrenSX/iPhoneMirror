@@ -22,8 +22,13 @@ enum class SessionState {
 };
 
 struct SessionOptions {
-    std::uint32_t requested_width{1920};
-    std::uint32_t requested_height{1080};
+    // Valeria=false makes iOS honor DisplaySize. The protocol selects an
+    // encoder tier from the requested long edge; an arbitrary huge square can
+    // fall back to 1440p. 1206x2622 is the highest tier verified on both test
+    // devices; broader 4K bounds make recent iOS choose a lower encoder tier.
+    std::uint32_t requested_width{1206};
+    std::uint32_t requested_height{2622};
+    bool request_native_display_size{false};
     // The reverse-engineered HPD1 message has no verified frame-rate key.
     // Keep this preference alongside the negotiated dimensions so downstream
     // preview/recording sinks can cap presentation without destabilising the
@@ -51,6 +56,10 @@ public:
 
     [[nodiscard]] SessionEvent process(const Packet& packet);
     [[nodiscard]] std::vector<std::vector<std::uint8_t>> stop_messages();
+    [[nodiscard]] std::vector<std::vector<std::uint8_t>> begin_display_reconfigure(
+        std::uint32_t width, std::uint32_t height);
+    [[nodiscard]] std::vector<std::vector<std::uint8_t>> complete_display_reconfigure();
+    void set_demo_mode(bool enabled) noexcept { options_.demo_mode = enabled; }
     void reset();
 
     [[nodiscard]] SessionState state() const noexcept { return state_; }

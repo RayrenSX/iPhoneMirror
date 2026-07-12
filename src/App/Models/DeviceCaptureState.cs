@@ -11,6 +11,8 @@ internal sealed class DeviceCaptureState
     internal int FrameRate { get; set; } = 60;
     internal bool PlayAudio { get; set; } = true;
     internal double Volume { get; set; } = 100;
+    internal uint AdvancedUsbWidth { get; set; }
+    internal uint AdvancedUsbHeight { get; set; }
     internal bool HasSession => Handle != 0;
     internal bool ErrorShown { get; set; }
 }

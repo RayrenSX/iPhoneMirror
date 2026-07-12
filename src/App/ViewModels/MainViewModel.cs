@@ -30,6 +30,7 @@ internal sealed class ResolutionPreset(string resourceKey, uint width, uint heig
 
 internal sealed class MainViewModel : INotifyPropertyChanged
 {
+    internal event Action<string, uint, uint>? DeviceVideoSizeChanged;
     // The first InteropBitmap experiment showed row corruption on this WPF
     // build. Keep the implementation available for a corrected memory-section
     // layout, but use the verified WriteableBitmap path in production.
@@ -90,6 +91,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private int _selectedFrameRate = 60;
     private double _playbackVolume = 100;
     private bool _playAudio = true;
+    private bool _advancedMode;
     private string _settingsStatus = string.Empty;
     private string? _settingsStatusKey = "StatusDefaultSettings";
     private object?[] _settingsStatusArguments = [];
@@ -125,6 +127,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand InstallDriverCommand { get; }
     public RelayCommand ApplyVideoSettingsCommand { get; }
     public RelayCommand ClearLogCommand { get; }
+    public RelayCommand AdvancedSettingsCommand { get; }
+    public bool IsAdvancedMode { get => _advancedMode; private set { if (Set(ref _advancedMode, value)) OnPropertyChanged(nameof(AdvancedSettingsVisibility)); } }
+    public Visibility AdvancedSettingsVisibility => IsAdvancedMode ? Visibility.Visible : Visibility.Collapsed;
 
     public DeviceViewModel? SelectedDevice
     {
@@ -285,6 +290,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         ApplyVideoSettingsCommand = new RelayCommand(() => _ = ApplyVideoSettingsAsync(),
             () => !IsOperationBusy);
         ClearLogCommand = new RelayCommand(ClearVisibleLog);
+        AdvancedSettingsCommand = new RelayCommand(ShowAdvancedSettings, () => IsAdvancedMode);
         LocalizationService.LanguageChanged += OnLanguageChanged;
     }
 
@@ -320,6 +326,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             {
                 var activeCapture = await Task.Run(GetSelectedCaptureStatus);
                 ApplyCaptureStatus(activeCapture);
+                await PollBackgroundSessionErrorsAsync();
                 return;
             }
 
@@ -551,6 +558,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 Fps = status.Fps,
                 LatencyMs = status.LatencyMs,
             };
+            if (status.Width != 0 && status.Height != 0)
+                DeviceVideoSizeChanged?.Invoke(state.Udid, status.Width, status.Height);
             if (status.State != CaptureState.Error || state.ErrorShown) continue;
             state.ErrorShown = true;
             var name = Devices.FirstOrDefault(device =>
@@ -617,9 +626,18 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             SetCaptureSessionOwner(device.Udid);
             var created = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
                 state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
-                state.PlayAudio, state.Volume / 100.0));
+                state.PlayAudio, state.Volume / 100.0,
+                IsAdvancedMode ? state.AdvancedUsbWidth : 0,
+                IsAdvancedMode ? state.AdvancedUsbHeight : 0));
             state.IsStarting = false;
             state.Handle = created.Success ? created.Handle : 0;
+            // The ownership marker was set before the blocking native start,
+            // so SetCaptureSessionOwner may legitimately be a no-op here.
+            // Handle is not observable itself; explicitly refresh the style
+            // trigger and command availability as soon as creation finishes.
+            OnPropertyChanged(nameof(HasCaptureSession));
+            StartCommand.NotifyCanExecuteChanged();
+            StopCommand.NotifyCanExecuteChanged();
             var result = (created.Success, created.Message);
             IsCapturing = created.Success;
             _activeCaptureUdid = created.Success ? device.Udid : null;
@@ -803,7 +821,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _deviceSessions[device.Udid] = state;
             var result = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
                 state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
-                playAudio: false, state.Volume / 100.0));
+                playAudio: false, state.Volume / 100.0,
+                IsAdvancedMode ? state.AdvancedUsbWidth : 0,
+                IsAdvancedMode ? state.AdvancedUsbHeight : 0));
             state.Handle = result.Success ? result.Handle : 0;
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
             {
@@ -878,6 +898,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(SourceVideoWidth));
             OnPropertyChanged(nameof(SourceVideoHeight));
         }
+        if (status.Width != 0 && status.Height != 0 && SelectedDevice is { } selected)
+            DeviceVideoSizeChanged?.Invoke(selected.Udid, status.Width, status.Height);
         FpsDisplay = status.Fps > 0 ? $"{status.Fps:F1} fps" : "— fps";
         LatencyDisplay = status.LatencyMs > 0 ? $"{status.LatencyMs:F1} ms" : "— ms";
         AudioDisplay = status.AudioSampleRate > 0
@@ -1096,10 +1118,92 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void ShowDriverHelp()
     {
-        MessageBox.Show(
-            LocalizationService.Get("DriverHelpBody"),
-            LocalizationService.Get("DriverHelpTitle"),
-            MessageBoxButton.OK, MessageBoxImage.Information);
+        new Windows.DriverHelpWindow { Owner = Application.Current?.MainWindow }.ShowDialog();
+    }
+
+    internal void EnableAdvancedMode()
+    {
+        IsAdvancedMode = true;
+        AdvancedSettingsCommand.NotifyCanExecuteChanged();
+    }
+
+    private void ShowAdvancedSettings()
+    {
+        if (SelectedDevice is null) return;
+        var state = CurrentDeviceSession ?? new DeviceCaptureState
+        {
+            Udid = SelectedDevice.Udid,
+            RenderWidth = SelectedResolutionPreset.Width,
+            RenderHeight = SelectedResolutionPreset.Height,
+            FrameRate = SelectedFrameRate,
+            PlayAudio = PlayAudio,
+            Volume = PlaybackVolume,
+        };
+        _deviceSessions[SelectedDevice.Udid] = state;
+        var device = SelectedDevice;
+        var window = new Windows.AdvancedSettingsWindow(state.AdvancedUsbWidth, state.AdvancedUsbHeight)
+        {
+            Owner = Application.Current?.MainWindow,
+        };
+        if (window.ShowDialog() == true)
+        {
+            state.AdvancedUsbWidth = window.RequestedWidth;
+            state.AdvancedUsbHeight = window.RequestedHeight;
+            SetRawSettingsStatus($"USB {window.RequestedWidth}×{window.RequestedHeight}");
+            AddUiLog($"Advanced USB request {window.RequestedWidth}x{window.RequestedHeight} saved for {state.Udid}");
+            if (state.Handle != 0) _ = RestartWithAdvancedUsbAsync(device, state);
+        }
+        if (window.DisableAdvancedModeRequested)
+        {
+            IsAdvancedMode = false;
+            AdvancedSettingsCommand.NotifyCanExecuteChanged();
+            state.AdvancedUsbWidth = state.AdvancedUsbHeight = 0;
+            SetRawSettingsStatus(LocalizationService.Get("AdvancedModeDisabled"));
+            if (state.Handle != 0) _ = RestartWithAdvancedUsbAsync(device, state);
+        }
+    }
+
+    private async Task RestartWithAdvancedUsbAsync(DeviceViewModel device, DeviceCaptureState state)
+    {
+        if (IsBusy || state.Handle == 0) return;
+        IsBusy = true;
+        var gateHeld = false;
+        try
+        {
+            await _coreGate.WaitAsync();
+            gateHeld = true;
+            var oldHandle = state.Handle;
+            await Task.Run(() => _core.StopDeviceSession(oldHandle));
+            _core.DestroyDeviceSession(oldHandle);
+            state.Handle = 0;
+            OnPropertyChanged(nameof(HasCaptureSession));
+            // libusb0 restores the phone's normal configuration during the
+            // stop path. Give Windows and the Apple USB stack a complete
+            // re-enumeration window before opening QuickTime again.
+            await Task.Delay(1500);
+            var created = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
+                state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
+                state.PlayAudio, state.Volume / 100.0,
+                state.AdvancedUsbWidth, state.AdvancedUsbHeight));
+            state.Handle = created.Success ? created.Handle : 0;
+            OnPropertyChanged(nameof(HasCaptureSession));
+            IsCapturing = created.Success;
+            NativeCore.SelectPreviewSession(state.Handle);
+            OnPropertyChanged(nameof(CurrentSessionHandle));
+            SetRawSettingsStatus(created.Success ? "Advanced USB request applied" : created.Message);
+        }
+        catch (Exception error)
+        {
+            SetRawSettingsStatus(error.Message);
+            state.Handle = 0;
+            IsCapturing = false;
+            OnPropertyChanged(nameof(HasCaptureSession));
+        }
+        finally
+        {
+            IsBusy = false;
+            if (gateHeld) _coreGate.Release();
+        }
     }
 
     public void RefreshPreview()

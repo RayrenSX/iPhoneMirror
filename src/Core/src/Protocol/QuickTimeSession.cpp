@@ -97,6 +97,12 @@ std::vector<std::uint8_t> async_dict(std::uint32_t subtype, std::uint64_t clock,
 }
 
 std::vector<std::uint8_t> make_hpd1(const SessionOptions& options) {
+    if (options.request_native_display_size) {
+        return async_dict(fourcc('h', 'p', 'd', '1'), EmptyClockRef, dictionary({
+            {"Valeria", boolean_value(options.demo_mode)},
+            {"HEVCDecoderSupports444", boolean_value(options.advertise_hevc_444)},
+        }));
+    }
     auto display_size = dictionary({
         {"Width", number_f64(options.requested_width)},
         {"Height", number_f64(options.requested_height)},
@@ -304,6 +310,21 @@ std::vector<std::vector<std::uint8_t>> SessionProtocol::stop_messages() {
         messages.push_back(async_control(fourcc('h', 'p', 'a', '0'), audio_clock));
     }
     messages.push_back(async_control(fourcc('h', 'p', 'd', '0'), EmptyClockRef));
+    return messages;
+}
+
+std::vector<std::vector<std::uint8_t>> SessionProtocol::begin_display_reconfigure(
+    std::uint32_t width, std::uint32_t height) {
+    options_.request_native_display_size = false;
+    options_.requested_width = width;
+    options_.requested_height = height;
+    return {async_control(fourcc('h', 'p', 'd', '0'), EmptyClockRef)};
+}
+
+std::vector<std::vector<std::uint8_t>> SessionProtocol::complete_display_reconfigure() {
+    std::vector<std::vector<std::uint8_t>> messages;
+    messages.push_back(make_hpd1(options_));
+    if (device_video_clock_ != 0) messages.push_back(make_need(device_video_clock_));
     return messages;
 }
 

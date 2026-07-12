@@ -61,6 +61,15 @@ std::string narrow(const wchar_t* text) {
     return result;
 }
 
+std::wstring product_type_for_udid(const wchar_t* udid) {
+    if (!udid || !*udid) return {};
+    try {
+        for (const auto& device : device_manager.refresh())
+            if (device.udid == udid) return device.product_type;
+    } catch (...) {}
+    return {};
+}
+
 std::wstring widen(std::string_view text) {
     if (text.empty()) return {};
     const int length = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
@@ -299,7 +308,7 @@ std::int32_t start_capture_locked(const wchar_t* udid,
         }
         if (capture_session) capture_session->stop();
         capture_session = std::make_unique<iPhoneMirror::capture::CaptureSession>(
-            serial, preferences);
+            serial, preferences, product_type_for_udid(udid));
         capture_session->start(false);
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
@@ -479,6 +488,8 @@ std::int32_t IM_CALL im_start_capture_with_options(const wchar_t* udid,
         .target_fps = options->target_fps,
         .play_audio = options->play_audio != 0,
         .audio_volume = options->audio_volume,
+        .usb_requested_width = options->reserved[0],
+        .usb_requested_height = options->reserved[1],
     };
     std::scoped_lock lock(state_mutex);
     capture_preferences = preferences;
@@ -805,9 +816,11 @@ std::int32_t IM_CALL im_session_create(const wchar_t* udid,
             .target_fps = options->target_fps,
             .play_audio = options->play_audio != 0,
             .audio_volume = options->audio_volume,
+            .usb_requested_width = options->reserved[0],
+            .usb_requested_height = options->reserved[1],
         };
         context->capture = std::make_unique<iPhoneMirror::capture::CaptureSession>(
-            narrow(udid), context->preferences);
+            narrow(udid), context->preferences, product_type_for_udid(udid));
         context->capture->start(false);
         std::scoped_lock lock(state_mutex);
         if (!initialized) {
@@ -1046,6 +1059,38 @@ std::int32_t IM_CALL im_session_force_preview_refresh(iPhoneMirror::SessionHandl
     if (context->renderers.empty())
         return fail(iPhoneMirror::Result::CaptureBackendUnavailable, L"Session preview is detached");
     for (auto& [_, renderer] : context->renderers) renderer->request_refresh();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_session_set_window_corner_profile(iPhoneMirror::SessionHandle handle,
+    void* hwnd, float radius, float exponent) {
+    if (!std::isfinite(radius) || !std::isfinite(exponent) || radius < 0 || radius > 0.5F ||
+        exponent < 1.5F || exponent > 8.0F)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid window corner profile");
+    auto context = find_multi_session(handle);
+    if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    std::scoped_lock lock(context->mutex);
+    const auto found = context->renderers.find(static_cast<HWND>(hwnd));
+    if (found == context->renderers.end())
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown preview window");
+    found->second->set_corner_profile(radius, exponent);
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_session_set_window_rotation(iPhoneMirror::SessionHandle handle,
+    void* hwnd, std::int32_t quarter_turns) {
+    auto context = find_multi_session(handle);
+    if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    std::scoped_lock lock(context->mutex);
+    const auto found = context->renderers.find(static_cast<HWND>(hwnd));
+    if (found == context->renderers.end())
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown preview window");
+    const auto normalized = ((quarter_turns % 4) + 4) % 4;
+    if (context->capture && (normalized & 1) != 0)
+        context->capture->request_display_orientation(true);
+    else if (context->capture && normalized == 0)
+        context->capture->request_display_orientation(false);
+    found->second->set_rotation(normalized == 2 ? 2 : 0);
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
