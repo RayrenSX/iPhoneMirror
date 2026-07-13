@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '0.6.0-preview.1',
+    [string]$Version = '1.0.0',
     [switch]$SkipBuild,
     [switch]$GenerateSbom
 )
