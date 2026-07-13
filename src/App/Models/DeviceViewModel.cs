@@ -39,11 +39,14 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
     public bool IsWireless => IsWirelessUdid(Udid);
 
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? "iPhone" : Name;
-    public string ModelDisplay => IsWireless ? "AirPlay" : string.IsNullOrWhiteSpace(ProductType)
-        ? LocalizationService.Get("ModelLoading")
-        : ProductType;
-    public string OsDisplay => IsWireless ? LocalizationService.Get("WirelessLocalNetwork") :
-        string.IsNullOrWhiteSpace(OsVersion) ? "iOS -" : $"iOS {OsVersion}";
+    public string ModelDisplay => string.IsNullOrWhiteSpace(ProductType)
+        ? IsWireless ? "AirPlay" : LocalizationService.Get("ModelLoading")
+        : IsWireless ? AppleProductNames.Resolve(ProductType) : ProductType;
+    public string OsDisplay => string.IsNullOrWhiteSpace(OsVersion)
+        ? IsWireless ? LocalizationService.Get("WirelessLocalNetwork") : "iOS -"
+        : IsWireless
+            ? $"iOS {OsVersion} · {LocalizationService.Get("WirelessLocalNetwork")}"
+            : $"iOS {OsVersion}";
     public string ShortUdid => IsWireless ? "AirPlay" :
         Udid.Length <= 18 ? Udid : $"{Udid[..8]}...{Udid[^6..]}";
     public bool Ready => State is ConnectionState.Ready;

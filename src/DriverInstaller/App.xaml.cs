@@ -14,6 +14,8 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+        DriverLocalization.Initialize(e.Args);
+        Resources.MergedDictionaries.Insert(0, DriverLocalization.CreateDictionary());
         DriverLogger.Write("Driver manager started.");
         var window = new MainWindow();
         MainWindow = window;

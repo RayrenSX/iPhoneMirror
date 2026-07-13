@@ -78,6 +78,7 @@ int wmain(int argc, wchar_t** argv) {
             wait_overlapped(pipe, connect, 5000, connected_bytes));
     bool ready{};
     bool callback_log{};
+    bool callback_metadata{};
     bool callback_connected{};
     bool callback_video{};
     bool callback_audio{};
@@ -109,6 +110,12 @@ int wmain(int argc, wchar_t** argv) {
         }
         const std::string device_id(header.device_id);
         const std::string device_name(header.device_name);
+        const std::string product_type(header.product_type);
+        const std::string os_version(header.os_version);
+        callback_metadata = callback_metadata ||
+            (header.type == iPhoneMirror::wireless::MessageType::DeviceInfo &&
+                device_id == "00:11:22:33:44:55" &&
+                product_type == "iPhone9,1" && os_version == "17.5.1");
         callback_connected = callback_connected ||
             (header.type == iPhoneMirror::wireless::MessageType::Connected &&
                 device_id == "00:11:22:33:44:55" && device_name == "Stub iPhone");
@@ -148,12 +155,14 @@ int wmain(int argc, wchar_t** argv) {
     CloseHandle(process.hProcess);
     CloseHandle(stop_event);
     CloseHandle(pipe);
-    if (!protocol_valid || !ready || !callback_log || !callback_connected ||
+    if (!protocol_valid || !ready || !callback_log || !callback_metadata ||
+        !callback_connected ||
         !callback_video || !callback_audio || !second_connected || !second_video ||
         !second_audio || !second_disconnected || !exited) {
         std::cerr << "wireless host IPC smoke failed: connected=" << connected
             << " protocol=" << protocol_valid << " ready=" << ready
             << " callback_log=" << callback_log
+            << " callback_metadata=" << callback_metadata
             << " callback_connected=" << callback_connected
             << " callback_video=" << callback_video
             << " callback_audio=" << callback_audio

@@ -13,7 +13,7 @@ internal static class AppleProductNames
             ["iPhone14,5"] = "iPhone 13",
             ["iPhone14,2"] = "iPhone 13 Pro",
             ["iPhone14,3"] = "iPhone 13 Pro Max",
-            ["iPhone14,6"] = "iPhone SE（第 3 代）",
+            ["iPhone14,6"] = "iPhone SE (3rd generation)",
             ["iPhone14,7"] = "iPhone 14",
             ["iPhone14,8"] = "iPhone 14 Plus",
             ["iPhone15,2"] = "iPhone 14 Pro",
@@ -37,9 +37,9 @@ internal static class AppleProductNames
     {
         if (KnownProducts.TryGetValue(productType, out var name)) return name;
         if (productType.StartsWith("iPad", StringComparison.OrdinalIgnoreCase))
-            return $"iPad（{productType}）";
+            return $"iPad ({productType})";
         if (productType.StartsWith("iPhone", StringComparison.OrdinalIgnoreCase))
-            return $"iPhone（{productType}）";
-        return "Apple 移动设备";
+            return $"iPhone ({productType})";
+        return DriverLocalization.Get("AppleMobileDevice");
     }
 }

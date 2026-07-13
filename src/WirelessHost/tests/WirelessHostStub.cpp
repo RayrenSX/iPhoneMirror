@@ -34,6 +34,7 @@ extern "C" void* __cdecl stub_start(const char*, unsigned int, unsigned int,
     IAirServerCallback* callback) {
     if (!callback) return nullptr;
     callback->log(6, "stub protocol log");
+    callback->log(6, "IPHONE_MIRROR_DEVICE_INFO\t00:11:22:33:44:55\tiPhone9,1\t17.5.1");
     callback->connected("Stub iPhone", "00:11:22:33:44:55");
 
     unsigned char video_bytes[]{

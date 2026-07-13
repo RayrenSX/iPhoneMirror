@@ -5,12 +5,14 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <format>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -60,6 +62,49 @@ using StartServer = void* (__cdecl*)(const char*, unsigned int, unsigned int,
     IAirServerCallback*);
 using StopServer = void (__cdecl*)(void*);
 
+struct DeviceMetadata {
+    std::string device_id;
+    std::string product_type;
+    std::string os_version;
+};
+
+std::optional<DeviceMetadata> parse_device_metadata(std::string_view message) {
+    constexpr std::string_view prefix = "IPHONE_MIRROR_DEVICE_INFO\t";
+    if (!message.starts_with(prefix)) return std::nullopt;
+    message.remove_prefix(prefix.size());
+
+    std::array<std::string_view, 3> fields{};
+    for (std::size_t index = 0; index < fields.size(); ++index) {
+        auto& field = fields[index];
+        const auto separator = message.find('\t');
+        if (index + 1 == fields.size()) {
+            if (separator != std::string_view::npos) return std::nullopt;
+            field = message;
+        } else {
+            if (separator == std::string_view::npos) return std::nullopt;
+            field = message.substr(0, separator);
+            message.remove_prefix(separator + 1);
+        }
+    }
+
+    const auto valid_field = [](std::string_view value, std::size_t limit,
+        bool allow_empty) {
+        if ((!allow_empty && value.empty()) || value.size() >= limit) return false;
+        return std::ranges::all_of(value, [](unsigned char character) {
+            return character >= 0x20 && character <= 0x7e;
+        });
+    };
+    if (!valid_field(fields[0], iPhoneMirror::wireless::DeviceIdBytes, false) ||
+        !valid_field(fields[1], iPhoneMirror::wireless::ProductTypeBytes, true) ||
+        !valid_field(fields[2], iPhoneMirror::wireless::OsVersionBytes, true))
+        return std::nullopt;
+    return DeviceMetadata{
+        .device_id = std::string(fields[0]),
+        .product_type = std::string(fields[1]),
+        .os_version = std::string(fields[2]),
+    };
+}
+
 bool write_all(HANDLE pipe, const void* source, std::size_t size) noexcept {
     const auto* bytes = static_cast<const std::uint8_t*>(source);
     while (size != 0) {
@@ -105,6 +150,15 @@ public:
         copy_text(header.device_id, remote_device_id);
         copy_text(header.device_name, remote_name);
         return send(header, payload);
+    }
+
+    bool send_device_info(const DeviceMetadata& metadata) noexcept {
+        iPhoneMirror::wireless::MessageHeader header;
+        header.type = iPhoneMirror::wireless::MessageType::DeviceInfo;
+        copy_text(header.device_id, metadata.device_id.c_str());
+        copy_text(header.product_type, metadata.product_type.c_str());
+        copy_text(header.os_version, metadata.os_version.c_str());
+        return send(header);
     }
 
 private:
@@ -232,12 +286,19 @@ public:
     void setVolume(float, const char*, const char*) override {}
 
     void log(int level, const char* message) override {
+        const auto text = safe_text(message);
+        if (const auto metadata = parse_device_metadata(text)) {
+            writer_.send_device_info(*metadata);
+            diagnostic(std::format("device metadata device={} model={} os={}",
+                metadata->device_id, metadata->product_type, metadata->os_version));
+            return;
+        }
         const auto log_index = log_callbacks_.fetch_add(1, std::memory_order_relaxed) + 1;
         // AirPlayServer uses syslog levels (INFO=6, DEBUG=7). Keep the opening
         // handshake in full, then retain errors only so a long stream cannot
         // flood the media pipe or the application log.
         if (log_index <= 512 || level <= 4) {
-            diagnostic(std::format("airplay level={} {}", level, safe_text(message)));
+            diagnostic(std::format("airplay level={} {}", level, text));
         }
     }
 

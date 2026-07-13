@@ -1,3 +1,5 @@
+using IPhoneMirror.DriverInstaller.Services;
+
 namespace IPhoneMirror.DriverInstaller.Models;
 
 internal enum DriverOperationKind
@@ -22,24 +24,24 @@ public sealed record AppleDeviceRecord(
     bool HasLibUsb0Filter,
     string[] UpperFilters)
 {
-    public string ConnectionText => IsPresent ? "已连接" : "历史设备";
-    public string DriverText => HasLibUsb0Filter ? "采集驱动已安装" : "未安装采集驱动";
+    public string ConnectionText => DriverLocalization.Get(IsPresent ? "Connected" : "HistoricalDevice");
+    public string DriverText => DriverLocalization.Get(HasLibUsb0Filter ? "CaptureInstalled" : "CaptureMissing");
     public string SelectionText
     {
         get
         {
             var friendlyName = string.IsNullOrWhiteSpace(DeviceName) ||
                                string.Equals(DeviceName, "iPhone", StringComparison.OrdinalIgnoreCase)
-                ? $"{ModelName}（设备 {DeviceNumber}）"
-                : $"{ModelName}（{DeviceName}）";
+                ? DriverLocalization.Format("DeviceNumberFormat", ModelName, DeviceNumber)
+                : DriverLocalization.Format("NamedDeviceFormat", ModelName, DeviceName);
             return string.IsNullOrWhiteSpace(OsVersion)
                 ? friendlyName
-                : $"{friendlyName} · iOS {OsVersion}";
+                : DriverLocalization.Format("DeviceOsFormat", friendlyName, OsVersion);
         }
     }
     public string DetailText => string.IsNullOrWhiteSpace(ProductType)
-        ? $"Apple USB 设备 {DeviceNumber}"
-        : $"设备型号 {ProductType}";
+        ? DriverLocalization.Format("AppleUsbDeviceFormat", DeviceNumber)
+        : DriverLocalization.Format("DeviceModelFormat", ProductType);
 }
 
 internal sealed record AppleSupportStatus(

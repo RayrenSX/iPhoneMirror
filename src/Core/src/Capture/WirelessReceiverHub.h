@@ -27,6 +27,8 @@ namespace iPhoneMirror::capture {
 struct WirelessDeviceSnapshot {
     std::wstring id;
     std::wstring name;
+    std::wstring product_type;
+    std::wstring os_version;
 };
 
 namespace detail {
@@ -41,6 +43,7 @@ public:
     ~WirelessClientStream();
 
     void set_identity(std::wstring name, bool connected);
+    void set_metadata(std::wstring product_type, std::wstring os_version);
     [[nodiscard]] WirelessDeviceSnapshot device() const;
     [[nodiscard]] bool connected() const;
     void attach(CapturePreferences preferences);
@@ -61,6 +64,8 @@ public:
 private:
     std::wstring id_;
     std::wstring name_;
+    std::wstring product_type_;
+    std::wstring os_version_;
     mutable std::mutex mutex_;
     bool connected_{};
     std::uint32_t attachments_{};
@@ -119,7 +124,7 @@ private:
     void handle_message(const wireless::MessageHeader& header,
         const std::vector<std::uint8_t>& payload);
     [[nodiscard]] std::shared_ptr<WirelessClientStream> get_or_create(
-        const wireless::MessageHeader& header);
+        const wireless::MessageHeader& header, bool mark_connected);
     void mark_all_disconnected() noexcept;
 };
 

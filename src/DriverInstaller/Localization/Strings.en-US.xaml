@@ -1,0 +1,127 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:system="clr-namespace:System;assembly=mscorlib">
+    <system:String x:Key="AppTitle">iPhoneMirror Driver Manager</system:String>
+    <system:String x:Key="AppSubtitle">Apple USB environment and per-device capture filter</system:String>
+    <system:String x:Key="OpenLogs">Open logs</system:String>
+    <system:String x:Key="Refresh">Refresh</system:String>
+    <system:String x:Key="AppleUsbEnvironment">Apple USB environment</system:String>
+    <system:String x:Key="CaptureFilterDriver">Capture filter driver</system:String>
+    <system:String x:Key="InstallAppleDevices">Install Apple Devices</system:String>
+    <system:String x:Key="PrepareTitle">Prepare mirroring environment</system:String>
+    <system:String x:Key="PrepareDescription">Automatically detect and install Apple USB support, the shared capture driver, and the capture filter for the connected iPhone.</system:String>
+    <system:String x:Key="InstallAll">Install all drivers</system:String>
+    <system:String x:Key="ConnectIphone">Connect an iPhone first</system:String>
+    <system:String x:Key="AppleDevices">Apple devices</system:String>
+    <system:String x:Key="CurrentDevice">Current device</system:String>
+    <system:String x:Key="DeviceInstance">Device instance</system:String>
+    <system:String x:Key="ConnectionStatus">Connection</system:String>
+    <system:String x:Key="DriverStatus">Driver status</system:String>
+    <system:String x:Key="Install">Install</system:String>
+    <system:String x:Key="Repair">Repair</system:String>
+    <system:String x:Key="Uninstall">Uninstall</system:String>
+    <system:String x:Key="DriverChangeNotice">Driver changes apply only to the selected Apple USB parent device and never replace Apple's official driver.</system:String>
+    <system:String x:Key="AdvancedSettings">Advanced settings</system:String>
+    <system:String x:Key="BackToSimple">Back to simple view</system:String>
+    <system:String x:Key="Installed">Installed</system:String>
+    <system:String x:Key="CheckPending">Checking</system:String>
+    <system:String x:Key="AppleSupportPreparing">Preparing Apple USB support...</system:String>
+    <system:String x:Key="AppleSupportReady">Apple USB support is ready.</system:String>
+    <system:String x:Key="RequiredAppleInstallTitle">Apple installation required</system:String>
+    <system:String x:Key="RequiredAppleInstallBody">Complete this step, then click Recheck. The tool will not operate the store window for you.</system:String>
+    <system:String x:Key="Recheck">Recheck</system:String>
+    <system:String x:Key="CannotOpenLogs">Could not open logs</system:String>
+    <system:String x:Key="QuickInstallTitle">Install all drivers</system:String>
+    <system:String x:Key="QuickInstallBody">The tool will check Apple USB support, the shared capture driver, and the selected iPhone. Missing components are installed automatically. A known incorrect WinUSB/libusb parent is removed before asking you to reconnect.</system:String>
+    <system:String x:Key="StartInstall">Start installation</system:String>
+    <system:String x:Key="ConnectPhoneTitle">Connect an iPhone</system:String>
+    <system:String x:Key="ConnectPhoneBody">Apple USB support is ready. Connect and unlock the iPhone, then tap Trust if prompted. The tool continues automatically after it detects the device.</system:String>
+    <system:String x:Key="StartDetection">Start detection</system:String>
+    <system:String x:Key="FailureTitle">Driver operation failed</system:String>
+    <system:String x:Key="FailureHeading">The driver operation could not be completed</system:String>
+    <system:String x:Key="FailureMethods">Choose one of the following options</system:String>
+    <system:String x:Key="HelpTitle">Get community help</system:String>
+    <system:String x:Key="HelpBody">Join QQ group 1050045279 and provide the operation log.</system:String>
+    <system:String x:Key="CopyGroup">Copy group number</system:String>
+    <system:String x:Key="AisiTitle">Prepare the driver with Aisi Screen Mirroring</system:String>
+    <system:String x:Key="AisiBody">Download Aisi Screen Mirroring, complete one normal wired mirroring session, then return and check again.</system:String>
+    <system:String x:Key="OpenWebsite">Open website</system:String>
+    <system:String x:Key="Close">Close</system:String>
+    <system:String x:Key="Retry">Check again</system:String>
+    <system:String x:Key="Cancel">Cancel</system:String>
+    <system:String x:Key="Continue">Continue</system:String>
+    <system:String x:Key="Acknowledge">Got it</system:String>
+    <system:String x:Key="RequiredActionTitle">Action required</system:String>
+    <system:String x:Key="SimpleNoDevice">Connect an iPhone and click the button. The tool will detect and install what is missing.</system:String>
+    <system:String x:Key="LogSuffix">Log: {0}</system:String>
+    <system:String x:Key="NoSelection">No device selected</system:String>
+    <system:String x:Key="WaitDeviceTimeout">Timed out waiting for an Apple device. Log: {0}</system:String>
+    <system:String x:Key="SelectedDeviceDisconnected">The selected device disconnected. Select it again and retry. Log: {0}</system:String>
+    <system:String x:Key="RepairingParent">Repairing the parent driver for {0}...</system:String>
+    <system:String x:Key="ParentRepairFailed">The parent driver is still not usbccgp after repair; automatic installation stopped. Log: {0}</system:String>
+    <system:String x:Key="DeviceReady">The mirroring driver for {0} is ready.</system:String>
+    <system:String x:Key="InstallingDriver">Installing the capture driver for {0}...</system:String>
+    <system:String x:Key="RepairingDriver">Repairing the capture driver for {0}...</system:String>
+    <system:String x:Key="ReconnectTimeout">Timed out waiting for the device to reconnect. Log: {0}</system:String>
+    <system:String x:Key="QuickInstallComplete">Installation complete. The mirroring driver for {0} is ready.</system:String>
+    <system:String x:Key="WaitingForDevice">Waiting for an Apple device...</system:String>
+    <system:String x:Key="ConfirmOperation">Confirm {0}</system:String>
+    <system:String x:Key="ConfirmOperationBody">The following device will be changed: {0}
+
+{1}
+{2}
+
+Only this device's libusb0 filter is changed. Apple's official driver is not replaced. Windows may request administrator approval.</system:String>
+    <system:String x:Key="Operating">{0} {1}...</system:String>
+    <system:String x:Key="ReplugTimeout">Timed out waiting for the device to disconnect or reconnect. The operation was rolled back or completed; review the log and retry.</system:String>
+    <system:String x:Key="DriverUninstalled">The capture filter was removed from the current device.</system:String>
+    <system:String x:Key="DriverInstalled">The capture filter was installed and verified on the current device.</system:String>
+    <system:String x:Key="UnplugTitle">Unplug the device</system:String>
+    <system:String x:Key="UnplugBody">The driver change is complete. Unplug this iPhone and wait for it to disappear from the device list.</system:String>
+    <system:String x:Key="Unplugged">Unplugged</system:String>
+    <system:String x:Key="ReconnectTitle">Reconnect the device</system:String>
+    <system:String x:Key="ReconnectBody">The device disconnected. Reconnect and unlock the iPhone, then tap Trust if prompted.</system:String>
+    <system:String x:Key="Reconnected">Reconnected</system:String>
+    <system:String x:Key="WaitingReconnect">Waiting for the device to reconnect...</system:String>
+    <system:String x:Key="WaitingDisconnect">Waiting for the device to disconnect...</system:String>
+    <system:String x:Key="DevicesReady">Detected {0} device(s); all mirroring drivers are ready.</system:String>
+    <system:String x:Key="DevicesMissing">Detected {0} device(s); click the button to install missing drivers.</system:String>
+    <system:String x:Key="GroupCopiedTitle">Group number copied</system:String>
+    <system:String x:Key="GroupCopiedBody">QQ group 1050045279 was copied. Search for it in QQ to apply.</system:String>
+    <system:String x:Key="CannotOpenQq">Could not open QQ</system:String>
+    <system:String x:Key="Connected">Connected</system:String>
+    <system:String x:Key="HistoricalDevice">Historical device</system:String>
+    <system:String x:Key="CaptureInstalled">Capture driver installed</system:String>
+    <system:String x:Key="CaptureMissing">Capture driver not installed</system:String>
+    <system:String x:Key="DeviceNumberFormat">{0} (device {1})</system:String>
+    <system:String x:Key="NamedDeviceFormat">{0} ({1})</system:String>
+    <system:String x:Key="DeviceOsFormat">{0} · iOS {1}</system:String>
+    <system:String x:Key="AppleUsbDeviceFormat">Apple USB device {0}</system:String>
+    <system:String x:Key="DeviceModelFormat">Model {0}</system:String>
+    <system:String x:Key="AppleServiceRunning">Apple USB service is running</system:String>
+    <system:String x:Key="AppleServiceStopped">Apple USB support is installed but the service is stopped</system:String>
+    <system:String x:Key="AppleSupportMissing">Apple Devices or Apple Mobile Device Support was not found</system:String>
+    <system:String x:Key="LibUsbMissing">The libusb0 shared service is not installed</system:String>
+    <system:String x:Key="LibUsbFilesMismatch">libusb0 files are missing or do not match the trusted version</system:String>
+    <system:String x:Key="LibUsbRunning">libusb0 {0} is running</system:String>
+    <system:String x:Key="LibUsbReadyOnConnect">libusb0 is installed and will load when a device connects</system:String>
+    <system:String x:Key="LibUsbCheckFailed">Could not inspect libusb0: </system:String>
+    <system:String x:Key="UnknownVersion">unknown version</system:String>
+    <system:String x:Key="AppleMobileDevice">Apple mobile device</system:String>
+    <system:String x:Key="InvalidDeviceTarget">The selected Apple device target is invalid.</system:String>
+    <system:String x:Key="DriverExecutableMissing">The driver manager executable path could not be determined.</system:String>
+    <system:String x:Key="ElevatedProcessStartFailed">The elevated driver process could not be started.</system:String>
+    <system:String x:Key="ElevatedProcessNoResult">The elevated driver process exited with code {0} without returning a result.</system:String>
+    <system:String x:Key="ElevatedInvalidResult">The elevated driver process returned an invalid result.</system:String>
+    <system:String x:Key="UacCancelled">Windows administrator approval was cancelled.</system:String>
+    <system:String x:Key="OfflineMsiFailed">The offline AppleMobileDeviceSupport MSI failed with exit code {0}.
+{1}
+Log: {2}</system:String>
+    <system:String x:Key="AppleDownloadUnavailable">The official Apple installer could not be obtained automatically. The official installation page was opened.</system:String>
+    <system:String x:Key="AppleSignatureInvalid">The Apple installer failed Windows signature validation and was not executed.</system:String>
+    <system:String x:Key="AppleInstallerFailed">The official Apple installer failed with exit code {0}.
+{1}
+Log: {2}</system:String>
+    <system:String x:Key="AppleServiceNotReady">Apple USB support is installed, but Apple Mobile Device Service is not ready. Connect and unlock the iPhone, then check again.
+Log: {0}</system:String>
+</ResourceDictionary>

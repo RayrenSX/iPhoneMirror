@@ -433,7 +433,7 @@ void test_wireless_i420_conversion() {
     check(!iPhoneMirror::capture::detail::convert_i420_to_nv12(
         header, std::span(i420).first(11), nv12, stride),
         "wireless conversion rejects truncated planes");
-    check(sizeof(iPhoneMirror::wireless::MessageHeader) == 256 &&
+    check(sizeof(iPhoneMirror::wireless::MessageHeader) == 352 &&
         header.magic == iPhoneMirror::wireless::IpcMagic &&
         header.version == iPhoneMirror::wireless::IpcVersion,
         "wireless IPC header layout and version are stable");

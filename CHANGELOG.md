@@ -5,6 +5,25 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.0.1-preview.1] - 2026-07-14
+
+### Changed
+
+- Synchronize the standalone driver manager language with the main application,
+  including shared settings, startup language forwarding, English/Chinese
+  resource dictionaries and localized operation dialogs.
+- Add AirPlay handshake device metadata forwarding and human-readable ProductType
+  display in the wireless device panel.
+
+### Fixed
+
+- Restore the wireless AirPlay receiver capability response to 5120x2880 at
+  60 fps, preventing iPhone mirroring from being negotiated down to a
+  1440-pixel edge and 30 fps after rebuilding the receiver DLL.
+- Add a repeatable AirPlay display-capability source patch and post-build binary
+  verification so future receiver rebuilds cannot silently regress to the
+  upstream lower-resolution profile.
+
 ## [1.0.0] - 2026-07-14
 
 ### Changed

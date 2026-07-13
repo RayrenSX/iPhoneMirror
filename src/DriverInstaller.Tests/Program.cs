@@ -42,7 +42,7 @@ Run("friendly product names", () =>
 {
     Equal("iPhone 12 mini", AppleProductNames.Resolve("iPhone13,1"));
     Equal("iPhone 17", AppleProductNames.Resolve("iPhone18,3"));
-    Equal("iPhone（iPhone99,9）", AppleProductNames.Resolve("iPhone99,9"));
+    Equal("iPhone (iPhone99,9)", AppleProductNames.Resolve("iPhone99,9"));
 });
 
 Run("payload path containment", () =>

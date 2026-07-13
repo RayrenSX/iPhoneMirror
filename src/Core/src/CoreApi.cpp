@@ -121,7 +121,9 @@ void fill_wireless_device(iPhoneMirror::DeviceInfo& output,
     output.lockdown_accessible = 1;
     copy_text(output.udid, L"airplay://" + input.id);
     copy_text(output.name, input.name.empty() ? L"iPhone" : input.name);
-    copy_text(output.product_type, L"AirPlay");
+    copy_text(output.product_type,
+        input.product_type.empty() ? L"AirPlay" : input.product_type);
+    copy_text(output.os_version, input.os_version);
     copy_text(output.connection_type, L"AirPlay");
     copy_text(output.status, L"Connected via AirPlay");
 }

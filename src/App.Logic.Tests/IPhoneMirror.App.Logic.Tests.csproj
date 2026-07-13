@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -16,6 +17,7 @@
     <Compile Include="..\App\Services\DeviceCornerProfileResolver.cs" Link="DeviceCornerProfileResolver.cs" />
     <Compile Include="..\App\Services\IndependentWindowAudioPolicy.cs" Link="IndependentWindowAudioPolicy.cs" />
     <Compile Include="..\App\Services\DriverManagerLauncher.cs" Link="DriverManagerLauncher.cs" />
+    <Compile Include="..\App\Localization\LocalizationService.cs" Link="LocalizationService.cs" />
     <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
   </ItemGroup>
 </Project>

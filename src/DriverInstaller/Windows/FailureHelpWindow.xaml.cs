@@ -22,12 +22,12 @@ public partial class FailureHelpWindow : Window
         {
             Clipboard.SetText(DriverConstants.QqGroupNumber);
             Process.Start(new ProcessStartInfo("https://im.qq.com/") { UseShellExecute = true });
-            PromptWindow.Inform(this, "群号已复制",
-                "QQ群号 1050045279 已复制。请在 QQ 中搜索并申请加入。");
+            PromptWindow.Inform(this, DriverLocalization.Get("GroupCopiedTitle"),
+                DriverLocalization.Get("GroupCopiedBody"));
         }
         catch (Exception error)
         {
-            PromptWindow.Inform(this, "无法打开 QQ", error.Message);
+            PromptWindow.Inform(this, DriverLocalization.Get("CannotOpenQq"), error.Message);
         }
     }
 

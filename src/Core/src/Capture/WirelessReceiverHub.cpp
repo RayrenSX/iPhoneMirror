@@ -154,9 +154,21 @@ void WirelessClientStream::set_identity(std::wstring name, bool connected) {
     if (!connected) clear_media();
 }
 
+void WirelessClientStream::set_metadata(
+    std::wstring product_type, std::wstring os_version) {
+    std::scoped_lock lock(mutex_);
+    if (!product_type.empty()) product_type_ = std::move(product_type);
+    if (!os_version.empty()) os_version_ = std::move(os_version);
+}
+
 WirelessDeviceSnapshot WirelessClientStream::device() const {
     std::scoped_lock lock(mutex_);
-    return {.id = id_, .name = name_};
+    return {
+        .id = id_,
+        .name = name_,
+        .product_type = product_type_,
+        .os_version = os_version_,
+    };
 }
 
 bool WirelessClientStream::connected() const {
@@ -498,37 +510,50 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
         logging::write("wireless_hub ready");
         break;
     case wireless::MessageType::Connected: {
-        const auto stream = get_or_create(header);
+        const auto stream = get_or_create(header, true);
         if (stream) logging::write(std::format("wireless_hub connected id={} name={}",
             narrow(stream->device().id), narrow(stream->device().name)));
         break;
     }
     case wireless::MessageType::Disconnected: {
-        const auto stream = get_or_create(header);
+        const auto stream = get_or_create(header, false);
         if (stream) {
-            const auto device = stream->device();
-            stream->set_identity(device.name, false);
+            auto device = stream->device();
+            const auto name = header_text(header.device_name);
+            stream->set_identity(name.empty() ? device.name : name, false);
             logging::write(std::format("wireless_hub disconnected id={}", narrow(device.id)));
         }
         break;
     }
     case wireless::MessageType::Video:
-        if (const auto stream = get_or_create(header)) stream->publish_video(header, payload);
+        if (const auto stream = get_or_create(header, true)) stream->publish_video(header, payload);
         break;
     case wireless::MessageType::Audio:
-        if (const auto stream = get_or_create(header)) stream->publish_audio(header, payload);
+        if (const auto stream = get_or_create(header, true)) stream->publish_audio(header, payload);
         break;
     case wireless::MessageType::Log:
         logging::write("airplay_host: " + std::string(
             reinterpret_cast<const char*>(payload.data()), payload.size()));
         break;
+    case wireless::MessageType::DeviceInfo: {
+        const auto stream = get_or_create(header, false);
+        if (stream) {
+            stream->set_metadata(header_text(header.product_type),
+                header_text(header.os_version));
+            const auto device = stream->device();
+            logging::write(std::format(
+                "wireless_hub metadata id={} model={} os={}", narrow(device.id),
+                narrow(device.product_type), narrow(device.os_version)));
+        }
+        break;
+    }
     default:
         throw std::runtime_error("unknown wireless IPC message type");
     }
 }
 
 std::shared_ptr<WirelessClientStream> WirelessReceiverHub::get_or_create(
-    const wireless::MessageHeader& header) {
+    const wireless::MessageHeader& header, bool mark_connected) {
     auto id = header_text(header.device_id);
     if (id.empty()) {
         logging::write("wireless_hub rejected message without device id");
@@ -542,7 +567,7 @@ std::shared_ptr<WirelessClientStream> WirelessReceiverHub::get_or_create(
         if (inserted) position->second = std::make_shared<WirelessClientStream>(id, name);
         stream = position->second;
     }
-    stream->set_identity(std::move(name), true);
+    if (mark_connected) stream->set_identity(std::move(name), true);
     return stream;
 }
 

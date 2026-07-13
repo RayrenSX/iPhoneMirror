@@ -6,10 +6,12 @@
 namespace iPhoneMirror::wireless {
 
 inline constexpr std::uint32_t IpcMagic = 0x50414D49U; // IMAP
-inline constexpr std::uint16_t IpcVersion = 2;
+inline constexpr std::uint16_t IpcVersion = 3;
 inline constexpr std::uint32_t MaxPayloadBytes = 64U * 1024U * 1024U;
 inline constexpr std::size_t DeviceIdBytes = 64;
 inline constexpr std::size_t DeviceNameBytes = 128;
+inline constexpr std::size_t ProductTypeBytes = 64;
+inline constexpr std::size_t OsVersionBytes = 32;
 
 enum class MessageType : std::uint16_t {
     Ready = 1,
@@ -18,6 +20,7 @@ enum class MessageType : std::uint16_t {
     Video = 4,
     Audio = 5,
     Log = 6,
+    DeviceInfo = 7,
 };
 
 #pragma pack(push, 1)
@@ -37,9 +40,11 @@ struct MessageHeader {
     std::uint32_t reserved{};
     char device_id[DeviceIdBytes]{};
     char device_name[DeviceNameBytes]{};
+    char product_type[ProductTypeBytes]{};
+    char os_version[OsVersionBytes]{};
 };
 #pragma pack(pop)
 
-static_assert(sizeof(MessageHeader) == 256);
+static_assert(sizeof(MessageHeader) == 352);
 
 } // namespace iPhoneMirror::wireless

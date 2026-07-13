@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using IPhoneMirror.App.Localization;
 
 namespace IPhoneMirror.App.Services;
 
@@ -29,12 +30,15 @@ internal sealed class DriverManagerLauncher
             if (TryActivateExisting(executablePath))
                 return new(true, executablePath, "The running driver manager was activated.");
 
-            using var process = Process.Start(new ProcessStartInfo
+            var start = new ProcessStartInfo
             {
                 FileName = executablePath,
                 WorkingDirectory = Path.GetDirectoryName(executablePath)!,
                 UseShellExecute = true,
-            });
+            };
+            start.ArgumentList.Add("--language");
+            start.ArgumentList.Add(LocalizationService.EffectiveCulture.Name);
+            using var process = Process.Start(start);
             return process is null
                 ? new(false, executablePath, "Windows did not start the driver manager process.")
                 : new(true, executablePath, "The driver manager was started.");

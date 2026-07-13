@@ -42,8 +42,8 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             var result = await RunMsiAsync(offlineMsi, packageLog);
             if (!IsInstallerSuccess(result.ExitCode))
                 return new AppleSupportInstallResult(false, false,
-                    $"离线 AppleMobileDeviceSupport MSI 安装失败，退出代码 {result.ExitCode}。\n" +
-                    LimitOutput(result.CombinedOutput) + $"\n日志：{packageLog}");
+                    DriverLocalization.Format("OfflineMsiFailed", result.ExitCode,
+                        LimitOutput(result.CombinedOutput), packageLog));
         }
         else
         {
@@ -57,20 +57,19 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             {
                 OpenMicrosoftStore();
                 return new AppleSupportInstallResult(false, true,
-                    "无法自动获得 Apple 官方安装包，已打开 Apple 官方安装入口。\n" +
-                    error.Message);
+                    DriverLocalization.Get("AppleDownloadUnavailable") + "\n" + error.Message);
             }
 
             if (!DriverPayload.IsAuthenticodeTrusted(setup))
                 return new AppleSupportInstallResult(false, false,
-                    "Apple 安装包签名无法通过 Windows 验证，已拒绝执行。");
+                    DriverLocalization.Get("AppleSignatureInvalid"));
 
             var result = await RunElevatedAsync(setup, ["/quiet", "/norestart"],
                 TimeSpan.FromMinutes(20));
             if (!IsInstallerSuccess(result.ExitCode))
                 return new AppleSupportInstallResult(false, false,
-                    $"Apple 官方安装包执行失败，退出代码 {result.ExitCode}。\n" +
-                    LimitOutput(result.CombinedOutput) + $"\n日志：{DriverLogger.Path}");
+                    DriverLocalization.Format("AppleInstallerFailed", result.ExitCode,
+                        LimitOutput(result.CombinedOutput), DriverLogger.Path));
         }
 
         var ready = await WaitForAppleSupportAsync(TimeSpan.FromSeconds(90));
@@ -89,8 +88,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         }
 
         return new AppleSupportInstallResult(false, false,
-            "Apple USB 支持已安装，但 Apple Mobile Device Service 尚未就绪。请连接并解锁 iPhone 后重新检测。" +
-            $"\n日志：{packageLog}");
+            DriverLocalization.Format("AppleServiceNotReady", packageLog));
     }
 
     internal void OpenMicrosoftStore()
@@ -278,7 +276,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         }
         catch (Win32Exception error) when (error.NativeErrorCode == 1223)
         {
-            return new ProcessResult(1223, string.Empty, "用户取消了管理员授权。");
+            return new ProcessResult(1223, string.Empty, DriverLocalization.Get("UacCancelled"));
         }
         catch (OperationCanceledException)
         {

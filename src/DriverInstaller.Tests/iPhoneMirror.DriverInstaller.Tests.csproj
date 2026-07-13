@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>iPhoneMirror.DriverInstaller.Tests</AssemblyName>
@@ -12,6 +13,7 @@
     <Compile Include="..\DriverInstaller\Services\DriverConstants.cs" Link="DriverConstants.cs" />
     <Compile Include="..\DriverInstaller\Services\DriverPayload.cs" Link="DriverPayload.cs" />
     <Compile Include="..\DriverInstaller\Services\DriverLogger.cs" Link="DriverLogger.cs" />
+    <Compile Include="..\DriverInstaller\Services\DriverLocalization.cs" Link="DriverLocalization.cs" />
     <Compile Include="..\DriverInstaller\Services\DeviceCatalog.cs" Link="DeviceCatalog.cs" />
     <Compile Include="..\DriverInstaller\Services\AppleDeviceMetadataReader.cs" Link="AppleDeviceMetadataReader.cs" />
     <Compile Include="..\DriverInstaller\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />

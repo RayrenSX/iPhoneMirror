@@ -14,14 +14,14 @@ internal sealed class DriverOperationClient
         if (!DriverConstants.IsAllowedAppleParent(device.InstanceId) ||
             !string.Equals(DriverConstants.NormalizeSerial(device.Serial), device.Serial,
                 StringComparison.OrdinalIgnoreCase))
-            return Failure("拒绝了无效的 Apple 设备目标。", null);
+            return Failure(DriverLocalization.Get("InvalidDeviceTarget"), null);
 
         var operationId = Guid.NewGuid().ToString("N");
         var paths = DriverConstants.GetOperationPaths(operationId);
         var executable = Environment.ProcessPath ??
             Process.GetCurrentProcess().MainModule?.FileName;
         if (string.IsNullOrWhiteSpace(executable))
-            return Failure("无法确定驱动管理器的可执行文件路径。", paths.LogPath);
+            return Failure(DriverLocalization.Get("DriverExecutableMissing"), paths.LogPath);
 
         var start = new ProcessStartInfo
         {
@@ -40,20 +40,20 @@ internal sealed class DriverOperationClient
         {
             using var process = Process.Start(start);
             if (process is null)
-                return Failure("管理员驱动进程未能启动。", paths.LogPath);
+                return Failure(DriverLocalization.Get("ElevatedProcessStartFailed"), paths.LogPath);
             await process.WaitForExitAsync();
 
             for (var attempt = 0; attempt < 10 && !File.Exists(paths.ResultPath); attempt++)
                 await Task.Delay(100);
             if (!File.Exists(paths.ResultPath))
-                return Failure($"管理员驱动进程以代码 {process.ExitCode} 退出，但没有返回结果。",
+                return Failure(DriverLocalization.Format("ElevatedProcessNoResult", process.ExitCode),
                     paths.LogPath);
 
             await using var stream = new FileStream(paths.ResultPath, FileMode.Open,
                 FileAccess.Read, FileShare.Read);
             var result = await JsonSerializer.DeserializeAsync<DriverOperationResult>(stream,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            var completed = result ?? Failure("管理员驱动进程返回了无效结果。", paths.LogPath);
+            var completed = result ?? Failure(DriverLocalization.Get("ElevatedInvalidResult"), paths.LogPath);
             DriverLogger.Write($"Completed elevated {kind}: success={completed.Success}; " +
                 $"message={completed.Message}; log={completed.LogPath}");
             return completed;
@@ -61,7 +61,7 @@ internal sealed class DriverOperationClient
         catch (Win32Exception error) when (error.NativeErrorCode == 1223)
         {
             DriverLogger.Write($"UAC cancelled for {kind}: {error.Message}");
-            return Failure("用户取消了 Windows 管理员授权。", paths.LogPath);
+            return Failure(DriverLocalization.Get("UacCancelled"), paths.LogPath);
         }
         catch (Exception error)
         {

@@ -138,6 +138,13 @@ AirPlay uses the same session path as USB, including the main
 preview, resolution/FPS limits, volume, screenshots, detached and full-screen
 windows, simultaneous sessions and OBS.
 
+During the AirPlay `SETUP` handshake, the receiver reads the sender's
+`deviceID`, `model` (Apple ProductType such as `iPhone9,1`) and `osVersion`
+from the binary plist. The values cross the versioned named-pipe IPC as a
+`DeviceInfo` message and are shown in the selected-device panel. Known
+ProductTypes are rendered as a human-readable model while retaining the raw
+identifier in parentheses; unknown identifiers are shown unchanged.
+
 ## Third-party dependencies and licensing
 
 | Dependency | Purpose | License/source |

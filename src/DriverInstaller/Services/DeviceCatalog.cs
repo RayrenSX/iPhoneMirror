@@ -75,10 +75,10 @@ internal sealed class DeviceCatalog
         {
             if (!TryQueryService(serviceName, out var running)) continue;
             return new AppleSupportStatus(true, running, serviceName,
-                running ? "Apple USB 服务正在运行" : "Apple USB 服务已安装但未运行");
+                DriverLocalization.Get(running ? "AppleServiceRunning" : "AppleServiceStopped"));
         }
         return new AppleSupportStatus(false, false, null,
-            "未检测到 Apple Devices 或 Apple Mobile Device Support");
+            DriverLocalization.Get("AppleSupportMissing"));
     }
 
     internal LibUsbStackStatus InspectLibUsbStack()
@@ -100,16 +100,16 @@ internal sealed class DeviceCatalog
                 : null;
             var running = installed && TryQueryService("libusb0", out var serviceRunning) &&
                           serviceRunning;
-            var diagnostic = !installed ? "libusb0 共享服务尚未安装" :
-                !filesMatch ? "libusb0 文件缺失或与受信任版本不一致" :
-                running ? $"libusb0 {version ?? "未知版本"} 正在运行" :
-                "libusb0 已安装，连接设备后将加载";
+            var diagnostic = !installed ? DriverLocalization.Get("LibUsbMissing") :
+                !filesMatch ? DriverLocalization.Get("LibUsbFilesMismatch") :
+                running ? DriverLocalization.Format("LibUsbRunning", version ?? DriverLocalization.Get("UnknownVersion")) :
+                DriverLocalization.Get("LibUsbReadyOnConnect");
             return new LibUsbStackStatus(installed, running, filesMatch, version, diagnostic);
         }
         catch (Exception error)
         {
             return new LibUsbStackStatus(false, false, false, null,
-                "无法检查 libusb0：" + error.Message);
+                DriverLocalization.Get("LibUsbCheckFailed") + error.Message);
         }
     }
 
@@ -132,7 +132,7 @@ internal sealed class DeviceCatalog
 
     private static string ResolveDisplayName(string? raw, string fallback)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return "Apple 移动设备";
+        if (string.IsNullOrWhiteSpace(raw)) return DriverLocalization.Get("AppleMobileDevice");
         var separator = raw.LastIndexOf(';');
         var value = separator >= 0 && separator + 1 < raw.Length
             ? raw[(separator + 1)..]

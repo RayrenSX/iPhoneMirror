@@ -15,11 +15,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DriverOperationClient _operations = new();
     private readonly AppleSupportInstaller _appleInstaller;
     private AppleDeviceRecord? _selectedDevice;
-    private AppleSupportStatus _appleSupport = new(false, false, null, "正在检查");
-    private LibUsbStackStatus _libUsb = new(false, false, false, null, "正在检查");
+    private AppleSupportStatus _appleSupport = new(false, false, null, L("CheckPending"));
+    private LibUsbStackStatus _libUsb = new(false, false, false, null, L("CheckPending"));
     private bool _isBusy;
     private bool _isAdvancedMode;
-    private string _operationStatus = "点击按钮后将自动检查并补齐缺失驱动。";
+    private string _operationStatus = L("SimpleNoDevice");
 
     public ObservableCollection<AppleDeviceRecord> Devices { get; } = [];
     public IEnumerable<AppleDeviceRecord> ConnectedDevices =>
@@ -56,10 +56,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public Visibility BusyVisibility => IsBusy ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AdvancedVisibility => IsAdvancedMode ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SimpleVisibility => IsAdvancedMode ? Visibility.Collapsed : Visibility.Visible;
-    public string AdvancedButtonText => IsAdvancedMode ? "返回简洁界面" : "高级设置";
+    public string AdvancedButtonText => L(IsAdvancedMode ? "BackToSimple" : "AdvancedSettings");
     public bool CanInteract => !IsBusy;
     public bool CanQuickInstall => !IsBusy && SelectedDevice is { IsPresent: true };
-    public string InstallButtonText => _selectedDevice?.HasLibUsb0Filter == true ? "已安装" : "安装";
+    public string InstallButtonText => L(_selectedDevice?.HasLibUsb0Filter == true ? "Installed" : "Install");
     public bool CanInstallAppleSupport => !IsBusy && !_appleSupport.Ready;
     public bool CanInstallDriver => !IsBusy && _selectedDevice is { IsPresent: true,
         HasLibUsb0Filter: false } && _appleSupport.Ready;
@@ -80,6 +80,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    private static string L(string key) => DriverLocalization.Get(key);
+    private static string F(string key, params object?[] args) => DriverLocalization.Format(key, args);
 
     public MainWindow()
     {
@@ -112,7 +115,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception error)
         {
-            PromptWindow.Inform(this, "无法打开日志", error.Message);
+            PromptWindow.Inform(this, L("CannotOpenLogs"), error.Message);
         }
     }
 
@@ -123,14 +126,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             DriverLogger.Write("Apple support install requested.");
-            OperationStatus = "正在准备 Apple USB 支持…";
+            OperationStatus = L("AppleSupportPreparing");
             var result = await _appleInstaller.InstallAsync();
             if (result.RequiresStoreInteraction)
             {
                 var action = new RequiredActionWindow(
-                    "需要完成 Apple 官方安装",
-                    result.Message + "\n\n请完成当前这一步后点击“重新检测”。工具不会自动操作商店窗口。",
-                    "重新检测") { Owner = this }.ShowDialog();
+                    L("RequiredAppleInstallTitle"),
+                    result.Message + "\n\n" + L("RequiredAppleInstallBody"),
+                    L("Recheck")) { Owner = this }.ShowDialog();
                 if (action == true)
                     result = await _appleInstaller.InstallAsync();
             }
@@ -140,7 +143,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 DriverLogger.Write("Apple support install failed: " + result.Message);
                 ShowFailure(result.Message);
             }
-            else OperationStatus = "Apple USB 支持已就绪。";
+            else OperationStatus = L("AppleSupportReady");
         }
         catch (Exception error)
         {
@@ -161,15 +164,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (result.RequiresStoreInteraction)
         {
             var action = new RequiredActionWindow(
-                "需要完成 Apple 官方安装",
-                result.Message + "\n\n请完成当前这一步后点击“重新检测”。工具不会自动操作商店窗口。",
-                "重新检测") { Owner = this }.ShowDialog();
+                L("RequiredAppleInstallTitle"),
+                result.Message + "\n\n" + L("RequiredAppleInstallBody"),
+                L("Recheck")) { Owner = this }.ShowDialog();
             if (action != true) return false;
             result = await _appleInstaller.InstallAsync();
         }
         if (result.Success)
         {
-            OperationStatus = "Apple USB 支持已就绪。";
+            OperationStatus = L("AppleSupportReady");
             return true;
         }
         OperationStatus = result.Message;
@@ -180,9 +183,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (IsBusy) return;
         var answer = PromptWindow.Confirm(this,
-            "一键安装全部驱动",
-            "工具将自动检查 Apple USB 支持、共享采集驱动和当前选中的 iPhone。发现缺失项会自动安装；发现明确属于 WinUSB/libusb 的错误父驱动会先移除，再提示重新连接。",
-            "开始安装");
+            L("QuickInstallTitle"), L("QuickInstallBody"), L("StartInstall"));
         if (!answer) return;
 
         IsBusy = true;
@@ -193,12 +194,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (!Devices.Any(device => device.IsPresent))
             {
                 var action = new RequiredActionWindow(
-                    "请连接 iPhone",
-                    "Apple USB 支持已准备好。请连接并解锁 iPhone；手机出现提示时点击“信任此电脑”。检测到设备后会自动继续。",
-                    "开始检测") { Owner = this }.ShowDialog();
+                    L("ConnectPhoneTitle"), L("ConnectPhoneBody"),
+                    L("StartDetection")) { Owner = this }.ShowDialog();
                 if (action != true || !await WaitForAnyDeviceAsync(TimeSpan.FromMinutes(3)))
                 {
-                    ShowFailure("等待 Apple 设备连接超时。\n日志：" + DriverLogger.Path);
+                    ShowFailure(F("WaitDeviceTimeout", DriverLogger.Path));
                     return;
                 }
                 await RefreshCoreAsync();
@@ -210,17 +210,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 string.Equals(item.InstanceId, selectedInstanceId, StringComparison.OrdinalIgnoreCase));
             if (device is not { IsPresent: true })
             {
-                ShowFailure("选中的设备已经断开，请重新选择后再试。\n日志：" + DriverLogger.Path);
+                ShowFailure(F("SelectedDeviceDisconnected", DriverLogger.Path));
                 return;
             }
 
             if (!string.Equals(device.Service, "usbccgp", StringComparison.OrdinalIgnoreCase))
             {
-                OperationStatus = $"正在修复 {device.DisplayName} 的父驱动…";
+                OperationStatus = F("RepairingParent", device.DisplayName);
                 var parent = await _operations.RunAsync(DriverOperationKind.ParentRepair, device);
                 if (!parent.Success)
                 {
-                    ShowFailure(parent.Message + $"\n日志：{parent.LogPath}");
+                    ShowFailure(parent.Message + "\n" + F("LogSuffix", parent.LogPath));
                     return;
                 }
                 if (!await GuideReconnectAsync(device.InstanceId,
@@ -231,42 +231,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 if (device is not { IsPresent: true } ||
                     !string.Equals(device.Service, "usbccgp", StringComparison.OrdinalIgnoreCase))
                 {
-                    ShowFailure("父驱动重新绑定后仍不是 usbccgp，已停止自动安装。\n日志：" +
-                                DriverLogger.Path);
+                    ShowFailure(F("ParentRepairFailed", DriverLogger.Path));
                     return;
                 }
             }
 
             if (device.HasLibUsb0Filter && _libUsb.FilesMatch)
             {
-                OperationStatus = $"{device.DisplayName} 的投屏驱动已经全部就绪。";
+                OperationStatus = F("DeviceReady", device.DisplayName);
                 return;
             }
 
             var kind = device.HasLibUsb0Filter
                 ? DriverOperationKind.Repair
                 : DriverOperationKind.Install;
-            OperationStatus = $"正在为 {device.DisplayName} {(
-                kind == DriverOperationKind.Install ? "安装" : "修复")}采集驱动…";
+            OperationStatus = F(kind == DriverOperationKind.Install ? "InstallingDriver" : "RepairingDriver",
+                device.DisplayName);
             var result = await _operations.RunAsync(kind, device);
             if (!result.Success)
             {
-                ShowFailure(result.Message + $"\n日志：{result.LogPath}");
+                ShowFailure(result.Message + "\n" + F("LogSuffix", result.LogPath));
                 return;
             }
             if (result.RequiresReplug &&
                 !await GuideReconnectAsync(device.InstanceId, kind))
             {
-                ShowFailure("等待设备重新连接超时。\n日志：" + result.LogPath);
+                ShowFailure(F("ReconnectTimeout", result.LogPath));
                 return;
             }
-            OperationStatus = $"一键安装完成，{device.DisplayName} 的投屏驱动已就绪。";
+            OperationStatus = F("QuickInstallComplete", device.DisplayName);
         }
         catch (Exception error)
         {
             DriverLogger.Write("Quick install failed: " + error);
             OperationStatus = error.Message;
-            ShowFailure(error.Message + $"\n日志：{DriverLogger.Path}");
+            ShowFailure(error.Message + "\n" + F("LogSuffix", DriverLogger.Path));
         }
         finally
         {
@@ -281,7 +280,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         do
         {
             if (_catalog.GetAppleDevices().Any(device => device.IsPresent)) return true;
-            OperationStatus = "等待 Apple 设备连接…";
+            OperationStatus = L("WaitingForDevice");
             await Task.Delay(500);
         } while (DateTime.UtcNow < deadline);
         return false;
@@ -304,16 +303,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             (!device.IsPresent || !_appleSupport.Ready)) return;
         if (kind == DriverOperationKind.Uninstall && !device.HasLibUsb0Filter) return;
 
-        var verb = kind switch
+        var verbKey = kind switch
         {
-            DriverOperationKind.Install => "安装",
-            DriverOperationKind.Repair => "修复",
-            _ => "卸载",
+            DriverOperationKind.Install => "Install",
+            DriverOperationKind.Repair => "Repair",
+            _ => "Uninstall",
         };
+        var verb = L(verbKey);
         var answer = PromptWindow.Confirm(this,
-            $"确认{verb}",
-            $"将对以下设备执行{verb}：\n\n{device.SelectionText}\n{device.DetailText}\n\n" +
-            "操作只修改该设备的 libusb0 过滤器，不替换 Apple 官方驱动。Windows 可能请求管理员授权。",
+            F("ConfirmOperation", verb),
+            F("ConfirmOperationBody", verb, device.SelectionText, device.DetailText),
             verb, kind == DriverOperationKind.Uninstall);
         if (!answer) return;
 
@@ -322,12 +321,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             for (var attempt = 0; attempt < 2; attempt++)
             {
-                OperationStatus = $"正在{verb} {device.DisplayName}…";
+                OperationStatus = F("Operating", verb, device.DisplayName);
                 var result = await _operations.RunAsync(kind, device);
                 if (!result.Success)
                 {
                     var failure = result.Message + (string.IsNullOrWhiteSpace(result.LogPath)
-                        ? string.Empty : $"\n日志：{result.LogPath}");
+                        ? string.Empty : "\n" + F("LogSuffix", result.LogPath));
                     OperationStatus = failure;
                     DriverLogger.Write(failure);
                     if (!ShowFailure(failure)) break;
@@ -342,13 +341,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     var reconnected = await GuideReconnectAsync(device.InstanceId, kind);
                     if (!reconnected)
                     {
-                        ShowFailure("等待设备拔下或重新连接超时。驱动操作本身已经回滚或完成，请查看日志后重试。");
+                        ShowFailure(L("ReplugTimeout"));
                         break;
                     }
                 }
                 OperationStatus = kind == DriverOperationKind.Uninstall
-                    ? "当前设备的采集过滤驱动已卸载。"
-                    : "当前设备的采集过滤驱动已安装并验证。";
+                    ? L("DriverUninstalled")
+                    : L("DriverInstalled");
                 await RefreshCoreAsync();
                 break;
             }
@@ -373,18 +372,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (present)
         {
             var unplug = PromptWindow.Confirm(this,
-                "请拔线",
-                "驱动更改已经完成。现在请拔掉这台 iPhone 的数据线，等待设备从列表中消失。",
-                "已经拔线");
+                L("UnplugTitle"), L("UnplugBody"), L("Unplugged"));
             if (!unplug) return false;
             if (!await WaitForPresenceAsync(instanceId, false, TimeSpan.FromMinutes(3)))
                 return false;
         }
 
         var reconnect = PromptWindow.Confirm(this,
-            "请重新连接",
-            "已检测到设备断开。现在请重新连接 iPhone，解锁设备，并在手机出现提示时点击“信任此电脑”。",
-            "已经连接");
+            L("ReconnectTitle"), L("ReconnectBody"), L("Reconnected"));
         if (!reconnect) return false;
         if (!await WaitForPresenceAsync(instanceId, true, TimeSpan.FromMinutes(3)))
             return false;
@@ -406,7 +401,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             var device = _catalog.FindExact(instanceId, serial);
             if (device?.IsPresent == expected) return true;
-            OperationStatus = expected ? "等待设备重新连接…" : "等待设备断开…";
+            OperationStatus = L(expected ? "WaitingReconnect" : "WaitingDisconnect");
             await Task.Delay(500);
         } while (DateTime.UtcNow < deadline);
         return false;
@@ -445,10 +440,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                             string.Equals(device.Service, "usbccgp",
                                 StringComparison.OrdinalIgnoreCase) && device.HasLibUsb0Filter);
             OperationStatus = connected == 0
-                ? "连接 iPhone 后点击按钮，工具会自动完成检测和安装。"
+                ? L("SimpleNoDevice")
                 : ready
-                    ? $"已检测到 {connected} 台设备，投屏驱动均已就绪。"
-                    : $"已检测到 {connected} 台设备，点击按钮自动安装缺失驱动。";
+                    ? F("DevicesReady", connected)
+                    : F("DevicesMissing", connected);
         }
         NotifyCommands();
     }

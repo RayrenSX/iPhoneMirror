@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using IPhoneMirror.DriverInstaller.Services;
 
 namespace IPhoneMirror.DriverInstaller.Windows;
 
@@ -27,13 +28,15 @@ public partial class PromptWindow : Window
     }
 
     internal static bool Confirm(Window owner, string title, string body,
-        string confirmText = "继续", bool danger = false) =>
-        new PromptWindow(title, body, confirmText, "取消", true, danger)
+        string? confirmText = null, bool danger = false) =>
+        new PromptWindow(title, body, confirmText ?? DriverLocalization.Get("Continue"),
+            DriverLocalization.Get("Cancel"), true, danger)
             { Owner = owner }.ShowDialog() == true;
 
     internal static void Inform(Window owner, string title, string body,
-        string confirmText = "知道了") =>
-        new PromptWindow(title, body, confirmText, string.Empty, false, false)
+        string? confirmText = null) =>
+        new PromptWindow(title, body, confirmText ?? DriverLocalization.Get("Acknowledge"),
+            string.Empty, false, false)
             { Owner = owner }.ShowDialog();
 
     private void OnConfirmClick(object sender, RoutedEventArgs e) => DialogResult = true;
