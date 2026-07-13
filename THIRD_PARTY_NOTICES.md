@@ -2,8 +2,8 @@
 
 This file describes third-party material intentionally included in the source
 tree or release package. Each component remains under its upstream license.
-The root MIT License applies only to original iPhoneMirror material and does
-not replace, narrow or relicense any component listed below.
+The root GNU General Public License v3.0 only applies to original iPhoneMirror
+material and does not replace, narrow or relicense any component listed below.
 
 ## quicktime_video_hack protocol fixtures
 
@@ -53,8 +53,8 @@ Apple software is not redistributed in this repository.
 `third_party/airplay-server/` contains a pinned runtime subset of the
 AirPlayServer x64 release with local compatibility patches. The GPL-licensed
 `iPhoneMirror.WirelessHost.exe` process loads its protocol/decoder DLL and sends
-decoded I420 video and PCM audio to the MIT application over a named pipe. The
-MIT application and native capture core do not link to the receiver DLL.
+decoded I420 video and PCM audio to the GPL-3.0-only application over a named
+pipe. The application and native capture core do not link to the receiver DLL.
 
 - Project: https://github.com/xenos1337/AirPlayServer
 - Version/commit: v1.1.0 / `ff149b2e768bf9ae93199de941ab170571a941a4`

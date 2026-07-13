@@ -81,8 +81,7 @@ try {
         $Sbom = Get-Content -LiteralPath $GeneratedSbom.FullName -Raw | ConvertFrom-Json
         $RootPackage = $Sbom.packages | Where-Object { $_.SPDXID -eq 'SPDXRef-RootPackage' }
         if (-not $RootPackage) { throw 'Generated SBOM has no root package.' }
-        $RootPackage.licenseDeclared =
-            'MIT AND GPL-3.0-only AND LGPL-2.1-or-later AND LGPL-3.0-only'
+        $RootPackage.licenseDeclared = 'GPL-3.0-only'
         $RootPackage.licenseConcluded = 'NOASSERTION'
         $RootPackage.copyrightText = 'Copyright (c) 2026 RayrenSX and third-party contributors'
 

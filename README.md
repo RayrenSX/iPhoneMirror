@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/RayrenSX/iPhoneMirror/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/RayrenSX/iPhoneMirror?include_prereleases&sort=semver"></a>
   <a href="https://github.com/RayrenSX/iPhoneMirror/actions/workflows/windows-build.yml"><img alt="Windows build" src="https://github.com/RayrenSX/iPhoneMirror/actions/workflows/windows-build.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-black.svg"></a>
+  <a href="LICENSE"><img alt="GPL v3 License" src="https://img.shields.io/badge/license-GPL--3.0--only-3DA639.svg"></a>
   <img alt="Windows 10 and 11 x64" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4">
 </p>
 
@@ -242,10 +242,12 @@ UDID、配对记录或完整 USB 抓包。
 
 ## 许可与致谢
 
-iPhoneMirror 自有代码采用 [MIT License](LICENSE)。随源码和发布包分发的第三方组件
-仍受各自许可证约束，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+iPhoneMirror 自有代码采用 [GNU General Public License v3.0 only](LICENSE)。分发修改版
+或衍生作品时必须遵守 GPLv3 的源码提供、版权声明和同许可证分发要求。随源码和发布包
+分发的第三方组件仍受各自许可证约束，详见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-无线接收器作为独立 GPLv3 进程分发，通过命名管道向 MIT 主程序传递解码后的媒体帧。
+无线接收器作为独立 GPLv3 进程分发，通过命名管道向 GPLv3 主程序传递解码后的媒体帧。
 发布包的 `Wireless/licenses` 包含固定版本、源码链接、二进制哈希与完整许可文本。
 
 协议研究参考：

@@ -62,4 +62,6 @@ outside this application package.
 - Keep Simplified Chinese and English resource keys in sync.
 
 By contributing, you agree that your contribution is licensed under the
-project's MIT License. Third-party material remains under its original license.
+project's GNU General Public License v3.0 only. By contributing, you agree that
+your contribution may be distributed under GPL-3.0-only. Third-party material
+remains under its original license.

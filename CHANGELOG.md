@@ -3,6 +3,13 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
+## [Unreleased]
+
+### Changed
+
+- Relicense original iPhoneMirror code from MIT to GNU GPL version 3 only.
+  Third-party components continue under their respective upstream licenses.
+
 ## [0.6.0-preview.1] - 2026-07-13
 
 ### Added

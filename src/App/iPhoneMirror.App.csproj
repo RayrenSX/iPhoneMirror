@@ -19,7 +19,7 @@
     <RepositoryUrl>https://github.com/RayrenSX/iPhoneMirror</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/RayrenSX/iPhoneMirror</PackageProjectUrl>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\iPhoneMirror.ico</ApplicationIcon>
     <DebugType>embedded</DebugType>

@@ -4,7 +4,7 @@ The files in `bin/x64` are a pinned runtime subset of AirPlayServer v1.1.0,
 with the wrapper patched for native Windows FFmpeg loading, per-client IPC
 identity, and a 5120x2880@60 AirPlay display capability response.
 iPhoneMirror starts its own GPL-licensed `iPhoneMirror.WirelessHost.exe`
-process, which loads `airplay2dll.dll`; the MIT-licensed application and native
+process, which loads `airplay2dll.dll`; the GPL-3.0-only application and native
 capture core exchange decoded frames with that process over a named pipe.
 
 - Project: https://github.com/xenos1337/AirPlayServer

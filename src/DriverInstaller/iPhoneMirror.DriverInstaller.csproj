@@ -10,6 +10,12 @@
     <AssemblyName>iPhoneMirror.Driver</AssemblyName>
     <RootNamespace>IPhoneMirror.DriverInstaller</RootNamespace>
     <Version>1.0.0</Version>
+    <Authors>RayrenSX</Authors>
+    <Product>iPhoneMirror Driver Manager</Product>
+    <Description>Standalone Apple USB and per-device capture driver manager for iPhoneMirror.</Description>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/RayrenSX/iPhoneMirror</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\App\Assets\iPhoneMirror.ico</ApplicationIcon>
     <PublishSingleFile>true</PublishSingleFile>

@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/RayrenSX/iPhoneMirror/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/RayrenSX/iPhoneMirror?include_prereleases&sort=semver"></a>
   <a href="https://github.com/RayrenSX/iPhoneMirror/actions/workflows/windows-build.yml"><img alt="Windows build" src="https://github.com/RayrenSX/iPhoneMirror/actions/workflows/windows-build.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-black.svg"></a>
+  <a href="LICENSE"><img alt="GPL v3 License" src="https://img.shields.io/badge/license-GPL--3.0--only-3DA639.svg"></a>
   <img alt="Windows 10 and 11 x64" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4">
 </p>
 
@@ -227,9 +227,11 @@ Never publish a real UDID, pairing record or unredacted USB capture.
 
 ## License and acknowledgements
 
-Original iPhoneMirror code is available under the [MIT License](LICENSE).
-Bundled third-party components remain under their own licenses; see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Original iPhoneMirror code is licensed under the
+[GNU General Public License v3.0 only](LICENSE). Distribution of modified or
+derivative versions must follow GPLv3 source-availability, notice and copyleft
+requirements. Bundled third-party components remain under their own licenses;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The wireless receiver is distributed as an independent GPLv3 process. Exact
 source links, binary hashes and component licenses are included under
