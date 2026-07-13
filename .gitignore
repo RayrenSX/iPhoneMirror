@@ -14,6 +14,7 @@ packages/
 build/
 out/
 outputs/
+work/
 src/**/bin/
 src/**/obj/
 src/App/native/

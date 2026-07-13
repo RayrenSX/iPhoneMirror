@@ -3,6 +3,41 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
+## [0.6.0-preview.1] - 2026-07-13
+
+### Added
+
+- Add three per-device wired projection modes: recommended Valeria demo,
+  experimental AirPlay adaptive output and fixed 1565×1565 Aisi-compatible output.
+- Add compact mode tabs with per-option detail dialogs covering quality,
+  status-bar, framing and advanced HPD1 sizing risks.
+- Add local-network AirPlay mirroring through an isolated wireless host process.
+- Route AirPlay through the existing session API so main preview, render limits,
+  audio, screenshots, detached/full-screen windows, simultaneous sessions and
+  OBS work the same way as USB sources.
+- Add bounded wireless IPC, I420-to-NV12 conversion tests and a host lifecycle
+  smoke test that verifies Ready and stop-event handling.
+- Add per-device mute controls to detached-window context menus, including a
+  multi-device action that mutes every other active window.
+- Add an independent `iPhoneMirror.Driver.exe` manager with one-click Apple USB
+  support and per-device libusb0 install, repair, uninstall, rollback and logs.
+- Add a main-window Driver manager button and strict wired preflight that opens
+  the manager when the selected device's driver is missing or unhealthy.
+
+### Changed
+
+- Treat the capture driver as an external prerequisite. iPhoneMirror now only
+  detects the selected device's capture-driver readiness.
+- Update release packaging, SBOM metadata and documentation for the driverless
+  application package.
+- Treat AirPlay as a first-class source in the device list and use the unified
+  Start/Stop action instead of a separate receiver window workflow.
+
+### Removed
+
+- Remove the bundled libusb-win32 driver package, elevated install helper,
+  in-app driver installation UI and driver-help window.
+
 ## [0.5.0-preview.2] - 2026-07-12
 
 ### Fixed
@@ -136,7 +171,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.2...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.6.0-preview.1...HEAD
+[0.6.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.2...v0.6.0-preview.1
 [0.5.0-preview.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.1...v0.5.0-preview.2
 [0.5.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.3.0-preview.4...v0.5.0-preview.1
 [0.3.0-preview.4]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v0.3.0-preview.4

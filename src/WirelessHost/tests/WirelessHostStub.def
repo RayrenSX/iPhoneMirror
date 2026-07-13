@@ -1,0 +1,3 @@
+EXPORTS
+    ?fgServerStart@@YAPEAXQEBDIIPEAVIAirServerCallback@@@Z=stub_start
+    ?fgServerStop@@YAXPEAX@Z=stub_stop

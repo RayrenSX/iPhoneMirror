@@ -12,6 +12,8 @@ set(IPHONEMIRROR_CORE_SOURCES
     src/Device/AppleUsbDiscovery.cpp
     src/Device/DeviceManager.cpp
     src/Capture/CaptureSession.cpp
+    src/Capture/WirelessReceiverHub.cpp
+    src/Capture/WirelessCaptureSession.cpp
     src/Media/H264.cpp
     src/Media/CoreMedia.cpp
     src/Media/MediaFoundationDecoder.cpp
@@ -40,6 +42,7 @@ target_include_directories(iPhoneMirror.Core
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/WirelessHost
         ${PROJECT_SOURCE_DIR}/third_party/libusb/include
         ${PROJECT_SOURCE_DIR}/third_party/libusb-win32/include
 )
@@ -89,11 +92,14 @@ if(IPHONEMIRROR_BUILD_TESTS)
         src/Transport/QtUsbTransport.cpp
         src/Transport/LibUsb0Transport.cpp
         src/Capture/CaptureSession.cpp
+        src/Capture/WirelessReceiverHub.cpp
+        src/Capture/WirelessCaptureSession.cpp
         src/Logging.cpp
     )
     target_include_directories(iPhoneMirror.Core.Tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/WirelessHost
         ${PROJECT_SOURCE_DIR}/third_party/libusb/include
         ${PROJECT_SOURCE_DIR}/third_party/libusb-win32/include
     )

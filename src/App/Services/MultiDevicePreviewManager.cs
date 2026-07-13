@@ -31,6 +31,10 @@ internal sealed class MultiDevicePreviewManager(MainViewModel viewModel) : IDisp
             cornerRadius, profile.CurveExponent);
         if (!NativePreviewWindow.TryCreateAndShowForSession(started.Handle, 1206, 2622,
                 $"iPhoneMirror — {device.DisplayName}", cornerRadius, profile.CurveExponent,
+                () => viewModel.IsDeviceAudioEnabled(device.Udid),
+                () => viewModel.ConnectedDeviceCount,
+                enabled => LogAudioResult(viewModel.SetDeviceAudioEnabled(device.Udid, enabled)),
+                () => LogAudioResult(viewModel.MuteOtherDeviceSessions(device.Udid)),
                 out var window) || window is null)
         {
             await viewModel.StopDeviceSessionAsync(device.Udid);
@@ -44,6 +48,11 @@ internal sealed class MultiDevicePreviewManager(MainViewModel viewModel) : IDisp
             _devices.Remove(device.Udid);
         };
         return (true, string.Empty);
+    }
+
+    private void LogAudioResult((bool Success, string Message) result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.Message)) viewModel.AddUiLog(result.Message);
     }
 
     internal void UpdateDevice(string udid, uint width, uint height)

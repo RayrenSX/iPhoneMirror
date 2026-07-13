@@ -7,8 +7,14 @@
     <system:String x:Key="LanguageChinese">简体中文</system:String>
     <system:String x:Key="LanguageEnglish">English</system:String>
     <system:String x:Key="LanguageToolTip">Interface language</system:String>
+    <system:String x:Key="DriverManagerButton">Driver manager</system:String>
+    <system:String x:Key="DriverManagerToolTip">Open the driver installation, repair, and removal tool</system:String>
+    <system:String x:Key="DriverManagerTitle">Driver manager</system:String>
+    <system:String x:Key="DriverManagerOpened">Driver manager opened</system:String>
+    <system:String x:Key="DriverManagerOpenedAutomatically">A wired-device driver problem was detected; the driver manager was opened</system:String>
+    <system:String x:Key="DriverManagerLaunchFailedFormat">Could not open the driver manager: {0}</system:String>
 
-    <system:String x:Key="DevicesTitle">Devices</system:String>
+    <system:String x:Key="DevicesTitle">Sources</system:String>
     <system:String x:Key="RefreshDevices">Refresh devices</system:String>
     <system:String x:Key="MirrorSimultaneously">Mirror simultaneously</system:String>
     <system:String x:Key="DeviceAlreadyMirroring">This device is already mirrored in the main preview</system:String>
@@ -24,6 +30,11 @@
     <system:String x:Key="IndependentWindowKeepCorners">Keep rounded corners</system:String>
     <system:String x:Key="IndependentWindowRotateLeft">Rotate left</system:String>
     <system:String x:Key="IndependentWindowRotateRight">Rotate right</system:String>
+    <system:String x:Key="IndependentWindowMute">Mute</system:String>
+    <system:String x:Key="IndependentWindowMuteThis">Mute this window</system:String>
+    <system:String x:Key="IndependentWindowUnmuteThis">Unmute this window</system:String>
+    <system:String x:Key="IndependentWindowMuteOthers">Mute other windows</system:String>
+    <system:String x:Key="IndependentWindowOtherWindowsMuted">Other windows muted</system:String>
     <system:String x:Key="KeepUnlocked">Keep the Apple device unlocked after connecting</system:String>
     <system:String x:Key="PreviewLabel">Preview</system:String>
     <system:String x:Key="ResolutionLabel">Resolution</system:String>
@@ -37,7 +48,7 @@
     <system:String x:Key="ControlTitle">Mirroring settings</system:String>
     <system:String x:Key="CurrentDevice">Current device</system:String>
     <system:String x:Key="ImageAndSound">Video and audio</system:String>
-    <system:String x:Key="RenderLimitHelp">Limits local rendering only; USB source quality is unchanged</system:String>
+    <system:String x:Key="RenderLimitHelp">Limits local rendering only; source stream quality is unchanged</system:String>
     <system:String x:Key="RenderResolutionLimit">Render resolution limit</system:String>
     <system:String x:Key="TargetFrameRate">Target frame rate</system:String>
     <system:String x:Key="ApplyVideoSettings">Apply video settings</system:String>
@@ -53,9 +64,7 @@
     <system:String x:Key="ProjectionActions">Mirroring</system:String>
     <system:String x:Key="StartMirroring">Start mirroring</system:String>
     <system:String x:Key="StopMirroring">Stop mirroring</system:String>
-    <system:String x:Key="DriverTrustHelp">Driver and trust help</system:String>
-    <system:String x:Key="FooterLocalUsb">Local USB only — no Wi‑Fi or AirPlay</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 0.5 Preview 2</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 0.6 Preview 1</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">Checking the Apple USB environment…</system:String>
     <system:String x:Key="StatusWaitingDevice">Waiting for a device</system:String>
@@ -63,7 +72,7 @@
     <system:String x:Key="StatusWaiting">Waiting</system:String>
     <system:String x:Key="StatusDefaultSettings">Native · 60 fps</system:String>
     <system:String x:Key="StatusWaitingLog">Waiting for core logs…</system:String>
-    <system:String x:Key="DeviceCountFormat">{0} device(s)</system:String>
+    <system:String x:Key="DeviceCountFormat">{0} source(s)</system:String>
     <system:String x:Key="NoDeviceSelected">No device selected</system:String>
     <system:String x:Key="ModelLoading">Reading model</system:String>
     <system:String x:Key="ConnectionDisconnected">Disconnected</system:String>
@@ -82,7 +91,7 @@
     <system:String x:Key="RenderLimitFormat">Render limit: {0}</system:String>
     <system:String x:Key="TargetFpsFormat">Target: {0} fps</system:String>
     <system:String x:Key="AppliedRenderFormat">Local rendering applied: {0} · {1} fps</system:String>
-    <system:String x:Key="AppliedRenderLogFormat">Local rendering: {0} / {1} fps — {2}; USB stream was not reconnected</system:String>
+    <system:String x:Key="AppliedRenderLogFormat">Local rendering: {0} / {1} fps — {2}; source stream was not reconnected</system:String>
     <system:String x:Key="ApplySettingsFailedFormat">Could not apply video settings: {0}</system:String>
 
     <system:String x:Key="EnvironmentReadyCapture">Apple pairing and direct USB capture are ready.</system:String>
@@ -93,26 +102,14 @@
     <system:String x:Key="DriverLibUsbReadyFormat">libusb {0} / UsbDk ready</system:String>
     <system:String x:Key="DriverAppleReadyFormat">Apple channel ready / libusb {0}</system:String>
     <system:String x:Key="DriverNeedsApple">Apple USB channel required</system:String>
-    <system:String x:Key="InstallCaptureDriver">Install capture driver</system:String>
-    <system:String x:Key="DriverPackageMissingButton">Driver package unavailable</system:String>
     <system:String x:Key="DriverDeviceFilterReadyFormat">This device is ready / libusb0 {0}</system:String>
     <system:String x:Key="DriverDeviceFilterProvisionalFormat">Filter registered / libusb0 {0}; capture will verify this device</system:String>
-    <system:String x:Key="DriverDeviceFilterMissing">This device needs its capture driver</system:String>
-    <system:String x:Key="DriverPackageMissing">The bundled capture-driver package is incomplete.</system:String>
+    <system:String x:Key="DriverDeviceFilterMissing">This device needs the external capture driver</system:String>
+    <system:String x:Key="DriverExternalRequired">Install or repair the external capture driver, then reconnect this Apple device.</system:String>
     <system:String x:Key="DriverInvalidAppleStack">The Apple USB parent driver is not compatible.</system:String>
     <system:String x:Key="DriverFilterStateError">The Apple device capture-driver state could not be verified.</system:String>
     <system:String x:Key="DriverReconnectPhone">Unlock and reconnect this Apple device, then refresh devices.</system:String>
-    <system:String x:Key="DriverInstallTitle">Install Apple device capture driver</system:String>
-    <system:String x:Key="DriverInstallConfirmFormat">iPhoneMirror needs to attach its USB capture filter to {0}. Windows will request administrator approval; unplug and reconnect this device after installation. Continue?</system:String>
-    <system:String x:Key="DriverInstallDeclined">Capture-driver installation was declined.</system:String>
-    <system:String x:Key="DriverInstalling">Installing the capture driver for this Apple device…</system:String>
-    <system:String x:Key="DriverInstallStartingFormat">Starting per-device driver installation: {0}</system:String>
-    <system:String x:Key="DriverInstallResultFormat">Driver installer: {0} Log: {1}</system:String>
-    <system:String x:Key="DriverInstallCancelled">Administrator approval was cancelled.</system:String>
-    <system:String x:Key="DriverInstallFailedFormat">Capture-driver installation failed: {0}</system:String>
-    <system:String x:Key="DriverReplugRequired">Driver installed. Unplug the cable, wait until the device disappears from the list, then reconnect this Apple device.</system:String>
-    <system:String x:Key="DriverReplugDetectedFormat">Device reconnect detected: {0}</system:String>
-    <system:String x:Key="DriverInstallComplete">Capture driver installed. Starting mirroring…</system:String>
+    <system:String x:Key="DriverReplugRequired">Reconnect this Apple device so the external capture driver can attach.</system:String>
     <system:String x:Key="CoreLoadFailedFormat">Core load failed: {0}</system:String>
     <system:String x:Key="Unavailable">Unavailable</system:String>
 
@@ -127,9 +124,9 @@
     <system:String x:Key="CaptureStopped">Mirroring stopped</system:String>
     <system:String x:Key="CaptureError">Mirroring error</system:String>
     <system:String x:Key="CaptureErrorFormat">Mirroring error: {0}</system:String>
-    <system:String x:Key="StartRequested">USB mirroring start requested</system:String>
+    <system:String x:Key="StartRequested">Mirroring start requested</system:String>
     <system:String x:Key="StartFailedFormat">Could not start mirroring: {0}</system:String>
-    <system:String x:Key="StopSessionReleased">Mirroring stopped and the QuickTime USB session was released</system:String>
+    <system:String x:Key="StopSessionReleased">Mirroring stopped and session resources were released</system:String>
     <system:String x:Key="StopFailedFormat">Could not stop mirroring: {0}</system:String>
     <system:String x:Key="LogViewCleared">Log view cleared (the log file was not deleted)</system:String>
 
@@ -158,7 +155,7 @@
     <system:String x:Key="AudioVolumeFormat">Windows playback volume: {0:F0}%</system:String>
     <system:String x:Key="AudioVolumeUpdateFailed">Could not update playback volume</system:String>
     <system:String x:Key="AudioVolumeUnsupported">This core version does not support runtime volume control</system:String>
-    <system:String x:Key="VideoPreferencesApplied">Local rendering settings applied (USB stream unchanged)</system:String>
+    <system:String x:Key="VideoPreferencesApplied">Local rendering settings applied (source stream unchanged)</system:String>
     <system:String x:Key="VideoPreferencesUpdateFailed">Could not update local rendering settings</system:String>
     <system:String x:Key="VideoPreferencesUnsupported">This core version does not support local render size or frame-rate control</system:String>
     <system:String x:Key="ReadCaptureStatusFailed">Could not read capture status</system:String>
@@ -167,9 +164,6 @@
     <system:String x:Key="ScreenshotNoFrame">No video frame is available for a screenshot</system:String>
     <system:String x:Key="ScreenshotInvalidFrame">The latest BGRA video frame is invalid</system:String>
 
-    <system:String x:Key="DriverHelpTitle">iPhoneMirror driver and trust help</system:String>
-    <system:String x:Key="DriverHelpBody">1. Install Apple Devices from Microsoft Store, or desktop iTunes, to obtain Apple Mobile Device Support.&#10;&#10;2. Unlock the iPhone or iPad and choose “Trust This Computer.”&#10;&#10;3. The hidden QuickTime USB configuration requires a compatible filter driver. iPhoneMirror does not replace the official Apple driver.</system:String>
-    <system:String x:Key="DriverHelpIntro">Complete these three checks for reliable USB mirroring.</system:String>
     <system:String x:Key="Close">Close</system:String>
     <system:String x:Key="Apply">Apply</system:String>
     <system:String x:Key="AdvancedSettings">Advanced settings</system:String>
@@ -183,10 +177,44 @@
     <system:String x:Key="AdvancedResolutionInvalid">Enter valid width and height values from 16 to 8192.</system:String>
     <system:String x:Key="AdvancedModeEnabled">Advanced mode enabled</system:String>
     <system:String x:Key="AdvancedModeDisabled">Advanced mode disabled; normal presets restored</system:String>
-    <system:String x:Key="DriverHelpAppleTitle">Install Apple device support</system:String>
-    <system:String x:Key="DriverHelpAppleBody">Install Apple Devices from Microsoft Store, or install desktop iTunes.</system:String>
-    <system:String x:Key="DriverHelpTrustTitle">Unlock and trust this computer</system:String>
-    <system:String x:Key="DriverHelpTrustBody">Keep the device unlocked, connect USB, and choose “Trust This Computer” on the iPhone or iPad.</system:String>
-    <system:String x:Key="DriverHelpFilterTitle">Install the capture filter for this device</system:String>
-    <system:String x:Key="DriverHelpFilterBody">Use the install button in the main window. After elevation completes, unplug and reconnect this device. The official Apple driver is preserved.</system:String>
+    <system:String x:Key="UsbProjectionModeTitle">USB projection protocol</system:String>
+    <system:String x:Key="UsbModeDemoLabel">A Demo (recommended)</system:String>
+    <system:String x:Key="UsbModeAirPlayLabel">B AirPlay (experimental)</system:String>
+    <system:String x:Key="UsbModeAisiLabel">C Aisi mode</system:String>
+    <system:String x:Key="UsbProjectionPerDeviceHint">Applies only to the currently selected USB device.</system:String>
+    <system:String x:Key="UsbModeDetailsToolTip">View this mode's advantages and disadvantages</system:String>
+    <system:String x:Key="UsbModeDetailsTitle">USB projection mode details</system:String>
+    <system:String x:Key="UsbModeAdvantageTitle">Advantages</system:String>
+    <system:String x:Key="UsbModeDisadvantageTitle">Disadvantages</system:String>
+    <system:String x:Key="UsbModeDemoAdvantage">Sends Valeria=true with the device's native DisplaySize, letting iOS provide a complete phone mirror while remaining in demonstration state. It offers the best compatibility and framing and is recommended for everyday use.</system:String>
+    <system:String x:Key="UsbModeDemoDisadvantage">iOS enters Apple's demonstration state. The status-bar date, time, and battery are locked to demonstration values instead of the phone's current state.</system:String>
+    <system:String x:Key="UsbModeDemoNotice">This mode does not enable AirPlay or external playback from video apps.</system:String>
+    <system:String x:Key="UsbModeAirPlayAdvantage">Sends Valeria=false, uses the device's native size, and retains first-frame probing, orientation detection, and adaptive reconfiguration. Video apps can switch to AirPlay or external playback.</system:String>
+    <system:String x:Key="UsbModeAirPlayDisadvantage">External-content resolution cannot be guaranteed to adapt perfectly to both the phone and the window. Content may be cropped, use the wrong aspect ratio, or be partly off-screen.</system:String>
+    <system:String x:Key="UsbModeAirPlayNotice">For custom sizing, click the version in the lower-right corner five times to enable Advanced mode. Custom HPD1 dimensions are risky and can cause a black screen, cropping, or failed USB reconnection.</system:String>
+    <system:String x:Key="UsbModeAisiAdvantage">Uses an Aisi-style configuration with Valeria=false and a fixed 1565×1565 request, reducing display-negotiation differences between devices.</system:String>
+    <system:String x:Key="UsbModeAisiDisadvantage">The square target limits source clarity and is unsuitable when image quality is the priority. Landscape content may also be scaled, letterboxed, or shown at an imperfect ratio.</system:String>
+    <system:String x:Key="UsbModeAisiNotice">This mode does not use this application's native-resolution probing or adaptive orientation reconfiguration.</system:String>
+    <system:String x:Key="UsbProjectionModeSelectedFormat">Selected: {0}</system:String>
+    <system:String x:Key="UsbProjectionModeRestarting">Reconnecting the current USB device with the new mode...</system:String>
+    <system:String x:Key="UsbProjectionModeAppliedFormat">Applied: {0}</system:String>
+    <system:String x:Key="WindowTitleConnectivity">iPhoneMirror - iPhone/iPad Mirroring</system:String>
+    <system:String x:Key="AppSubtitleConnectivity">Low-latency USB and wireless AirPlay mirroring for Windows</system:String>
+    <system:String x:Key="WirelessReceiverTitle">Wireless AirPlay</system:String>
+    <system:String x:Key="WirelessReceiverNameLabel">Receiver name</system:String>
+    <system:String x:Key="ApplyReceiverName">Apply</system:String>
+    <system:String x:Key="WirelessServiceAlwaysOn">Always on</system:String>
+    <system:String x:Key="WirelessConnected">AirPlay connected</system:String>
+    <system:String x:Key="WirelessLocalNetwork">Local network</system:String>
+    <system:String x:Key="WirelessReady">AirPlay receiver ready</system:String>
+    <system:String x:Key="WirelessStarting">Starting the AirPlay receiver...</system:String>
+    <system:String x:Key="WirelessWaitingDevice">The AirPlay receiver is running. Choose Screen Mirroring in iPhone Control Center.</system:String>
+    <system:String x:Key="WirelessConnecting">An AirPlay device is connecting...</system:String>
+    <system:String x:Key="WirelessStreaming">Wireless AirPlay mirroring</system:String>
+    <system:String x:Key="WirelessStopping">Stopping the AirPlay receiver...</system:String>
+    <system:String x:Key="WirelessStopped">Wireless mirroring stopped</system:String>
+    <system:String x:Key="WirelessRunningFormat">Wireless receiver active: {0}</system:String>
+    <system:String x:Key="WirelessReceiverMissing">The wireless receiver component is missing. Rebuild the release package.</system:String>
+    <system:String x:Key="FooterConnectivity">Local USB / AirPlay; no cloud relay</system:String>
+    <system:String x:Key="FooterVersionCurrent">iPhoneMirror 0.6 Preview 1</system:String>
 </ResourceDictionary>

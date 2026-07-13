@@ -160,6 +160,32 @@ bool frame_is_nearly_black(const media::DecodedFrame& frame) noexcept {
 
 } // namespace
 
+UsbDisplayConfiguration make_usb_display_configuration(UsbProjectionMode mode,
+    std::uint32_t native_width, std::uint32_t native_height,
+    std::uint32_t requested_width, std::uint32_t requested_height) noexcept {
+    UsbDisplayConfiguration configuration;
+    auto& options = configuration.session_options;
+    switch (mode) {
+    case UsbProjectionMode::Demo:
+        options.demo_mode = true;
+        options.requested_width = native_width;
+        options.requested_height = native_height;
+        break;
+    case UsbProjectionMode::AirPlay:
+        options.demo_mode = false;
+        options.requested_width = requested_width != 0 ? requested_width : native_width;
+        options.requested_height = requested_height != 0 ? requested_height : native_height;
+        configuration.adaptive_reconfiguration = true;
+        break;
+    case UsbProjectionMode::Aisi:
+        options.demo_mode = false;
+        options.requested_width = 1565;
+        options.requested_height = 1565;
+        break;
+    }
+    return configuration;
+}
+
 CaptureSession::CaptureSession(std::string serial, bool play_audio)
     : CaptureSession(std::move(serial), CapturePreferences{.play_audio = play_audio}) {}
 
@@ -255,6 +281,7 @@ std::uint32_t CaptureSession::target_fps() const noexcept {
 }
 
 void CaptureSession::request_display_orientation(bool landscape) noexcept {
+    if (preferences_.usb_projection_mode != UsbProjectionMode::AirPlay) return;
     requested_display_orientation_.store(landscape ? 2 : 1, std::memory_order_release);
 }
 
@@ -352,25 +379,28 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         audio_volume_.load(std::memory_order_relaxed)));
     std::unique_ptr<CaptureConnection> usb;
     quicktime::StreamDecoder decoder;
-    quicktime::SessionOptions session_options;
-    // Deliberately keep SessionOptions' protocol defaults. GUI resolution and
-    // frame-rate choices are local presentation controls and must not alter
-    // HPD1/USB negotiation.
+    const auto display_configuration = make_usb_display_configuration(
+        preferences_.usb_projection_mode, native_portrait_width_, native_portrait_height_,
+        preferences_.usb_requested_width, preferences_.usb_requested_height);
+    auto session_options = display_configuration.session_options;
+    const bool adaptive_display = display_configuration.adaptive_reconfiguration;
     // Always negotiate the audio stream. The playback toggle is deliberately
     // local so it can be switched on again without restarting USB/QuickTime.
     session_options.request_audio = true;
-    session_options.requested_width = native_portrait_width_;
-    session_options.requested_height = native_portrait_height_;
-    session_options.demo_mode = true;
-    if (preferences_.usb_requested_width != 0 && preferences_.usb_requested_height != 0) {
-        session_options.requested_width = preferences_.usb_requested_width;
-        session_options.requested_height = preferences_.usb_requested_height;
-        session_options.demo_mode = false;
+    if (preferences_.usb_projection_mode == UsbProjectionMode::AirPlay &&
+        preferences_.usb_requested_width != 0 && preferences_.usb_requested_height != 0) {
         logging::write(std::format("advanced_usb_request={}x{}",
             preferences_.usb_requested_width, preferences_.usb_requested_height));
     }
-    // Probe each device instead of relying solely on a model table. Valeria
-    // is disabled immediately after the first valid portrait format arrives.
+    const char* projection_mode = preferences_.usb_projection_mode == UsbProjectionMode::Demo
+        ? "demo" : preferences_.usb_projection_mode == UsbProjectionMode::AirPlay
+        ? "airplay" : "aisi";
+    logging::write(std::format(
+        "usb_projection mode={} valeria={} native_size={} display_size={}x{} adaptive={}",
+        projection_mode, session_options.demo_mode,
+        session_options.request_native_display_size,
+        session_options.requested_width, session_options.requested_height,
+        adaptive_display));
     quicktime::SessionProtocol protocol(session_options);
     bool audio_initialization_disabled{};
     std::vector<std::uint8_t> read_buffer(1024U * 1024U);
@@ -678,7 +708,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                             published->width >= 880 && published->width <= 890 &&
                             published->height >= 1918 && published->height <= 1922;
                         const auto orientation_now = std::chrono::steady_clock::now();
-                        if (!native_probe_published &&
+                        if (adaptive_display && !native_probe_published &&
                             preferences_.usb_requested_width == 0 &&
                             preferences_.usb_requested_height == 0 &&
                             published->height > published->width) {
@@ -926,7 +956,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             }
             const auto probed_size = display_reconfigure_pending ? 0 :
                 native_probe_size_.exchange(0, std::memory_order_acq_rel);
-            if (probed_size != 0 && !display_reconfigure_pending) {
+            if (adaptive_display && probed_size != 0 && !display_reconfigure_pending) {
                 const auto probed_width = static_cast<std::uint32_t>(probed_size >> 32U);
                 const auto probed_height = static_cast<std::uint32_t>(probed_size);
                 native_portrait_width_ = probed_width;
@@ -949,7 +979,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             }
             const auto requested_orientation = display_reconfigure_pending ? 0 :
                 requested_display_orientation_.exchange(0, std::memory_order_acq_rel);
-            if (requested_orientation != 0 && !display_reconfigure_pending) {
+            if (adaptive_display && requested_orientation != 0 && !display_reconfigure_pending) {
                 const bool landscape = requested_orientation == 2;
                 const auto requests = protocol.begin_display_reconfigure(
                     landscape ? native_portrait_height_ : native_portrait_width_,

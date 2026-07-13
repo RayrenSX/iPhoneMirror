@@ -1,16 +1,16 @@
 #pragma once
 
+#include "Capture/ICaptureSession.h"
 #include "Protocol/QuickTimeSession.h"
-#include "Media/MediaFoundationDecoder.h"
 
-#include <cstdint>
 #include <atomic>
-#include <thread>
-#include <mutex>
-#include <string>
-#include <optional>
-#include <memory>
+#include <cstdint>
 #include <deque>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
 
 namespace iPhoneMirror::audio {
 class WasapiRenderer;
@@ -18,66 +18,35 @@ class WasapiRenderer;
 
 namespace iPhoneMirror::capture {
 
-enum class State : std::int32_t {
-    Idle = 0,
-    ActivatingUsb = 1,
-    WaitingForDevice = 2,
-    Handshaking = 3,
-    Streaming = 4,
-    Stopping = 5,
-    Stopped = 6,
-    Error = 7,
+struct UsbDisplayConfiguration {
+    quicktime::SessionOptions session_options;
+    bool adaptive_reconfiguration{};
 };
 
-struct Snapshot {
-    State state{State::Idle};
-    std::uint32_t width{};
-    std::uint32_t height{};
-    double fps{};
-    double latency_ms{};
-    std::uint64_t video_frames{};
-    std::uint64_t audio_packets{};
-    std::uint32_t audio_sample_rate{};
-    std::uint32_t audio_channels{};
-    std::wstring message{L"空闲"};
-};
+[[nodiscard]] UsbDisplayConfiguration make_usb_display_configuration(
+    UsbProjectionMode mode, std::uint32_t native_width, std::uint32_t native_height,
+    std::uint32_t requested_width = 0, std::uint32_t requested_height = 0) noexcept;
 
-struct CapturePreferences {
-    // Local D3D presentation limit only. It must never be copied into the
-    // QuickTime SessionOptions/HPD1 DisplaySize request.
-    std::uint32_t render_max_width{};
-    std::uint32_t render_max_height{};
-    std::uint32_t target_fps{60};
-    bool play_audio{true};
-    float audio_volume{1.0F};
-    // Advanced-mode USB HPD1 request. (0,0) keeps the normal per-device probe.
-    std::uint32_t usb_requested_width{};
-    std::uint32_t usb_requested_height{};
-};
-
-class CaptureSession {
+class CaptureSession final : public ICaptureSession {
 public:
     explicit CaptureSession(std::string serial, bool play_audio = true);
     CaptureSession(std::string serial, CapturePreferences preferences,
         std::wstring product_type = {});
-    ~CaptureSession();
+    ~CaptureSession() override;
     CaptureSession(const CaptureSession&) = delete;
     CaptureSession& operator=(const CaptureSession&) = delete;
 
     void start(bool use_usbdk);
-    void stop() noexcept;
-    [[nodiscard]] Snapshot snapshot() const;
-    [[nodiscard]] std::int64_t latest_frame_timestamp() const;
-    // Returns an immutable snapshot without copying the multi-megabyte NV12
-    // payload. The GUI keeps this shared reference only for the duration of
-    // its conversion, while the capture thread can publish the next frame.
-    [[nodiscard]] std::shared_ptr<const media::DecodedFrame> latest_frame() const;
-    [[nodiscard]] std::shared_ptr<const media::DecodedFrame> next_render_frame();
-    void set_audio_enabled(bool enabled) noexcept;
-    void set_audio_volume(float volume) noexcept;
-    void set_target_fps(std::uint32_t target_fps) noexcept;
-    [[nodiscard]] std::uint32_t target_fps() const noexcept;
-    void request_display_orientation(bool landscape) noexcept;
+    void stop() noexcept override;
+    [[nodiscard]] Snapshot snapshot() const override;
+    [[nodiscard]] std::int64_t latest_frame_timestamp() const override;
+    [[nodiscard]] std::shared_ptr<const media::DecodedFrame> latest_frame() const override;
+    [[nodiscard]] std::shared_ptr<const media::DecodedFrame> next_render_frame() override;
+    void set_audio_enabled(bool enabled) noexcept override;
+    void set_audio_volume(float volume) noexcept override;
+    void set_target_fps(std::uint32_t target_fps) noexcept override;
+    [[nodiscard]] std::uint32_t target_fps() const noexcept override;
+    void request_display_orientation(bool landscape) noexcept override;
 
 private:
     enum class UsbBackend { LibUsb1, UsbDk, LibUsb0 };

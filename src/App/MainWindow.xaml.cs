@@ -95,6 +95,13 @@ public partial class MainWindow : Window
         _viewModel.AddUiLog(LocalizationService.Get("AdvancedModeEnabled"));
     }
 
+    private void OnUsbProjectionModeInfoClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: UsbProjectionModeOption option }) return;
+        e.Handled = true;
+        new Windows.UsbProjectionModeInfoWindow(option) { Owner = this }.ShowDialog();
+    }
+
     private async void OnMirrorSimultaneouslyClick(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem item ||

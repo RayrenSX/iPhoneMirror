@@ -2,16 +2,14 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Models;
 
-/// <summary>
-/// A stable, mutable list item keyed by UDID. Device refreshes update this
-/// instance in place so WPF never publishes a transient null selection while
-/// a second phone is attached or an existing phone changes connection state.
-/// </summary>
 internal sealed class DeviceViewModel : INotifyPropertyChanged
 {
+    internal const string WirelessUdidPrefix = "airplay://";
+
     private string _name;
     private string _productType;
     private string _osVersion;
@@ -19,14 +17,8 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
     private string _status;
     private ConnectionState _state;
 
-    private DeviceViewModel(
-        string udid,
-        string name,
-        string productType,
-        string osVersion,
-        string connectionType,
-        string status,
-        ConnectionState state)
+    private DeviceViewModel(string udid, string name, string productType,
+        string osVersion, string connectionType, string status, ConnectionState state)
     {
         Udid = udid;
         _name = name;
@@ -44,29 +36,32 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
     public string ConnectionType => _connectionType;
     public string Status => _status;
     public ConnectionState State => _state;
+    public bool IsWireless => IsWirelessUdid(Udid);
 
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? "iPhone" : Name;
-    public string ModelDisplay => string.IsNullOrWhiteSpace(ProductType)
+    public string ModelDisplay => IsWireless ? "AirPlay" : string.IsNullOrWhiteSpace(ProductType)
         ? LocalizationService.Get("ModelLoading")
         : ProductType;
-    public string OsDisplay => string.IsNullOrWhiteSpace(OsVersion) ? "iOS —" : $"iOS {OsVersion}";
-    public string ShortUdid => Udid.Length <= 18 ? Udid : $"{Udid[..8]}…{Udid[^6..]}";
+    public string OsDisplay => IsWireless ? LocalizationService.Get("WirelessLocalNetwork") :
+        string.IsNullOrWhiteSpace(OsVersion) ? "iOS -" : $"iOS {OsVersion}";
+    public string ShortUdid => IsWireless ? "AirPlay" :
+        Udid.Length <= 18 ? Udid : $"{Udid[..8]}...{Udid[^6..]}";
     public bool Ready => State is ConnectionState.Ready;
-    public string StatusDisplay => LocalizationService.Get(State switch
-    {
-        ConnectionState.Disconnected => "ConnectionDisconnected",
-        ConnectionState.UsbPresentNoMux => "ConnectionUsbNoMux",
-        ConnectionState.Connected => "ConnectionConnected",
-        ConnectionState.Paired => "ConnectionPaired",
-        ConnectionState.Ready => "ConnectionReady",
-        _ => "ConnectionError",
-    });
+    public string StatusDisplay => IsWireless ? LocalizationService.Get("WirelessConnected") : LocalizationService.Get(State switch
+        {
+            ConnectionState.Disconnected => "ConnectionDisconnected",
+            ConnectionState.UsbPresentNoMux => "ConnectionUsbNoMux",
+            ConnectionState.Connected => "ConnectionConnected",
+            ConnectionState.Paired => "ConnectionPaired",
+            ConnectionState.Ready => "ConnectionReady",
+            _ => "ConnectionError",
+        });
 
-    /// <summary>Updates all volatile fields while retaining list identity.</summary>
     internal bool UpdateFrom(DeviceViewModel source)
     {
         if (!UdidEquals(Udid, source.Udid))
-            throw new ArgumentException("Cannot update a device item from a different UDID.", nameof(source));
+            throw new ArgumentException("Cannot update a device item from a different UDID.",
+                nameof(source));
 
         var changed = false;
         changed |= Set(ref _name, source.Name, nameof(Name), nameof(DisplayName));
@@ -81,6 +76,7 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
     internal void NotifyLanguageChanged()
     {
         OnPropertyChanged(nameof(ModelDisplay));
+        OnPropertyChanged(nameof(OsDisplay));
         OnPropertyChanged(nameof(StatusDisplay));
     }
 
@@ -99,6 +95,9 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
 
     internal static bool UdidEquals(string? left, string? right) =>
         string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsWirelessUdid(string? udid) => udid?.StartsWith(
+        WirelessUdidPrefix, StringComparison.OrdinalIgnoreCase) == true;
 
     public static DeviceViewModel FromNative(NativeDeviceInfo info) => new(
         info.Udid ?? string.Empty,

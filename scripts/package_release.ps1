@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '0.5.0-preview.2',
+    [string]$Version = '0.6.0-preview.1',
     [switch]$SkipBuild,
     [switch]$GenerateSbom
 )
@@ -24,8 +24,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Release build failed: $LASTEXITCODE" }
     }
 
-    if (-not (Test-Path -LiteralPath (Join-Path $PublishRoot 'iPhoneMirror.exe'))) {
-        throw 'Published application is missing. Run the Release build first.'
+    foreach ($requiredExecutable in @('iPhoneMirror.exe', 'iPhoneMirror.Driver.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $PublishRoot $requiredExecutable))) {
+            throw "Published executable is missing: $requiredExecutable. Run the Release build first."
+        }
     }
 
     foreach ($path in @($StagingRoot, $ReleaseRoot)) {
@@ -39,7 +41,6 @@ try {
 
     $forbidden = Get-ChildItem -LiteralPath $PackageRoot -Recurse -File | Where-Object {
         $_.Extension -in @('.log', '.dmp', '.mdmp', '.pcap', '.pcapng', '.pdb') -or
-        $_.Name -eq 'InstallIPhoneFilter.ps1' -or
         $_.Name -eq 'UsbDkHelper.dll'
     }
     if ($forbidden) {
@@ -81,7 +82,7 @@ try {
         $RootPackage = $Sbom.packages | Where-Object { $_.SPDXID -eq 'SPDXRef-RootPackage' }
         if (-not $RootPackage) { throw 'Generated SBOM has no root package.' }
         $RootPackage.licenseDeclared =
-            'MIT AND LGPL-2.1-or-later AND GPL-3.0-only AND LGPL-3.0-only'
+            'MIT AND GPL-3.0-only AND LGPL-2.1-or-later AND LGPL-3.0-only'
         $RootPackage.licenseConcluded = 'NOASSERTION'
         $RootPackage.copyrightText = 'Copyright (c) 2026 RayrenSX and third-party contributors'
 
@@ -103,18 +104,7 @@ try {
                 })
             },
             [PSCustomObject][ordered]@{
-                name = 'libusb-win32 kernel driver'
-                SPDXID = 'SPDXRef-Package-libusb-win32-driver-1.2.6.0'
-                downloadLocation = 'https://sourceforge.net/projects/libusb-win32/files/libusb-win32-releases/1.2.6.0/'
-                filesAnalyzed = $false
-                licenseConcluded = 'GPL-3.0-only'
-                licenseDeclared = 'GPL-3.0-only'
-                copyrightText = 'NOASSERTION'
-                versionInfo = '1.2.6.0'
-                supplier = 'Organization: libusb-win32 project'
-            },
-            [PSCustomObject][ordered]@{
-                name = 'libusb-win32 library and installer'
+                name = 'libusb-win32 import library'
                 SPDXID = 'SPDXRef-Package-libusb-win32-library-1.2.6.0'
                 downloadLocation = 'https://sourceforge.net/projects/libusb-win32/files/libusb-win32-releases/1.2.6.0/'
                 filesAnalyzed = $false
@@ -123,6 +113,33 @@ try {
                 copyrightText = 'NOASSERTION'
                 versionInfo = '1.2.6.0'
                 supplier = 'Organization: libusb-win32 project'
+            },
+            [PSCustomObject][ordered]@{
+                name = 'AirPlayServer wireless receiver'
+                SPDXID = 'SPDXRef-Package-AirPlayServer-1.1.0'
+                downloadLocation = 'https://github.com/xenos1337/AirPlayServer/releases/tag/v1.1.0'
+                filesAnalyzed = $false
+                licenseConcluded = 'GPL-3.0-only'
+                licenseDeclared = 'GPL-3.0-only'
+                copyrightText = 'Copyright (c) 2025 xenos1337 and upstream contributors'
+                versionInfo = '1.1.0'
+                supplier = 'Person: xenos1337'
+                externalRefs = @([PSCustomObject][ordered]@{
+                    referenceCategory = 'PACKAGE-MANAGER'
+                    referenceType = 'purl'
+                    referenceLocator = 'pkg:github/xenos1337/AirPlayServer@v1.1.0'
+                })
+            },
+            [PSCustomObject][ordered]@{
+                name = 'FFmpeg H.264 runtime'
+                SPDXID = 'SPDXRef-Package-FFmpeg-4.4.2'
+                downloadLocation = 'https://github.com/FFmpeg/FFmpeg/releases/tag/n4.4.2'
+                filesAnalyzed = $false
+                licenseConcluded = 'LGPL-2.1-or-later'
+                licenseDeclared = 'LGPL-2.1-or-later'
+                copyrightText = 'NOASSERTION'
+                versionInfo = '4.4.2'
+                supplier = 'Organization: FFmpeg project'
             }
         )
         foreach ($NativePackage in $NativePackages) {

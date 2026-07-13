@@ -13,7 +13,7 @@ body:
     id: version
     attributes:
       label: iPhoneMirror version
-      placeholder: v0.3.0-preview.1
+      placeholder: v0.6.0-preview.1
     validations:
       required: true
   - type: dropdown

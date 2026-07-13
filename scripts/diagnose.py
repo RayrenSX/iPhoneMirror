@@ -177,11 +177,11 @@ def capture(
                 image.save(save_frame)
                 print(json.dumps({"saved_frame": str(save_frame)}, ensure_ascii=False))
         elif last:
-            detail = core.im_last_error() or last.message or "未收到首个解码视频帧"
+            detail = core.im_last_error() or last.message or "no decoded video frame was received"
             print(json.dumps({"frame_error": detail, "state": last.state}, ensure_ascii=False))
             raise RuntimeError(detail)
         else:
-            raise RuntimeError("采集未返回状态")
+            raise RuntimeError("capture returned no status")
     finally:
         core.im_stop_capture()
 

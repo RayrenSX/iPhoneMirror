@@ -17,7 +17,7 @@
 
 namespace iPhoneMirror {
 
-constexpr std::uint32_t ApiVersion = 9;
+constexpr std::uint32_t ApiVersion = 12;
 using SessionHandle = std::uint64_t;
 constexpr std::size_t MaxUdid = 128;
 constexpr std::size_t MaxName = 128;
@@ -118,8 +118,8 @@ struct VideoFrameInfo {
 
 // Versioned capture preferences used by im_start_capture_with_options.
 // requested_width/requested_height are local preview-render limits. The first
-// two reserved words are used by the opt-in advanced GUI mode as an explicit
-// USB HPD1 request; both must be non-zero to activate that override.
+// Reserved words 0/1 are the optional advanced USB HPD1 size. Reserved word 2
+// selects the USB projection mode: 0=demo, 1=AirPlay, 2=Aisi-compatible.
 struct CaptureOptions {
     std::uint32_t struct_size;
     std::uint32_t api_version;
@@ -142,6 +142,16 @@ IM_API std::uint32_t IM_CALL im_api_version();
 IM_API std::int32_t IM_CALL im_refresh_devices(
     iPhoneMirror::DeviceInfo* devices,
     std::uint32_t* count);
+
+// The AirPlay receiver is process-global and remains active independently of
+// preview sessions. Connected clients are enumerated as ordinary devices.
+IM_API std::int32_t IM_CALL im_wireless_receiver_start(
+    const wchar_t* receiver_name, const wchar_t* host_path);
+IM_API void IM_CALL im_wireless_receiver_stop();
+IM_API std::int32_t IM_CALL im_wireless_receiver_get_status(
+    std::int32_t* running, std::int32_t* ready);
+IM_API std::int32_t IM_CALL im_refresh_wireless_devices(
+    iPhoneMirror::DeviceInfo* devices, std::uint32_t* count);
 
 IM_API std::int32_t IM_CALL im_get_environment(
     iPhoneMirror::EnvironmentInfo* environment);
@@ -222,6 +232,11 @@ IM_API std::int32_t IM_CALL im_set_audio_volume(float volume);
 // may be attached/detached from an HWND without stopping its background stream.
 IM_API std::int32_t IM_CALL im_session_create(
     const wchar_t* udid, const iPhoneMirror::CaptureOptions* options,
+    iPhoneMirror::SessionHandle* handle);
+// Subscribes to one client of the process-global AirPlay receiver and routes
+// that client's decoded YUV/PCM stream into the normal session pipeline.
+IM_API std::int32_t IM_CALL im_wireless_session_create(
+    const wchar_t* device_id, const iPhoneMirror::CaptureOptions* options,
     iPhoneMirror::SessionHandle* handle);
 IM_API std::int32_t IM_CALL im_session_stop(iPhoneMirror::SessionHandle handle);
 IM_API void IM_CALL im_session_destroy(iPhoneMirror::SessionHandle handle);

@@ -7,8 +7,14 @@
     <system:String x:Key="LanguageChinese">简体中文</system:String>
     <system:String x:Key="LanguageEnglish">English</system:String>
     <system:String x:Key="LanguageToolTip">界面语言</system:String>
+    <system:String x:Key="DriverManagerButton">驱动管理器</system:String>
+    <system:String x:Key="DriverManagerToolTip">打开驱动安装、修复与卸载工具</system:String>
+    <system:String x:Key="DriverManagerTitle">驱动管理器</system:String>
+    <system:String x:Key="DriverManagerOpened">已打开驱动管理器</system:String>
+    <system:String x:Key="DriverManagerOpenedAutomatically">检测到有线设备驱动异常，已自动打开驱动管理器</system:String>
+    <system:String x:Key="DriverManagerLaunchFailedFormat">无法打开驱动管理器：{0}</system:String>
 
-    <system:String x:Key="DevicesTitle">设备</system:String>
+    <system:String x:Key="DevicesTitle">投屏来源</system:String>
     <system:String x:Key="RefreshDevices">刷新设备</system:String>
     <system:String x:Key="MirrorSimultaneously">同时投屏</system:String>
     <system:String x:Key="DeviceAlreadyMirroring">该设备已在主预览中投屏</system:String>
@@ -24,6 +30,11 @@
     <system:String x:Key="IndependentWindowKeepCorners">保留圆角</system:String>
     <system:String x:Key="IndependentWindowRotateLeft">向左旋转</system:String>
     <system:String x:Key="IndependentWindowRotateRight">向右旋转</system:String>
+    <system:String x:Key="IndependentWindowMute">静音</system:String>
+    <system:String x:Key="IndependentWindowMuteThis">静音该窗口</system:String>
+    <system:String x:Key="IndependentWindowUnmuteThis">取消静音该窗口</system:String>
+    <system:String x:Key="IndependentWindowMuteOthers">静音其他窗口</system:String>
+    <system:String x:Key="IndependentWindowOtherWindowsMuted">其他窗口已静音</system:String>
     <system:String x:Key="KeepUnlocked">连接后请保持 Apple 设备解锁</system:String>
     <system:String x:Key="PreviewLabel">预览</system:String>
     <system:String x:Key="ResolutionLabel">分辨率</system:String>
@@ -37,7 +48,7 @@
     <system:String x:Key="ControlTitle">投屏设置</system:String>
     <system:String x:Key="CurrentDevice">当前设备</system:String>
     <system:String x:Key="ImageAndSound">画面与声音</system:String>
-    <system:String x:Key="RenderLimitHelp">仅限制本地渲染，USB 源画质不变</system:String>
+    <system:String x:Key="RenderLimitHelp">仅限制本地渲染，来源码流画质不变</system:String>
     <system:String x:Key="RenderResolutionLimit">渲染分辨率上限</system:String>
     <system:String x:Key="TargetFrameRate">目标帧率</system:String>
     <system:String x:Key="ApplyVideoSettings">应用画面设置</system:String>
@@ -53,9 +64,7 @@
     <system:String x:Key="ProjectionActions">投屏操作</system:String>
     <system:String x:Key="StartMirroring">开始投屏</system:String>
     <system:String x:Key="StopMirroring">暂停投屏</system:String>
-    <system:String x:Key="DriverTrustHelp">驱动与信任帮助</system:String>
-    <system:String x:Key="FooterLocalUsb">本地 USB，不使用 Wi‑Fi / AirPlay</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 0.5 Preview 2</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 0.6 Preview 1</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">正在检查 Apple USB 环境…</system:String>
     <system:String x:Key="StatusWaitingDevice">等待设备连接</system:String>
@@ -63,7 +72,7 @@
     <system:String x:Key="StatusWaiting">等待</system:String>
     <system:String x:Key="StatusDefaultSettings">原生 · 60 fps</system:String>
     <system:String x:Key="StatusWaitingLog">等待核心日志…</system:String>
-    <system:String x:Key="DeviceCountFormat">{0} 台设备</system:String>
+    <system:String x:Key="DeviceCountFormat">{0} 个来源</system:String>
     <system:String x:Key="NoDeviceSelected">未选择设备</system:String>
     <system:String x:Key="ModelLoading">型号读取中</system:String>
     <system:String x:Key="ConnectionDisconnected">未连接</system:String>
@@ -82,7 +91,7 @@
     <system:String x:Key="RenderLimitFormat">渲染上限 {0}</system:String>
     <system:String x:Key="TargetFpsFormat">目标 {0} fps</system:String>
     <system:String x:Key="AppliedRenderFormat">已应用本地渲染：{0} · {1} fps</system:String>
-    <system:String x:Key="AppliedRenderLogFormat">本地渲染设置：{0} / {1} fps — {2}；USB 码流未重连</system:String>
+    <system:String x:Key="AppliedRenderLogFormat">本地渲染设置：{0} / {1} fps — {2}；来源码流未重连</system:String>
     <system:String x:Key="ApplySettingsFailedFormat">应用画面设置失败：{0}</system:String>
 
     <system:String x:Key="EnvironmentReadyCapture">Apple 配对通道与 USB 采集后端已就绪。</system:String>
@@ -93,26 +102,14 @@
     <system:String x:Key="DriverLibUsbReadyFormat">libusb {0} / UsbDk 就绪</system:String>
     <system:String x:Key="DriverAppleReadyFormat">Apple 通道就绪 / libusb {0}</system:String>
     <system:String x:Key="DriverNeedsApple">需要 Apple USB 通道</system:String>
-    <system:String x:Key="InstallCaptureDriver">安装采集驱动</system:String>
-    <system:String x:Key="DriverPackageMissingButton">驱动包不可用</system:String>
     <system:String x:Key="DriverDeviceFilterReadyFormat">当前设备已就绪 / libusb0 {0}</system:String>
     <system:String x:Key="DriverDeviceFilterProvisionalFormat">过滤驱动已登记 / libusb0 {0}；开始投屏时将核验当前设备</system:String>
-    <system:String x:Key="DriverDeviceFilterMissing">当前设备需要安装采集驱动</system:String>
-    <system:String x:Key="DriverPackageMissing">内置采集驱动包不完整。</system:String>
+    <system:String x:Key="DriverDeviceFilterMissing">当前设备需要外部采集驱动</system:String>
+    <system:String x:Key="DriverExternalRequired">请先安装或修复外部采集驱动，然后重新连接这台 Apple 设备。</system:String>
     <system:String x:Key="DriverInvalidAppleStack">Apple USB 父设备驱动不兼容。</system:String>
     <system:String x:Key="DriverFilterStateError">无法确认 Apple 设备采集驱动状态。</system:String>
     <system:String x:Key="DriverReconnectPhone">请解锁并重新连接这台 Apple 设备，然后刷新设备。</system:String>
-    <system:String x:Key="DriverInstallTitle">安装 Apple 设备采集驱动</system:String>
-    <system:String x:Key="DriverInstallConfirmFormat">iPhoneMirror 需要为 {0} 添加 USB 采集过滤驱动。Windows 将请求管理员授权；安装完成后需要拔下并重新连接这台设备。是否继续？</system:String>
-    <system:String x:Key="DriverInstallDeclined">已取消安装采集驱动。</system:String>
-    <system:String x:Key="DriverInstalling">正在为当前 Apple 设备安装采集驱动…</system:String>
-    <system:String x:Key="DriverInstallStartingFormat">开始按设备安装驱动：{0}</system:String>
-    <system:String x:Key="DriverInstallResultFormat">驱动安装结果：{0} 日志：{1}</system:String>
-    <system:String x:Key="DriverInstallCancelled">已取消管理员授权。</system:String>
-    <system:String x:Key="DriverInstallFailedFormat">采集驱动安装失败：{0}</system:String>
-    <system:String x:Key="DriverReplugRequired">驱动已安装。请拔下数据线，等待设备列表显示断开后，再重新连接这台 Apple 设备。</system:String>
-    <system:String x:Key="DriverReplugDetectedFormat">已检测到设备重新连接：{0}</system:String>
-    <system:String x:Key="DriverInstallComplete">采集驱动已安装，正在开始投屏…</system:String>
+    <system:String x:Key="DriverReplugRequired">请重新连接这台 Apple 设备，以便外部采集驱动接管。</system:String>
     <system:String x:Key="CoreLoadFailedFormat">核心加载失败：{0}</system:String>
     <system:String x:Key="Unavailable">不可用</system:String>
 
@@ -127,9 +124,9 @@
     <system:String x:Key="CaptureStopped">投屏已停止</system:String>
     <system:String x:Key="CaptureError">投屏出现错误</system:String>
     <system:String x:Key="CaptureErrorFormat">投屏错误：{0}</system:String>
-    <system:String x:Key="StartRequested">已请求开始 USB 投屏</system:String>
+    <system:String x:Key="StartRequested">已请求开始投屏</system:String>
     <system:String x:Key="StartFailedFormat">开始投屏失败：{0}</system:String>
-    <system:String x:Key="StopSessionReleased">投屏已停止，QuickTime USB 会话已释放</system:String>
+    <system:String x:Key="StopSessionReleased">投屏已停止，会话资源已释放</system:String>
     <system:String x:Key="StopFailedFormat">停止投屏失败：{0}</system:String>
     <system:String x:Key="LogViewCleared">日志视图已清空（不会删除磁盘日志）</system:String>
 
@@ -158,7 +155,7 @@
     <system:String x:Key="AudioVolumeFormat">Windows 播放音量 {0:F0}%</system:String>
     <system:String x:Key="AudioVolumeUpdateFailed">无法更新声音音量</system:String>
     <system:String x:Key="AudioVolumeUnsupported">当前核心版本尚不支持运行时音量调节</system:String>
-    <system:String x:Key="VideoPreferencesApplied">本地渲染参数已应用（USB 码流未重连）</system:String>
+    <system:String x:Key="VideoPreferencesApplied">本地渲染参数已应用（来源码流未重连）</system:String>
     <system:String x:Key="VideoPreferencesUpdateFailed">无法更新本地渲染参数</system:String>
     <system:String x:Key="VideoPreferencesUnsupported">当前核心版本尚不支持本地渲染尺寸/帧率调整</system:String>
     <system:String x:Key="ReadCaptureStatusFailed">读取采集状态失败</system:String>
@@ -167,9 +164,6 @@
     <system:String x:Key="ScreenshotNoFrame">尚未收到可截图的视频帧</system:String>
     <system:String x:Key="ScreenshotInvalidFrame">最新视频帧的 BGRA 布局无效</system:String>
 
-    <system:String x:Key="DriverHelpTitle">iPhoneMirror 驱动与信任帮助</system:String>
-    <system:String x:Key="DriverHelpBody">1. 安装 Apple Devices（Microsoft Store）或 iTunes 桌面版以获得 Apple Mobile Device Support。&#10;&#10;2. 解锁 iPhone 或 iPad，并点击“信任此电脑”。&#10;&#10;3. QuickTime 隐藏 USB 配置需要兼容过滤驱动。本程序不会替换 Apple 官方驱动。</system:String>
-    <system:String x:Key="DriverHelpIntro">完成以下三项后即可稳定使用 USB 投屏。</system:String>
     <system:String x:Key="Close">关闭</system:String>
     <system:String x:Key="Apply">应用</system:String>
     <system:String x:Key="AdvancedSettings">高级设置</system:String>
@@ -183,10 +177,44 @@
     <system:String x:Key="AdvancedResolutionInvalid">请输入 16–8192 范围内的有效宽度和高度。</system:String>
     <system:String x:Key="AdvancedModeEnabled">高级模式已开启</system:String>
     <system:String x:Key="AdvancedModeDisabled">高级模式已关闭，恢复普通预设</system:String>
-    <system:String x:Key="DriverHelpAppleTitle">安装 Apple 设备支持</system:String>
-    <system:String x:Key="DriverHelpAppleBody">从 Microsoft Store 安装 Apple Devices，或安装桌面版 iTunes。</system:String>
-    <system:String x:Key="DriverHelpTrustTitle">解锁并信任电脑</system:String>
-    <system:String x:Key="DriverHelpTrustBody">保持设备解锁，连接数据线，并在 iPhone 或 iPad 上选择“信任此电脑”。</system:String>
-    <system:String x:Key="DriverHelpFilterTitle">安装当前设备的采集过滤驱动</system:String>
-    <system:String x:Key="DriverHelpFilterBody">点击主界面的安装按钮；授权完成后拔下并重新连接该设备。官方 Apple 驱动不会被替换。</system:String>
+    <system:String x:Key="UsbProjectionModeTitle">有线投屏协议</system:String>
+    <system:String x:Key="UsbModeDemoLabel">A 演示模式(推荐)</system:String>
+    <system:String x:Key="UsbModeAirPlayLabel">B AirPlay(实验)</system:String>
+    <system:String x:Key="UsbModeAisiLabel">C 爱思模式</system:String>
+    <system:String x:Key="UsbProjectionPerDeviceHint">仅应用于当前选中的有线设备。</system:String>
+    <system:String x:Key="UsbModeDetailsToolTip">查看该模式的优缺点</system:String>
+    <system:String x:Key="UsbModeDetailsTitle">有线投屏模式说明</system:String>
+    <system:String x:Key="UsbModeAdvantageTitle">优点</system:String>
+    <system:String x:Key="UsbModeDisadvantageTitle">缺点</system:String>
+    <system:String x:Key="UsbModeDemoAdvantage">发送 Valeria=true 和设备原生 DisplaySize，由 iOS 输出完整的手机镜像，并保持固定演示状态。兼容性和画面完整性最高，推荐日常使用。</system:String>
+    <system:String x:Key="UsbModeDemoDisadvantage">iOS 会进入 Apple 演示状态，状态栏日期、时间和电量会锁定为演示值，不能反映手机当前状态。</system:String>
+    <system:String x:Key="UsbModeDemoNotice">此模式不会启用视频 App 的 AirPlay 或外接播放画面。</system:String>
+    <system:String x:Key="UsbModeAirPlayAdvantage">发送 Valeria=false，使用设备原生尺寸，并保留当前的首帧探测、横竖屏识别和自适应重配。视频 App 可以切换到 AirPlay 或外接播放。</system:String>
+    <system:String x:Key="UsbModeAirPlayDisadvantage">外接内容的分辨率无法保证与手机和窗口完美自适应，可能出现裁切、比例异常或画面显示不全。</system:String>
+    <system:String x:Key="UsbModeAirPlayNotice">需要自定义时，连续点击右下角版本号 5 次开启高级模式。自定义 HPD1 尺寸存在风险，错误参数可能导致黑屏、裁切或 USB 重连失败。</system:String>
+    <system:String x:Key="UsbModeAisiAdvantage">采用爱思同类方案，发送 Valeria=false 并固定请求 1565×1565，减少不同设备之间的分辨率协商差异。</system:String>
+    <system:String x:Key="UsbModeAisiDisadvantage">方形目标会限制源画面的清晰度，不适合画质优先；横屏内容还可能出现缩放、黑边或比例不理想。</system:String>
+    <system:String x:Key="UsbModeAisiNotice">此模式不会使用本项目的原生分辨率探测和横竖屏自适应重配。</system:String>
+    <system:String x:Key="UsbProjectionModeSelectedFormat">已选择：{0}</system:String>
+    <system:String x:Key="UsbProjectionModeRestarting">正在按新模式重新连接当前有线设备...</system:String>
+    <system:String x:Key="UsbProjectionModeAppliedFormat">已应用：{0}</system:String>
+    <system:String x:Key="WindowTitleConnectivity">iPhoneMirror - iPhone/iPad 投屏</system:String>
+    <system:String x:Key="AppSubtitleConnectivity">Windows USB 低延迟与 AirPlay 无线投屏</system:String>
+    <system:String x:Key="WirelessReceiverTitle">无线 AirPlay</system:String>
+    <system:String x:Key="WirelessReceiverNameLabel">接收端名称</system:String>
+    <system:String x:Key="ApplyReceiverName">应用</system:String>
+    <system:String x:Key="WirelessServiceAlwaysOn">常驻</system:String>
+    <system:String x:Key="WirelessConnected">AirPlay 已连接</system:String>
+    <system:String x:Key="WirelessLocalNetwork">本地网络</system:String>
+    <system:String x:Key="WirelessReady">AirPlay 接收端已就绪</system:String>
+    <system:String x:Key="WirelessStarting">正在启动 AirPlay 接收端...</system:String>
+    <system:String x:Key="WirelessWaitingDevice">AirPlay 接收端已启动，请在 iPhone 控制中心选择屏幕镜像。</system:String>
+    <system:String x:Key="WirelessConnecting">AirPlay 设备正在连接...</system:String>
+    <system:String x:Key="WirelessStreaming">AirPlay 无线投屏中</system:String>
+    <system:String x:Key="WirelessStopping">正在停止 AirPlay 接收端...</system:String>
+    <system:String x:Key="WirelessStopped">无线投屏已停止</system:String>
+    <system:String x:Key="WirelessRunningFormat">无线接收端运行中：{0}</system:String>
+    <system:String x:Key="WirelessReceiverMissing">无线接收组件缺失，请重新构建发布包。</system:String>
+    <system:String x:Key="FooterConnectivity">本机 USB / AirPlay，无云端中转</system:String>
+    <system:String x:Key="FooterVersionCurrent">iPhoneMirror 0.6 Preview 1</system:String>
 </ResourceDictionary>

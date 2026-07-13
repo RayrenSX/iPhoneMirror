@@ -7,7 +7,10 @@
 #include "Transport/LibUsb0Readiness.h"
 #include "Transport/QtUsbTransport.h"
 #include "Capture/CaptureSession.h"
+#include "Capture/WirelessCaptureSession.h"
+#include "IpcProtocol.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -40,6 +43,20 @@ void check(bool condition, const char* message) {
         ++failures;
         std::cerr << "FAIL: " << message << '\n';
     }
+}
+
+bool contains_ascii(const std::vector<std::uint8_t>& bytes, std::string_view value) {
+    return std::search(bytes.begin(), bytes.end(), value.begin(), value.end()) != bytes.end();
+}
+
+std::vector<std::uint8_t> initial_hpd1(iPhoneMirror::quicktime::SessionOptions options) {
+    using namespace iPhoneMirror::quicktime;
+    SessionProtocol session(options);
+    (void)session.process(decode_framed(make_ping()));
+    const auto event = session.process(decode_framed(
+        read_fixture("fixtures/quicktime_video_hack/cwpa-request1")));
+    if (event.outbound.empty()) throw std::runtime_error("CWPA did not produce HPD1");
+    return event.outbound.front();
 }
 
 template <typename Function>
@@ -296,6 +313,51 @@ void test_session_protocol() {
         decode_framed(stop[1]).subtype == fourcc('h', 'p', 'd', '0'), "session emits HPA0 and HPD0");
 }
 
+void test_usb_projection_modes() {
+    using namespace iPhoneMirror::capture;
+
+    const auto demo = make_usb_display_configuration(
+        UsbProjectionMode::Demo, 1206, 2622);
+    check(demo.session_options.demo_mode, "demo mode enables Valeria");
+    check(!demo.session_options.request_native_display_size,
+        "demo mode includes a native DisplaySize to start video");
+    check(demo.session_options.requested_width == 1206 &&
+        demo.session_options.requested_height == 2622,
+        "demo mode requests native portrait dimensions");
+    check(!demo.adaptive_reconfiguration,
+        "demo mode does not run AirPlay display reconfiguration");
+    const auto demo_hpd1 = initial_hpd1(demo.session_options);
+    check(contains_ascii(demo_hpd1, "Valeria"), "demo HPD1 contains Valeria");
+    check(contains_ascii(demo_hpd1, "DisplaySize"),
+        "demo HPD1 contains the native DisplaySize required for video");
+
+    const auto airplay = make_usb_display_configuration(
+        UsbProjectionMode::AirPlay, 1206, 2622);
+    check(!airplay.session_options.demo_mode, "AirPlay mode disables Valeria");
+    check(airplay.session_options.requested_width == 1206 &&
+        airplay.session_options.requested_height == 2622,
+        "AirPlay mode requests native portrait dimensions");
+    check(airplay.adaptive_reconfiguration,
+        "AirPlay mode enables adaptive display reconfiguration");
+    check(contains_ascii(initial_hpd1(airplay.session_options), "DisplaySize"),
+        "AirPlay HPD1 contains DisplaySize");
+
+    const auto custom_airplay = make_usb_display_configuration(
+        UsbProjectionMode::AirPlay, 1206, 2622, 1920, 1080);
+    check(custom_airplay.session_options.requested_width == 1920 &&
+        custom_airplay.session_options.requested_height == 1080,
+        "AirPlay mode preserves advanced custom dimensions");
+
+    const auto aisi = make_usb_display_configuration(
+        UsbProjectionMode::Aisi, 1206, 2622, 1920, 1080);
+    check(!aisi.session_options.demo_mode, "Aisi mode disables Valeria");
+    check(aisi.session_options.requested_width == 1565 &&
+        aisi.session_options.requested_height == 1565,
+        "Aisi mode uses its fixed square display target");
+    check(!aisi.adaptive_reconfiguration,
+        "Aisi mode keeps the fixed target during orientation changes");
+}
+
 void test_libusb_runtime() {
     const auto probe = iPhoneMirror::transport::probe_usb_runtime();
     check(probe.runtime_available, "libusb runtime loads");
@@ -344,6 +406,88 @@ void test_capture_preflight_without_device() {
     check_throws([&] { session.start(false); }, "capture preflight rejects missing USB device");
 }
 
+void test_wireless_i420_conversion() {
+    iPhoneMirror::wireless::MessageHeader header;
+    header.type = iPhoneMirror::wireless::MessageType::Video;
+    header.width = 3;
+    header.height = 2;
+    header.stride[0] = 4;
+    header.stride[1] = 2;
+    header.stride[2] = 2;
+    header.plane_size[0] = 8;
+    header.plane_size[1] = 2;
+    header.plane_size[2] = 2;
+    const std::vector<std::uint8_t> i420{
+        1, 2, 3, 99, 4, 5, 6, 99,
+        10, 11,
+        20, 21,
+    };
+    std::vector<std::uint8_t> nv12;
+    std::int32_t stride{};
+    check(iPhoneMirror::capture::detail::convert_i420_to_nv12(
+        header, i420, nv12, stride), "wireless I420 frame converts to NV12");
+    check(stride == 4, "wireless NV12 stride is even");
+    check(nv12 == std::vector<std::uint8_t>{
+        1, 2, 3, 0, 4, 5, 6, 0, 10, 20, 11, 21,
+    }, "wireless NV12 planes and chroma order are correct");
+    check(!iPhoneMirror::capture::detail::convert_i420_to_nv12(
+        header, std::span(i420).first(11), nv12, stride),
+        "wireless conversion rejects truncated planes");
+    check(sizeof(iPhoneMirror::wireless::MessageHeader) == 256 &&
+        header.magic == iPhoneMirror::wireless::IpcMagic &&
+        header.version == iPhoneMirror::wireless::IpcVersion,
+        "wireless IPC header layout and version are stable");
+}
+
+void test_wireless_multi_stream_isolation() {
+    iPhoneMirror::capture::CapturePreferences preferences;
+    preferences.play_audio = false;
+    auto first = std::make_shared<iPhoneMirror::capture::WirelessClientStream>(
+        L"00:11:22:33:44:55", L"First iPhone");
+    auto second = std::make_shared<iPhoneMirror::capture::WirelessClientStream>(
+        L"66:77:88:99:AA:BB", L"Second iPhone");
+    first->set_identity(L"First iPhone", true);
+    second->set_identity(L"Second iPhone", true);
+    first->attach(preferences);
+    second->attach(preferences);
+
+    iPhoneMirror::wireless::MessageHeader first_header;
+    first_header.type = iPhoneMirror::wireless::MessageType::Video;
+    first_header.width = 4;
+    first_header.height = 2;
+    first_header.stride[0] = 4;
+    first_header.stride[1] = first_header.stride[2] = 2;
+    first_header.plane_size[0] = 8;
+    first_header.plane_size[1] = first_header.plane_size[2] = 2;
+    const std::vector<std::uint8_t> first_i420{
+        1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 20, 21,
+    };
+    auto second_header = first_header;
+    second_header.width = 2;
+    second_header.stride[0] = 2;
+    second_header.stride[1] = second_header.stride[2] = 1;
+    second_header.plane_size[0] = 4;
+    second_header.plane_size[1] = second_header.plane_size[2] = 1;
+    const std::vector<std::uint8_t> second_i420{31, 32, 33, 34, 40, 50};
+
+    first->publish_video(first_header, first_i420);
+    second->publish_video(second_header, second_i420);
+    const auto first_snapshot = first->snapshot();
+    const auto second_snapshot = second->snapshot();
+    check(first_snapshot.width == 4 && first_snapshot.height == 2 &&
+        first_snapshot.video_frames == 1, "first wireless client owns its frame state");
+    check(second_snapshot.width == 2 && second_snapshot.height == 2 &&
+        second_snapshot.video_frames == 1, "second wireless client owns its frame state");
+    check(first->latest_frame()->nv12 != second->latest_frame()->nv12,
+        "wireless client pixel buffers are isolated");
+
+    first->set_identity(L"First iPhone", false);
+    check(first->snapshot().width == 0 && second->snapshot().width == 2,
+        "disconnect clears only the matching wireless client");
+    first->detach();
+    second->detach();
+}
+
 } // namespace
 
 int main() {
@@ -362,10 +506,13 @@ int main() {
         test_coremedia();
         test_upstream_capture_fixtures();
         test_session_protocol();
+        test_usb_projection_modes();
         test_apple_usb_serial_matching();
         test_libusb_runtime();
         test_media_foundation_decoder();
         test_capture_preflight_without_device();
+        test_wireless_i420_conversion();
+        test_wireless_multi_stream_isolation();
     } catch (const std::exception& error) {
         std::cerr << "UNEXPECTED: " << error.what() << '\n';
         return 2;

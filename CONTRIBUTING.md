@@ -48,10 +48,10 @@ Localization verification:
 6. For real-device changes, state the ProductType and iOS version but do not
    publish the UDID.
 
-Changes to the elevated driver helper, registry filters, bundled binaries,
-QuickTime activation/stop sequence or third-party licensing require extra
-review. Do not replace pinned driver files or hashes without documenting their
-upstream source, signature and full license obligations.
+Changes to external-driver detection, USB activation/stop sequencing, vendored
+native libraries or third-party licensing require extra review. Driver
+installation, registry filter mutation, signing and rollback behavior now live
+outside this application package.
 
 ## Style
 

@@ -2,6 +2,8 @@
 
 #include "Device/DeviceManager.h"
 #include "Capture/CaptureSession.h"
+#include "Capture/WirelessCaptureSession.h"
+#include "Capture/WirelessReceiverHub.h"
 #include "Logging.h"
 #include "Renderer/D3D11PreviewRenderer.h"
 #include "Transport/LibUsb0Readiness.h"
@@ -28,15 +30,16 @@ std::mutex state_mutex;
 bool initialized{};
 thread_local std::wstring last_error;
 iPhoneMirror::device::DeviceManager device_manager;
-std::unique_ptr<iPhoneMirror::capture::CaptureSession> capture_session;
+std::unique_ptr<iPhoneMirror::capture::ICaptureSession> capture_session;
 std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer> preview_renderer;
+std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> wireless_receiver;
 iPhoneMirror::capture::CapturePreferences capture_preferences;
 float preview_corner_radius{0.1784F};
 float preview_corner_exponent{2.36F};
 
 struct MultiSessionContext {
     std::mutex mutex;
-    std::unique_ptr<iPhoneMirror::capture::CaptureSession> capture;
+    std::unique_ptr<iPhoneMirror::capture::ICaptureSession> capture;
     std::unordered_map<HWND, std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer>> renderers;
     iPhoneMirror::capture::CapturePreferences preferences;
     float corner_radius{0.1784F};
@@ -105,6 +108,29 @@ void fill_device(iPhoneMirror::DeviceInfo& output, const iPhoneMirror::device::D
     copy_text(output.os_version, input.os_version);
     copy_text(output.connection_type, input.connection_type);
     copy_text(output.status, input.status);
+}
+
+void fill_wireless_device(iPhoneMirror::DeviceInfo& output,
+    const iPhoneMirror::capture::WirelessDeviceSnapshot& input) {
+    output = {};
+    output.struct_size = sizeof(output);
+    output.api_version = iPhoneMirror::ApiVersion;
+    output.state = iPhoneMirror::ConnectionState::Ready;
+    output.usb_connected = 0;
+    output.pair_record_present = 1;
+    output.lockdown_accessible = 1;
+    copy_text(output.udid, L"airplay://" + input.id);
+    copy_text(output.name, input.name.empty() ? L"iPhone" : input.name);
+    copy_text(output.product_type, L"AirPlay");
+    copy_text(output.connection_type, L"AirPlay");
+    copy_text(output.status, L"Connected via AirPlay");
+}
+
+std::wstring wireless_device_id(const wchar_t* value) {
+    std::wstring result = value ? value : L"";
+    constexpr std::wstring_view prefix = L"airplay://";
+    if (result.starts_with(prefix)) result.erase(0, prefix.size());
+    return result;
 }
 
 std::uint8_t clamp_byte(int value) noexcept {
@@ -307,9 +333,10 @@ std::int32_t start_capture_locked(const wchar_t* udid,
             preview_renderer->set_max_fps(preferences.target_fps);
         }
         if (capture_session) capture_session->stop();
-        capture_session = std::make_unique<iPhoneMirror::capture::CaptureSession>(
+        auto usb_capture = std::make_unique<iPhoneMirror::capture::CaptureSession>(
             serial, preferences, product_type_for_udid(udid));
-        capture_session->start(false);
+        usb_capture->start(false);
+        capture_session = std::move(usb_capture);
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
     } catch (const std::exception& error) {
@@ -338,11 +365,13 @@ std::int32_t IM_CALL im_initialize() {
 void IM_CALL im_shutdown() {
     std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer> renderer;
     std::vector<std::shared_ptr<MultiSessionContext>> sessions;
+    std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
     {
         std::scoped_lock lock(state_mutex);
         renderer = std::move(preview_renderer);
         for (auto& [_, session] : multi_sessions) sessions.push_back(std::move(session));
         multi_sessions.clear();
+        receiver = std::move(wireless_receiver);
     }
     // Join the render thread without holding state_mutex: its frame provider
     // briefly takes that mutex to snapshot the active capture session.
@@ -359,6 +388,7 @@ void IM_CALL im_shutdown() {
         if (context->capture) context->capture->stop();
         context->capture.reset();
     }
+    if (receiver) receiver->stop();
     {
         std::scoped_lock lock(state_mutex);
         iPhoneMirror::logging::write("im_shutdown");
@@ -398,6 +428,87 @@ std::int32_t IM_CALL im_refresh_devices(iPhoneMirror::DeviceInfo* devices, std::
     } catch (...) {
         return fail(iPhoneMirror::Result::InternalError, L"刷新 Apple 设备时发生异常");
     }
+}
+
+std::int32_t IM_CALL im_wireless_receiver_start(const wchar_t* receiver_name,
+    const wchar_t* host_path) {
+    if (!receiver_name || !*receiver_name || !host_path || !*host_path)
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"Wireless receiver name and host path are required");
+    std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
+    {
+        std::scoped_lock lock(state_mutex);
+        if (!initialized)
+            return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
+        if (!wireless_receiver)
+            wireless_receiver = std::make_shared<iPhoneMirror::capture::WirelessReceiverHub>();
+        receiver = wireless_receiver;
+    }
+    try {
+        receiver->start(receiver_name, host_path);
+        last_error.clear();
+        return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+    } catch (const std::exception& error) {
+        return fail(iPhoneMirror::Result::TransportUnavailable,
+            L"Could not start AirPlay receiver: " + widen(error.what()));
+    }
+}
+
+void IM_CALL im_wireless_receiver_stop() {
+    std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
+    {
+        std::scoped_lock lock(state_mutex);
+        receiver = wireless_receiver;
+    }
+    if (receiver) receiver->stop();
+}
+
+std::int32_t IM_CALL im_wireless_receiver_get_status(
+    std::int32_t* running, std::int32_t* ready) {
+    if (!running || !ready)
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"Wireless receiver status outputs are required");
+    std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
+    {
+        std::scoped_lock lock(state_mutex);
+        if (!initialized)
+            return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
+        receiver = wireless_receiver;
+    }
+    *running = receiver && receiver->running() ? 1 : 0;
+    *ready = receiver && receiver->ready() ? 1 : 0;
+    last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_refresh_wireless_devices(
+    iPhoneMirror::DeviceInfo* devices, std::uint32_t* count) {
+    if (!count)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"count cannot be null");
+    std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
+    {
+        std::scoped_lock lock(state_mutex);
+        if (!initialized)
+            return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
+        receiver = wireless_receiver;
+    }
+    const auto records = receiver ? receiver->devices()
+                                  : std::vector<iPhoneMirror::capture::WirelessDeviceSnapshot>{};
+    const auto required = static_cast<std::uint32_t>(records.size());
+    if (!devices) {
+        *count = required;
+        last_error.clear();
+        return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+    }
+    const auto capacity = *count;
+    *count = required;
+    if (capacity < required)
+        return fail(iPhoneMirror::Result::BufferTooSmall,
+            L"Wireless device list buffer is too small");
+    for (std::size_t index = 0; index < records.size(); ++index)
+        fill_wireless_device(devices[index], records[index]);
+    last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
 std::int32_t IM_CALL im_get_environment(iPhoneMirror::EnvironmentInfo* environment) {
@@ -490,6 +601,9 @@ std::int32_t IM_CALL im_start_capture_with_options(const wchar_t* udid,
         .audio_volume = options->audio_volume,
         .usb_requested_width = options->reserved[0],
         .usb_requested_height = options->reserved[1],
+        .usb_projection_mode = options->reserved[2] <= 2
+            ? static_cast<iPhoneMirror::capture::UsbProjectionMode>(options->reserved[2])
+            : iPhoneMirror::capture::UsbProjectionMode::Demo,
     };
     std::scoped_lock lock(state_mutex);
     capture_preferences = preferences;
@@ -818,10 +932,14 @@ std::int32_t IM_CALL im_session_create(const wchar_t* udid,
             .audio_volume = options->audio_volume,
             .usb_requested_width = options->reserved[0],
             .usb_requested_height = options->reserved[1],
+            .usb_projection_mode = options->reserved[2] <= 2
+                ? static_cast<iPhoneMirror::capture::UsbProjectionMode>(options->reserved[2])
+                : iPhoneMirror::capture::UsbProjectionMode::Demo,
         };
-        context->capture = std::make_unique<iPhoneMirror::capture::CaptureSession>(
+        auto usb_capture = std::make_unique<iPhoneMirror::capture::CaptureSession>(
             narrow(udid), context->preferences, product_type_for_udid(udid));
-        context->capture->start(false);
+        usb_capture->start(false);
+        context->capture = std::move(usb_capture);
         std::scoped_lock lock(state_mutex);
         if (!initialized) {
             context->capture->stop();
@@ -836,6 +954,57 @@ std::int32_t IM_CALL im_session_create(const wchar_t* udid,
     } catch (const std::exception& error) {
         return fail(iPhoneMirror::Result::TransportUnavailable,
             L"Could not create device session: " + widen(error.what()));
+    }
+}
+
+std::int32_t IM_CALL im_wireless_session_create(const wchar_t* device_id,
+    const iPhoneMirror::CaptureOptions* options,
+    iPhoneMirror::SessionHandle* handle) {
+    if (!device_id || !*device_id || !handle || !options ||
+        options->struct_size != sizeof(iPhoneMirror::CaptureOptions) ||
+        !valid_video_preferences(options->requested_width, options->requested_height,
+            options->target_fps) || !std::isfinite(options->audio_volume) ||
+        options->audio_volume < 0.0F || options->audio_volume > 1.0F) {
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid wireless session options");
+    }
+    std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
+    {
+        std::scoped_lock lock(state_mutex);
+        if (!initialized) return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
+        receiver = wireless_receiver;
+    }
+    if (!receiver || !receiver->running())
+        return fail(iPhoneMirror::Result::TransportUnavailable,
+            L"AirPlay receiver is not running");
+    try {
+        auto context = std::make_shared<MultiSessionContext>();
+        context->preferences = {
+            .render_max_width = options->requested_width,
+            .render_max_height = options->requested_height,
+            .target_fps = options->target_fps,
+            .play_audio = options->play_audio != 0,
+            .audio_volume = options->audio_volume,
+        };
+        auto wireless = std::make_unique<iPhoneMirror::capture::WirelessCaptureSession>(
+            receiver, wireless_device_id(device_id), context->preferences);
+        wireless->start();
+        context->capture = std::move(wireless);
+        std::scoped_lock lock(state_mutex);
+        if (!initialized) {
+            context->capture->stop();
+            return fail(iPhoneMirror::Result::NotInitialized,
+                L"Core closed while creating wireless session");
+        }
+        const auto id = next_session_handle++;
+        multi_sessions.emplace(id, std::move(context));
+        *handle = id;
+        iPhoneMirror::logging::write(std::format(
+            "wireless_session create handle={} device={}", id, narrow(device_id)));
+        last_error.clear();
+        return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+    } catch (const std::exception& error) {
+        return fail(iPhoneMirror::Result::TransportUnavailable,
+            L"Could not create wireless session: " + widen(error.what()));
     }
 }
 

@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:IPhoneMirror.App.Controls"
         mc:Ignorable="d"
-        Title="{DynamicResource WindowTitle}"
+        Title="{DynamicResource WindowTitleConnectivity}"
         Icon="pack://application:,,,/Assets/iPhoneMirror.ico"
         Width="1420" Height="860" MinWidth="1240" MinHeight="680"
         WindowStartupLocation="CenterScreen"
@@ -82,6 +82,76 @@
             <Setter Property="MinHeight" Value="36"/>
             <Setter Property="Padding" Value="8,7"/>
         </Style>
+        <Style x:Key="UsbModeTabItem" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="2"/>
+            <Setter Property="Padding" Value="7,6"/>
+            <Setter Property="MinHeight" Value="38"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="TabRoot" Background="{TemplateBinding Background}"
+                                BorderBrush="Transparent" BorderThickness="1"
+                                CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabRoot" Property="Background" Value="#252525"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabRoot" Property="Background" Value="#F2F2F2"/>
+                                <Setter TargetName="TabRoot" Property="BorderBrush" Value="#F2F2F2"/>
+                                <Setter Property="Foreground" Value="#0D0D0D"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="UsbModeInfoButton" TargetType="Button">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="MinHeight" Value="18"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="#343434"/>
+            <Setter Property="BorderBrush" Value="White"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="InfoRoot" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="9">
+                            <TextBlock Text="!" Foreground="{TemplateBinding Foreground}"
+                                       FontSize="{TemplateBinding FontSize}"
+                                       FontWeight="{TemplateBinding FontWeight}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="InfoRoot" Property="Background" Value="#5A5A5A"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="InfoRoot" Property="Background" Value="#202020"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="CaptureActionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Width" Value="132"/>
             <Setter Property="Height" Value="40"/>
@@ -153,10 +223,12 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="iPhoneMirror" FontSize="24" FontWeight="SemiBold"/>
-                <TextBlock Text="{DynamicResource AppSubtitle}" Foreground="{StaticResource MutedTextBrush}"
+                <TextBlock Text="{DynamicResource AppSubtitleConnectivity}" Foreground="{StaticResource MutedTextBrush}"
                            FontSize="12" Margin="0,4,0,0"/>
             </StackPanel>
             <Border Grid.Column="1" Padding="0" VerticalAlignment="Center"
@@ -176,7 +248,13 @@
                 <ComboBoxItem Tag="zh-CN" Content="{DynamicResource LanguageChinese}"/>
                 <ComboBoxItem Tag="en-US" Content="{DynamicResource LanguageEnglish}"/>
             </ComboBox>
-            <Button x:Name="CaptureActionButton" Grid.Column="5"
+            <Button Grid.Column="5" Width="116" Height="40" Padding="12,8"
+                    Content="{DynamicResource DriverManagerButton}"
+                    Command="{Binding OpenDriverManagerCommand}"
+                    ToolTip="{DynamicResource DriverManagerToolTip}"
+                    AutomationProperties.AutomationId="DriverManagerButton"
+                    VerticalAlignment="Center" FontSize="13"/>
+            <Button x:Name="CaptureActionButton" Grid.Column="7"
                     AutomationProperties.AutomationId="CaptureActionButton"
                     Style="{StaticResource CaptureActionButton}"
                     VerticalAlignment="Center"/>
@@ -409,7 +487,7 @@
                                     <Grid>
                                         <Border Width="30" Height="4" CornerRadius="2" Background="#666666"
                                                 VerticalAlignment="Top" Margin="0,8,0,0"/>
-                                        <TextBlock Text="USB" Foreground="{StaticResource MutedTextBrush}"
+                                        <TextBlock Text="{Binding SelectedConnection}" Foreground="{StaticResource MutedTextBrush}"
                                                    FontWeight="SemiBold" FontSize="12"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Grid>
@@ -525,6 +603,47 @@
                     <StackPanel Margin="0,0,7,0">
                         <TextBlock Text="{DynamicResource ControlTitle}" FontSize="16" FontWeight="SemiBold"/>
 
+                        <Border Style="{StaticResource ControlSectionCard}"
+                                Visibility="{Binding UsbProjectionSettingsVisibility}">
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource UsbProjectionModeTitle}"
+                                           Style="{StaticResource ControlSectionTitle}"/>
+                                <Border Background="#151515" BorderBrush="#343434"
+                                        BorderThickness="1" CornerRadius="7"
+                                        Padding="2" Margin="0,9,0,0">
+                                    <ListBox ItemsSource="{Binding UsbProjectionModes}"
+                                             SelectedItem="{Binding SelectedUsbProjectionMode, Mode=TwoWay}"
+                                             IsEnabled="{Binding CanChangeUsbProjectionMode}"
+                                             ItemContainerStyle="{StaticResource UsbModeTabItem}"
+                                             Background="Transparent" BorderThickness="0" Padding="0"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBox.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <UniformGrid Rows="1" Columns="3"/>
+                                            </ItemsPanelTemplate>
+                                        </ListBox.ItemsPanel>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid>
+                                                    <TextBlock Text="{Binding Label}" FontSize="9"
+                                                               FontWeight="SemiBold" TextWrapping="Wrap"
+                                                               TextAlignment="Center" VerticalAlignment="Center"
+                                                               Margin="0,0,20,0"
+                                                               Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
+                                                    <Button Style="{StaticResource UsbModeInfoButton}"
+                                                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                            Click="OnUsbProjectionModeInfoClick"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+                                <TextBlock Text="{DynamicResource UsbProjectionPerDeviceHint}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                            </StackPanel>
+                        </Border>
+
                         <Border Style="{StaticResource ControlSectionCard}" Visibility="Collapsed">
                             <StackPanel>
                                 <Grid>
@@ -618,17 +737,45 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource ControlSectionCard}">
+                        <Border Style="{StaticResource ControlSectionCard}"
+                                Visibility="{Binding AdvancedSettingsVisibility}">
                             <StackPanel>
-                                <Button x:Name="InstallDriverButton" Content="{Binding DriverInstallButtonText}"
-                                        Command="{Binding InstallDriverCommand}"
-                                        Visibility="{Binding DriverInstallVisibility}"
-                                        Style="{StaticResource ToolButton}"/>
-                                <Button Content="{DynamicResource DriverTrustHelp}" Command="{Binding DriverHelpCommand}"
-                                        Style="{StaticResource ToolButton}" Margin="0,9,0,0"/>
                                 <Button Content="{DynamicResource AdvancedSettings}" Command="{Binding AdvancedSettingsCommand}"
-                                        Visibility="{Binding AdvancedSettingsVisibility}"
-                                        Style="{StaticResource ToolButton}" Margin="0,9,0,0"/>
+                                        Style="{StaticResource ToolButton}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource ControlSectionCard}"
+                                Visibility="{Binding WirelessSettingsVisibility}">
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="{DynamicResource WirelessReceiverTitle}"
+                                               Style="{StaticResource ControlSectionTitle}"/>
+                                    <TextBlock Text="{DynamicResource WirelessServiceAlwaysOn}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Foreground="{StaticResource SuccessBrush}" FontSize="10"/>
+                                </Grid>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding WirelessReceiverName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             Style="{StaticResource RoundedTextBox}"
+                                             MaxLength="63" Height="36"
+                                             ToolTip="{DynamicResource WirelessReceiverNameLabel}"/>
+                                    <Button Grid.Column="2" Content="{DynamicResource ApplyReceiverName}"
+                                            Command="{Binding ApplyWirelessNameCommand}"
+                                            Style="{StaticResource ToolButton}" MinWidth="64"/>
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="1,8,0,0">
+                                    <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}"
+                                             VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                    <TextBlock Text="{Binding WirelessStatus}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="10" TextWrapping="Wrap"/>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -637,8 +784,8 @@
         </Grid>
 
         <Grid x:Name="FooterPanel" Grid.Row="3" Margin="0,16,0,0">
-            <TextBlock Text="{DynamicResource FooterLocalUsb}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
-            <TextBlock Text="{DynamicResource FooterVersion}" Foreground="{StaticResource MutedTextBrush}"
+            <TextBlock Text="{DynamicResource FooterConnectivity}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
+            <TextBlock Text="{DynamicResource FooterVersionCurrent}" Foreground="{StaticResource MutedTextBrush}"
                        FontSize="10" HorizontalAlignment="Right" Cursor="Hand"
                        MouseLeftButtonDown="OnVersionClick"/>
         </Grid>

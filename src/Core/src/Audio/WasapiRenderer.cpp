@@ -61,14 +61,16 @@ WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& for
       capacity_frames_(std::max<std::size_t>(8192,
           static_cast<std::size_t>(format.sample_rate / 6.0))),
       ring_(capacity_frames_ * block_align_) {
-    const bool pcm16_stereo = format.format_id == LinearPcm &&
+    const bool pcm16_interleaved = format.format_id == LinearPcm &&
         (format.format_flags & PcmIsFloat) == 0 &&
         (format.format_flags & PcmIsBigEndian) == 0 &&
         (format.format_flags & PcmIsSignedInteger) != 0 &&
         (format.format_flags & PcmIsNonInterleaved) == 0 &&
-        format.sample_rate == 48000.0 && format.channels_per_frame == 2 &&
-        format.bits_per_channel == 16 && format.bytes_per_frame == 4;
-    if (!pcm16_stereo) {
+        format.sample_rate >= 8000.0 && format.sample_rate <= 192000.0 &&
+        format.channels_per_frame >= 1 && format.channels_per_frame <= 8 &&
+        format.bits_per_channel == 16 &&
+        format.bytes_per_frame == format.channels_per_frame * 2U;
+    if (!pcm16_interleaved) {
         throw std::invalid_argument(std::format(
             "unsupported QuickTime audio format id=0x{:08X} flags=0x{:X} rate={} channels={} bits={} bpf={}",
             format.format_id, format.format_flags, format.sample_rate,

@@ -11,9 +11,11 @@
     <Compile Include="..\App\Services\StableDeviceSelection.cs" Link="StableDeviceSelection.cs" />
     <Compile Include="..\App\Services\CaptureSessionOwnership.cs" Link="CaptureSessionOwnership.cs" />
     <Compile Include="..\App\Services\CaptureShutdownCoordinator.cs" Link="CaptureShutdownCoordinator.cs" />
-    <Compile Include="..\App\Services\DriverReplugTracker.cs" Link="DriverReplugTracker.cs" />
     <Compile Include="..\App\Models\DeviceCornerProfile.cs" Link="DeviceCornerProfile.cs" />
     <Compile Include="..\App\Models\DeviceCaptureState.cs" Link="DeviceCaptureState.cs" />
     <Compile Include="..\App\Services\DeviceCornerProfileResolver.cs" Link="DeviceCornerProfileResolver.cs" />
+    <Compile Include="..\App\Services\IndependentWindowAudioPolicy.cs" Link="IndependentWindowAudioPolicy.cs" />
+    <Compile Include="..\App\Services\DriverManagerLauncher.cs" Link="DriverManagerLauncher.cs" />
+    <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
   </ItemGroup>
 </Project>

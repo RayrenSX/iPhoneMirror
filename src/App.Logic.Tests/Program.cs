@@ -91,6 +91,55 @@ Equal("rectangular",
 Equal(0, DeviceCornerProfile.Rectangular.GetGdiRadius(1206),
     "rectangular fallback radius");
 
+Equal("iPhoneMirror AirPlay",
+    WirelessReceiverConfiguration.SanitizeReceiverName("  iPhoneMirror AirPlay  "),
+    "wireless receiver name is trimmed");
+Equal("iPhoneMirror AirPlay",
+    WirelessReceiverConfiguration.SanitizeReceiverName("\r\n[];"),
+    "invalid wireless receiver name falls back");
+Equal(63,
+    WirelessReceiverConfiguration.SanitizeReceiverName(new string('a', 80)).Length,
+    "wireless receiver name respects the mDNS label limit");
+Equal<string?>(null,
+    WirelessReceiverConfiguration.FindExecutable(Path.GetTempPath(),
+        Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.exe")),
+    "wireless receiver discovery rejects missing executables");
+
+var driverManagerRoot = Path.Combine(Path.GetTempPath(), "iPhoneMirror.App.Tests",
+    Guid.NewGuid().ToString("N"));
+try
+{
+    var appDirectory = Path.Combine(driverManagerRoot, "outputs", "iPhoneMirror");
+    var siblingDirectory = Path.Combine(driverManagerRoot, "outputs", "iPhoneMirror.Driver");
+    Directory.CreateDirectory(appDirectory);
+    Directory.CreateDirectory(siblingDirectory);
+    var siblingExecutable = Path.Combine(siblingDirectory, "iPhoneMirror.Driver.exe");
+    File.WriteAllBytes(siblingExecutable, []);
+    Equal(Path.GetFullPath(siblingExecutable),
+        DriverManagerLauncher.FindExecutable(appDirectory, workingDirectory: driverManagerRoot),
+        "driver manager discovery finds sibling output");
+
+    var overrideExecutable = Path.Combine(driverManagerRoot, "custom-driver-manager.exe");
+    File.WriteAllBytes(overrideExecutable, []);
+    Equal(Path.GetFullPath(overrideExecutable),
+        DriverManagerLauncher.FindExecutable(appDirectory, overrideExecutable,
+            driverManagerRoot),
+        "driver manager override takes priority");
+}
+finally
+{
+    if (Directory.Exists(driverManagerRoot)) Directory.Delete(driverManagerRoot, recursive: true);
+}
+
+Equal(false, IndependentWindowAudioPolicy.ShowMuteOthers(1),
+    "single device only shows the current-window mute action");
+Equal(true, IndependentWindowAudioPolicy.ShowMuteOthers(2),
+    "multiple devices show the mute-other-windows action");
+Sequence(["phone-b", "phone-c"],
+    IndependentWindowAudioPolicy.GetOtherDeviceIds("PHONE-A",
+        ["phone-a", "phone-b", "PHONE-B", "phone-c"]),
+    "mute-other-windows excludes the current device and duplicate sessions");
+
 
 // Closing must explicitly stop the QuickTime session before core disposal,
 // and repeated close notifications must not send a second shutdown sequence.
@@ -106,6 +155,14 @@ Sequence(["stop", "dispose"], shutdownOrder, "window close cleanup is ordered an
 
 var deviceA = new DeviceCaptureState { Udid = "phone-a", Handle = 11, FrameRate = 60, Volume = 80 };
 var deviceB = new DeviceCaptureState { Udid = "phone-b", Handle = 22, FrameRate = 30, Volume = 25 };
+Equal(UsbProjectionMode.Demo, deviceA.UsbProjectionMode,
+    "USB projection defaults to recommended demo mode");
+deviceA.UsbProjectionMode = UsbProjectionMode.AirPlay;
+deviceB.UsbProjectionMode = UsbProjectionMode.Aisi;
+Equal(UsbProjectionMode.AirPlay, deviceA.UsbProjectionMode,
+    "device A keeps its independent USB projection mode");
+Equal(UsbProjectionMode.Aisi, deviceB.UsbProjectionMode,
+    "device B keeps its independent USB projection mode");
 deviceB.FrameRate = 24;
 Equal((ulong)11, deviceA.Handle, "switching device does not release first session");
 Equal(60, deviceA.FrameRate, "device A settings remain independent");
@@ -126,16 +183,5 @@ catch (InvalidOperationException error) when (error.Message == "stop failed")
 {
 }
 Sequence(["stop", "dispose"], failureOrder, "core is disposed after stop failure");
-
-// A SetupAPI restart during installation does not satisfy the user-facing
-// replug requirement: the exact UDID must disappear and then return.
-var replug = new DriverReplugTracker();
-replug.MarkInstalled("phone-a");
-Equal(true, replug.IsPending("PHONE-A"), "driver install starts replug requirement");
-Equal(0, replug.ObservePresent(["phone-a"]).Count, "still-present phone does not satisfy replug");
-Equal(true, replug.IsPending("phone-a"), "disconnect is still required");
-Equal(0, replug.ObservePresent([]).Count, "disconnect arms reconnect detection");
-Sequence(["phone-a"], replug.ObservePresent(["PHONE-A"]), "reconnect completes exact-device cycle");
-Equal(false, replug.IsPending("phone-a"), "completed replug clears requirement");
 
 Console.WriteLine("App logic tests passed.");

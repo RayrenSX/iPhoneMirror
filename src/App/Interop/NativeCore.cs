@@ -126,6 +126,21 @@ internal sealed class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_refresh_devices([Out] NativeDeviceInfo[]? devices, ref uint count);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    private static extern int im_wireless_receiver_start(
+        [MarshalAs(UnmanagedType.LPWStr)] string receiverName,
+        [MarshalAs(UnmanagedType.LPWStr)] string hostPath);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void im_wireless_receiver_stop();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_wireless_receiver_get_status(out int running, out int ready);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_refresh_wireless_devices(
+        [Out] NativeDeviceInfo[]? devices, ref uint count);
+
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_get_environment(ref NativeEnvironmentInfo environment);
 
@@ -181,6 +196,10 @@ internal sealed class NativeCore : IDisposable
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     private static extern int im_session_create([MarshalAs(UnmanagedType.LPWStr)] string udid,
+        ref NativeCaptureOptions options, out ulong handle);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    private static extern int im_wireless_session_create(
+        [MarshalAs(UnmanagedType.LPWStr)] string deviceId,
         ref NativeCaptureOptions options, out ulong handle);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_stop(ulong handle);
@@ -369,6 +388,54 @@ internal sealed class NativeCore : IDisposable
         throw new InvalidOperationException(LocalizationService.Get("EnumerateDevicesFailed"));
     }
 
+    public (bool Success, string Message) StartWirelessReceiver(
+        string receiverName, string hostPath)
+    {
+        var result = im_wireless_receiver_start(receiverName, hostPath);
+        return result == 0
+            ? (true, LocalizationService.Get("WirelessReady"))
+            : (false, GetLastError(LocalizationService.Get("WirelessReceiverMissing")));
+    }
+
+    public (bool Running, bool Ready) GetWirelessReceiverStatus()
+    {
+        var result = im_wireless_receiver_get_status(out var running, out var ready);
+        return result == 0 ? (running != 0, ready != 0) : (false, false);
+    }
+
+    public void StopWirelessReceiver() => im_wireless_receiver_stop();
+
+    public IReadOnlyList<NativeDeviceInfo> GetWirelessDevices()
+    {
+        for (var attempt = 0; attempt < 3; ++attempt)
+        {
+            uint count = 0;
+            var result = im_refresh_wireless_devices(null, ref count);
+            if (result != 0) throw new InvalidOperationException(GetLastError(
+                LocalizationService.Get("EnumerateDevicesFailed")));
+            if (count == 0) return [];
+
+            var devices = new NativeDeviceInfo[count];
+            for (var i = 0; i < devices.Length; ++i)
+            {
+                devices[i].StructSize = (uint)Marshal.SizeOf<NativeDeviceInfo>();
+                devices[i].Udid = string.Empty;
+                devices[i].Name = string.Empty;
+                devices[i].ProductType = string.Empty;
+                devices[i].OsVersion = string.Empty;
+                devices[i].ConnectionType = string.Empty;
+                devices[i].Status = string.Empty;
+            }
+            var capacity = count;
+            result = im_refresh_wireless_devices(devices, ref capacity);
+            if (result == (int)NativeResult.BufferTooSmall) continue;
+            if (result != 0) throw new InvalidOperationException(GetLastError(
+                LocalizationService.Get("EnumerateDevicesFailed")));
+            return devices.Take(checked((int)Math.Min(capacity, (uint)devices.Length))).ToArray();
+        }
+        throw new InvalidOperationException(LocalizationService.Get("EnumerateDevicesFailed"));
+    }
+
     public (bool Success, string Message) StartCapture(string udid, bool playAudio = true)
     {
         var result = im_start_capture_ex(udid, playAudio ? 1 : 0);
@@ -379,12 +446,12 @@ internal sealed class NativeCore : IDisposable
 
     public (bool Success, ulong Handle, string Message) CreateDeviceSession(string udid,
         uint width, uint height, uint fps, bool playAudio, double volume,
-        uint usbWidth = 0, uint usbHeight = 0)
+        uint usbWidth = 0, uint usbHeight = 0, uint usbProjectionMode = 0)
     {
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 9,
+            ApiVersion = 12,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,
@@ -394,7 +461,29 @@ internal sealed class NativeCore : IDisposable
         };
         options.Reserved[0] = usbWidth;
         options.Reserved[1] = usbHeight;
+        options.Reserved[2] = Math.Min(usbProjectionMode, 2U);
         var result = im_session_create(udid, ref options, out var handle);
+        return result == 0
+            ? (true, handle, LocalizationService.Get("CaptureStarted"))
+            : (false, 0, GetLastError(LocalizationService.Get("CannotStartCapture")));
+    }
+
+    public (bool Success, ulong Handle, string Message) CreateWirelessSession(
+        string deviceId, uint width, uint height, uint fps,
+        bool playAudio, double volume)
+    {
+        var options = new NativeCaptureOptions
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
+            ApiVersion = 12,
+            RequestedWidth = width,
+            RequestedHeight = height,
+            TargetFps = fps,
+            PlayAudio = playAudio ? 1 : 0,
+            AudioVolume = Math.Clamp((float)volume, 0, 1),
+            Reserved = new uint[5],
+        };
+        var result = im_wireless_session_create(deviceId, ref options, out var handle);
         return result == 0
             ? (true, handle, LocalizationService.Get("CaptureStarted"))
             : (false, 0, GetLastError(LocalizationService.Get("CannotStartCapture")));

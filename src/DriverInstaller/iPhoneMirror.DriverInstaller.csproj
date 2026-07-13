@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AssemblyName>iPhoneMirror.Driver</AssemblyName>
+    <RootNamespace>IPhoneMirror.DriverInstaller</RootNamespace>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\App\Assets\iPhoneMirror.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="..\App\Assets\iPhoneMirror.ico">
+      <Link>Assets\iPhoneMirror.ico</Link>
+    </Resource>
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\amd64\install-filter.exe"
+                      LogicalName="DriverPayload.amd64.install-filter.exe" />
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\amd64\libusb0.sys"
+                      LogicalName="DriverPayload.amd64.libusb0.sys" />
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\amd64\libusb0.dll"
+                      LogicalName="DriverPayload.amd64.libusb0.dll" />
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\x86\libusb0_x86.dll"
+                      LogicalName="DriverPayload.x86.libusb0_x86.dll" />
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\AUTHORS.txt"
+                      LogicalName="DriverPayload.licenses.AUTHORS.txt" />
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\COPYING_GPL.txt"
+                      LogicalName="DriverPayload.licenses.COPYING_GPL.txt" />
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\COPYING_LGPL.txt"
+                      LogicalName="DriverPayload.licenses.COPYING_LGPL.txt" />
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\README.txt"
+                      LogicalName="DriverPayload.licenses.README.txt" />
+    <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\libusb-win32-src-1.2.6.0.zip"
+                      LogicalName="DriverPayload.source.libusb-win32-src-1.2.6.0.zip" />
+  </ItemGroup>
+</Project>

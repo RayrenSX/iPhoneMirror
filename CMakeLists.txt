@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(iPhoneMirror VERSION 0.5.0 LANGUAGES CXX)
+project(iPhoneMirror VERSION 0.6.0 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "iPhoneMirror currently targets Windows 10/11 only")
@@ -18,3 +18,4 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_subdirectory(src/Core)
+add_subdirectory(src/WirelessHost)

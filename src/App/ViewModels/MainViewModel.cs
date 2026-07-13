@@ -28,6 +28,25 @@ internal sealed class ResolutionPreset(string resourceKey, uint width, uint heig
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
+internal sealed class UsbProjectionModeOption(UsbProjectionMode mode, string labelResourceKey,
+    string advantageResourceKey, string disadvantageResourceKey,
+    string noticeResourceKey) : INotifyPropertyChanged
+{
+    public UsbProjectionMode Mode { get; } = mode;
+    public string Label => LocalizationService.Get(labelResourceKey);
+    public string Advantage => LocalizationService.Get(advantageResourceKey);
+    public string Disadvantage => LocalizationService.Get(disadvantageResourceKey);
+    public string Notice => LocalizationService.Get(noticeResourceKey);
+    internal void NotifyLanguageChanged()
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Label)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Advantage)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Disadvantage)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Notice)));
+    }
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+
 internal sealed class MainViewModel : INotifyPropertyChanged
 {
     internal event Action<string, uint, uint>? DeviceVideoSizeChanged;
@@ -37,6 +56,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private static readonly bool EnableInteropPreview = false;
     private readonly NativeCore _core;
     private readonly IPhoneFilterDriverService _filterDriver = new();
+    private readonly DriverManagerLauncher _driverManager = new();
+    private readonly WirelessReceiverService _wirelessReceiver = new();
     // Serializes every native-core operation that can race USB teardown,
     // device enumeration, restart, or application shutdown.
     private readonly SemaphoreSlim _coreGate = new(1, 1);
@@ -47,6 +68,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private readonly CaptureShutdownCoordinator _shutdownCoordinator = new();
     private readonly Dictionary<string, DeviceCaptureState> _deviceSessions =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pausedWirelessDevices =
+        new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<NativeDeviceInfo> _lastUsbDevices = [];
     private bool _disposed;
     private DeviceViewModel? _selectedDevice;
     private string _environmentStatus = string.Empty;
@@ -60,10 +84,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     // It prevents a device switch from abandoning a failed/starting session.
     private readonly CaptureSessionOwnership _captureSession = new();
     private int _manualRefreshPending;
-    // Installation can restart the device node programmatically, but the
-    // libusb0 filter is only considered ready for this GUI after a real
-    // unplug/replug cycle has been observed for the exact UDID.
-    private readonly DriverReplugTracker _driverReplug = new();
     private ImageSource? _previewSource;
     // WPF's compositor can retain an ImageSource for more than one render
     // pass.  Reusing the immediately previous WriteableBitmap therefore lets
@@ -100,7 +120,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private NativeEnvironmentInfo? _lastEnvironment;
     private NativeCaptureStatus? _lastCaptureStatus;
     private IPhoneFilterDriverStatus _filterDriverStatus = new(
-        IPhoneFilterDriverState.NoDevice, string.Empty, null, null, string.Empty);
+        IPhoneFilterDriverState.NoDevice, null, string.Empty);
+    private string _wirelessReceiverName = WirelessReceiverConfiguration.DefaultReceiverName;
+    private string _wirelessStatus = string.Empty;
+    private bool _wirelessReceiverRunning;
+    private bool _wirelessReceiverReady;
     private readonly Queue<string> _visibleLogLines = new();
     private long _logPosition;
     private string _partialLogLine = string.Empty;
@@ -119,17 +143,35 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         new("Resolution540p", 960, 540),
     ];
     public IReadOnlyList<int> FrameRates { get; } = [120, 60, 30, 24];
+    public IReadOnlyList<UsbProjectionModeOption> UsbProjectionModes { get; } =
+    [
+        new(UsbProjectionMode.Demo, "UsbModeDemoLabel", "UsbModeDemoAdvantage",
+            "UsbModeDemoDisadvantage", "UsbModeDemoNotice"),
+        new(UsbProjectionMode.AirPlay, "UsbModeAirPlayLabel", "UsbModeAirPlayAdvantage",
+            "UsbModeAirPlayDisadvantage", "UsbModeAirPlayNotice"),
+        new(UsbProjectionMode.Aisi, "UsbModeAisiLabel", "UsbModeAisiAdvantage",
+            "UsbModeAisiDisadvantage", "UsbModeAisiNotice"),
+    ];
 
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
     public RelayCommand RefreshCommand { get; }
-    public RelayCommand DriverHelpCommand { get; }
-    public RelayCommand InstallDriverCommand { get; }
     public RelayCommand ApplyVideoSettingsCommand { get; }
     public RelayCommand ClearLogCommand { get; }
     public RelayCommand AdvancedSettingsCommand { get; }
+    public RelayCommand ApplyWirelessNameCommand { get; }
+    public RelayCommand OpenDriverManagerCommand { get; }
     public bool IsAdvancedMode { get => _advancedMode; private set { if (Set(ref _advancedMode, value)) OnPropertyChanged(nameof(AdvancedSettingsVisibility)); } }
-    public Visibility AdvancedSettingsVisibility => IsAdvancedMode ? Visibility.Visible : Visibility.Collapsed;
+    public bool IsWirelessSelected => SelectedDevice?.IsWireless == true;
+    public Visibility WirelessSettingsVisibility => Visibility.Visible;
+    private bool CurrentDeviceOwnsCapture => SelectedDevice is not null &&
+        DeviceViewModel.UdidEquals(_captureSession.OwnerUdid, SelectedDevice.Udid);
+    public Visibility UsbProjectionSettingsVisibility => SelectedDevice is not null &&
+        !IsWirelessSelected && !CurrentDeviceOwnsCapture && !HasCaptureSession
+        ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility AdvancedSettingsVisibility => IsAdvancedMode && !IsWirelessSelected &&
+        CurrentUsbProjectionMode == UsbProjectionMode.AirPlay
+        ? Visibility.Visible : Visibility.Collapsed;
 
     public DeviceViewModel? SelectedDevice
     {
@@ -140,6 +182,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public string EnvironmentStatus { get => _environmentStatus; private set => Set(ref _environmentStatus, value); }
     public string CaptureStatus { get => _captureStatus; private set => Set(ref _captureStatus, value); }
     public string DriverState { get => _driverState; private set => Set(ref _driverState, value); }
+    public string WirelessReceiverName
+    {
+        get => _wirelessReceiverName;
+        set
+        {
+            if (Set(ref _wirelessReceiverName, value))
+                ApplyWirelessNameCommand.NotifyCanExecuteChanged();
+        }
+    }
+    public string WirelessStatus { get => _wirelessStatus; private set => Set(ref _wirelessStatus, value); }
     private DeviceCaptureState? CurrentDeviceSession => SelectedDevice is null ? null :
         _deviceSessions.GetValueOrDefault(SelectedDevice.Udid);
     public ulong CurrentSessionHandle => CurrentDeviceSession?.Handle ?? 0;
@@ -155,10 +207,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             StartCommand.NotifyCanExecuteChanged();
             StopCommand.NotifyCanExecuteChanged();
             ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
-            InstallDriverCommand.NotifyCanExecuteChanged();
+            ApplyWirelessNameCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
         }
     }
     private bool IsOperationBusy => IsBusy;
+    internal int ConnectedDeviceCount => Devices.Count;
     public string DeviceCount => LocalizationService.Format("DeviceCountFormat", Devices.Count);
     public string SelectedName => SelectedDevice?.DisplayName ?? LocalizationService.Get("NoDeviceSelected");
     public string SelectedModel => SelectedDevice?.ModelDisplay ?? "—";
@@ -240,6 +294,34 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    private UsbProjectionMode CurrentUsbProjectionMode =>
+        CurrentDeviceSession?.UsbProjectionMode ?? UsbProjectionMode.Demo;
+
+    public UsbProjectionModeOption? SelectedUsbProjectionMode
+    {
+        get => UsbProjectionModes.FirstOrDefault(option => option.Mode == CurrentUsbProjectionMode);
+        set
+        {
+            var device = SelectedDevice;
+            if (value is null || device is null || device.IsWireless || IsOperationBusy) return;
+            var state = GetOrCreateDeviceState(device);
+            if (state.UsbProjectionMode == value.Mode) return;
+            state.UsbProjectionMode = value.Mode;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(AdvancedSettingsVisibility));
+            SetSettingsStatus("UsbProjectionModeSelectedFormat", value.Label);
+            AddUiLog($"USB projection mode {value.Mode} selected for {state.Udid}");
+            if (state.Handle != 0)
+            {
+                SetSettingsStatus("UsbProjectionModeRestarting");
+                _ = RestartUsbSessionAsync(device, state);
+            }
+        }
+    }
+
+    public bool CanChangeUsbProjectionMode => SelectedDevice is not null &&
+        !IsWirelessSelected && !IsOperationBusy;
+
     // Kept as a compatibility alias for older XAML and start options.
     public bool CaptureAudio { get => PlayAudio; set => PlayAudio = value; }
 
@@ -254,13 +336,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public string TargetFpsDisplay => LocalizationService.Format("TargetFpsFormat", SelectedFrameRate);
     public string LogText { get => _logText; private set => Set(ref _logText, value); }
     public string LogPathDisplay => _logPath;
-    public Visibility DriverInstallVisibility => !_driverReplug.IsPending(SelectedDevice?.Udid) &&
-        _filterDriverStatus.State is IPhoneFilterDriverState.Missing or
-            IPhoneFilterDriverState.PackageMissing
-            ? Visibility.Visible : Visibility.Collapsed;
-    public string DriverInstallButtonText => LocalizationService.Get(
-        _filterDriverStatus.State == IPhoneFilterDriverState.PackageMissing
-            ? "DriverPackageMissingButton" : "InstallCaptureDriver");
 
     public ImageSource? PreviewSource { get => _previewSource; private set => Set(ref _previewSource, value); }
 
@@ -276,21 +351,21 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _core = new NativeCore();
         _selectedResolutionPreset = ResolutionPresets[0];
         StartCommand = new RelayCommand(() => _ = StartAsync(),
-            () => SelectedDevice is not null && !_driverReplug.IsPending(SelectedDevice.Udid) &&
-                  !HasCaptureSession && !IsCapturing && !IsOperationBusy);
+            () => SelectedDevice is not null && !HasCaptureSession &&
+                !IsCapturing && !IsOperationBusy);
         StopCommand = new RelayCommand(() => _ = StopAsync(),
             () => HasCaptureSession && !IsOperationBusy);
         // A manual refresh is guaranteed to run after a short in-flight poll;
         // timer refreshes remain best-effort and never build up a queue.
         RefreshCommand = new RelayCommand(() => _ = RefreshAsync(forceDeviceEnumeration: true));
-        DriverHelpCommand = new RelayCommand(ShowDriverHelp);
-        InstallDriverCommand = new RelayCommand(() => _ = InstallSelectedDriverAsync(),
-            () => !IsOperationBusy && !IsCapturing &&
-                  !_driverReplug.IsPending(SelectedDevice?.Udid) && _filterDriverStatus.CanInstall);
         ApplyVideoSettingsCommand = new RelayCommand(() => _ = ApplyVideoSettingsAsync(),
             () => !IsOperationBusy);
         ClearLogCommand = new RelayCommand(ClearVisibleLog);
         AdvancedSettingsCommand = new RelayCommand(ShowAdvancedSettings, () => IsAdvancedMode);
+        OpenDriverManagerCommand = new RelayCommand(() => OpenDriverManager());
+        ApplyWirelessNameCommand = new RelayCommand(() => _ = RestartWirelessReceiverAsync(),
+            () => _wirelessReceiver.IsAvailable && !IsOperationBusy);
+        RefreshWirelessStatus();
         LocalizationService.LanguageChanged += OnLanguageChanged;
     }
 
@@ -317,34 +392,30 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             }
             if (_disposed) return;
 
-            // Polling during capture stays status-only. An explicit Refresh,
-            // however, performs usbmux/Lockdown discovery so a second iPhone
-            // appears without interrupting the active libusb0 capture. It
-            // deliberately skips GetEnvironment(), whose global USB probe is
-            // unnecessary here and unsafe to run beside a live libusb0 handle.
+            await EnsureWirelessReceiverStartedLockedAsync();
+            NativeEnvironmentInfo? environment = null;
+            IReadOnlyList<NativeDeviceInfo> wirelessDevices;
             if (AnyDeviceSession && !forceDeviceEnumeration)
             {
-                var activeCapture = await Task.Run(GetSelectedCaptureStatus);
-                ApplyCaptureStatus(activeCapture);
-                await PollBackgroundSessionErrorsAsync();
-                return;
-            }
-
-            NativeEnvironmentInfo? environment = null;
-            IReadOnlyList<NativeDeviceInfo> nativeDevices;
-            NativeCaptureStatus capture;
-            if (AnyDeviceSession)
-            {
-                (nativeDevices, capture) = await Task.Run(() =>
-                    (_core.GetDevices(), GetSelectedCaptureStatus()));
+                wirelessDevices = await Task.Run(_core.GetWirelessDevices);
             }
             else
             {
-                var result = await Task.Run(() =>
-                    (_core.GetEnvironment(), _core.GetDevices(), GetSelectedCaptureStatus()));
-                environment = result.Item1;
-                nativeDevices = result.Item2;
-                capture = result.Item3;
+                if (AnyDeviceSession)
+                {
+                    var result = await Task.Run(() =>
+                        (_core.GetDevices(), _core.GetWirelessDevices()));
+                    _lastUsbDevices = result.Item1;
+                    wirelessDevices = result.Item2;
+                }
+                else
+                {
+                    var result = await Task.Run(() =>
+                        (_core.GetEnvironment(), _core.GetDevices(), _core.GetWirelessDevices()));
+                    environment = result.Item1;
+                    _lastUsbDevices = result.Item2;
+                    wirelessDevices = result.Item3;
+                }
             }
 
             if (environment is { } currentEnvironment)
@@ -353,19 +424,22 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 UpdateEnvironmentStatus(currentEnvironment);
             }
 
-            var devices = nativeDevices
+            var devices = _lastUsbDevices.Concat(wirelessDevices)
                 .Where(device => !string.IsNullOrWhiteSpace(device.Udid))
                 .Select(DeviceViewModel.FromNative)
                 .GroupBy(device => device.Udid, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToList();
-            var captureActive = IsActiveCaptureState(capture.State);
+            RefreshWirelessStatus();
+            await SyncWirelessSessionsLockedAsync(devices.Where(device => device.IsWireless));
+            var captureActive = AnyDeviceSession;
             // Device discovery runs off the UI thread and can overlap a real
             // user click. A selection captured before that await is stale and
             // used to snap the highlight back to the old phone when the poll
             // completes. Read the current UDID only when applying the result.
             var currentSelectionUdid = SelectedDevice?.Udid;
             ReconcileDevices(devices, currentSelectionUdid, captureActive);
+            var capture = await Task.Run(GetSelectedCaptureStatus);
             ApplyCaptureStatus(capture);
             await PollBackgroundSessionErrorsAsync();
 
@@ -384,6 +458,116 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (gateHeld) _coreGate.Release();
             if (forceDeviceEnumeration) Interlocked.Exchange(ref _manualRefreshPending, 0);
         }
+    }
+
+    private async Task EnsureWirelessReceiverStartedLockedAsync()
+    {
+        if (!_wirelessReceiver.IsAvailable)
+        {
+            _wirelessReceiverRunning = _wirelessReceiverReady = false;
+            RefreshWirelessStatus();
+            return;
+        }
+        var status = _core.GetWirelessReceiverStatus();
+        _wirelessReceiverRunning = status.Running;
+        _wirelessReceiverReady = status.Ready;
+        if (!_wirelessReceiverRunning)
+        {
+            var hostPath = _wirelessReceiver.ExecutablePath;
+            if (hostPath is null) return;
+            var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(
+                WirelessReceiverName);
+            Set(ref _wirelessReceiverName, sanitized, nameof(WirelessReceiverName));
+            var started = await Task.Run(() => _core.StartWirelessReceiver(sanitized, hostPath));
+            _wirelessReceiverRunning = started.Success;
+            _wirelessReceiverReady = false;
+            if (!started.Success) AddUiLog(started.Message);
+        }
+        RefreshWirelessStatus();
+    }
+
+    private async Task SyncWirelessSessionsLockedAsync(IEnumerable<DeviceViewModel> connected)
+    {
+        var wireless = connected.ToList();
+        var connectedIds = wireless.Select(device => device.Udid)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in _deviceSessions.Where(pair =>
+                     DeviceViewModel.IsWirelessUdid(pair.Key) &&
+                     !connectedIds.Contains(pair.Key)).ToArray())
+        {
+            if (pair.Value.Handle != 0)
+            {
+                var handle = pair.Value.Handle;
+                await Task.Run(() => _core.StopDeviceSession(handle));
+                _core.DestroyDeviceSession(handle);
+            }
+            _deviceSessions.Remove(pair.Key);
+            _pausedWirelessDevices.Remove(pair.Key);
+            if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, pair.Key))
+            {
+                NativeCore.SelectPreviewSession(0);
+                SetCaptureSessionOwner(null);
+                _activeCaptureUdid = null;
+                IsCapturing = false;
+                ResetPreviewState();
+            }
+        }
+
+        foreach (var device in wireless)
+        {
+            if (_pausedWirelessDevices.Contains(device.Udid)) continue;
+            if (_deviceSessions.TryGetValue(device.Udid, out var existing) &&
+                existing.Handle != 0) continue;
+            var playAudio = !_deviceSessions.Any(pair =>
+                DeviceViewModel.IsWirelessUdid(pair.Key) && pair.Value.Handle != 0 &&
+                pair.Value.PlayAudio);
+            var state = existing ?? new DeviceCaptureState
+            {
+                Udid = device.Udid,
+                RenderWidth = 0,
+                RenderHeight = 0,
+                FrameRate = 60,
+                PlayAudio = playAudio,
+                Volume = PlaybackVolume,
+            };
+            _deviceSessions[device.Udid] = state;
+            var result = await Task.Run(() => CreateSession(device, state));
+            state.Handle = result.Success ? result.Handle : 0;
+            if (!result.Success) AddUiLog(LocalizationService.Format(
+                "StartFailedFormat", result.Message));
+        }
+    }
+
+    private async Task RestartWirelessReceiverAsync()
+    {
+        if (_disposed || IsOperationBusy) return;
+        IsBusy = true;
+        var gateHeld = false;
+        try
+        {
+            await _coreGate.WaitAsync();
+            gateHeld = true;
+            if (_disposed) return;
+            await SyncWirelessSessionsLockedAsync([]);
+            await Task.Run(_core.StopWirelessReceiver);
+            _wirelessReceiverRunning = _wirelessReceiverReady = false;
+            var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(
+                WirelessReceiverName);
+            Set(ref _wirelessReceiverName, sanitized, nameof(WirelessReceiverName));
+            await EnsureWirelessReceiverStartedLockedAsync();
+            AddUiLog(LocalizationService.Format("WirelessRunningFormat", sanitized));
+        }
+        catch (Exception error)
+        {
+            WirelessStatus = LocalizationService.Format("StartFailedFormat", error.Message);
+            AddUiLog(WirelessStatus);
+        }
+        finally
+        {
+            if (gateHeld) _coreGate.Release();
+            IsBusy = false;
+        }
+        await RefreshAsync(forceDeviceEnumeration: true);
     }
 
     private void ReconcileDevices(
@@ -411,8 +595,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 DeviceViewModel.UdidEquals(device.Udid, sessionUdid));
             if (retained is not null) desired.Add(retained);
         }
-
-        TrackDriverReplugCycle(desired);
 
         var desiredByUdid = desired
             .GroupBy(device => device.Udid, StringComparer.OrdinalIgnoreCase)
@@ -501,31 +683,21 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedOs));
         OnPropertyChanged(nameof(SelectedUdid));
         OnPropertyChanged(nameof(SelectedConnection));
+        OnPropertyChanged(nameof(IsWirelessSelected));
+        OnPropertyChanged(nameof(WirelessSettingsVisibility));
+        OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
+        OnPropertyChanged(nameof(SelectedUsbProjectionMode));
+        OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
+        OnPropertyChanged(nameof(AdvancedSettingsVisibility));
     }
 
     private void SetCaptureSessionOwner(string? udid)
     {
         if (!_captureSession.SetOwner(udid)) return;
         OnPropertyChanged(nameof(HasCaptureSession));
+        OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
         StartCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
-    }
-
-    private void TrackDriverReplugCycle(IReadOnlyList<DeviceViewModel> discovered)
-    {
-        if (!_driverReplug.Any) return;
-        foreach (var udid in _driverReplug.ObservePresent(discovered.Select(device => device.Udid)))
-        {
-            AddUiLog(LocalizationService.Format("DriverReplugDetectedFormat", udid));
-            NotifyDriverReplugStateChanged();
-        }
-    }
-
-    private void NotifyDriverReplugStateChanged()
-    {
-        OnPropertyChanged(nameof(DriverInstallVisibility));
-        StartCommand.NotifyCanExecuteChanged();
-        InstallDriverCommand.NotifyCanExecuteChanged();
     }
 
     private static bool IsActiveCaptureState(CaptureState state) => state is
@@ -592,17 +764,17 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         var gateHeld = false;
         try
         {
-            // One-click start includes the per-iPhone filter setup. Windows
-            // still displays its normal UAC consent dialog; the main GUI never
-            // runs elevated.
-            if (!await EnsureSelectedDriverReadyAsync(confirmInstall: true)) return;
+            var requestedDevice = SelectedDevice;
+            if (requestedDevice is null) return;
+            var preflight = EnsureSourceReady(requestedDevice);
+            if (!preflight.Success) return;
             // A user click that lands during the short background poll should
             // run immediately after it, rather than being silently discarded.
             await _coreGate.WaitAsync();
             gateHeld = true;
             if (_disposed) return;
             var device = SelectedDevice;
-            if (device is null) return;
+            if (device is null || !DeviceViewModel.UdidEquals(device.Udid, requestedDevice.Udid)) return;
             _lastPreviewTimestamp = 0;
             _renderedFrames = 0;
             _renderClock.Restart();
@@ -622,13 +794,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 Volume = PlaybackVolume,
             };
             _deviceSessions[device.Udid] = state;
+            if (device.IsWireless) _pausedWirelessDevices.Remove(device.Udid);
             state.IsStarting = true;
             SetCaptureSessionOwner(device.Udid);
-            var created = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
-                state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
-                state.PlayAudio, state.Volume / 100.0,
-                IsAdvancedMode ? state.AdvancedUsbWidth : 0,
-                IsAdvancedMode ? state.AdvancedUsbHeight : 0));
+            var created = await Task.Run(() => CreateSession(device, state));
             state.IsStarting = false;
             state.Handle = created.Success ? created.Handle : 0;
             // The ownership marker was set before the blocking native start,
@@ -715,10 +884,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             // restore. Keep that wait off the WPF UI thread.
             var state = CurrentDeviceSession;
             if (state is null || state.Handle == 0) return;
+            var stoppedUdid = state.Udid;
             var handle = state.Handle;
             await Task.Run(() => _core.StopDeviceSession(handle));
             _core.DestroyDeviceSession(handle);
             state.Handle = 0;
+            if (DeviceViewModel.IsWirelessUdid(stoppedUdid))
+                _pausedWirelessDevices.Add(stoppedUdid);
             NativeCore.SelectPreviewSession(0);
             OnPropertyChanged(nameof(CurrentSessionHandle));
             SetCaptureSessionOwner(null);
@@ -801,9 +973,47 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     internal ulong GetDeviceSessionHandle(string udid) =>
         _deviceSessions.GetValueOrDefault(udid)?.Handle ?? 0;
 
+    internal bool IsDeviceAudioEnabled(string udid) =>
+        _deviceSessions.TryGetValue(udid, out var state) &&
+        state.Handle != 0 && state.PlayAudio;
+
+    internal (bool Success, string Message) SetDeviceAudioEnabled(string udid, bool enabled)
+    {
+        if (!_deviceSessions.TryGetValue(udid, out var state) || state.Handle == 0)
+            return (false, LocalizationService.Get("StatusWaitingDevice"));
+
+        var result = InvokeDeviceSetting(() => _core.SetDeviceAudioEnabled(state.Handle, enabled));
+        if (!result.Success) return result;
+
+        state.PlayAudio = enabled;
+        if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
+        {
+            Set(ref _playAudio, enabled, nameof(PlayAudio));
+            OnPropertyChanged(nameof(CaptureAudio));
+        }
+        SetSettingsStatus(enabled ? "AudioPlaybackEnabled" : "AudioPlaybackMuted");
+        return (true, LocalizationService.Get(
+            enabled ? "AudioPlaybackEnabled" : "AudioPlaybackMuted"));
+    }
+
+    internal (bool Success, string Message) MuteOtherDeviceSessions(string currentUdid)
+    {
+        var otherIds = IndependentWindowAudioPolicy.GetOtherDeviceIds(currentUdid,
+            _deviceSessions.Where(pair => pair.Value.Handle != 0)
+                .Select(pair => pair.Key));
+        foreach (var udid in otherIds)
+        {
+            var result = SetDeviceAudioEnabled(udid, false);
+            if (!result.Success) return result;
+        }
+        return (true, LocalizationService.Get("IndependentWindowOtherWindowsMuted"));
+    }
+
     internal async Task<(bool Success, ulong Handle, string Message)> StartBackgroundSessionAsync(
         DeviceViewModel device)
     {
+        var preflight = EnsureSourceReady(device);
+        if (!preflight.Success) return (false, 0, preflight.Message);
         await _coreGate.WaitAsync();
         try
         {
@@ -819,11 +1029,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 Volume = 100,
             };
             _deviceSessions[device.Udid] = state;
-            var result = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
-                state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
-                playAudio: false, state.Volume / 100.0,
-                IsAdvancedMode ? state.AdvancedUsbWidth : 0,
-                IsAdvancedMode ? state.AdvancedUsbHeight : 0));
+            var result = await Task.Run(() => CreateSession(device, state));
             state.Handle = result.Success ? result.Handle : 0;
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
             {
@@ -888,7 +1094,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (!captureActive && status.State is CaptureState.Idle or CaptureState.Stopped or CaptureState.Error)
             _activeCaptureUdid = null;
         if (status.State is not CaptureState.Idle || SelectedDevice is null)
-            CaptureStatus = GetCaptureStatusText(status);
+            CaptureStatus = GetCaptureStatusText(status, IsWirelessSelected);
         Resolution = status.Width > 0 && status.Height > 0 ? $"{status.Width}×{status.Height}" : "—";
         if (status.Width > 0 && status.Height > 0 &&
             (status.Width != _sourceVideoWidth || status.Height != _sourceVideoHeight))
@@ -934,34 +1140,49 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void UpdateSelectedDriverStatus()
     {
-        var udid = SelectedDevice?.Udid;
-        _filterDriverStatus = _filterDriver.Inspect(udid);
-        if (_filterDriverStatus.State == IPhoneFilterDriverState.Provisional &&
-            !string.IsNullOrWhiteSpace(udid))
+        if (IsWirelessSelected)
+        {
+            RefreshWirelessStatus();
+            return;
+        }
+        if (SelectedDevice is null) return;
+        _filterDriverStatus = InspectDriverStatus(SelectedDevice);
+        if (_lastEnvironment is { } environment)
+            UpdateEnvironmentStatus(environment);
+        else
+            ApplySelectedDriverState();
+    }
+
+    private IPhoneFilterDriverStatus InspectDriverStatus(DeviceViewModel device,
+        bool requireExactBackend = false)
+    {
+        var status = _filterDriver.Inspect(device.Udid);
+        if (status.State == IPhoneFilterDriverState.Provisional)
         {
             try
             {
-                _filterDriverStatus = _filterDriver.Inspect(
-                    udid, _core.IsLibUsb0DeviceAvailable(udid));
+                status = _filterDriver.Inspect(device.Udid,
+                    _core.IsLibUsb0DeviceAvailable(device.Udid));
             }
-            catch
+            catch (Exception error)
             {
+                if (requireExactBackend)
+                    return new(IPhoneFilterDriverState.Error, status.InstalledVersion,
+                        $"Exact libusb0 device verification failed: {error.Message}");
                 // Keep the conservative Provisional state. Native capture
                 // repeats the same exact-serial preflight before activation.
             }
         }
-        ApplySelectedDriverState();
-        OnPropertyChanged(nameof(DriverInstallVisibility));
-        OnPropertyChanged(nameof(DriverInstallButtonText));
-        InstallDriverCommand.NotifyCanExecuteChanged();
+        return status;
     }
 
     private void ApplySelectedDriverState()
     {
         if (SelectedDevice is null) return;
-        if (_driverReplug.IsPending(SelectedDevice.Udid))
+        if (IsWirelessSelected)
         {
-            DriverState = LocalizationService.Get("DriverReplugRequired");
+            DriverState = WirelessStatus;
+            EnvironmentStatus = WirelessStatus;
             return;
         }
         DriverState = _filterDriverStatus.State switch
@@ -972,105 +1193,142 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 "DriverDeviceFilterProvisionalFormat", _filterDriverStatus.InstalledVersion ?? "?"),
             IPhoneFilterDriverState.Missing => LocalizationService.Get("DriverDeviceFilterMissing"),
             IPhoneFilterDriverState.PendingRestart => LocalizationService.Get("DriverReplugRequired"),
-            IPhoneFilterDriverState.PackageMissing => LocalizationService.Get("DriverPackageMissing"),
             IPhoneFilterDriverState.InvalidStack => LocalizationService.Get("DriverInvalidAppleStack"),
             IPhoneFilterDriverState.Error => LocalizationService.Get("DriverFilterStateError"),
             _ => DriverState,
         };
     }
 
-    private async Task InstallSelectedDriverAsync()
+    private (bool Success, string Message) EnsureSourceReady(
+        DeviceViewModel device)
     {
-        if (_disposed || IsOperationBusy || IsCapturing || SelectedDevice is null) return;
-        IsBusy = true;
-        try
+        if (device.IsWireless)
         {
-            await EnsureSelectedDriverReadyAsync(confirmInstall: true);
+            if (!_wirelessReceiver.IsAvailable || !_wirelessReceiverRunning)
+            {
+                var message = LocalizationService.Get("WirelessReceiverMissing");
+                if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
+                    CaptureStatus = message;
+                RefreshWirelessStatus();
+                return (false, message);
+            }
+
+            if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
+                CaptureStatus = WirelessStatus;
+            ApplySelectedDriverState();
+            return (true, WirelessStatus);
         }
-        finally
+
+        // Wireless devices return above and never enter the USB driver path.
+        // A real start click requires an exact serial-level libusb0 result;
+        // the provisional background status is not sufficient here.
+        var driverStatus = InspectDriverStatus(device, requireExactBackend: true);
+        if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
         {
-            IsBusy = false;
+            _filterDriverStatus = driverStatus;
+            ApplySelectedDriverState();
         }
+        if (driverStatus.CanStartCapture)
+        {
+            if (driverStatus.State == IPhoneFilterDriverState.Provisional)
+                AddUiLog("driver preflight is provisional; native libusb0 serial enumeration is authoritative");
+            return (true, string.Empty);
+        }
+        var failure = LocalizationService.Get(driverStatus.State switch
+        {
+            IPhoneFilterDriverState.NoDevice => "DriverReconnectPhone",
+            IPhoneFilterDriverState.PendingRestart => "DriverReplugRequired",
+            IPhoneFilterDriverState.Missing => "DriverExternalRequired",
+            IPhoneFilterDriverState.InvalidStack => "DriverInvalidAppleStack",
+            _ => "DriverFilterStateError",
+        });
+        if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
+            CaptureStatus = failure;
+        AddUiLog($"driver preflight: {driverStatus.Diagnostic}");
+        if (driverStatus.State is IPhoneFilterDriverState.PendingRestart or
+            IPhoneFilterDriverState.Missing or IPhoneFilterDriverState.InvalidStack or
+            IPhoneFilterDriverState.Error)
+            OpenDriverManager(automatic: true);
+        return (false, failure);
     }
 
-    private async Task<bool> EnsureSelectedDriverReadyAsync(bool confirmInstall)
+    private bool OpenDriverManager(bool automatic = false)
     {
-        var device = SelectedDevice;
-        if (device is null) return false;
-        if (_driverReplug.IsPending(device.Udid))
+        var result = _driverManager.Launch();
+        if (result.Success)
         {
-            CaptureStatus = LocalizationService.Get("DriverReplugRequired");
-            AddUiLog(LocalizationService.Get("DriverReplugRequired"));
-            return false;
-        }
-        UpdateSelectedDriverStatus();
-        if (_filterDriverStatus.CanStartCapture)
-        {
-            if (_filterDriverStatus.State == IPhoneFilterDriverState.Provisional)
-                AddUiLog("driver preflight is provisional; native libusb0 serial enumeration is authoritative");
+            AddUiLog(LocalizationService.Get(automatic
+                ? "DriverManagerOpenedAutomatically"
+                : "DriverManagerOpened"));
             return true;
         }
-        if (!_filterDriverStatus.CanInstall)
-        {
-            CaptureStatus = LocalizationService.Get(_filterDriverStatus.State switch
-            {
-                IPhoneFilterDriverState.NoDevice => "DriverReconnectPhone",
-                IPhoneFilterDriverState.PendingRestart => "DriverReplugRequired",
-                IPhoneFilterDriverState.PackageMissing => "DriverPackageMissing",
-                IPhoneFilterDriverState.InvalidStack => "DriverInvalidAppleStack",
-                _ => "DriverFilterStateError",
-            });
-            AddUiLog($"driver preflight: {_filterDriverStatus.Diagnostic}");
-            return false;
-        }
 
-        if (confirmInstall && MessageBox.Show(
-                LocalizationService.Format("DriverInstallConfirmFormat", device.DisplayName),
-                LocalizationService.Get("DriverInstallTitle"), MessageBoxButton.YesNo,
-                MessageBoxImage.Information, MessageBoxResult.Yes) != MessageBoxResult.Yes)
-        {
-            AddUiLog(LocalizationService.Get("DriverInstallDeclined"));
-            return false;
-        }
-
-        CaptureStatus = LocalizationService.Get("DriverInstalling");
-        AddUiLog(LocalizationService.Format("DriverInstallStartingFormat", device.Udid));
-        var result = await _filterDriver.InstallAsync(device.Udid);
-        AddUiLog(LocalizationService.Format("DriverInstallResultFormat", result.Message,
-            result.LogPath ?? "-"));
-        if (!result.Success)
-        {
-            CaptureStatus = result.Cancelled
-                ? LocalizationService.Get("DriverInstallCancelled")
-                : LocalizationService.Format("DriverInstallFailedFormat", result.Message);
-            UpdateSelectedDriverStatus();
-            return false;
-        }
-
-        // Require and observe a physical unplug/replug after every actual
-        // installation. A successful SetupAPI restart is not sufficient for
-        // every Apple USB stack/phone combination, especially with two phones.
-        _driverReplug.MarkInstalled(device.Udid);
-        NotifyDriverReplugStateChanged();
-        CaptureStatus = LocalizationService.Get("DriverReplugRequired");
-        DriverState = LocalizationService.Get("DriverReplugRequired");
-        MessageBox.Show(LocalizationService.Get("DriverReplugRequired"),
-            LocalizationService.Get("DriverInstallTitle"), MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        var failure = LocalizationService.Format("DriverManagerLaunchFailedFormat",
+            result.Message);
+        AddUiLog(failure);
+        if (!automatic) CaptureStatus = failure;
+        MessageBox.Show(failure, LocalizationService.Get("DriverManagerTitle"),
+            MessageBoxButton.OK, MessageBoxImage.Error);
         return false;
     }
 
-    private static string GetCaptureStatusText(NativeCaptureStatus status) => status.State switch
+    private static string GetCaptureStatusText(NativeCaptureStatus status, bool wireless) => status.State switch
     {
         CaptureState.Idle => LocalizationService.Get("CaptureIdle"),
-        CaptureState.ActivatingUsb => LocalizationService.Get("CaptureActivating"),
-        CaptureState.WaitingForDevice => LocalizationService.Get("CaptureWaitingDevice"),
-        CaptureState.Handshaking => LocalizationService.Get("CaptureHandshaking"),
-        CaptureState.Streaming => LocalizationService.Get("CaptureStreaming"),
-        CaptureState.Stopping => LocalizationService.Get("CaptureStopping"),
-        CaptureState.Stopped => LocalizationService.Get("CaptureStopped"),
+        CaptureState.ActivatingUsb => LocalizationService.Get(wireless ? "WirelessStarting" : "CaptureActivating"),
+        CaptureState.WaitingForDevice => LocalizationService.Get(wireless ? "WirelessWaitingDevice" : "CaptureWaitingDevice"),
+        CaptureState.Handshaking => LocalizationService.Get(wireless ? "WirelessConnecting" : "CaptureHandshaking"),
+        CaptureState.Streaming => LocalizationService.Get(wireless ? "WirelessStreaming" : "CaptureStreaming"),
+        CaptureState.Stopping => LocalizationService.Get(wireless ? "WirelessStopping" : "CaptureStopping"),
+        CaptureState.Stopped => LocalizationService.Get(wireless ? "WirelessStopped" : "CaptureStopped"),
         _ => LocalizationService.Get("CaptureError"),
     };
+
+    private void RefreshWirelessStatus()
+    {
+        if (!_wirelessReceiver.IsAvailable)
+        {
+            WirelessStatus = LocalizationService.Get("WirelessReceiverMissing");
+        }
+        else if (!_wirelessReceiverRunning || !_wirelessReceiverReady)
+            WirelessStatus = LocalizationService.Get("WirelessStarting");
+        else WirelessStatus = LocalizationService.Format(
+            "WirelessRunningFormat", WirelessReceiverName);
+        if (IsWirelessSelected) ApplySelectedDriverState();
+    }
+
+    private (bool Success, ulong Handle, string Message) CreateSession(
+        DeviceViewModel device, DeviceCaptureState state)
+    {
+        if (device.IsWireless)
+        {
+            return _core.CreateWirelessSession(device.Udid,
+                state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
+                state.PlayAudio, state.Volume / 100.0);
+        }
+        return _core.CreateDeviceSession(device.Udid,
+            state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
+            state.PlayAudio, state.Volume / 100.0,
+            IsAdvancedMode ? state.AdvancedUsbWidth : 0,
+            IsAdvancedMode ? state.AdvancedUsbHeight : 0,
+            (uint)state.UsbProjectionMode);
+    }
+
+    private DeviceCaptureState GetOrCreateDeviceState(DeviceViewModel device)
+    {
+        if (_deviceSessions.TryGetValue(device.Udid, out var state)) return state;
+        state = new DeviceCaptureState
+        {
+            Udid = device.Udid,
+            RenderWidth = SelectedResolutionPreset.Width,
+            RenderHeight = SelectedResolutionPreset.Height,
+            FrameRate = SelectedFrameRate,
+            PlayAudio = PlayAudio,
+            Volume = PlaybackVolume,
+        };
+        _deviceSessions[device.Udid] = state;
+        return state;
+    }
 
     private void SetSettingsStatus(string resourceKey, params object?[] arguments)
     {
@@ -1091,6 +1349,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _selectedLanguage = LocalizationService.SelectedLanguage;
         OnPropertyChanged(nameof(SelectedLanguage));
         foreach (var preset in ResolutionPresets) preset.NotifyLanguageChanged();
+        foreach (var mode in UsbProjectionModes) mode.NotifyLanguageChanged();
 
         foreach (var device in Devices) device.NotifyLanguageChanged();
 
@@ -1100,8 +1359,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedOs));
         OnPropertyChanged(nameof(TargetResolutionDisplay));
         OnPropertyChanged(nameof(TargetFpsDisplay));
-        OnPropertyChanged(nameof(DriverInstallButtonText));
-
         if (_lastEnvironment is { } environment) UpdateEnvironmentStatus(environment);
         else
         {
@@ -1114,11 +1371,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             SettingsStatus = LocalizationService.Format(_settingsStatusKey, _settingsStatusArguments);
         if (_visibleLogLines.Count == 0) PublishLogText();
         ApplySelectedDriverState();
-    }
-
-    private void ShowDriverHelp()
-    {
-        new Windows.DriverHelpWindow { Owner = Application.Current?.MainWindow }.ShowDialog();
+        RefreshWirelessStatus();
     }
 
     internal void EnableAdvancedMode()
@@ -1129,7 +1382,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void ShowAdvancedSettings()
     {
-        if (SelectedDevice is null) return;
+        if (SelectedDevice is null || SelectedDevice.IsWireless) return;
         var state = CurrentDeviceSession ?? new DeviceCaptureState
         {
             Udid = SelectedDevice.Udid,
@@ -1151,7 +1404,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             state.AdvancedUsbHeight = window.RequestedHeight;
             SetRawSettingsStatus($"USB {window.RequestedWidth}×{window.RequestedHeight}");
             AddUiLog($"Advanced USB request {window.RequestedWidth}x{window.RequestedHeight} saved for {state.Udid}");
-            if (state.Handle != 0) _ = RestartWithAdvancedUsbAsync(device, state);
+            if (state.Handle != 0) _ = RestartUsbSessionAsync(device, state);
         }
         if (window.DisableAdvancedModeRequested)
         {
@@ -1159,13 +1412,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             AdvancedSettingsCommand.NotifyCanExecuteChanged();
             state.AdvancedUsbWidth = state.AdvancedUsbHeight = 0;
             SetRawSettingsStatus(LocalizationService.Get("AdvancedModeDisabled"));
-            if (state.Handle != 0) _ = RestartWithAdvancedUsbAsync(device, state);
+            if (state.Handle != 0) _ = RestartUsbSessionAsync(device, state);
         }
     }
 
-    private async Task RestartWithAdvancedUsbAsync(DeviceViewModel device, DeviceCaptureState state)
+    private async Task RestartUsbSessionAsync(DeviceViewModel device, DeviceCaptureState state)
     {
-        if (IsBusy || state.Handle == 0) return;
+        if (device.IsWireless || IsBusy || state.Handle == 0) return;
         IsBusy = true;
         var gateHeld = false;
         try
@@ -1185,10 +1438,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             for (var attempt = 1; attempt <= 3; attempt++)
             {
                 await Task.Delay(attempt == 1 ? 1500 : 2500);
-                created = await Task.Run(() => _core.CreateDeviceSession(device.Udid,
-                    state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
-                    state.PlayAudio, state.Volume / 100.0,
-                    state.AdvancedUsbWidth, state.AdvancedUsbHeight));
+                created = await Task.Run(() => CreateSession(device, state));
                 if (!created.Success)
                 {
                     lastFailure = new InvalidOperationException(created.Message);
@@ -1214,10 +1464,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 }
                 if (ready)
                 {
-                    IsCapturing = true;
-                    NativeCore.SelectPreviewSession(state.Handle);
-                    OnPropertyChanged(nameof(CurrentSessionHandle));
-                    SetRawSettingsStatus("Advanced USB request applied");
+                    var appliedMode = UsbProjectionModes.FirstOrDefault(option =>
+                        option.Mode == state.UsbProjectionMode)?.Label ?? state.UsbProjectionMode.ToString();
+                    if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, state.Udid))
+                    {
+                        IsCapturing = true;
+                        NativeCore.SelectPreviewSession(state.Handle);
+                        OnPropertyChanged(nameof(CurrentSessionHandle));
+                        SetSettingsStatus("UsbProjectionModeAppliedFormat", appliedMode);
+                    }
+                    AddUiLog($"USB projection mode {state.UsbProjectionMode} applied for {state.Udid}");
                     return;
                 }
                 try { await Task.Run(() => _core.StopDeviceSession(created.Handle)); } catch { }
@@ -1231,7 +1487,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             SetRawSettingsStatus(error.Message);
             state.Handle = 0;
-            IsCapturing = false;
+            if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, state.Udid))
+                IsCapturing = false;
             OnPropertyChanged(nameof(HasCaptureSession));
         }
         finally

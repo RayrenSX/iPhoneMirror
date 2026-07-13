@@ -16,8 +16,8 @@ Please use
 [GitHub private vulnerability reporting](https://github.com/RayrenSX/iPhoneMirror/security/advisories/new).
 Do not open a public issue for vulnerabilities involving:
 
-- the elevated driver-installation helper or registry filters;
-- privilege escalation or unsafe file/hash verification;
+- unsafe external-driver detection or accidental registry mutation;
+- privilege escalation or unsafe file handling;
 - memory safety in USB, protocol, decoder or renderer code;
 - exposure of UDIDs, pairing data, logs, screen content or audio;
 - crafted USB/CoreMedia/H.264 data that crashes or compromises the host.

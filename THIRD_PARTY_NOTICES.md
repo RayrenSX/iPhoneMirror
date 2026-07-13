@@ -30,22 +30,39 @@ links to the library.
 ## libusb-win32 1.2.6.0
 
 `third_party/libusb-win32/` contains the public compatibility header and the
-x64 dynamic import library used by the native core.
-
-The release package also intentionally includes the unmodified libusb-win32
-1.2.6.0 filter driver, user-mode DLLs and filter installer under
-`src/App/Drivers/libusb-win32-1.2.6.0/`. The complete corresponding upstream
-source archive is distributed beside those binaries.
+x64 dynamic import library used by the native core. The standalone driver
+manager also carries the signed upstream runtime payload under
+`src/DriverInstaller/Assets/libusb-win32-1.2.6.0/`; it is intentionally absent
+from the main iPhoneMirror application output.
 
 - Project: https://github.com/mcuee/libusb-win32
 - Release archive: https://sourceforge.net/projects/libusb-win32/files/libusb-win32-releases/1.2.6.0/
-- Kernel driver: GNU General Public License version 3
-- Library and installer: GNU Lesser General Public License version 3
-- Included licenses: `COPYING_GPL.txt` and `COPYING_LGPL.txt`
-- Corresponding source: `libusb-win32-src-1.2.6.0.zip`
+- Dynamic import library: GNU Lesser General Public License version 3
+- Driver payload licenses: `src/DriverInstaller/Assets/libusb-win32-1.2.6.0/COPYING_GPL.txt`,
+  `COPYING_LGPL.txt`, `README.txt` and `AUTHORS.txt`
+- Driver payload hashes and signature validation are enforced by
+  `src/DriverInstaller/Services/DriverConstants.cs` and `DriverPayload.cs`.
 
-The bundled `libusb0.sys` and DLL files carry valid upstream Authenticode
-signatures. The upstream `install-filter.exe` is not Authenticode-signed; the
-iPhoneMirror compiled helper verifies its exact SHA-256 before execution.
+The driver manager does not copy proprietary Aisi binaries. Apple USB support
+is installed from a signed offline AppleMobileDeviceSupport MSI when available,
+or from Apple's official iTunes installer when the user authorizes that fallback.
+Apple software is not redistributed in this repository.
+
+## AirPlayServer 1.1.0 wireless receiver
+
+`third_party/airplay-server/` contains a pinned runtime subset of the
+AirPlayServer x64 release with local compatibility patches. The GPL-licensed
+`iPhoneMirror.WirelessHost.exe` process loads its protocol/decoder DLL and sends
+decoded I420 video and PCM audio to the MIT application over a named pipe. The
+MIT application and native capture core do not link to the receiver DLL.
+
+- Project: https://github.com/xenos1337/AirPlayServer
+- Version/commit: v1.1.0 / `ff149b2e768bf9ae93199de941ab170571a941a4`
+- AirPlayServer wrapper: MIT
+- PlayFair implementation and receiver runtime: GPL version 3
+- FFmpeg 4.4.2 runtime: LGPL version 2.1 or later
+- Fraunhofer FDK AAC: Fraunhofer FDK AAC license
+- Exact hashes, source links and license files:
+  `third_party/airplay-server/SOURCE.md`
 
 All third-party components are provided without warranty.
