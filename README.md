@@ -18,10 +18,11 @@
   <img alt="Windows 10 and 11 x64" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4">
 </p>
 
-> [!IMPORTANT]
-> 当前是公开预览版。程序尚未进行商业 Authenticode 签名，Windows 可能显示
-> SmartScreen 或“未知发布者”提示。Apple Screen Capture 是私有协议，未来 iOS
-> 更新可能需要同步适配。
+## 社区交流
+
+欢迎加入 QQ 群，与其他用户交流使用体验、反馈问题、讨论功能建议。
+
+QQ群号：**1050045279**
 
 ## 下载
 
