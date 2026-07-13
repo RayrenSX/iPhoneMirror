@@ -3,14 +3,7 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
-## [Unreleased]
-
-### Changed
-
-- Relicense original iPhoneMirror code from MIT to GNU GPL version 3 only.
-  Third-party components continue under their respective upstream licenses.
-
-## [0.6.0-preview.1] - 2026-07-13
+## [0.6.0-preview.1] - 2026-07-14
 
 ### Added
 
@@ -33,6 +26,9 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ### Changed
 
+- License original iPhoneMirror code under GNU GPL version 3 only. Previous
+  releases remain under their original licenses, and third-party components
+  continue under their respective upstream licenses.
 - Treat the capture driver as an external prerequisite. iPhoneMirror now only
   detects the selected device's capture-driver readiness.
 - Update release packaging, SBOM metadata and documentation for the driverless
