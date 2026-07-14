@@ -306,7 +306,13 @@
                             VerticalAlignment="Center" Margin="2,0"/>
                     <ListBox x:Name="DeviceListBox" Grid.Row="4" ItemsSource="{Binding Devices}"
                              SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
-                             PreviewMouseRightButtonDown="OnDeviceListRightButtonDown">
+                             AllowDrop="True"
+                             PreviewMouseLeftButtonDown="OnDeviceListLeftButtonDown"
+                             PreviewMouseMove="OnDeviceListMouseMove"
+                             PreviewMouseLeftButtonUp="OnDeviceListLeftButtonUp"
+                             PreviewMouseRightButtonDown="OnDeviceListRightButtonDown"
+                             DragOver="OnDeviceListDragOver"
+                             Drop="OnDeviceListDrop">
                         <ListBox.Resources>
                             <Style TargetType="ContextMenu">
                                 <Setter Property="Background" Value="#151515"/>
@@ -501,20 +507,14 @@
                         <controls:NativePreviewHost x:Name="MainPreviewHost">
                             <controls:NativePreviewHost.Style>
                                 <Style TargetType="{x:Type controls:NativePreviewHost}">
-                                    <!-- Keep a live 1 px native target while the WPF connection state
-                                         is shown. Recreating an HwndHost at capture time can briefly
-                                         attach the renderer at the wrong size. -->
-                                    <Setter Property="Width" Value="1"/>
-                                    <Setter Property="Height" Value="1"/>
-                                    <Setter Property="HorizontalAlignment" Value="Left"/>
-                                    <Setter Property="VerticalAlignment" Value="Top"/>
+                                    <!-- HwndHost airspace cannot be painted over by WPF. Remove it
+                                         from idle layout entirely instead of shrinking it through an
+                                         intermediate native surface that DWM can expose for a frame. -->
+                                    <Setter Property="Visibility" Value="Collapsed"/>
                                     <Setter Property="IsHitTestVisible" Value="False"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsCapturing}" Value="True">
-                                            <Setter Property="Width" Value="Auto"/>
-                                            <Setter Property="Height" Value="Auto"/>
-                                            <Setter Property="HorizontalAlignment" Value="Stretch"/>
-                                            <Setter Property="VerticalAlignment" Value="Stretch"/>
+                                            <Setter Property="Visibility" Value="Visible"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -604,6 +604,19 @@
                         <TextBlock Text="{DynamicResource ControlTitle}" FontSize="16" FontWeight="SemiBold"/>
 
                         <Border Style="{StaticResource ControlSectionCard}"
+                                Visibility="{Binding WirelessTopSettingsVisibility}">
+                            <StackPanel>
+                                <Grid><TextBlock Text="{DynamicResource WirelessReceiverTitle}" Style="{StaticResource ControlSectionTitle}"/><TextBlock Text="{DynamicResource WirelessServiceAlwaysOn}" HorizontalAlignment="Right" Foreground="{StaticResource SuccessBrush}" FontSize="10"/></Grid>
+                                <TextBlock Text="{DynamicResource WirelessResolutionLabel}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                <ComboBox ItemsSource="{Binding WirelessDisplayProfiles}" DisplayMemberPath="Label" SelectedItem="{Binding SelectedWirelessDisplayProfile, Mode=TwoWay}"/>
+                                <TextBlock Text="{DynamicResource WirelessResolutionHelp}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox Text="{Binding WirelessReceiverName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource RoundedTextBox}" MaxLength="63" Height="36" ToolTip="{DynamicResource WirelessReceiverNameLabel}"/><Button Grid.Column="2" Content="{DynamicResource ApplyWirelessSettings}" Command="{Binding ApplyWirelessSettingsCommand}" Style="{StaticResource ToolButton}" MinWidth="64"/></Grid>
+                                <TextBlock Text="{Binding WirelessStatus}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" TextWrapping="Wrap" Margin="1,8,0,0"/>
+                                <TextBlock Text="{Binding AppliedWirelessProfileDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" Margin="1,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource ControlSectionCard}"
                                 Visibility="{Binding UsbProjectionSettingsVisibility}">
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource UsbProjectionModeTitle}"
@@ -670,29 +683,31 @@
                         <Border Style="{StaticResource ControlSectionCard}">
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource ImageAndSound}" Style="{StaticResource ControlSectionTitle}"/>
-                                <TextBlock Text="{DynamicResource RenderLimitHelp}"
-                                           Foreground="{StaticResource MutedTextBrush}" FontSize="9"
-                                           TextWrapping="Wrap" Margin="0,4,0,1"/>
+                                <StackPanel Visibility="{Binding WiredVideoLimitSettingsVisibility}">
+                                    <TextBlock Text="{DynamicResource RenderLimitHelp}"
+                                               Foreground="{StaticResource MutedTextBrush}" FontSize="9"
+                                               TextWrapping="Wrap" Margin="0,4,0,1"/>
 
-                                <TextBlock Text="{DynamicResource RenderResolutionLimit}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
-                                <ComboBox x:Name="ResolutionComboBox"
-                                          ItemsSource="{Binding ResolutionPresets}"
-                                          DisplayMemberPath="Label"
-                                          SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
+                                    <TextBlock Text="{DynamicResource RenderResolutionLimit}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                    <ComboBox x:Name="ResolutionComboBox"
+                                              ItemsSource="{Binding ResolutionPresets}"
+                                              DisplayMemberPath="Label"
+                                              SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
 
-                                <TextBlock Text="{DynamicResource TargetFrameRate}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
-                                <ComboBox x:Name="FrameRateComboBox"
-                                          ItemsSource="{Binding FrameRates}"
-                                          SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
+                                    <TextBlock Text="{DynamicResource TargetFrameRate}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                    <ComboBox x:Name="FrameRateComboBox"
+                                              ItemsSource="{Binding FrameRates}"
+                                              SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
 
-                                <Button x:Name="ApplyVideoSettingsButton"
-                                        Content="{DynamicResource ApplyVideoSettings}"
-                                        Command="{Binding ApplyVideoSettingsCommand}"
-                                        Style="{StaticResource ToolButton}"
-                                        Margin="0,10,0,0"/>
-                                <TextBlock Text="{Binding SettingsStatus}"
-                                           Foreground="{StaticResource MutedTextBrush}"
-                                           FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                    <Button x:Name="ApplyVideoSettingsButton"
+                                            Content="{DynamicResource ApplyVideoSettings}"
+                                            Command="{Binding ApplyVideoSettingsCommand}"
+                                            Style="{StaticResource ToolButton}"
+                                            Margin="0,10,0,0"/>
+                                    <TextBlock Text="{Binding SettingsStatus}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                </StackPanel>
 
                                 <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,12,0,11"/>
                                 <CheckBox x:Name="AudioPlaybackCheckBox"
@@ -737,7 +752,8 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource ControlSectionCard}"
+                        <Border x:Name="AdvancedSettingsCard"
+                                Style="{StaticResource ControlSectionCard}"
                                 Visibility="{Binding AdvancedSettingsVisibility}">
                             <StackPanel>
                                 <Button Content="{DynamicResource AdvancedSettings}" Command="{Binding AdvancedSettingsCommand}"
@@ -746,7 +762,7 @@
                         </Border>
 
                         <Border Style="{StaticResource ControlSectionCard}"
-                                Visibility="{Binding WirelessSettingsVisibility}">
+                                Visibility="{Binding WirelessBottomSettingsVisibility}">
                             <StackPanel>
                                 <Grid>
                                     <TextBlock Text="{DynamicResource WirelessReceiverTitle}"
@@ -755,6 +771,15 @@
                                                HorizontalAlignment="Right" VerticalAlignment="Center"
                                                Foreground="{StaticResource SuccessBrush}" FontSize="10"/>
                                 </Grid>
+                                <TextBlock Text="{DynamicResource WirelessResolutionLabel}"
+                                           Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                <ComboBox ItemsSource="{Binding WirelessDisplayProfiles}"
+                                          DisplayMemberPath="Label"
+                                          SelectedItem="{Binding SelectedWirelessDisplayProfile, Mode=TwoWay}"
+                                          AutomationProperties.AutomationId="WirelessResolutionComboBox"/>
+                                <TextBlock Text="{DynamicResource WirelessResolutionHelp}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                 <Grid Margin="0,10,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -765,8 +790,8 @@
                                              Style="{StaticResource RoundedTextBox}"
                                              MaxLength="63" Height="36"
                                              ToolTip="{DynamicResource WirelessReceiverNameLabel}"/>
-                                    <Button Grid.Column="2" Content="{DynamicResource ApplyReceiverName}"
-                                            Command="{Binding ApplyWirelessNameCommand}"
+                                    <Button Grid.Column="2" Content="{DynamicResource ApplyWirelessSettings}"
+                                            Command="{Binding ApplyWirelessSettingsCommand}"
                                             Style="{StaticResource ToolButton}" MinWidth="64"/>
                                 </Grid>
                                 <StackPanel Orientation="Horizontal" Margin="1,8,0,0">
@@ -776,6 +801,9 @@
                                                Foreground="{StaticResource MutedTextBrush}"
                                                FontSize="10" TextWrapping="Wrap"/>
                                 </StackPanel>
+                                <TextBlock Text="{Binding AppliedWirelessProfileDisplay}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="9" TextWrapping="Wrap" Margin="1,4,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -789,5 +817,24 @@
                        FontSize="10" HorizontalAlignment="Right" Cursor="Hand"
                        MouseLeftButtonDown="OnVersionClick"/>
         </Grid>
+
+        <Popup x:Name="PreviewTransitionMask"
+               PlacementTarget="{Binding ElementName=PreviewPanel}"
+               Placement="Center"
+               AllowsTransparency="True"
+               StaysOpen="True"
+               Focusable="False"
+               IsHitTestVisible="False">
+            <Grid Width="{Binding ActualWidth, ElementName=PreviewPanel}"
+                  Height="{Binding ActualHeight, ElementName=PreviewPanel}"
+                  Background="Transparent"
+                  SnapsToDevicePixels="True"
+                  UseLayoutRounding="True">
+                <Border Margin="1,0,1,2"
+                        Background="#050505"
+                        CornerRadius="7"
+                        SnapsToDevicePixels="True"/>
+            </Grid>
+        </Popup>
     </Grid>
 </Window>

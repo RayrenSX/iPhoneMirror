@@ -14,6 +14,7 @@ using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Windows;
 
 namespace IPhoneMirror.App.ViewModels;
 
@@ -125,6 +126,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private string _wirelessStatus = string.Empty;
     private bool _wirelessReceiverRunning;
     private bool _wirelessReceiverReady;
+    private WirelessDisplayProfile _selectedWirelessDisplayProfile =
+        WirelessReceiverConfiguration.DefaultDisplayProfile;
+    private WirelessDisplayProfile _appliedWirelessDisplayProfile =
+        WirelessReceiverConfiguration.DefaultDisplayProfile;
+    private string _appliedWirelessReceiverName = WirelessReceiverConfiguration.DefaultReceiverName;
+    private readonly HashSet<string> _knownWirelessDeviceIds =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _visibleLogLines = new();
     private long _logPosition;
     private string _partialLogLine = string.Empty;
@@ -143,6 +151,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         new("Resolution540p", 960, 540),
     ];
     public IReadOnlyList<int> FrameRates { get; } = [120, 60, 30, 24];
+    public IReadOnlyList<WirelessDisplayProfile> WirelessDisplayProfiles { get; } =
+        WirelessReceiverConfiguration.DisplayProfiles;
     public IReadOnlyList<UsbProjectionModeOption> UsbProjectionModes { get; } =
     [
         new(UsbProjectionMode.Demo, "UsbModeDemoLabel", "UsbModeDemoAdvantage",
@@ -159,15 +169,22 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand ApplyVideoSettingsCommand { get; }
     public RelayCommand ClearLogCommand { get; }
     public RelayCommand AdvancedSettingsCommand { get; }
-    public RelayCommand ApplyWirelessNameCommand { get; }
+    public RelayCommand ApplyWirelessSettingsCommand { get; }
     public RelayCommand OpenDriverManagerCommand { get; }
     public bool IsAdvancedMode { get => _advancedMode; private set { if (Set(ref _advancedMode, value)) OnPropertyChanged(nameof(AdvancedSettingsVisibility)); } }
     public bool IsWirelessSelected => SelectedDevice?.IsWireless == true;
-    public Visibility WirelessSettingsVisibility => Visibility.Visible;
+    public Visibility WiredVideoLimitSettingsVisibility => IsWirelessSelected
+        ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility WirelessActualVideoSettingsVisibility => IsWirelessSelected
+        ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility WirelessTopSettingsVisibility => IsWirelessSelected
+        ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility WirelessBottomSettingsVisibility => IsWirelessSelected
+        ? Visibility.Collapsed : Visibility.Visible;
     private bool CurrentDeviceOwnsCapture => SelectedDevice is not null &&
         DeviceViewModel.UdidEquals(_captureSession.OwnerUdid, SelectedDevice.Udid);
     public Visibility UsbProjectionSettingsVisibility => SelectedDevice is not null &&
-        !IsWirelessSelected && !CurrentDeviceOwnsCapture && !HasCaptureSession
+        !IsWirelessSelected && !IsOperationBusy && !CurrentDeviceOwnsCapture && !HasCaptureSession
         ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AdvancedSettingsVisibility => IsAdvancedMode && !IsWirelessSelected &&
         CurrentUsbProjectionMode == UsbProjectionMode.AirPlay
@@ -188,10 +205,21 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         set
         {
             if (Set(ref _wirelessReceiverName, value))
-                ApplyWirelessNameCommand.NotifyCanExecuteChanged();
+                ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
         }
     }
     public string WirelessStatus { get => _wirelessStatus; private set => Set(ref _wirelessStatus, value); }
+    public WirelessDisplayProfile SelectedWirelessDisplayProfile
+    {
+        get => _selectedWirelessDisplayProfile;
+        set
+        {
+            if (value is null || !Set(ref _selectedWirelessDisplayProfile, value)) return;
+            ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
+        }
+    }
+    public string AppliedWirelessProfileDisplay => LocalizationService.Format(
+        "WirelessProfileAppliedFormat", _appliedWirelessDisplayProfile.Label);
     private DeviceCaptureState? CurrentDeviceSession => SelectedDevice is null ? null :
         _deviceSessions.GetValueOrDefault(SelectedDevice.Udid);
     public ulong CurrentSessionHandle => CurrentDeviceSession?.Handle ?? 0;
@@ -207,7 +235,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             StartCommand.NotifyCanExecuteChanged();
             StopCommand.NotifyCanExecuteChanged();
             ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
-            ApplyWirelessNameCommand.NotifyCanExecuteChanged();
+            ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
             OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
         }
     }
@@ -363,7 +392,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         ClearLogCommand = new RelayCommand(ClearVisibleLog);
         AdvancedSettingsCommand = new RelayCommand(ShowAdvancedSettings, () => IsAdvancedMode);
         OpenDriverManagerCommand = new RelayCommand(() => OpenDriverManager());
-        ApplyWirelessNameCommand = new RelayCommand(() => _ = RestartWirelessReceiverAsync(),
+        ApplyWirelessSettingsCommand = new RelayCommand(() => _ = RestartWirelessReceiverAsync(),
             () => _wirelessReceiver.IsAvailable && !IsOperationBusy);
         RefreshWirelessStatus();
         LocalizationService.LanguageChanged += OnLanguageChanged;
@@ -430,15 +459,24 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 .GroupBy(device => device.Udid, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToList();
+            var currentWirelessDeviceIds = devices
+                .Where(device => device.IsWireless)
+                .Select(device => device.Udid)
+                .ToArray();
+            var newlyConnectedWirelessUdid = StableDeviceSelection.FindNewlyConnected(
+                _knownWirelessDeviceIds, currentWirelessDeviceIds);
             RefreshWirelessStatus();
             await SyncWirelessSessionsLockedAsync(devices.Where(device => device.IsWireless));
+            _knownWirelessDeviceIds.Clear();
+            _knownWirelessDeviceIds.UnionWith(currentWirelessDeviceIds);
             var captureActive = AnyDeviceSession;
             // Device discovery runs off the UI thread and can overlap a real
             // user click. A selection captured before that await is stale and
             // used to snap the highlight back to the old phone when the poll
             // completes. Read the current UDID only when applying the result.
             var currentSelectionUdid = SelectedDevice?.Udid;
-            ReconcileDevices(devices, currentSelectionUdid, captureActive);
+            ReconcileDevices(devices, currentSelectionUdid, captureActive,
+                newlyConnectedWirelessUdid);
             var capture = await Task.Run(GetSelectedCaptureStatus);
             ApplyCaptureStatus(capture);
             await PollBackgroundSessionErrorsAsync();
@@ -478,7 +516,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(
                 WirelessReceiverName);
             Set(ref _wirelessReceiverName, sanitized, nameof(WirelessReceiverName));
-            var started = await Task.Run(() => _core.StartWirelessReceiver(sanitized, hostPath));
+            var profile = _appliedWirelessDisplayProfile;
+            var started = await Task.Run(() => _core.StartWirelessReceiver(sanitized, hostPath,
+                profile.Width, profile.Height, profile.FrameRate));
             _wirelessReceiverRunning = started.Success;
             _wirelessReceiverReady = false;
             if (!started.Success) AddUiLog(started.Message);
@@ -541,6 +581,28 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private async Task RestartWirelessReceiverAsync()
     {
         if (_disposed || IsOperationBusy) return;
+        var profile = SelectedWirelessDisplayProfile;
+        var connectedCount = Devices.Count(device => device.IsWireless);
+        var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(WirelessReceiverName);
+        var changes = new List<string>();
+        if (!string.Equals(sanitized, _appliedWirelessReceiverName, StringComparison.Ordinal))
+            changes.Add(LocalizationService.Format("WirelessNameChangeFormat",
+                _appliedWirelessReceiverName, sanitized));
+        if (!ReferenceEquals(profile, _appliedWirelessDisplayProfile))
+            changes.Add(LocalizationService.Format("WirelessResolutionChangeFormat",
+                _appliedWirelessDisplayProfile.Label, profile.Label));
+        if (changes.Count == 0)
+        {
+            AppPromptWindow.Inform(LocalizationService.Get("WirelessSettingsTitle"),
+                LocalizationService.Get("WirelessSettingsUnchanged"));
+            return;
+        }
+        var impact = connectedCount > 0
+            ? LocalizationService.Format("WirelessSettingsConnectedImpactFormat", connectedCount)
+            : LocalizationService.Get("WirelessSettingsReadyImpact");
+        var body = LocalizationService.Format("WirelessSettingsConfirmFormat",
+            string.Join(Environment.NewLine, changes), impact, sanitized);
+        if (!AppPromptWindow.Confirm(LocalizationService.Get("WirelessSettingsTitle"), body)) return;
         IsBusy = true;
         var gateHeld = false;
         try
@@ -551,9 +613,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             await SyncWirelessSessionsLockedAsync([]);
             await Task.Run(_core.StopWirelessReceiver);
             _wirelessReceiverRunning = _wirelessReceiverReady = false;
-            var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(
-                WirelessReceiverName);
+            _appliedWirelessDisplayProfile = profile;
+            OnPropertyChanged(nameof(AppliedWirelessProfileDisplay));
             Set(ref _wirelessReceiverName, sanitized, nameof(WirelessReceiverName));
+            _appliedWirelessReceiverName = sanitized;
             await EnsureWirelessReceiverStartedLockedAsync();
             AddUiLog(LocalizationService.Format("WirelessRunningFormat", sanitized));
         }
@@ -573,7 +636,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private void ReconcileDevices(
         IReadOnlyList<DeviceViewModel> discovered,
         string? previousSelectionUdid,
-        bool captureActive)
+        bool captureActive,
+        string? newlyConnectedWirelessUdid)
     {
         var desired = discovered.ToList();
 
@@ -624,7 +688,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (previousCount != Devices.Count) OnPropertyChanged(nameof(DeviceCount));
 
         var nextUdid = StableDeviceSelection.ChooseUdid(
-            Devices.Select(device => device.Udid), previousSelectionUdid, _activeCaptureUdid);
+            Devices.Select(device => device.Udid), previousSelectionUdid, _activeCaptureUdid,
+            newlyConnectedWirelessUdid);
         var nextSelection = Devices.FirstOrDefault(device =>
             DeviceViewModel.UdidEquals(device.Udid, nextUdid));
         SetSelectedDevice(nextSelection, scheduleCaptureSwitch: false);
@@ -635,6 +700,23 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         // soon as capture stops or an automatic switch completes.
         if (!captureActive) UpdateSelectedDriverStatus();
     }
+
+    internal void MoveDevice(
+        DeviceViewModel source,
+        DeviceViewModel? target,
+        bool placeAfterTarget)
+    {
+        var sourceIndex = Devices.IndexOf(source);
+        if (sourceIndex < 0) return;
+        int? targetIndex = target is null ? null : Devices.IndexOf(target);
+        var destinationIndex = StableDeviceSelection.CalculateDropIndex(
+            Devices.Count, sourceIndex, targetIndex, placeAfterTarget);
+        if (destinationIndex == sourceIndex) return;
+        Devices.Move(sourceIndex, destinationIndex);
+    }
+
+    internal bool HasCaptureSessionFor(DeviceViewModel device) =>
+        _deviceSessions.TryGetValue(device.Udid, out var session) && session.HasSession;
 
     private void SetSelectedDevice(DeviceViewModel? value, bool scheduleCaptureSwitch)
     {
@@ -684,7 +766,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedUdid));
         OnPropertyChanged(nameof(SelectedConnection));
         OnPropertyChanged(nameof(IsWirelessSelected));
-        OnPropertyChanged(nameof(WirelessSettingsVisibility));
+        OnPropertyChanged(nameof(WiredVideoLimitSettingsVisibility));
+        OnPropertyChanged(nameof(WirelessActualVideoSettingsVisibility));
+        OnPropertyChanged(nameof(WirelessTopSettingsVisibility));
+        OnPropertyChanged(nameof(WirelessBottomSettingsVisibility));
         OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
         OnPropertyChanged(nameof(SelectedUsbProjectionMode));
         OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
@@ -736,8 +821,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             state.ErrorShown = true;
             var name = Devices.FirstOrDefault(device =>
                 DeviceViewModel.UdidEquals(device.Udid, state.Udid))?.DisplayName ?? state.Udid;
-            MessageBox.Show(status.Message, LocalizationService.Format(
-                "DeviceCaptureErrorTitleFormat", name), MessageBoxButton.OK, MessageBoxImage.Error);
+            AppPromptWindow.Inform(LocalizationService.Format(
+                "DeviceCaptureErrorTitleFormat", name), status.Message);
         }
     }
 
@@ -1267,8 +1352,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             result.Message);
         AddUiLog(failure);
         if (!automatic) CaptureStatus = failure;
-        MessageBox.Show(failure, LocalizationService.Get("DriverManagerTitle"),
-            MessageBoxButton.OK, MessageBoxImage.Error);
+        AppPromptWindow.Inform(LocalizationService.Get("DriverManagerTitle"), failure);
         return false;
     }
 
@@ -1349,6 +1433,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _selectedLanguage = LocalizationService.SelectedLanguage;
         OnPropertyChanged(nameof(SelectedLanguage));
         foreach (var preset in ResolutionPresets) preset.NotifyLanguageChanged();
+        foreach (var profile in WirelessDisplayProfiles) profile.NotifyLanguageChanged();
         foreach (var mode in UsbProjectionModes) mode.NotifyLanguageChanged();
 
         foreach (var device in Devices) device.NotifyLanguageChanged();
@@ -1359,6 +1444,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedOs));
         OnPropertyChanged(nameof(TargetResolutionDisplay));
         OnPropertyChanged(nameof(TargetFpsDisplay));
+        OnPropertyChanged(nameof(AppliedWirelessProfileDisplay));
         if (_lastEnvironment is { } environment) UpdateEnvironmentStatus(environment);
         else
         {

@@ -51,6 +51,9 @@
     <system:String x:Key="RenderLimitHelp">仅限制本地渲染，来源码流画质不变</system:String>
     <system:String x:Key="RenderResolutionLimit">渲染分辨率上限</system:String>
     <system:String x:Key="TargetFrameRate">目标帧率</system:String>
+    <system:String x:Key="ActualStream">当前 AirPlay 接收到的实际码流</system:String>
+    <system:String x:Key="ActualResolution">实际分辨率</system:String>
+    <system:String x:Key="ActualFrameRate">实际帧率</system:String>
     <system:String x:Key="ApplyVideoSettings">应用画面设置</system:String>
     <system:String x:Key="PlayAudioWindows">在 Windows 播放声音</system:String>
     <system:String x:Key="PlaybackVolume">播放音量</system:String>
@@ -64,7 +67,7 @@
     <system:String x:Key="ProjectionActions">投屏操作</system:String>
     <system:String x:Key="StartMirroring">开始投屏</system:String>
     <system:String x:Key="StopMirroring">暂停投屏</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 0.6 Preview 1</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 1.0.3</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">正在检查 Apple USB 环境…</system:String>
     <system:String x:Key="StatusWaitingDevice">等待设备连接</system:String>
@@ -203,6 +206,26 @@
     <system:String x:Key="WirelessReceiverTitle">无线 AirPlay</system:String>
     <system:String x:Key="WirelessReceiverNameLabel">接收端名称</system:String>
     <system:String x:Key="ApplyReceiverName">应用</system:String>
+    <system:String x:Key="WirelessResolutionTitle">无线投屏清晰度</system:String>
+    <system:String x:Key="WirelessSettingsTitle">应用无线 AirPlay 设置</system:String>
+    <system:String x:Key="WirelessNameChangeFormat">接收端名称：{0} → {1}</system:String>
+    <system:String x:Key="WirelessResolutionChangeFormat">连接分辨率：{0} → {1}</system:String>
+    <system:String x:Key="WirelessSettingsConnectedImpactFormat">当前有 {0} 台无线设备连接，应用后会全部断开。</system:String>
+    <system:String x:Key="WirelessSettingsReadyImpact">接收端将重启并重新发布 AirPlay 能力。</system:String>
+    <system:String x:Key="WirelessSettingsConfirmFormat">本次修改：&#10;{0}&#10;&#10;{1}&#10;&#10;应用后请在 iPhone 打开“控制中心” → “屏幕镜像”，重新选择“{2}”。</system:String>
+    <system:String x:Key="WirelessSettingsUnchanged">名称和连接分辨率均未改变。</system:String>
+    <system:String x:Key="Continue">继续</system:String>
+    <system:String x:Key="Cancel">取消</system:String>
+    <system:String x:Key="WirelessResolutionLabel">连接分辨率</system:String>
+    <system:String x:Key="WirelessResolutionHelp">应用后将重新声明 AirPlay 接收能力；弱网请选择 720p 或 540p。</system:String>
+    <system:String x:Key="WirelessProfileMaximum">最高画质（最高 5120×2880 · 60 fps）</system:String>
+    <system:String x:Key="WirelessProfile1080p">1080p（推荐 · 60 fps）</system:String>
+    <system:String x:Key="WirelessProfile720p">720p（流畅 · 30 fps）</system:String>
+    <system:String x:Key="WirelessProfile540p">540p（弱网 · 30 fps）</system:String>
+    <system:String x:Key="WirelessProfileAppliedFormat">当前声明：{0}</system:String>
+    <system:String x:Key="ApplyWirelessSettings">应用</system:String>
+    <system:String x:Key="WirelessProfileDisconnectConfirmFormat">当前有 {0} 台无线设备已连接。应用“{1}”会断开全部无线投屏并重启接收端。是否继续？</system:String>
+    <system:String x:Key="WirelessProfileReconnectInstructionsFormat">已重新声明“{0}”。请在 iPhone 打开“控制中心” → “屏幕镜像”，重新选择“{1}”。如果列表仍保留旧连接，请先点“停止镜像”，再重新选择接收端。</system:String>
     <system:String x:Key="WirelessServiceAlwaysOn">常驻</system:String>
     <system:String x:Key="WirelessConnected">AirPlay 已连接</system:String>
     <system:String x:Key="WirelessLocalNetwork">本地网络</system:String>
@@ -216,5 +239,5 @@
     <system:String x:Key="WirelessRunningFormat">无线接收端运行中：{0}</system:String>
     <system:String x:Key="WirelessReceiverMissing">无线接收组件缺失，请重新构建发布包。</system:String>
     <system:String x:Key="FooterConnectivity">本机 USB / AirPlay，无云端中转</system:String>
-    <system:String x:Key="FooterVersionCurrent">iPhoneMirror 0.6 Preview 1</system:String>
+    <system:String x:Key="FooterVersionCurrent">iPhoneMirror 1.0.3</system:String>
 </ResourceDictionary>

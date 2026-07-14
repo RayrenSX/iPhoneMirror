@@ -30,6 +30,24 @@ Equal("phone-b", StableDeviceSelection.ChooseUdid(["phone-a", "phone-b"], "PHONE
     "previous selection wins case-insensitively");
 Equal("phone-a", StableDeviceSelection.ChooseUdid(["phone-a", "phone-b"], "missing", "PHONE-A"),
     "active capture is fallback selection");
+Equal("airplay://phone-b", StableDeviceSelection.ChooseUdid(
+        ["phone-a", "airplay://phone-b"], "phone-a", "phone-a", "AIRPLAY://PHONE-B"),
+    "new wireless connection is selected once");
+Equal("airplay://phone-b", StableDeviceSelection.FindNewlyConnected(
+        ["airplay://phone-a"], ["airplay://phone-a", "airplay://phone-b"]),
+    "new wireless edge is detected");
+Equal<string?>(null, StableDeviceSelection.FindNewlyConnected(
+        ["airplay://phone-a"], ["AIRPLAY://PHONE-A"]),
+    "known wireless device is not selected repeatedly");
+Equal(2, StableDeviceSelection.CalculateDropIndex(3, 0, 2, true),
+    "dragging first device after last moves it to the end");
+Equal(0, StableDeviceSelection.CalculateDropIndex(3, 2, 0, false),
+    "dragging last device before first moves it to the start");
+
+Equal("iPhone 12 mini", AppleProductNames.Resolve("iPhone13,1"),
+    "known ProductType uses the real model name");
+Equal("iPhone99,9", AppleProductNames.Resolve("iPhone99,9"),
+    "unknown ProductType remains visible for diagnostics");
 
 // Ownership remains until an explicit completed stop; changing UI selection
 // or observing a capture error must not silently release it.
@@ -101,6 +119,12 @@ Equal("iPhoneMirror AirPlay",
 Equal(63,
     WirelessReceiverConfiguration.SanitizeReceiverName(new string('a', 80)).Length,
     "wireless receiver name respects the mDNS label limit");
+Equal("1080p", WirelessReceiverConfiguration.DefaultDisplayProfile.Id,
+    "wireless receiver defaults to the balanced 1080p profile");
+Equal(true, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 30),
+    "wireless 720p weak-network profile is supported");
+Equal(false, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 60),
+    "unsupported wireless profile combinations are rejected");
 Equal<string?>(null,
     WirelessReceiverConfiguration.FindExecutable(Path.GetTempPath(),
         Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.exe")),

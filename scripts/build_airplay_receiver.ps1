@@ -98,9 +98,16 @@ if (-not $BinaryHex.Contains($TargetHeightAndRate) -or
     -not $BinaryHex.Contains($TargetWidth) -or
     $BinaryHex.Contains($LegacyHeightAndRate) -or
     $BinaryHex.Contains($LegacyWidth)) {
-    throw 'Built AirPlay receiver does not contain only the expected 5120x2880@60 display capability.'
+    throw 'Built AirPlay receiver does not contain the expected 5120x2880@60 fallback capability.'
 }
-Write-Host 'Verified AirPlay display capability: 5120x2880 @ 60fps.' -ForegroundColor Green
+$BinaryAscii = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Binary))
+foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIGHT',
+        'IPHONE_MIRROR_AIRPLAY_FPS', 'IPHONE_MIRROR_AIRPLAY_NAME')) {
+    if (-not $BinaryAscii.Contains($Marker)) {
+        throw "Built AirPlay receiver is missing runtime capability marker: $Marker"
+    }
+}
+Write-Host 'Verified runtime-selectable AirPlay display capabilities with 5120x2880@60 fallback.' -ForegroundColor Green
 if ($Install) {
     Copy-Item -LiteralPath $Binary `
         -Destination (Join-Path $ReceiverRoot 'bin\x64\airplay2dll.dll') -Force

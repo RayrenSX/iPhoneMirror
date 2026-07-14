@@ -65,7 +65,7 @@ int wmain(int argc, wchar_t** argv) {
     auto command = quote(argv[1]) + L" --pipe " + quote(pipe_name) +
         L" --stop-event " + quote(stop_name) + L" --name \"Smoke Test\"" +
         L" --parent-pid " + std::to_wstring(GetCurrentProcessId()) +
-        L" --library " + quote(argv[2]);
+        L" --width 1280 --height 720 --fps 30 --library " + quote(argv[2]);
     STARTUPINFOW startup{.cb = sizeof(startup)};
     PROCESS_INFORMATION process{};
     if (!CreateProcessW(argv[1], command.data(), nullptr, nullptr, FALSE,
@@ -78,6 +78,7 @@ int wmain(int argc, wchar_t** argv) {
             wait_overlapped(pipe, connect, 5000, connected_bytes));
     bool ready{};
     bool callback_log{};
+    bool capability_log{};
     bool callback_metadata{};
     bool callback_connected{};
     bool callback_video{};
@@ -106,6 +107,8 @@ int wmain(int argc, wchar_t** argv) {
             const std::string text(reinterpret_cast<const char*>(payload.data()),
                 payload.size());
             callback_log = callback_log || text.find("stub protocol log") != std::string::npos;
+            capability_log = capability_log ||
+                text.find("capability=1280x720@30") != std::string::npos;
             std::cerr << "host: " << text << '\n';
         }
         const std::string device_id(header.device_id);
@@ -155,13 +158,14 @@ int wmain(int argc, wchar_t** argv) {
     CloseHandle(process.hProcess);
     CloseHandle(stop_event);
     CloseHandle(pipe);
-    if (!protocol_valid || !ready || !callback_log || !callback_metadata ||
+    if (!protocol_valid || !ready || !callback_log || !capability_log || !callback_metadata ||
         !callback_connected ||
         !callback_video || !callback_audio || !second_connected || !second_video ||
         !second_audio || !second_disconnected || !exited) {
         std::cerr << "wireless host IPC smoke failed: connected=" << connected
             << " protocol=" << protocol_valid << " ready=" << ready
             << " callback_log=" << callback_log
+            << " capability_log=" << capability_log
             << " callback_metadata=" << callback_metadata
             << " callback_connected=" << callback_connected
             << " callback_video=" << callback_video

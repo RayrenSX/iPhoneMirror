@@ -32,6 +32,8 @@ separate .NET Desktop Runtime. It also includes the standalone
 `iPhoneMirror.Driver.exe` driver manager; no separate driver-tool download is
 required.
 
+The [complete user guide (Chinese)](docs/USER_GUIDE.md) covers every main interface and workflow.
+
 The computer still needs either Apple Devices from Microsoft Store or the
 desktop iTunes package containing Apple Mobile Device Support. Wireless
 discovery uses the DNS-SD support built into Windows 10/11; no Bonjour service
@@ -51,6 +53,53 @@ isolated wireless host owns AirPlay protocol and decode, sending bounded media
 frames over a named pipe. Driver installation, repair and removal belong to the
 standalone `iPhoneMirror.Driver.exe`; the main app only reads wired-driver
 state and never mutates system drivers inside the capture process.
+
+> [!TIP]
+> See the [complete user guide](docs/USER_GUIDE.md) for driver setup,
+> USB, AirPlay, multi-device previews, OBS, logs and advanced settings.
+
+## Highlights
+
+### Device-specific iPhone and iPad presentation
+
+iPhoneMirror does not put every device inside the same generic rounded
+rectangle. It resolves Apple's `ProductType` into visual profiles for iPhone X,
+notched phones, mini, standard/Max, Dynamic Island, iPad Pro, Air, mini and
+all-screen base iPads. Known Home-button and rectangular displays stay
+rectangular. Unknown future devices use a conservative geometry fallback so an
+iPad is not clipped with a phone-shaped curve.
+
+The profile affects both native rendering and the detached-window outline.
+Resizing, orientation changes and full-screen transitions preserve the visual
+shape of that device, while the context menu still allows the user to remove or
+restore corners manually.
+Corner parameters are visual fits based on public device appearance and frame
+geometry, not Apple-published industrial measurements.
+
+### Unified transport, native rendering and multiple devices
+
+- USB Screen Capture and local-network AirPlay share one device, preview, audio and OBS workflow.
+- Each phone has its own session and detached window; multiple devices can keep running together.
+- Device cards support press-and-hold reordering, and a new wireless sender auto-selects only once.
+- H.264/CoreMedia and AirPlay media are decoded locally and presented through D3D11/DirectComposition.
+- Media does not pass through an iPhoneMirror cloud relay, and USB capture does not depend on the network.
+- Clean detached windows are ready for OBS, while screenshots read the decoded frame without application UI.
+
+### Compared with common mirroring tools
+
+| Dimension | iPhoneMirror | Common general-purpose approach |
+|---|---|---|
+| Connections | USB and AirPlay in one workflow | One transport, or separate wired and wireless apps |
+| Device shape | Per-family iPhone/iPad curves and corners | One generic radius, rectangle or extra black framing |
+| Multiple devices | Independent sessions, windows, ordering and simultaneous preview | Primarily single-device switching |
+| Wired compatibility | Per-device Demo, experimental AirPlay and Aisi modes | Fixed negotiation parameters |
+| OBS | Clean native detached window | Crop the control UI or capture the desktop |
+| Drivers | Separate per-device install, repair, removal and logs | Driver changes hidden inside the main application |
+| Data path | Local PC/LAN processing with no project cloud relay | Some products require accounts or online services |
+
+iPhoneMirror does not currently provide touch/remote control or an integrated
+video editor. Apple's private protocol and compatible AirPlay implementation
+may require updates for future iOS releases.
 
 ## Features
 
@@ -128,15 +177,28 @@ are stored under `%ProgramData%\iPhoneMirror.Driver`.
 
 ## Wireless AirPlay
 
-1. Connect the Windows computer and iPhone/iPad to the same private network.
-2. Select the **iPhoneMirror AirPlay** source and optionally edit its receiver name.
-3. Click the same **Start Mirroring** button used for USB sources.
-4. Open Screen Mirroring in iOS Control Center and select `iPhoneMirror AirPlay`.
-5. Allow the receiver on Private networks if Windows Firewall asks.
+The AirPlay receiver starts with the main application. The user does not need
+to click **Start Mirroring** before the receiver appears on an iPhone. No empty
+AirPlay source is shown in the left device list; a wireless card is created
+after a sender connects and is auto-selected once at connection time.
 
-AirPlay uses the same session path as USB, including the main
-preview, resolution/FPS limits, volume, screenshots, detached and full-screen
-windows, simultaneous sessions and OBS.
+1. Connect the Windows computer and iPhone/iPad to the same private network.
+2. Configure the receiver name and advertised connection profile in the
+   **Wireless AirPlay** section.
+3. Choose maximum 5120x2880 at 60 fps, default 1080p at 60 fps, 720p at 30 fps,
+   or 540p at 30 fps.
+4. Click **Apply**. Name and resolution changes are summarized in one dialog.
+5. Open Screen Mirroring in iOS Control Center and select the configured name.
+6. Use **Stop Mirroring** for a connected wireless session; the receiver keeps running.
+
+Wireless tabs do not show the wired local resolution/FPS caps. AirPlay quality
+must be advertised before connection. Applying a new name or profile restarts
+the receiver, disconnects all current wireless sessions, and requires the phone
+to select the receiver again. Wireless sessions still support volume,
+screenshots, detached/full-screen windows, simultaneous previews and OBS.
+
+There is no fixed application-level wireless device count; practical capacity
+depends on CPU/GPU resources, memory and local-network bandwidth.
 
 During the AirPlay `SETUP` handshake, the receiver reads the sender's
 `deviceID`, `model` (Apple ProductType such as `iPhone9,1`) and `osVersion`
@@ -213,7 +275,8 @@ iPhone/iPad
 See [protocol](docs/PROTOCOL.md), [architecture](docs/ARCHITECTURE.md),
 [D3D11 rendering](docs/D3D11_RENDERING.md),
 [device corner profiles](docs/DEVICE_CORNER_PROFILES.md) and
-[WASAPI audio](docs/WASAPI_AUDIO.md) documentation.
+[WASAPI audio](docs/WASAPI_AUDIO.md) documentation. Planned work is tracked in
+the [upgrade roadmap](docs/ROADMAP.md); roadmap items are not implemented features.
 
 ## Current limitations
 

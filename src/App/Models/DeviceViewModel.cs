@@ -41,7 +41,7 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? "iPhone" : Name;
     public string ModelDisplay => string.IsNullOrWhiteSpace(ProductType)
         ? IsWireless ? "AirPlay" : LocalizationService.Get("ModelLoading")
-        : IsWireless ? AppleProductNames.Resolve(ProductType) : ProductType;
+        : AppleProductNames.Resolve(ProductType);
     public string OsDisplay => string.IsNullOrWhiteSpace(OsVersion)
         ? IsWireless ? LocalizationService.Get("WirelessLocalNetwork") : "iOS -"
         : IsWireless

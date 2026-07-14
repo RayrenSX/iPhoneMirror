@@ -147,6 +147,9 @@ IM_API std::int32_t IM_CALL im_refresh_devices(
 // preview sessions. Connected clients are enumerated as ordinary devices.
 IM_API std::int32_t IM_CALL im_wireless_receiver_start(
     const wchar_t* receiver_name, const wchar_t* host_path);
+IM_API std::int32_t IM_CALL im_wireless_receiver_start_ex(
+    const wchar_t* receiver_name, const wchar_t* host_path,
+    std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate);
 IM_API void IM_CALL im_wireless_receiver_stop();
 IM_API std::int32_t IM_CALL im_wireless_receiver_get_status(
     std::int32_t* running, std::int32_t* ready);

@@ -434,6 +434,12 @@ std::int32_t IM_CALL im_refresh_devices(iPhoneMirror::DeviceInfo* devices, std::
 
 std::int32_t IM_CALL im_wireless_receiver_start(const wchar_t* receiver_name,
     const wchar_t* host_path) {
+    return im_wireless_receiver_start_ex(receiver_name, host_path, 5120, 2880, 60);
+}
+
+std::int32_t IM_CALL im_wireless_receiver_start_ex(const wchar_t* receiver_name,
+    const wchar_t* host_path, std::uint32_t width, std::uint32_t height,
+    std::uint32_t frame_rate) {
     if (!receiver_name || !*receiver_name || !host_path || !*host_path)
         return fail(iPhoneMirror::Result::InvalidArgument,
             L"Wireless receiver name and host path are required");
@@ -447,7 +453,15 @@ std::int32_t IM_CALL im_wireless_receiver_start(const wchar_t* receiver_name,
         receiver = wireless_receiver;
     }
     try {
-        receiver->start(receiver_name, host_path);
+        const auto supported =
+            (width == 5120 && height == 2880 && frame_rate == 60) ||
+            (width == 1920 && height == 1080 && frame_rate == 60) ||
+            (width == 1280 && height == 720 && frame_rate == 30) ||
+            (width == 960 && height == 540 && frame_rate == 30);
+        if (!supported)
+            return fail(iPhoneMirror::Result::InvalidArgument,
+                L"Unsupported AirPlay display capability profile");
+        receiver->start(receiver_name, host_path, width, height, frame_rate);
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
     } catch (const std::exception& error) {

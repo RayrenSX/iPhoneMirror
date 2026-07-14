@@ -58,7 +58,7 @@ internal static class AppleProductNames
     {
         if (string.IsNullOrWhiteSpace(productType)) return string.Empty;
         return KnownProducts.TryGetValue(productType, out var name)
-            ? $"{name} ({productType})"
+            ? name
             : productType;
     }
 }

@@ -29,12 +29,41 @@ internal static class StableDeviceSelection
     internal static string? ChooseUdid(
         IEnumerable<string> visibleOrder,
         string? previousSelectionUdid,
-        string? activeCaptureUdid)
+        string? activeCaptureUdid,
+        string? newlyConnectedWirelessUdid = null)
     {
         var visible = visibleOrder.Where(Valid).ToArray();
-        return visible.FirstOrDefault(udid => Same(udid, previousSelectionUdid))
+        return visible.FirstOrDefault(udid => Same(udid, newlyConnectedWirelessUdid))
+            ?? visible.FirstOrDefault(udid => Same(udid, previousSelectionUdid))
             ?? visible.FirstOrDefault(udid => Same(udid, activeCaptureUdid))
             ?? visible.FirstOrDefault();
+    }
+
+    internal static string? FindNewlyConnected(
+        IEnumerable<string> previousWirelessUdids,
+        IEnumerable<string> currentWirelessUdids)
+    {
+        var previous = new HashSet<string>(
+            previousWirelessUdids.Where(Valid), StringComparer.OrdinalIgnoreCase);
+        return currentWirelessUdids
+            .Where(Valid)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(previous.Add);
+    }
+
+    internal static int CalculateDropIndex(
+        int itemCount,
+        int sourceIndex,
+        int? targetIndex,
+        bool placeAfterTarget)
+    {
+        if (itemCount <= 0 || sourceIndex < 0 || sourceIndex >= itemCount) return sourceIndex;
+        var insertionIndex = targetIndex is >= 0 and < int.MaxValue
+            ? targetIndex.Value + (placeAfterTarget ? 1 : 0)
+            : itemCount;
+        insertionIndex = Math.Clamp(insertionIndex, 0, itemCount);
+        if (sourceIndex < insertionIndex) --insertionIndex;
+        return Math.Clamp(insertionIndex, 0, itemCount - 1);
     }
 
     private static bool Valid(string? value) => !string.IsNullOrWhiteSpace(value);

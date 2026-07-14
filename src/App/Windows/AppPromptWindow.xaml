@@ -1,0 +1,38 @@
+<Window x:Class="IPhoneMirror.App.Windows.AppPromptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="520" SizeToContent="Height" MinHeight="250" MaxHeight="540"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Foreground="{StaticResource TextBrush}" ShowInTaskbar="False">
+    <Border Background="{StaticResource AppBackgroundBrush}" BorderBrush="#454545"
+            BorderThickness="1" CornerRadius="8">
+        <Grid Margin="24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/><RowDefinition Height="14"/>
+                <RowDefinition Height="Auto"/><RowDefinition Height="20"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                <TextBlock Text="{Binding PromptTitle}" FontSize="20" FontWeight="SemiBold"/>
+                <Button Content="×" HorizontalAlignment="Right" Width="32" Height="32"
+                        MinHeight="32" Padding="0" FontSize="18" Click="OnCancelClick"/>
+            </Grid>
+            <Border Grid.Row="2" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                    CornerRadius="8" Padding="16">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="300">
+                    <TextBlock Text="{Binding PromptBody}" TextWrapping="Wrap"
+                               FontSize="13" LineHeight="21"/>
+                </ScrollViewer>
+            </Border>
+            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="{Binding CancelText}" Click="OnCancelClick"
+                        MinWidth="92" Margin="0,0,8,0"
+                        Visibility="{Binding CancelVisibility}"/>
+                <Button Content="{Binding ConfirmText}" Click="OnConfirmClick"
+                        MinWidth="118" Style="{StaticResource PrimaryButton}"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

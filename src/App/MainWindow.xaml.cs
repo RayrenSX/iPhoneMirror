@@ -5,8 +5,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.ViewModels;
 
@@ -28,6 +30,13 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private int _versionClickCount;
     private DateTime _lastVersionClickUtc;
+    private DeviceViewModel? _pressedDevice;
+    private Point _devicePressPoint;
+    private DateTime _devicePressStartedUtc;
+    private bool _deviceDragStarted;
+    private int _previewTransitionRevision;
+
+    private static readonly TimeSpan DeviceDragHoldDuration = TimeSpan.FromMilliseconds(350);
 
     public MainWindow()
     {
@@ -128,6 +137,158 @@ public partial class MainWindow : Window
         item.ContextMenu.IsOpen = true;
     }
 
+    private void OnDeviceListLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var item = FindListBoxItem(e.OriginalSource as DependencyObject);
+        if (item?.DataContext is not DeviceViewModel device) return;
+        _pressedDevice = device;
+        _devicePressPoint = e.GetPosition(DeviceListBox);
+        _devicePressStartedUtc = DateTime.UtcNow;
+        _deviceDragStarted = false;
+        DeviceListBox.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnDeviceListMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_pressedDevice is null || _deviceDragStarted ||
+            e.LeftButton != MouseButtonState.Pressed ||
+            DateTime.UtcNow - _devicePressStartedUtc < DeviceDragHoldDuration) return;
+
+        var current = e.GetPosition(DeviceListBox);
+        if (Math.Abs(current.X - _devicePressPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(current.Y - _devicePressPoint.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        var dragged = _pressedDevice;
+        _deviceDragStarted = true;
+        DeviceListBox.ReleaseMouseCapture();
+        e.Handled = true;
+        try
+        {
+            DragDrop.DoDragDrop(DeviceListBox, dragged, DragDropEffects.Move);
+        }
+        finally
+        {
+            ResetDeviceDragState();
+        }
+    }
+
+    private void OnDeviceListLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_pressedDevice is null) return;
+        var device = _pressedDevice;
+        var select = !_deviceDragStarted;
+        ResetDeviceDragState();
+        if (select) _ = SelectDeviceWithTransitionAsync(device);
+        e.Handled = true;
+    }
+
+    private async Task SelectDeviceWithTransitionAsync(DeviceViewModel device)
+    {
+        if (ReferenceEquals(_viewModel.SelectedDevice, device)) return;
+        var revision = Interlocked.Increment(ref _previewTransitionRevision);
+        var maskTransition = _viewModel.IsCapturing &&
+            !_viewModel.HasCaptureSessionFor(device);
+        if (!maskTransition)
+        {
+            PreviewTransitionMask.IsOpen = false;
+            DeviceListBox.SelectedItem = device;
+            return;
+        }
+
+        PreviewTransitionMask.IsOpen = true;
+        try
+        {
+            // A Popup owns a separate HWND and can cover WPF/HwndHost airspace.
+            // Give DWM two frames to present it before changing preview owners.
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            await Task.Delay(34);
+            if (revision != _previewTransitionRevision || _shutdownStarted) return;
+            DeviceListBox.SelectedItem = device;
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            await Task.Delay(100);
+        }
+        finally
+        {
+            if (revision == _previewTransitionRevision)
+                PreviewTransitionMask.IsOpen = false;
+        }
+    }
+
+    private void OnDeviceListDragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(DeviceViewModel)) is not DeviceViewModel source)
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+        e.Effects = DragDropEffects.Move;
+        var item = FindListBoxItem(e.OriginalSource as DependencyObject);
+        var target = item?.DataContext as DeviceViewModel;
+        if (target is not null && !ReferenceEquals(source, target))
+        {
+            var before = CaptureDeviceItemPositions();
+            var placeAfter = e.GetPosition(item!).Y >= item!.ActualHeight / 2;
+            var oldIndex = _viewModel.Devices.IndexOf(source);
+            _viewModel.MoveDevice(source, target, placeAfter);
+            if (_viewModel.Devices.IndexOf(source) != oldIndex)
+                AnimateDeviceItemsFrom(before);
+        }
+        e.Handled = true;
+    }
+
+    private void OnDeviceListDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(DeviceViewModel)) is not DeviceViewModel source) return;
+        var item = FindListBoxItem(e.OriginalSource as DependencyObject);
+        var target = item?.DataContext as DeviceViewModel;
+        var placeAfter = item is not null && e.GetPosition(item).Y >= item.ActualHeight / 2;
+        _viewModel.MoveDevice(source, target, placeAfter);
+        e.Handled = true;
+    }
+
+    private void ResetDeviceDragState()
+    {
+        DeviceListBox.ReleaseMouseCapture();
+        _pressedDevice = null;
+        _deviceDragStarted = false;
+    }
+
+    private Dictionary<DeviceViewModel, double> CaptureDeviceItemPositions()
+    {
+        var positions = new Dictionary<DeviceViewModel, double>();
+        foreach (var device in _viewModel.Devices)
+            if (DeviceListBox.ItemContainerGenerator.ContainerFromItem(device) is ListBoxItem item)
+                positions[device] = item.TranslatePoint(default, DeviceListBox).Y;
+        return positions;
+    }
+
+    private void AnimateDeviceItemsFrom(IReadOnlyDictionary<DeviceViewModel, double> before)
+    {
+        DeviceListBox.UpdateLayout();
+        foreach (var device in _viewModel.Devices)
+        {
+            if (!before.TryGetValue(device, out var oldY) ||
+                DeviceListBox.ItemContainerGenerator.ContainerFromItem(device) is not ListBoxItem item)
+                continue;
+            var delta = oldY - item.TranslatePoint(default, DeviceListBox).Y;
+            if (Math.Abs(delta) < 0.5) continue;
+            var transform = item.RenderTransform as TranslateTransform ?? new TranslateTransform();
+            item.RenderTransform = transform;
+            transform.BeginAnimation(TranslateTransform.YProperty,
+                new DoubleAnimation(delta, 0, TimeSpan.FromMilliseconds(170))
+                { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+        }
+    }
+
+    private static ListBoxItem? FindListBoxItem(DependencyObject? source)
+    {
+        while (source is not null && source is not ListBoxItem)
+            source = VisualTreeHelper.GetParent(source);
+        return source as ListBoxItem;
+    }
+
     private void RefreshPreview()
     {
         var refreshed = _secondaryMirrors.IsOpen(_viewModel.SelectedDevice)
@@ -157,6 +318,16 @@ public partial class MainWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.AdvancedSettingsVisibility) &&
+            _viewModel.AdvancedSettingsVisibility == Visibility.Visible)
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+                () => AdvancedSettingsCard.BringIntoView());
+        }
+
+        if (e.PropertyName == nameof(MainViewModel.IsCapturing) && !_viewModel.IsCapturing)
+            MainPreviewHost.SetPresentationVisible(false);
+
         // Width is raised before height as one atomic status update. Listening
         // to the final height notification avoids resizing twice per frame-
         // format/orientation change.
@@ -170,8 +341,20 @@ public partial class MainWindow : Window
                 _viewModel.SourceVideoHeight);
             if (e.PropertyName is nameof(MainViewModel.SelectedDevice) or
                 nameof(MainViewModel.CurrentSessionHandle))
-                Dispatcher.BeginInvoke(DispatcherPriority.Render, MainPreviewHost.Activate);
+                QueueMainPreviewHostSync();
         }
+        else if (e.PropertyName == nameof(MainViewModel.IsCapturing))
+            QueueMainPreviewHostSync();
+    }
+
+    private void QueueMainPreviewHostSync() =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Render, SynchronizeMainPreviewHost);
+
+    private void SynchronizeMainPreviewHost()
+    {
+        var visible = _viewModel.IsCapturing && _viewModel.CurrentSessionHandle != 0;
+        MainPreviewHost.SetPresentationVisible(visible);
+        if (visible) MainPreviewHost.Activate();
     }
 
     private void OnDeviceVideoSizeChanged(string udid, uint width, uint height) =>

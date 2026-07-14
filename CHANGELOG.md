@@ -5,6 +5,41 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-07-14
+
+### Fixed
+
+- Unify application prompts with the driver manager dialog style, summarize
+  receiver-name and resolution changes in one confirmation, advertise renamed
+  receivers in both DNS-SD and AirPlay `/info`, move wireless settings to the
+  top for wireless tabs, and add animated device-list drag ordering.
+- Add pre-connection AirPlay capability profiles for maximum quality, 1080p,
+  720p and 540p. Applying a profile restarts the receiver, prompts connected
+  devices before disconnecting them, and gives explicit iPhone reconnection
+  instructions so the selected source resolution is renegotiated.
+- Replace local render-resolution and frame-rate limit controls with read-only
+  actual stream resolution and frame rate when an AirPlay device is selected,
+  while preserving those local controls for wired devices.
+- Hide the wired A/B/C projection-mode selector as soon as capture startup
+  begins, avoiding the brief white disabled-state flash before the active
+  session takes ownership.
+- Allow long-press drag ordering in the device list while preserving the custom
+  order across subsequent USB and AirPlay discovery polls.
+- Keep advanced USB settings restricted to experimental AirPlay mode, and
+  automatically scroll the newly unlocked settings card into view after the
+  fifth footer-version click.
+- Select a newly connected AirPlay device once without repeatedly overriding a
+  later manual device selection.
+- Resolve known wired and wireless ProductType identifiers to readable Apple
+  model names, and correct the advanced USB height/width field order.
+- Keep the embedded native preview HWND black while switching from an active
+  session to an idle device, and hide the airspace child immediately before
+  removing the complete HwndHost airspace from idle layout to eliminate the
+  white transition frame. A separate dark Popup HWND masks the active-to-idle
+  handoff only after DWM has presented it, making the visible switch atomic.
+  Its perimeter stays transparent so the original preview border remains
+   continuously visible without cross-HWND pixel-rounding mismatch.
+
 ## [1.0.1-preview.1] - 2026-07-14
 
 ### Changed
@@ -205,7 +240,9 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.1-preview.1...v1.0.3
+[1.0.1-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.0...v1.0.1-preview.1
 [1.0.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.6.0-preview.1...v1.0.0
 [0.6.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.2...v0.6.0-preview.1
 [0.5.0-preview.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.5.0-preview.1...v0.5.0-preview.2

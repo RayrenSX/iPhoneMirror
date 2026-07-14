@@ -363,7 +363,8 @@ void WirelessClientStream::stop_audio_renderer() noexcept {
 
 WirelessReceiverHub::~WirelessReceiverHub() { stop(); }
 
-void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_path) {
+void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_path,
+    std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate) {
     if (worker_.joinable() || process_) return;
     if (!std::filesystem::is_regular_file(host_path))
         throw std::runtime_error("wireless host executable is missing");
@@ -390,7 +391,9 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
 
     auto command = quote_argument(host_path_) + L" --pipe " + quote_argument(pipe_name_) +
         L" --stop-event " + quote_argument(stop_event_name_) + L" --name " +
-        quote_argument(receiver_name_) + L" --parent-pid " + std::to_wstring(GetCurrentProcessId());
+        quote_argument(receiver_name_) + L" --parent-pid " + std::to_wstring(GetCurrentProcessId()) +
+        L" --width " + std::to_wstring(width) + L" --height " + std::to_wstring(height) +
+        L" --fps " + std::to_wstring(frame_rate);
     STARTUPINFOW startup{.cb = sizeof(startup)};
     PROCESS_INFORMATION process{};
     const auto working_directory = std::filesystem::path(host_path_).parent_path().wstring();
@@ -406,8 +409,10 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
     process_ = process.hProcess;
     stopping_.store(false, std::memory_order_release);
     ready_.store(false, std::memory_order_release);
-    logging::write(std::format("wireless_hub host_started pid={} receiver={} host={}",
-        process.dwProcessId, narrow(receiver_name_), narrow(host_path_)));
+    logging::write(std::format(
+        "wireless_hub host_started pid={} receiver={} capability={}x{}@{} host={}",
+        process.dwProcessId, narrow(receiver_name_), width, height, frame_rate,
+        narrow(host_path_)));
     worker_ = std::jthread([this](std::stop_token token) { run(token); });
 }
 

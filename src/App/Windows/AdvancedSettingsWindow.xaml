@@ -26,7 +26,18 @@
    <StackPanel>
     <TextBlock Text="{DynamicResource AdvancedUsbResolution}" FontWeight="SemiBold"/>
     <TextBlock Text="{DynamicResource AdvancedUsbResolutionHelp}" Foreground="#A9A9A9" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,12"/>
-    <Grid Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{DynamicResource WidthLabel}" Foreground="#A9A9A9" FontSize="11"/><TextBox x:Name="WidthBox" Margin="0,5,0,0" FontSize="16"/></StackPanel><TextBlock Grid.Column="1" Text="×" Foreground="#A9A9A9" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10"/><StackPanel Grid.Column="2"><TextBlock Text="{DynamicResource HeightLabel}" Foreground="#A9A9A9" FontSize="11"/><TextBox x:Name="HeightBox" Margin="0,5,0,0" FontSize="16"/></StackPanel></Grid>
+    <Grid Margin="0,5,0,0">
+     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+     <StackPanel>
+      <TextBlock Text="{DynamicResource HeightLabel}" Foreground="#A9A9A9" FontSize="11"/>
+      <TextBox x:Name="HeightBox" Margin="0,5,0,0" FontSize="16"/>
+     </StackPanel>
+     <TextBlock Grid.Column="1" Text="×" Foreground="#A9A9A9" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10"/>
+     <StackPanel Grid.Column="2">
+      <TextBlock Text="{DynamicResource WidthLabel}" Foreground="#A9A9A9" FontSize="11"/>
+      <TextBox x:Name="WidthBox" Margin="0,5,0,0" FontSize="16"/>
+     </StackPanel>
+    </Grid>
     <TextBlock x:Name="ErrorText" Foreground="#E56B75" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>
    </StackPanel>
   </Border>

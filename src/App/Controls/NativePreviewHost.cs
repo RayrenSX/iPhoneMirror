@@ -8,12 +8,16 @@ namespace IPhoneMirror.App.Controls;
 internal sealed class NativePreviewHost : HwndHost
 {
     private const int WmNcHitTest = 0x0084;
+    private const int WmEraseBackground = 0x0014;
     private const int HtTransparent = -1;
     private const int WsChild = 0x40000000;
-    private const int WsVisible = 0x10000000;
     private const int WsClipSiblings = 0x04000000;
     private const int WsClipChildren = 0x02000000;
+    private const int SsBlackRect = 0x00000004;
+    private const int SwHide = 0;
+    private const int SwShowNoActivate = 4;
     private nint _window;
+    private bool _presentationVisible;
 
     public NativePreviewHost()
     {
@@ -22,7 +26,7 @@ internal sealed class NativePreviewHost : HwndHost
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
         _window = CreateWindowExW(0, "STATIC", string.Empty,
-            WsChild | WsVisible | WsClipSiblings | WsClipChildren,
+            WsChild | WsClipSiblings | WsClipChildren | SsBlackRect,
             0, 0, 1, 1, hwndParent.Handle, 0, 0, 0);
         if (_window == 0) throw new InvalidOperationException(
             LocalizationService.Get("PreviewChildCreateFailed"));
@@ -32,6 +36,7 @@ internal sealed class NativePreviewHost : HwndHost
             _window = 0;
             throw new InvalidOperationException(LocalizationService.Get("PreviewRendererAttachFailed"));
         }
+        if (_presentationVisible) _ = ShowWindow(_window, SwShowNoActivate);
         return new HandleRef(this, _window);
     }
 
@@ -53,6 +58,12 @@ internal sealed class NativePreviewHost : HwndHost
         // builds do not expose that entry point, so retain reattachment as a
         // compatibility fallback.
         return PreviewAttachmentCoordinator.Refresh(_window);
+    }
+
+    internal void SetPresentationVisible(bool visible)
+    {
+        _presentationVisible = visible;
+        if (_window != 0) _ = ShowWindow(_window, visible ? SwShowNoActivate : SwHide);
     }
 
     protected override void OnWindowPositionChanged(System.Windows.Rect rcBoundingBox)
@@ -86,6 +97,15 @@ internal sealed class NativePreviewHost : HwndHost
             handled = true;
             return HtTransparent;
         }
+        if (message == WmEraseBackground)
+        {
+            // The selected D3D session can be detached one dispatcher frame
+            // before WPF shrinks this airspace HWND to its idle 1 px target.
+            // Suppress the STATIC control's default white erase during that
+            // handoff; SS_BLACKRECT supplies the same black as the preview.
+            handled = true;
+            return 1;
+        }
         return base.WndProc(hwnd, message, wParam, lParam, ref handled);
     }
 
@@ -97,6 +117,10 @@ internal sealed class NativePreviewHost : HwndHost
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyWindow(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(nint window, int command);
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(nint window);

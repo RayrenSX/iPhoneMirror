@@ -324,6 +324,28 @@ std::wstring argument_value(int argc, wchar_t** argv, std::wstring_view name) {
     return {};
 }
 
+unsigned int argument_uint(int argc, wchar_t** argv, std::wstring_view name,
+    unsigned int fallback) noexcept {
+    const auto value = argument_value(argc, argv, name);
+    if (value.empty()) return fallback;
+    try {
+        std::size_t consumed{};
+        const auto parsed = std::stoul(value, &consumed);
+        return consumed == value.size() && parsed <= 8192 ?
+            static_cast<unsigned int>(parsed) : fallback;
+    } catch (...) {
+        return fallback;
+    }
+}
+
+bool supported_capability(unsigned int width, unsigned int height,
+    unsigned int fps) noexcept {
+    return (width == 5120 && height == 2880 && fps == 60) ||
+        (width == 1920 && height == 1080 && fps == 60) ||
+        (width == 1280 && height == 720 && fps == 30) ||
+        (width == 960 && height == 540 && fps == 30);
+}
+
 std::string utf8(std::wstring_view value) {
     if (value.empty()) return {};
     const auto length = WideCharToMultiByte(CP_UTF8, 0, value.data(),
@@ -363,11 +385,27 @@ int wmain(int argc, wchar_t** argv) {
     const auto receiver_name_wide = argument_value(argc, argv, L"--name");
     const auto parent_text = argument_value(argc, argv, L"--parent-pid");
     const auto library_override = argument_value(argc, argv, L"--library");
+    const auto capability_width = argument_uint(argc, argv, L"--width", 5120);
+    const auto capability_height = argument_uint(argc, argv, L"--height", 2880);
+    const auto capability_fps = argument_uint(argc, argv, L"--fps", 60);
     if (pipe_name.empty() || stop_event_name.empty()) return 2;
 
     const auto pipe = connect_pipe(pipe_name);
     if (pipe == INVALID_HANDLE_VALUE) return 3;
     IpcWriter writer(pipe);
+
+    if (!supported_capability(capability_width, capability_height, capability_fps)) {
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+            "Unsupported AirPlay display capability profile");
+        CloseHandle(pipe);
+        return 7;
+    }
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_WIDTH",
+        std::to_wstring(capability_width).c_str());
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_HEIGHT",
+        std::to_wstring(capability_height).c_str());
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_FPS",
+        std::to_wstring(capability_fps).c_str());
 
     const auto directory = executable_directory();
     const auto library_path = library_override.empty()
@@ -402,9 +440,11 @@ int wmain(int argc, wchar_t** argv) {
     AirPlayCallback callback(writer);
     auto receiver_name = utf8(receiver_name_wide);
     if (receiver_name.empty()) receiver_name = "iPhoneMirror AirPlay";
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_NAME", receiver_name_wide.c_str());
     writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-        std::format("wireless host starting receiver={} raop_port=5001 "
-            "airplay_port=7001", receiver_name).c_str());
+        std::format("wireless host starting receiver={} capability={}x{}@{} "
+            "raop_port=5001 airplay_port=7001", receiver_name, capability_width,
+            capability_height, capability_fps).c_str());
     const auto server = start_server(receiver_name.c_str(), 5001, 7001, &callback);
     if (!server) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,

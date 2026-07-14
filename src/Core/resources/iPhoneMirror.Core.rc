@@ -1,8 +1,8 @@
 #include <windows.h>
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,1,0
- PRODUCTVERSION 1,0,1,0
+ FILEVERSION 1,0,3,0
+ PRODUCTVERSION 1,0,3,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -15,12 +15,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "RayrenSX\0"
             VALUE "FileDescription", "iPhoneMirror USB Capture Core\0"
-            VALUE "FileVersion", "1.0.1.0\0"
+            VALUE "FileVersion", "1.0.3.0\0"
             VALUE "InternalName", "iPhoneMirror.Core.dll\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 RayrenSX\0"
             VALUE "OriginalFilename", "iPhoneMirror.Core.dll\0"
             VALUE "ProductName", "iPhoneMirror\0"
-            VALUE "ProductVersion", "1.0.1-preview.1\0"
+            VALUE "ProductVersion", "1.0.3\0"
         END
     END
     BLOCK "VarFileInfo"

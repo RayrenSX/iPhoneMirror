@@ -131,6 +131,12 @@ internal sealed class NativeCore : IDisposable
         [MarshalAs(UnmanagedType.LPWStr)] string receiverName,
         [MarshalAs(UnmanagedType.LPWStr)] string hostPath);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    private static extern int im_wireless_receiver_start_ex(
+        [MarshalAs(UnmanagedType.LPWStr)] string receiverName,
+        [MarshalAs(UnmanagedType.LPWStr)] string hostPath,
+        uint width, uint height, uint frameRate);
+
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void im_wireless_receiver_stop();
 
@@ -389,9 +395,10 @@ internal sealed class NativeCore : IDisposable
     }
 
     public (bool Success, string Message) StartWirelessReceiver(
-        string receiverName, string hostPath)
+        string receiverName, string hostPath, uint width, uint height, uint frameRate)
     {
-        var result = im_wireless_receiver_start(receiverName, hostPath);
+        var result = im_wireless_receiver_start_ex(
+            receiverName, hostPath, width, height, frameRate);
         return result == 0
             ? (true, LocalizationService.Get("WirelessReady"))
             : (false, GetLastError(LocalizationService.Get("WirelessReceiverMissing")));

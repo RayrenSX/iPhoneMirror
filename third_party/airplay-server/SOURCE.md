@@ -2,12 +2,16 @@
 
 The files in `bin/x64` are a pinned runtime subset of AirPlayServer v1.1.0,
 with the wrapper patched for native Windows FFmpeg loading, per-client IPC
-identity, AirPlay SETUP device metadata extraction, and a 5120x2880@60 AirPlay
-display capability response. The SETUP metadata patch reads the sender's
+identity, AirPlay SETUP device metadata extraction, and runtime-selectable
+AirPlay display capability responses with a 5120x2880@60 fallback. The SETUP
+metadata patch reads the sender's
 `deviceID`, `model` (Apple ProductType), and `osVersion` plist values and
 forwards them to the host as an explicit IPC `DeviceInfo` message.
 iPhoneMirror's receiver build script reapplies both patches and verifies the
-compiled DLL contains only the 5120x2880@60 display profile before installation.
+compiled DLL contains the runtime width, height and frame-rate capability
+markers before installation. The host only accepts the predefined maximum,
+1080p, 720p and 540p profiles exposed by the application, and forwards the
+configured receiver name into both DNS-SD registration and the `/info` plist.
 iPhoneMirror starts its own GPL-licensed `iPhoneMirror.WirelessHost.exe`
 process, which loads `airplay2dll.dll`; the GPL-3.0-only application and native
 capture core exchange decoded frames with that process over a named pipe.
