@@ -1,3 +1,5 @@
+#include <Windows.h>
+
 struct SFgAudioFrame {
     unsigned long long pts;
     unsigned int sampleRate;
@@ -33,6 +35,8 @@ public:
 extern "C" void* __cdecl stub_start(const char*, unsigned int, unsigned int,
     IAirServerCallback* callback) {
     if (!callback) return nullptr;
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY",
+        L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     callback->log(6, "stub protocol log");
     callback->log(6, "IPHONE_MIRROR_DEVICE_INFO\t00:11:22:33:44:55\tiPhone9,1\t17.5.1");
     callback->connected("Stub iPhone", "00:11:22:33:44:55");
@@ -68,6 +72,8 @@ extern "C" void* __cdecl stub_start(const char*, unsigned int, unsigned int,
     callback->outputVideo(&video, "Second iPhone", "66:77:88:99:AA:BB");
     callback->outputAudio(&audio, "Second iPhone", "66:77:88:99:AA:BB");
     callback->disconnected("Second iPhone", "66:77:88:99:AA:BB");
+    char media_url[] = "https://example.test/video.m3u8";
+    callback->videoPlay(media_url, 0.75, 12.5);
     return reinterpret_cast<void*>(1);
 }
 

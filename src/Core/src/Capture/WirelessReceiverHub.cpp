@@ -5,16 +5,54 @@
 #include "Logging.h"
 
 #include <Windows.h>
+#include <sddl.h>
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <format>
+#include <iterator>
 #include <stdexcept>
 
 namespace {
 
 HANDLE as_handle(void* value) noexcept { return static_cast<HANDLE>(value); }
+
+class LocalSecurityAttributes final {
+public:
+    LocalSecurityAttributes() {
+        constexpr auto descriptor = L"D:P(A;;GA;;;SY)(A;;GA;;;OW)";
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(descriptor,
+                SDDL_REVISION_1, &descriptor_, nullptr))
+            throw std::runtime_error(std::format(
+                "Could not create IPC security descriptor: {}", GetLastError()));
+        attributes_ = {
+            .nLength = sizeof(attributes_),
+            .lpSecurityDescriptor = descriptor_,
+            .bInheritHandle = FALSE,
+        };
+    }
+
+    ~LocalSecurityAttributes() { if (descriptor_) LocalFree(descriptor_); }
+    LocalSecurityAttributes(const LocalSecurityAttributes&) = delete;
+    LocalSecurityAttributes& operator=(const LocalSecurityAttributes&) = delete;
+
+    SECURITY_ATTRIBUTES* get() noexcept { return &attributes_; }
+
+private:
+    PSECURITY_DESCRIPTOR descriptor_{};
+    SECURITY_ATTRIBUTES attributes_{};
+};
+
+std::wstring unique_ipc_suffix() {
+    GUID value{};
+    if (FAILED(CoCreateGuid(&value)))
+        throw std::runtime_error("Could not generate an AirPlay IPC nonce");
+    wchar_t text[40]{};
+    if (StringFromGUID2(value, text, static_cast<int>(std::size(text))) == 0)
+        throw std::runtime_error("Could not format an AirPlay IPC nonce");
+    return std::format(L"{}-{}", GetCurrentProcessId(), text);
+}
 
 bool read_all(HANDLE pipe, void* destination, std::size_t size) noexcept {
     auto* bytes = static_cast<std::uint8_t*>(destination);
@@ -26,6 +64,38 @@ bool read_all(HANDLE pipe, void* destination, std::size_t size) noexcept {
         size -= read;
     }
     return true;
+}
+
+bool write_all(HANDLE pipe, const void* source, std::size_t size) noexcept {
+    const auto* bytes = static_cast<const std::uint8_t*>(source);
+    while (size != 0) {
+        DWORD written{};
+        const auto request = static_cast<DWORD>(std::min<std::size_t>(size, 1024U * 1024U));
+        if (!WriteFile(pipe, bytes, request, &written, nullptr) || written == 0) return false;
+        bytes += written;
+        size -= written;
+    }
+    return true;
+}
+
+bool connect_expected_client(HANDLE pipe, DWORD expected_process_id,
+    std::stop_token stop_token) {
+    while (!stop_token.stop_requested()) {
+        const auto connected = ConnectNamedPipe(pipe, nullptr) != FALSE ||
+            GetLastError() == ERROR_PIPE_CONNECTED;
+        if (!connected) return false;
+
+        ULONG client_process_id{};
+        if (GetNamedPipeClientProcessId(pipe, &client_process_id) &&
+            client_process_id == expected_process_id)
+            return true;
+
+        iPhoneMirror::logging::write(std::format(
+            "wireless_hub rejected pipe client pid={} expected={}",
+            client_process_id, expected_process_id));
+        DisconnectNamedPipe(pipe);
+    }
+    return false;
 }
 
 std::wstring quote_argument(std::wstring_view value) {
@@ -365,27 +435,46 @@ WirelessReceiverHub::~WirelessReceiverHub() { stop(); }
 
 void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_path,
     std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate) {
+    std::scoped_lock lifecycle_lock(lifecycle_mutex_);
+    // A crashed host leaves a signaled process handle and a joinable reader
+    // thread behind. Reap that stale state before starting its replacement.
+    if (process_ && WaitForSingleObject(as_handle(process_), 0) != WAIT_TIMEOUT)
+        stop_locked();
     if (worker_.joinable() || process_) return;
     if (!std::filesystem::is_regular_file(host_path))
         throw std::runtime_error("wireless host executable is missing");
     receiver_name_ = std::move(receiver_name);
     host_path_ = std::move(host_path);
-    const auto suffix = std::format(L"{}-{}", GetCurrentProcessId(), GetTickCount64());
+    {
+        std::scoped_lock lock(mutex_);
+        media_command_ = {};
+    }
+    const auto suffix = unique_ipc_suffix();
     pipe_name_ = L"\\\\.\\pipe\\iPhoneMirror-AirPlay-Hub-" + suffix;
     stop_event_name_ = L"Local\\iPhoneMirror-AirPlay-Hub-Stop-" + suffix;
 
+    LocalSecurityAttributes security;
     const auto pipe = CreateNamedPipeW(pipe_name_.c_str(),
-        PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
-        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 0, 8U * 1024U * 1024U,
-        0, nullptr);
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+        1, 64U * 1024U, 8U * 1024U * 1024U,
+        0, security.get());
     if (pipe == INVALID_HANDLE_VALUE)
         throw std::runtime_error(std::format("CreateNamedPipe failed: {}", GetLastError()));
     pipe_ = pipe;
-    const auto stop_event = CreateEventW(nullptr, TRUE, FALSE, stop_event_name_.c_str());
+    SetLastError(ERROR_SUCCESS);
+    const auto stop_event = CreateEventW(security.get(), TRUE, FALSE, stop_event_name_.c_str());
+    const auto stop_event_error = GetLastError();
     if (!stop_event) {
         CloseHandle(pipe);
         pipe_ = nullptr;
-        throw std::runtime_error(std::format("CreateEvent failed: {}", GetLastError()));
+        throw std::runtime_error(std::format("CreateEvent failed: {}", stop_event_error));
+    }
+    if (stop_event_error == ERROR_ALREADY_EXISTS) {
+        CloseHandle(stop_event);
+        CloseHandle(pipe);
+        pipe_ = nullptr;
+        throw std::runtime_error("AirPlay stop event name was already claimed");
     }
     stop_event_ = stop_event;
 
@@ -393,7 +482,8 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
         L" --stop-event " + quote_argument(stop_event_name_) + L" --name " +
         quote_argument(receiver_name_) + L" --parent-pid " + std::to_wstring(GetCurrentProcessId()) +
         L" --width " + std::to_wstring(width) + L" --height " + std::to_wstring(height) +
-        L" --fps " + std::to_wstring(frame_rate);
+        L" --fps " + std::to_wstring(frame_rate) +
+        L" --mode combined --raop-port 5001 --airplay-port 7001";
     STARTUPINFOW startup{.cb = sizeof(startup)};
     PROCESS_INFORMATION process{};
     const auto working_directory = std::filesystem::path(host_path_).parent_path().wstring();
@@ -410,13 +500,18 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
     stopping_.store(false, std::memory_order_release);
     ready_.store(false, std::memory_order_release);
     logging::write(std::format(
-        "wireless_hub host_started pid={} receiver={} capability={}x{}@{} host={}",
+        "wireless_hub host_started pid={} receiver={} capability={}x{}@{} mode=combined host={}",
         process.dwProcessId, narrow(receiver_name_), width, height, frame_rate,
         narrow(host_path_)));
     worker_ = std::jthread([this](std::stop_token token) { run(token); });
 }
 
 void WirelessReceiverHub::stop() noexcept {
+    std::scoped_lock lifecycle_lock(lifecycle_mutex_);
+    stop_locked();
+}
+
+void WirelessReceiverHub::stop_locked() noexcept {
     if (!worker_.joinable() && !process_) return;
     stopping_.store(true, std::memory_order_release);
     ready_.store(false, std::memory_order_release);
@@ -449,7 +544,10 @@ void WirelessReceiverHub::stop() noexcept {
     logging::write("wireless_hub stopped");
 }
 
-bool WirelessReceiverHub::running() const noexcept { return process_ != nullptr; }
+bool WirelessReceiverHub::running() const noexcept {
+    std::scoped_lock lifecycle_lock(lifecycle_mutex_);
+    return process_ && WaitForSingleObject(as_handle(process_), 0) == WAIT_TIMEOUT;
+}
 
 bool WirelessReceiverHub::ready() const noexcept {
     return ready_.load(std::memory_order_acquire);
@@ -482,11 +580,33 @@ std::shared_ptr<WirelessClientStream> WirelessReceiverHub::attach(
     return stream;
 }
 
+MediaCastCommand WirelessReceiverHub::media_command() const {
+    std::scoped_lock lock(mutex_);
+    return media_command_;
+}
+
+bool WirelessReceiverHub::update_media_playback(std::uint64_t command_id,
+    double duration, double position, double rate) noexcept {
+    if (!std::isfinite(duration) || !std::isfinite(position) || !std::isfinite(rate) ||
+        duration < 0 || position < 0) return false;
+    std::scoped_lock lifecycle_lock(lifecycle_mutex_);
+    if (!pipe_ || !process_) return false;
+    wireless::MessageHeader header;
+    header.type = wireless::MessageType::PlaybackState;
+    header.media_command_id = command_id;
+    header.media_duration = duration;
+    header.media_position = position;
+    header.media_rate = rate;
+    std::scoped_lock write_lock(pipe_write_mutex_);
+    return write_all(as_handle(pipe_), &header, sizeof(header));
+}
+
 void WirelessReceiverHub::run(std::stop_token stop_token) noexcept {
     try {
         const auto pipe = as_handle(pipe_);
-        const auto connected = ConnectNamedPipe(pipe, nullptr) != FALSE ||
-            GetLastError() == ERROR_PIPE_CONNECTED;
+        const auto expected_process_id = process_ ? GetProcessId(as_handle(process_)) : 0;
+        const auto connected = expected_process_id != 0 &&
+            connect_expected_client(pipe, expected_process_id, stop_token);
         if (!connected) throw std::runtime_error("wireless host could not connect");
         logging::write("wireless_hub pipe_connected");
         while (!stop_token.stop_requested()) {
@@ -552,6 +672,42 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
         }
         break;
     }
+    case wireless::MessageType::MediaPlay: {
+        if (header.media_command_id == 0 || payload.empty() || payload.size() > 16U * 1024U)
+            throw std::runtime_error("invalid media play command");
+        const auto url = widen(std::string_view(
+            reinterpret_cast<const char*>(payload.data()), payload.size()));
+        if (!url.starts_with(L"http://") && !url.starts_with(L"https://"))
+            throw std::runtime_error("media play URL is not HTTP(S)");
+        {
+            std::scoped_lock lock(mutex_);
+            media_command_ = {
+                .id = header.media_command_id,
+                .type = MediaCastCommandType::Play,
+                .url = url,
+                .start_position = std::max(0.0, header.media_position),
+                .volume = header.media_volume,
+            };
+        }
+        logging::write(std::format("wireless_hub media_play command={} url_bytes={}",
+            header.media_command_id, payload.size()));
+        break;
+    }
+    case wireless::MessageType::MediaStop:
+        if (header.media_command_id == 0)
+            throw std::runtime_error("invalid media stop command");
+        {
+            std::scoped_lock lock(mutex_);
+            media_command_ = {
+                .id = header.media_command_id,
+                .type = MediaCastCommandType::Stop,
+            };
+        }
+        logging::write(std::format("wireless_hub media_stop command={}",
+            header.media_command_id));
+        break;
+    case wireless::MessageType::PlaybackState:
+        throw std::runtime_error("unexpected playback state from wireless host");
     default:
         throw std::runtime_error("unknown wireless IPC message type");
     }

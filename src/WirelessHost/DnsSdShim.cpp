@@ -5,15 +5,59 @@
 #include <WinSock2.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <cwctype>
+#include <format>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace {
+
+// Preserve the authentication/audio transport bits required by screen
+// mirroring, while clearing video, photo, HLS, slideshow, rotation-advertising,
+// playback-queue, and second-word cloud-media capabilities.
+constexpr std::wstring_view MirroringOnlyFeatures = L"0x5A7FFEC0,0x0";
+// Match UxPlay's HLS-enabled legacy feature set. Advertising the newer
+// playback-queue/cloud/TLS bits makes some video apps require AirPlay 2
+// services that this receiver intentionally does not implement, so they hide
+// the route before attempting a connection.
+constexpr std::wstring_view MediaCastFeatures = L"0x5A7FFEF7,0x0";
+constexpr std::wstring_view LegacyAirPlayModel = L"AppleTV3,2";
+constexpr std::wstring_view LegacyAirPlayVersion = L"220.68";
+constexpr std::wstring_view AirPlayPairingIdentity =
+    L"2e388006-13ba-4041-9a67-25dd4a43d536";
+
+std::wstring receiver_mode() {
+    wchar_t mode[16]{};
+    const auto length = GetEnvironmentVariableW(
+        L"IPHONE_MIRROR_AIRPLAY_MODE", mode, static_cast<DWORD>(std::size(mode)));
+    return length < std::size(mode) ? std::wstring(mode, length) : std::wstring{};
+}
+
+std::wstring environment_value(const wchar_t* name, std::size_t capacity) {
+    std::wstring value(capacity, L'\0');
+    const auto length = GetEnvironmentVariableW(
+        name, value.data(), static_cast<DWORD>(value.size()));
+    if (length == 0 || length >= value.size()) return {};
+    value.resize(length);
+    return value;
+}
+
+bool is_lower_hex(std::wstring_view value, std::size_t length) noexcept {
+    return value.size() == length && std::ranges::all_of(value,
+        [](wchar_t character) {
+            return (character >= L'0' && character <= L'9') ||
+                (character >= L'a' && character <= L'f');
+        });
+}
 
 using DNSServiceRef = struct Registration*;
 using DNSServiceFlags = std::uint32_t;
@@ -39,8 +83,20 @@ struct Registration {
     void* callback_context{};
     std::string name;
     std::string regtype;
+    std::wstring service_identity;
+    std::atomic_bool owns_service_identity{};
     HANDLE completion{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
 };
+
+std::mutex active_services_mutex;
+std::unordered_set<std::wstring> active_services;
+std::atomic_uint16_t screen_mirroring_network_port{};
+
+void release_service_identity(Registration& registration) noexcept {
+    if (!registration.owns_service_identity.exchange(false)) return;
+    std::scoped_lock lock(active_services_mutex);
+    active_services.erase(registration.service_identity);
+}
 
 TxtRecordState* txt_state(const TXTRecordRef* record) noexcept {
     TxtRecordState* state{};
@@ -92,6 +148,62 @@ std::wstring host_name() {
     return result;
 }
 
+std::array<std::uint8_t, 6> media_device_id() noexcept {
+    wchar_t computer[MAX_COMPUTERNAME_LENGTH + 1]{};
+    DWORD length = static_cast<DWORD>(std::size(computer));
+    if (!GetComputerNameW(computer, &length)) {
+        constexpr wchar_t fallback[] = L"iPhoneMirror";
+        std::copy(std::begin(fallback), std::end(fallback), computer);
+        length = static_cast<DWORD>(std::size(fallback) - 1);
+    }
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (DWORD index = 0; index < length; ++index) {
+        hash ^= static_cast<std::uint8_t>(computer[index]);
+        hash *= 1099511628211ULL;
+    }
+    // Bump the media-route identity when its advertised protocol profile
+    // changes. iOS and third-party apps otherwise keep the old audio-only
+    // classification cached even after the TXT record is corrected.
+    constexpr std::string_view profile = "video-cast-v2";
+    for (const auto byte : profile) {
+        hash ^= static_cast<std::uint8_t>(byte);
+        hash *= 1099511628211ULL;
+    }
+    return {0x02, static_cast<std::uint8_t>(hash),
+        static_cast<std::uint8_t>(hash >> 8),
+        static_cast<std::uint8_t>(hash >> 16),
+        static_cast<std::uint8_t>(hash >> 24),
+        static_cast<std::uint8_t>(hash >> 32)};
+}
+
+std::wstring media_device_id_text(bool compact) {
+    wchar_t configured[32]{};
+    const auto length = GetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_DEVICE_ID",
+        configured, static_cast<DWORD>(std::size(configured)));
+    if (length == 17) {
+        const std::wstring_view value(configured, length);
+        const auto valid = std::ranges::all_of(value, [index = std::size_t{}]
+            (wchar_t character) mutable {
+                const auto separator = index++ % 3 == 2;
+                return separator ? character == L':' : std::iswxdigit(character) != 0;
+            });
+        if (valid) {
+            if (!compact) return std::wstring(value);
+            std::wstring result;
+            result.reserve(12);
+            for (const auto character : value)
+                if (character != L':') result.push_back(character);
+            return result;
+        }
+    }
+    const auto id = media_device_id();
+    return compact
+        ? std::format(L"{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+            id[0], id[1], id[2], id[3], id[4], id[5])
+        : std::format(L"{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            id[0], id[1], id[2], id[3], id[4], id[5]);
+}
+
 std::vector<std::pair<std::wstring, std::wstring>> parse_txt(
     std::uint16_t length, const void* source) {
     std::vector<std::pair<std::wstring, std::wstring>> result;
@@ -116,6 +228,7 @@ void WINAPI registration_complete(DWORD status, void* context,
     PDNS_SERVICE_INSTANCE) {
     const auto registration = static_cast<Registration*>(context);
     if (!registration) return;
+    if (status != ERROR_SUCCESS) release_service_identity(*registration);
     if (registration->callback) {
         registration->callback(registration, 0,
             status == ERROR_SUCCESS ? 0 : -65537,
@@ -182,10 +295,86 @@ extern "C" __declspec(dllexport) DNSServiceErrorType __stdcall DNSServiceRegiste
     registration->callback_context = callback_context;
     registration->name = name;
     registration->regtype = regtype;
+    const auto mode = receiver_mode();
+    const auto media_mode = mode == L"media" || mode == L"combined";
+    const auto service_type = std::string_view(regtype);
 
-    auto service_name = widen(name) + L"." + widen(regtype) + L".local";
+    if (service_type == "_raop._tcp") {
+        // Legacy mirror-only mode exposes RAOP through its redirected AirPlay
+        // record. Combined mode follows AirPlay receivers such as UxPlay and
+        // publishes the matching RAOP and AirPlay records as one device.
+        if (!media_mode) {
+            screen_mirroring_network_port.store(network_port, std::memory_order_release);
+            *output = registration.release();
+            return 0;
+        }
+    }
+
+    if (service_type == "_airplay._tcp" && !media_mode) {
+        const auto mirroring_port = screen_mirroring_network_port.load(
+            std::memory_order_acquire);
+        if (mirroring_port != 0) network_port = mirroring_port;
+    }
+
+    auto instance_name = widen(name);
+    if (service_type == "_raop._tcp" && media_mode) {
+        const auto separator = instance_name.find(L'@');
+        const auto display_name = separator == std::wstring::npos
+            ? instance_name : instance_name.substr(separator + 1);
+        instance_name = media_device_id_text(true) + L"@" + display_name;
+    }
+    auto service_name = instance_name + L"." + widen(regtype) + L".local";
+    registration->service_identity = service_name;
+    {
+        std::scoped_lock lock(active_services_mutex);
+        const auto [_, inserted] = active_services.insert(service_name);
+        if (!inserted) {
+            // Upstream registers once per network adapter. Windows DNS-SD can
+            // already advertise one registration on every adapter, so keeping
+            // the duplicates would make iPhone display "name (1)" and leave
+            // stale siblings after a receiver rename.
+            *output = registration.release();
+            return 0;
+        }
+        registration->owns_service_identity.store(true);
+    }
     const auto host = host_name();
     auto properties = parse_txt(txt_length, txt_record);
+    const auto set_property = [&properties](std::wstring_view key,
+                                  std::wstring_view value) {
+        const auto property = std::ranges::find_if(properties,
+            [key](const auto& item) { return item.first == key; });
+        if (property == properties.end()) properties.emplace_back(key, value);
+        else property->second.assign(value);
+    };
+    if (service_type == "_airplay._tcp") {
+        const auto advertised = media_mode ? MediaCastFeatures : MirroringOnlyFeatures;
+        set_property(L"features", advertised);
+        if (media_mode) {
+            const auto public_key = environment_value(
+                L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY", 65);
+            set_property(L"deviceid", media_device_id_text(false));
+            set_property(L"model", LegacyAirPlayModel);
+            set_property(L"srcvers", LegacyAirPlayVersion);
+            set_property(L"pi", AirPlayPairingIdentity);
+            if (is_lower_hex(public_key, 64)) set_property(L"pk", public_key);
+            set_property(L"pw", L"false");
+        }
+    }
+    else if (service_type == "_raop._tcp" && media_mode) {
+        // UxPlay publishes the video/HLS feature mask on both service records.
+        // Without RAOP `ft`, iOS route pickers classify this target as a pure
+        // AirTunes speaker and never open the /play video-control channel.
+        set_property(L"ft", MediaCastFeatures);
+        const auto public_key = environment_value(
+            L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY", 65);
+        set_property(L"am", LegacyAirPlayModel);
+        set_property(L"vs", LegacyAirPlayVersion);
+        if (is_lower_hex(public_key, 64)) set_property(L"pk", public_key);
+        set_property(L"vv", L"2");
+        set_property(L"cn", L"0,1,2,3");
+        set_property(L"rhd", L"5.6.0.0");
+    }
     std::vector<PCWSTR> keys;
     std::vector<PCWSTR> values;
     keys.reserve(properties.size());
@@ -202,10 +391,15 @@ extern "C" __declspec(dllexport) DNSServiceErrorType __stdcall DNSServiceRegiste
     // Keep a live opaque ref so the upstream library does not tear down those
     // servers just because DNS-SD is unavailable on one adapter.
     if (!registration->instance) {
+        release_service_identity(*registration);
         *output = registration.release();
         return 0;
     }
     registration->request.Version = 1;
+    // Keep only the first upstream registration for each service type and
+    // publish it on that one adapter. Publishing a single logical instance on
+    // every adapter makes iPhone expose duplicate names when two adapters are
+    // connected to the same LAN.
     registration->request.InterfaceIndex = interface_index;
     registration->request.pServiceInstance = registration->instance;
     registration->request.pRegisterCompletionCallback = registration_complete;
@@ -213,7 +407,13 @@ extern "C" __declspec(dllexport) DNSServiceErrorType __stdcall DNSServiceRegiste
     registration->request.unicastEnabled = FALSE;
     const auto status = DnsServiceRegister(&registration->request,
         &registration->cancel);
-    if (status != ERROR_SUCCESS) {
+    // The Windows DNS-SD API is asynchronous. DNS_REQUEST_PENDING is its
+    // documented success return, while ERROR_SUCCESS is accepted for
+    // compatibility with synchronous implementations. Treating 9506 as a
+    // failure used to drop the active-service guard immediately, so the
+    // upstream per-adapter loop published the same receiver twice.
+    if (status != DNS_REQUEST_PENDING && status != ERROR_SUCCESS) {
+        release_service_identity(*registration);
         DnsServiceFreeInstance(registration->instance);
         registration->instance = nullptr;
         *output = registration.release();
@@ -226,15 +426,24 @@ extern "C" __declspec(dllexport) DNSServiceErrorType __stdcall DNSServiceRegiste
 extern "C" __declspec(dllexport) void __stdcall DNSServiceRefDeallocate(
     DNSServiceRef registration) {
     if (!registration) return;
-    ResetEvent(registration->completion);
-    auto deregister = registration->request;
-    deregister.pRegisterCompletionCallback = registration_complete;
-    const auto status = registration->instance
-        ? DnsServiceDeRegister(&deregister, nullptr) : ERROR_INVALID_PARAMETER;
-    if (status == ERROR_SUCCESS)
-        WaitForSingleObject(registration->completion, 2000);
-    DnsServiceRegisterCancel(&registration->cancel);
-    DnsServiceFreeInstance(registration->instance);
+    if (registration->instance) {
+        ResetEvent(registration->completion);
+        auto deregister = registration->request;
+        deregister.pRegisterCompletionCallback = registration_complete;
+        // DnsServiceDeRegister requires a null cancel parameter and reports
+        // asynchronous success as DNS_REQUEST_PENDING as well.
+        const auto status = DnsServiceDeRegister(&deregister, nullptr);
+        if (status == DNS_REQUEST_PENDING || status == ERROR_SUCCESS) {
+            if (WaitForSingleObject(registration->completion, 2000) != WAIT_OBJECT_0) {
+                // The callback still owns this context. The wireless host is
+                // process-isolated and is about to exit, so leaking this one
+                // registration is safer than freeing callback-owned memory.
+                return;
+            }
+        }
+        DnsServiceFreeInstance(registration->instance);
+    }
+    release_service_identity(*registration);
     CloseHandle(registration->completion);
     delete registration;
 }

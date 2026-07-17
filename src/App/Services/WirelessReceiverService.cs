@@ -32,6 +32,9 @@ internal static class WirelessReceiverConfiguration
     ];
     internal static WirelessDisplayProfile DefaultDisplayProfile => DisplayProfiles[1];
 
+    internal static bool RequiresOriginalQualityWarning(WirelessDisplayProfile profile) =>
+        string.Equals(profile.Id, "maximum", StringComparison.Ordinal);
+
     internal static bool IsSupportedDisplayProfile(uint width, uint height, uint frameRate) =>
         DisplayProfiles.Any(profile => profile.Width == width && profile.Height == height &&
             profile.FrameRate == frameRate);

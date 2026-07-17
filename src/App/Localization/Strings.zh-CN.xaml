@@ -67,7 +67,7 @@
     <system:String x:Key="ProjectionActions">投屏操作</system:String>
     <system:String x:Key="StartMirroring">开始投屏</system:String>
     <system:String x:Key="StopMirroring">暂停投屏</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 1.0.3</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 1.1.0 Preview 1</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">正在检查 Apple USB 环境…</system:String>
     <system:String x:Key="StatusWaitingDevice">等待设备连接</system:String>
@@ -218,7 +218,7 @@
     <system:String x:Key="Cancel">取消</system:String>
     <system:String x:Key="WirelessResolutionLabel">连接分辨率</system:String>
     <system:String x:Key="WirelessResolutionHelp">应用后将重新声明 AirPlay 接收能力；弱网请选择 720p 或 540p。</system:String>
-    <system:String x:Key="WirelessProfileMaximum">最高画质（最高 5120×2880 · 60 fps）</system:String>
+    <system:String x:Key="WirelessProfileMaximum">原画（最高 5120×2880 · 60 fps）</system:String>
     <system:String x:Key="WirelessProfile1080p">1080p（推荐 · 60 fps）</system:String>
     <system:String x:Key="WirelessProfile720p">720p（流畅 · 30 fps）</system:String>
     <system:String x:Key="WirelessProfile540p">540p（弱网 · 30 fps）</system:String>
@@ -226,6 +226,8 @@
     <system:String x:Key="ApplyWirelessSettings">应用</system:String>
     <system:String x:Key="WirelessProfileDisconnectConfirmFormat">当前有 {0} 台无线设备已连接。应用“{1}”会断开全部无线投屏并重启接收端。是否继续？</system:String>
     <system:String x:Key="WirelessProfileReconnectInstructionsFormat">已重新声明“{0}”。请在 iPhone 打开“控制中心” → “屏幕镜像”，重新选择“{1}”。如果列表仍保留旧连接，请先点“停止镜像”，再重新选择接收端。</system:String>
+    <system:String x:Key="WirelessOriginalQualityWarningTitle">原画模式提示</system:String>
+    <system:String x:Key="WirelessOriginalQualityWarningBody">原画模式在部分设备或网络环境下可能出现画面停帧。建议优先使用 1080p；如仍需原画，请确保局域网稳定，并从 iPhone“控制中心” → “屏幕镜像”连接。</system:String>
     <system:String x:Key="WirelessServiceAlwaysOn">常驻</system:String>
     <system:String x:Key="WirelessConnected">AirPlay 已连接</system:String>
     <system:String x:Key="WirelessLocalNetwork">本地网络</system:String>
@@ -239,5 +241,19 @@
     <system:String x:Key="WirelessRunningFormat">无线接收端运行中：{0}</system:String>
     <system:String x:Key="WirelessReceiverMissing">无线接收组件缺失，请重新构建发布包。</system:String>
     <system:String x:Key="FooterConnectivity">本机 USB / AirPlay，无云端中转</system:String>
-    <system:String x:Key="FooterVersionCurrent">iPhoneMirror 1.0.3</system:String>
+    <system:String x:Key="FooterVersionCurrent">iPhoneMirror 1.1.0 Preview 1</system:String>
+    <system:String x:Key="MediaCastTitle">视频应用投屏</system:String>
+    <system:String x:Key="MediaCastDescription">接收视频 App 内“投屏”按钮发送的影片，不是控制中心的屏幕镜像。</system:String>
+    <system:String x:Key="MediaCastReady">视频投放接收端已就绪</system:String>
+    <system:String x:Key="MediaCastStarting">正在启动视频投放接收端...</system:String>
+    <system:String x:Key="MediaCastReceiverMissing">视频投放组件缺失，请重新构建发布包。</system:String>
+    <system:String x:Key="MediaCastWindowTitle">iPhoneMirror 视频应用投屏</system:String>
+    <system:String x:Key="MediaCastWaitingVideo">等待视频 App 投放内容...</system:String>
+    <system:String x:Key="MediaCastLoadingVideo">正在加载投放的视频...</system:String>
+    <system:String x:Key="MediaCastPlaybackEnded">视频播放完毕</system:String>
+    <system:String x:Key="MediaCastPlaybackFailedFormat">视频投放播放失败：{0}</system:String>
+    <system:String x:Key="MediaCastInvalidUrl">收到的视频地址无效或不是 HTTP(S) 地址。</system:String>
+    <system:String x:Key="MediaCastStopped">视频应用投屏已停止</system:String>
+    <system:String x:Key="MediaCastPlayReceived">已收到视频应用投屏请求</system:String>
+    <system:String x:Key="UnknownError">未知错误</system:String>
 </ResourceDictionary>

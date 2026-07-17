@@ -271,16 +271,29 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             using var process = Process.Start(start)
                 ?? throw new InvalidOperationException("The Apple installer did not start.");
             using var cancellation = new CancellationTokenSource(timeout);
-            await process.WaitForExitAsync(cancellation.Token);
+            try
+            {
+                await process.WaitForExitAsync(cancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                }
+                catch
+                {
+                    // The elevated process may deny termination. The timeout
+                    // still has to return control to the driver manager UI.
+                }
+                throw new TimeoutException("Apple USB support installation timed out.");
+            }
             return new ProcessResult(process.ExitCode, string.Empty, string.Empty);
         }
         catch (Win32Exception error) when (error.NativeErrorCode == 1223)
         {
             return new ProcessResult(1223, string.Empty, DriverLocalization.Get("UacCancelled"));
-        }
-        catch (OperationCanceledException)
-        {
-            throw new TimeoutException("Apple USB support installation timed out.");
         }
     }
 

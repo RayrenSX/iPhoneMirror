@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(iPhoneMirror VERSION 1.0.3 LANGUAGES CXX)
+project(iPhoneMirror VERSION 1.1.0 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "iPhoneMirror currently targets Windows 10/11 only")

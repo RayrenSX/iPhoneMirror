@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.0.3',
+    [string]$Version = '1.1.0-preview.1',
     [switch]$SkipBuild,
     [switch]$GenerateSbom
 )
@@ -16,6 +16,7 @@ $PackageRoot = Join-Path $StagingRoot $PackageName
 $ArchivePath = Join-Path $ReleaseRoot "$PackageName.zip"
 $SbomAsset = Join-Path $ReleaseRoot "$PackageName-sbom.spdx.json"
 $ChecksumPath = Join-Path $ReleaseRoot 'SHA256SUMS.txt'
+$LegacyArchive = Join-Path $Root 'outputs\iPhoneMirror-video-app-discovery-fix.zip'
 
 Push-Location $Root
 try {
@@ -168,6 +169,11 @@ try {
     }
     [IO.File]::WriteAllText($ChecksumPath,
         ($checksumLines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+
+    if (Test-Path -LiteralPath $LegacyArchive) {
+        Remove-Item -LiteralPath $LegacyArchive -Force
+    }
+    Remove-Item -LiteralPath $StagingRoot -Recurse -Force
 
     Write-Host "Release package: $ArchivePath" -ForegroundColor Green
     Write-Host "Checksums:      $ChecksumPath" -ForegroundColor Green

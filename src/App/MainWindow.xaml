@@ -520,6 +520,29 @@
                                 </Style>
                             </controls:NativePreviewHost.Style>
                         </controls:NativePreviewHost>
+                        <Grid x:Name="MediaCastSurface" Visibility="Collapsed"
+                              AutomationProperties.AutomationId="MediaCastSurface"
+                              Background="#050505" Panel.ZIndex="2">
+                            <MediaElement x:Name="MediaCastMediaElement"
+                                          LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                                          Stretch="Uniform" ScrubbingEnabled="True"
+                                          MediaOpened="OnMediaCastMediaOpened"
+                                          MediaEnded="OnMediaCastMediaEnded"
+                                          MediaFailed="OnMediaCastMediaFailed"/>
+                            <Border x:Name="MediaCastStatusPanel"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    Background="#D9202020" CornerRadius="8" Padding="20,12">
+                                <TextBlock x:Name="MediaCastStatusText"
+                                           Text="{DynamicResource MediaCastWaitingVideo}"
+                                           FontSize="14" TextWrapping="Wrap" TextAlignment="Center"
+                                           MaxWidth="560"/>
+                            </Border>
+                            <Button HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Width="34" Height="30" MinHeight="30" Margin="0,8,8,0"
+                                    Padding="0" Content="&#x00D7;"
+                                    AutomationProperties.AutomationId="CloseMediaCastButton"
+                                    Click="OnMediaCastCloseClick"/>
+                        </Grid>
                     </Grid>
                 </Border>
 
@@ -804,6 +827,30 @@
                                 <TextBlock Text="{Binding AppliedWirelessProfileDisplay}"
                                            Foreground="{StaticResource MutedTextBrush}"
                                            FontSize="9" TextWrapping="Wrap" Margin="1,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource ControlSectionCard}">
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="{DynamicResource MediaCastTitle}"
+                                               Style="{StaticResource ControlSectionTitle}"/>
+                                    <TextBlock Text="{DynamicResource WirelessServiceAlwaysOn}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Foreground="{StaticResource SuccessBrush}" FontSize="10"/>
+                                </Grid>
+                                <TextBlock Text="{DynamicResource MediaCastDescription}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <TextBlock Text="{Binding MediaCastReceiverName}"
+                                           FontSize="13" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="1,7,0,0">
+                                    <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}"
+                                             VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                    <TextBlock Text="{Binding MediaCastStatus}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="10" TextWrapping="Wrap"/>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>

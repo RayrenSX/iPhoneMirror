@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.ViewModels;
@@ -21,6 +22,8 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _logTimer;
+    private readonly DispatcherTimer _mediaCastTimer;
+    private readonly DispatcherTimer _mediaPlaybackTimer;
     private readonly MultiDevicePreviewManager _secondaryMirrors;
     private readonly SemaphoreSlim _screenshotGate = new(1, 1);
     private bool _isFullScreen;
@@ -35,6 +38,11 @@ public partial class MainWindow : Window
     private DateTime _devicePressStartedUtc;
     private bool _deviceDragStarted;
     private int _previewTransitionRevision;
+    private ulong _mediaCommandId;
+    private double _mediaStartPosition;
+    private bool _mediaPlaying;
+    private bool _mediaStopped = true;
+    private bool _mediaCastActive;
 
     private static readonly TimeSpan DeviceDragHoldDuration = TimeSpan.FromMilliseconds(350);
 
@@ -46,10 +54,15 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.DeviceVideoSizeChanged += OnDeviceVideoSizeChanged;
+        _viewModel.MediaCastCommandReceived += OnMediaCastCommandReceived;
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _refreshTimer.Tick += (_, _) => _ = _viewModel.RefreshAsync();
         _logTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _logTimer.Tick += (_, _) => _ = _viewModel.RefreshLogsAsync();
+        _mediaCastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _mediaCastTimer.Tick += (_, _) => _viewModel.RefreshMediaCast();
+        _mediaPlaybackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _mediaPlaybackTimer.Tick += (_, _) => ReportMediaCastPlayback();
         Loaded += OnLoaded;
         Closing += OnClosing;
     }
@@ -60,6 +73,7 @@ public partial class MainWindow : Window
         // stalled service or USB re-enumeration must not make the GUI appear
         // frozen or prevent the user from seeing the current status.
         _refreshTimer.Start();
+        _mediaCastTimer.Start();
         _ = _viewModel.RefreshAsync();
     }
 
@@ -71,8 +85,11 @@ public partial class MainWindow : Window
         _shutdownStarted = true;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.DeviceVideoSizeChanged -= OnDeviceVideoSizeChanged;
+        _viewModel.MediaCastCommandReceived -= OnMediaCastCommandReceived;
         _refreshTimer.Stop();
         _logTimer.Stop();
+        _mediaCastTimer.Stop();
+        StopMediaCastPlayback();
         _secondaryMirrors.Dispose();
         try
         {
@@ -89,6 +106,109 @@ public partial class MainWindow : Window
             _allowClose = true;
             Close();
         }
+    }
+
+    private void OnMediaCastCommandReceived(MediaCastRequest request)
+    {
+        try
+        {
+            if (request.Command == MediaCastCommand.Stop)
+            {
+                StopMediaCastPlayback();
+                _viewModel.AddUiLog(LocalizationService.Get("MediaCastStopped"));
+                return;
+            }
+            if (request.Command != MediaCastCommand.Play) return;
+            PlayMediaCast(request);
+            _viewModel.AddUiLog(LocalizationService.Get("MediaCastPlayReceived"));
+        }
+        catch (Exception error)
+        {
+            _viewModel.AddUiLog(LocalizationService.Format(
+                "MediaCastPlaybackFailedFormat", error.Message));
+        }
+    }
+
+    private void PlayMediaCast(MediaCastRequest request)
+    {
+        if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var source) ||
+            source.Scheme is not ("http" or "https"))
+            throw new InvalidOperationException(LocalizationService.Get("MediaCastInvalidUrl"));
+
+        _mediaCommandId = request.CommandId;
+        _mediaStartPosition = Math.Max(0, request.StartPosition);
+        _mediaPlaying = false;
+        _mediaStopped = false;
+        _mediaCastActive = true;
+        MainPreviewHost.SetPresentationVisible(false);
+        MainPreviewHost.Visibility = Visibility.Collapsed;
+        MediaCastMediaElement.Stop();
+        MediaCastMediaElement.Source = source;
+        MediaCastMediaElement.Volume = Math.Clamp(request.Volume, 0, 1);
+        MediaCastStatusText.Text = LocalizationService.Get("MediaCastLoadingVideo");
+        MediaCastStatusPanel.Visibility = Visibility.Visible;
+        MediaCastSurface.Visibility = Visibility.Visible;
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        MediaCastMediaElement.Play();
+        _mediaPlaybackTimer.Start();
+    }
+
+    private void StopMediaCastPlayback()
+    {
+        if (!_mediaStopped)
+        {
+            _mediaStopped = true;
+            _mediaPlaying = false;
+            _mediaPlaybackTimer.Stop();
+            MediaCastMediaElement.Stop();
+            ReportMediaCastPlayback();
+        }
+        MediaCastSurface.Visibility = Visibility.Collapsed;
+        _mediaCastActive = false;
+        MainPreviewHost.ClearValue(VisibilityProperty);
+        SynchronizeMainPreviewHost();
+    }
+
+    private void OnMediaCastMediaOpened(object sender, RoutedEventArgs e)
+    {
+        if (_mediaStartPosition > 0)
+            MediaCastMediaElement.Position = TimeSpan.FromSeconds(_mediaStartPosition);
+        _mediaPlaying = true;
+        MediaCastStatusPanel.Visibility = Visibility.Collapsed;
+        ReportMediaCastPlayback();
+    }
+
+    private void OnMediaCastMediaEnded(object sender, RoutedEventArgs e)
+    {
+        _mediaPlaying = false;
+        MediaCastStatusText.Text = LocalizationService.Get("MediaCastPlaybackEnded");
+        MediaCastStatusPanel.Visibility = Visibility.Visible;
+        ReportMediaCastPlayback();
+    }
+
+    private void OnMediaCastMediaFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        _mediaPlaying = false;
+        MediaCastStatusText.Text = LocalizationService.Format("MediaCastPlaybackFailedFormat",
+            e.ErrorException?.Message ?? LocalizationService.Get("UnknownError"));
+        MediaCastStatusPanel.Visibility = Visibility.Visible;
+        ReportMediaCastPlayback();
+    }
+
+    private void ReportMediaCastPlayback()
+    {
+        if (_mediaCommandId == 0) return;
+        var duration = MediaCastMediaElement.NaturalDuration.HasTimeSpan
+            ? MediaCastMediaElement.NaturalDuration.TimeSpan.TotalSeconds : 0;
+        _viewModel.ReportMediaCastPlayback(_mediaCommandId, duration,
+            Math.Max(0, MediaCastMediaElement.Position.TotalSeconds), _mediaPlaying ? 1 : 0);
+    }
+
+    private void OnMediaCastCloseClick(object sender, RoutedEventArgs e)
+    {
+        StopMediaCastPlayback();
+        _viewModel.AddUiLog(LocalizationService.Get("MediaCastStopped"));
     }
 
     private void OnRefreshPreviewClick(object sender, RoutedEventArgs e) => RefreshPreview();
@@ -116,10 +236,18 @@ public partial class MainWindow : Window
         if (sender is not MenuItem item ||
             ItemsControl.ItemsControlFromItemContainer(item) is not ContextMenu menu ||
             menu.PlacementTarget is not FrameworkElement { DataContext: Models.DeviceViewModel device }) return;
-        var result = await _secondaryMirrors.ShowAsync(device);
-        _viewModel.AddUiLog(result.Success
-            ? LocalizationService.Format("SimultaneousMirrorStartedFormat", device.DisplayName)
-            : LocalizationService.Format("SimultaneousMirrorFailedFormat", result.Message));
+        try
+        {
+            var result = await _secondaryMirrors.ShowAsync(device);
+            _viewModel.AddUiLog(result.Success
+                ? LocalizationService.Format("SimultaneousMirrorStartedFormat", device.DisplayName)
+                : LocalizationService.Format("SimultaneousMirrorFailedFormat", result.Message));
+        }
+        catch (Exception error)
+        {
+            _viewModel.AddUiLog(LocalizationService.Format(
+                "SimultaneousMirrorFailedFormat", error.Message));
+        }
     }
 
     private void OnDeviceListRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -291,9 +419,10 @@ public partial class MainWindow : Window
 
     private void RefreshPreview()
     {
-        var refreshed = _secondaryMirrors.IsOpen(_viewModel.SelectedDevice)
-            ? _secondaryMirrors.Refresh(_viewModel.SelectedDevice)
-            : MainPreviewHost.ForceRefresh();
+        var refreshed = _mediaCastActive ||
+            (_secondaryMirrors.IsOpen(_viewModel.SelectedDevice)
+                ? _secondaryMirrors.Refresh(_viewModel.SelectedDevice)
+                : MainPreviewHost.ForceRefresh());
         _viewModel.AddUiLog(LocalizationService.Get(
             refreshed ? "PreviewRefreshed" : "PreviewRefreshFailed"));
     }
@@ -352,7 +481,8 @@ public partial class MainWindow : Window
 
     private void SynchronizeMainPreviewHost()
     {
-        var visible = _viewModel.IsCapturing && _viewModel.CurrentSessionHandle != 0;
+        var visible = !_mediaCastActive && _viewModel.IsCapturing &&
+            _viewModel.CurrentSessionHandle != 0;
         MainPreviewHost.SetPresentationVisible(visible);
         if (visible) MainPreviewHost.Activate();
     }
@@ -432,7 +562,7 @@ public partial class MainWindow : Window
             WindowState = WindowState.Maximized;
             _isFullScreen = true;
         }
-        MainPreviewHost.Activate();
+        if (!_mediaCastActive) MainPreviewHost.Activate();
     }
 
     private void OnScreenshotClick(object sender, RoutedEventArgs e) => _ = CaptureScreenshotAsync();

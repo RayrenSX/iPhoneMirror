@@ -17,7 +17,7 @@
 
 namespace iPhoneMirror {
 
-constexpr std::uint32_t ApiVersion = 12;
+constexpr std::uint32_t ApiVersion = 13;
 using SessionHandle = std::uint64_t;
 constexpr std::size_t MaxUdid = 128;
 constexpr std::size_t MaxName = 128;
@@ -26,6 +26,7 @@ constexpr std::size_t MaxOsVersion = 32;
 constexpr std::size_t MaxConnectionType = 32;
 constexpr std::size_t MaxStatus = 192;
 constexpr std::size_t MaxDiagnostic = 512;
+constexpr std::size_t MaxMediaUrl = 16384;
 
 enum class Result : std::int32_t {
     Ok = 0,
@@ -131,6 +132,23 @@ struct CaptureOptions {
     std::uint32_t reserved[5];
 };
 
+enum class MediaCastCommand : std::uint32_t {
+    None = 0,
+    Play = 1,
+    Stop = 2,
+};
+
+struct MediaCastRequest {
+    std::uint32_t struct_size;
+    std::uint32_t api_version;
+    std::uint64_t command_id;
+    MediaCastCommand command;
+    std::uint32_t reserved;
+    double start_position;
+    double volume;
+    wchar_t url[MaxMediaUrl];
+};
+
 } // namespace iPhoneMirror
 
 IM_API std::int32_t IM_CALL im_initialize();
@@ -155,6 +173,19 @@ IM_API std::int32_t IM_CALL im_wireless_receiver_get_status(
     std::int32_t* running, std::int32_t* ready);
 IM_API std::int32_t IM_CALL im_refresh_wireless_devices(
     iPhoneMirror::DeviceInfo* devices, std::uint32_t* count);
+
+// Logical URL-video receiver backed by the combined process-global AirPlay
+// host. It shares the advertised receiver identity but never contributes
+// devices or frames to the screen-mirroring session pipeline.
+IM_API std::int32_t IM_CALL im_media_cast_receiver_start(
+    const wchar_t* receiver_name, const wchar_t* host_path);
+IM_API void IM_CALL im_media_cast_receiver_stop();
+IM_API std::int32_t IM_CALL im_media_cast_receiver_get_status(
+    std::int32_t* running, std::int32_t* ready);
+IM_API std::int32_t IM_CALL im_media_cast_get_request(
+    iPhoneMirror::MediaCastRequest* request);
+IM_API std::int32_t IM_CALL im_media_cast_set_playback_state(
+    std::uint64_t command_id, double duration, double position, double rate);
 
 IM_API std::int32_t IM_CALL im_get_environment(
     iPhoneMirror::EnvironmentInfo* environment);

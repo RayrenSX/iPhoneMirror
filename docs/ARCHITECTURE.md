@@ -20,13 +20,15 @@ iPhone USB
                       └─ EAT! → CMSampleBuffer → 48 kHz PCM
                                  → WASAPI playback / OBS app-audio capture
 
-iPhone/iPad AirPlay
-  └─ Windows DNS-SD discovery + AirPlay protocol (`iPhoneMirror.WirelessHost.exe`)
-       ├─ decoded I420 video ─┐
-       └─ decoded PCM audio ──┴─ named pipe IPC
-                                  └─ WirelessCaptureSession
-                                       ├─ I420 → NV12 → shared D3D11 renderer path
-                                       └─ PCM → shared WASAPI path
+iPhone/iPad AirPlay (one receiver identity, 5001/7001)
+  └─ combined-mode `iPhoneMirror.WirelessHost.exe`
+       ├─ screen-mirroring I420/PCM ─ named pipe IPC
+       │                            └─ WirelessCaptureSession
+       │                                 ├─ I420 → NV12 → shared D3D11 renderer path
+       │                                 └─ PCM → shared WASAPI path
+       └─ video-app HTTP(S)/HLS URL + playback commands ─ named pipe IPC
+                                                          └─ WPF MediaElement playback surface
+                                                               └─ playback state → iPhone/iPad
 ```
 
 ## 模块边界
@@ -60,13 +62,13 @@ src/Core (C++ DLL)
 
 src/WirelessHost (独立 GPLv3 进程)
 ├─ AirPlayServer runtime   AirPlay/FairPlay、H.264/AAC 解码
-└─ IpcProtocol             有界命名管道消息，仅传递解码后视频/音频
+└─ IpcProtocol             有界双向命名管道消息，传递镜像帧或视频投放命令/播放状态
 
 src/App (WPF/.NET)
 ├─ Interop                 C ABI P/Invoke 与原生预览绑定
 ├─ Models/ViewModels       UI 状态、设备轮询、多设备切换、命令
 ├─ Services               外部驱动只读检测/管理器启动、截图、窗口比例和预览协调
-└─ MainWindow/Windows      主窗口、独立窗口、OBS 窗口
+└─ MainWindow/Windows      主窗口、镜像独立窗口、视频投放界面、OBS 窗口
 
 src/DriverInstaller (独立 WPF/.NET EXE)
 ├─ DeviceCatalog            Apple Lockdown 元数据、设备选择和父设备状态
@@ -90,6 +92,8 @@ src/DriverInstaller (独立 WPF/.NET EXE)
 - 视频解码队列最多保留 1–2 帧，过载时丢旧的非关键帧；
 - 音频使用有界环形缓冲，时钟漂移由 SKEW/PTS 修正；
 - 所有停止/拔线路径都可取消并恢复 USB 配置。
+- 屏幕镜像与视频应用投屏共用一个 combined-mode 宿主，通过有界 IPC 消息类型分流，
+  不共享设备会话或播放界面状态；
 - 无线停止事件和父进程句柄共同保证后台宿主不会残留。
 
 ## OBS 路线

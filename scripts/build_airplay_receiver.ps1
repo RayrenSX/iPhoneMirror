@@ -26,13 +26,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot '.git'))) {
 }
 
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
-$Head = (& git -C $SourceRoot rev-parse HEAD).Trim()
+$SafeSourceRoot = $SourceRoot.Replace('\', '/')
+$Head = (& git -c "safe.directory=$SafeSourceRoot" -C $SourceRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $Head -ne $Commit) {
     throw "AirPlayServer source must be at $Commit; found $Head"
 }
 & (Join-Path $ReceiverRoot 'patches\Apply-DeviceMetadataPatch.ps1') `
     -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-DisplayCapabilityPatch.ps1') `
+    -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-ScreenMirroringOnlyPatch.ps1') `
     -SourceRoot $SourceRoot
 
 $VsWhere = Join-Path ${env:ProgramFiles(x86)} `
@@ -102,12 +105,26 @@ if (-not $BinaryHex.Contains($TargetHeightAndRate) -or
 }
 $BinaryAscii = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Binary))
 foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIGHT',
-        'IPHONE_MIRROR_AIRPLAY_FPS', 'IPHONE_MIRROR_AIRPLAY_NAME')) {
+        'IPHONE_MIRROR_AIRPLAY_FPS', 'IPHONE_MIRROR_AIRPLAY_NAME',
+        'IPHONE_MIRROR_MEDIA_CAST_BLOCKED',
+        'IPHONE_MIRROR_AIRPLAY_MODE',
+        'IPHONE_MIRROR_MEDIA_CAST_FAIRPLAY',
+        'IPHONE_MIRROR_RAOP_MEDIA_CAST_BLOCKED',
+        'IPHONE_MIRROR_AIRPLAY_PAIRING_SEED',
+        'IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY',
+        '2e388006-13ba-4041-9a67-25dd4a43d536',
+        'AppleTV3,2', '220.68', 'combined', '0x5A7FFEC0,0x0')) {
     if (-not $BinaryAscii.Contains($Marker)) {
         throw "Built AirPlay receiver is missing runtime capability marker: $Marker"
     }
 }
-Write-Host 'Verified runtime-selectable AirPlay display capabilities with 5120x2880@60 fallback.' -ForegroundColor Green
+if ($BinaryAscii.Contains('0x5A7FFFF7,0x1E') -or
+    $BinaryAscii.Contains('0x5A7FFFC0,0x1E') -or
+    $BinaryAscii.Contains('0x484051C0,0x0') -or
+    $BinaryAscii.Contains('0x1A7FFEC0,0x0')) {
+    throw 'Built AirPlay receiver still advertises media casting capabilities.'
+}
+Write-Host 'Verified combined screen-mirroring and URL-video AirPlay mode.' -ForegroundColor Green
 if ($Install) {
     Copy-Item -LiteralPath $Binary `
         -Destination (Join-Path $ReceiverRoot 'bin\x64\airplay2dll.dll') -Force
