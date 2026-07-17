@@ -160,6 +160,7 @@ internal sealed class AspectRatioWindowController : IDisposable
         var dpiScale = dpi == 0 ? 1.0 : dpi / 96.0;
         var minClientWidth = Math.Max(1.0, _minWidthDips * dpiScale - frameWidth);
         var minClientHeight = Math.Max(1.0, _minHeightDips * dpiScale - frameHeight);
+
         var minimumScale = Math.Max(minClientWidth / clientWidth, minClientHeight / clientHeight);
         var maximumScale = Math.Min(
             workWidth * ChangedWorkAreaFraction / clientWidth,
@@ -211,6 +212,25 @@ internal sealed class AspectRatioWindowController : IDisposable
         var minClientWidth = Math.Max(1.0, _minWidthDips * dpiScale - frameWidth);
         var minClientHeight = Math.Max(1.0, _minHeightDips * dpiScale - frameHeight);
 
+        // WM_SIZING previously enforced the ratio and minimum size only. A
+        // horizontal edge could therefore keep increasing the width after the
+        // proportional height had already grown beyond the monitor. Derive a
+        // ratio-compatible maximum from the current work area so the dragged
+        // dimension stops when either screen axis is exhausted.
+        var minAspectWidth = Math.Max(minClientWidth, minClientHeight * _aspectRatio);
+        var minAspectHeight = minAspectWidth / _aspectRatio;
+        var maxAspectWidth = double.PositiveInfinity;
+        if (TryGetWorkArea(out var workArea))
+        {
+            var maxClientWidth = Math.Max(1.0,
+                workArea.Right - workArea.Left - frameWidth);
+            var maxClientHeight = Math.Max(1.0,
+                workArea.Bottom - workArea.Top - frameHeight);
+            maxAspectWidth = Math.Max(minAspectWidth,
+                Math.Min(maxClientWidth, maxClientHeight * _aspectRatio));
+        }
+        var maxAspectHeight = maxAspectWidth / _aspectRatio;
+
         var heightFromWidth = clientWidth / _aspectRatio;
         var widthFromHeight = clientHeight * _aspectRatio;
         var widthDriven = edge is 1 or 2 ||
@@ -222,14 +242,12 @@ internal sealed class AspectRatioWindowController : IDisposable
         double targetClientHeight;
         if (widthDriven)
         {
-            targetClientWidth = Math.Max(clientWidth,
-                Math.Max(minClientWidth, minClientHeight * _aspectRatio));
+            targetClientWidth = Math.Clamp(clientWidth, minAspectWidth, maxAspectWidth);
             targetClientHeight = targetClientWidth / _aspectRatio;
         }
         else
         {
-            targetClientHeight = Math.Max(clientHeight,
-                Math.Max(minClientHeight, minClientWidth / _aspectRatio));
+            targetClientHeight = Math.Clamp(clientHeight, minAspectHeight, maxAspectHeight);
             targetClientWidth = targetClientHeight * _aspectRatio;
         }
 
@@ -240,7 +258,17 @@ internal sealed class AspectRatioWindowController : IDisposable
 
         if (dragLeft) rectangle.Left = rectangle.Right - targetOuterWidth;
         else rectangle.Right = rectangle.Left + targetOuterWidth;
-        if (dragTop) rectangle.Top = rectangle.Bottom - targetOuterHeight;
+
+        if (edge is 1 or 2)
+        {
+            // A left/right drag has no vertical anchor. Grow around the
+            // existing vertical center instead of sending all added height
+            // below the window, where it can appear unconstrained.
+            var centerY = ((long)rectangle.Top + rectangle.Bottom) / 2;
+            rectangle.Top = (int)(centerY - targetOuterHeight / 2L);
+            rectangle.Bottom = rectangle.Top + targetOuterHeight;
+        }
+        else if (dragTop) rectangle.Top = rectangle.Bottom - targetOuterHeight;
         else rectangle.Bottom = rectangle.Top + targetOuterHeight;
     }
 

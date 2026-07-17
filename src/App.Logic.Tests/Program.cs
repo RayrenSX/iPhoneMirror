@@ -49,16 +49,6 @@ Equal("iPhone 12 mini", AppleProductNames.Resolve("iPhone13,1"),
 Equal("iPhone99,9", AppleProductNames.Resolve("iPhone99,9"),
     "unknown ProductType remains visible for diagnostics");
 
-// Ownership remains until an explicit completed stop; changing UI selection
-// or observing a capture error must not silently release it.
-var session = new CaptureSessionOwnership();
-Equal(true, session.SetOwner("phone-a"), "start records owner");
-Equal(true, session.RequiresStopBeforeSwitch("phone-b"), "switch requires stop");
-Equal(false, session.RequiresStopBeforeSwitch("PHONE-A"), "same device does not stop");
-Equal("phone-a", session.OwnerUdid, "status polling does not clear owner");
-Equal(true, session.SetOwner(null), "completed stop clears owner");
-Equal(false, session.RequiresStopBeforeSwitch("phone-b"), "cleared session needs no second stop");
-
 // Display outlines are selected from ProductType when available. Legacy
 // Home-button displays remain rectangular, while metadata-less startup can
 // use a conservative decoded-frame aspect fallback.
@@ -121,6 +111,12 @@ Equal(63,
     "wireless receiver name respects the mDNS label limit");
 Equal("1080p", WirelessReceiverConfiguration.DefaultDisplayProfile.Id,
     "wireless receiver defaults to the balanced 1080p profile");
+Equal(true, WirelessReceiverConfiguration.RequiresOriginalQualityWarning(
+        WirelessReceiverConfiguration.DisplayProfiles[0]),
+    "wireless original-quality profile requires a stability warning");
+Equal(false, WirelessReceiverConfiguration.RequiresOriginalQualityWarning(
+        WirelessReceiverConfiguration.DisplayProfiles[1]),
+    "wireless 1080p profile does not require the original-quality warning");
 Equal(true, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 30),
     "wireless 720p weak-network profile is supported");
 Equal(false, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 60),
@@ -129,6 +125,30 @@ Equal<string?>(null,
     WirelessReceiverConfiguration.FindExecutable(Path.GetTempPath(),
         Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.exe")),
     "wireless receiver discovery rejects missing executables");
+
+var logPath = Path.Combine(Path.GetTempPath(), $"iPhoneMirror-log-{Guid.NewGuid():N}.txt");
+try
+{
+    var reader = new NativeLogTailReader(logPath);
+    await File.WriteAllTextAsync(logPath, "first\npartial");
+    Sequence(["first"], await reader.ReadNewLinesAsync(),
+        "log reader publishes complete lines only");
+    await File.AppendAllTextAsync(logPath, "-line\n");
+    Sequence(["partial-line"], await reader.ReadNewLinesAsync(),
+        "log reader preserves a partial line across reads");
+    await File.WriteAllTextAsync(logPath, "reset\n");
+    Sequence(["reset"], await reader.ReadNewLinesAsync(),
+        "log reader restarts after truncation");
+    await File.AppendAllTextAsync(logPath, new string('x', 20 * 1024) + "\n");
+    var longLines = await reader.ReadNewLinesAsync();
+    Equal(1, longLines.Count, "log reader returns one bounded long line");
+    Equal(16 * 1024, longLines[0].Length, "log reader bounds individual line memory");
+    Equal(true, longLines[0].EndsWith('…'), "bounded log line has a truncation marker");
+}
+finally
+{
+    if (File.Exists(logPath)) File.Delete(logPath);
+}
 
 var driverManagerRoot = Path.Combine(Path.GetTempPath(), "iPhoneMirror.App.Tests",
     Guid.NewGuid().ToString("N"));

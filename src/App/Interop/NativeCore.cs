@@ -31,6 +31,13 @@ internal enum CaptureState : int
     Error,
 }
 
+internal enum MediaCastCommand : uint
+{
+    None,
+    Play,
+    Stop,
+}
+
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 internal struct NativeDeviceInfo
 {
@@ -109,7 +116,22 @@ internal struct NativeCaptureOptions
     [MarshalAs(UnmanagedType.ByValArray, SizeConst = 5)] public uint[] Reserved;
 }
 
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+internal struct NativeMediaCastRequest
+{
+    public uint StructSize;
+    public uint ApiVersion;
+    public ulong CommandId;
+    public MediaCastCommand Command;
+    public uint Reserved;
+    public double StartPosition;
+    public double Volume;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16384)] public string Url;
+}
+
 public sealed record VideoFrame(uint Width, uint Height, uint Stride, long Timestamp100Ns, byte[] Pixels);
+internal sealed record MediaCastRequest(ulong CommandId, MediaCastCommand Command,
+    string Url, double StartPosition, double Volume);
 
 internal sealed class NativeCore : IDisposable
 {
@@ -147,6 +169,20 @@ internal sealed class NativeCore : IDisposable
     private static extern int im_refresh_wireless_devices(
         [Out] NativeDeviceInfo[]? devices, ref uint count);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    private static extern int im_media_cast_receiver_start(
+        [MarshalAs(UnmanagedType.LPWStr)] string receiverName,
+        [MarshalAs(UnmanagedType.LPWStr)] string hostPath);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void im_media_cast_receiver_stop();
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_media_cast_receiver_get_status(out int running, out int ready);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_media_cast_get_request(ref NativeMediaCastRequest request);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_media_cast_set_playback_state(
+        ulong commandId, double duration, double position, double rate);
+
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_get_environment(ref NativeEnvironmentInfo environment);
 
@@ -177,16 +213,8 @@ internal sealed class NativeCore : IDisposable
     private static extern int im_get_capture_status(ref NativeCaptureStatus status);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int im_get_latest_video_timestamp(out long timestamp100Ns);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_copy_latest_video_frame(
         ref NativeVideoFrameInfo info, [Out] byte[]? buffer, ref uint bufferSize);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int im_copy_latest_video_frame_scaled(
-        ref NativeVideoFrameInfo info, [Out] byte[]? buffer, ref uint bufferSize,
-        uint maxWidth, uint maxHeight);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_attach_preview_window(nint hwnd);
@@ -225,8 +253,6 @@ internal sealed class NativeCore : IDisposable
     private static extern int im_session_set_audio_volume(ulong handle, float volume);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_set_corner_profile(ulong handle, float radius, float exponent);
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int im_session_get_latest_video_timestamp(ulong handle, out long timestamp);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_copy_latest_video_frame(ulong handle,
         ref NativeVideoFrameInfo info, [Out] byte[]? buffer, ref uint bufferSize,
@@ -411,6 +437,41 @@ internal sealed class NativeCore : IDisposable
     }
 
     public void StopWirelessReceiver() => im_wireless_receiver_stop();
+
+    public (bool Success, string Message) StartMediaCastReceiver(
+        string receiverName, string hostPath)
+    {
+        var result = im_media_cast_receiver_start(receiverName, hostPath);
+        return result == 0
+            ? (true, LocalizationService.Get("MediaCastReady"))
+            : (false, GetLastError(LocalizationService.Get("MediaCastReceiverMissing")));
+    }
+
+    public (bool Running, bool Ready) GetMediaCastReceiverStatus()
+    {
+        var result = im_media_cast_receiver_get_status(out var running, out var ready);
+        return result == 0 ? (running != 0, ready != 0) : (false, false);
+    }
+
+    public MediaCastRequest? GetMediaCastRequest()
+    {
+        var request = new NativeMediaCastRequest
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeMediaCastRequest>(),
+            Url = string.Empty,
+        };
+        return im_media_cast_get_request(ref request) == 0 &&
+            request.Command != MediaCastCommand.None
+            ? new(request.CommandId, request.Command, request.Url,
+                request.StartPosition, request.Volume)
+            : null;
+    }
+
+    public bool SetMediaCastPlaybackState(ulong commandId,
+        double duration, double position, double rate) =>
+        im_media_cast_set_playback_state(commandId, duration, position, rate) == 0;
+
+    public void StopMediaCastReceiver() => im_media_cast_receiver_stop();
 
     public IReadOnlyList<NativeDeviceInfo> GetWirelessDevices()
     {
@@ -607,16 +668,6 @@ internal sealed class NativeCore : IDisposable
         return status;
     }
 
-    public long GetLatestVideoTimestamp()
-    {
-        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
-        long timestamp;
-        var result = handle != 0
-            ? im_session_get_latest_video_timestamp(handle, out timestamp)
-            : im_get_latest_video_timestamp(out timestamp);
-        return result == 0 ? timestamp : 0;
-    }
-
     public VideoFrame? GetLatestVideoFrame()
     {
         var info = new NativeVideoFrameInfo { StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>() };
@@ -632,26 +683,6 @@ internal sealed class NativeCore : IDisposable
             result = handle != 0
                 ? im_session_copy_latest_video_frame(handle, ref info, _frameBuffer, ref size, 0, 0)
                 : im_copy_latest_video_frame(ref info, _frameBuffer, ref size);
-        }
-        if (result != 0 || _frameBuffer is null) return null;
-        return new VideoFrame(info.Width, info.Height, info.Stride, info.Timestamp100Ns, _frameBuffer);
-    }
-
-    public VideoFrame? GetLatestPreviewFrame(uint maxWidth = 960, uint maxHeight = 2200)
-    {
-        var info = new NativeVideoFrameInfo { StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>() };
-        uint size = (uint)(_frameBuffer?.Length ?? 0);
-        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
-        var result = handle != 0
-            ? im_session_copy_latest_video_frame(handle, ref info, _frameBuffer, ref size, maxWidth, maxHeight)
-            : im_copy_latest_video_frame_scaled(ref info, _frameBuffer, ref size, maxWidth, maxHeight);
-        if (result == (int)NativeResult.BufferTooSmall)
-        {
-            _frameBuffer = new byte[size];
-            info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
-            result = handle != 0
-                ? im_session_copy_latest_video_frame(handle, ref info, _frameBuffer, ref size, maxWidth, maxHeight)
-                : im_copy_latest_video_frame_scaled(ref info, _frameBuffer, ref size, maxWidth, maxHeight);
         }
         if (result != 0 || _frameBuffer is null) return null;
         return new VideoFrame(info.Width, info.Height, info.Stride, info.Timestamp100Ns, _frameBuffer);

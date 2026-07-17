@@ -4,7 +4,6 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using IPhoneMirror.App.Controls;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
@@ -18,7 +17,7 @@ namespace IPhoneMirror.App.Windows;
 /// </summary>
 internal sealed class NativePreviewWindow : IDisposable
 {
-    internal const string StableTitle = PreviewWindow.StableTitle;
+    internal const string StableTitle = "iPhoneMirror OBS Preview";
 
     private const int WmNcCalcSize = 0x0083;
     private const int WmNcHitTest = 0x0084;
@@ -112,16 +111,16 @@ internal sealed class NativePreviewWindow : IDisposable
     private WindowRect _restoreRectangle;
     private nint _restoreStyle;
 
-    private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string? title = null,
-        Func<nint, bool>? attachPreview = null, Action<nint>? detachPreview = null,
-        Func<nint, bool>? refreshPreview = null, ulong sessionHandle = 0,
-        double cornerRadius = 0, double cornerExponent = 2.0,
+    private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string title,
+        Func<nint, bool> attachPreview, Action<nint> detachPreview,
+        Func<nint, bool> refreshPreview, ulong sessionHandle,
+        double cornerRadius, double cornerExponent,
         Func<bool>? isAudioEnabled = null, Func<int>? connectedDeviceCount = null,
         Action<bool>? setAudioEnabled = null, Action? muteOtherWindows = null)
     {
-        _attachPreview = attachPreview ?? PreviewAttachmentCoordinator.Activate;
-        _detachPreview = detachPreview ?? PreviewAttachmentCoordinator.Unregister;
-        _refreshPreview = refreshPreview ?? PreviewAttachmentCoordinator.Refresh;
+        _attachPreview = attachPreview;
+        _detachPreview = detachPreview;
+        _refreshPreview = refreshPreview;
         _sessionHandle = sessionHandle;
         _cornerRadius = cornerRadius;
         _cornerExponent = cornerExponent;
@@ -217,42 +216,6 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal event EventHandler? Closed;
 
-    internal nint Handle => _handle;
-    internal bool IsFullScreen => _isFullScreen;
-
-    internal static bool TryCreateAndShow(uint sourceWidth, uint sourceHeight,
-        out NativePreviewWindow? window)
-        => TryCreateAndShow(sourceWidth, sourceHeight, null, out window);
-
-    internal static bool TryCreateAndShow(uint sourceWidth, uint sourceHeight,
-        string? title, out NativePreviewWindow? window)
-    {
-        window = null;
-        NativePreviewWindow? candidate = null;
-        try
-        {
-            candidate = new NativePreviewWindow(sourceWidth, sourceHeight, title);
-            if (!candidate._attachPreview(candidate._handle))
-            {
-                candidate.Dispose();
-                return false;
-            }
-
-            candidate._attached = true;
-            _ = ShowWindow(candidate._handle, SwShow);
-            _ = SetWindowPos(candidate._handle, HwndTopMost, 0, 0, 0, 0,
-                SwpNoSize | SwpNoMove | SwpNoActivate);
-            _ = SetForegroundWindow(candidate._handle);
-            window = candidate;
-            return true;
-        }
-        catch
-        {
-            candidate?.Dispose();
-            return false;
-        }
-    }
-
     internal static bool TryCreateAndShowForSession(ulong handle, uint sourceWidth,
         uint sourceHeight, string title, double cornerRadius, double cornerExponent,
         Func<bool> isAudioEnabled, Func<int> connectedDeviceCount,
@@ -345,8 +308,6 @@ internal sealed class NativePreviewWindow : IDisposable
             SwpNoZOrder | SwpFrameChanged | SwpShowWindow);
         _ = SetForegroundWindow(_handle);
     }
-
-    internal void Close() => Dispose();
 
     private void ApplyApplicationIcons()
     {

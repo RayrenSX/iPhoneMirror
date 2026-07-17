@@ -67,7 +67,7 @@
     <system:String x:Key="ProjectionActions">Mirroring</system:String>
     <system:String x:Key="StartMirroring">Start mirroring</system:String>
     <system:String x:Key="StopMirroring">Stop mirroring</system:String>
-    <system:String x:Key="FooterVersion">iPhoneMirror 1.0.3</system:String>
+    <system:String x:Key="FooterVersion">iPhoneMirror 1.1.0 Preview 1</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">Checking the Apple USB environment…</system:String>
     <system:String x:Key="StatusWaitingDevice">Waiting for a device</system:String>
@@ -218,7 +218,7 @@
     <system:String x:Key="Cancel">Cancel</system:String>
     <system:String x:Key="WirelessResolutionLabel">Connection resolution</system:String>
     <system:String x:Key="WirelessResolutionHelp">Applying re-advertises the AirPlay receiver capability. Use 720p or 540p on a weak network.</system:String>
-    <system:String x:Key="WirelessProfileMaximum">Maximum quality (up to 5120×2880 · 60 fps)</system:String>
+    <system:String x:Key="WirelessProfileMaximum">Original quality (up to 5120×2880 · 60 fps)</system:String>
     <system:String x:Key="WirelessProfile1080p">1080p (recommended · 60 fps)</system:String>
     <system:String x:Key="WirelessProfile720p">720p (smooth · 30 fps)</system:String>
     <system:String x:Key="WirelessProfile540p">540p (weak network · 30 fps)</system:String>
@@ -226,6 +226,8 @@
     <system:String x:Key="ApplyWirelessSettings">Apply</system:String>
     <system:String x:Key="WirelessProfileDisconnectConfirmFormat">{0} wireless device(s) are connected. Applying “{1}” will disconnect all wireless mirroring and restart the receiver. Continue?</system:String>
     <system:String x:Key="WirelessProfileReconnectInstructionsFormat">“{0}” is now advertised. On iPhone, open Control Center → Screen Mirroring and select “{1}” again. If the old connection remains listed, tap Stop Mirroring first, then select the receiver again.</system:String>
+    <system:String x:Key="WirelessOriginalQualityWarningTitle">Original quality notice</system:String>
+    <system:String x:Key="WirelessOriginalQualityWarningBody">Original quality may freeze on some devices or network conditions. 1080p is recommended. If you still need original quality, use a stable local network and connect from iPhone Control Center → Screen Mirroring.</system:String>
     <system:String x:Key="WirelessServiceAlwaysOn">Always on</system:String>
     <system:String x:Key="WirelessConnected">AirPlay connected</system:String>
     <system:String x:Key="WirelessLocalNetwork">Local network</system:String>
@@ -239,5 +241,19 @@
     <system:String x:Key="WirelessRunningFormat">Wireless receiver active: {0}</system:String>
     <system:String x:Key="WirelessReceiverMissing">The wireless receiver component is missing. Rebuild the release package.</system:String>
     <system:String x:Key="FooterConnectivity">Local USB / AirPlay; no cloud relay</system:String>
-    <system:String x:Key="FooterVersionCurrent">iPhoneMirror 1.0.3</system:String>
+    <system:String x:Key="FooterVersionCurrent">iPhoneMirror 1.1.0 Preview 1</system:String>
+    <system:String x:Key="MediaCastTitle">Video app casting</system:String>
+    <system:String x:Key="MediaCastDescription">Receives movies sent from a video app's Cast button. This is separate from Control Center Screen Mirroring.</system:String>
+    <system:String x:Key="MediaCastReady">Video casting receiver ready</system:String>
+    <system:String x:Key="MediaCastStarting">Starting the video casting receiver...</system:String>
+    <system:String x:Key="MediaCastReceiverMissing">The video casting component is missing. Rebuild the release package.</system:String>
+    <system:String x:Key="MediaCastWindowTitle">iPhoneMirror Video App Casting</system:String>
+    <system:String x:Key="MediaCastWaitingVideo">Waiting for a video app to cast content...</system:String>
+    <system:String x:Key="MediaCastLoadingVideo">Loading the cast video...</system:String>
+    <system:String x:Key="MediaCastPlaybackEnded">Video playback ended</system:String>
+    <system:String x:Key="MediaCastPlaybackFailedFormat">Video casting playback failed: {0}</system:String>
+    <system:String x:Key="MediaCastInvalidUrl">The received video URL is invalid or is not an HTTP(S) URL.</system:String>
+    <system:String x:Key="MediaCastStopped">Video app casting stopped</system:String>
+    <system:String x:Key="MediaCastPlayReceived">Received a video app casting request</system:String>
+    <system:String x:Key="UnknownError">Unknown error</system:String>
 </ResourceDictionary>

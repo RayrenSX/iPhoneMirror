@@ -92,7 +92,7 @@ internal sealed class NativePreviewHost : HwndHost
     {
         if (message == WmNcHitTest)
         {
-            // Let the borderless top-level PreviewWindow own drag/resize hit
+            // Let the borderless top-level native preview own drag/resize hit
             // testing even though this native child covers the whole client.
             handled = true;
             return HtTransparent;

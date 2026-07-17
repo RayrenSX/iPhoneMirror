@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.0.3</Version>
-    <AssemblyVersion>1.0.3.0</AssemblyVersion>
-    <FileVersion>1.0.3.0</FileVersion>
+    <Version>1.1.0-preview.1</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>
@@ -23,7 +23,14 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\iPhoneMirror.ico</ApplicationIcon>
     <DebugType>embedded</DebugType>
-    <PublishSingleFile>false</PublishSingleFile>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <!-- English framework resources are neutral; keep only the Simplified
+         Chinese satellite assemblies in addition to that built-in fallback. -->
+    <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,86 +40,54 @@
       <TargetPath>iPhoneMirror.Core.dll</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="native\libusb-1.0.dll" Condition="Exists('native\libusb-1.0.dll')">
       <Link>libusb-1.0.dll</Link>
       <TargetPath>libusb-1.0.dll</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="native\Wireless\iPhoneMirror.WirelessHost.exe" Condition="Exists('native\Wireless\iPhoneMirror.WirelessHost.exe')">
       <Link>Wireless\iPhoneMirror.WirelessHost.exe</Link>
       <TargetPath>Wireless\iPhoneMirror.WirelessHost.exe</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="native\Wireless\dnssd.dll" Condition="Exists('native\Wireless\dnssd.dll')">
       <Link>Wireless\dnssd.dll</Link>
       <TargetPath>Wireless\dnssd.dll</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="..\..\third_party\airplay-server\bin\x64\airplay2dll.dll;..\..\third_party\airplay-server\bin\x64\avcodec-58.dll;..\..\third_party\airplay-server\bin\x64\avutil-56.dll;..\..\third_party\airplay-server\bin\x64\swresample-3.dll;..\..\third_party\airplay-server\bin\x64\swscale-5.dll">
       <Link>Wireless\%(Filename)%(Extension)</Link>
       <TargetPath>Wireless\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="..\..\third_party\airplay-server\LICENSE-*;..\..\third_party\airplay-server\NOTICE-*;..\..\third_party\airplay-server\SOURCE.md;..\..\third_party\airplay-server\SHA256SUMS.txt">
       <Link>Wireless\licenses\%(Filename)%(Extension)</Link>
       <TargetPath>Wireless\licenses\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="..\..\README.md">
-      <Link>README.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="..\..\README.en.md">
-      <Link>README.en.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="..\..\LICENSE">
       <Link>LICENSE</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="..\..\CHANGELOG.md">
-      <Link>CHANGELOG.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="..\..\THIRD_PARTY_NOTICES.md" Condition="Exists('..\..\THIRD_PARTY_NOTICES.md')">
       <Link>THIRD_PARTY_NOTICES.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="..\..\docs\OBS_OUTPUT.md" Condition="Exists('..\..\docs\OBS_OUTPUT.md')">
-      <Link>docs\OBS_OUTPUT.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="..\..\docs\DEVICE_CORNER_PROFILES.md" Condition="Exists('..\..\docs\DEVICE_CORNER_PROFILES.md')">
-      <Link>docs\DEVICE_CORNER_PROFILES.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="..\..\docs\USER_GUIDE.md" Condition="Exists('..\..\docs\USER_GUIDE.md')">
-      <Link>docs\USER_GUIDE.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="..\..\docs\ROADMAP.md" Condition="Exists('..\..\docs\ROADMAP.md')">
-      <Link>docs\ROADMAP.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="..\..\docs\releases\v1.0.3.md" Condition="Exists('..\..\docs\releases\v1.0.3.md')">
-      <Link>docs\releases\v1.0.3.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
   </ItemGroup>
 </Project>

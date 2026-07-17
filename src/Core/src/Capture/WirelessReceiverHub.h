@@ -31,6 +31,16 @@ struct WirelessDeviceSnapshot {
     std::wstring os_version;
 };
 
+enum class MediaCastCommandType : std::uint32_t { None, Play, Stop };
+
+struct MediaCastCommand {
+    std::uint64_t id{};
+    MediaCastCommandType type{};
+    std::wstring url;
+    double start_position{};
+    double volume{};
+};
+
 namespace detail {
 [[nodiscard]] bool convert_i420_to_nv12(const wireless::MessageHeader& header,
     std::span<const std::uint8_t> payload, std::vector<std::uint8_t>& destination,
@@ -106,9 +116,14 @@ public:
     [[nodiscard]] std::vector<WirelessDeviceSnapshot> devices() const;
     [[nodiscard]] std::shared_ptr<WirelessClientStream> attach(
         std::wstring_view device_id, CapturePreferences preferences);
+    [[nodiscard]] MediaCastCommand media_command() const;
+    bool update_media_playback(std::uint64_t command_id, double duration,
+        double position, double rate) noexcept;
 
 private:
+    mutable std::mutex lifecycle_mutex_;
     mutable std::mutex mutex_;
+    mutable std::mutex pipe_write_mutex_;
     std::map<std::wstring, std::shared_ptr<WirelessClientStream>, std::less<>> clients_;
     std::wstring receiver_name_;
     std::wstring host_path_;
@@ -120,7 +135,9 @@ private:
     void* process_{};
     std::atomic_bool stopping_{};
     std::atomic_bool ready_{};
+    MediaCastCommand media_command_;
 
+    void stop_locked() noexcept;
     void run(std::stop_token stop_token) noexcept;
     void handle_message(const wireless::MessageHeader& header,
         const std::vector<std::uint8_t>& payload);

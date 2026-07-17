@@ -111,7 +111,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         "${PROJECT_SOURCE_DIR}/third_party/libusb/lib/x64/libusb-1.0.lib"
         "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib"
         mfplat mf mfuuid wmcodecdspuuid d3d11 dxgi
-        ole32 avrt
+        ole32 advapi32 avrt
         delayimp
     )
     target_link_options(iPhoneMirror.Core.Tests PRIVATE /DELAYLOAD:libusb0.dll)

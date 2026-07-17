@@ -1,15 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Windows;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Interop;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Models;
@@ -51,26 +44,18 @@ internal sealed class UsbProjectionModeOption(UsbProjectionMode mode, string lab
 internal sealed class MainViewModel : INotifyPropertyChanged
 {
     internal event Action<string, uint, uint>? DeviceVideoSizeChanged;
-    // The first InteropBitmap experiment showed row corruption on this WPF
-    // build. Keep the implementation available for a corrected memory-section
-    // layout, but use the verified WriteableBitmap path in production.
-    private static readonly bool EnableInteropPreview = false;
+    internal event Action<MediaCastRequest>? MediaCastCommandReceived;
     private readonly NativeCore _core;
     private readonly IPhoneFilterDriverService _filterDriver = new();
     private readonly DriverManagerLauncher _driverManager = new();
-    private readonly WirelessReceiverService _wirelessReceiver = new();
+    private readonly WirelessReceiverController _wireless;
+    private readonly MediaCastReceiverController _mediaCast;
     // Serializes every native-core operation that can race USB teardown,
     // device enumeration, restart, or application shutdown.
     private readonly SemaphoreSlim _coreGate = new(1, 1);
-    // Device selection can change repeatedly while the native stop operation
-    // is still restoring the previous phone's normal USB configuration.
-    // Serialize those transitions and let only the newest selection win.
-    private readonly SemaphoreSlim _logGate = new(1, 1);
+    private readonly NativeLogTailReader _logReader = new();
     private readonly CaptureShutdownCoordinator _shutdownCoordinator = new();
-    private readonly Dictionary<string, DeviceCaptureState> _deviceSessions =
-        new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _pausedWirelessDevices =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly DeviceSessionManager _sessions;
     private IReadOnlyList<NativeDeviceInfo> _lastUsbDevices = [];
     private bool _disposed;
     private DeviceViewModel? _selectedDevice;
@@ -80,28 +65,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private bool _isCapturing;
     private bool _isBusy;
     private string? _activeCaptureUdid;
-    // Unlike _activeCaptureUdid, this survives a terminal/error status until
-    // StopCapture has actually joined the native session and sent HPA0/HPD0.
-    // It prevents a device switch from abandoning a failed/starting session.
-    private readonly CaptureSessionOwnership _captureSession = new();
     private int _manualRefreshPending;
-    private ImageSource? _previewSource;
-    // WPF's compositor can retain an ImageSource for more than one render
-    // pass.  Reusing the immediately previous WriteableBitmap therefore lets
-    // WritePixels overwrite a surface while it is still being scanned out,
-    // which appears as horizontal/vertical strips from two different frames.
-    // Keep a small ring and never write a bitmap again until several other
-    // surfaces have been submitted.
-    private WriteableBitmap[] _previewBuffers = [];
-    private MemoryMappedFile[] _previewMaps = [];
-    private MemoryMappedViewAccessor[] _previewViews = [];
-    private InteropBitmap[] _interopBuffers = [];
-    private bool _useInteropPreview;
-    private int _nextPreviewBuffer;
-    private long _lastPreviewTimestamp;
-    private long _renderedFrames;
-    private readonly Stopwatch _renderClock = Stopwatch.StartNew();
-    private long _lastFpsUpdateTicks;
     private string _resolution = "—";
     private uint _sourceVideoWidth;
     private uint _sourceVideoHeight;
@@ -122,23 +86,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private NativeCaptureStatus? _lastCaptureStatus;
     private IPhoneFilterDriverStatus _filterDriverStatus = new(
         IPhoneFilterDriverState.NoDevice, null, string.Empty);
-    private string _wirelessReceiverName = WirelessReceiverConfiguration.DefaultReceiverName;
     private string _wirelessStatus = string.Empty;
-    private bool _wirelessReceiverRunning;
-    private bool _wirelessReceiverReady;
-    private WirelessDisplayProfile _selectedWirelessDisplayProfile =
-        WirelessReceiverConfiguration.DefaultDisplayProfile;
-    private WirelessDisplayProfile _appliedWirelessDisplayProfile =
-        WirelessReceiverConfiguration.DefaultDisplayProfile;
-    private string _appliedWirelessReceiverName = WirelessReceiverConfiguration.DefaultReceiverName;
+    private string _mediaCastStatus = string.Empty;
+    private ulong _lastMediaCastCommandId;
     private readonly HashSet<string> _knownWirelessDeviceIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _visibleLogLines = new();
-    private long _logPosition;
-    private string _partialLogLine = string.Empty;
-    private readonly Decoder _logDecoder = Encoding.UTF8.GetDecoder();
-    private readonly string _logPath = Environment.GetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE")
-        ?? Path.Combine(Path.GetTempPath(), "iPhoneMirror-capture.log");
 
     public ObservableCollection<DeviceViewModel> Devices { get; } = [];
     public IReadOnlyList<ResolutionPreset> ResolutionPresets { get; } =
@@ -181,10 +134,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         ? Visibility.Visible : Visibility.Collapsed;
     public Visibility WirelessBottomSettingsVisibility => IsWirelessSelected
         ? Visibility.Collapsed : Visibility.Visible;
-    private bool CurrentDeviceOwnsCapture => SelectedDevice is not null &&
-        DeviceViewModel.UdidEquals(_captureSession.OwnerUdid, SelectedDevice.Udid);
     public Visibility UsbProjectionSettingsVisibility => SelectedDevice is not null &&
-        !IsWirelessSelected && !IsOperationBusy && !CurrentDeviceOwnsCapture && !HasCaptureSession
+        !IsWirelessSelected && !IsBusy && !HasCaptureSession
         ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AdvancedSettingsVisibility => IsAdvancedMode && !IsWirelessSelected &&
         CurrentUsbProjectionMode == UsbProjectionMode.AirPlay
@@ -193,7 +144,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public DeviceViewModel? SelectedDevice
     {
         get => _selectedDevice;
-        set => SetSelectedDevice(value, scheduleCaptureSwitch: true);
+        set => SetSelectedDevice(value, updateDriverStatus: true);
     }
 
     public string EnvironmentStatus { get => _environmentStatus; private set => Set(ref _environmentStatus, value); }
@@ -201,30 +152,41 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public string DriverState { get => _driverState; private set => Set(ref _driverState, value); }
     public string WirelessReceiverName
     {
-        get => _wirelessReceiverName;
+        get => _wireless.ReceiverName;
         set
         {
-            if (Set(ref _wirelessReceiverName, value))
-                ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
-        }
-    }
-    public string WirelessStatus { get => _wirelessStatus; private set => Set(ref _wirelessStatus, value); }
-    public WirelessDisplayProfile SelectedWirelessDisplayProfile
-    {
-        get => _selectedWirelessDisplayProfile;
-        set
-        {
-            if (value is null || !Set(ref _selectedWirelessDisplayProfile, value)) return;
+            if (string.Equals(_wireless.ReceiverName, value, StringComparison.Ordinal)) return;
+            _wireless.ReceiverName = value;
+            OnPropertyChanged();
             ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
         }
     }
+    public string WirelessStatus { get => _wirelessStatus; private set => Set(ref _wirelessStatus, value); }
+    public string MediaCastReceiverName => _wireless.AppliedReceiverName;
+    public string MediaCastStatus { get => _mediaCastStatus; private set => Set(ref _mediaCastStatus, value); }
+    public WirelessDisplayProfile SelectedWirelessDisplayProfile
+    {
+        get => _wireless.SelectedProfile;
+        set
+        {
+            if (value is null || ReferenceEquals(_wireless.SelectedProfile, value)) return;
+            _wireless.SelectedProfile = value;
+            OnPropertyChanged();
+            ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
+            if (WirelessReceiverConfiguration.RequiresOriginalQualityWarning(value))
+            {
+                AppPromptWindow.Inform(
+                    LocalizationService.Get("WirelessOriginalQualityWarningTitle"),
+                    LocalizationService.Get("WirelessOriginalQualityWarningBody"));
+            }
+        }
+    }
     public string AppliedWirelessProfileDisplay => LocalizationService.Format(
-        "WirelessProfileAppliedFormat", _appliedWirelessDisplayProfile.Label);
+        "WirelessProfileAppliedFormat", _wireless.AppliedProfile.Label);
     private DeviceCaptureState? CurrentDeviceSession => SelectedDevice is null ? null :
-        _deviceSessions.GetValueOrDefault(SelectedDevice.Udid);
+        _sessions.Get(SelectedDevice.Udid);
     public ulong CurrentSessionHandle => CurrentDeviceSession?.Handle ?? 0;
     public bool HasCaptureSession => CurrentDeviceSession?.HasSession == true;
-    private bool AnyDeviceSession => _deviceSessions.Values.Any(session => session.HasSession);
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) { StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); } } }
     public bool IsBusy
     {
@@ -240,8 +202,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
         }
     }
-    private bool IsOperationBusy => IsBusy;
-    internal int ConnectedDeviceCount => Devices.Count;
     public string DeviceCount => LocalizationService.Format("DeviceCountFormat", Devices.Count);
     public string SelectedName => SelectedDevice?.DisplayName ?? LocalizationService.Get("NoDeviceSelected");
     public string SelectedModel => SelectedDevice?.ModelDisplay ?? "—";
@@ -332,7 +292,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         set
         {
             var device = SelectedDevice;
-            if (value is null || device is null || device.IsWireless || IsOperationBusy) return;
+            if (value is null || device is null || device.IsWireless || IsBusy) return;
             var state = GetOrCreateDeviceState(device);
             if (state.UsbProjectionMode == value.Mode) return;
             state.UsbProjectionMode = value.Mode;
@@ -349,10 +309,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public bool CanChangeUsbProjectionMode => SelectedDevice is not null &&
-        !IsWirelessSelected && !IsOperationBusy;
-
-    // Kept as a compatibility alias for older XAML and start options.
-    public bool CaptureAudio { get => PlayAudio; set => PlayAudio = value; }
+        !IsWirelessSelected && !IsBusy;
 
     private static (bool Success, string Message) InvokeDeviceSetting(Action action)
     {
@@ -364,9 +321,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         "RenderLimitFormat", SelectedResolutionPreset.Label);
     public string TargetFpsDisplay => LocalizationService.Format("TargetFpsFormat", SelectedFrameRate);
     public string LogText { get => _logText; private set => Set(ref _logText, value); }
-    public string LogPathDisplay => _logPath;
-
-    public ImageSource? PreviewSource { get => _previewSource; private set => Set(ref _previewSource, value); }
+    public string LogPathDisplay => _logReader.Path;
 
     public MainViewModel()
     {
@@ -378,23 +333,27 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _logText = LocalizationService.Get("StatusWaitingLog");
         _selectedLanguage = LocalizationService.SelectedLanguage;
         _core = new NativeCore();
+        _wireless = new WirelessReceiverController(_core);
+        _mediaCast = new MediaCastReceiverController(_core);
+        _sessions = new DeviceSessionManager(_core);
         _selectedResolutionPreset = ResolutionPresets[0];
         StartCommand = new RelayCommand(() => _ = StartAsync(),
             () => SelectedDevice is not null && !HasCaptureSession &&
-                !IsCapturing && !IsOperationBusy);
+                !IsCapturing && !IsBusy);
         StopCommand = new RelayCommand(() => _ = StopAsync(),
-            () => HasCaptureSession && !IsOperationBusy);
+            () => HasCaptureSession && !IsBusy);
         // A manual refresh is guaranteed to run after a short in-flight poll;
         // timer refreshes remain best-effort and never build up a queue.
         RefreshCommand = new RelayCommand(() => _ = RefreshAsync(forceDeviceEnumeration: true));
         ApplyVideoSettingsCommand = new RelayCommand(() => _ = ApplyVideoSettingsAsync(),
-            () => !IsOperationBusy);
+            () => !IsBusy);
         ClearLogCommand = new RelayCommand(ClearVisibleLog);
         AdvancedSettingsCommand = new RelayCommand(ShowAdvancedSettings, () => IsAdvancedMode);
         OpenDriverManagerCommand = new RelayCommand(() => OpenDriverManager());
         ApplyWirelessSettingsCommand = new RelayCommand(() => _ = RestartWirelessReceiverAsync(),
-            () => _wirelessReceiver.IsAvailable && !IsOperationBusy);
+            () => _wireless.IsAvailable && !IsBusy);
         RefreshWirelessStatus();
+        RefreshMediaCastStatus();
         LocalizationService.LanguageChanged += OnLanguageChanged;
     }
 
@@ -416,21 +375,26 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             }
             else
             {
-                if (IsOperationBusy || !await _coreGate.WaitAsync(0)) return;
+                if (IsBusy || !await _coreGate.WaitAsync(0)) return;
                 gateHeld = true;
             }
             if (_disposed) return;
 
-            await EnsureWirelessReceiverStartedLockedAsync();
+            var receiverStart = await _wireless.EnsureStartedAsync();
+            if (receiverStart.IsNewError && receiverStart.Error is not null)
+                AddUiLog(receiverStart.Error);
+            RefreshWirelessStatus();
+            await _mediaCast.EnsureStartedAsync();
+            RefreshMediaCastStatus();
             NativeEnvironmentInfo? environment = null;
             IReadOnlyList<NativeDeviceInfo> wirelessDevices;
-            if (AnyDeviceSession && !forceDeviceEnumeration)
+            if (_sessions.AnySession && !forceDeviceEnumeration)
             {
                 wirelessDevices = await Task.Run(_core.GetWirelessDevices);
             }
             else
             {
-                if (AnyDeviceSession)
+                if (_sessions.AnySession)
                 {
                     var result = await Task.Run(() =>
                         (_core.GetDevices(), _core.GetWirelessDevices()));
@@ -469,7 +433,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             await SyncWirelessSessionsLockedAsync(devices.Where(device => device.IsWireless));
             _knownWirelessDeviceIds.Clear();
             _knownWirelessDeviceIds.UnionWith(currentWirelessDeviceIds);
-            var captureActive = AnyDeviceSession;
+            var captureActive = _sessions.AnySession;
             // Device discovery runs off the UI thread and can overlap a real
             // user click. A selection captured before that await is stale and
             // used to snap the highlight back to the old phone when the poll
@@ -487,8 +451,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception error)
         {
-            EnvironmentStatus = LocalizationService.Format("CoreLoadFailedFormat", error.Message);
-            DriverState = LocalizationService.Get("Unavailable");
+            // Preserve a previously verified USB environment when a later
+            // wireless/session poll fails transiently. Only the initial probe
+            // can legitimately classify the whole native core as unavailable.
+            if (_lastEnvironment is null)
+            {
+                EnvironmentStatus = LocalizationService.Format("CoreLoadFailedFormat", error.Message);
+                DriverState = LocalizationService.Get("Unavailable");
+            }
             if (forceDeviceEnumeration) AddUiLog($"device refresh failed: {error.Message}");
         }
         finally
@@ -498,55 +468,23 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private async Task EnsureWirelessReceiverStartedLockedAsync()
-    {
-        if (!_wirelessReceiver.IsAvailable)
-        {
-            _wirelessReceiverRunning = _wirelessReceiverReady = false;
-            RefreshWirelessStatus();
-            return;
-        }
-        var status = _core.GetWirelessReceiverStatus();
-        _wirelessReceiverRunning = status.Running;
-        _wirelessReceiverReady = status.Ready;
-        if (!_wirelessReceiverRunning)
-        {
-            var hostPath = _wirelessReceiver.ExecutablePath;
-            if (hostPath is null) return;
-            var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(
-                WirelessReceiverName);
-            Set(ref _wirelessReceiverName, sanitized, nameof(WirelessReceiverName));
-            var profile = _appliedWirelessDisplayProfile;
-            var started = await Task.Run(() => _core.StartWirelessReceiver(sanitized, hostPath,
-                profile.Width, profile.Height, profile.FrameRate));
-            _wirelessReceiverRunning = started.Success;
-            _wirelessReceiverReady = false;
-            if (!started.Success) AddUiLog(started.Message);
-        }
-        RefreshWirelessStatus();
-    }
-
     private async Task SyncWirelessSessionsLockedAsync(IEnumerable<DeviceViewModel> connected)
     {
         var wireless = connected.ToList();
         var connectedIds = wireless.Select(device => device.Udid)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in _deviceSessions.Where(pair =>
+        foreach (var pair in _sessions.Entries.Where(pair =>
                      DeviceViewModel.IsWirelessUdid(pair.Key) &&
                      !connectedIds.Contains(pair.Key)).ToArray())
         {
             if (pair.Value.Handle != 0)
-            {
-                var handle = pair.Value.Handle;
-                await Task.Run(() => _core.StopDeviceSession(handle));
-                _core.DestroyDeviceSession(handle);
-            }
-            _deviceSessions.Remove(pair.Key);
-            _pausedWirelessDevices.Remove(pair.Key);
+                await _sessions.StopAndDestroyAsync(pair.Value);
+            _sessions.Remove(pair.Key);
+            _sessions.SetWirelessPaused(pair.Key, false);
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, pair.Key))
             {
                 NativeCore.SelectPreviewSession(0);
-                SetCaptureSessionOwner(null);
+                NotifyCaptureSessionChanged();
                 _activeCaptureUdid = null;
                 IsCapturing = false;
                 ResetPreviewState();
@@ -555,10 +493,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
         foreach (var device in wireless)
         {
-            if (_pausedWirelessDevices.Contains(device.Udid)) continue;
-            if (_deviceSessions.TryGetValue(device.Udid, out var existing) &&
+            if (_sessions.IsWirelessPaused(device.Udid)) continue;
+            if (_sessions.TryGet(device.Udid, out var existing) &&
                 existing.Handle != 0) continue;
-            var playAudio = !_deviceSessions.Any(pair =>
+            var playAudio = !_sessions.Entries.Any(pair =>
                 DeviceViewModel.IsWirelessUdid(pair.Key) && pair.Value.Handle != 0 &&
                 pair.Value.PlayAudio);
             var state = existing ?? new DeviceCaptureState
@@ -570,7 +508,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 PlayAudio = playAudio,
                 Volume = PlaybackVolume,
             };
-            _deviceSessions[device.Udid] = state;
+            _sessions.Set(state);
             var result = await Task.Run(() => CreateSession(device, state));
             state.Handle = result.Success ? result.Handle : 0;
             if (!result.Success) AddUiLog(LocalizationService.Format(
@@ -580,17 +518,17 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task RestartWirelessReceiverAsync()
     {
-        if (_disposed || IsOperationBusy) return;
+        if (_disposed || IsBusy) return;
         var profile = SelectedWirelessDisplayProfile;
         var connectedCount = Devices.Count(device => device.IsWireless);
         var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(WirelessReceiverName);
         var changes = new List<string>();
-        if (!string.Equals(sanitized, _appliedWirelessReceiverName, StringComparison.Ordinal))
+        if (!string.Equals(sanitized, _wireless.AppliedReceiverName, StringComparison.Ordinal))
             changes.Add(LocalizationService.Format("WirelessNameChangeFormat",
-                _appliedWirelessReceiverName, sanitized));
-        if (!ReferenceEquals(profile, _appliedWirelessDisplayProfile))
+                _wireless.AppliedReceiverName, sanitized));
+        if (!ReferenceEquals(profile, _wireless.AppliedProfile))
             changes.Add(LocalizationService.Format("WirelessResolutionChangeFormat",
-                _appliedWirelessDisplayProfile.Label, profile.Label));
+                _wireless.AppliedProfile.Label, profile.Label));
         if (changes.Count == 0)
         {
             AppPromptWindow.Inform(LocalizationService.Get("WirelessSettingsTitle"),
@@ -611,14 +549,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             gateHeld = true;
             if (_disposed) return;
             await SyncWirelessSessionsLockedAsync([]);
-            await Task.Run(_core.StopWirelessReceiver);
-            _wirelessReceiverRunning = _wirelessReceiverReady = false;
-            _appliedWirelessDisplayProfile = profile;
-            OnPropertyChanged(nameof(AppliedWirelessProfileDisplay));
-            Set(ref _wirelessReceiverName, sanitized, nameof(WirelessReceiverName));
-            _appliedWirelessReceiverName = sanitized;
-            await EnsureWirelessReceiverStartedLockedAsync();
-            AddUiLog(LocalizationService.Format("WirelessRunningFormat", sanitized));
+            await _wireless.StopAsync();
+            var started = await _wireless.EnsureStartedAsync(sanitized, profile);
+            RefreshWirelessStatus();
+            if (started.Started)
+            {
+                OnPropertyChanged(nameof(WirelessReceiverName));
+                OnPropertyChanged(nameof(MediaCastReceiverName));
+                OnPropertyChanged(nameof(AppliedWirelessProfileDisplay));
+                RefreshWirelessStatus();
+                AddUiLog(LocalizationService.Format("WirelessRunningFormat", sanitized));
+            }
+            else if (started.IsNewError && started.Error is not null)
+                AddUiLog(started.Error);
         }
         catch (Exception error)
         {
@@ -651,7 +594,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 DeviceViewModel.UdidEquals(device.Udid, _activeCaptureUdid));
             if (activeCard is not null) desired.Add(activeCard);
         }
-        foreach (var sessionUdid in _deviceSessions.Values
+        foreach (var sessionUdid in _sessions.Values
                      .Where(session => session.HasSession).Select(session => session.Udid))
         {
             if (desired.Any(device => DeviceViewModel.UdidEquals(device.Udid, sessionUdid))) continue;
@@ -692,7 +635,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             newlyConnectedWirelessUdid);
         var nextSelection = Devices.FirstOrDefault(device =>
             DeviceViewModel.UdidEquals(device.Udid, nextUdid));
-        SetSelectedDevice(nextSelection, scheduleCaptureSwitch: false);
+        SetSelectedDevice(nextSelection, updateDriverStatus: false);
         NotifySelectedDeviceProperties();
 
         // Never invoke the legacy libusb0 enumeration API while a capture
@@ -716,9 +659,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     }
 
     internal bool HasCaptureSessionFor(DeviceViewModel device) =>
-        _deviceSessions.TryGetValue(device.Udid, out var session) && session.HasSession;
+        _sessions.TryGet(device.Udid, out var session) && session.HasSession;
 
-    private void SetSelectedDevice(DeviceViewModel? value, bool scheduleCaptureSwitch)
+    private void SetSelectedDevice(DeviceViewModel? value, bool updateDriverStatus)
     {
         // Collection notifications can cause a two-way ListBox binding to
         // offer null even though the selected stable item is still present.
@@ -730,7 +673,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         var session = CurrentDeviceSession;
         _activeCaptureUdid = session?.HasSession == true ? value?.Udid : null;
         IsCapturing = session?.HasSession == true;
-        SetCaptureSessionOwner(_activeCaptureUdid);
+        NotifyCaptureSessionChanged();
         NativeCore.SelectPreviewSession(session?.Handle ?? 0);
         OnPropertyChanged(nameof(CurrentSessionHandle));
         if (session is not null)
@@ -750,11 +693,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         StopCommand.NotifyCanExecuteChanged();
         ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
 
-        // A transient null can be published by WPF while a ListBox item is
-        // being moved. Let the already queued transition observe the changed
-        // selection and release its busy state instead of orphaning it behind
-        // a revision that has no corresponding task.
-        if (scheduleCaptureSwitch && !HasCaptureSession)
+        if (updateDriverStatus && !HasCaptureSession)
             UpdateSelectedDriverStatus();
     }
 
@@ -776,9 +715,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(AdvancedSettingsVisibility));
     }
 
-    private void SetCaptureSessionOwner(string? udid)
+    private void NotifyCaptureSessionChanged()
     {
-        if (!_captureSession.SetOwner(udid)) return;
         OnPropertyChanged(nameof(HasCaptureSession));
         OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
         StartCommand.NotifyCanExecuteChanged();
@@ -802,19 +740,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task PollBackgroundSessionErrorsAsync()
     {
-        foreach (var state in _deviceSessions.Values.Where(value =>
+        foreach (var state in _sessions.Values.Where(value =>
                      value.Handle != 0 && value.Handle != CurrentSessionHandle).ToArray())
         {
             NativeCaptureStatus status;
             try { status = await Task.Run(() => _core.GetDeviceSessionStatus(state.Handle)); }
             catch { continue; }
-            state.LastStatus = new NativeCaptureStatusSnapshot
-            {
-                Width = status.Width,
-                Height = status.Height,
-                Fps = status.Fps,
-                LatencyMs = status.LatencyMs,
-            };
             if (status.Width != 0 && status.Height != 0)
                 DeviceVideoSizeChanged?.Invoke(state.Udid, status.Width, status.Height);
             if (status.State != CaptureState.Error || state.ErrorShown) continue;
@@ -828,10 +759,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void ResetPreviewState()
     {
-        DisposePreviewBuffers();
-        PreviewSource = null;
-        _lastPreviewTimestamp = 0;
-        _renderedFrames = 0;
         _sourceVideoWidth = 0;
         _sourceVideoHeight = 0;
         OnPropertyChanged(nameof(SourceVideoWidth));
@@ -844,7 +771,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task StartAsync()
     {
-        if (_disposed || SelectedDevice is null || HasCaptureSession || IsOperationBusy) return;
+        if (_disposed || SelectedDevice is null || HasCaptureSession || IsBusy) return;
         IsBusy = true;
         var gateHeld = false;
         try
@@ -860,33 +787,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (_disposed) return;
             var device = SelectedDevice;
             if (device is null || !DeviceViewModel.UdidEquals(device.Udid, requestedDevice.Udid)) return;
-            _lastPreviewTimestamp = 0;
-            _renderedFrames = 0;
-            _renderClock.Restart();
-            _lastFpsUpdateTicks = 0;
             var preference = (Success: true, Message: LocalizationService.Get("VideoPreferencesApplied"));
             // Own the session before the native start call can block in USB
             // activation. A device click or window close during that interval
             // must still queue an explicit stop for this exact phone, and the
             // top action changes to its red stop state immediately.
-            var state = _deviceSessions.GetValueOrDefault(device.Udid) ?? new DeviceCaptureState
-            {
-                Udid = device.Udid,
-                RenderWidth = SelectedResolutionPreset.Width,
-                RenderHeight = SelectedResolutionPreset.Height,
-                FrameRate = SelectedFrameRate,
-                PlayAudio = PlayAudio,
-                Volume = PlaybackVolume,
-            };
-            _deviceSessions[device.Udid] = state;
-            if (device.IsWireless) _pausedWirelessDevices.Remove(device.Udid);
-            state.IsStarting = true;
-            SetCaptureSessionOwner(device.Udid);
+            var state = GetOrCreateDeviceState(device);
+            if (device.IsWireless) _sessions.SetWirelessPaused(device.Udid, false);
             var created = await Task.Run(() => CreateSession(device, state));
-            state.IsStarting = false;
             state.Handle = created.Success ? created.Handle : 0;
-            // The ownership marker was set before the blocking native start,
-            // so SetCaptureSessionOwner may legitimately be a no-op here.
             // Handle is not observable itself; explicitly refresh the style
             // trigger and command availability as soon as creation finishes.
             OnPropertyChanged(nameof(HasCaptureSession));
@@ -895,7 +804,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             var result = (created.Success, created.Message);
             IsCapturing = created.Success;
             _activeCaptureUdid = created.Success ? device.Udid : null;
-            SetCaptureSessionOwner(created.Success ? device.Udid : null);
+            NotifyCaptureSessionChanged();
             NativeCore.SelectPreviewSession(state.Handle);
             OnPropertyChanged(nameof(CurrentSessionHandle));
             CaptureStatus = result.Message;
@@ -909,7 +818,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception error)
         {
             _activeCaptureUdid = null;
-            SetCaptureSessionOwner(null);
+            NotifyCaptureSessionChanged();
             IsCapturing = false;
             CaptureStatus = LocalizationService.Format("StartFailedFormat", error.Message);
             AddUiLog(CaptureStatus);
@@ -923,7 +832,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task ApplyVideoSettingsAsync()
     {
-        if (_disposed || IsOperationBusy) return;
+        if (_disposed || IsBusy) return;
         IsBusy = true;
         var gateHeld = false;
         try
@@ -956,7 +865,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task StopAsync()
     {
-        if (_disposed || !HasCaptureSession || IsOperationBusy) return;
+        if (_disposed || !HasCaptureSession || IsBusy) return;
         IsBusy = true;
         var gateHeld = false;
         CaptureStatus = LocalizationService.Get("CaptureStopping");
@@ -970,15 +879,21 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             var state = CurrentDeviceSession;
             if (state is null || state.Handle == 0) return;
             var stoppedUdid = state.Udid;
-            var handle = state.Handle;
-            await Task.Run(() => _core.StopDeviceSession(handle));
-            _core.DestroyDeviceSession(handle);
-            state.Handle = 0;
+            await _sessions.StopAndDestroyAsync(state);
             if (DeviceViewModel.IsWirelessUdid(stoppedUdid))
-                _pausedWirelessDevices.Add(stoppedUdid);
+            {
+                _sessions.SetWirelessPaused(stoppedUdid, true);
+                // Destroying the local decoder session only makes the preview
+                // black; the iPhone keeps its AirPlay connection alive. Stop
+                // the receiver process as well so the sender gets a real
+                // transport disconnect and leaves its mirroring state. A short
+                // auto-start holdoff prevents an immediate reconnect race.
+                await _wireless.StopAsync(TimeSpan.FromSeconds(2));
+                RefreshWirelessStatus();
+            }
             NativeCore.SelectPreviewSession(0);
             OnPropertyChanged(nameof(CurrentSessionHandle));
-            SetCaptureSessionOwner(null);
+            NotifyCaptureSessionChanged();
             _activeCaptureUdid = null;
             IsCapturing = false;
             CaptureStatus = LocalizationService.Get("CaptureStopped");
@@ -988,7 +903,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception error)
         {
             _activeCaptureUdid = null;
-            SetCaptureSessionOwner(null);
+            NotifyCaptureSessionChanged();
             IsCapturing = false;
             ResetPreviewState();
             CaptureStatus = LocalizationService.Format("StopFailedFormat", error.Message);
@@ -1002,52 +917,24 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task RefreshLogsAsync()
     {
-        if (_disposed || !await _logGate.WaitAsync(0)) return;
-        try
-        {
-            if (!File.Exists(_logPath)) return;
-            await using var stream = new FileStream(_logPath, FileMode.Open, FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete, 32 * 1024, useAsync: true);
-            if (stream.Length < _logPosition)
-            {
-                _logPosition = 0;
-                _partialLogLine = string.Empty;
-                _logDecoder.Reset();
-            }
-            // On first view show a useful tail instead of replaying an
-            // arbitrarily large log accumulated by previous sessions.
-            if (_logPosition == 0 && stream.Length > 256 * 1024)
-                _logPosition = stream.Length - 256 * 1024;
-            if (stream.Length <= _logPosition) return;
-
-            stream.Position = _logPosition;
-            var bytesToRead = (int)Math.Min(stream.Length - _logPosition, 256 * 1024);
-            var buffer = new byte[bytesToRead];
-            var bytesRead = await stream.ReadAsync(buffer);
-            if (bytesRead == 0) return;
-            _logPosition += bytesRead;
-
-            var characters = new char[Encoding.UTF8.GetMaxCharCount(bytesRead)];
-            _logDecoder.Convert(buffer, 0, bytesRead, characters, 0, characters.Length,
-                flush: false, out _, out var charactersUsed, out _);
-            var text = (_partialLogLine + new string(characters, 0, charactersUsed))
-                .Replace("\r\n", "\n");
-            var lines = text.Split('\n');
-            _partialLogLine = lines[^1];
-            foreach (var line in lines.Take(lines.Length - 1))
-                if (!string.IsNullOrWhiteSpace(line)) AddLogLine(line);
-            PublishLogText();
-        }
-        catch (IOException)
-        {
-            // The native logger can rotate/flush between length and read.
-            // The next timer tick resumes from the last successful offset.
-        }
-        finally
-        {
-            _logGate.Release();
-        }
+        if (_disposed) return;
+        var lines = await _logReader.ReadNewLinesAsync();
+        foreach (var line in lines) AddLogLine(line);
+        if (lines.Count != 0) PublishLogText();
     }
+
+    public void RefreshMediaCast()
+    {
+        if (_disposed) return;
+        var request = _core.GetMediaCastRequest();
+        if (request is null || request.CommandId == _lastMediaCastCommandId) return;
+        _lastMediaCastCommandId = request.CommandId;
+        MediaCastCommandReceived?.Invoke(request);
+    }
+
+    internal void ReportMediaCastPlayback(ulong commandId,
+        double duration, double position, double rate) =>
+        _core.SetMediaCastPlaybackState(commandId, duration, position, rate);
 
     internal void AddUiLog(string message)
     {
@@ -1055,16 +942,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         PublishLogText();
     }
 
-    internal ulong GetDeviceSessionHandle(string udid) =>
-        _deviceSessions.GetValueOrDefault(udid)?.Handle ?? 0;
-
     internal bool IsDeviceAudioEnabled(string udid) =>
-        _deviceSessions.TryGetValue(udid, out var state) &&
+        _sessions.TryGet(udid, out var state) &&
         state.Handle != 0 && state.PlayAudio;
 
     internal (bool Success, string Message) SetDeviceAudioEnabled(string udid, bool enabled)
     {
-        if (!_deviceSessions.TryGetValue(udid, out var state) || state.Handle == 0)
+        if (!_sessions.TryGet(udid, out var state) || state.Handle == 0)
             return (false, LocalizationService.Get("StatusWaitingDevice"));
 
         var result = InvokeDeviceSetting(() => _core.SetDeviceAudioEnabled(state.Handle, enabled));
@@ -1074,7 +958,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
         {
             Set(ref _playAudio, enabled, nameof(PlayAudio));
-            OnPropertyChanged(nameof(CaptureAudio));
         }
         SetSettingsStatus(enabled ? "AudioPlaybackEnabled" : "AudioPlaybackMuted");
         return (true, LocalizationService.Get(
@@ -1084,7 +967,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     internal (bool Success, string Message) MuteOtherDeviceSessions(string currentUdid)
     {
         var otherIds = IndependentWindowAudioPolicy.GetOtherDeviceIds(currentUdid,
-            _deviceSessions.Where(pair => pair.Value.Handle != 0)
+            _sessions.Entries.Where(pair => pair.Value.Handle != 0)
                 .Select(pair => pair.Key));
         foreach (var udid in otherIds)
         {
@@ -1102,7 +985,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         await _coreGate.WaitAsync();
         try
         {
-            if (_deviceSessions.TryGetValue(device.Udid, out var existing) && existing.Handle != 0)
+            if (_sessions.TryGet(device.Udid, out var existing) && existing.Handle != 0)
                 return (true, existing.Handle, string.Empty);
             var state = existing ?? new DeviceCaptureState
             {
@@ -1113,14 +996,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 PlayAudio = false,
                 Volume = 100,
             };
-            _deviceSessions[device.Udid] = state;
+            _sessions.Set(state);
             var result = await Task.Run(() => CreateSession(device, state));
             state.Handle = result.Success ? result.Handle : 0;
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
             {
                 IsCapturing = result.Success;
                 _activeCaptureUdid = result.Success ? device.Udid : null;
-                SetCaptureSessionOwner(_activeCaptureUdid);
+                NotifyCaptureSessionChanged();
                 NativeCore.SelectPreviewSession(state.Handle);
                 OnPropertyChanged(nameof(CurrentSessionHandle));
             }
@@ -1134,17 +1017,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         await _coreGate.WaitAsync();
         try
         {
-            if (!_deviceSessions.TryGetValue(udid, out var state) || state.Handle == 0) return;
-            var handle = state.Handle;
-            await Task.Run(() => _core.StopDeviceSession(handle));
-            _core.DestroyDeviceSession(handle);
-            state.Handle = 0;
+            if (!_sessions.TryGet(udid, out var state) || state.Handle == 0) return;
+            await _sessions.StopAndDestroyAsync(state);
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
             {
                 NativeCore.SelectPreviewSession(0);
                 IsCapturing = false;
                 _activeCaptureUdid = null;
-                SetCaptureSessionOwner(null);
+                NotifyCaptureSessionChanged();
                 OnPropertyChanged(nameof(CurrentSessionHandle));
                 ResetPreviewState();
             }
@@ -1289,9 +1169,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     {
         if (device.IsWireless)
         {
-            if (!_wirelessReceiver.IsAvailable || !_wirelessReceiverRunning)
+            if (!_wireless.IsAvailable || !_wireless.Running)
             {
-                var message = LocalizationService.Get("WirelessReceiverMissing");
+                var message = _wireless.GetStatusText();
                 if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
                     CaptureStatus = message;
                 RefreshWirelessStatus();
@@ -1370,16 +1250,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void RefreshWirelessStatus()
     {
-        if (!_wirelessReceiver.IsAvailable)
-        {
-            WirelessStatus = LocalizationService.Get("WirelessReceiverMissing");
-        }
-        else if (!_wirelessReceiverRunning || !_wirelessReceiverReady)
-            WirelessStatus = LocalizationService.Get("WirelessStarting");
-        else WirelessStatus = LocalizationService.Format(
-            "WirelessRunningFormat", WirelessReceiverName);
+        WirelessStatus = _wireless.GetStatusText();
         if (IsWirelessSelected) ApplySelectedDriverState();
     }
+
+    private void RefreshMediaCastStatus() => MediaCastStatus = _mediaCast.GetStatusText();
 
     private (bool Success, ulong Handle, string Message) CreateSession(
         DeviceViewModel device, DeviceCaptureState state)
@@ -1400,7 +1275,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private DeviceCaptureState GetOrCreateDeviceState(DeviceViewModel device)
     {
-        if (_deviceSessions.TryGetValue(device.Udid, out var state)) return state;
+        if (_sessions.TryGet(device.Udid, out var state)) return state;
         state = new DeviceCaptureState
         {
             Udid = device.Udid,
@@ -1410,7 +1285,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             PlayAudio = PlayAudio,
             Volume = PlaybackVolume,
         };
-        _deviceSessions[device.Udid] = state;
+        _sessions.Set(state);
         return state;
     }
 
@@ -1458,6 +1333,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (_visibleLogLines.Count == 0) PublishLogText();
         ApplySelectedDriverState();
         RefreshWirelessStatus();
+        RefreshMediaCastStatus();
     }
 
     internal void EnableAdvancedMode()
@@ -1469,16 +1345,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private void ShowAdvancedSettings()
     {
         if (SelectedDevice is null || SelectedDevice.IsWireless) return;
-        var state = CurrentDeviceSession ?? new DeviceCaptureState
-        {
-            Udid = SelectedDevice.Udid,
-            RenderWidth = SelectedResolutionPreset.Width,
-            RenderHeight = SelectedResolutionPreset.Height,
-            FrameRate = SelectedFrameRate,
-            PlayAudio = PlayAudio,
-            Volume = PlaybackVolume,
-        };
-        _deviceSessions[SelectedDevice.Udid] = state;
+        var state = GetOrCreateDeviceState(SelectedDevice);
         var device = SelectedDevice;
         var window = new Windows.AdvancedSettingsWindow(state.AdvancedUsbWidth, state.AdvancedUsbHeight)
         {
@@ -1511,10 +1378,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             await _coreGate.WaitAsync();
             gateHeld = true;
-            var oldHandle = state.Handle;
-            await Task.Run(() => _core.StopDeviceSession(oldHandle));
-            _core.DestroyDeviceSession(oldHandle);
-            state.Handle = 0;
+            await _sessions.StopAndDestroyAsync(state);
             OnPropertyChanged(nameof(HasCaptureSession));
             // libusb0 restores the phone's normal configuration during the
             // stop path. Give Windows and the Apple USB stack a complete
@@ -1562,9 +1426,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     AddUiLog($"USB projection mode {state.UsbProjectionMode} applied for {state.Udid}");
                     return;
                 }
-                try { await Task.Run(() => _core.StopDeviceSession(created.Handle)); } catch { }
-                _core.DestroyDeviceSession(created.Handle);
-                state.Handle = 0;
+                try { await _sessions.StopAndDestroyAsync(state); } catch { }
                 OnPropertyChanged(nameof(HasCaptureSession));
             }
             throw lastFailure ?? new InvalidOperationException(created.Message);
@@ -1584,114 +1446,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public void RefreshPreview()
-    {
-        if (!IsCapturing) return;
-        var timestamp = _core.GetLatestVideoTimestamp();
-        if (timestamp == 0 || timestamp == _lastPreviewTimestamp) return;
-        // The preview surface is displayed at roughly 400 px wide for a
-        // phone-shaped source. The preview column displays the phone at about
-        // 380-400 px wide, so matching that width avoids making WPF upload and
-        // composite pixels that are immediately discarded by layout scaling.
-        var frame = _core.GetLatestPreviewFrame(400, 2200);
-        if (frame is null || frame.Width == 0 || frame.Height == 0 ||
-            frame.Timestamp100Ns <= _lastPreviewTimestamp) return;
-        _lastPreviewTimestamp = frame.Timestamp100Ns;
-        var previewReady = _useInteropPreview
-            ? _interopBuffers.Length == 4 && _interopBuffers[0].PixelWidth == (int)frame.Width &&
-              _interopBuffers[0].PixelHeight == (int)frame.Height
-            : _previewBuffers.Length == 4 && _previewBuffers[0].PixelWidth == (int)frame.Width &&
-              _previewBuffers[0].PixelHeight == (int)frame.Height;
-        if (!previewReady)
-        {
-            DisposePreviewBuffers();
-            try
-            {
-                if (!EnableInteropPreview) throw new NotSupportedException();
-                var stride = checked((int)frame.Stride);
-                var bytes = checked((long)stride * (long)frame.Height);
-                _previewMaps = Enumerable.Range(0, 4)
-                    .Select(_ => MemoryMappedFile.CreateNew(null, bytes))
-                    .ToArray();
-                _previewViews = _previewMaps.Select(map => map.CreateViewAccessor(0, bytes,
-                    MemoryMappedFileAccess.ReadWrite)).ToArray();
-                _interopBuffers = _previewMaps.Select(map =>
-                    Imaging.CreateBitmapSourceFromMemorySection(
-                        map.SafeMemoryMappedFileHandle.DangerousGetHandle(),
-                        (int)frame.Width, (int)frame.Height, PixelFormats.Bgra32,
-                        96, 96)).Cast<InteropBitmap>().ToArray();
-                _useInteropPreview = true;
-            }
-            catch
-            {
-                DisposePreviewBuffers();
-                _previewBuffers = Enumerable.Range(0, 4)
-                    .Select(_ => new WriteableBitmap((int)frame.Width, (int)frame.Height, 96, 96,
-                        PixelFormats.Bgra32, null))
-                    .ToArray();
-                _useInteropPreview = false;
-            }
-            _nextPreviewBuffer = 0;
-        }
-
-        var nextIndex = _nextPreviewBuffer;
-        _nextPreviewBuffer = (_nextPreviewBuffer + 1) % 4;
-        ImageSource next;
-        if (_useInteropPreview)
-        {
-            _previewViews[nextIndex].WriteArray(0, frame.Pixels, 0, frame.Pixels.Length);
-            _previewViews[nextIndex].Flush();
-            _interopBuffers[nextIndex].Invalidate();
-            next = _interopBuffers[nextIndex];
-        }
-        else
-        {
-            var bitmap = _previewBuffers[nextIndex];
-            bitmap.Lock();
-            try
-            {
-                var rowBytes = checked((int)frame.Stride);
-                if (bitmap.BackBufferStride == rowBytes)
-                {
-                    Marshal.Copy(frame.Pixels, 0, bitmap.BackBuffer, frame.Pixels.Length);
-                }
-                else
-                {
-                    var sourceOffset = 0;
-                    var destination = bitmap.BackBuffer;
-                    for (var y = 0U; y < frame.Height; ++y)
-                    {
-                        Marshal.Copy(frame.Pixels, sourceOffset, destination, rowBytes);
-                        sourceOffset += rowBytes;
-                        destination += bitmap.BackBufferStride;
-                    }
-                }
-                bitmap.AddDirtyRect(new Int32Rect(0, 0, (int)frame.Width, (int)frame.Height));
-            }
-            finally
-            {
-                bitmap.Unlock();
-            }
-            next = bitmap;
-        }
-        PreviewSource = next;
-        ++_renderedFrames;
-        var nowTicks = _renderClock.ElapsedTicks;
-        if (_lastFpsUpdateTicks == 0 || nowTicks - _lastFpsUpdateTicks >= Stopwatch.Frequency / 2) {
-            var seconds = _renderClock.Elapsed.TotalSeconds;
-            if (seconds > 0.0) FpsDisplay = $"{_renderedFrames / seconds:F1} fps";
-            _lastFpsUpdateTicks = nowTicks;
-        }
-    }
-
     internal async Task ShutdownAsync()
     {
         if (_disposed) return;
         _disposed = true;
         LocalizationService.LanguageChanged -= OnLanguageChanged;
-        DisposePreviewBuffers();
         await _coreGate.WaitAsync();
-        await _logGate.WaitAsync();
         try
         {
             await _shutdownCoordinator.StopAndDisposeOnceAsync(
@@ -1699,16 +1459,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 {
                     try
                     {
-                        foreach (var session in _deviceSessions.Values.Where(value => value.Handle != 0).ToArray())
+                        foreach (var session in _sessions.Values.Where(value => value.Handle != 0).ToArray())
                         {
-                            var handle = session.Handle;
-                            AddUiLog($"application shutdown stopping device session: udid={session.Udid} handle={handle}");
-                            try { await Task.Run(() => _core.StopDeviceSession(handle)); }
-                            finally
-                            {
-                                _core.DestroyDeviceSession(handle);
-                                session.Handle = 0;
-                            }
+                            AddUiLog($"application shutdown stopping device session: " +
+                                $"udid={session.Udid} handle={session.Handle}");
+                            await _sessions.StopAndDestroyAsync(session);
                         }
                         // Defensive cleanup for a legacy session created by an
                         // older component in the same process.
@@ -1716,7 +1471,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     }
                     finally
                     {
-                        SetCaptureSessionOwner(null);
+                        NotifyCaptureSessionChanged();
                         _activeCaptureUdid = null;
                         IsCapturing = false;
                     }
@@ -1725,22 +1480,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         finally
         {
-            _logGate.Release();
             _coreGate.Release();
-            _logGate.Dispose();
-            _coreGate.Dispose();
         }
-    }
-
-    private void DisposePreviewBuffers()
-    {
-        foreach (var view in _previewViews) view.Dispose();
-        foreach (var map in _previewMaps) map.Dispose();
-        _previewViews = [];
-        _previewMaps = [];
-        _interopBuffers = [];
-        _previewBuffers = [];
-        _useInteropPreview = false;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

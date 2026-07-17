@@ -68,13 +68,27 @@ try {
         & $CTest --test-dir build/native -C $TestConfiguration --output-on-failure
         if ($LASTEXITCODE -ne 0) { throw "Native tests failed: $LASTEXITCODE" }
 
-        dotnet run --project src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj `
-            --configuration $Configuration
-        if ($LASTEXITCODE -ne 0) { throw "App logic tests failed: $LASTEXITCODE" }
+        foreach ($Project in @(
+            'src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj',
+            'src/DriverInstaller.Tests/iPhoneMirror.DriverInstaller.Tests.csproj'
+        )) {
+            dotnet restore $Project -p:NuGetAudit=false
+            if ($LASTEXITCODE -ne 0) { throw "Test restore failed: $Project ($LASTEXITCODE)" }
+            dotnet run --no-restore --project $Project --configuration $Configuration
+            if ($LASTEXITCODE -ne 0) { throw "Tests failed: $Project ($LASTEXITCODE)" }
+        }
+    }
 
-        dotnet run --project src/DriverInstaller.Tests/iPhoneMirror.DriverInstaller.Tests.csproj `
-            --configuration $Configuration
-        if ($LASTEXITCODE -ne 0) { throw "Driver installer tests failed: $LASTEXITCODE" }
+    if ($NoPublish) {
+        foreach ($Project in @(
+            'src/App/iPhoneMirror.App.csproj',
+            'src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj'
+        )) {
+            dotnet restore $Project -p:NuGetAudit=false
+            if ($LASTEXITCODE -ne 0) { throw "Application restore failed: $Project ($LASTEXITCODE)" }
+            dotnet build $Project --no-restore --configuration $Configuration
+            if ($LASTEXITCODE -ne 0) { throw "Application build failed: $Project ($LASTEXITCODE)" }
+        }
     }
 
     if (-not $NoPublish -and (Test-Path 'src/App/iPhoneMirror.App.csproj')) {
@@ -101,6 +115,7 @@ try {
             --configuration $Configuration `
             --runtime win-x64 `
             --self-contained true `
+            -p:NuGetAudit=false `
             --output outputs/iPhoneMirror
         if ($LASTEXITCODE -ne 0) { throw "WPF publish failed: $LASTEXITCODE" }
 
@@ -118,10 +133,8 @@ try {
         $requiredArtifacts = @(
             'iPhoneMirror.exe',
             'iPhoneMirror.Core.dll',
-            'README.md',
-            'README.en.md',
+            'libusb-1.0.dll',
             'LICENSE',
-            'CHANGELOG.md',
             'THIRD_PARTY_NOTICES.md',
             'Wireless\iPhoneMirror.WirelessHost.exe',
             'Wireless\airplay2dll.dll',
@@ -150,7 +163,14 @@ try {
 
     if (-not $NoPublish -and
         (Test-Path 'src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj')) {
-        $DriverPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Driver'
+        # The driver manager is shipped beside the main executable, where the
+        # application discovers it. Publishing a second identical 69 MB copy
+        # under outputs/iPhoneMirror.Driver only wastes disk space.
+        $LegacyDriverPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Driver'
+        if (Test-Path -LiteralPath $LegacyDriverPublishRoot) {
+            Remove-Item -LiteralPath $LegacyDriverPublishRoot -Recurse -Force
+        }
+        $DriverPublishRoot = Join-Path $Root 'work\publish\iPhoneMirror.Driver'
         if (Test-Path -LiteralPath $DriverPublishRoot) {
             Remove-Item -LiteralPath $DriverPublishRoot -Recurse -Force
         }
@@ -158,7 +178,8 @@ try {
             --configuration $Configuration `
             --runtime win-x64 `
             --self-contained true `
-            --output outputs/iPhoneMirror.Driver
+            -p:NuGetAudit=false `
+            --output $DriverPublishRoot
         if ($LASTEXITCODE -ne 0) { throw "Driver installer publish failed: $LASTEXITCODE" }
 
         $DriverPublishedFiles = @(Get-ChildItem -LiteralPath $DriverPublishRoot -File)
@@ -176,11 +197,35 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $MainPublishRoot 'iPhoneMirror.Driver.exe'))) {
             throw 'Driver manager was not copied into the main application output.'
         }
+        Remove-Item -LiteralPath $DriverPublishRoot -Recurse -Force
+
+        $allowedTopLevelFiles = @(
+            'iPhoneMirror.exe',
+            'iPhoneMirror.Core.dll',
+            'iPhoneMirror.Driver.exe',
+            'libusb-1.0.dll',
+            'LICENSE',
+            'THIRD_PARTY_NOTICES.md'
+        )
+        $unexpectedFiles = @(Get-ChildItem -LiteralPath $MainPublishRoot -File | Where-Object {
+            $_.Name -notin $allowedTopLevelFiles
+        })
+        $unexpectedDirectories = @(Get-ChildItem -LiteralPath $MainPublishRoot -Directory |
+            Where-Object { $_.Name -ne 'Wireless' })
+        if ($unexpectedFiles.Count -ne 0 -or $unexpectedDirectories.Count -ne 0) {
+            $unexpected = @($unexpectedFiles.Name) + @($unexpectedDirectories.Name)
+            throw "Unexpected files in compact application output: $($unexpected -join ', ')"
+        }
     }
 
-    Write-Host "Build complete: $Root\outputs\iPhoneMirror" -ForegroundColor Green
-    Write-Host "Driver tool: $Root\outputs\iPhoneMirror.Driver\iPhoneMirror.Driver.exe" `
-        -ForegroundColor Green
+    if ($NoPublish) {
+        Write-Host 'Build and tests complete (publishing skipped).' -ForegroundColor Green
+    }
+    else {
+        Write-Host "Build complete: $Root\outputs\iPhoneMirror" -ForegroundColor Green
+        Write-Host "Driver tool: $Root\outputs\iPhoneMirror\iPhoneMirror.Driver.exe" `
+            -ForegroundColor Green
+    }
 }
 finally {
     Pop-Location

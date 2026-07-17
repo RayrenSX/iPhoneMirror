@@ -5,6 +5,48 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.1.0-preview.1] - 2026-07-17
+
+### Added
+
+- Add video-app casting beside AirPlay screen mirroring. The receiver accepts
+  HTTP(S) and HLS playback URLs, routes play/stop commands through bounded
+  bidirectional IPC, and reports playback duration, position and rate back to
+  the sending device.
+- Add a lightweight DLNA/UPnP MediaRenderer with SSDP discovery, device and
+  service descriptions, AVTransport, ConnectionManager and RenderingControl
+  actions for video apps that use cast discovery instead of screen mirroring.
+- Add an integrated WPF `MediaElement` playback surface, bilingual status and
+  error messages, and an end-to-end media-cast UI smoke test.
+- Add bounded native-log tail reading and additional aspect-ratio, wireless
+  lifecycle and IPC regression coverage.
+
+### Changed
+
+- Refactor device-session, wireless-receiver and media-cast lifecycle ownership
+  into dedicated services, reducing duplicated stop/destroy paths in the main
+  view model.
+- Replace the legacy XAML detached preview window with the native preview
+  window path and keep aspect-ratio, rotation, corner and multi-device behavior
+  coordinated by native HWND ownership.
+- Use one combined AirPlay host and visible receiver identity while separating
+  screen-mirroring frames from video-app playback commands through bounded IPC
+  message types and independent application session state.
+- Publish the WPF application and driver manager as compressed self-contained
+  single-file executables while leaving required native and wireless runtimes
+  beside the application for deterministic loading and licensing.
+- Refresh the pinned AirPlay receiver build, source metadata, patches and
+  SHA-256 manifest for screen-mirroring-only capability handling.
+
+### Fixed
+
+- Harden wireless host startup, authenticated named-pipe client validation,
+  message bounds and shutdown cleanup so receiver processes cannot silently
+  attach to the wrong parent or remain after the application exits.
+- Accept fragmented DLNA HTTP headers and SOAP bodies by restoring blocking,
+  timeout-bounded I/O on each accepted client socket.
+- Improve Apple support installer process handling and release packaging checks.
+
 ## [1.0.3] - 2026-07-14
 
 ### Fixed
@@ -240,7 +282,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.1.0-preview.1...HEAD
+[1.1.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.3...v1.1.0-preview.1
 [1.0.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.1-preview.1...v1.0.3
 [1.0.1-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.0...v1.0.1-preview.1
 [1.0.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v0.6.0-preview.1...v1.0.0

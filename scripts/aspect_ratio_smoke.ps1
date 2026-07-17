@@ -18,6 +18,13 @@ using System.Runtime.InteropServices;
 public static class AspectRatioSmokeNative {
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MONITORINFO {
+        public uint Size;
+        public RECT Monitor;
+        public RECT WorkArea;
+        public uint Flags;
+    }
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr window, out RECT rectangle);
     [DllImport("user32.dll")]
@@ -26,6 +33,10 @@ public static class AspectRatioSmokeNative {
     public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
     [DllImport("user32.dll")]
     public static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+    [DllImport("user32.dll")]
+    public static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
 }
 '@
 
@@ -45,19 +56,21 @@ function Find-ById(
     throw "Automation element not found: $Id"
 }
 
-function Wait-PreviewWindow([int]$ProcessId, [int]$TimeoutSeconds = 12) {
+function Wait-PreviewWindow(
+    [int]$ProcessId,
+    [IntPtr]$MainWindowHandle,
+    [int]$TimeoutSeconds = 12) {
     $processCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ProcessId)
-    $nameCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        'iPhoneMirror OBS Preview')
-    $condition = [System.Windows.Automation.AndCondition]::new(
-        $processCondition, $nameCondition)
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-            [System.Windows.Automation.TreeScope]::Children, $condition)
-        if ($null -ne $window) { return $window }
+        $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Children, $processCondition)
+        foreach ($window in $windows) {
+            if ([IntPtr]$window.Current.NativeWindowHandle -ne $MainWindowHandle) {
+                return $window
+            }
+        }
         Start-Sleep -Milliseconds 150
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Preview window did not open'
@@ -87,7 +100,7 @@ try {
     $button.GetCurrentPattern(
         [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
-    $preview = Wait-PreviewWindow $process.Id
+    $preview = Wait-PreviewWindow $process.Id $process.MainWindowHandle
     $handle = [IntPtr]$preview.Current.NativeWindowHandle
     Start-Sleep -Seconds 1
 
@@ -132,12 +145,55 @@ try {
         throw "WM_SIZING aspect is not locked: $lockedAspect"
     }
 
+    # A ratio-only implementation can still let a horizontal drag grow until
+    # the proportional height is far beyond the screen. Verify that an absurd
+    # right-edge proposal is capped by both axes of the monitor work area.
+    $oversized = [AspectRatioSmokeNative+RECT]::new()
+    $oversized.Left = $outer.Left
+    $oversized.Top = $outer.Top
+    $oversized.Right = $outer.Left + 50000
+    $oversized.Bottom = $outer.Bottom
+    $memory = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
+    try {
+        [Runtime.InteropServices.Marshal]::StructureToPtr($oversized, $memory, $false)
+        [void][AspectRatioSmokeNative]::SendMessage($handle, 0x0214, [IntPtr]2, $memory)
+        $limited = [Runtime.InteropServices.Marshal]::PtrToStructure(
+            $memory, [type][AspectRatioSmokeNative+RECT])
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::FreeHGlobal($memory)
+    }
+
+    $monitor = [AspectRatioSmokeNative]::MonitorFromWindow($handle, 2)
+    $monitorInfo = [AspectRatioSmokeNative+MONITORINFO]::new()
+    $monitorInfo.Size = [Runtime.InteropServices.Marshal]::SizeOf(
+        [type][AspectRatioSmokeNative+MONITORINFO])
+    if ($monitor -eq [IntPtr]::Zero -or
+        ![AspectRatioSmokeNative]::GetMonitorInfo($monitor, [ref]$monitorInfo)) {
+        throw 'Could not read preview monitor work area'
+    }
+    $frameWidth = ($outer.Right - $outer.Left) - $clientWidth
+    $frameHeight = ($outer.Bottom - $outer.Top) - $clientHeight
+    $limitedClientWidth = $limited.Right - $limited.Left - $frameWidth
+    $limitedClientHeight = $limited.Bottom - $limited.Top - $frameHeight
+    $workWidth = $monitorInfo.WorkArea.Right - $monitorInfo.WorkArea.Left
+    $workHeight = $monitorInfo.WorkArea.Bottom - $monitorInfo.WorkArea.Top
+    $limitedAspect = $limitedClientWidth / [double]$limitedClientHeight
+    if ($limitedClientWidth -gt $workWidth -or $limitedClientHeight -gt $workHeight) {
+        throw "Horizontal WM_SIZING exceeded work area: ${limitedClientWidth}x${limitedClientHeight}"
+    }
+    if ([Math]::Abs($limitedAspect - $expected) -gt 0.003) {
+        throw "Limited horizontal WM_SIZING lost aspect ratio: $limitedAspect"
+    }
+
     [pscustomobject]@{
         InitialClient = "${clientWidth}x${clientHeight}"
         InitialAspect = [Math]::Round($initialAspect, 6)
         SquareProposal = '700x700'
         LockedRectangle = "${lockedWidth}x${lockedHeight}"
         LockedAspect = [Math]::Round($lockedAspect, 6)
+        LimitedHorizontalClient = "${limitedClientWidth}x${limitedClientHeight}"
+        LimitedHorizontalAspect = [Math]::Round($limitedAspect, 6)
         NoRedirectionBitmap = $noRedirectionBitmap
     }
 

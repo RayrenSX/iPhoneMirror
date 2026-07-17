@@ -8,8 +8,9 @@ set_target_properties(iPhoneMirror.DnsSdShim PROPERTIES
     PREFIX ""
     OUTPUT_NAME "dnssd")
 
-add_executable(iPhoneMirror.WirelessHost WirelessHost.cpp)
+add_executable(iPhoneMirror.WirelessHost WirelessHost.cpp DlnaRenderer.cpp)
 add_dependencies(iPhoneMirror.WirelessHost iPhoneMirror.DnsSdShim)
+target_link_libraries(iPhoneMirror.WirelessHost PRIVATE bcrypt ws2_32)
 
 target_compile_definitions(iPhoneMirror.WirelessHost PRIVATE
     UNICODE
@@ -64,6 +65,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_compile_options(iPhoneMirror.WirelessHost.Smoke PRIVATE
         /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.WirelessHost.Smoke PRIVATE ws2_32)
     add_dependencies(iPhoneMirror.WirelessHost.Smoke
         iPhoneMirror.WirelessHost iPhoneMirror.WirelessHost.Stub)
     add_test(NAME WirelessHostSmoke COMMAND iPhoneMirror.WirelessHost.Smoke
