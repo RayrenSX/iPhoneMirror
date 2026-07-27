@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -31,7 +32,9 @@ struct WirelessDeviceSnapshot {
     std::wstring os_version;
 };
 
-enum class MediaCastCommandType : std::uint32_t { None, Play, Stop };
+enum class MediaCastCommandType : std::uint32_t {
+    None, Play, Stop, Pause, Resume, Seek,
+};
 
 struct MediaCastCommand {
     std::uint64_t id{};
@@ -45,6 +48,20 @@ namespace detail {
 [[nodiscard]] bool convert_i420_to_nv12(const wireless::MessageHeader& header,
     std::span<const std::uint8_t> payload, std::vector<std::uint8_t>& destination,
     std::int32_t& destination_stride) noexcept;
+
+class MediaCommandQueue final {
+public:
+    void reset() noexcept;
+    [[nodiscard]] bool push(MediaCastCommand command);
+    [[nodiscard]] MediaCastCommand pop();
+    [[nodiscard]] std::uint64_t latest_id() const noexcept;
+    [[nodiscard]] std::size_t size() const noexcept;
+
+private:
+    static constexpr std::size_t MaxPendingCommands = 64;
+    std::deque<MediaCastCommand> commands_;
+    std::uint64_t latest_id_{};
+};
 }
 
 class WirelessClientStream final {
@@ -116,33 +133,51 @@ public:
     [[nodiscard]] std::vector<WirelessDeviceSnapshot> devices() const;
     [[nodiscard]] std::shared_ptr<WirelessClientStream> attach(
         std::wstring_view device_id, CapturePreferences preferences);
-    [[nodiscard]] MediaCastCommand media_command() const;
+    [[nodiscard]] MediaCastCommand take_media_command();
     bool update_media_playback(std::uint64_t command_id, double duration,
         double position, double rate) noexcept;
+    bool request_media_stop() noexcept;
 
 private:
     mutable std::mutex lifecycle_mutex_;
     mutable std::mutex mutex_;
     mutable std::mutex pipe_write_mutex_;
+    mutable std::mutex playback_mutex_;
+    std::condition_variable_any playback_condition_;
     std::map<std::wstring, std::shared_ptr<WirelessClientStream>, std::less<>> clients_;
     std::wstring receiver_name_;
     std::wstring host_path_;
     std::wstring pipe_name_;
     std::wstring stop_event_name_;
     std::jthread worker_;
+    std::jthread playback_worker_;
     void* pipe_{};
     void* stop_event_{};
     void* process_{};
     std::atomic_bool stopping_{};
     std::atomic_bool ready_{};
-    MediaCastCommand media_command_;
+    std::atomic_bool pipe_disconnected_{};
+    detail::MediaCommandQueue media_commands_;
+    struct PlaybackUpdate {
+        std::uint64_t command_id{};
+        double duration{};
+        double position{};
+        double rate{};
+        bool pending{};
+        bool stop_requested{};
+        std::uint64_t stop_command_id{};
+        std::uint64_t stopped_command_id{};
+    } playback_update_;
 
     void stop_locked() noexcept;
     void run(std::stop_token stop_token) noexcept;
+    void run_playback_writer(std::stop_token stop_token) noexcept;
     void handle_message(const wireless::MessageHeader& header,
         const std::vector<std::uint8_t>& payload);
     [[nodiscard]] std::shared_ptr<WirelessClientStream> get_or_create(
         const wireless::MessageHeader& header, bool mark_connected);
+    [[nodiscard]] std::shared_ptr<WirelessClientStream> find_connected(
+        const wireless::MessageHeader& header) const;
     void mark_all_disconnected() noexcept;
 };
 

@@ -1,5 +1,7 @@
 #include <Windows.h>
 
+#include <limits>
+
 struct SFgAudioFrame {
     unsigned long long pts;
     unsigned int sampleRate;
@@ -74,6 +76,10 @@ extern "C" void* __cdecl stub_start(const char*, unsigned int, unsigned int,
     callback->disconnected("Second iPhone", "66:77:88:99:AA:BB");
     char media_url[] = "https://example.test/video.m3u8";
     callback->videoPlay(media_url, 0.75, 12.5);
+    char invalid_media_values_url[] = "https://example.test/invalid-values.mp4";
+    callback->videoPlay(invalid_media_values_url,
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity());
     return reinterpret_cast<void*>(1);
 }
 

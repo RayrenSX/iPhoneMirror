@@ -9,6 +9,7 @@ namespace IPhoneMirror.App.Models;
 internal sealed class DeviceViewModel : INotifyPropertyChanged
 {
     internal const string WirelessUdidPrefix = "airplay://";
+    internal const string MediaCastUdid = "media-cast://active";
 
     private string _name;
     private string _productType;
@@ -37,20 +38,30 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
     public string Status => _status;
     public ConnectionState State => _state;
     public bool IsWireless => IsWirelessUdid(Udid);
+    public bool IsMediaCast => IsMediaCastUdid(Udid);
+    public string AutomationId => IsMediaCast ? "MediaCastDeviceCard" : "DeviceCard";
 
-    public string DisplayName => string.IsNullOrWhiteSpace(Name) ? "iPhone" : Name;
-    public string ModelDisplay => string.IsNullOrWhiteSpace(ProductType)
+    public string DisplayName => IsMediaCast
+        ? LocalizationService.Get("MediaCastDeviceName")
+        : string.IsNullOrWhiteSpace(Name) ? "iPhone" : Name;
+    public string ModelDisplay => IsMediaCast
+        ? LocalizationService.Get("MediaCastDeviceModel")
+        : string.IsNullOrWhiteSpace(ProductType)
         ? IsWireless ? "AirPlay" : LocalizationService.Get("ModelLoading")
         : AppleProductNames.Resolve(ProductType);
-    public string OsDisplay => string.IsNullOrWhiteSpace(OsVersion)
+    public string OsDisplay => IsMediaCast
+        ? LocalizationService.Get("MediaCastDeviceConnection")
+        : string.IsNullOrWhiteSpace(OsVersion)
         ? IsWireless ? LocalizationService.Get("WirelessLocalNetwork") : "iOS -"
         : IsWireless
             ? $"iOS {OsVersion} · {LocalizationService.Get("WirelessLocalNetwork")}"
             : $"iOS {OsVersion}";
-    public string ShortUdid => IsWireless ? "AirPlay" :
+    public string ShortUdid => IsMediaCast ? "AirPlay / DLNA" : IsWireless ? "AirPlay" :
         Udid.Length <= 18 ? Udid : $"{Udid[..8]}...{Udid[^6..]}";
     public bool Ready => State is ConnectionState.Ready;
-    public string StatusDisplay => IsWireless ? LocalizationService.Get("WirelessConnected") : LocalizationService.Get(State switch
+    public string StatusDisplay => IsMediaCast
+        ? LocalizationService.Get("MediaCastDeviceActive")
+        : IsWireless ? LocalizationService.Get("WirelessConnected") : LocalizationService.Get(State switch
         {
             ConnectionState.Disconnected => "ConnectionDisconnected",
             ConnectionState.UsbPresentNoMux => "ConnectionUsbNoMux",
@@ -78,6 +89,7 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
 
     internal void NotifyLanguageChanged()
     {
+        OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(ModelDisplay));
         OnPropertyChanged(nameof(OsDisplay));
         OnPropertyChanged(nameof(StatusDisplay));
@@ -101,6 +113,18 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
 
     internal static bool IsWirelessUdid(string? udid) => udid?.StartsWith(
         WirelessUdidPrefix, StringComparison.OrdinalIgnoreCase) == true;
+
+    internal static bool IsMediaCastUdid(string? udid) => string.Equals(
+        udid, MediaCastUdid, StringComparison.OrdinalIgnoreCase);
+
+    internal static DeviceViewModel CreateMediaCast() => new(
+        MediaCastUdid,
+        LocalizationService.Get("MediaCastDeviceName"),
+        string.Empty,
+        string.Empty,
+        "AirPlay / DLNA",
+        string.Empty,
+        ConnectionState.Ready);
 
     public static DeviceViewModel FromNative(NativeDeviceInfo info) => new(
         info.Udid ?? string.Empty,

@@ -104,19 +104,33 @@ try {
     # Start on the most recently appended device, then select the first phone.
     $source = $items[$items.Count - 1]
     $target = $items[0]
-    $sourceUdid = $source.Current.AutomationId
-    $targetUdid = $target.Current.AutomationId
+    $selectedUdidText = Find-ById $window 'SelectedDeviceUdidText'
     $idleActionName = $action.Current.Name
     Select-Item $source
     Start-Sleep -Milliseconds 500
+    $sourceUdid = $selectedUdidText.Current.Name
     Invoke-WhenEnabled $action
     $activeLabel = Wait-ActionState $action $idleActionName $true
+    Start-Sleep -Seconds ([Math]::Max(4, [Math]::Floor($StreamingSeconds / 2)))
+
+    # Selection is independent of session ownership: the first stream must
+    # remain alive while the second device starts its own native session.
+    Select-Item $target
+    $targetIdleLabel = Wait-ActionState $action $idleActionName $false 30
+    Start-Sleep -Milliseconds 500
+    $targetUdid = $selectedUdidText.Current.Name
+    Invoke-WhenEnabled $action
+    $targetActiveLabel = Wait-ActionState $action $idleActionName $true
     Start-Sleep -Seconds $StreamingSeconds
 
-    # This click must synchronously complete native StopCapture/HPA0/HPD0
-    # before the target device controls become available.
-    Select-Item $target
-    $idleLabel = Wait-ActionState $action $idleActionName $false 30
+    # Stop the selected target, then return to the source. Its button must
+    # still represent an active session until it is explicitly stopped.
+    Invoke-WhenEnabled $action
+    $targetStoppedLabel = Wait-ActionState $action $idleActionName $false 45
+    Select-Item $source
+    $sourceStillActiveLabel = Wait-ActionState $action $idleActionName $true 15
+    Invoke-WhenEnabled $action
+    $sourceStoppedLabel = Wait-ActionState $action $idleActionName $false 45
     Start-Sleep -Seconds 2
 
     $newLog = if (Test-Path -LiteralPath $Log) {
@@ -129,16 +143,36 @@ try {
         }
         finally { $stream.Dispose() }
     } else { '' }
-    if ($newLog -notmatch 'shutdown_usb handshake_started=.* stop_messages=') {
-        throw 'The device switch did not log the mandatory QuickTime shutdown sequence.'
+    $createdHandles = @([regex]::Matches($newLog,
+        'multi_session create handle=(\d+)') | ForEach-Object {
+            $_.Groups[1].Value
+        } | Select-Object -Unique)
+    if ($createdHandles.Count -lt 2) {
+        throw "Concurrent capture did not create two distinct sessions: $($createdHandles -join ',')."
+    }
+    $streamingStates = [regex]::Matches($newLog,
+        'capture_state .*?handle=h\d+ state=Streaming').Count
+    if ($streamingStates -lt 2) {
+        throw "Both devices did not independently reach Streaming; observed $streamingStates state transitions."
+    }
+    $shutdowns = [regex]::Matches($newLog,
+        'shutdown_usb handshake_started=.*?stop_messages=').Count
+    if ($shutdowns -lt 2) {
+        throw "Expected two QuickTime shutdown handshakes; observed $shutdowns."
     }
 
     [pscustomobject]@{
         SourceUdid = $sourceUdid
         TargetUdid = $targetUdid
-        ActiveButton = $activeLabel
-        IdleButton = $idleLabel
-        QuickTimeShutdownLogged = $true
+        SourceActiveButton = $activeLabel
+        TargetIdleButton = $targetIdleLabel
+        TargetActiveButton = $targetActiveLabel
+        TargetStoppedButton = $targetStoppedLabel
+        SourceStillActiveButton = $sourceStillActiveLabel
+        SourceStoppedButton = $sourceStoppedLabel
+        SessionHandles = $createdHandles -join ','
+        StreamingTransitions = $streamingStates
+        QuickTimeShutdowns = $shutdowns
     }
 }
 finally {

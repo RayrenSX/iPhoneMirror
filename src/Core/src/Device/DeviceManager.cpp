@@ -6,6 +6,7 @@
 #include "Transport/QtUsbTransport.h"
 #include "Transport/LibUsb0Transport.h"
 #include "Transport/UsbMuxClient.h"
+#include "Logging.h"
 
 #include <Windows.h>
 
@@ -57,8 +58,7 @@ plist::Value lockdown_exchange(transport::Socket& socket, const plist::Value& re
     return plist::parse_xml(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
 }
 
-void enrich_from_lockdown(transport::UsbMuxClient& mux, DeviceRecord& record) {
-    auto socket = mux.connect_device(record.device_id, 62078);
+void enrich_from_lockdown(transport::Socket& socket, DeviceRecord& record) {
     const auto response = lockdown_exchange(socket, plist::Value::Dict({
         {"Label", plist::Value::String("iPhoneMirror")},
         {"Request", plist::Value::String("GetValue")},
@@ -80,7 +80,20 @@ void enrich_from_lockdown(transport::UsbMuxClient& mux, DeviceRecord& record) {
 void add_devices_from_port(std::uint16_t port, std::map<std::string, DeviceRecord, std::less<>>& devices) {
     transport::UsbMuxClient mux(port);
     for (const auto& mux_device : mux.list_devices()) {
-        auto& record = devices[mux_device.serial];
+        if (!mux_device.connection_type.empty() &&
+            _stricmp(mux_device.connection_type.c_str(), "USB") != 0)
+            continue;
+        // ListDevices can briefly retain a device after unplug/re-enumeration.
+        // Require a fresh tunnel before exposing it to the UI; a stale usbmux
+        // row cannot complete this Connect request.
+        transport::Socket lockdown;
+        try {
+            lockdown = mux.connect_device(mux_device.device_id, 62078);
+        } catch (...) {
+            continue;
+        }
+
+        DeviceRecord record;
         record.device_id = mux_device.device_id;
         record.mux_port = port;
         record.usb_connected = true;
@@ -103,7 +116,7 @@ void add_devices_from_port(std::uint16_t port, std::map<std::string, DeviceRecor
         }
 
         try {
-            enrich_from_lockdown(mux, record);
+            enrich_from_lockdown(lockdown, record);
             if (record.lockdown_accessible) {
                 record.state = ConnectionState::Ready;
                 record.status = record.pair_record_present ? L"已连接并已配对" : L"已连接；设备信息可读，配对记录未确认";
@@ -111,6 +124,7 @@ void add_devices_from_port(std::uint16_t port, std::map<std::string, DeviceRecor
         } catch (const std::exception&) {
             if (record.pair_record_present) record.status = L"已配对；请解锁 iPhone 后重试";
         }
+        devices.insert_or_assign(mux_device.serial, std::move(record));
     }
 }
 

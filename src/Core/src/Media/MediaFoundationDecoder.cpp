@@ -1,22 +1,27 @@
 #include "Media/MediaFoundationDecoder.h"
 
-#include "Media/H264.h"
 #include "../Logging.h"
 
 #include <Windows.h>
+#include <codecapi.h>
 #include <d3d11.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
 #include <mftransform.h>
 #include <wmcodecdsp.h>
-#include <codecapi.h>
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <format>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
+#include <string>
+#include <thread>
+#include <utility>
 
 using Microsoft::WRL::ComPtr;
 
@@ -24,7 +29,10 @@ namespace iPhoneMirror::media {
 namespace {
 
 void check(HRESULT result, const char* operation) {
-    if (FAILED(result)) throw std::runtime_error(std::format("{} failed: 0x{:08X}", operation, static_cast<unsigned>(result)));
+    if (FAILED(result)) {
+        throw std::runtime_error(std::format("{} failed: 0x{:08X}", operation,
+            static_cast<unsigned>(result)));
+    }
 }
 
 void ensure_media_foundation() {
@@ -34,291 +42,1014 @@ void ensure_media_foundation() {
     check(startup_result, "MFStartup");
 }
 
-std::vector<std::uint8_t> parameter_sets_annex_b(const coremedia::FormatDescription& format) {
+bool environment_enabled(const char* name) noexcept {
+    char value[8]{};
+    const auto length = GetEnvironmentVariableA(name, value, static_cast<DWORD>(std::size(value)));
+    return length > 0 && (value[0] == '1' || value[0] == 'y' || value[0] == 'Y');
+}
+
+std::string narrow_ascii(std::wstring_view value) {
+    std::string result;
+    result.reserve(value.size());
+    for (const auto ch : value) result.push_back(ch <= 0x7f ? static_cast<char>(ch) : '?');
+    return result;
+}
+
+std::vector<std::uint8_t> parameter_sets_annex_b(
+    const coremedia::FormatDescription& format) {
     std::vector<std::uint8_t> result;
     const auto add = [&result](const std::vector<std::uint8_t>& nalu) {
         result.insert(result.end(), {0, 0, 0, 1});
         result.insert(result.end(), nalu.begin(), nalu.end());
     };
+    for (const auto& vps : format.video_parameter_sets) add(vps);
     for (const auto& sps : format.sequence_parameter_sets) add(sps);
     for (const auto& pps : format.picture_parameter_sets) add(pps);
     return result;
 }
 
+std::vector<std::uint8_t> length_prefixed_to_annex_b(
+    std::span<const std::uint8_t> sample, std::uint8_t length_size) {
+    if (length_size < 1 || length_size > 4) {
+        throw std::runtime_error("invalid video NAL length size");
+    }
+    std::vector<std::uint8_t> result;
+    result.reserve(sample.size() + 16);
+    std::size_t offset{};
+    while (offset < sample.size()) {
+        if (sample.size() - offset < length_size) {
+            throw std::runtime_error("truncated length-prefixed video NAL header");
+        }
+        std::uint32_t length{};
+        for (std::uint8_t index{}; index < length_size; ++index) {
+            length = (length << 8U) | sample[offset + index];
+        }
+        offset += length_size;
+        if (length == 0 || length > sample.size() - offset) {
+            throw std::runtime_error("invalid length-prefixed video NAL size");
+        }
+        result.insert(result.end(), {0, 0, 0, 1});
+        result.insert(result.end(), sample.begin() + static_cast<std::ptrdiff_t>(offset),
+            sample.begin() + static_cast<std::ptrdiff_t>(offset + length));
+        offset += length;
+    }
+    return result;
+}
+
+GUID input_subtype(coremedia::VideoCodec codec) {
+    if (codec == coremedia::VideoCodec::H264) return MFVideoFormat_H264;
+    if (codec == coremedia::VideoCodec::Hevc) return MFVideoFormat_HEVC;
+    throw std::invalid_argument("unsupported compressed video codec");
+}
+
+coremedia::ColorPrimaries map_primaries(UINT32 value) noexcept {
+    switch (value) {
+    case MFVideoPrimaries_BT709: return coremedia::ColorPrimaries::Bt709;
+    case MFVideoPrimaries_BT2020: return coremedia::ColorPrimaries::Bt2020;
+    case MFVideoPrimaries_Display_P3: return coremedia::ColorPrimaries::DisplayP3;
+    default: return coremedia::ColorPrimaries::Unspecified;
+    }
+}
+
+coremedia::TransferFunction map_transfer(UINT32 value) noexcept {
+    switch (value) {
+    case MFVideoTransFunc_709: return coremedia::TransferFunction::Bt709;
+    case MFVideoTransFunc_sRGB: return coremedia::TransferFunction::Srgb;
+    case MFVideoTransFunc_2084: return coremedia::TransferFunction::Pq;
+    case MFVideoTransFunc_HLG: return coremedia::TransferFunction::Hlg;
+    default: return coremedia::TransferFunction::Unspecified;
+    }
+}
+
+coremedia::MatrixCoefficients map_matrix(UINT32 value) noexcept {
+    switch (value) {
+    case MFVideoTransferMatrix_BT601: return coremedia::MatrixCoefficients::Bt601;
+    case MFVideoTransferMatrix_BT709: return coremedia::MatrixCoefficients::Bt709;
+    case MFVideoTransferMatrix_BT2020_10:
+    case MFVideoTransferMatrix_BT2020_12:
+        return coremedia::MatrixCoefficients::Bt2020;
+    default: return coremedia::MatrixCoefficients::Unspecified;
+    }
+}
+
+coremedia::ColorRange map_range(UINT32 value) noexcept {
+    switch (value) {
+    case MFNominalRange_0_255: return coremedia::ColorRange::Full;
+    case MFNominalRange_16_235: return coremedia::ColorRange::Limited;
+    default: return coremedia::ColorRange::Unspecified;
+    }
+}
+
+coremedia::VideoColorDescription color_description(IMFAttributes* attributes,
+    const coremedia::FormatDescription& format,
+    const coremedia::VideoColorDescription* base = nullptr) noexcept {
+    auto color = base ? *base : format.color;
+    UINT32 value{};
+    if (attributes && SUCCEEDED(attributes->GetUINT32(MF_MT_VIDEO_PRIMARIES, &value))) {
+        const auto mapped = map_primaries(value);
+        if (mapped != coremedia::ColorPrimaries::Unspecified) color.primaries = mapped;
+    }
+    if (attributes && SUCCEEDED(attributes->GetUINT32(MF_MT_TRANSFER_FUNCTION, &value))) {
+        const auto mapped = map_transfer(value);
+        if (mapped != coremedia::TransferFunction::Unspecified) color.transfer = mapped;
+    }
+    if (attributes && SUCCEEDED(attributes->GetUINT32(MF_MT_YUV_MATRIX, &value))) {
+        const auto mapped = map_matrix(value);
+        if (mapped != coremedia::MatrixCoefficients::Unspecified) color.matrix = mapped;
+    }
+    if (attributes && SUCCEEDED(attributes->GetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, &value))) {
+        const auto mapped = map_range(value);
+        if (mapped != coremedia::ColorRange::Unspecified) color.range = mapped;
+    }
+#if (WINVER >= _WIN32_WINNT_WIN10)
+    if (attributes && SUCCEEDED(attributes->GetUINT32(MF_MT_MAX_LUMINANCE_LEVEL, &value)))
+        color.hdr.max_content_light_level = value;
+    if (attributes && SUCCEEDED(attributes->GetUINT32(MF_MT_MAX_FRAME_AVERAGE_LUMINANCE_LEVEL, &value)))
+        color.hdr.max_frame_average_light_level = value;
+    if (attributes && SUCCEEDED(attributes->GetUINT32(MF_MT_MAX_MASTERING_LUMINANCE, &value)))
+        color.hdr.max_mastering_luminance = value;
+    if (attributes && SUCCEEDED(attributes->GetUINT32(MF_MT_MIN_MASTERING_LUMINANCE, &value)))
+        color.hdr.min_mastering_luminance = value;
+#endif
+    if (color.primaries == coremedia::ColorPrimaries::Unspecified)
+        color.primaries = coremedia::ColorPrimaries::Bt709;
+    if (color.transfer == coremedia::TransferFunction::Unspecified)
+        color.transfer = coremedia::TransferFunction::Bt709;
+    if (color.matrix == coremedia::MatrixCoefficients::Unspecified) {
+        color.matrix = format.height >= 720
+            ? coremedia::MatrixCoefficients::Bt709
+            : coremedia::MatrixCoefficients::Bt601;
+    }
+    if (color.range == coremedia::ColorRange::Unspecified)
+        color.range = coremedia::ColorRange::Limited;
+    return color;
+}
+
+struct DecoderCandidate {
+    ComPtr<IMFActivate> activation;
+    CLSID clsid{};
+    bool use_clsid{};
+    bool hardware{};
+    std::string name;
+};
+
+std::vector<DecoderCandidate> enumerate_pass(const GUID& subtype, UINT32 flags) {
+    MFT_REGISTER_TYPE_INFO input{MFMediaType_Video, subtype};
+    IMFActivate** raw{};
+    UINT32 count{};
+    const auto result = MFTEnumEx(MFT_CATEGORY_VIDEO_DECODER, flags, &input, nullptr, &raw, &count);
+    if (FAILED(result)) {
+        logging::write(std::format("mf_decoder enumerate flags=0x{:X} hr=0x{:08X}",
+            flags, static_cast<unsigned>(result)));
+        return {};
+    }
+    std::vector<DecoderCandidate> candidates;
+    candidates.reserve(count);
+    for (UINT32 index{}; index < count; ++index) {
+        ComPtr<IMFActivate> activation;
+        activation.Attach(raw[index]);
+        wchar_t* friendly{};
+        UINT32 friendly_length{};
+        std::string name = "MediaFoundationMFT";
+        if (SUCCEEDED(activation->GetAllocatedString(MFT_FRIENDLY_NAME_Attribute,
+                &friendly, &friendly_length)) && friendly) {
+            name = narrow_ascii(std::wstring_view(friendly, friendly_length));
+            CoTaskMemFree(friendly);
+        }
+        wchar_t* hardware_url{};
+        UINT32 hardware_url_length{};
+        const bool hardware = SUCCEEDED(activation->GetAllocatedString(
+            MFT_ENUM_HARDWARE_URL_Attribute, &hardware_url, &hardware_url_length));
+        if (hardware_url) CoTaskMemFree(hardware_url);
+        candidates.push_back({
+            .activation = std::move(activation),
+            .hardware = hardware,
+            .name = std::move(name),
+        });
+    }
+    CoTaskMemFree(raw);
+    return candidates;
+}
+
+void append_candidates(std::vector<DecoderCandidate>& destination,
+    std::vector<DecoderCandidate> source) {
+    for (auto& candidate : source) destination.push_back(std::move(candidate));
+}
+
+std::vector<DecoderCandidate> software_candidates(const GUID& subtype,
+    UINT32 flags) {
+    auto candidates = enumerate_pass(subtype, flags);
+    std::erase_if(candidates, [](const DecoderCandidate& candidate) {
+        return candidate.hardware;
+    });
+    return candidates;
+}
+
+void append_builtin_candidates(std::vector<DecoderCandidate>& candidates,
+    coremedia::VideoCodec codec) {
+    const auto add = [&candidates](const CLSID& clsid, std::string name) {
+        candidates.push_back({.clsid = clsid, .use_clsid = true, .name = std::move(name)});
+    };
+    if (codec == coremedia::VideoCodec::H264) {
+        add(CLSID_MSH264DecoderMFT, "MSH264DecoderMFT");
+        add(CLSID_CMSH264DecoderMFT, "CMSH264DecoderMFT");
+    } else if (codec == coremedia::VideoCodec::Hevc) {
+        add(CLSID_MSH265DecoderMFT, "MSH265DecoderMFT");
+    }
+}
+
+std::vector<DecoderCandidate> decoder_candidates(coremedia::VideoCodec codec,
+    DecoderPreference preference) {
+    const auto subtype = input_subtype(codec);
+    std::vector<DecoderCandidate> candidates;
+    constexpr auto Sorted = static_cast<UINT32>(MFT_ENUM_FLAG_SORTANDFILTER);
+    constexpr auto Software = static_cast<UINT32>(MFT_ENUM_FLAG_SYNCMFT) |
+        static_cast<UINT32>(MFT_ENUM_FLAG_ASYNCMFT) |
+        static_cast<UINT32>(MFT_ENUM_FLAG_LOCALMFT) | Sorted;
+    if (preference == DecoderPreference::Auto) {
+        append_candidates(candidates, enumerate_pass(subtype,
+            static_cast<UINT32>(MFT_ENUM_FLAG_ALL) | Sorted));
+    } else if (preference == DecoderPreference::HardwarePreferred) {
+        append_candidates(candidates, enumerate_pass(subtype,
+            static_cast<UINT32>(MFT_ENUM_FLAG_HARDWARE) | Sorted));
+        append_candidates(candidates, software_candidates(subtype, Software));
+    } else {
+        append_candidates(candidates, software_candidates(subtype, Software));
+    }
+    append_builtin_candidates(candidates, codec);
+    return candidates;
+}
+
 } // namespace
 
-MediaFoundationH264Decoder::MediaFoundationH264Decoder() {
-    ensure_media_foundation();
-    const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(com_result) && com_result != RPC_E_CHANGED_MODE) check(com_result, "CoInitializeEx");
-    auto decoder_result = CoCreateInstance(CLSID_MSH264DecoderMFT, nullptr,
-        CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform_));
-    const char* decoder_name = "MSH264DecoderMFT";
-    if (FAILED(decoder_result)) {
-        decoder_result = CoCreateInstance(CLSID_CMSH264DecoderMFT, nullptr,
-            CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform_));
-        decoder_name = "CMSH264DecoderMFT";
+std::string_view decoder_preference_name(DecoderPreference value) noexcept {
+    switch (value) {
+    case DecoderPreference::Auto: return "auto";
+    case DecoderPreference::HardwarePreferred: return "hardware_preferred";
+    case DecoderPreference::SoftwareCompatible: return "software_compatible";
     }
-    check(decoder_result, "create Microsoft H264 decoder");
-    logging::write(std::format("mf_decoder selected={}", decoder_name));
-    ComPtr<IMFAttributes> attributes;
-    bool d3d11_aware = false;
-    HRESULT low_latency_attribute_result = E_NOINTERFACE;
-    if (SUCCEEDED(transform_->GetAttributes(&attributes))) {
-        low_latency_attribute_result = attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
-        UINT32 aware{};
-        d3d11_aware = SUCCEEDED(attributes->GetUINT32(MF_SA_D3D11_AWARE, &aware)) && aware != 0;
+    return "unknown";
+}
+
+std::string_view pixel_format_name(PixelFormat value) noexcept {
+    return value == PixelFormat::P010 ? "p010" : "nv12";
+}
+
+std::string_view codec_name(coremedia::VideoCodec value) noexcept {
+    switch (value) {
+    case coremedia::VideoCodec::H264: return "h264";
+    case coremedia::VideoCodec::Hevc: return "hevc";
+    default: return "unknown";
     }
-    ComPtr<ICodecAPI> codec_api;
-    if (SUCCEEDED(transform_->QueryInterface(IID_PPV_ARGS(&codec_api)))) {
-        VARIANT value;
-        VariantInit(&value);
-        value.vt = VT_UI4;
-        value.ulVal = TRUE;
-        const auto codec_low_latency_result = codec_api->SetValue(&CODECAPI_AVLowLatencyMode, &value);
-        logging::write(std::format(
-            "mf_decoder low_latency_attribute_hr=0x{:08X} codec_hr=0x{:08X}",
-            static_cast<unsigned>(low_latency_attribute_result),
-            static_cast<unsigned>(codec_low_latency_result)));
-        VariantClear(&value);
+}
+
+std::string_view color_primaries_name(coremedia::ColorPrimaries value) noexcept {
+    switch (value) {
+    case coremedia::ColorPrimaries::Bt709: return "bt709";
+    case coremedia::ColorPrimaries::Bt2020: return "bt2020";
+    case coremedia::ColorPrimaries::DisplayP3: return "display_p3";
+    default: return "unspecified";
+    }
+}
+
+std::string_view transfer_function_name(coremedia::TransferFunction value) noexcept {
+    switch (value) {
+    case coremedia::TransferFunction::Bt709: return "bt709";
+    case coremedia::TransferFunction::Srgb: return "srgb";
+    case coremedia::TransferFunction::Pq: return "pq";
+    case coremedia::TransferFunction::Hlg: return "hlg";
+    default: return "unspecified";
+    }
+}
+
+std::string_view matrix_coefficients_name(coremedia::MatrixCoefficients value) noexcept {
+    switch (value) {
+    case coremedia::MatrixCoefficients::Bt601: return "bt601";
+    case coremedia::MatrixCoefficients::Bt709: return "bt709";
+    case coremedia::MatrixCoefficients::Bt2020: return "bt2020";
+    default: return "unspecified";
+    }
+}
+
+std::string_view color_range_name(coremedia::ColorRange value) noexcept {
+    switch (value) {
+    case coremedia::ColorRange::Limited: return "limited";
+    case coremedia::ColorRange::Full: return "full";
+    default: return "unspecified";
+    }
+}
+
+namespace detail {
+
+std::optional<std::uint32_t> checked_video_buffer_size(
+    std::uint32_t width, std::uint32_t height, PixelFormat format) noexcept {
+    if (width == 0 || height == 0 || width > MaxDecodedVideoDimension ||
+        height > MaxDecodedVideoDimension) return std::nullopt;
+    const auto component_bytes = format == PixelFormat::P010 ? 2ULL : 1ULL;
+    const auto stride = ((static_cast<std::uint64_t>(width) + 1U) & ~1ULL) * component_bytes;
+    const auto y_bytes = stride * height;
+    const auto uv_bytes = stride * ((static_cast<std::uint64_t>(height) + 1U) / 2U);
+    const auto total = y_bytes + uv_bytes;
+    if (total > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+    return static_cast<std::uint32_t>(total);
+}
+
+std::optional<std::uint32_t> checked_nv12_buffer_size(
+    std::uint32_t width, std::uint32_t height) noexcept {
+    return checked_video_buffer_size(width, height, PixelFormat::Nv12);
+}
+
+bool is_random_access_sample(const coremedia::FormatDescription& format,
+    std::span<const std::uint8_t> sample) noexcept {
+    if (format.nalu_length_size < 1 || format.nalu_length_size > 4) return false;
+    std::size_t offset{};
+    while (offset < sample.size()) {
+        if (sample.size() - offset < format.nalu_length_size) return false;
+        std::uint32_t length{};
+        for (std::uint8_t index{}; index < format.nalu_length_size; ++index)
+            length = (length << 8U) | sample[offset + index];
+        offset += format.nalu_length_size;
+        if (length == 0 || length > sample.size() - offset) return false;
+        if (format.video_codec() == coremedia::VideoCodec::H264) {
+            if ((sample[offset] & 0x1fU) == 5U) return true;
+        } else if (format.video_codec() == coremedia::VideoCodec::Hevc) {
+            const auto type = static_cast<std::uint8_t>((sample[offset] >> 1U) & 0x3fU);
+            if (type >= 16U && type <= 21U) return true;
+        }
+        offset += length;
+    }
+    return false;
+}
+
+YuvConversionParameters yuv_conversion_parameters(PixelFormat format,
+    coremedia::ColorRange range, coremedia::MatrixCoefficients matrix) noexcept {
+    YuvConversionParameters result;
+    const bool full_range = range == coremedia::ColorRange::Full;
+    if (format == PixelFormat::P010) {
+        constexpr double Denominator = 65535.0;
+        result.y_offset = full_range ? 0.0 : (64.0 * 64.0) / Denominator;
+        result.y_scale = full_range
+            ? Denominator / (1023.0 * 64.0)
+            : Denominator / (876.0 * 64.0);
+        result.chroma_offset = (512.0 * 64.0) / Denominator;
+        result.chroma_scale = full_range
+            ? Denominator / (1023.0 * 64.0)
+            : Denominator / (896.0 * 64.0);
     } else {
-        logging::write(std::format("mf_decoder low_latency_attribute_hr=0x{:08X}",
-            static_cast<unsigned>(low_latency_attribute_result)));
+        result.y_offset = full_range ? 0.0 : 16.0 / 255.0;
+        result.y_scale = full_range ? 1.0 : 255.0 / 219.0;
+        result.chroma_offset = 128.0 / 255.0;
+        result.chroma_scale = full_range ? 1.0 : 255.0 / 224.0;
+    }
+    if (matrix == coremedia::MatrixCoefficients::Bt601) {
+        result.red_cr = 1.4020;
+        result.green_cb = -0.344136;
+        result.green_cr = -0.714136;
+        result.blue_cb = 1.7720;
+    } else if (matrix == coremedia::MatrixCoefficients::Bt2020) {
+        result.red_cr = 1.4746;
+        result.green_cb = -0.164553;
+        result.green_cr = -0.571353;
+        result.blue_cb = 1.8814;
+    }
+    return result;
+}
+
+namespace {
+
+double clamp_unit(double value) noexcept { return std::clamp(value, 0.0, 1.0); }
+
+double inverse_srgb(double value) noexcept {
+    value = clamp_unit(value);
+    return value <= 0.04045 ? value / 12.92
+        : std::pow((value + 0.055) / 1.055, 2.4);
+}
+
+double encode_srgb(double value) noexcept {
+    value = std::max(0.0, value);
+    return value <= 0.0031308 ? value * 12.92
+        : 1.055 * std::pow(value, 1.0 / 2.4) - 0.055;
+}
+
+double pq_to_nits(double value) noexcept {
+    constexpr double m1 = 2610.0 / 16384.0;
+    constexpr double m2 = 2523.0 / 32.0;
+    constexpr double c1 = 3424.0 / 4096.0;
+    constexpr double c2 = 2413.0 / 128.0;
+    constexpr double c3 = 2392.0 / 128.0;
+    const auto p = std::pow(clamp_unit(value), 1.0 / m2);
+    return 10000.0 * std::pow(std::max((p - c1) /
+        std::max(c2 - c3 * p, 1.0e-12), 0.0), 1.0 / m1);
+}
+
+double hlg_to_nits(double value, double peak_nits) noexcept {
+    constexpr double a = 0.17883277;
+    constexpr double b = 0.28466892;
+    constexpr double c = 0.55991073;
+    value = clamp_unit(value);
+    const auto scene = value <= 0.5 ? value * value / 3.0
+        : (std::exp((value - c) / a) + b) / 12.0;
+    return std::max(peak_nits, 100.0) * std::pow(std::max(scene, 0.0), 1.2);
+}
+
+SdrRgb convert_primaries_to_709(SdrRgb value,
+    coremedia::ColorPrimaries primaries) noexcept {
+    if (primaries == coremedia::ColorPrimaries::Bt2020) {
+        return {
+            1.6605 * value.red - 0.5876 * value.green - 0.0728 * value.blue,
+           -0.1246 * value.red + 1.1329 * value.green - 0.0083 * value.blue,
+           -0.0182 * value.red - 0.1006 * value.green + 1.1187 * value.blue,
+        };
+    }
+    if (primaries == coremedia::ColorPrimaries::DisplayP3) {
+        return {
+            1.224745 * value.red - 0.224904 * value.green,
+           -0.042058 * value.red + 1.042081 * value.green,
+           -0.019642 * value.red - 0.078655 * value.green + 1.098537 * value.blue,
+        };
+    }
+    return value;
+}
+
+double aces_tone_map(double nits) noexcept {
+    const auto value = std::max(nits / 203.0, 0.0);
+    return clamp_unit((value * (2.51 * value + 0.03)) /
+        (value * (2.43 * value + 0.59) + 0.14));
+}
+
+} // namespace
+
+SdrRgb convert_yuv_to_sdr(double y, double cb, double cr,
+    const coremedia::VideoColorDescription& color, PixelFormat format) noexcept {
+    return convert_yuv_to_sdr(y, cb, cr, color,
+        yuv_conversion_parameters(format, color.range, color.matrix));
+}
+
+SdrRgb convert_yuv_to_sdr(double y, double cb, double cr,
+    const coremedia::VideoColorDescription& color,
+    const YuvConversionParameters& parameters) noexcept {
+    y = std::max(0.0, y - parameters.y_offset) * parameters.y_scale;
+    cb = (cb - parameters.chroma_offset) * parameters.chroma_scale;
+    cr = (cr - parameters.chroma_offset) * parameters.chroma_scale;
+    SdrRgb encoded{
+        y + parameters.red_cr * cr,
+        y + parameters.green_cb * cb + parameters.green_cr * cr,
+        y + parameters.blue_cb * cb,
+    };
+    encoded.red = clamp_unit(encoded.red);
+    encoded.green = clamp_unit(encoded.green);
+    encoded.blue = clamp_unit(encoded.blue);
+    if (color.is_hdr()) {
+        auto peak_nits = color.hdr.max_mastering_luminance != 0
+            ? static_cast<double>(color.hdr.max_mastering_luminance)
+            : color.hdr.max_content_light_level != 0
+            ? static_cast<double>(color.hdr.max_content_light_level) : 1000.0;
+        SdrRgb nits;
+        if (color.transfer == coremedia::TransferFunction::Pq) {
+            nits = {pq_to_nits(encoded.red), pq_to_nits(encoded.green),
+                pq_to_nits(encoded.blue)};
+        } else {
+            nits = {hlg_to_nits(encoded.red, peak_nits),
+                hlg_to_nits(encoded.green, peak_nits),
+                hlg_to_nits(encoded.blue, peak_nits)};
+        }
+        nits = convert_primaries_to_709(nits, color.primaries);
+        return {
+            clamp_unit(encode_srgb(aces_tone_map(nits.red))),
+            clamp_unit(encode_srgb(aces_tone_map(nits.green))),
+            clamp_unit(encode_srgb(aces_tone_map(nits.blue))),
+        };
+    }
+    if (color.primaries != coremedia::ColorPrimaries::Bt709 &&
+        color.primaries != coremedia::ColorPrimaries::Unspecified) {
+        auto linear = convert_primaries_to_709({inverse_srgb(encoded.red),
+            inverse_srgb(encoded.green), inverse_srgb(encoded.blue)}, color.primaries);
+        return {clamp_unit(encode_srgb(linear.red)),
+            clamp_unit(encode_srgb(linear.green)),
+            clamp_unit(encode_srgb(linear.blue))};
+    }
+    return encoded;
+}
+
+} // namespace detail
+
+struct MediaFoundationVideoDecoder::Impl {
+    DecoderPreference preference{DecoderPreference::Auto};
+    ComPtr<IMFTransform> transform;
+    ComPtr<IMFMediaType> output_type;
+    ComPtr<IMFMediaEventGenerator> event_generator;
+    ComPtr<IMFActivate> active_activation;
+    ComPtr<IMFDXGIDeviceManager> d3d_manager;
+    ComPtr<ID3D11Device> d3d_device;
+    coremedia::FormatDescription format;
+    std::vector<DecoderCandidate> candidates;
+    std::size_t candidate_index{std::numeric_limits<std::size_t>::max()};
+    std::uint32_t fps_numerator{60};
+    std::uint32_t fps_denominator{1};
+    std::uint32_t minimum_output_bytes{};
+    PixelFormat output_format{PixelFormat::Nv12};
+    coremedia::VideoColorDescription output_color;
+    std::string selected_name;
+    bool selected_hardware{};
+    bool asynchronous{};
+    std::uint32_t pending_input_requests{};
+    bool configured{};
+    bool sent_parameter_sets{};
+    bool waiting_for_random_access{};
+
+    explicit Impl(DecoderPreference value) : preference(value) {}
+
+    ~Impl() { reset_transform(); }
+
+    void reset_transform() noexcept {
+        if (active_activation) (void)active_activation->ShutdownObject();
+        output_type.Reset();
+        transform.Reset();
+        event_generator.Reset();
+        active_activation.Reset();
+        d3d_manager.Reset();
+        d3d_device.Reset();
+        minimum_output_bytes = 0;
+        selected_name.clear();
+        selected_hardware = false;
+        asynchronous = false;
+        pending_input_requests = 0;
+        configured = false;
+        sent_parameter_sets = false;
     }
 
-    // The WPF preview currently consumes a CPU NV12 frame.  A D3D11 manager
-    // makes the MFT return GPU-backed samples on some Windows builds; our
-    // compatibility readback path would then synchronously stall on the GPU
-    // (and can stop after a few frames). Keep it opt-in until the native
-    // texture-to-WPF path is enabled. This also gives us a safe A/B switch for
-    // future hardware rendering work.
-    const bool request_d3d11 = [] {
-        char value[8]{};
-        const auto length = GetEnvironmentVariableA("IPHONE_MIRROR_MF_D3D11", value, sizeof(value));
-        return length > 0 && (value[0] == '1' || value[0] == 'y' || value[0] == 'Y');
-    }();
-    if (d3d11_aware && request_d3d11) {
+    void enable_common_attributes() {
+        ComPtr<IMFAttributes> attributes;
+        HRESULT low_latency_attribute_result = E_NOINTERFACE;
+        bool d3d11_aware{};
+        if (SUCCEEDED(transform->GetAttributes(&attributes))) {
+            UINT32 async_attribute{};
+            if (SUCCEEDED(attributes->GetUINT32(MF_TRANSFORM_ASYNC, &async_attribute)) &&
+                async_attribute != 0) {
+                asynchronous = true;
+                check(attributes->SetUINT32(MF_TRANSFORM_ASYNC_UNLOCK, TRUE),
+                    "unlock asynchronous decoder MFT");
+            }
+            low_latency_attribute_result = attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
+            UINT32 aware{};
+            d3d11_aware = SUCCEEDED(attributes->GetUINT32(MF_SA_D3D11_AWARE, &aware)) && aware != 0;
+        }
+        ComPtr<ICodecAPI> codec_api;
+        HRESULT codec_result = E_NOINTERFACE;
+        if (SUCCEEDED(transform.As(&codec_api))) {
+            VARIANT value;
+            VariantInit(&value);
+            value.vt = VT_UI4;
+            value.ulVal = TRUE;
+            codec_result = codec_api->SetValue(&CODECAPI_AVLowLatencyMode, &value);
+            VariantClear(&value);
+        }
+        logging::write(std::format(
+            "mf_decoder attributes low_latency_hr=0x{:08X} codec_hr=0x{:08X} d3d11_aware={} async={}",
+            static_cast<unsigned>(low_latency_attribute_result),
+            static_cast<unsigned>(codec_result), d3d11_aware ? "true" : "false",
+            asynchronous ? "true" : "false"));
+        if (asynchronous) {
+            check(transform.As(&event_generator),
+                "query asynchronous decoder event generator");
+        }
+
+        if (!d3d11_aware || !environment_enabled("IPHONE_MIRROR_MF_D3D11")) return;
         ComPtr<ID3D11DeviceContext> context;
         D3D_FEATURE_LEVEL level{};
-        constexpr D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
-        const auto device_result = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-            D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            levels, static_cast<UINT>(sizeof(levels) / sizeof(levels[0])), D3D11_SDK_VERSION,
-            &d3d_device_, &level, &context);
-        if (SUCCEEDED(device_result)) {
-            UINT reset_token{};
-            const auto manager_result = MFCreateDXGIDeviceManager(&reset_token, &d3d_manager_);
-            if (SUCCEEDED(manager_result) && SUCCEEDED(d3d_manager_->ResetDevice(d3d_device_.Get(), reset_token))) {
-                const auto set_result = transform_->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER,
-                    reinterpret_cast<ULONG_PTR>(d3d_manager_.Get()));
-                logging::write(std::format(
-                    "mf_decoder d3d11_aware=true set_d3d_manager_hr=0x{:08X} feature_level=0x{:04X}",
-                    static_cast<unsigned>(set_result), static_cast<unsigned>(level)));
-                if (FAILED(set_result)) {
-                    d3d_manager_.Reset();
-                    d3d_device_.Reset();
+        constexpr D3D_FEATURE_LEVEL levels[] = {
+            D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
+        const auto device_result = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE,
+            nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            levels, static_cast<UINT>(std::size(levels)), D3D11_SDK_VERSION,
+            &d3d_device, &level, &context);
+        check(device_result, "create decoder D3D11 device");
+        UINT reset_token{};
+        check(MFCreateDXGIDeviceManager(&reset_token, &d3d_manager),
+            "create decoder DXGI device manager");
+        check(d3d_manager->ResetDevice(d3d_device.Get(), reset_token),
+            "reset decoder DXGI device manager");
+        check(transform->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER,
+            reinterpret_cast<ULONG_PTR>(d3d_manager.Get())), "set decoder D3D manager");
+        logging::write(std::format("mf_decoder d3d11_manager=enabled feature_level=0x{:04X}",
+            static_cast<unsigned>(level)));
+    }
+
+    void select_output() {
+        output_type.Reset();
+        const bool prefer_p010 = format.bit_depth_luma > 8 || format.bit_depth_chroma > 8;
+        const std::array<GUID, 2> preferred = prefer_p010
+            ? std::array<GUID, 2>{MFVideoFormat_P010, MFVideoFormat_NV12}
+            : std::array<GUID, 2>{MFVideoFormat_NV12, MFVideoFormat_P010};
+        for (const auto& wanted : preferred) {
+            for (DWORD index{};; ++index) {
+                ComPtr<IMFMediaType> candidate;
+                const auto result = transform->GetOutputAvailableType(0, index, &candidate);
+                if (result == MF_E_NO_MORE_TYPES) break;
+                check(result, "enumerate decoder output type");
+                GUID subtype{};
+                if (SUCCEEDED(candidate->GetGUID(MF_MT_SUBTYPE, &subtype)) && subtype == wanted &&
+                    SUCCEEDED(transform->SetOutputType(0, candidate.Get(), 0))) {
+                    output_type = std::move(candidate);
+                    output_format = wanted == MFVideoFormat_P010 ? PixelFormat::P010 : PixelFormat::Nv12;
+                    const auto output_bytes = detail::checked_video_buffer_size(
+                        format.width, format.height, output_format);
+                    if (!output_bytes) throw std::runtime_error("decoded output buffer size overflow");
+                    minimum_output_bytes = *output_bytes;
+                    output_color = color_description(output_type.Get(), format);
+                    return;
                 }
-            } else {
-                logging::write(std::format(
-                    "mf_decoder d3d11_aware=true manager_hr=0x{:08X} device_hr=0x{:08X}",
-                    static_cast<unsigned>(manager_result), static_cast<unsigned>(device_result)));
-                d3d_manager_.Reset();
-                d3d_device_.Reset();
             }
+        }
+        throw std::runtime_error("decoder exposes neither NV12 nor P010 output");
+    }
+
+    void configure_candidate(std::size_t index) {
+        reset_transform();
+        auto& candidate = candidates.at(index);
+        if (candidate.use_clsid) {
+            check(CoCreateInstance(candidate.clsid, nullptr, CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS(&transform)), "create built-in video decoder");
         } else {
-            logging::write(std::format(
-                "mf_decoder d3d11_aware=true device_hr=0x{:08X}",
-                static_cast<unsigned>(device_result)));
+            check(candidate.activation->ActivateObject(IID_PPV_ARGS(&transform)),
+                "activate enumerated video decoder");
+            active_activation = candidate.activation;
         }
-    } else {
-        logging::write(std::format("mf_decoder d3d11_aware={} d3d11_manager=disabled",
-            d3d11_aware ? "true" : "false"));
-    }
-}
+        enable_common_attributes();
 
-MediaFoundationH264Decoder::~MediaFoundationH264Decoder() {
-    if (output_type_) output_type_->Release();
-    if (transform_) transform_->Release();
-}
-
-void MediaFoundationH264Decoder::configure(const coremedia::FormatDescription& format,
-    std::uint32_t fps_numerator, std::uint32_t fps_denominator) {
-    if (!format.is_video() || format.width == 0 || format.height == 0) throw std::invalid_argument("invalid H264 format description");
-    format_ = format;
-    ComPtr<IMFMediaType> input;
-    check(MFCreateMediaType(&input), "MFCreateMediaType input");
-    check(input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "set input major type");
-    // The Microsoft decoder requires Annex-B byte streams even though the
-    // QuickTime CMSampleBuffer arriving over USB is AVC1/AVCC.
-    check(input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264), "set H264 input subtype");
-    check(MFSetAttributeSize(input.Get(), MF_MT_FRAME_SIZE, format.width, format.height), "set input frame size");
-    check(MFSetAttributeRatio(input.Get(), MF_MT_FRAME_RATE, fps_numerator, fps_denominator), "set input frame rate");
-    check(input->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive), "set input interlace mode");
-    const bool allow_frame_reordering = [] {
-        char value[8]{};
-        const auto length = GetEnvironmentVariableA(
-            "IPHONE_MIRROR_ALLOW_FRAME_REORDERING", value, sizeof(value));
-        return length > 0 && (value[0] == '1' || value[0] == 'y' || value[0] == 'Y');
-    }();
-    if (!allow_frame_reordering) {
-        // The QuickTime screen stream is produced in display order. Without
-        // this explicit hint, the inbox H.264 MFT can conservatively retain a
-        // full Level 5.1 DPB (14 pictures at 1216x2624) even though the live
-        // stream contains no reordered pictures.
-        check(input->SetUINT32(MF_MT_VIDEO_NO_FRAME_ORDERING, TRUE),
-            "disable H264 frame reordering");
+        ComPtr<IMFMediaType> input;
+        check(MFCreateMediaType(&input), "create decoder input type");
+        check(input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
+            "set decoder input major type");
+        check(input->SetGUID(MF_MT_SUBTYPE, input_subtype(format.video_codec())),
+            "set decoder input subtype");
+        check(MFSetAttributeSize(input.Get(), MF_MT_FRAME_SIZE, format.width, format.height),
+            "set decoder input frame size");
+        check(MFSetAttributeRatio(input.Get(), MF_MT_FRAME_RATE, fps_numerator, fps_denominator),
+            "set decoder input frame rate");
+        check(input->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive),
+            "set decoder input interlace mode");
+        if (!environment_enabled("IPHONE_MIRROR_ALLOW_FRAME_REORDERING")) {
+            check(input->SetUINT32(MF_MT_VIDEO_NO_FRAME_ORDERING, TRUE),
+                "disable decoder frame reordering");
+        }
+        const auto sequence_header = parameter_sets_annex_b(format);
+        if (!sequence_header.empty()) {
+            check(input->SetBlob(MF_MT_MPEG_SEQUENCE_HEADER, sequence_header.data(),
+                static_cast<UINT32>(sequence_header.size())), "set decoder sequence header");
+        }
+        check(transform->SetInputType(0, input.Get(), 0), "set decoder input type");
+        select_output();
+        check(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0),
+            "begin decoder streaming");
+        check(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0),
+            "start decoder stream");
+        candidate_index = index;
+        selected_name = candidate.name;
+        selected_hardware = candidate.hardware;
+        configured = true;
+        sent_parameter_sets = false;
+        logging::write(std::format(
+            "mf_decoder selected={} hardware={} policy={} codec={} output={} size={}x{} "
+            "bit_depth={}/{} primaries={} transfer={} matrix={} range={} hdr={}",
+            selected_name, selected_hardware ? "true" : "false",
+            decoder_preference_name(preference), codec_name(format.video_codec()),
+            pixel_format_name(output_format), format.width, format.height,
+            format.bit_depth_luma, format.bit_depth_chroma,
+            color_primaries_name(output_color.primaries),
+            transfer_function_name(output_color.transfer),
+            matrix_coefficients_name(output_color.matrix),
+            color_range_name(output_color.range), output_color.is_hdr() ? "true" : "false"));
     }
-    logging::write(std::format("mf_decoder no_frame_ordering={}",
-        allow_frame_reordering ? "false" : "true"));
-    const auto sequence_header = parameter_sets_annex_b(format);
-    if (!sequence_header.empty()) {
-        check(input->SetBlob(MF_MT_MPEG_SEQUENCE_HEADER, sequence_header.data(),
-            static_cast<UINT32>(sequence_header.size())), "set Annex-B sequence header");
-    }
-    check(transform_->SetInputType(0, input.Get(), 0), "set decoder input type");
-    select_nv12_output();
-    check(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0), "begin decoder streaming");
-    check(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0), "start decoder stream");
-    configured_ = true;
-    sent_parameter_sets_ = false;
-}
 
-void MediaFoundationH264Decoder::select_nv12_output() {
-    if (output_type_) { output_type_->Release(); output_type_ = nullptr; }
-    for (DWORD index = 0;; ++index) {
-        ComPtr<IMFMediaType> candidate;
-        const HRESULT result = transform_->GetOutputAvailableType(0, index, &candidate);
-        if (result == MF_E_NO_MORE_TYPES) break;
-        check(result, "enumerate decoder output type");
-        GUID subtype{};
-        if (SUCCEEDED(candidate->GetGUID(MF_MT_SUBTYPE, &subtype)) && subtype == MFVideoFormat_NV12 &&
-            SUCCEEDED(transform_->SetOutputType(0, candidate.Get(), 0))) {
-            output_type_ = candidate.Detach();
-            return;
+    void select_first_working_candidate(std::size_t begin = 0) {
+        std::string failures;
+        for (std::size_t index = begin; index < candidates.size(); ++index) {
+            try {
+                configure_candidate(index);
+                return;
+            } catch (const std::exception& error) {
+                logging::write(std::format(
+                    "mf_decoder candidate_rejected name={} hardware={} reason={}",
+                    candidates[index].name, candidates[index].hardware ? "true" : "false",
+                    error.what()));
+                if (!failures.empty()) failures += "; ";
+                failures += candidates[index].name + ": " + error.what();
+            }
+        }
+        reset_transform();
+        throw std::runtime_error("no compatible Media Foundation decoder: " + failures);
+    }
+
+    void configure(const coremedia::FormatDescription& value,
+        std::uint32_t numerator, std::uint32_t denominator) {
+        if (!value.is_video() || value.video_codec() == coremedia::VideoCodec::Unknown ||
+            !detail::checked_video_buffer_size(value.width, value.height, PixelFormat::Nv12) ||
+            numerator == 0 || denominator == 0) {
+            throw std::invalid_argument("invalid AVC/HEVC format description or dimensions");
+        }
+        format = value;
+        fps_numerator = numerator;
+        fps_denominator = denominator;
+        candidates = decoder_candidates(format.video_codec(), preference);
+        if (candidates.empty()) throw std::runtime_error("no Media Foundation video decoder is installed");
+        waiting_for_random_access = false;
+        select_first_working_candidate();
+    }
+
+    std::optional<DecodedFrame> receive_output() {
+        for (;;) {
+            MFT_OUTPUT_STREAM_INFO stream_info{};
+            check(transform->GetOutputStreamInfo(0, &stream_info),
+                "get decoder output stream info");
+            ComPtr<IMFSample> sample;
+            if ((stream_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) == 0) {
+                ComPtr<IMFMediaBuffer> buffer;
+                check(MFCreateSample(&sample), "create decoder output sample");
+                check(MFCreateMemoryBuffer(std::max<DWORD>(stream_info.cbSize,
+                    minimum_output_bytes), &buffer), "create decoder output buffer");
+                check(sample->AddBuffer(buffer.Get()), "attach decoder output buffer");
+            }
+            MFT_OUTPUT_DATA_BUFFER output{};
+            output.dwStreamID = 0;
+            output.pSample = sample.Get();
+            DWORD status{};
+            const auto result = transform->ProcessOutput(0, 1, &output, &status);
+            ComPtr<IMFCollection> output_events;
+            if (output.pEvents) output_events.Attach(output.pEvents);
+            // When MFT_OUTPUT_STREAM_PROVIDES_SAMPLES is set, ProcessOutput
+            // returns a new sample reference. Adopt it immediately so stream
+            // change, failure, and early-return paths release it exactly once.
+            ComPtr<IMFSample> transform_sample;
+            if (output.pSample && output.pSample != sample.Get())
+                transform_sample.Attach(output.pSample);
+            IMFSample* decoded_sample = transform_sample
+                ? transform_sample.Get() : sample.Get();
+            if (result == MF_E_TRANSFORM_NEED_MORE_INPUT) return std::nullopt;
+            if (result == MF_E_TRANSFORM_STREAM_CHANGE) {
+                select_output();
+                continue;
+            }
+            check(result, "decoder ProcessOutput");
+            if (!decoded_sample) return std::nullopt;
+
+            ComPtr<IMFMediaBuffer> contiguous;
+            check(decoded_sample->ConvertToContiguousBuffer(&contiguous),
+                "make decoder output contiguous");
+            BYTE* source{};
+            DWORD current{};
+            check(contiguous->Lock(&source, nullptr, &current), "lock decoder output");
+            DecodedFrame frame;
+            frame.width = format.width;
+            frame.height = format.height;
+            frame.pixel_format = output_format;
+            // Hardware MFTs may attach updated mastering/color information to
+            // individual samples. Prefer it over the initial media type, as a
+            // stream can switch between SDR and HDR without changing geometry.
+            frame.color = color_description(decoded_sample, format, &output_color);
+            try {
+                frame.nv12.assign(source, source + current);
+            } catch (...) {
+                contiguous->Unlock();
+                throw;
+            }
+            contiguous->Unlock();
+            LONGLONG time{};
+            if (SUCCEEDED(decoded_sample->GetSampleTime(&time))) frame.timestamp_100ns = time;
+            UINT32 raw_stride{};
+            if (output_type && SUCCEEDED(output_type->GetUINT32(MF_MT_DEFAULT_STRIDE, &raw_stride))) {
+                frame.stride = static_cast<std::int32_t>(raw_stride);
+            } else {
+                frame.stride = static_cast<std::int32_t>(format.width *
+                    (output_format == PixelFormat::P010 ? 2U : 1U));
+            }
+            return frame;
         }
     }
-    throw std::runtime_error("Microsoft H264 decoder exposes no NV12 output");
-}
 
-std::vector<DecodedFrame> MediaFoundationH264Decoder::decode(std::span<const std::uint8_t> avcc_sample,
-    std::int64_t timestamp_100ns, std::int64_t duration_100ns) {
-    if (!configured_) throw std::logic_error("H264 decoder is not configured");
-    auto encoded = h264::avcc_to_annex_b(avcc_sample, format_.nalu_length_size);
-    if (!sent_parameter_sets_) {
-        auto parameter_sets = parameter_sets_annex_b(format_);
-        parameter_sets.insert(parameter_sets.end(), encoded.begin(), encoded.end());
-        encoded = std::move(parameter_sets);
-        sent_parameter_sets_ = true;
-    }
-
-    ComPtr<IMFSample> sample;
-    ComPtr<IMFMediaBuffer> buffer;
-    check(MFCreateSample(&sample), "create H264 input sample");
-    check(MFCreateMemoryBuffer(static_cast<DWORD>(encoded.size()), &buffer), "create H264 input buffer");
-    BYTE* destination{};
-    DWORD capacity{};
-    check(buffer->Lock(&destination, &capacity, nullptr), "lock H264 input buffer");
-    std::copy(encoded.begin(), encoded.end(), destination);
-    buffer->Unlock();
-    check(buffer->SetCurrentLength(static_cast<DWORD>(encoded.size())), "set H264 input length");
-    check(sample->AddBuffer(buffer.Get()), "attach H264 input buffer");
-    check(sample->SetSampleTime(timestamp_100ns), "set H264 sample time");
-    check(sample->SetSampleDuration(duration_100ns), "set H264 sample duration");
-    if (h264::is_keyframe_avcc(avcc_sample, format_.nalu_length_size)) {
-        check(sample->SetUINT32(MFSampleExtension_CleanPoint, TRUE), "mark H264 clean point");
-    }
-
-    // A synchronous MFT may temporarily stop accepting input while one or
-    // more decoded pictures are waiting in its output queue.  The previous
-    // implementation returned the pending picture immediately, which silently
-    // discarded the encoded sample that produced MF_E_NOTACCEPTING.  On the
-    // iPhone stream this happens periodically around reference-frame changes
-    // and causes visible 50-66 ms gaps.  Drain all available output pictures,
-    // then retry the same input sample until it is accepted.
-    std::vector<DecodedFrame> decoded;
-    HRESULT input_result = transform_->ProcessInput(0, sample.Get(), 0);
-    while (input_result == MF_E_NOTACCEPTING) {
-        auto pending = receive_output();
-        if (!pending) {
-            check(input_result, "decoder ProcessInput (no output while not accepting)");
+    void handle_async_event(IMFMediaEvent* event,
+        std::vector<DecodedFrame>& decoded, bool& drain_complete) {
+        HRESULT event_status{};
+        check(event->GetStatus(&event_status), "read asynchronous decoder event status");
+        check(event_status, "asynchronous decoder event");
+        MediaEventType type{MEUnknown};
+        check(event->GetType(&type), "read asynchronous decoder event type");
+        if (type == METransformNeedInput) {
+            UINT32 stream_id{};
+            if (SUCCEEDED(event->GetUINT32(MF_EVENT_MFT_INPUT_STREAM_ID, &stream_id)) &&
+                stream_id != 0) throw std::runtime_error("decoder requested an unknown input stream");
+            if (pending_input_requests != std::numeric_limits<std::uint32_t>::max())
+                ++pending_input_requests;
+        } else if (type == METransformHaveOutput) {
+            if (auto output = receive_output()) decoded.push_back(std::move(*output));
+        } else if (type == METransformDrainComplete) {
+            drain_complete = true;
         }
-        decoded.push_back(std::move(*pending));
-        input_result = transform_->ProcessInput(0, sample.Get(), 0);
     }
-    check(input_result, "decoder ProcessInput");
 
-    // Consume every frame immediately available. The Microsoft decoder can
-    // release a group of reordered pictures at once around an IDR; returning
-    // only the newest picture here previously discarded almost half of the
-    // valid 60 fps output. The presentation queue decides what to display.
-    while (auto output = receive_output()) {
-        decoded.push_back(std::move(*output));
+    bool get_async_event(DWORD flags, std::vector<DecodedFrame>& decoded,
+        bool& drain_complete) {
+        ComPtr<IMFMediaEvent> event;
+        const auto result = event_generator->GetEvent(flags, &event);
+        if (result == MF_E_NO_EVENTS_AVAILABLE) return false;
+        check(result, "get asynchronous decoder event");
+        handle_async_event(event.Get(), decoded, drain_complete);
+        return true;
     }
-    return decoded;
-}
 
-std::vector<DecodedFrame> MediaFoundationH264Decoder::drain() {
-    if (!configured_) return {};
-    check(transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0), "end decoder stream");
-    check(transform_->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0), "drain decoder");
-    std::vector<DecodedFrame> decoded;
-    while (auto output = receive_output()) {
-        decoded.push_back(std::move(*output));
+    void pump_available_async_events(std::vector<DecodedFrame>& decoded) {
+        bool drain_complete{};
+        while (get_async_event(MF_EVENT_FLAG_NO_WAIT, decoded, drain_complete)) {}
     }
-    return decoded;
-}
 
-std::optional<DecodedFrame> MediaFoundationH264Decoder::receive_output() {
-    MFT_OUTPUT_STREAM_INFO stream_info{};
-    check(transform_->GetOutputStreamInfo(0, &stream_info), "get decoder output stream info");
-    ComPtr<IMFSample> sample;
-    if ((stream_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) == 0) {
+    void wait_for_async_input(std::vector<DecodedFrame>& decoded) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        bool drain_complete{};
+        while (pending_input_requests == 0) {
+            if (!get_async_event(MF_EVENT_FLAG_NO_WAIT, decoded, drain_complete)) {
+                if (std::chrono::steady_clock::now() >= deadline)
+                    throw std::runtime_error("asynchronous decoder input request timed out");
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+    }
+
+    std::vector<DecodedFrame> decode_once(std::span<const std::uint8_t> source,
+        std::int64_t timestamp, std::int64_t duration, bool random_access) {
+        auto encoded = length_prefixed_to_annex_b(source, format.nalu_length_size);
+        if (!sent_parameter_sets) {
+            auto parameter_sets = parameter_sets_annex_b(format);
+            parameter_sets.insert(parameter_sets.end(), encoded.begin(), encoded.end());
+            encoded = std::move(parameter_sets);
+            sent_parameter_sets = true;
+        }
+        if (encoded.size() > std::numeric_limits<DWORD>::max())
+            throw std::runtime_error("compressed video sample is too large");
+        ComPtr<IMFSample> sample;
         ComPtr<IMFMediaBuffer> buffer;
-        check(MFCreateSample(&sample), "create decoder output sample");
-        check(MFCreateMemoryBuffer(std::max<DWORD>(stream_info.cbSize, format_.width * format_.height * 3 / 2),
-            &buffer), "create decoder output buffer");
-        check(sample->AddBuffer(buffer.Get()), "attach decoder output buffer");
+        check(MFCreateSample(&sample), "create decoder input sample");
+        check(MFCreateMemoryBuffer(static_cast<DWORD>(encoded.size()), &buffer),
+            "create decoder input buffer");
+        BYTE* destination{};
+        DWORD capacity{};
+        check(buffer->Lock(&destination, &capacity, nullptr), "lock decoder input buffer");
+        std::copy(encoded.begin(), encoded.end(), destination);
+        buffer->Unlock();
+        check(buffer->SetCurrentLength(static_cast<DWORD>(encoded.size())),
+            "set decoder input length");
+        check(sample->AddBuffer(buffer.Get()), "attach decoder input buffer");
+        check(sample->SetSampleTime(timestamp), "set decoder sample time");
+        check(sample->SetSampleDuration(std::max<std::int64_t>(1, duration)),
+            "set decoder sample duration");
+        if (random_access) check(sample->SetUINT32(MFSampleExtension_CleanPoint, TRUE),
+            "mark decoder clean point");
+
+        std::vector<DecodedFrame> decoded;
+        if (asynchronous) {
+            wait_for_async_input(decoded);
+            --pending_input_requests;
+            check(transform->ProcessInput(0, sample.Get(), 0),
+                "asynchronous decoder ProcessInput");
+            pump_available_async_events(decoded);
+            return decoded;
+        }
+        auto input_result = transform->ProcessInput(0, sample.Get(), 0);
+        while (input_result == MF_E_NOTACCEPTING) {
+            auto pending = receive_output();
+            if (!pending) check(input_result,
+                "decoder ProcessInput (no output while not accepting)");
+            decoded.push_back(std::move(*pending));
+            input_result = transform->ProcessInput(0, sample.Get(), 0);
+        }
+        check(input_result, "decoder ProcessInput");
+        while (auto output = receive_output()) decoded.push_back(std::move(*output));
+        return decoded;
     }
 
-    MFT_OUTPUT_DATA_BUFFER output{};
-    output.dwStreamID = 0;
-    output.pSample = sample.Get();
-    DWORD status{};
-    HRESULT result = transform_->ProcessOutput(0, 1, &output, &status);
-    if (output.pEvents) output.pEvents->Release();
-    if (result == MF_E_TRANSFORM_NEED_MORE_INPUT) return std::nullopt;
-    if (result == MF_E_TRANSFORM_STREAM_CHANGE) {
-        select_nv12_output();
-        return receive_output();
+    std::vector<DecodedFrame> drain() {
+        if (!configured) return {};
+        check(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0),
+            "end decoder stream");
+        check(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0),
+            "drain decoder");
+        std::vector<DecodedFrame> decoded;
+        if (!asynchronous) {
+            while (auto output = receive_output()) decoded.push_back(std::move(*output));
+            return decoded;
+        }
+        bool drain_complete{};
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!drain_complete) {
+            if (!get_async_event(MF_EVENT_FLAG_NO_WAIT, decoded, drain_complete)) {
+                if (std::chrono::steady_clock::now() >= deadline)
+                    throw std::runtime_error("asynchronous decoder drain timed out");
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        return decoded;
     }
-    check(result, "decoder ProcessOutput");
-    if (!output.pSample) return std::nullopt;
 
-    ComPtr<IMFMediaBuffer> contiguous;
-    check(output.pSample->ConvertToContiguousBuffer(&contiguous), "make NV12 output contiguous");
-    BYTE* source{};
-    DWORD current{};
-    check(contiguous->Lock(&source, nullptr, &current), "lock NV12 output");
-    DecodedFrame frame;
-    frame.width = format_.width;
-    frame.height = format_.height;
-    frame.nv12.assign(source, source + current);
-    contiguous->Unlock();
-    LONGLONG time{};
-    if (SUCCEEDED(output.pSample->GetSampleTime(&time))) frame.timestamp_100ns = time;
-    UINT32 stride{};
-    if (output_type_ && SUCCEEDED(output_type_->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride))) {
-        frame.stride = static_cast<std::int32_t>(stride);
-    } else {
-        frame.stride = static_cast<std::int32_t>(format_.width);
+    void flush() {
+        if (!transform) return;
+        (void)transform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+        pending_input_requests = 0;
+        if (asynchronous && event_generator) {
+            for (;;) {
+                ComPtr<IMFMediaEvent> event;
+                if (event_generator->GetEvent(MF_EVENT_FLAG_NO_WAIT, &event) ==
+                    MF_E_NO_EVENTS_AVAILABLE) break;
+                if (!event) break;
+            }
+            (void)transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+        }
+        sent_parameter_sets = false;
+        waiting_for_random_access = true;
     }
-    return frame;
+
+    std::vector<DecodedFrame> decode(std::span<const std::uint8_t> sample,
+        std::int64_t timestamp, std::int64_t duration) {
+        if (!configured) throw std::logic_error("video decoder is not configured");
+        const bool random_access = detail::is_random_access_sample(format, sample);
+        if (waiting_for_random_access && !random_access) return {};
+        if (random_access) waiting_for_random_access = false;
+        try {
+            return decode_once(sample, timestamp, duration, random_access);
+        } catch (const std::exception& error) {
+            const auto failed_name = selected_name;
+            logging::write(std::format(
+                "mf_decoder runtime_failure selected={} random_access={} reason={}",
+                failed_name, random_access ? "true" : "false", error.what()));
+            const auto next = candidate_index == std::numeric_limits<std::size_t>::max()
+                ? candidates.size() : candidate_index + 1U;
+            if (next >= candidates.size()) throw;
+            select_first_working_candidate(next);
+            logging::write(std::format("mf_decoder fallback from={} to={}",
+                failed_name, selected_name));
+            if (!random_access) {
+                waiting_for_random_access = true;
+                return {};
+            }
+            return decode_once(sample, timestamp, duration, true);
+        }
+    }
+};
+
+MediaFoundationVideoDecoder::MediaFoundationVideoDecoder(DecoderPreference preference) {
+    const auto com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(com_result) && com_result != RPC_E_CHANGED_MODE)
+        check(com_result, "CoInitializeEx");
+    com_initialized_ = SUCCEEDED(com_result);
+    try {
+        ensure_media_foundation();
+        impl_ = std::make_unique<Impl>(preference);
+    } catch (...) {
+        impl_.reset();
+        if (com_initialized_) {
+            CoUninitialize();
+            com_initialized_ = false;
+        }
+        throw;
+    }
 }
 
-void MediaFoundationH264Decoder::flush() {
-    if (!transform_) return;
-    transform_->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
-    sent_parameter_sets_ = false;
+MediaFoundationVideoDecoder::~MediaFoundationVideoDecoder() {
+    impl_.reset();
+    if (com_initialized_) CoUninitialize();
+}
+
+void MediaFoundationVideoDecoder::configure(const coremedia::FormatDescription& format,
+    std::uint32_t fps_numerator, std::uint32_t fps_denominator) {
+    impl_->configure(format, fps_numerator, fps_denominator);
+}
+
+std::vector<DecodedFrame> MediaFoundationVideoDecoder::decode(
+    std::span<const std::uint8_t> sample, std::int64_t timestamp_100ns,
+    std::int64_t duration_100ns) {
+    return impl_->decode(sample, timestamp_100ns, duration_100ns);
+}
+
+std::vector<DecodedFrame> MediaFoundationVideoDecoder::drain() {
+    return impl_->drain();
+}
+
+void MediaFoundationVideoDecoder::flush() {
+    impl_->flush();
+}
+
+DecoderPreference MediaFoundationVideoDecoder::preference() const noexcept {
+    return impl_->preference;
+}
+
+std::string_view MediaFoundationVideoDecoder::selected_decoder_name() const noexcept {
+    return impl_->selected_name;
+}
+
+bool MediaFoundationVideoDecoder::selected_decoder_is_hardware() const noexcept {
+    return impl_->selected_hardware;
+}
+
+PixelFormat MediaFoundationVideoDecoder::output_pixel_format() const noexcept {
+    return impl_->output_format;
 }
 
 } // namespace iPhoneMirror::media

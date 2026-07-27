@@ -1,4 +1,7 @@
+using IPhoneMirror.DriverInstaller.Models;
 using IPhoneMirror.DriverInstaller.Services;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 [assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
 
@@ -8,6 +11,10 @@ Run("serial normalization", () =>
 {
     Equal("0000810100044D600A22001E",
         DriverConstants.NormalizeSerial("00008101-00044d600a22001e"));
+    True(DriverConstants.IsValidSerial("0000810100044D600A22001E"));
+    True(DriverConstants.IsValidSerial("0000810100044d600a22001e"));
+    False(DriverConstants.IsValidSerial("00008101-00044D600A22001E"));
+    False(DriverConstants.IsValidSerial("short"));
 });
 
 Run("Apple parent allowlist", () =>
@@ -26,6 +33,238 @@ Run("operation IDs", () =>
 {
     True(DriverConstants.IsValidOperationId(Guid.NewGuid().ToString("N")));
     False(DriverConstants.IsValidOperationId("not-an-operation"));
+});
+
+Run("Apple package cache is per-user", () =>
+{
+    var localRoot = Path.GetFullPath(Environment.GetFolderPath(
+        Environment.SpecialFolder.LocalApplicationData));
+    var packagesRoot = Path.GetFullPath(DriverConstants.PackagesRoot);
+    True(packagesRoot.StartsWith(localRoot + Path.DirectorySeparatorChar,
+        StringComparison.OrdinalIgnoreCase));
+    False(packagesRoot.StartsWith(Path.GetFullPath(DriverConstants.DataRoot) +
+        Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+});
+
+Run("Apple signer subject allowlist is exact", () =>
+{
+    True(DriverPayload.IsAllowedAppleSignerSubject(
+        "CN=Apple Inc., O=Apple Inc., L=Cupertino, S=California, C=US"));
+    False(DriverPayload.IsAllowedAppleSignerSubject(
+        "CN=Apple Inc., OU=Software Engineering, O=Apple Inc., L=Cupertino, S=California, C=US"));
+    False(DriverPayload.IsAllowedAppleSignerSubject(
+        "CN=APPLE INC., O=Apple Inc., L=Cupertino, S=California, C=US"));
+    False(DriverPayload.IsAllowedAppleSignerSubject(
+        "CN=Apple Inc., O=Apple Inc., L=Cupertino, S=California, C=US, OU=Injected"));
+    False(DriverPayload.IsAllowedAppleSignerSubject(null));
+});
+
+Run("unsigned Apple package is rejected", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(root);
+        var package = Path.Combine(root, "iTunes64Setup.exe");
+        File.WriteAllText(package, "not an Authenticode package");
+        False(DriverPayload.IsTrustedAppleSignature(package));
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+});
+
+Run("verified file lock blocks replacement", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(root);
+        var package = Path.Combine(root, "package.bin");
+        var moved = Path.Combine(root, "replacement.bin");
+        File.WriteAllText(package, "trusted payload");
+        var expectedHash = DriverPayload.ComputeHash(package);
+        using (DriverPayload.LockAndValidateHash(package, expectedHash))
+        {
+            Throws<IOException>(() => File.OpenWrite(package).Dispose());
+            Throws<IOException>(() => File.Delete(package));
+            Throws<IOException>(() => File.Move(package, moved, overwrite: true));
+        }
+        File.AppendAllText(package, " updated");
+        True(File.ReadAllText(package).EndsWith(" updated", StringComparison.Ordinal));
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+});
+
+Run("reparse path components are rejected", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    var link = Path.Combine(root, "link");
+    try
+    {
+        var target = Path.Combine(root, "target");
+        Directory.CreateDirectory(target);
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+        }
+        catch (Exception error) when (error is UnauthorizedAccessException ||
+                                      (error is IOException &&
+                                       (error.HResult & 0xffff) == 1314))
+        {
+            var fallback = Path.Combine(Environment.GetFolderPath(
+                Environment.SpecialFolder.UserProfile), "Application Data");
+            if (File.Exists(fallback) || Directory.Exists(fallback) ||
+                (File.GetAttributes(fallback) & FileAttributes.ReparsePoint) != 0)
+            {
+                Throws<IOException>(() => DriverPayload.EnsureNoReparsePoints(fallback));
+                Throws<IOException>(() => DriverPayload.EnsureNoReparsePoints(
+                    Path.Combine(fallback, "operation", "payload")));
+                Console.WriteLine(
+                    "Used the Windows profile junction for the reparse test.");
+                return;
+            }
+            Console.WriteLine("Skipped reparse test: no reparse point is available.");
+            return;
+        }
+        Throws<IOException>(() => DriverPayload.EnsureNoReparsePoints(link));
+        Throws<IOException>(() => DriverPayload.EnsureNoReparsePoints(
+            Path.Combine(link, "operation", "payload")));
+    }
+    finally
+    {
+        if (Directory.Exists(link)) Directory.Delete(link);
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+});
+
+Run("protected operation directory ACL", () =>
+{
+    var security = DriverPayload.CreateProtectedSystemDirectorySecurity();
+    DriverPayload.ValidateProtectedSystemDirectorySecurity(security);
+
+    var worldWritable = DriverPayload.CreateProtectedSystemDirectorySecurity();
+    worldWritable.AddAccessRule(new FileSystemAccessRule(
+        new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+        FileSystemRights.Modify, InheritanceFlags.ContainerInherit |
+        InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+    Throws<IOException>(() =>
+        DriverPayload.ValidateProtectedSystemDirectorySecurity(worldWritable));
+
+    var untrustedOwner = DriverPayload.CreateProtectedSystemDirectorySecurity();
+    untrustedOwner.SetOwner(new SecurityIdentifier(WellKnownSidType.WorldSid, null));
+    Throws<IOException>(() =>
+        DriverPayload.ValidateProtectedSystemDirectorySecurity(untrustedOwner));
+
+    Throws<IOException>(() => DriverPayload.ValidateProtectedSystemDirectorySecurity(
+        new DirectorySecurity()));
+});
+
+Run("elevated result matches process exit code", () =>
+{
+    var success = new DriverOperationResult(true, false, "ok", null, null, string.Empty);
+    var failure = new DriverOperationResult(false, false, "failed", null, null, string.Empty);
+    True(DriverOperationClient.IsResultConsistentWithExitCode(0, success));
+    False(DriverOperationClient.IsResultConsistentWithExitCode(1, success));
+    True(DriverOperationClient.IsResultConsistentWithExitCode(1, failure));
+    False(DriverOperationClient.IsResultConsistentWithExitCode(0, failure));
+});
+
+Run("log sanitization", () =>
+{
+    var raw = "password=plain-secret token:token-secret \"secret\":\"quoted secret\" " +
+              "Authorization: Bearer header-secret\r\nx-api-key: api-secret " +
+              "https://example.test/?signature=query-secret&ok=1";
+    var sanitized = DriverLogger.Sanitize(raw);
+    foreach (var secret in new[]
+             {
+                 "plain-secret", "token-secret", "quoted secret", "header-secret",
+                 "api-secret", "query-secret",
+             })
+        False(sanitized.Contains(secret, StringComparison.Ordinal));
+    True(sanitized.Contains("<redacted>", StringComparison.Ordinal));
+    False(sanitized.Contains('\r'));
+    False(sanitized.Contains('\n'));
+});
+
+Run("operation correlation IDs survive sanitization", () =>
+{
+    var operation = Guid.NewGuid().ToString("N");
+    var deviceSerial = "0000810100044D600A22001E";
+    var entry = DriverLogger.FormatEntry("INFO", "test", "correlation",
+        ("operation", operation), ("serial", deviceSerial));
+    True(entry.Contains($"operation={operation}", StringComparison.Ordinal));
+    False(entry.Contains(deviceSerial, StringComparison.Ordinal));
+});
+
+Run("UI log rotation restarts the session", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "driver-ui.log");
+        File.WriteAllText(path, new string('x', 1024));
+        var sessionStarted = true;
+
+        True(DriverLogger.TryRotateIfNeeded(path, 512, 2, ref sessionStarted));
+        False(sessionStarted);
+        True(File.Exists(path + ".1"));
+
+        DriverLogger.EnsureSessionStarted(path, ref sessionStarted);
+        True(sessionStarted);
+        var active = File.ReadAllText(path);
+        True(active.Contains("category=logger", StringComparison.Ordinal));
+        True(active.Contains("event=session_start", StringComparison.Ordinal));
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+});
+
+Run("operation log rotation is bounded", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "operation.log");
+        var logType = typeof(ElevatedDriverHost).GetNestedType("OperationLog",
+            System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("OperationLog type was not found.");
+        var constructor = logType.GetConstructor(
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null, [typeof(string), typeof(string), typeof(DriverOperationKind)],
+            modifiers: null)
+            ?? throw new InvalidOperationException("OperationLog constructor was not found.");
+        var write = logType.GetMethod("Write",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("OperationLog.Write was not found.");
+        var log = constructor.Invoke([path, Guid.NewGuid().ToString("N"),
+            DriverOperationKind.Install]);
+        var message = new string('x', 4096);
+        for (var index = 0; index < 600; index++)
+            write.Invoke(log, [message]);
+
+        True(File.Exists(path));
+        True(File.Exists(path + ".1"));
+        var totalBytes = new FileInfo(path).Length + new FileInfo(path + ".1").Length;
+        True(totalBytes <= 2L * 1024 * 1024 + 8 * 1024);
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
 });
 
 Run("replaceable parent driver allowlist", () =>
@@ -68,6 +307,14 @@ Run("embedded payload hashes and signature", () =>
             DriverConstants.InstallerHash);
         DriverPayload.ValidateHash(Path.Combine(payload, @"amd64\libusb0.sys"),
             DriverConstants.DriverHash);
+        True(DriverPayload.IsAuthenticodeTrusted(
+            Path.Combine(payload, @"amd64\libusb0.sys")));
+        True(DriverPayload.TryGetAuthenticodeSignerSubject(
+            Path.Combine(payload, @"amd64\libusb0.sys"), out var signerSubject));
+        True(!string.IsNullOrWhiteSpace(signerSubject));
+        False(DriverPayload.IsAllowedAppleSignerSubject(signerSubject));
+        False(DriverPayload.IsTrustedAppleSignature(
+            Path.Combine(payload, @"amd64\libusb0.sys")));
         DriverPayload.ValidateHash(Path.Combine(payload, @"amd64\libusb0.dll"),
             DriverConstants.Dll64Hash);
         DriverPayload.ValidateHash(Path.Combine(payload, @"x86\libusb0_x86.dll"),

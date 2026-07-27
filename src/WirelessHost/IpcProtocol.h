@@ -6,7 +6,7 @@
 namespace iPhoneMirror::wireless {
 
 inline constexpr std::uint32_t IpcMagic = 0x50414D49U; // IMAP
-inline constexpr std::uint16_t IpcVersion = 4;
+inline constexpr std::uint16_t IpcVersion = 6;
 inline constexpr std::uint32_t MaxPayloadBytes = 64U * 1024U * 1024U;
 inline constexpr std::size_t DeviceIdBytes = 64;
 inline constexpr std::size_t DeviceNameBytes = 128;
@@ -24,6 +24,10 @@ enum class MessageType : std::uint16_t {
     MediaPlay = 8,
     MediaStop = 9,
     PlaybackState = 10,
+    MediaPause = 11,
+    MediaResume = 12,
+    MediaSeek = 13,
+    MediaStopRequest = 14,
 };
 
 #pragma pack(push, 1)

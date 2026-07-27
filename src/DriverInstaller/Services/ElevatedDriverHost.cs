@@ -11,6 +11,9 @@ namespace IPhoneMirror.DriverInstaller.Services;
 internal static class ElevatedDriverHost
 {
     private const uint CrSuccess = 0;
+    private const uint DevNodePresent = 0x00000008;
+    private const int MaximumLoggedProcessOutputLines = 80;
+    private const int MaximumLoggedProcessLineCharacters = 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -24,30 +27,42 @@ internal static class ElevatedDriverHost
     {
         if (arguments.Count != 5 || !IsRequested(arguments) ||
             !Enum.TryParse<DriverOperationKind>(arguments[1], ignoreCase: false, out var kind) ||
+            !Enum.IsDefined(kind) ||
             !DriverConstants.IsAllowedAppleParent(arguments[2]) ||
-            string.IsNullOrWhiteSpace(arguments[3]) ||
+            !DriverConstants.IsValidSerial(arguments[3]) ||
             !DriverConstants.IsValidOperationId(arguments[4]))
+        {
+            DriverLogger.WriteWarning("elevated-host", "arguments_rejected",
+                ("argument_count", arguments.Count),
+                ("kind", arguments.Count > 1 ? arguments[1] : "unknown"),
+                ("operation", arguments.Count > 4 ? arguments[4] : "unknown"));
             return 2;
+        }
 
         var instanceId = arguments[2];
         var expectedSerial = DriverConstants.NormalizeSerial(arguments[3]);
         var operationId = arguments[4];
         var paths = DriverConstants.GetOperationPaths(operationId);
+        var timer = Stopwatch.StartNew();
         try
         {
-            DriverPayload.CreateSafeDirectory(DriverConstants.DataRoot);
-            DriverPayload.CreateSafeDirectory(DriverConstants.OperationsRoot);
-            DriverPayload.CreateSafeDirectory(DriverConstants.BackupsRoot);
+            DriverPayload.CreateProtectedSystemDirectory(DriverConstants.DataRoot);
+            DriverPayload.CreateProtectedSystemDirectory(DriverConstants.OperationsRoot);
+            DriverPayload.CreateProtectedSystemDirectory(DriverConstants.BackupsRoot);
             if (Directory.Exists(paths.Directory))
                 throw new IOException("The driver operation directory already exists.");
-            DriverPayload.CreateSafeDirectory(paths.Directory);
+            DriverPayload.CreateProtectedSystemDirectory(paths.Directory);
         }
-        catch
+        catch (Exception error)
         {
+            DriverLogger.WriteException("elevated-host", "operation_directory_failed", error,
+                ("operation", operationId), ("kind", kind));
             return 3;
         }
 
-        var log = new OperationLog(paths.LogPath);
+        var log = new OperationLog(paths.LogPath, operationId, kind);
+        log.WriteEvent("started", ("device", DriverLogger.DeviceFingerprint(expectedSerial)),
+            ("instance", DriverLogger.Sanitize(instanceId)));
         FilterSnapshot[]? snapshot = null;
         var createdSystemFiles = new List<string>();
         string? backupPath = null;
@@ -57,6 +72,7 @@ internal static class ElevatedDriverHost
         {
             if (!IsAdministrator())
                 throw new InvalidOperationException("The driver operation is not elevated.");
+            log.WriteEvent("privilege_verified", ("administrator", true));
 
             using var mutex = new Mutex(false, @"Global\iPhoneMirror.Driver.Operation");
             var lockTaken = false;
@@ -67,21 +83,30 @@ internal static class ElevatedDriverHost
                 if (!lockTaken)
                     throw new InvalidOperationException(
                         "Another iPhone driver operation is already running.");
+                log.WriteEvent("operation_lock_acquired");
 
                 var target = ValidateTarget(instanceId, expectedSerial,
                     requirePresent: kind is not DriverOperationKind.Uninstall,
                     allowKnownBadParent: kind == DriverOperationKind.ParentRepair);
-                log.Write($"Validated {kind} target {target.InstanceId} present={target.IsPresent}.");
+                log.WriteEvent("target_validated",
+                    ("device", DriverLogger.DescribeDevice(target)));
 
+                log.WriteEvent("payload_extract_start");
                 var payloadRoot = DriverPayload.ExtractRuntimeFiles(paths.Directory);
+                log.WriteEvent("payload_verified", ("files", 4),
+                    ("payload", DriverLogger.DescribePath(payloadRoot)),
+                    ("kernel_signature", "trusted"));
                 serviceExistedBefore = ServiceExists();
+                log.WriteEvent("service_snapshot", ("exists", serviceExistedBefore.Value));
                 if (serviceExistedBefore.Value && kind != DriverOperationKind.ParentRepair)
                     ValidateInstalledServiceDefinition();
 
                 snapshot = CaptureSnapshot(instanceId);
+                log.WriteEvent("filter_snapshot_captured", ("entries", snapshot.Length));
                 backupPath = SaveSnapshot(kind, expectedSerial, operationId, snapshot,
                     serviceExistedBefore.Value);
-                log.Write("Saved rollback snapshot: " + backupPath);
+                log.WriteEvent("rollback_snapshot_saved",
+                    ("snapshot", DriverLogger.DescribePath(backupPath)));
 
                 if (kind == DriverOperationKind.ParentRepair)
                 {
@@ -89,6 +114,7 @@ internal static class ElevatedDriverHost
                         throw new InvalidOperationException(
                             $"The Apple parent service is not a known replaceable driver: {target.Service}.");
                     parentRemovalStarted = true;
+                    log.WriteEvent("parent_repair_remove_start");
                     RunPnPRemove(instanceId, log);
                     snapshot = null;
                     if (IsDevicePresent(instanceId))
@@ -98,23 +124,37 @@ internal static class ElevatedDriverHost
                         "The incorrect Apple parent device was removed. Reconnect the iPhone to rebind usbccgp.";
                     WriteResult(paths.ResultPath, new DriverOperationResult(true, true,
                         parentMessage, instanceId, backupPath, paths.LogPath));
-                    log.Write(parentMessage);
+                    log.WriteEvent("completed", ("success", true),
+                        ("requires_replug", true), ("elapsed_ms", timer.ElapsedMilliseconds),
+                        ("message", parentMessage));
                     return 0;
                 }
 
                 if (kind is DriverOperationKind.Install or DriverOperationKind.Repair)
                 {
-                    EnsureSystemFiles(payloadRoot, createdSystemFiles);
+                    log.WriteEvent("filter_install_start", ("operation_kind", kind));
+                    EnsureSystemFiles(payloadRoot, createdSystemFiles, log);
                     RunFilterTool(payloadRoot, "i", "-di=" + instanceId, log);
-                    WaitForHealthyTarget(instanceId, TimeSpan.FromSeconds(20));
+                    var healthy = WaitForHealthyTarget(instanceId, TimeSpan.FromSeconds(20));
+                    log.WriteEvent("target_health_checked", ("healthy", healthy));
+                    if (!healthy)
+                        throw new TimeoutException("The target device did not become healthy in time.");
                     VerifyInstalled(instanceId, snapshot);
                     ValidateInstalledStack();
+                    log.WriteEvent("installed_stack_verified", ("hashes", "trusted"));
+                    log.WriteEvent("filter_install_verified",
+                        ("created_system_files", createdSystemFiles.Count));
                 }
                 else
                 {
+                    log.WriteEvent("filter_uninstall_start");
                     RunFilterTool(payloadRoot, "u", "-di=" + instanceId, log);
-                    WaitForHealthyTarget(instanceId, TimeSpan.FromSeconds(20));
+                    var healthy = WaitForHealthyTarget(instanceId, TimeSpan.FromSeconds(20));
+                    log.WriteEvent("target_health_checked", ("healthy", healthy));
+                    if (!healthy)
+                        throw new TimeoutException("The target device did not become healthy in time.");
                     VerifyUninstalled(instanceId, snapshot);
+                    log.WriteEvent("filter_uninstall_verified");
                 }
 
                 var message = kind == DriverOperationKind.Uninstall
@@ -123,7 +163,9 @@ internal static class ElevatedDriverHost
                 var result = new DriverOperationResult(true, target.IsPresent, message,
                     instanceId, backupPath, paths.LogPath);
                 WriteResult(paths.ResultPath, result);
-                log.Write(message);
+                log.WriteEvent("completed", ("success", true),
+                    ("requires_replug", target.IsPresent),
+                    ("elapsed_ms", timer.ElapsedMilliseconds), ("message", message));
                 return 0;
             }
             finally
@@ -133,10 +175,16 @@ internal static class ElevatedDriverHost
         }
         catch (Exception error)
         {
-            log.Write("ERROR: " + error);
+            log.WriteException("operation_failed", error,
+                ("elapsed_ms", timer.ElapsedMilliseconds),
+                ("parent_removal_started", parentRemovalStarted));
+            log.WriteEvent("rollback_start", ("snapshot_entries", snapshot?.Length ?? 0),
+                ("created_system_files", createdSystemFiles.Count));
             var rollbackComplete = kind == DriverOperationKind.ParentRepair
                 ? !parentRemovalStarted
                 : RollBack(snapshot, serviceExistedBefore, createdSystemFiles, log);
+            log.WriteEvent("rollback_completed", ("complete", rollbackComplete),
+                ("elapsed_ms", timer.ElapsedMilliseconds));
             var message = kind == DriverOperationKind.ParentRepair
                 ? parentRemovalStarted
                     ? "Parent driver repair stopped after the removal request began. " +
@@ -153,7 +201,7 @@ internal static class ElevatedDriverHost
             }
             catch (Exception resultError)
             {
-                log.Write("Failed to write result: " + resultError.Message);
+                log.WriteException("result_write_failed", resultError);
             }
             return 1;
         }
@@ -184,13 +232,14 @@ internal static class ElevatedDriverHost
     private static string SaveSnapshot(DriverOperationKind kind, string serial,
         string operationId, FilterSnapshot[] snapshot, bool serviceExisted)
     {
+        var deviceFingerprint = DriverLogger.DeviceFingerprint(serial);
         var path = Path.Combine(DriverConstants.BackupsRoot,
-            $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{kind}-{serial}-{operationId}.json");
+            $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{kind}-{deviceFingerprint}-{operationId}.json");
         var payload = new
         {
             CreatedUtc = DateTime.UtcNow,
             Operation = kind.ToString(),
-            Serial = serial,
+            DeviceFingerprint = deviceFingerprint,
             ServiceExisted = serviceExisted,
             Devices = snapshot,
         };
@@ -202,19 +251,23 @@ internal static class ElevatedDriverHost
         OperationLog log)
     {
         var installer = Path.Combine(payloadRoot, @"amd64\install-filter.exe");
-        DriverPayload.ValidateHash(installer, DriverConstants.InstallerHash);
-        var result = RunProcess(installer, [command, device], TimeSpan.FromMinutes(2));
-        log.Write($"install-filter {command} exit={result.ExitCode}");
+        using var installerLock = DriverPayload.LockAndValidateHash(installer,
+            DriverConstants.InstallerHash);
+        log.WriteEvent("payload_hash_verified", ("asset", "install-filter.exe"),
+            ("sha256", DriverLogger.HashTag(DriverConstants.InstallerHash)));
+        var result = RunProcess(installer, [command, device], TimeSpan.FromMinutes(2), log,
+            "install-filter");
+        log.WriteEvent("filter_tool_result", ("command", command),
+            ("exit_code", result.ExitCode));
         if (!string.IsNullOrWhiteSpace(result.CombinedOutput))
-            foreach (var line in result.CombinedOutput.Split(['\r', '\n'],
-                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                log.Write("install-filter: " + line);
+            WriteProcessOutput(log, "filter_tool_output", result.CombinedOutput);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(
                 $"Exact-device filter operation failed with code {result.ExitCode}.");
     }
 
-    private static void EnsureSystemFiles(string payloadRoot, List<string> createdFiles)
+    private static void EnsureSystemFiles(string payloadRoot, List<string> createdFiles,
+        OperationLog log)
     {
         var windows = Path.GetDirectoryName(Environment.SystemDirectory)!;
         var deployments = new[]
@@ -232,15 +285,26 @@ internal static class ElevatedDriverHost
 
         foreach (var item in deployments)
         {
-            DriverPayload.ValidateHash(item.Source, item.Hash);
+            using var sourceLock = DriverPayload.LockAndValidateHash(item.Source, item.Hash);
+            log.WriteEvent("payload_hash_verified", ("asset", Path.GetFileName(item.Source)),
+                ("sha256", DriverLogger.HashTag(item.Hash)));
             if (File.Exists(item.Destination))
             {
                 DriverPayload.ValidateHash(item.Destination, item.Hash);
+                log.WriteEvent("system_file_verified", ("file", Path.GetFileName(item.Destination)),
+                    ("action", "existing"), ("sha256", DriverLogger.HashTag(item.Hash)));
                 continue;
             }
-            File.Copy(item.Source, item.Destination, overwrite: false);
+            using (var destination = new FileStream(item.Destination, FileMode.CreateNew,
+                       FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.WriteThrough))
+            {
+                sourceLock.CopyTo(destination);
+                destination.Flush(flushToDisk: true);
+            }
             createdFiles.Add(item.Destination);
             DriverPayload.ValidateHash(item.Destination, item.Hash);
+            log.WriteEvent("system_file_deployed", ("file", Path.GetFileName(item.Destination)),
+                ("action", "created"), ("sha256", DriverLogger.HashTag(item.Hash)));
         }
     }
 
@@ -361,7 +425,8 @@ internal static class ElevatedDriverHost
                 catch (Exception error)
                 {
                     complete = false;
-                    log.Write($"Snapshot restore failed for {item.InstanceId}: {error.Message}");
+                    log.WriteException("snapshot_restore_failed", error,
+                        ("device", DriverLogger.Sanitize(item.InstanceId)));
                 }
             }
         }
@@ -379,7 +444,8 @@ internal static class ElevatedDriverHost
                     catch (Exception error)
                     {
                         complete = false;
-                        log.Write($"Created file cleanup failed for {path}: {error.Message}");
+                        log.WriteException("created_file_cleanup_failed", error,
+                            ("file", Path.GetFileName(path)));
                     }
                 }
             }
@@ -430,16 +496,18 @@ internal static class ElevatedDriverHost
         do
         {
             if (CM_Locate_DevNodeW(out var node, instanceId, 0) == CrSuccess &&
-                CM_Get_DevNode_Status(out _, out var problem, node, 0) == CrSuccess &&
-                problem == 0) return true;
+                CM_Get_DevNode_Status(out var status, out var problem, node, 0) == CrSuccess &&
+                problem == 0 && (status & DevNodePresent) != 0) return true;
             Thread.Sleep(250);
         } while (DateTime.UtcNow < deadline);
         return false;
     }
 
     private static ProcessResult RunProcess(string executable,
-        IReadOnlyList<string> arguments, TimeSpan timeout)
+        IReadOnlyList<string> arguments, TimeSpan timeout, OperationLog? log = null,
+        string? processName = null)
     {
+        var timer = Stopwatch.StartNew();
         var start = new ProcessStartInfo
         {
             FileName = executable,
@@ -450,17 +518,40 @@ internal static class ElevatedDriverHost
             WorkingDirectory = Path.GetDirectoryName(executable)!,
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        var name = processName ?? Path.GetFileName(executable);
+        log?.WriteEvent("process_start", ("process", name),
+            ("argument_count", arguments.Count), ("timeout_ms", timeout.TotalMilliseconds));
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("The filter installer did not start.");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(checked((int)timeout.TotalMilliseconds)))
         {
-            try { process.Kill(entireProcessTree: true); } catch { }
+            var terminationRequested = false;
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                terminationRequested = true;
+                process.WaitForExit(5000);
+            }
+            catch (Exception error)
+            {
+                log?.WriteException("process_timeout_termination_failed", error,
+                    ("process", name));
+            }
+            log?.WriteError("process_timeout", ("process", name),
+                ("elapsed_ms", timer.ElapsedMilliseconds),
+                ("termination_requested", terminationRequested),
+                ("terminated", process.HasExited));
             throw new TimeoutException("The filter installer timed out.");
         }
         Task.WaitAll(stdout, stderr);
-        return new ProcessResult(process.ExitCode, stdout.Result, stderr.Result);
+        var result = new ProcessResult(process.ExitCode, stdout.Result, stderr.Result);
+        log?.WriteEvent("process_exit", ("process", name), ("exit_code", result.ExitCode),
+            ("elapsed_ms", timer.ElapsedMilliseconds),
+            ("stdout_length", result.StandardOutput.Length),
+            ("stderr_length", result.StandardError.Length));
+        return result;
     }
 
     private static bool TryRemoveNewService(OperationLog log)
@@ -469,10 +560,12 @@ internal static class ElevatedDriverHost
         try
         {
             var sc = Path.Combine(Environment.SystemDirectory, "sc.exe");
-            var stop = RunProcess(sc, ["stop", "libusb0"], TimeSpan.FromSeconds(20));
-            log.Write("rollback sc stop exit=" + stop.ExitCode);
-            var delete = RunProcess(sc, ["delete", "libusb0"], TimeSpan.FromSeconds(20));
-            log.Write("rollback sc delete exit=" + delete.ExitCode);
+            var stop = RunProcess(sc, ["stop", "libusb0"], TimeSpan.FromSeconds(20), log,
+                "sc-stop");
+            log.WriteEvent("service_rollback_stop", ("exit_code", stop.ExitCode));
+            var delete = RunProcess(sc, ["delete", "libusb0"], TimeSpan.FromSeconds(20), log,
+                "sc-delete");
+            log.WriteEvent("service_rollback_delete", ("exit_code", delete.ExitCode));
             var deadline = DateTime.UtcNow.AddSeconds(5);
             while (DateTime.UtcNow < deadline)
             {
@@ -483,7 +576,7 @@ internal static class ElevatedDriverHost
         }
         catch (Exception error)
         {
-            log.Write("Service rollback failed: " + error.Message);
+            log.WriteException("service_rollback_failed", error);
             return false;
         }
     }
@@ -499,19 +592,53 @@ internal static class ElevatedDriverHost
     {
         var pnputil = Path.Combine(Environment.SystemDirectory, "pnputil.exe");
         var result = RunProcess(pnputil, ["/remove-device", instanceId, "/force"],
-            TimeSpan.FromMinutes(2));
-        log.Write($"pnputil remove-device exit={result.ExitCode}");
-        foreach (var line in result.CombinedOutput.Split(['\r', '\n'],
-                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            log.Write("pnputil: " + line);
+            TimeSpan.FromMinutes(2), log, "pnputil");
+        log.WriteEvent("pnp_remove_result", ("exit_code", result.ExitCode));
+        WriteProcessOutput(log, "pnp_remove_output", result.CombinedOutput);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(
                 $"Windows failed to remove the incorrect Apple parent device (code {result.ExitCode}).");
     }
 
+    private static void WriteProcessOutput(OperationLog log, string eventName, string output)
+    {
+        var lines = output.Split(['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var truncatedLines = 0;
+        var headCount = lines.Length <= MaximumLoggedProcessOutputLines
+            ? lines.Length
+            : MaximumLoggedProcessOutputLines / 2;
+        var tailStart = lines.Length <= MaximumLoggedProcessOutputLines
+            ? lines.Length
+            : lines.Length - MaximumLoggedProcessOutputLines / 2;
+
+        void WriteLine(int index)
+        {
+            var line = lines[index];
+            var truncated = line.Length > MaximumLoggedProcessLineCharacters;
+            if (truncated)
+            {
+                line = line[..MaximumLoggedProcessLineCharacters] + "...<truncated>";
+                truncatedLines++;
+            }
+            log.WriteEvent(eventName, ("line_number", index + 1),
+                ("line", line), ("truncated", truncated));
+        }
+
+        for (var index = 0; index < headCount; index++) WriteLine(index);
+        for (var index = tailStart; index < lines.Length; index++) WriteLine(index);
+
+        var loggedLines = headCount + lines.Length - tailStart;
+        log.WriteEvent(eventName + "_summary", ("characters", output.Length),
+            ("total_lines", lines.Length), ("logged_lines", loggedLines),
+            ("omitted_lines", lines.Length - loggedLines),
+            ("truncated_lines", truncatedLines));
+    }
+
     private static bool IsDevicePresent(string instanceId) =>
         CM_Locate_DevNodeW(out var node, instanceId, 0) == CrSuccess &&
-        CM_Get_DevNode_Status(out _, out _, node, 0) == CrSuccess;
+        CM_Get_DevNode_Status(out var status, out var problem, node, 0) == CrSuccess &&
+        problem == 0 && (status & DevNodePresent) != 0;
 
     private static bool IsAdministrator()
     {
@@ -530,10 +657,93 @@ internal static class ElevatedDriverHost
     private sealed record FilterSnapshot(
         string InstanceId, bool UpperFiltersExisted, string[] UpperFilters);
 
-    private sealed class OperationLog(string path)
+    private sealed class OperationLog
     {
-        internal void Write(string message) => File.AppendAllText(path,
-            $"{DateTime.UtcNow:O} {message}{Environment.NewLine}", Encoding.UTF8);
+        private const long MaximumBytes = 1024L * 1024;
+        private readonly string _path;
+        private readonly string _operationId;
+        private readonly DriverOperationKind _kind;
+        private readonly object _gate = new();
+
+        internal OperationLog(string path, string operationId, DriverOperationKind kind)
+        {
+            _path = path;
+            _operationId = operationId;
+            _kind = kind;
+        }
+
+        internal void Write(string message) =>
+            WriteEvent("message", ("message", message));
+
+        internal void WriteEvent(string eventName,
+            params (string Key, object? Value)[] fields) =>
+            Append("INFO", eventName, fields);
+
+        internal void WriteWarning(string eventName,
+            params (string Key, object? Value)[] fields) =>
+            Append("WARN", eventName, fields);
+
+        internal void WriteError(string eventName,
+            params (string Key, object? Value)[] fields) =>
+            Append("ERROR", eventName, fields);
+
+        internal void WriteException(string eventName, Exception error,
+            params (string Key, object? Value)[] fields)
+        {
+            var all = new (string Key, object? Value)[fields.Length + 2];
+            fields.CopyTo(all, 0);
+            all[^2] = ("exception", error.GetType().Name);
+            all[^1] = ("error", error.Message);
+            Append("ERROR", eventName, all);
+        }
+
+        private void Append(string level, string eventName,
+            IReadOnlyList<(string Key, object? Value)> fields)
+        {
+            try
+            {
+                var all = new (string Key, object? Value)[fields.Count + 2];
+                all[0] = ("operation", _operationId);
+                all[1] = ("kind", _kind);
+                for (var index = 0; index < fields.Count; index++)
+                    all[index + 2] = fields[index];
+                lock (_gate)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+                    var entry = DriverLogger.FormatEntry(level, "elevated-driver",
+                        eventName, all);
+                    var entryBytes = Encoding.UTF8.GetByteCount(entry);
+                    if (entryBytes > MaximumBytes)
+                    {
+                        entry = DriverLogger.FormatEntry("WARN", "elevated-driver",
+                            "oversized_log_entry_dropped", ("operation", _operationId),
+                            ("kind", _kind), ("event_name", eventName),
+                            ("entry_bytes", entryBytes));
+                        entryBytes = Encoding.UTF8.GetByteCount(entry);
+                    }
+                    RotateIfNeeded(entryBytes);
+                    File.AppendAllText(_path, entry, Encoding.UTF8);
+                }
+            }
+            catch
+            {
+                // Diagnostics must not turn a recoverable driver operation into a failure.
+            }
+        }
+
+        private void RotateIfNeeded(int nextEntryBytes)
+        {
+            if (!File.Exists(_path)) return;
+            var currentBytes = new FileInfo(_path).Length;
+            if (currentBytes + nextEntryBytes <= MaximumBytes) return;
+
+            var archivePath = _path + ".1";
+            if (File.Exists(archivePath)) File.Delete(archivePath);
+            if (currentBytes <= MaximumBytes)
+                File.Move(_path, archivePath);
+            else
+                File.Delete(_path);
+        }
     }
 
     [System.Runtime.InteropServices.DllImport("cfgmgr32.dll", CharSet =

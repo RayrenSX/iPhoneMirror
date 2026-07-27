@@ -4,6 +4,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace iPhoneMirror::coremedia {
@@ -82,6 +83,61 @@ void parse_avcc(FormatDescription& format) {
     }
 }
 
+void parse_hvcc(FormatDescription& format) {
+    const auto marker = quicktime::fourcc('d', 'a', 't', 'v');
+    for (std::size_t index = 0; index + 4 <= format.extensions.size(); ++index) {
+        if (u32le(format.extensions.data() + index) != marker) continue;
+        const auto config = std::span(format.extensions).subspan(index + 4);
+        // ISO/IEC 14496-15 HEVCDecoderConfigurationRecord through numOfArrays.
+        if (config.size() < 23 || config[0] != 1) continue;
+
+        const auto nalu_length_size = static_cast<std::uint8_t>((config[21] & 0x03U) + 1U);
+        const auto chroma_format = static_cast<std::uint8_t>((config[16] & 0x03U));
+        const auto bit_depth_luma = static_cast<std::uint8_t>(8U + (config[17] & 0x07U));
+        const auto bit_depth_chroma = static_cast<std::uint8_t>(8U + (config[18] & 0x07U));
+        std::vector<std::vector<std::uint8_t>> vps;
+        std::vector<std::vector<std::uint8_t>> sps;
+        std::vector<std::vector<std::uint8_t>> pps;
+        std::size_t offset = 23;
+        const auto array_count = config[22];
+        bool valid = true;
+        for (std::uint8_t array_index{}; array_index < array_count; ++array_index) {
+            if (config.size() - offset < 3) { valid = false; break; }
+            const auto nalu_type = static_cast<std::uint8_t>(config[offset++] & 0x3fU);
+            const auto nalu_count = u16be(config.data() + offset);
+            offset += 2;
+            for (std::uint16_t item{}; item < nalu_count; ++item) {
+                if (config.size() - offset < 2) { valid = false; break; }
+                const auto length = u16be(config.data() + offset);
+                offset += 2;
+                if (length == 0 || length > config.size() - offset) {
+                    valid = false;
+                    break;
+                }
+                std::vector<std::uint8_t> nalu(
+                    config.begin() + static_cast<std::ptrdiff_t>(offset),
+                    config.begin() + static_cast<std::ptrdiff_t>(offset + length));
+                if (nalu_type == 32) vps.push_back(std::move(nalu));
+                else if (nalu_type == 33) sps.push_back(std::move(nalu));
+                else if (nalu_type == 34) pps.push_back(std::move(nalu));
+                offset += length;
+            }
+            if (!valid) break;
+        }
+        if (!valid || sps.empty() || pps.empty()) continue;
+        format.nalu_length_size = nalu_length_size;
+        format.chroma_format = chroma_format;
+        format.bit_depth_luma = bit_depth_luma;
+        format.bit_depth_chroma = bit_depth_chroma;
+        format.video_parameter_sets = std::move(vps);
+        format.sequence_parameter_sets = std::move(sps);
+        format.picture_parameter_sets = std::move(pps);
+        format.decoder_configuration_record.assign(config.begin(),
+            config.begin() + static_cast<std::ptrdiff_t>(offset));
+        return;
+    }
+}
+
 FormatDescription parse_format_description(std::span<const std::uint8_t> bytes) {
     FormatDescription format;
     std::size_t offset{};
@@ -112,7 +168,8 @@ FormatDescription parse_format_description(std::span<const std::uint8_t> bytes) 
         const auto extensions = read_chunk(bytes, offset);
         if (extensions.magic != quicktime::fourcc('e', 'x', 't', 'n')) throw std::runtime_error("missing video extensions");
         format.extensions.assign(extensions.payload.begin(), extensions.payload.end());
-        parse_avcc(format);
+        if (format.video_codec() == VideoCodec::H264) parse_avcc(format);
+        else if (format.video_codec() == VideoCodec::Hevc) parse_hvcc(format);
     } else {
         throw std::runtime_error("unsupported CoreMedia media type");
     }
@@ -126,7 +183,34 @@ double CMTime::seconds() const noexcept {
     return timescale == 0 ? 0.0 : static_cast<double>(value) / static_cast<double>(timescale);
 }
 
-bool CMTime::valid() const noexcept { return timescale != 0 && (flags & 1U) != 0; }
+bool CMTime::valid() const noexcept {
+    // kCMTimeFlags_HasBeenRounded (bit 1) can accompany an ordinary value.
+    // Positive/negative infinity and indefinite (bits 2..4) are implied
+    // values and must never reach timestamp arithmetic.
+    constexpr std::uint32_t Valid = 1U;
+    constexpr std::uint32_t ImpliedValueFlagsMask = 0x1cU;
+    return timescale > 0 && (flags & Valid) != 0 &&
+        (flags & ImpliedValueFlagsMask) == 0;
+}
+
+std::optional<std::int64_t> CMTime::to_100ns() const noexcept {
+    if (!valid()) return std::nullopt;
+    constexpr std::int64_t UnitsPerSecond = 10'000'000;
+    const auto scale = static_cast<std::int64_t>(timescale);
+    const auto quotient = value / scale;
+    const auto remainder = value % scale;
+    constexpr auto Minimum = std::numeric_limits<std::int64_t>::min();
+    constexpr auto Maximum = std::numeric_limits<std::int64_t>::max();
+    if (quotient > Maximum / UnitsPerSecond ||
+        quotient < Minimum / UnitsPerSecond) return std::nullopt;
+    const auto whole = quotient * UnitsPerSecond;
+    // abs(remainder) < INT32_MAX, so this multiplication is bounded well
+    // inside int64_t even for the largest valid timescale.
+    const auto fractional = (remainder * UnitsPerSecond) / scale;
+    if ((fractional > 0 && whole > Maximum - fractional) ||
+        (fractional < 0 && whole < Minimum - fractional)) return std::nullopt;
+    return whole + fractional;
+}
 
 CMTime parse_time(std::span<const std::uint8_t> bytes) {
     if (bytes.size() < 24) throw std::runtime_error("CMTime requires 24 bytes");
@@ -193,6 +277,14 @@ SampleBufferEnvelope parse_sample_envelope(std::span<const std::uint8_t> payload
 
 bool FormatDescription::is_video() const noexcept { return media_type == quicktime::fourcc('v', 'i', 'd', 'e'); }
 bool FormatDescription::is_audio() const noexcept { return media_type == quicktime::fourcc('s', 'o', 'u', 'n'); }
+
+VideoCodec FormatDescription::video_codec() const noexcept {
+    if (codec == quicktime::fourcc('a', 'v', 'c', '1') ||
+        codec == quicktime::fourcc('a', 'v', 'c', '3')) return VideoCodec::H264;
+    if (codec == quicktime::fourcc('h', 'v', 'c', '1') ||
+        codec == quicktime::fourcc('h', 'e', 'v', '1')) return VideoCodec::Hevc;
+    return VideoCodec::Unknown;
+}
 
 SampleBuffer parse_sample_buffer(std::span<const std::uint8_t> serialized) {
     if (serialized.size() < 4 || u32le(serialized.data()) != quicktime::fourcc('s', 'b', 'u', 'f')) {

@@ -14,16 +14,30 @@ $RaopHeaderFile = Join-Path $SourceRoot 'AirPlayServerLib\include\raop.h'
 $RaopRouterFile = Join-Path $SourceRoot 'AirPlayServerLib\lib\raop.c'
 $PairingFile = Join-Path $SourceRoot 'AirPlayServerLib\lib\pairing.c'
 $GlobalFile = Join-Path $SourceRoot 'AirPlayServerLib\lib\global.h'
+$MirrorBufferFile = Join-Path $SourceRoot 'AirPlayServerLib\lib\mirror_buffer.c'
 $WrapperServerFile = Join-Path $SourceRoot 'airplay2dll\src\FgAirplayServer.cpp'
 foreach ($File in @($DnsSdFile, $AirPlayFile, $AirPlayHandlersFile,
         $RaopFile, $RaopHeaderFile, $RaopRouterFile, $PairingFile, $GlobalFile,
-        $WrapperServerFile)) {
+        $MirrorBufferFile, $WrapperServerFile)) {
     if (-not (Test-Path -LiteralPath $File)) {
         throw "AirPlayServer media capability source is missing: $File"
     }
 }
 
 $Encoding = [Text.UTF8Encoding]::new($false)
+$MirrorBuffer = [IO.File]::ReadAllText($MirrorBufferFile, $Encoding)
+$MirrorCommentMarker = 'IPHONE_MIRROR_ASCII_DECRYPT_COMMENT'
+if (-not $MirrorBuffer.Contains($MirrorCommentMarker)) {
+    $Pattern = '(?m)^(\s*mirror_buffer->nextDecryptCount = 16 - restlen;)[^\r\n]*$'
+    if ([regex]::Matches($MirrorBuffer, $Pattern).Count -ne 1) {
+        throw 'AirPlay mirror-buffer comment repair point changed.'
+    }
+    # The upstream UTF-8 Chinese comment contains a byte that CP936 interprets
+    # as a trailing backslash. MSVC then line-splices away the closing brace.
+    $MirrorBuffer = [regex]::Replace($MirrorBuffer, $Pattern,
+        '$1 // IPHONE_MIRROR_ASCII_DECRYPT_COMMENT')
+    [IO.File]::WriteAllText($MirrorBufferFile, $MirrorBuffer, $Encoding)
+}
 $Global = [IO.File]::ReadAllText($GlobalFile, $Encoding)
 $Global = $Global.Replace('"AppleTV14,1"', '"AppleTV3,2"')
 $Global = $Global.Replace('"Kodi,1"', '"AppleTV3,2"')
@@ -319,6 +333,48 @@ elseif (-not $AirPlay.Contains('IPHONE_MIRROR_MEDIA_CAST_MODE')) {
     $AirPlay = $AirPlay.Replace($Needle, $Replacement)
 }
 
+# Some upstream tags do not contain the legacy blocking stanza above. Ensure
+# the mode flag used by the FairPlay and playback-control routes is declared
+# independently of which historical patch shape was found.
+if (-not $AirPlay.Contains(
+        'const char *iphone_mirror_mode = getenv("IPHONE_MIRROR_AIRPLAY_MODE");')) {
+    $Needle = "`tlogger_log(conn->airplay->logger, LOGGER_DEBUG, `"[AirPlay] Handling request %s with URL %s`", method, url);"
+    $ModeDeclaration = @'
+	/* IPHONE_MIRROR_MEDIA_CAST_MODE */
+	const char *iphone_mirror_mode = getenv("IPHONE_MIRROR_AIRPLAY_MODE");
+	int iphone_mirror_media_cast = iphone_mirror_mode != NULL &&
+		(!strcmp(iphone_mirror_mode, "media") ||
+		 !strcmp(iphone_mirror_mode, "combined"));
+'@ -replace "`r?`n", $NewLine
+    if ([regex]::Matches($AirPlay, [regex]::Escape($Needle)).Count -ne 1) {
+        throw 'AirPlay media-mode declaration insertion point changed.'
+    }
+    $AirPlay = $AirPlay.Replace($Needle,
+        $ModeDeclaration.TrimEnd("`r", "`n") + $NewLine + $Needle)
+}
+
+$LegacyRateRoute = @'
+	// POST /rate?value=1.000000 HTTP/1.1
+	else if (!strcmp(method, "POST") && !strncmp(url, "/rate", strlen("/rate"))) {
+//		handler = &raop_handler_pairsetup;
+	}
+'@ -replace "`r?`n", $NewLine
+$MediaRateRoute = @'
+	// POST /rate?value=1.000000 HTTP/1.1
+	else if (!strcmp(method, "POST") &&
+		!strncmp(url, "/rate", strlen("/rate"))) {
+		/* IPHONE_MIRROR_MEDIA_CAST_RATE_CONTROL */
+		const char *value = strstr(url, "value=");
+		if (conn->airplay->callbacks.video_play != NULL)
+			conn->airplay->callbacks.video_play(conn->airplay->callbacks.cls,
+				value != NULL && atof(value + 6) == 0 ?
+				"iphonemirror://pause" : "iphonemirror://resume", 0, 0);
+	}
+'@ -replace "`r?`n", $NewLine
+if ($AirPlay.Contains($LegacyRateRoute)) {
+    $AirPlay = $AirPlay.Replace($LegacyRateRoute, $MediaRateRoute)
+}
+
 $StopMarker = 'IPHONE_MIRROR_MEDIA_CAST_STOP'
 $LegacyStopCallback = @'
 		auto video_play = conn->airplay->callbacks.video_play;
@@ -348,6 +404,13 @@ if (-not $AirPlay.Contains($StopMarker)) {
 			conn->airplay->callbacks.video_play(
 				conn->airplay->callbacks.cls, NULL, 0, 0);
 	}
+	else if (!strncmp(url, "/scrub", 6)) {
+		/* IPHONE_MIRROR_MEDIA_CAST_SEEK_CONTROL */
+		const char *position = strstr(url, "position=");
+		if (position != NULL && conn->airplay->callbacks.video_play != NULL)
+			conn->airplay->callbacks.video_play(conn->airplay->callbacks.cls,
+				"iphonemirror://seek", 0, atof(position + 9));
+	}
 	else if (!strcmp(method, "POST") && !strcmp(url, "/reverse")) {
 '@ -replace "`r?`n", $NewLine
     if ([regex]::Matches($AirPlay, [regex]::Escape($Needle)).Count -ne 1) {
@@ -355,6 +418,13 @@ if (-not $AirPlay.Contains($StopMarker)) {
     }
     $AirPlay = $AirPlay.Replace($Needle, $Replacement.TrimEnd("`r", "`n"))
 }
+$AirPlay = [regex]::Replace($AirPlay,
+    'else if \(iphone_mirror_media_cast && !strcmp\(method, "POST"\) &&\r?\n\s*!strncmp\(url, "/rate", strlen\("/rate"\)\)\) \{',
+    'else if (!strcmp(method, "POST") &&' + $NewLine +
+    "`t`t!strncmp(url, `"/rate`", strlen(`"/rate`"))) {")
+$AirPlay = $AirPlay.Replace(
+    'else if (iphone_mirror_media_cast && !strncmp(url, "/scrub", 6)) {',
+    'else if (!strncmp(url, "/scrub", 6)) {')
 $AirPlay = $AirPlay.Replace(
     'conn->airplay->callbacks.video_play(conn->airplay->callbacks.cls, url, volume, start_pos);',
     'conn->airplay->callbacks.video_play(conn->airplay->callbacks.cls, url, volume, start_pos_sec > 0 ? start_pos_sec : start_pos);')
@@ -802,11 +872,30 @@ $MediaHandlerStart = @'
 		if (conn->raop->callbacks.video_play != NULL)
 			conn->raop->callbacks.video_play(
 				conn->raop->callbacks.cls, NULL, 0, 0);
+	} else if (!strncmp(url, "/rate", 5)) {
+		/* IPHONE_MIRROR_RAOP_RATE_CONTROL */
+		const char *value = strstr(url, "value=");
+		if (conn->raop->callbacks.video_play != NULL)
+			conn->raop->callbacks.video_play(conn->raop->callbacks.cls,
+				value != NULL && atof(value + 6) == 0 ?
+				"iphonemirror://pause" : "iphonemirror://resume", 0, 0);
+	} else if (!strncmp(url, "/scrub", 6)) {
+		/* IPHONE_MIRROR_RAOP_SEEK_CONTROL */
+		const char *position = strstr(url, "position=");
+		if (position != NULL && conn->raop->callbacks.video_play != NULL)
+			conn->raop->callbacks.video_play(conn->raop->callbacks.cls,
+				"iphonemirror://seek", 0, atof(position + 9));
 	} else if (!strcmp(method, "GET") && !strcmp(url, "/info")) {
 '@ -replace "`r?`n", $RouterNewLine
 if ($RaopRouter.Contains($LegacyHandlerStart)) {
     $RaopRouter = $RaopRouter.Replace($LegacyHandlerStart, $MediaHandlerStart)
 }
+$RaopRouter = $RaopRouter.Replace(
+    '} else if (iphone_mirror_media_cast && !strncmp(url, "/rate", 5)) {',
+    '} else if (!strncmp(url, "/rate", 5)) {')
+$RaopRouter = $RaopRouter.Replace(
+    '} else if (iphone_mirror_media_cast && !strncmp(url, "/scrub", 6)) {',
+    '} else if (!strncmp(url, "/scrub", 6)) {')
 if (-not $RaopRouter.Contains('iphone_mirror_media_control =')) {
     throw 'AirPlay unified RAOP media-control route was not applied.'
 }

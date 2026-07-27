@@ -30,10 +30,13 @@ internal static class StableDeviceSelection
         IEnumerable<string> visibleOrder,
         string? previousSelectionUdid,
         string? activeCaptureUdid,
-        string? newlyConnectedWirelessUdid = null)
+        string? newlyConnectedWirelessUdid = null,
+        bool preferNewlyConnectedWireless = true)
     {
         var visible = visibleOrder.Where(Valid).ToArray();
-        return visible.FirstOrDefault(udid => Same(udid, newlyConnectedWirelessUdid))
+        return (preferNewlyConnectedWireless
+                ? visible.FirstOrDefault(udid => Same(udid, newlyConnectedWirelessUdid))
+                : null)
             ?? visible.FirstOrDefault(udid => Same(udid, previousSelectionUdid))
             ?? visible.FirstOrDefault(udid => Same(udid, activeCaptureUdid))
             ?? visible.FirstOrDefault();

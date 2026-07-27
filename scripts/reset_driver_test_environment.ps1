@@ -14,7 +14,12 @@ $ExpectedDll64Hash = '4F18B5D2C28AA66B648C8683C6D09B52B92CBBEE85984BBEFAD5F38A64
 $ExpectedDll32Hash = '00CACA07869B19D10B370552AC7CC2F6F2EE246FC15DB11650F6CD3F4EF9B666'
 $Root = Split-Path -Parent $PSScriptRoot
 $Installer = Join-Path $Root 'src\DriverInstaller\Assets\libusb-win32-1.2.6.0\amd64\install-filter.exe'
-$DataRoot = Join-Path $env:ProgramData 'iPhoneMirror.Driver\TestResets'
+$WindowsRoot = [Environment]::GetFolderPath('Windows')
+$SystemDirectory = [Environment]::SystemDirectory
+$DataRoot = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) `
+    'iPhoneMirror.Driver\TestResets'
+$RegExe = Join-Path $SystemDirectory 'reg.exe'
+$ScExe = Join-Path $SystemDirectory 'sc.exe'
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -81,27 +86,42 @@ function Restore-Snapshots([object[]]$Snapshots) {
 function Get-LibUsb0References {
     $references = @()
     foreach ($rootPath in @(
-        'SYSTEM\CurrentControlSet\Enum\USB',
+        'SYSTEM\CurrentControlSet\Enum',
         'SYSTEM\CurrentControlSet\Control\Class')) {
         $rootKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($rootPath, $false)
-        if ($null -eq $rootKey) { continue }
+        if ($null -eq $rootKey) {
+            throw "Cannot prove libusb0 is unused because $rootPath could not be opened."
+        }
         try {
             $stack = [Collections.Generic.Stack[object]]::new()
             $stack.Push([PSCustomObject]@{ Key = $rootKey; Path = $rootPath; Owns = $false })
             while ($stack.Count -ne 0) {
                 $entry = $stack.Pop()
                 try {
-                    $filters = @(Get-UpperFilters $entry.Key)
-                    if ($filters -contains 'libusb0') { $references += $entry.Path }
+                    $service = $entry.Key.GetValue('Service', $null,
+                        [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                    if ($service -is [string] -and
+                        [string]::Equals($service, 'libusb0',
+                            [StringComparison]::OrdinalIgnoreCase)) {
+                        $references += "$($entry.Path) [Service]"
+                    }
+                    foreach ($valueName in @('UpperFilters', 'LowerFilters')) {
+                        $filters = @($entry.Key.GetValue($valueName, $null,
+                            [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+                        if ($filters -contains 'libusb0') {
+                            $references += "$($entry.Path) [$valueName]"
+                        }
+                    }
                     foreach ($name in $entry.Key.GetSubKeyNames()) {
                         $child = $entry.Key.OpenSubKey($name, $false)
-                        if ($null -ne $child) {
-                            $stack.Push([PSCustomObject]@{
-                                Key = $child
-                                Path = "$($entry.Path)\$name"
-                                Owns = $true
-                            })
+                        if ($null -eq $child) {
+                            throw "Cannot prove libusb0 is unused because $($entry.Path)\$name could not be opened."
                         }
+                        $stack.Push([PSCustomObject]@{
+                            Key = $child
+                            Path = "$($entry.Path)\$name"
+                            Owns = $true
+                        })
                     }
                 } finally {
                     if ($entry.Owns) { $entry.Key.Dispose() }
@@ -120,6 +140,44 @@ function Assert-Hash([string]$Path, [string]$Expected) {
     if ($actual -ne $Expected) { throw "Hash mismatch: $Path" }
 }
 
+function Invoke-ServiceControl([string[]]$Arguments) {
+    $output = & $ScExe @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    return [PSCustomObject]@{
+        ExitCode = $exitCode
+        Output = (@($output | ForEach-Object { $_.ToString() }) -join
+            [Environment]::NewLine)
+    }
+}
+
+function Get-LibUsb0ServiceState {
+    try {
+        $drivers = @(Get-CimInstance -ClassName Win32_SystemDriver `
+            -Filter "Name = 'libusb0'" -ErrorAction Stop)
+    }
+    catch {
+        throw "Unable to query libusb0 service safely: $($_.Exception.Message)"
+    }
+    if ($drivers.Count -eq 0) { return $null }
+    if ($drivers.Count -ne 1) {
+        throw "Expected one libusb0 service, found $($drivers.Count)."
+    }
+    return [string]$drivers[0].State
+}
+
+function Wait-LibUsb0Service([switch]$Deleted, [int]$TimeoutSeconds = 15) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $state = Get-LibUsb0ServiceState
+        if ($Deleted -and $null -eq $state) { return }
+        if (-not $Deleted -and $state -eq 'Stopped') { return }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    $expected = if ($Deleted) { 'deleted' } else { 'stopped' }
+    throw "libusb0 service did not become $expected within $TimeoutSeconds seconds."
+}
+
 if (-not $Execute) {
     $targets = @(Get-AppleFilterTargets)
     Write-Host 'DRY RUN - no system changes were made.'
@@ -130,10 +188,15 @@ if (-not $Execute) {
 }
 
 if (-not (Test-Administrator)) {
+    $quotedScriptPath = '"' + $PSCommandPath + '"'
     $arguments = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
-        '-Execute', '-Confirmation', $Confirmation)
-    $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arguments -Wait -PassThru
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $quotedScriptPath,
+        '-Execute')
+    if (-not [string]::IsNullOrWhiteSpace($Confirmation)) {
+        $arguments += @('-Confirmation', $Confirmation)
+    }
+    $process = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') `
+        -Verb RunAs -ArgumentList $arguments -Wait -PassThru
     exit $process.ExitCode
 }
 
@@ -156,11 +219,12 @@ $targets = @(Get-AppleFilterTargets)
 $targets | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backup 'filters.json') -Encoding UTF8
 $serviceBackup = Join-Path $backup 'libusb0-service.reg'
 $globalRemovalStarted = $false
+$serviceWasRunning = $false
 
 $systemFiles = @(
-    [PSCustomObject]@{ Path = "$env:WINDIR\System32\drivers\libusb0.sys"; Hash = $ExpectedDriverHash; BackupName = 'libusb0.sys' },
-    [PSCustomObject]@{ Path = "$env:WINDIR\System32\libusb0.dll"; Hash = $ExpectedDll64Hash; BackupName = 'libusb0-system32.dll' },
-    [PSCustomObject]@{ Path = "$env:WINDIR\SysWOW64\libusb0.dll"; Hash = $ExpectedDll32Hash; BackupName = 'libusb0-syswow64.dll' }
+    [PSCustomObject]@{ Path = (Join-Path $SystemDirectory 'drivers\libusb0.sys'); Hash = $ExpectedDriverHash; BackupName = 'libusb0.sys' },
+    [PSCustomObject]@{ Path = (Join-Path $SystemDirectory 'libusb0.dll'); Hash = $ExpectedDll64Hash; BackupName = 'libusb0-system32.dll' },
+    [PSCustomObject]@{ Path = (Join-Path $WindowsRoot 'SysWOW64\libusb0.dll'); Hash = $ExpectedDll32Hash; BackupName = 'libusb0-syswow64.dll' }
 )
 foreach ($file in $systemFiles) {
     if (Test-Path -LiteralPath $file.Path) {
@@ -191,15 +255,33 @@ try {
         Write-Warning 'Global libusb0 service was retained because other references still exist:'
         $references | ForEach-Object { Write-Warning "  $_" }
     } else {
-        & "$env:WINDIR\System32\reg.exe" export 'HKLM\SYSTEM\CurrentControlSet\Services\libusb0' $serviceBackup /y | Out-Null
+        $serviceState = Get-LibUsb0ServiceState
+        if ($null -eq $serviceState) {
+            throw 'The libusb0 service is missing; global cleanup was refused.'
+        }
+        if ($serviceState -notin @('Stopped', 'Running')) {
+            throw "The libusb0 service is in transient state $serviceState; global cleanup was refused."
+        }
+        $serviceWasRunning = $serviceState -eq 'Running'
+        & $RegExe export 'HKLM\SYSTEM\CurrentControlSet\Services\libusb0' `
+            $serviceBackup /y | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Unable to back up the libusb0 service registry key.' }
         $globalRemovalStarted = $true
         foreach ($file in $systemFiles) {
             if (Test-Path -LiteralPath $file.Path) { Assert-Hash $file.Path $file.Hash }
         }
-        & "$env:WINDIR\System32\sc.exe" stop libusb0 | Out-Null
-        & "$env:WINDIR\System32\sc.exe" delete libusb0 | Out-Null
-        Start-Sleep -Milliseconds 500
+        if ($serviceState -ne 'Stopped') {
+            $stop = Invoke-ServiceControl @('stop', 'libusb0')
+            if ($stop.ExitCode -notin @(0, 1062)) {
+                throw "Unable to stop libusb0 service: $($stop.Output)"
+            }
+            Wait-LibUsb0Service
+        }
+        $delete = Invoke-ServiceControl @('delete', 'libusb0')
+        if ($delete.ExitCode -ne 0) {
+            throw "Unable to delete libusb0 service: $($delete.Output)"
+        }
+        Wait-LibUsb0Service -Deleted
         foreach ($file in $systemFiles) {
             if (Test-Path -LiteralPath $file.Path) {
                 Remove-Item -LiteralPath $file.Path -Force
@@ -220,8 +302,14 @@ try {
             }
         }
         if (Test-Path -LiteralPath $serviceBackup) {
-            & "$env:WINDIR\System32\reg.exe" import $serviceBackup | Out-Null
+            & $RegExe import $serviceBackup | Out-Null
             if ($LASTEXITCODE -ne 0) { Write-Warning 'Service registry restore failed.' }
+            elseif ($serviceWasRunning) {
+                $start = Invoke-ServiceControl @('start', 'libusb0')
+                if ($start.ExitCode -notin @(0, 1056)) {
+                    Write-Warning "Service restart failed: $($start.Output)"
+                }
+            }
         }
     }
     Restore-Snapshots $targets

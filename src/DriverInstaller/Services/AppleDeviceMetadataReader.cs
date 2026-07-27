@@ -49,13 +49,16 @@ internal static class AppleDeviceMetadataReader
                     }
                     catch (Exception error)
                     {
-                        DriverLogger.Write($"Lockdown metadata unavailable for {serial}: {error.Message}");
+                        DriverLogger.WriteException("usbmux", "lockdown_metadata_unavailable", error,
+                            ("device", DriverLogger.DeviceFingerprint(serial)),
+                            ("port", port));
                     }
                 }
             }
             catch (Exception error)
             {
-                DriverLogger.Write($"usbmux metadata port {port} unavailable: {error.Message}");
+                DriverLogger.WriteException("usbmux", "metadata_port_unavailable", error,
+                    ("port", port));
             }
         }
         return result;
@@ -64,16 +67,24 @@ internal static class AppleDeviceMetadataReader
     private static TcpClient Connect(int port)
     {
         var client = new TcpClient { ReceiveTimeout = 1500, SendTimeout = 1500 };
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(750));
-        client.ConnectAsync(IPAddress.Loopback, port, cancellation.Token)
-            .GetAwaiter().GetResult();
-        return client;
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(750));
+            client.ConnectAsync(IPAddress.Loopback, port, cancellation.Token)
+                .GetAwaiter().GetResult();
+            return client;
+        }
+        catch
+        {
+            client.Dispose();
+            throw;
+        }
     }
 
     private static XDocument SendMuxRequest(TcpClient client, string body)
     {
         var xml = BuildPlist(
-            "<key>BundleID</key><string>com.openai.iphonemirror.driver</string>" +
+            "<key>BundleID</key><string>com.iphonemirror.windows.driver</string>" +
             "<key>ClientVersionString</key><string>iPhoneMirror.Driver 1.0</string>" +
             body +
             "<key>ProgName</key><string>iPhoneMirror.Driver</string>" +

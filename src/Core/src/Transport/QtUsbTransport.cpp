@@ -2,9 +2,9 @@
 
 #include <Windows.h>
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <format>
-#include <cctype>
 #include <memory>
 #include <utility>
 
@@ -32,15 +32,6 @@ bool usbdk_helper_installed() noexcept {
     return true;
 }
 
-std::string normalized_serial(std::string value) {
-    if (value.size() == 24 && value.find('-') == std::string::npos && value.find('&') == std::string::npos) {
-        value.insert(8, "-");
-    }
-    std::transform(value.begin(), value.end(), value.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value;
-}
-
 struct DeviceListDeleter {
     void operator()(libusb_device** devices) const noexcept { if (devices) libusb_free_device_list(devices, 1); }
 };
@@ -49,12 +40,15 @@ struct ConfigDeleter {
     void operator()(libusb_config_descriptor* descriptor) const noexcept { if (descriptor) libusb_free_config_descriptor(descriptor); }
 };
 
-UsbEndpointSet endpoints_for(libusb_device* device, std::uint8_t wanted_subclass) {
+std::vector<UsbEndpointSet> endpoint_candidates_for(
+    libusb_device* device, std::uint8_t wanted_subclass) {
     libusb_device_descriptor device_descriptor{};
     const int descriptor_result = libusb_get_device_descriptor(device, &device_descriptor);
     if (descriptor_result != LIBUSB_SUCCESS) throw UsbError("libusb_get_device_descriptor", descriptor_result);
 
-    for (std::uint8_t config_index = 0; config_index < device_descriptor.bNumConfigurations; ++config_index) {
+    std::vector<UsbEndpointSet> candidates;
+    for (std::uint8_t config_index = 0;
+        config_index < device_descriptor.bNumConfigurations; ++config_index) {
         libusb_config_descriptor* raw_config{};
         const int result = libusb_get_config_descriptor(device, config_index, &raw_config);
         if (result != LIBUSB_SUCCESS) continue;
@@ -67,6 +61,7 @@ UsbEndpointSet endpoints_for(libusb_device* device, std::uint8_t wanted_subclass
                 UsbEndpointSet found{};
                 found.configuration = config->bConfigurationValue;
                 found.interface_number = interface.bInterfaceNumber;
+                found.alternate_setting = interface.bAlternateSetting;
                 for (std::uint8_t endpoint_index = 0; endpoint_index < interface.bNumEndpoints; ++endpoint_index) {
                     const auto& endpoint = interface.endpoint[endpoint_index];
                     if ((endpoint.bmAttributes & LIBUSB_TRANSFER_TYPE_MASK) != LIBUSB_TRANSFER_TYPE_BULK) continue;
@@ -80,11 +75,46 @@ UsbEndpointSet endpoints_for(libusb_device* device, std::uint8_t wanted_subclass
                         found.bulk_out_packet_size = endpoint.wMaxPacketSize;
                     }
                 }
-                if (found.bulk_in != 0 && found.bulk_out != 0) return found;
+                if (found.bulk_in != 0 && found.bulk_out != 0)
+                    candidates.push_back(found);
             }
         }
     }
-    return {};
+    return candidates;
+}
+
+UsbEndpointSet endpoints_for(libusb_device* device,
+    std::uint8_t wanted_subclass) {
+    const auto candidates = endpoint_candidates_for(device, wanted_subclass);
+    return select_best_quicktime_endpoints(candidates);
+}
+
+std::string topology_for(libusb_device* device) {
+    std::array<std::uint8_t, 8> ports{};
+    const int count = libusb_get_port_numbers(device, ports.data(),
+        static_cast<int>(ports.size()));
+    if (count <= 0) return {};
+    std::string result = std::to_string(libusb_get_bus_number(device));
+    result.push_back(':');
+    for (int index{}; index < count; ++index) {
+        if (index != 0) result.push_back('.');
+        result += std::to_string(ports[static_cast<std::size_t>(index)]);
+    }
+    return result;
+}
+
+void populate_descriptor_summary(libusb_device* device,
+    const libusb_device_descriptor& descriptor, AppleUsbDevice& info) {
+    info.configuration_count = descriptor.bNumConfigurations;
+    info.topology_id = topology_for(device);
+    for (std::uint8_t index{}; index < descriptor.bNumConfigurations; ++index) {
+        libusb_config_descriptor* raw_config{};
+        if (libusb_get_config_descriptor(device, index, &raw_config) !=
+            LIBUSB_SUCCESS) continue;
+        std::unique_ptr<libusb_config_descriptor, ConfigDeleter> config(raw_config);
+        info.highest_configuration_value = (std::max)(
+            info.highest_configuration_value, config->bConfigurationValue);
+    }
 }
 
 std::string serial_for(libusb_device* device, const libusb_device_descriptor& descriptor, bool& can_open) {
@@ -99,26 +129,43 @@ std::string serial_for(libusb_device* device, const libusb_device_descriptor& de
     return length > 0 ? std::string(reinterpret_cast<char*>(buffer), static_cast<std::size_t>(length)) : std::string{};
 }
 
-libusb_device* find_device(QtUsbContext& context, const std::string& serial, AppleUsbDevice& info) {
+libusb_device* find_device(QtUsbContext& context,
+    const AppleUsbIdentity& identity, AppleUsbDevice& info,
+    bool require_quicktime = false) {
     libusb_device** raw_devices{};
     const auto count = libusb_get_device_list(context.native(), &raw_devices);
     if (count < 0) throw UsbError("libusb_get_device_list", static_cast<int>(count));
     std::unique_ptr<libusb_device*, DeviceListDeleter> devices(raw_devices);
+    std::vector<AppleUsbDevice> candidates;
+    std::vector<libusb_device*> candidate_devices;
     for (std::ptrdiff_t index = 0; index < count; ++index) {
         libusb_device_descriptor descriptor{};
         if (libusb_get_device_descriptor(raw_devices[index], &descriptor) != LIBUSB_SUCCESS || descriptor.idVendor != AppleVendorId) continue;
+        AppleUsbDevice candidate;
+        candidate.vendor_id = descriptor.idVendor;
+        candidate.product_id = descriptor.idProduct;
+        candidate.bus = libusb_get_bus_number(raw_devices[index]);
+        candidate.address = libusb_get_device_address(raw_devices[index]);
+        populate_descriptor_summary(raw_devices[index], descriptor, candidate);
         bool can_open{};
-        const auto candidate = serial_for(raw_devices[index], descriptor, can_open);
-        if (normalized_serial(candidate) != normalized_serial(serial)) continue;
-        info.vendor_id = descriptor.idVendor;
-        info.product_id = descriptor.idProduct;
-        info.serial = candidate;
-        info.can_open = can_open;
-        info.quicktime_endpoints = endpoints_for(raw_devices[index], QuickTimeSubclass);
-        libusb_ref_device(raw_devices[index]);
-        return raw_devices[index];
+        candidate.serial = serial_for(raw_devices[index], descriptor, can_open);
+        candidate.can_open = can_open;
+        candidate.mux_endpoints = endpoints_for(raw_devices[index], UsbMuxSubclass);
+        candidate.quicktime_endpoints = endpoints_for(raw_devices[index], QuickTimeSubclass);
+        candidate.mux_configuration = candidate.mux_endpoints.configuration != 0;
+        candidate.quicktime_configuration = candidate.quicktime_endpoints.configuration != 0;
+        candidates.push_back(std::move(candidate));
+        candidate_devices.push_back(raw_devices[index]);
     }
-    throw std::runtime_error("Apple USB device not found by serial");
+    const auto selection = select_apple_usb_device(candidates, identity,
+        require_quicktime);
+    if (!selection.index)
+        throw std::runtime_error(selection.ambiguous
+            ? "Apple USB device identity is ambiguous after re-enumeration"
+            : "Apple USB device not found by serial or physical port");
+    info = std::move(candidates[*selection.index]);
+    libusb_ref_device(candidate_devices[*selection.index]);
+    return candidate_devices[*selection.index];
 }
 
 } // namespace
@@ -156,6 +203,7 @@ std::vector<AppleUsbDevice> QtUsbContext::enumerate() const {
         device.product_id = descriptor.idProduct;
         device.bus = libusb_get_bus_number(raw_devices[index]);
         device.address = libusb_get_device_address(raw_devices[index]);
+        populate_descriptor_summary(raw_devices[index], descriptor, device);
         device.serial = serial_for(raw_devices[index], descriptor, device.can_open);
         device.mux_endpoints = endpoints_for(raw_devices[index], UsbMuxSubclass);
         device.quicktime_endpoints = endpoints_for(raw_devices[index], QuickTimeSubclass);
@@ -185,8 +233,14 @@ QtUsbConnection& QtUsbConnection::operator=(QtUsbConnection&& other) noexcept {
 }
 
 bool QtUsbConnection::enable_quicktime_configuration(QtUsbContext& context, const std::string& serial) {
+    return enable_quicktime_configuration(context,
+        AppleUsbIdentity{.serial = serial});
+}
+
+bool QtUsbConnection::enable_quicktime_configuration(QtUsbContext& context,
+    const AppleUsbIdentity& identity) {
     AppleUsbDevice info;
-    libusb_device* device = find_device(context, serial, info);
+    libusb_device* device = find_device(context, identity, info);
     std::unique_ptr<libusb_device, decltype(&libusb_unref_device)> device_guard(device, &libusb_unref_device);
     libusb_device_handle* handle{};
     const int open_result = libusb_open(device, &handle);
@@ -197,15 +251,27 @@ bool QtUsbConnection::enable_quicktime_configuration(QtUsbContext& context, cons
             static_cast<std::uint8_t>(LIBUSB_REQUEST_TYPE_VENDOR) |
             static_cast<std::uint8_t>(LIBUSB_RECIPIENT_DEVICE),
         0x52, 0, 2, nullptr, 0, 1000);
-    if (result < 0) throw UsbError("enable QuickTime USB configuration", result);
-    return true; // Device is expected to disconnect/re-enumerate immediately.
+    // The successful operation disconnects the device and may surface as
+    // NO_DEVICE/IO on some Windows backends. Re-enumeration is the authority.
+    return result >= 0;
 }
 
 QtUsbConnection QtUsbConnection::open_quicktime(QtUsbContext& context, const std::string& serial) {
+    return open_quicktime(context, AppleUsbIdentity{.serial = serial});
+}
+
+QtUsbConnection QtUsbConnection::open_quicktime(QtUsbContext& context,
+    const AppleUsbIdentity& identity, bool allow_conventional_fallback) {
     AppleUsbDevice info;
-    libusb_device* device = find_device(context, serial, info);
+    libusb_device* device = find_device(context, identity, info);
     std::unique_ptr<libusb_device, decltype(&libusb_unref_device)> device_guard(device, &libusb_unref_device);
-    if (!info.quicktime_configuration) throw std::runtime_error("device has no QuickTime 0x2A USB interface");
+    if (!info.quicktime_configuration && allow_conventional_fallback) {
+        info.quicktime_endpoints = conventional_quicktime_endpoints(identity);
+        info.quicktime_configuration =
+            info.quicktime_endpoints.configuration != 0;
+    }
+    if (!info.quicktime_configuration)
+        throw std::runtime_error("Apple device has no QuickTime 0x2A USB interface");
 
     QtUsbConnection result;
     const int open_result = libusb_open(device, &result.handle_);
@@ -218,7 +284,34 @@ QtUsbConnection QtUsbConnection::open_quicktime(QtUsbContext& context, const std
     const int claim_result = libusb_claim_interface(result.handle_, result.endpoints_.interface_number);
     if (claim_result != LIBUSB_SUCCESS) throw UsbError("libusb_claim_interface", claim_result);
     result.claimed_ = true;
+    if (result.endpoints_.alternate_setting != 0) {
+        const int alternate_result = libusb_set_interface_alt_setting(
+            result.handle_, result.endpoints_.interface_number,
+            result.endpoints_.alternate_setting);
+        if (alternate_result != LIBUSB_SUCCESS)
+            throw UsbError("libusb_set_interface_alt_setting", alternate_result);
+    }
     return result;
+}
+
+bool QtUsbConnection::disable_quicktime_configuration(QtUsbContext& context,
+    const AppleUsbIdentity& identity) {
+    AppleUsbDevice info;
+    libusb_device* device = find_device(context, identity, info);
+    std::unique_ptr<libusb_device, decltype(&libusb_unref_device)> device_guard(
+        device, &libusb_unref_device);
+    libusb_device_handle* handle{};
+    const int open_result = libusb_open(device, &handle);
+    if (open_result != LIBUSB_SUCCESS) throw UsbError("libusb_open", open_result);
+    std::unique_ptr<libusb_device_handle, decltype(&libusb_close)> handle_guard(
+        handle, &libusb_close);
+    const int result = libusb_control_transfer(handle,
+        static_cast<std::uint8_t>(LIBUSB_ENDPOINT_OUT) |
+            static_cast<std::uint8_t>(LIBUSB_REQUEST_TYPE_VENDOR) |
+            static_cast<std::uint8_t>(LIBUSB_RECIPIENT_DEVICE),
+        0x52, 0, 0, nullptr, 0, 1000);
+    if (result < 0) throw UsbError("disable QuickTime USB configuration", result);
+    return true;
 }
 
 std::size_t QtUsbConnection::read(std::span<std::uint8_t> destination, unsigned timeout_ms) {

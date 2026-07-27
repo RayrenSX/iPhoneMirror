@@ -28,6 +28,9 @@ public static class WindowChromeSmokeNative {
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(
         IntPtr hWnd, int attribute, out RECT rect, int size);
+    [DllImport("dwmapi.dll", EntryPoint="DwmGetWindowAttribute")]
+    public static extern int DwmGetWindowAttributeInt(
+        IntPtr hWnd, int attribute, out int value, int size);
     [DllImport("user32.dll")]
     public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")]
@@ -113,6 +116,56 @@ function Invoke-Element([System.Windows.Automation.AutomationElement]$Element) {
     $pattern.Invoke()
 }
 
+function Send-TestMediaAction([string]$Action, [string]$Arguments) {
+    $body = '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">' +
+        '<s:Body><u:' + $Action +
+        ' xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">' +
+        '<InstanceID>0</InstanceID>' + $Arguments + '</u:' + $Action +
+        '></s:Body></s:Envelope>'
+    $bodyBytes = [Text.Encoding]::UTF8.GetBytes($body)
+    $header = "POST /dlna/control/avtransport HTTP/1.1`r`n" +
+        "Host: 127.0.0.1:8090`r`nContent-Type: text/xml`r`n" +
+        "SOAPACTION: `"urn:schemas-upnp-org:service:AVTransport:1#$Action`"`r`n" +
+        "Content-Length: $($bodyBytes.Length)`r`nConnection: close`r`n`r`n"
+    $client = [Net.Sockets.TcpClient]::new()
+    try {
+        $client.SendTimeout = 5000
+        $client.ReceiveTimeout = 5000
+        $client.NoDelay = $true
+        $client.Connect('127.0.0.1', 8090)
+        $stream = $client.GetStream()
+        $headerBytes = [Text.Encoding]::ASCII.GetBytes($header)
+        $stream.Write($headerBytes, 0, $headerBytes.Length)
+        $stream.Write($bodyBytes, 0, $bodyBytes.Length)
+        $stream.Flush()
+        $buffer = [byte[]]::new(4096)
+        $count = $stream.Read($buffer, 0, $buffer.Length)
+        $response = [Text.Encoding]::UTF8.GetString($buffer, 0, $count)
+        if ($response -notmatch '^HTTP/1\.1 200 ') {
+            throw "$Action failed: $response"
+        }
+    }
+    finally { $client.Dispose() }
+}
+
+function Start-TestMediaCast {
+    $uri = [Security.SecurityElement]::Escape(
+        'https://example.test/window-chrome-preview.mp4')
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        try {
+            Send-TestMediaAction SetAVTransportURI `
+                "<CurrentURI>$uri</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>"
+            Send-TestMediaAction Play '<Speed>1</Speed>'
+            return
+        }
+        catch {
+            if ([DateTime]::UtcNow -ge $deadline) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+    } while ($true)
+}
+
 function Save-Window([IntPtr]$Handle, [string]$Path) {
     $rect = [WindowChromeSmokeNative+RECT]::new()
     # DWM returns physical pixels, unlike GetWindowRect which can be
@@ -138,19 +191,19 @@ function Save-Window([IntPtr]$Handle, [string]$Path) {
     finally { $bitmap.Dispose() }
 }
 
-function Wait-PreviewWindow([int]$ProcessId, [int]$TimeoutSeconds = 10) {
+function Wait-PreviewWindow([int]$ProcessId, [IntPtr]$ExcludedHandle,
+    [int]$TimeoutSeconds = 10) {
     $processCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ProcessId)
-    $nameCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        'iPhoneMirror OBS Preview')
-    $condition = [System.Windows.Automation.AndCondition]::new(
-        $processCondition, $nameCondition)
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-            [System.Windows.Automation.TreeScope]::Children, $condition)
-        if ($null -ne $window) { return $window }
+        $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Children, $processCondition)
+        foreach ($window in $windows) {
+            if ([IntPtr]$window.Current.NativeWindowHandle -ne $ExcludedHandle) {
+                return $window
+            }
+        }
         Start-Sleep -Milliseconds 150
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Preview window did not open'
@@ -216,7 +269,20 @@ try {
     Start-Sleep -Seconds 1
 
     Invoke-Element (Find-ById $main 'PreviewWindowButton')
-    $preview = Wait-PreviewWindow $process.Id
+    $mediaCastFallback = $false
+    try {
+        $preview = Wait-PreviewWindow $process.Id $process.MainWindowHandle 2
+    }
+    catch {
+        # A clean machine can have no physical/wireless device selected. Use
+        # the integrated media surface so the system-titlebar path is still
+        # exercised instead of silently skipping the independent window.
+        Start-TestMediaCast
+        [void](Find-ById $main 'CloseMediaCastButton' 10)
+        Invoke-Element (Find-ById $main 'PreviewWindowButton')
+        $preview = Wait-PreviewWindow $process.Id $process.MainWindowHandle
+        $mediaCastFallback = $true
+    }
     $previewHandle = [IntPtr]$preview.Current.NativeWindowHandle
     Start-Sleep -Seconds 1
     $windowRect = [WindowChromeSmokeNative+RECT]::new()
@@ -236,6 +302,9 @@ try {
     $region = [WindowChromeSmokeNative]::CreateRectRgn(0, 0, 0, 0)
     try { $regionType = [WindowChromeSmokeNative]::GetWindowRgn($previewHandle, $region) }
     finally { [void][WindowChromeSmokeNative]::DeleteObject($region) }
+    $cornerPreference = 0
+    $cornerResult = [WindowChromeSmokeNative]::DwmGetWindowAttributeInt(
+        $previewHandle, 33, [ref]$cornerPreference, 4)
     $previewImage = Join-Path $Output 'rounded-preview-window.png'
     Save-Window $previewHandle $previewImage
 
@@ -254,14 +323,28 @@ try {
     }
     finally { $previewBitmap.Dispose() }
 
-    if ($hasCaption) { throw 'Preview window still has WS_CAPTION' }
-    # The legacy WPF fallback uses a binary HRGN. The preferred native path
-    # deliberately has no HRGN: DirectComposition owns its antialiased clip.
-    if (!$noRedirectionBitmap -and $regionType -le 0) {
-        throw "Fallback preview window has no native region: $regionType"
+    if ($mediaCastFallback) {
+        if (!$hasCaption) { throw 'Media-cast preview lost its native title bar' }
+        if ($topNonClient -le 0) {
+            throw "Media-cast preview has no standard non-client title area: $topNonClient"
+        }
+        if ($cornerResult -eq 0 -and $cornerPreference -eq 1) {
+            throw 'Media-cast preview incorrectly disables Windows window rounding'
+        }
     }
-    if ($topNonClient -ne 0 -or $leftNonClient -ne 0) {
-        throw "Preview client does not cover the shaped HWND: left=$leftNonClient top=$topNonClient"
+    else {
+        if ($hasCaption) { throw 'Mirror preview window unexpectedly has WS_CAPTION' }
+        # The native mirror path stays borderless and uses the renderer's
+        # device corner profile; only media-cast content gets system chrome.
+        if (!$noRedirectionBitmap -and $regionType -le 0) {
+            throw "Fallback preview window has no native region: $regionType"
+        }
+        if ($topNonClient -ne 0 -or $leftNonClient -ne 0) {
+            throw "Mirror preview client does not cover its HWND: left=$leftNonClient top=$topNonClient"
+        }
+        if ($cornerResult -eq 0 -and $cornerPreference -ne 1) {
+            throw "Mirror preview lost its renderer-owned corner policy: $cornerPreference"
+        }
     }
     # CopyFromScreen is not a reliable pixel oracle for a
     # WS_EX_NOREDIRECTIONBITMAP DirectComposition window: depending on the GPU
@@ -272,10 +355,12 @@ try {
     [pscustomobject]@{
         StartButtonName = $start.Current.Name
         StartButtonEnabled = $start.Current.IsEnabled
+        PreviewMode = if ($mediaCastFallback) { 'media-cast' } else { 'mirror' }
         MainFullscreenGeometry = $mainFullscreenGeometry
         MainFullscreenOffset = "$fullOffsetX,$fullOffsetY"
         MainFullscreenSizeDelta = "$fullWidthDelta,$fullHeightDelta"
         PreviewHasCaption = $hasCaption
+        PreviewCornerPreference = $cornerPreference
         PreviewNoRedirectionBitmap = $noRedirectionBitmap
         PreviewRegionType = $regionType
         PreviewNonClient = "$leftNonClient,$topNonClient"

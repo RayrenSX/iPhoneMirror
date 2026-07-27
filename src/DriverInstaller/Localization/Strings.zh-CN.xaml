@@ -111,6 +111,7 @@
     <system:String x:Key="InvalidDeviceTarget">拒绝了无效的 Apple 设备目标。</system:String>
     <system:String x:Key="DriverExecutableMissing">无法确定驱动管理器的可执行文件路径。</system:String>
     <system:String x:Key="ElevatedProcessStartFailed">管理员驱动进程未能启动。</system:String>
+    <system:String x:Key="ElevatedProcessTimeout">管理员驱动操作已超时，请查看操作日志后重试。</system:String>
     <system:String x:Key="ElevatedProcessNoResult">管理员驱动进程以代码 {0} 退出，但没有返回结果。</system:String>
     <system:String x:Key="ElevatedInvalidResult">管理员驱动进程返回了无效结果。</system:String>
     <system:String x:Key="UacCancelled">用户取消了 Windows 管理员授权。</system:String>

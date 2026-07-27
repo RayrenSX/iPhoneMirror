@@ -6,11 +6,25 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <thread>
 #include <vector>
 
 namespace iPhoneMirror::audio {
+
+namespace detail {
+
+struct WasapiBufferLayout {
+    std::uint32_t block_align{};
+    std::size_t capacity_frames{};
+    std::size_t capacity_bytes{};
+};
+
+[[nodiscard]] std::optional<WasapiBufferLayout> checked_wasapi_buffer_layout(
+    const coremedia::AudioStreamBasicDescription& format) noexcept;
+
+} // namespace detail
 
 struct PlaybackStats {
     bool active{};
@@ -64,6 +78,7 @@ private:
 
     [[nodiscard]] std::size_t dequeue(std::uint8_t* destination, std::size_t frames);
     [[nodiscard]] std::size_t queued_frames() const;
+    void close_events() noexcept;
     void run(std::stop_token token) noexcept;
     void run_endpoint(std::stop_token token);
 };

@@ -12,7 +12,9 @@ endpoint disagrees.
 The combined receiver advertises the UxPlay-compatible legacy HLS feature mask
 and dispatches by request type. Screen-mirroring stream type 110 continues to
 the decoded-frame IPC path, while `/play`, `/playback-info`, and `/stop` use the
-URL-video IPC path. Both the AirPlay HTTP and RAOP ports handle media controls,
+URL-video IPC path. `/rate` pause/resume and `/scrub` seek requests are forwarded
+as distinct IPC controls without reloading the media URL. Both the AirPlay HTTP
+and RAOP ports handle media controls,
 and the two-stage `/fp-setup` exchange remains available before the first video
 URL. The `/info` response, HTTP server-info response, and both DNS-SD records
 use the same receiver name, model, features, and device ID. The SETUP

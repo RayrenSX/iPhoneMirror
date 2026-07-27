@@ -17,7 +17,7 @@
 
 namespace iPhoneMirror {
 
-constexpr std::uint32_t ApiVersion = 13;
+constexpr std::uint32_t ApiVersion = 15;
 using SessionHandle = std::uint64_t;
 constexpr std::size_t MaxUdid = 128;
 constexpr std::size_t MaxName = 128;
@@ -120,7 +120,9 @@ struct VideoFrameInfo {
 // Versioned capture preferences used by im_start_capture_with_options.
 // requested_width/requested_height are local preview-render limits. The first
 // Reserved words 0/1 are the optional advanced USB HPD1 size. Reserved word 2
-// selects the USB projection mode: 0=demo, 1=AirPlay, 2=Aisi-compatible.
+// selects USB projection mode (0=demo, 1=AirPlay, 2=Aisi-compatible), word 3
+// selects decoder policy (0=auto, 1=hardware preferred, 2=software compatible),
+// and word 4 selects color output (0=auto, 1=SDR tone-map, 2=prefer HDR).
 struct CaptureOptions {
     std::uint32_t struct_size;
     std::uint32_t api_version;
@@ -136,6 +138,9 @@ enum class MediaCastCommand : std::uint32_t {
     None = 0,
     Play = 1,
     Stop = 2,
+    Pause = 3,
+    Resume = 4,
+    Seek = 5,
 };
 
 struct MediaCastRequest {
@@ -154,6 +159,9 @@ struct MediaCastRequest {
 IM_API std::int32_t IM_CALL im_initialize();
 IM_API void IM_CALL im_shutdown();
 IM_API std::uint32_t IM_CALL im_api_version();
+// Persists a single sanitized application/UI diagnostic in the shared log.
+// Messages are limited to 4096 UTF-16 code units and may not be empty.
+IM_API std::int32_t IM_CALL im_log_message(const wchar_t* message);
 
 // On input, *count is the number of entries available in devices. On output it
 // is the number of devices discovered. Passing devices == nullptr is a count query.
@@ -186,6 +194,9 @@ IM_API std::int32_t IM_CALL im_media_cast_get_request(
     iPhoneMirror::MediaCastRequest* request);
 IM_API std::int32_t IM_CALL im_media_cast_set_playback_state(
     std::uint64_t command_id, double duration, double position, double rate);
+// Requests that the active receiver-side URL-video transport transition to
+// stopped. The UI should still release its local decoder after this succeeds.
+IM_API std::int32_t IM_CALL im_media_cast_request_stop();
 
 IM_API std::int32_t IM_CALL im_get_environment(
     iPhoneMirror::EnvironmentInfo* environment);

@@ -111,6 +111,7 @@ Only this device's libusb0 filter is changed. Apple's official driver is not rep
     <system:String x:Key="InvalidDeviceTarget">The selected Apple device target is invalid.</system:String>
     <system:String x:Key="DriverExecutableMissing">The driver manager executable path could not be determined.</system:String>
     <system:String x:Key="ElevatedProcessStartFailed">The elevated driver process could not be started.</system:String>
+    <system:String x:Key="ElevatedProcessTimeout">The elevated driver operation timed out. Review the operation log before retrying.</system:String>
     <system:String x:Key="ElevatedProcessNoResult">The elevated driver process exited with code {0} without returning a result.</system:String>
     <system:String x:Key="ElevatedInvalidResult">The elevated driver process returned an invalid result.</system:String>
     <system:String x:Key="UacCancelled">Windows administrator approval was cancelled.</system:String>

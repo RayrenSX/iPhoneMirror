@@ -15,6 +15,9 @@ public:
     struct Callbacks {
         std::function<void(std::string_view, double)> play;
         std::function<void()> stop;
+        std::function<void()> pause;
+        std::function<void()> resume;
+        std::function<void(double)> seek;
         std::function<void(double*, double*, double*)> get_play_info;
         std::function<void(std::string_view)> log;
     };
@@ -27,6 +30,7 @@ public:
     bool start(std::string friendly_name, std::string uuid,
         std::uint16_t http_port, std::uint16_t ssdp_port, Callbacks callbacks);
     void stop() noexcept;
+    void set_transport_stopped() noexcept;
 
 private:
     struct Impl;

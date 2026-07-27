@@ -203,6 +203,13 @@
                     <Setter Property="Content" Value="{DynamicResource StopMirroring}"/>
                     <Setter Property="Command" Value="{Binding StopCommand}"/>
                 </DataTrigger>
+                <DataTrigger Binding="{Binding IsMediaCasting}" Value="True">
+                    <Setter Property="Background" Value="#C93645"/>
+                    <Setter Property="BorderBrush" Value="#C93645"/>
+                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Content" Value="{DynamicResource StopMirroring}"/>
+                    <Setter Property="Command" Value="{Binding MediaCastStopCommand}"/>
+                </DataTrigger>
             </Style.Triggers>
         </Style>
     </Window.Resources>
@@ -305,6 +312,7 @@
                     <Border Grid.Row="3" Height="1" Background="{StaticResource BorderSoftBrush}"
                             VerticalAlignment="Center" Margin="2,0"/>
                     <ListBox x:Name="DeviceListBox" Grid.Row="4" ItemsSource="{Binding Devices}"
+                             AutomationProperties.AutomationId="DeviceListBox"
                              SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
                              AllowDrop="True"
                              PreviewMouseLeftButtonDown="OnDeviceListLeftButtonDown"
@@ -372,11 +380,13 @@
                             <Style TargetType="ListBoxItem"
                                    BasedOn="{StaticResource {x:Type ListBoxItem}}">
                                 <Setter Property="ContextMenu" Value="{StaticResource DeviceContextMenu}"/>
+                                <Setter Property="AutomationProperties.AutomationId"
+                                        Value="{Binding AutomationId}"/>
                             </Style>
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid>
+                                <Grid AutomationProperties.AutomationId="{Binding AutomationId}">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="42"/>
                                         <ColumnDefinition Width="*"/>
@@ -523,13 +533,14 @@
                         <Grid x:Name="MediaCastSurface" Visibility="Collapsed"
                               AutomationProperties.AutomationId="MediaCastSurface"
                               Background="#050505" Panel.ZIndex="2">
-                            <MediaElement x:Name="MediaCastMediaElement"
-                                          LoadedBehavior="Manual" UnloadedBehavior="Manual"
-                                          Stretch="Uniform" ScrubbingEnabled="True"
-                                          MediaOpened="OnMediaCastMediaOpened"
-                                          MediaEnded="OnMediaCastMediaEnded"
-                                          MediaFailed="OnMediaCastMediaFailed"/>
+                            <Grid x:Name="MediaCastPlayerHost" Background="#050505">
+                                <MediaElement x:Name="MediaCastMediaElement"
+                                              LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                                              Stretch="Uniform" ScrubbingEnabled="True"/>
+                            </Grid>
                             <Border x:Name="MediaCastStatusPanel"
+                                    Visibility="Collapsed"
+                                    AutomationProperties.AutomationId="MediaCastStatusPanel"
                                     HorizontalAlignment="Center" VerticalAlignment="Center"
                                     Background="#D9202020" CornerRadius="8" Padding="20,12">
                                 <TextBlock x:Name="MediaCastStatusText"
@@ -559,26 +570,30 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="13">
                             <TextBlock Text="{DynamicResource ResolutionLabel}" Style="{StaticResource StatLabel}"/>
-                            <TextBlock Text="{Binding Resolution}" Style="{StaticResource StatValue}"/>
+                            <TextBlock Text="{Binding Resolution}" Style="{StaticResource StatValue}"
+                                       AutomationProperties.AutomationId="ResolutionValue"/>
                             <TextBlock Text="{Binding TargetResolutionDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
                         <Border Grid.Column="1" Background="{StaticResource BorderSoftBrush}" Margin="0,10"/>
                         <StackPanel Grid.Column="2" Margin="13">
                             <TextBlock Text="{DynamicResource FrameRateLabel}" Style="{StaticResource StatLabel}"/>
-                            <TextBlock Text="{Binding FpsDisplay}" Style="{StaticResource StatValue}"/>
+                            <TextBlock Text="{Binding FpsDisplay}" Style="{StaticResource StatValue}"
+                                       AutomationProperties.AutomationId="FrameRateValue"/>
                             <TextBlock Text="{Binding TargetFpsDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
                         </StackPanel>
                         <Border Grid.Column="3" Background="{StaticResource BorderSoftBrush}" Margin="0,10"/>
                         <StackPanel Grid.Column="4" Margin="13">
                             <TextBlock Text="{DynamicResource LatencyLabel}" Style="{StaticResource StatLabel}"/>
-                            <TextBlock Text="{Binding LatencyDisplay}" Style="{StaticResource StatValue}"/>
+                            <TextBlock Text="{Binding LatencyDisplay}" Style="{StaticResource StatValue}"
+                                       AutomationProperties.AutomationId="LatencyValue"/>
                             <TextBlock Text="{DynamicResource EndToEndLabel}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
                         </StackPanel>
                         <Border Grid.Column="5" Background="{StaticResource BorderSoftBrush}" Margin="0,10"/>
                         <StackPanel Grid.Column="6" Margin="13">
                             <TextBlock Text="{DynamicResource AudioLabel}" Style="{StaticResource StatLabel}"/>
-                            <TextBlock Text="{Binding AudioDisplay}" Style="{StaticResource StatValue}"/>
-                            <TextBlock Text="48 kHz PCM" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
+                            <TextBlock Text="{Binding AudioDisplay}" Style="{StaticResource StatValue}"
+                                       AutomationProperties.AutomationId="AudioValue"/>
+                            <TextBlock Text="{Binding AudioDetailDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -721,6 +736,23 @@
                                     <ComboBox x:Name="FrameRateComboBox"
                                               ItemsSource="{Binding FrameRates}"
                                               SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
+
+                                    <TextBlock Text="{DynamicResource DecoderPreferenceLabel}"
+                                               Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                    <ComboBox ItemsSource="{Binding DecoderPreferences}"
+                                              DisplayMemberPath="Label"
+                                              IsEnabled="{Binding CanChangeVideoPipeline}"
+                                              SelectedItem="{Binding SelectedDecoderPreference, Mode=TwoWay}"/>
+
+                                    <TextBlock Text="{DynamicResource ColorOutputLabel}"
+                                               Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                    <ComboBox ItemsSource="{Binding ColorOutputPreferences}"
+                                              DisplayMemberPath="Label"
+                                              IsEnabled="{Binding CanChangeVideoPipeline}"
+                                              SelectedItem="{Binding SelectedColorOutputPreference, Mode=TwoWay}"/>
+                                    <TextBlock Text="{DynamicResource VideoPipelinePreferenceHelp}"
+                                               Foreground="{StaticResource MutedTextBrush}" FontSize="9"
+                                               TextWrapping="Wrap" Margin="0,6,0,0"/>
 
                                     <Button x:Name="ApplyVideoSettingsButton"
                                             Content="{DynamicResource ApplyVideoSettings}"

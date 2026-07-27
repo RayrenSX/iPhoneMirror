@@ -1,3 +1,4 @@
+#include "Audio/WasapiRenderer.h"
 #include "Media/CoreMedia.h"
 #include "Media/H264.h"
 #include "Media/MediaFoundationDecoder.h"
@@ -8,14 +9,18 @@
 #include "Transport/QtUsbTransport.h"
 #include "Capture/CaptureSession.h"
 #include "Capture/WirelessCaptureSession.h"
+#include "Logging.h"
 #include "IpcProtocol.h"
+#include "iPhoneMirror/CoreApi.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -91,6 +96,19 @@ void test_plist() {
 
     const auto round_trip = iPhoneMirror::plist::parse_xml(iPhoneMirror::plist::to_xml(root));
     check(round_trip.find("Enabled")->bool_or(), "plist serialization round trip");
+
+    check_throws([] {
+        (void)iPhoneMirror::plist::parse_xml("<integer/>");
+    }, "empty plist integer rejected");
+    check_throws([] {
+        (void)iPhoneMirror::plist::parse_xml("<real></real>");
+    }, "empty plist real rejected");
+    check_throws([] {
+        (void)iPhoneMirror::plist::parse_xml("<string>&#xD800;</string>");
+    }, "surrogate XML entity rejected");
+    check_throws([] {
+        (void)iPhoneMirror::plist::parse_xml("<string>&#x110000;</string>");
+    }, "out-of-range XML entity rejected");
 }
 
 void test_quicktime_framing() {
@@ -148,6 +166,23 @@ void test_coremedia() {
     time[12] = 1;                  // valid flag
     const auto parsed = iPhoneMirror::coremedia::parse_time(time);
     check(parsed.valid() && std::abs(parsed.seconds() - 1.0) < 0.0001, "CMTime parsed");
+    check(parsed.to_100ns() && *parsed.to_100ns() == 10'000'000,
+        "CMTime converts to 100ns units without floating-point rounding");
+    using iPhoneMirror::coremedia::CMTime;
+    check(CMTime{.value = -1500, .timescale = 1000, .flags = 1}.to_100ns() == -15'000'000,
+        "negative CMTime conversion preserves truncation semantics");
+    check(CMTime{.value = std::numeric_limits<std::int64_t>::max(),
+            .timescale = 10'000'000, .flags = 1}.to_100ns() ==
+            std::numeric_limits<std::int64_t>::max() &&
+        CMTime{.value = std::numeric_limits<std::int64_t>::min(),
+            .timescale = 10'000'000, .flags = 1}.to_100ns() ==
+            std::numeric_limits<std::int64_t>::min(),
+        "CMTime conversion handles exact int64 boundaries");
+    check(!CMTime{.value = std::numeric_limits<std::int64_t>::max(),
+            .timescale = 1, .flags = 1}.to_100ns() &&
+        !CMTime{.value = 1, .timescale = -1, .flags = 1}.valid() &&
+        !CMTime{.value = 1, .timescale = 1, .flags = 5}.valid(),
+        "CMTime rejects overflow, negative timescales, and implied infinity flags");
 
     std::vector<std::uint8_t> sample;
     const auto append32 = [&sample](std::uint32_t value) {
@@ -214,6 +249,48 @@ void test_coremedia() {
         "AVCC NAL length size parsed");
     check(parsed_sample.format && parsed_sample.format->sequence_parameter_sets.size() == 1 &&
         parsed_sample.format->picture_parameter_sets.size() == 1, "AVCC SPS/PPS parsed");
+
+    std::vector<std::uint8_t> hevc_format_payload;
+    append(hevc_format_payload, chunk(iPhoneMirror::quicktime::fourcc('m', 'd', 'i', 'a'), media_type));
+    append(hevc_format_payload, chunk(iPhoneMirror::quicktime::fourcc('v', 'd', 'i', 'm'), dimensions));
+    std::vector<std::uint8_t> hevc_codec;
+    append32_to(hevc_codec, iPhoneMirror::quicktime::fourcc('h', 'v', 'c', '1'));
+    append(hevc_format_payload, chunk(iPhoneMirror::quicktime::fourcc('c', 'o', 'd', 'c'), hevc_codec));
+    std::vector<std::uint8_t> hvcc{
+        1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 120,
+        0xf0, 0, 0xfc, 0xfd, 0xfa, 0xfa, 0, 0, 0xff, 3,
+    };
+    const auto append_hevc_array = [&hvcc](std::uint8_t type,
+        std::initializer_list<std::uint8_t> nalu) {
+        hvcc.push_back(static_cast<std::uint8_t>(0x80U | type));
+        hvcc.insert(hvcc.end(), {0, 1, 0, static_cast<std::uint8_t>(nalu.size())});
+        hvcc.insert(hvcc.end(), nalu);
+    };
+    append_hevc_array(32, {0x40, 0x01});
+    append_hevc_array(33, {0x42, 0x01});
+    append_hevc_array(34, {0x44, 0x01});
+    std::vector<std::uint8_t> hevc_extensions;
+    append32_to(hevc_extensions, iPhoneMirror::quicktime::fourcc('d', 'a', 't', 'v'));
+    append(hevc_extensions, hvcc);
+    append(hevc_format_payload,
+        chunk(iPhoneMirror::quicktime::fourcc('e', 'x', 't', 'n'), hevc_extensions));
+    std::vector<std::uint8_t> hevc_serialized;
+    append32_to(hevc_serialized, iPhoneMirror::quicktime::fourcc('s', 'b', 'u', 'f'));
+    const std::vector<std::uint8_t> hevc_idr{0, 0, 0, 2, 0x26, 0x01};
+    append(hevc_serialized,
+        chunk(iPhoneMirror::quicktime::fourcc('s', 'd', 'a', 't'), hevc_idr));
+    append(hevc_serialized,
+        chunk(iPhoneMirror::quicktime::fourcc('f', 'd', 's', 'c'), hevc_format_payload));
+    const auto parsed_hevc = iPhoneMirror::coremedia::parse_sample_buffer(hevc_serialized);
+    check(parsed_hevc.format &&
+        parsed_hevc.format->video_codec() == iPhoneMirror::coremedia::VideoCodec::Hevc &&
+        parsed_hevc.format->bit_depth_luma == 10 &&
+        parsed_hevc.format->video_parameter_sets.size() == 1 &&
+        parsed_hevc.format->sequence_parameter_sets.size() == 1 &&
+        parsed_hevc.format->picture_parameter_sets.size() == 1,
+        "hvcC parses HEVC VPS/SPS/PPS and 10-bit format metadata");
+    check(parsed_hevc.format && iPhoneMirror::media::detail::is_random_access_sample(
+        *parsed_hevc.format, hevc_idr), "HEVC IDR is recognized as a random-access sample");
 }
 
 void test_upstream_capture_fixtures() {
@@ -375,6 +452,134 @@ void test_apple_usb_serial_matching() {
     check(!apple_usb_serial_equal(
         "000081010000000000000001", "00008150-0000000000000002"),
         "different Apple serials do not match");
+
+    std::string padded_serial = "00008103000E74501104A01E";
+    padded_serial.resize(40, '\0');
+    check(apple_usb_serial_equal(
+        padded_serial, "00008103-000E74501104A01E"),
+        "USB descriptors padded with NUL code points match usbmux UDIDs");
+    check(!apple_usb_serial_equal(
+        std::string("00008103000E74501104A01E\0unexpected", 35),
+        "00008103-000E74501104A01E"),
+        "non-padding bytes after an embedded NUL are rejected");
+    check(!apple_usb_serial_equal({}, {}) &&
+        !apple_usb_serial_equal("   ", "\t"),
+        "empty normalized USB serials never identify a device");
+}
+
+void test_apple_usb_reenumeration_selection() {
+    using namespace iPhoneMirror::transport;
+
+    AppleUsbDevice initial;
+    initial.vendor_id = 0x05ac;
+    initial.product_id = 0x12ab;
+    initial.serial = "00008103000E74501104A01E";
+    initial.topology_id = "3:2.4";
+    initial.can_open = true;
+    initial.configuration_count = 5;
+    initial.highest_configuration_value = 5;
+    const auto identity = make_apple_usb_identity(initial);
+    check(identity.expected_quicktime_configuration == 6 &&
+        identity.original_product_id == 0x12ab,
+        "modern iPad identity derives appended QuickTime configuration 6");
+
+    AppleUsbDevice descriptor_unavailable;
+    descriptor_unavailable.serial = initial.serial;
+    const auto incomplete_identity = make_apple_usb_identity(descriptor_unavailable);
+    check(incomplete_identity.expected_quicktime_configuration == 0,
+        "missing descriptors do not invent a conventional QuickTime configuration");
+
+    AppleUsbDevice other;
+    other.vendor_id = 0x05ac;
+    other.product_id = 0x12ab;
+    other.serial = "000081010000000000000001";
+    other.topology_id = "3:2.3";
+    other.can_open = true;
+    other.quicktime_configuration = true;
+    other.quicktime_endpoints = {
+        .configuration = 5, .interface_number = 2,
+        .bulk_in = 0x86, .bulk_out = 0x05,
+        .bulk_in_packet_size = 512, .bulk_out_packet_size = 512,
+    };
+
+    AppleUsbDevice reenumerated = initial;
+    reenumerated.product_id = 0x12cd; // PID changes are not device identity.
+    reenumerated.address = 19;
+    reenumerated.serial.resize(40, '\0');
+    reenumerated.configuration_count = 6;
+    reenumerated.highest_configuration_value = 6;
+    reenumerated.quicktime_configuration = true;
+    reenumerated.quicktime_endpoints = {
+        .configuration = 6, .interface_number = 4, .alternate_setting = 1,
+        .bulk_in = 0x87, .bulk_out = 0x06,
+        .bulk_in_packet_size = 1024, .bulk_out_packet_size = 1024,
+    };
+
+    const std::vector exact_candidates{other, reenumerated};
+    const auto exact = select_apple_usb_device(exact_candidates, identity, true);
+    check(exact.index && *exact.index == 1 &&
+        exact.match_kind == AppleUsbMatchKind::Serial && !exact.ambiguous,
+        "re-enumeration selects the exact iPad despite PID/address changes");
+
+    auto same_model_other = reenumerated;
+    same_model_other.serial = other.serial;
+    same_model_other.topology_id = other.topology_id;
+    same_model_other.address = 20;
+    const std::vector same_model_candidates{same_model_other, reenumerated};
+    const auto same_model = select_apple_usb_device(same_model_candidates,
+        identity, true);
+    check(same_model.index && *same_model.index == 1 &&
+        same_model.match_kind == AppleUsbMatchKind::Serial,
+        "same-model devices with the same PID remain isolated by serial");
+
+    auto serial_temporarily_unreadable = reenumerated;
+    serial_temporarily_unreadable.serial.clear();
+    const std::vector topology_candidates{other, serial_temporarily_unreadable};
+    const auto topology = select_apple_usb_device(topology_candidates,
+        identity, true);
+    check(topology.index && *topology.index == 1 &&
+        topology.match_kind == AppleUsbMatchKind::Topology,
+        "unique physical port safely bridges a temporarily unreadable serial");
+
+    auto known_other_device = reenumerated;
+    known_other_device.serial = other.serial;
+    const std::vector known_other_candidates{known_other_device};
+    const auto known_other = select_apple_usb_device(known_other_candidates,
+        identity, true);
+    check(!known_other.index && known_other.topology_matches == 0,
+        "physical-port fallback rejects a known different device serial");
+
+    auto ambiguous = serial_temporarily_unreadable;
+    const std::vector ambiguous_candidates{serial_temporarily_unreadable, ambiguous};
+    const auto ambiguous_selection = select_apple_usb_device(
+        ambiguous_candidates, identity, true);
+    check(!ambiguous_selection.index && ambiguous_selection.ambiguous,
+        "ambiguous physical matches never cross-bind concurrent devices");
+
+    auto same_pid_wrong_device = other;
+    same_pid_wrong_device.topology_id = "3:2.8";
+    const std::vector wrong_candidates{same_pid_wrong_device};
+    check(!select_apple_usb_device(wrong_candidates, identity, true).index,
+        "VID/PID equality alone never selects another connected device");
+
+    const std::vector endpoint_candidates{
+        other.quicktime_endpoints, reenumerated.quicktime_endpoints};
+    const auto endpoints = select_best_quicktime_endpoints(endpoint_candidates);
+    check(endpoints.configuration == 6 && endpoints.interface_number == 4 &&
+        endpoints.alternate_setting == 1 && endpoints.bulk_in == 0x87 &&
+        endpoints.bulk_out == 0x06,
+        "QuickTime endpoint selection supports config 6 and alternate settings");
+    const auto conventional = conventional_quicktime_endpoints(identity);
+    check(conventional.configuration == 6 &&
+        conventional.interface_number == 2 && conventional.bulk_in == 0x86 &&
+        conventional.bulk_out == 0x05,
+        "stale-descriptor fallback uses the derived appended configuration");
+
+    const auto diagnostic = describe_apple_usb_candidates(exact_candidates,
+        identity);
+    check(diagnostic.find("configs=6/6") != std::string::npos &&
+        diagnostic.find("serial_match=true") != std::string::npos,
+        "USB selection diagnostics record descriptor and match decisions");
 }
 
 void test_media_foundation_decoder() {
@@ -384,7 +589,14 @@ void test_media_foundation_decoder() {
     check(sample.format.has_value(), "decoder fixture has video format");
     if (!sample.format) return;
     iPhoneMirror::media::MediaFoundationH264Decoder decoder;
+    auto oversized = *sample.format;
+    oversized.width = iPhoneMirror::media::detail::MaxDecodedVideoDimension + 1;
+    check_throws([&] { decoder.configure(oversized, 60, 1); },
+        "Media Foundation rejects oversized H264 dimensions before allocation");
     decoder.configure(*sample.format, 60, 1);
+    check(!decoder.selected_decoder_name().empty() &&
+        decoder.output_pixel_format() == iPhoneMirror::media::PixelFormat::Nv12,
+        "decoder reports the selected MFT and negotiated output format");
     std::vector<iPhoneMirror::media::DecodedFrame> frames;
     for (int index = 0; index < 8 && frames.empty(); ++index) {
         auto decoded = decoder.decode(sample.sample_data, static_cast<std::int64_t>(index) * 166667, 166667);
@@ -399,6 +611,150 @@ void test_media_foundation_decoder() {
         check(frames.back().width == 1126 && frames.back().height == 2436, "decoded NV12 dimensions match format");
         check(!frames.back().nv12.empty(), "decoded NV12 frame contains pixels");
     }
+}
+
+void test_capture_media_safety_helpers() {
+    using iPhoneMirror::capture::detail::VideoQueueAction;
+    using iPhoneMirror::capture::detail::VideoQueueBudget;
+
+    const auto odd_nv12 = iPhoneMirror::media::detail::checked_nv12_buffer_size(3, 3);
+    check(odd_nv12 && *odd_nv12 == 20,
+        "checked NV12 size uses even stride and rounded chroma height");
+    const auto maximum_nv12 = iPhoneMirror::media::detail::checked_nv12_buffer_size(
+        iPhoneMirror::media::detail::MaxDecodedVideoDimension,
+        iPhoneMirror::media::detail::MaxDecodedVideoDimension);
+    check(maximum_nv12 && *maximum_nv12 == 100663296,
+        "maximum supported NV12 dimensions have a checked 64-bit size");
+    check(!iPhoneMirror::media::detail::checked_nv12_buffer_size(0, 1080) &&
+        !iPhoneMirror::media::detail::checked_nv12_buffer_size(8193, 1080) &&
+        !iPhoneMirror::media::detail::checked_nv12_buffer_size(UINT32_MAX, UINT32_MAX),
+        "checked NV12 size rejects zero, oversized, and overflowing dimensions");
+    const auto odd_p010 = iPhoneMirror::media::detail::checked_video_buffer_size(
+        3, 3, iPhoneMirror::media::PixelFormat::P010);
+    check(odd_p010 && *odd_p010 == 40,
+        "checked P010 size uses two-byte components and an even chroma stride");
+    const auto maximum_p010 = iPhoneMirror::media::detail::checked_video_buffer_size(
+        iPhoneMirror::media::detail::MaxDecodedVideoDimension,
+        iPhoneMirror::media::detail::MaxDecodedVideoDimension,
+        iPhoneMirror::media::PixelFormat::P010);
+    check(maximum_p010 && *maximum_p010 == 201326592,
+        "maximum supported P010 allocation remains bounded");
+
+    iPhoneMirror::coremedia::VideoColorDescription sdr_color{
+        .primaries = iPhoneMirror::coremedia::ColorPrimaries::Bt709,
+        .transfer = iPhoneMirror::coremedia::TransferFunction::Bt709,
+        .matrix = iPhoneMirror::coremedia::MatrixCoefficients::Bt709,
+        .range = iPhoneMirror::coremedia::ColorRange::Limited,
+    };
+    const auto p010_black = iPhoneMirror::media::detail::convert_yuv_to_sdr(
+        static_cast<double>(64U << 6U) / 65535.0,
+        static_cast<double>(512U << 6U) / 65535.0,
+        static_cast<double>(512U << 6U) / 65535.0,
+        sdr_color, iPhoneMirror::media::PixelFormat::P010);
+    const auto p010_white = iPhoneMirror::media::detail::convert_yuv_to_sdr(
+        static_cast<double>(940U << 6U) / 65535.0,
+        static_cast<double>(512U << 6U) / 65535.0,
+        static_cast<double>(512U << 6U) / 65535.0,
+        sdr_color, iPhoneMirror::media::PixelFormat::P010);
+    check(p010_black.red < 0.001 && p010_black.green < 0.001 &&
+        p010_black.blue < 0.001 && p010_white.red > 0.999 &&
+        p010_white.green > 0.999 && p010_white.blue > 0.999,
+        "P010 limited-range conversion preserves reference black and white");
+
+    auto hdr_color = sdr_color;
+    hdr_color.primaries = iPhoneMirror::coremedia::ColorPrimaries::Bt2020;
+    hdr_color.transfer = iPhoneMirror::coremedia::TransferFunction::Pq;
+    hdr_color.matrix = iPhoneMirror::coremedia::MatrixCoefficients::Bt2020;
+    hdr_color.range = iPhoneMirror::coremedia::ColorRange::Full;
+    hdr_color.hdr.max_mastering_luminance = 1000;
+    const auto tone_mapped = iPhoneMirror::media::detail::convert_yuv_to_sdr(
+        0.75, static_cast<double>(512U << 6U) / 65535.0,
+        static_cast<double>(512U << 6U) / 65535.0,
+        hdr_color, iPhoneMirror::media::PixelFormat::P010);
+    check(std::isfinite(tone_mapped.red) && tone_mapped.red > 0.8 &&
+        tone_mapped.red <= 1.0 && tone_mapped.green > 0.8 &&
+        tone_mapped.blue > 0.8,
+        "PQ BT.2020 conversion deterministically tone-maps HDR into SDR gamut");
+    check(iPhoneMirror::media::decoder_preference_name(
+        iPhoneMirror::media::DecoderPreference::HardwarePreferred) ==
+        "hardware_preferred", "decoder policy values have stable diagnostics");
+
+    iPhoneMirror::coremedia::AudioStreamBasicDescription audio_format{
+        .sample_rate = 48000,
+        .format_id = 0x6c70636dU,
+        .format_flags = 1U << 2U,
+        .bytes_per_packet = 4,
+        .frames_per_packet = 1,
+        .bytes_per_frame = 4,
+        .channels_per_frame = 2,
+        .bits_per_channel = 16,
+    };
+    const auto audio_layout =
+        iPhoneMirror::audio::detail::checked_wasapi_buffer_layout(audio_format);
+    check(audio_layout && audio_layout->block_align == 4 &&
+        audio_layout->capacity_frames == 8192 &&
+        audio_layout->capacity_bytes == 32768,
+        "WASAPI validates PCM before computing its bounded ring layout");
+    audio_format.sample_rate = std::numeric_limits<double>::infinity();
+    check(!iPhoneMirror::audio::detail::checked_wasapi_buffer_layout(audio_format),
+        "WASAPI rejects non-finite rates before allocation");
+    audio_format.sample_rate = 48000;
+    audio_format.bytes_per_frame = std::numeric_limits<std::uint32_t>::max();
+    check(!iPhoneMirror::audio::detail::checked_wasapi_buffer_layout(audio_format),
+        "WASAPI rejects malformed block alignment before allocation");
+
+    constexpr auto packed = iPhoneMirror::capture::detail::pack_video_dimensions(
+        1206, 2622);
+    constexpr auto unpacked =
+        iPhoneMirror::capture::detail::unpack_video_dimensions(packed);
+    static_assert(unpacked.width == 1206 && unpacked.height == 2622);
+    check(unpacked.width == 1206 && unpacked.height == 2622,
+        "adaptive display dimensions publish as one atomic value");
+
+    VideoQueueBudget budget;
+    check(budget.has_capacity(0, 0, 1024),
+        "empty compressed video queue accepts a normal sample");
+    const auto overflow = budget.admit(VideoQueueBudget::MaxPendingSamples,
+        4096, 1024, false);
+    check(overflow.action == VideoQueueAction::ClearAndDrop &&
+        overflow.entered_recovery && budget.awaiting_keyframe() &&
+        overflow.dropped_samples == VideoQueueBudget::MaxPendingSamples + 1,
+        "queue overflow drops the stale GOP and waits for a keyframe");
+    const auto inter_frame = budget.admit(0, 0, 2048, false);
+    check(inter_frame.action == VideoQueueAction::DropIncoming &&
+        budget.awaiting_keyframe(),
+        "queue recovery rejects inter frames without growing memory");
+    const auto keyframe = budget.admit(0, 0, 4096, true);
+    check(keyframe.action == VideoQueueAction::ReplaceWithKeyframe &&
+        !budget.awaiting_keyframe(),
+        "queue recovery resumes at a keyframe with decoder reset");
+    check(!budget.has_capacity(0, 0, VideoQueueBudget::MaxPendingBytes + 1),
+        "single compressed samples cannot exceed the queue byte budget");
+
+    iPhoneMirror::capture::detail::VideoWorkerFailure standard_failure;
+    try {
+        throw std::runtime_error("decoder fault");
+    } catch (...) {
+        standard_failure.capture_current();
+    }
+    check(standard_failure.failed(), "decoder worker failure is observable by capture loop");
+    check_throws([&] { standard_failure.rethrow_if_set(); },
+        "decoder worker exception is rethrown on the capture thread");
+
+    iPhoneMirror::capture::detail::VideoWorkerFailure nonstandard_failure;
+    try {
+        throw 7;
+    } catch (...) {
+        nonstandard_failure.capture_current();
+    }
+    bool normalized_nonstandard{};
+    try {
+        nonstandard_failure.rethrow_if_set();
+    } catch (const std::runtime_error&) {
+        normalized_nonstandard = true;
+    }
+    check(normalized_nonstandard,
+        "non-standard decoder exceptions are normalized before leaving noexcept run");
 }
 
 void test_capture_preflight_without_device() {
@@ -434,9 +790,18 @@ void test_wireless_i420_conversion() {
         header, std::span(i420).first(11), nv12, stride),
         "wireless conversion rejects truncated planes");
     check(sizeof(iPhoneMirror::wireless::MessageHeader) == 392 &&
+        iPhoneMirror::ApiVersion == 15 &&
         header.magic == iPhoneMirror::wireless::IpcMagic &&
-        header.version == iPhoneMirror::wireless::IpcVersion,
+        header.version == iPhoneMirror::wireless::IpcVersion &&
+        iPhoneMirror::wireless::IpcVersion == 6,
         "wireless IPC header layout and version are stable");
+    check(static_cast<std::uint32_t>(
+            iPhoneMirror::capture::MediaCastCommandType::Pause) == 3 &&
+        static_cast<std::uint32_t>(
+            iPhoneMirror::capture::MediaCastCommandType::Resume) == 4 &&
+        static_cast<std::uint32_t>(
+            iPhoneMirror::capture::MediaCastCommandType::Seek) == 5,
+        "media playback controls have stable public ABI values");
 }
 
 void test_wireless_multi_stream_isolation() {
@@ -484,8 +849,127 @@ void test_wireless_multi_stream_isolation() {
     first->set_identity(L"First iPhone", false);
     check(first->snapshot().width == 0 && second->snapshot().width == 2,
         "disconnect clears only the matching wireless client");
+    first->publish_video(first_header, first_i420);
+    check(first->snapshot().video_frames == 1 && first->latest_frame() == nullptr,
+        "late frames after disconnect cannot repopulate the wireless client");
     first->detach();
     second->detach();
+}
+
+void test_media_command_queue() {
+    using iPhoneMirror::capture::MediaCastCommand;
+    using iPhoneMirror::capture::MediaCastCommandType;
+    iPhoneMirror::capture::detail::MediaCommandQueue queue;
+    check(queue.push(MediaCastCommand{.id = 1, .type = MediaCastCommandType::Play,
+        .url = L"https://example.test/video.mp4"}), "first media command is accepted");
+    check(queue.push(MediaCastCommand{.id = 2, .type = MediaCastCommandType::Seek,
+        .start_position = 12.5}), "newer seek command is accepted");
+    check(queue.push(MediaCastCommand{.id = 3, .type = MediaCastCommandType::Pause}),
+        "newer pause command is accepted");
+    check(queue.pop().id == 1 && queue.pop().id == 2 && queue.pop().id == 3,
+        "media commands preserve Play/Seek/Pause order");
+
+    check(!queue.push(MediaCastCommand{.id = 3, .type = MediaCastCommandType::Resume}) &&
+        !queue.push(MediaCastCommand{.id = 2, .type = MediaCastCommandType::Seek}) &&
+        !queue.push(MediaCastCommand{.id = 0, .type = MediaCastCommandType::Stop}),
+        "stale and zero media commands are rejected");
+    check(queue.size() == 0 && queue.latest_id() == 3,
+        "media command queue rejects duplicate and out-of-order command ids");
+
+    queue.reset();
+    check(queue.push(MediaCastCommand{.id = 10, .type = MediaCastCommandType::Play}),
+        "media queue accepts play after reset");
+    for (std::uint64_t id = 11; id <= 90; ++id)
+        check(queue.push(MediaCastCommand{.id = id, .type = MediaCastCommandType::Seek,
+            .start_position = static_cast<double>(id)}),
+            "monotonic media command flood is accepted");
+    check(queue.size() == 64, "media command queue has a hard bound");
+    check(queue.pop().id == 10, "control floods never evict the Play prerequisite");
+    std::uint64_t final_id{};
+    while (queue.size() != 0) final_id = queue.pop().id;
+    check(final_id == 90 && queue.latest_id() == 90,
+        "media command queue retains the newest control and command id");
+}
+
+void test_logging_shutdown_boundary() {
+    namespace logging = iPhoneMirror::logging;
+    logging::shutdown();
+
+    const auto path = std::filesystem::temp_directory_path() /
+        (L"iPhoneMirror-logging-boundary-" +
+            std::to_wstring(GetCurrentProcessId()) + L".log");
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_LOG_FILE", path.c_str());
+
+    logging::write("late-write-must-be-discarded");
+    check(!std::filesystem::exists(path),
+        "logging shutdown prevents a late write from reopening the file");
+
+    logging::initialize();
+    constexpr std::string_view sensitive_identifier =
+        "00008110-0012345678901234";
+    const auto identifier_fingerprint = logging::fingerprint(sensitive_identifier);
+    check(identifier_fingerprint == logging::fingerprint(sensitive_identifier) &&
+        identifier_fingerprint != logging::fingerprint("another-device") &&
+        identifier_fingerprint.starts_with("anon-") &&
+        identifier_fingerprint.find(sensitive_identifier) == std::string::npos,
+        "log fingerprints are stable within a process and do not expose identifiers");
+    logging::write("test_identifier_fp=" + identifier_fingerprint);
+    logging::write("write-after-explicit-reinitialize");
+    logging::write(iPhoneMirror::logging::Level::Warning, "test/category",
+        "warning-line-one\nwarning-line-two");
+    logging::write_event(iPhoneMirror::logging::Level::Error, "test",
+        "synthetic_failure", "code=42");
+    logging::shutdown();
+    std::ifstream stream(path, std::ios::binary);
+    const std::string contents{
+        std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+    check(contents.find("late-write-must-be-discarded") == std::string::npos &&
+        contents.find(sensitive_identifier) == std::string::npos &&
+        contents.find(identifier_fingerprint) != std::string::npos &&
+        contents.find("write-after-explicit-reinitialize") != std::string::npos &&
+        contents.find("[level=WARN] [category=test_category]") != std::string::npos &&
+        contents.find("warning-line-one warning-line-two") != std::string::npos &&
+        contents.find("[level=ERROR] [category=test]") != std::string::npos &&
+        contents.find("event=synthetic_failure code=42") != std::string::npos &&
+        contents.find("[seq=") != std::string::npos &&
+        contents.find("[session=") != std::string::npos &&
+        contents.find("dropped_before_start=1") != std::string::npos &&
+        contents.find("[shutdown] session=") != std::string::npos &&
+        contents.find("warnings=1 errors=1") != std::string::npos,
+        "structured logging preserves context, sanitizes lines, and writes a summary");
+
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_LOG_FILE", nullptr);
+    stream.close();
+    std::filesystem::remove(path, error);
+
+    const auto failed_directory = std::filesystem::temp_directory_path() /
+        (L"iPhoneMirror-logging-failure-" +
+            std::to_wstring(GetCurrentProcessId()));
+    std::filesystem::remove_all(failed_directory, error);
+    std::filesystem::create_directories(failed_directory, error);
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_LOG_FILE", failed_directory.c_str());
+    logging::initialize();
+    logging::write("write-to-directory-must-be-counted");
+
+    // A failed destination must be recoverable without tearing down Core. In
+    // production this covers a transiently unavailable custom log directory.
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_LOG_FILE", path.c_str());
+    logging::initialize();
+    logging::write("write-after-failed-log-target");
+    logging::shutdown();
+    std::ifstream recovery_stream(path, std::ios::binary);
+    const std::string recovery_contents{
+        std::istreambuf_iterator<char>(recovery_stream),
+        std::istreambuf_iterator<char>()};
+    check(recovery_contents.find("dropped_before_start=1") != std::string::npos &&
+        recovery_contents.find("write-after-failed-log-target") != std::string::npos,
+        "failed log targets recover in-place and retain the dropped-write count");
+    recovery_stream.close();
+    SetEnvironmentVariableW(L"IPHONE_MIRROR_LOG_FILE", nullptr);
+    std::filesystem::remove(path, error);
+    std::filesystem::remove_all(failed_directory, error);
 }
 
 } // namespace
@@ -508,11 +992,15 @@ int main() {
         test_session_protocol();
         test_usb_projection_modes();
         test_apple_usb_serial_matching();
+        test_apple_usb_reenumeration_selection();
         test_libusb_runtime();
         test_media_foundation_decoder();
+        test_capture_media_safety_helpers();
         test_capture_preflight_without_device();
         test_wireless_i420_conversion();
         test_wireless_multi_stream_isolation();
+        test_media_command_queue();
+        test_logging_shutdown_boundary();
     } catch (const std::exception& error) {
         std::cerr << "UNEXPECTED: " << error.what() << '\n';
         return 2;

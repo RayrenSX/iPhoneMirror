@@ -11,6 +11,8 @@ internal static partial class DriverConstants
     internal const string QqGroupNumber = "1050045279";
     internal const string AisiOfficialUrl = "https://www.i4.cn/";
     internal const string DriverVersion = "1.2.6.0";
+    internal const string AppleSignerSubject =
+        "CN=Apple Inc., O=Apple Inc., L=Cupertino, S=California, C=US";
 
     internal const string InstallerHash =
         "DF2ABF387893332F28C4DF68B10A6B176DC9706142055DCCCCF447F5A9CEDE2D";
@@ -26,7 +28,9 @@ internal static partial class DriverConstants
         "iPhoneMirror.Driver");
     internal static string OperationsRoot => Path.Combine(DataRoot, "Operations");
     internal static string BackupsRoot => Path.Combine(DataRoot, "Backups");
-    internal static string PackagesRoot => Path.Combine(DataRoot, "Packages");
+    internal static string PackagesRoot => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "iPhoneMirror.Driver", "Packages");
 
     [GeneratedRegex(@"^USB\\VID_05AC&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9]+$",
         RegexOptions.CultureInvariant)]
@@ -47,6 +51,15 @@ internal static partial class DriverConstants
 
     internal static string NormalizeSerial(string value) => new(
         value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+    internal static bool IsValidSerial(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var normalized = NormalizeSerial(value);
+        return normalized.Length is >= 8 and <= 40 &&
+               normalized.All(char.IsAsciiLetterOrDigit) &&
+               string.Equals(value, normalized, StringComparison.OrdinalIgnoreCase);
+    }
 
     internal static (string Directory, string ResultPath, string LogPath) GetOperationPaths(
         string operationId)

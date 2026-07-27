@@ -7,11 +7,60 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# .NET Framework MSBuild rejects environment blocks containing both Path and PATH.
+$ProcessEnvironment = [Environment]::GetEnvironmentVariables()
+$PathEntries = @($ProcessEnvironment.GetEnumerator() |
+    Where-Object { $_.Key -ieq 'Path' })
+if ($PathEntries.Count -gt 1) {
+    $CanonicalPath = ($PathEntries | Where-Object { $_.Key -ceq 'Path' } |
+        Select-Object -First 1).Value
+    if ($null -eq $CanonicalPath) { $CanonicalPath = $PathEntries[0].Value }
+    [Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('Path', $CanonicalPath, 'Process')
+}
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CMake = 'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 $CTest = 'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe'
 $WirelessRoot = Join-Path $Root 'third_party\airplay-server'
 $WirelessManifest = Join-Path $WirelessRoot 'SHA256SUMS.txt'
+$ExpectedWirelessManifestPaths = @(
+    'bin/x64/airplay2dll.dll',
+    'bin/x64/avcodec-58.dll',
+    'bin/x64/avutil-56.dll',
+    'bin/x64/swresample-3.dll',
+    'bin/x64/swscale-5.dll'
+)
+
+function Assert-SafeWorkspaceDirectory([string]$Path) {
+    $workspace = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not $fullPath.StartsWith($workspace + '\',
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Directory is outside the workspace: $fullPath"
+    }
+    $current = [IO.DirectoryInfo]::new($fullPath)
+    while ($null -ne $current -and
+        $current.FullName.Length -ge $workspace.Length) {
+        if ($current.Exists -and
+            ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing a workspace directory containing a reparse point: $($current.FullName)"
+        }
+        if ([string]::Equals($current.FullName, $workspace,
+                [StringComparison]::OrdinalIgnoreCase)) { break }
+        $current = $current.Parent
+    }
+}
+
+function Assert-NoReparseChildren([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
+    $reparse = @(Get-ChildItem -LiteralPath $Path -Recurse -Force |
+        Where-Object {
+            ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        })
+    if ($reparse.Count -ne 0) {
+        throw "Refusing recursive mutation through a reparse point: $($reparse[0].FullName)"
+    }
+}
 
 if (-not (Test-Path $CMake)) {
     $CMake = (Get-Command cmake -ErrorAction Stop).Source
@@ -22,8 +71,13 @@ if (-not (Test-Path $CTest)) {
 
 Push-Location $Root
 try {
+    Assert-SafeWorkspaceDirectory $WirelessRoot
     if (-not (Test-Path -LiteralPath $WirelessManifest)) {
         throw 'Wireless receiver hash manifest is missing.'
+    }
+    $manifestItem = Get-Item -LiteralPath $WirelessManifest -Force
+    if (($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Wireless receiver hash manifest must not be a reparse point.'
     }
     $WirelessHashes = foreach ($line in Get-Content -LiteralPath $WirelessManifest) {
         if ($line -notmatch '^([0-9a-fA-F]{64})\s{2}(.+)$') {
@@ -31,10 +85,26 @@ try {
         }
         [PSCustomObject]@{ Hash = $Matches[1].ToLowerInvariant(); Path = $Matches[2] }
     }
+    $manifestPaths = @($WirelessHashes | ForEach-Object { $_.Path } |
+        Select-Object -Unique)
+    $missingManifestPaths = @($ExpectedWirelessManifestPaths |
+        Where-Object { $_ -notin $manifestPaths })
+    $unexpectedManifestPaths = @($manifestPaths |
+        Where-Object { $_ -notin $ExpectedWirelessManifestPaths })
+    if ($missingManifestPaths.Count -ne 0 -or
+        $unexpectedManifestPaths.Count -ne 0 -or
+        @($WirelessHashes).Count -ne $ExpectedWirelessManifestPaths.Count) {
+        throw 'Wireless receiver hash manifest does not exactly cover the expected binaries.'
+    }
     foreach ($entry in $WirelessHashes) {
         $source = Join-Path $WirelessRoot ($entry.Path -replace '/', '\')
-        if (-not (Test-Path -LiteralPath $source)) {
+        Assert-SafeWorkspaceDirectory (Split-Path -Parent $source)
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
             throw "Wireless receiver artifact is missing: $($entry.Path)"
+        }
+        $sourceItem = Get-Item -LiteralPath $source -Force
+        if (($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Wireless receiver artifact is a reparse point: $($entry.Path)"
         }
         $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne $entry.Hash) {
@@ -45,27 +115,12 @@ try {
     & $CMake --preset windows-x64
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
 
-    if ($Configuration -eq 'Release') {
-        # Some endpoint-security products heuristically block freshly linked,
-        # unsigned optimized console test executables. Build only the shipping
-        # DLL in Release, then execute the same protocol suite in Debug.
-        & $CMake --build --preset windows-x64-release `
-            --target iPhoneMirror.Core iPhoneMirror.WirelessHost --parallel
-    }
-    else {
-        & $CMake --build --preset windows-x64-debug --parallel
-    }
+    $BuildPreset = "windows-x64-$($Configuration.ToLowerInvariant())"
+    & $CMake --build --preset $BuildPreset --parallel
     if ($LASTEXITCODE -ne 0) { throw "Native build failed: $LASTEXITCODE" }
 
     if (-not $SkipTests) {
-        $TestConfiguration = $Configuration
-        if ($Configuration -eq 'Release') {
-            & $CMake --build build/native --config Debug `
-                --target iPhoneMirror.Core.Tests iPhoneMirror.WirelessHost.Smoke --parallel
-            if ($LASTEXITCODE -ne 0) { throw "Debug protocol test build failed: $LASTEXITCODE" }
-            $TestConfiguration = 'Debug'
-        }
-        & $CTest --test-dir build/native -C $TestConfiguration --output-on-failure
+        & $CTest --test-dir build/native -C $Configuration --output-on-failure
         if ($LASTEXITCODE -ne 0) { throw "Native tests failed: $LASTEXITCODE" }
 
         foreach ($Project in @(
@@ -77,6 +132,26 @@ try {
             dotnet run --no-restore --project $Project --configuration $Configuration
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $Project ($LASTEXITCODE)" }
         }
+    }
+
+    if (Test-Path 'src/App/iPhoneMirror.App.csproj') {
+        $NativeDll = Join-Path $Root "build/native/src/Core/$Configuration/iPhoneMirror.Core.dll"
+        $WirelessHost = Join-Path $Root `
+            "build/native/src/WirelessHost/$Configuration/iPhoneMirror.WirelessHost.exe"
+        $DnsSdShim = Join-Path $Root `
+            "build/native/src/WirelessHost/$Configuration/dnssd.dll"
+        $AppNative = Join-Path $Root 'src/App/native'
+        $AppWireless = Join-Path $AppNative 'Wireless'
+        Assert-SafeWorkspaceDirectory $AppNative
+        Assert-SafeWorkspaceDirectory $AppWireless
+        New-Item -ItemType Directory -Force -Path $AppNative | Out-Null
+        New-Item -ItemType Directory -Force -Path $AppWireless | Out-Null
+        Copy-Item $NativeDll (Join-Path $AppNative 'iPhoneMirror.Core.dll') -Force
+        Copy-Item $WirelessHost `
+            (Join-Path $AppWireless 'iPhoneMirror.WirelessHost.exe') -Force
+        Copy-Item $DnsSdShim (Join-Path $AppWireless 'dnssd.dll') -Force
+        Copy-Item (Join-Path $Root 'third_party/libusb/bin/x64/libusb-1.0.dll') `
+            (Join-Path $AppNative 'libusb-1.0.dll') -Force
     }
 
     if ($NoPublish) {
@@ -92,23 +167,10 @@ try {
     }
 
     if (-not $NoPublish -and (Test-Path 'src/App/iPhoneMirror.App.csproj')) {
-        $NativeDll = Join-Path $Root "build/native/src/Core/$Configuration/iPhoneMirror.Core.dll"
-        $WirelessHost = Join-Path $Root `
-            "build/native/src/WirelessHost/$Configuration/iPhoneMirror.WirelessHost.exe"
-        $DnsSdShim = Join-Path $Root `
-            "build/native/src/WirelessHost/$Configuration/dnssd.dll"
-        $AppNative = Join-Path $Root 'src/App/native'
-        $AppWireless = Join-Path $AppNative 'Wireless'
         $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
-        New-Item -ItemType Directory -Force -Path $AppNative | Out-Null
-        New-Item -ItemType Directory -Force -Path $AppWireless | Out-Null
-        Copy-Item $NativeDll (Join-Path $AppNative 'iPhoneMirror.Core.dll') -Force
-        Copy-Item $WirelessHost `
-            (Join-Path $AppWireless 'iPhoneMirror.WirelessHost.exe') -Force
-        Copy-Item $DnsSdShim (Join-Path $AppWireless 'dnssd.dll') -Force
-        Copy-Item (Join-Path $Root 'third_party/libusb/bin/x64/libusb-1.0.dll') `
-            (Join-Path $AppNative 'libusb-1.0.dll') -Force
+        Assert-SafeWorkspaceDirectory $PublishRoot
         if (Test-Path -LiteralPath $PublishRoot) {
+            Assert-NoReparseChildren $PublishRoot
             Remove-Item -LiteralPath $PublishRoot -Recurse -Force
         }
         dotnet publish src/App/iPhoneMirror.App.csproj `
@@ -126,7 +188,14 @@ try {
             (Join-Path $PublishRoot 'libusb0.sys')
         )) {
             if (Test-Path -LiteralPath $forbidden) {
-                Remove-Item -LiteralPath $forbidden -Force
+                if ((Get-Item -LiteralPath $forbidden -Force).PSIsContainer) {
+                    Assert-SafeWorkspaceDirectory $forbidden
+                    Assert-NoReparseChildren $forbidden
+                    Remove-Item -LiteralPath $forbidden -Recurse -Force
+                }
+                else {
+                    Remove-Item -LiteralPath $forbidden -Force
+                }
             }
         }
 
@@ -136,6 +205,7 @@ try {
             'libusb-1.0.dll',
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
+            'licenses\libusb-COPYING.txt',
             'Wireless\iPhoneMirror.WirelessHost.exe',
             'Wireless\airplay2dll.dll',
             'Wireless\avcodec-58.dll',
@@ -143,6 +213,10 @@ try {
             'Wireless\dnssd.dll',
             'Wireless\swresample-3.dll',
             'Wireless\swscale-5.dll',
+            'Wireless\licenses\LICENSE-FFMPEG-LGPL-2.1.txt',
+            'Wireless\licenses\LICENSE-MIT.txt',
+            'Wireless\licenses\LICENSE-PLAYFAIR-GPL-3.0.md',
+            'Wireless\licenses\NOTICE-FDK-AAC.txt',
             'Wireless\licenses\SOURCE.md',
             'Wireless\licenses\SHA256SUMS.txt'
         )
@@ -167,11 +241,15 @@ try {
         # application discovers it. Publishing a second identical 69 MB copy
         # under outputs/iPhoneMirror.Driver only wastes disk space.
         $LegacyDriverPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Driver'
+        Assert-SafeWorkspaceDirectory $LegacyDriverPublishRoot
         if (Test-Path -LiteralPath $LegacyDriverPublishRoot) {
+            Assert-NoReparseChildren $LegacyDriverPublishRoot
             Remove-Item -LiteralPath $LegacyDriverPublishRoot -Recurse -Force
         }
         $DriverPublishRoot = Join-Path $Root 'work\publish\iPhoneMirror.Driver'
+        Assert-SafeWorkspaceDirectory $DriverPublishRoot
         if (Test-Path -LiteralPath $DriverPublishRoot) {
+            Assert-NoReparseChildren $DriverPublishRoot
             Remove-Item -LiteralPath $DriverPublishRoot -Recurse -Force
         }
         dotnet publish src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj `
@@ -197,6 +275,8 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $MainPublishRoot 'iPhoneMirror.Driver.exe'))) {
             throw 'Driver manager was not copied into the main application output.'
         }
+        Assert-SafeWorkspaceDirectory $DriverPublishRoot
+        Assert-NoReparseChildren $DriverPublishRoot
         Remove-Item -LiteralPath $DriverPublishRoot -Recurse -Force
 
         $allowedTopLevelFiles = @(
@@ -211,7 +291,7 @@ try {
             $_.Name -notin $allowedTopLevelFiles
         })
         $unexpectedDirectories = @(Get-ChildItem -LiteralPath $MainPublishRoot -Directory |
-            Where-Object { $_.Name -ne 'Wireless' })
+            Where-Object { $_.Name -notin @('Wireless', 'licenses') })
         if ($unexpectedFiles.Count -ne 0 -or $unexpectedDirectories.Count -ne 0) {
             $unexpected = @($unexpectedFiles.Name) + @($unexpectedDirectories.Name)
             throw "Unexpected files in compact application output: $($unexpected -join ', ')"

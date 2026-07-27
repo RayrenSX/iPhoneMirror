@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using IPhoneMirror.App.Localization;
@@ -40,6 +41,28 @@ internal static class ScreenshotService
             96, 96, PixelFormats.Bgra32, null, pixels, checked((int)frame.Stride));
         bitmap.Freeze();
 
+        return SavePng(bitmap, destinationPath);
+    }
+
+    internal static string CaptureVisualPng(FrameworkElement visual, string destinationPath)
+    {
+        ArgumentNullException.ThrowIfNull(visual);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+
+        visual.UpdateLayout();
+        var width = checked((int)Math.Ceiling(visual.ActualWidth));
+        var height = checked((int)Math.Ceiling(visual.ActualHeight));
+        if (width <= 0 || height <= 0)
+            throw new InvalidOperationException(LocalizationService.Get("ScreenshotNoFrame"));
+
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        bitmap.Freeze();
+        return SavePng(bitmap, destinationPath);
+    }
+
+    private static string SavePng(BitmapSource bitmap, string destinationPath)
+    {
         var fullPath = Path.GetFullPath(destinationPath);
         var directory = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);

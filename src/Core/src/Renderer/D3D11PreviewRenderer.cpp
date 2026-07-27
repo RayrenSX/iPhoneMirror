@@ -6,6 +6,7 @@
 #include <d3dcompiler.h>
 #include <dcomp.h>
 #include <dxgi1_3.h>
+#include <dxgi1_6.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -63,6 +64,33 @@ std::size_t allocated_nv12_height(const media::DecodedFrame& frame, std::size_t 
     return frame.height;
 }
 
+bool monitor_has_active_hdr(IDXGIFactory1* factory, HWND window) noexcept {
+    if (!factory || !window) return false;
+    const auto monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+    for (UINT adapter_index{};; ++adapter_index) {
+        ComPtr<IDXGIAdapter1> adapter;
+        if (factory->EnumAdapters1(adapter_index, &adapter) == DXGI_ERROR_NOT_FOUND) break;
+        if (!adapter) continue;
+        for (UINT output_index{};; ++output_index) {
+            ComPtr<IDXGIOutput> output;
+            if (adapter->EnumOutputs(output_index, &output) == DXGI_ERROR_NOT_FOUND) break;
+            if (!output) continue;
+            DXGI_OUTPUT_DESC output_description{};
+            if (FAILED(output->GetDesc(&output_description)) ||
+                output_description.Monitor != monitor) continue;
+            ComPtr<IDXGIOutput6> output6;
+            DXGI_OUTPUT_DESC1 description{};
+            if (FAILED(output.As(&output6)) ||
+                FAILED(output6->GetDesc1(&description))) return false;
+            const bool advanced_color =
+                description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 ||
+                description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
+            return advanced_color && description.BitsPerColor >= 10;
+        }
+    }
+    return false;
+}
+
 constexpr const char* VertexShader = R"(
 struct VSOutput {
     float4 position : SV_POSITION;
@@ -91,6 +119,20 @@ cbuffer ShapeConstants : register(b0) {
     float cornerEnabled;
     float rotationQuarterTurns;
     float2 shapePadding;
+    float yOffset;
+    float yScale;
+    float chromaOffset;
+    float chromaScale;
+    float redCr;
+    float greenCb;
+    float greenCr;
+    float blueCb;
+    float transferFunction;
+    float colorPrimaries;
+    float hdrSurface;
+    float preserveHdr;
+    float sourcePeakNits;
+    float3 colorPadding;
 };
 
 float2 rotateUv(float2 uv) {
@@ -122,15 +164,89 @@ float4 premultiplyForCorner(float3 rgb, float2 pixel) {
     return float4(rgb * alpha, alpha);
 }
 
+float3 inverseSrgb(float3 value) {
+    float3 low = value / 12.92;
+    float3 high = pow(max((value + 0.055) / 1.055, 0.0), 2.4);
+    return lerp(high, low, step(value, 0.04045));
+}
+
+float3 encodeSrgb(float3 value) {
+    value = max(value, 0.0);
+    float3 low = value * 12.92;
+    float3 high = 1.055 * pow(value, 1.0 / 2.4) - 0.055;
+    return lerp(high, low, step(value, 0.0031308));
+}
+
+float3 pqToNits(float3 value) {
+    const float m1 = 2610.0 / 16384.0;
+    const float m2 = 2523.0 / 32.0;
+    const float c1 = 3424.0 / 4096.0;
+    const float c2 = 2413.0 / 128.0;
+    const float c3 = 2392.0 / 128.0;
+    float3 p = pow(saturate(value), 1.0 / m2);
+    return 10000.0 * pow(max((p - c1) / max(c2 - c3 * p, 1.0e-6), 0.0), 1.0 / m1);
+}
+
+float3 hlgToNits(float3 value) {
+    const float a = 0.17883277;
+    const float b = 0.28466892;
+    const float c = 0.55991073;
+    float3 low = value * value / 3.0;
+    float3 high = (exp((value - c) / a) + b) / 12.0;
+    float3 sceneLinear = lerp(high, low, step(value, 0.5));
+    return max(sourcePeakNits, 100.0) * pow(max(sceneLinear, 0.0), 1.2);
+}
+
+float3 convertPrimariesTo709(float3 linearRgb) {
+    if (colorPrimaries > 0.5 && colorPrimaries < 1.5) {
+        return float3(
+            1.6605 * linearRgb.r - 0.5876 * linearRgb.g - 0.0728 * linearRgb.b,
+           -0.1246 * linearRgb.r + 1.1329 * linearRgb.g - 0.0083 * linearRgb.b,
+           -0.0182 * linearRgb.r - 0.1006 * linearRgb.g + 1.1187 * linearRgb.b);
+    }
+    if (colorPrimaries >= 1.5) {
+        return float3(
+            1.224745 * linearRgb.r - 0.224904 * linearRgb.g,
+           -0.042058 * linearRgb.r + 1.042081 * linearRgb.g,
+           -0.019642 * linearRgb.r - 0.078655 * linearRgb.g + 1.098537 * linearRgb.b);
+    }
+    return linearRgb;
+}
+
+float3 acesToneMap(float3 linearNits) {
+    float3 value = max(linearNits / 203.0, 0.0);
+    return saturate((value * (2.51 * value + 0.03)) /
+        (value * (2.43 * value + 0.59) + 0.14));
+}
+
+float3 applyColorOutput(float3 encodedRgb) {
+    encodedRgb = saturate(encodedRgb);
+    if (transferFunction > 0.5) {
+        float3 nits = transferFunction < 1.5
+            ? pqToNits(encodedRgb)
+            : hlgToNits(encodedRgb);
+        nits = max(convertPrimariesTo709(nits), 0.0);
+        if (preserveHdr > 0.5) return nits / 80.0;
+        float3 toneMapped = acesToneMap(nits);
+        return hdrSurface > 0.5 ? toneMapped : encodeSrgb(toneMapped);
+    }
+    if (hdrSurface > 0.5 || colorPrimaries > 0.5) {
+        float3 linearRgb = max(convertPrimariesTo709(inverseSrgb(encodedRgb)), 0.0);
+        return hdrSurface > 0.5 ? linearRgb : encodeSrgb(linearRgb);
+    }
+    return encodedRgb;
+}
+
 float4 nv12Main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
     uv = rotateUv(uv);
-    float y = max(0.0, yPlane.Sample(linearSampler, uv) - (16.0 / 255.0)) * 1.16438356;
-    float2 chroma = uvPlane.Sample(linearSampler, uv) - float2(0.5, 0.5);
+    float y = max(0.0, yPlane.Sample(linearSampler, uv) - yOffset) * yScale;
+    float2 chroma = (uvPlane.Sample(linearSampler, uv) -
+        float2(chromaOffset, chromaOffset)) * chromaScale;
     float3 rgb;
-    rgb.r = y + 1.79274107 * chroma.y;
-    rgb.g = y - 0.21324861 * chroma.x - 0.53290933 * chroma.y;
-    rgb.b = y + 2.11240179 * chroma.x;
-    return premultiplyForCorner(saturate(rgb), position.xy);
+    rgb.r = y + redCr * chroma.y;
+    rgb.g = y + greenCb * chroma.x + greenCr * chroma.y;
+    rgb.b = y + blueCb * chroma.x;
+    return premultiplyForCorner(applyColorOutput(rgb), position.xy);
 }
 
 float4 copyMain(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
@@ -153,6 +269,20 @@ struct D3D11PreviewRenderer::Impl {
         float corner_enabled{};
         float rotation_quarter_turns{};
         float padding[2]{};
+        float y_offset{};
+        float y_scale{1.0F};
+        float chroma_offset{0.5F};
+        float chroma_scale{1.0F};
+        float red_cr{1.5748F};
+        float green_cb{-0.1873F};
+        float green_cr{-0.4681F};
+        float blue_cb{1.8556F};
+        float transfer_function{};
+        float color_primaries{};
+        float hdr_surface{};
+        float preserve_hdr{};
+        float source_peak_nits{1000.0F};
+        float color_padding[3]{};
     };
 
     HWND window{};
@@ -162,6 +292,7 @@ struct D3D11PreviewRenderer::Impl {
 
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
+    ComPtr<IDXGIFactory2> factory;
     ComPtr<IDXGISwapChain1> swap_chain;
     ComPtr<IDCompositionDevice> composition_device;
     ComPtr<IDCompositionTarget> composition_target;
@@ -180,6 +311,8 @@ struct D3D11PreviewRenderer::Impl {
     ComPtr<ID3D11Texture2D> render_texture;
     ComPtr<ID3D11RenderTargetView> render_target;
     ComPtr<ID3D11ShaderResourceView> render_view;
+    DXGI_FORMAT swap_chain_format{DXGI_FORMAT_B8G8R8A8_UNORM};
+    bool hdr_surface{};
 
     std::uint32_t frame_width{};
     std::uint32_t frame_height{};
@@ -204,6 +337,14 @@ struct D3D11PreviewRenderer::Impl {
     // switch cannot render one frame using a mixed profile.
     std::atomic_uint64_t corner_profile{pack_corner_profile(0.1784F, 2.36F)};
     std::atomic_int rotation_quarter_turns{};
+    std::atomic<media::ColorOutputPreference> color_output_preference{
+        media::ColorOutputPreference::Auto};
+    media::PixelFormat texture_pixel_format{media::PixelFormat::Nv12};
+    std::atomic_uint64_t color_signature{};
+    HMONITOR configured_monitor{};
+    bool configured_monitor_hdr{};
+    bool requested_hdr_surface{};
+    std::chrono::steady_clock::time_point next_color_output_probe{};
     std::uint32_t scheduled_fps{};
     std::chrono::steady_clock::time_point next_present_due{};
 
@@ -242,7 +383,6 @@ struct D3D11PreviewRenderer::Impl {
 
         ComPtr<IDXGIDevice> dxgi_device;
         ComPtr<IDXGIAdapter> adapter;
-        ComPtr<IDXGIFactory2> factory;
         check(device.As(&dxgi_device), "query IDXGIDevice");
         ComPtr<IDXGIDevice1> dxgi_device1;
         if (SUCCEEDED(dxgi_device.As(&dxgi_device1))) {
@@ -254,9 +394,17 @@ struct D3D11PreviewRenderer::Impl {
         }
         check(dxgi_device->GetAdapter(&adapter), "IDXGIDevice GetAdapter");
         check(adapter->GetParent(IID_PPV_ARGS(&factory)), "query IDXGIFactory2");
+        const bool hdr_monitor = monitor_has_active_hdr(factory.Get(), window);
+        configured_monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+        configured_monitor_hdr = hdr_monitor;
+        requested_hdr_surface = false;
+        next_color_output_probe = std::chrono::steady_clock::now() +
+            std::chrono::seconds(1);
         DXGI_SWAP_CHAIN_DESC1 swap_description{};
         swap_description.Width = target_width;
         swap_description.Height = target_height;
+        // Start in the inexpensive SDR format. The first HDR frame upgrades
+        // the swap chain only when the window is actually on an HDR display.
         swap_description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         swap_description.SampleDesc.Count = 1;
         swap_description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
@@ -266,9 +414,37 @@ struct D3D11PreviewRenderer::Impl {
         swap_description.AlphaMode = composition_mode
             ? DXGI_ALPHA_MODE_PREMULTIPLIED
             : DXGI_ALPHA_MODE_IGNORE;
+        const auto create_swap_chain = [&](DXGI_FORMAT format) -> HRESULT {
+            swap_description.Format = format;
+            ComPtr<IDXGISwapChain1> candidate;
+            const auto result = composition_mode
+                ? factory->CreateSwapChainForComposition(device.Get(), &swap_description,
+                    nullptr, &candidate)
+                : factory->CreateSwapChainForHwnd(device.Get(), window, &swap_description,
+                    nullptr, nullptr, &candidate);
+            if (FAILED(result)) return result;
+            if (format == DXGI_FORMAT_R16G16B16A16_FLOAT) {
+                ComPtr<IDXGISwapChain3> swap_chain3;
+                UINT support{};
+                if (FAILED(candidate.As(&swap_chain3)) ||
+                    FAILED(swap_chain3->CheckColorSpaceSupport(
+                        DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &support)) ||
+                    (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == 0 ||
+                    FAILED(swap_chain3->SetColorSpace1(
+                        DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709))) {
+                    return DXGI_ERROR_UNSUPPORTED;
+                }
+            }
+            swap_chain = std::move(candidate);
+            swap_chain_format = format;
+            hdr_surface = format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+            return S_OK;
+        };
+        const auto swap_result = create_swap_chain(swap_description.Format);
+        check(swap_result, composition_mode
+            ? "CreateSwapChainForComposition" : "CreateSwapChainForHwnd");
+
         if (composition_mode) {
-            check(factory->CreateSwapChainForComposition(device.Get(), &swap_description,
-                nullptr, &swap_chain), "CreateSwapChainForComposition");
             check(DCompositionCreateDevice(dxgi_device.Get(), IID_PPV_ARGS(&composition_device)),
                 "DCompositionCreateDevice");
             check(composition_device->CreateTargetForHwnd(window, TRUE, &composition_target),
@@ -281,8 +457,6 @@ struct D3D11PreviewRenderer::Impl {
                 "IDCompositionTarget SetRoot");
             check(composition_device->Commit(), "IDCompositionDevice Commit");
         } else {
-            check(factory->CreateSwapChainForHwnd(device.Get(), window, &swap_description,
-                nullptr, nullptr, &swap_chain), "CreateSwapChainForHwnd");
             (void)factory->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER);
         }
 
@@ -319,9 +493,10 @@ struct D3D11PreviewRenderer::Impl {
         recreate_target();
         present_black();
         logging::write(std::format(
-            "d3d_preview initialized feature_level=0x{:04X} target={}x{} mode={}",
+            "d3d_preview initialized feature_level=0x{:04X} target={}x{} mode={} output={} hdr_monitor={}",
             static_cast<unsigned>(selected), target_width, target_height,
-            composition_mode ? "composition" : "hwnd"));
+            composition_mode ? "composition" : "hwnd",
+            hdr_surface ? "scrgb_fp16" : "sdr_bgra8", hdr_monitor ? "true" : "false"));
     }
 
     void recreate_target() {
@@ -332,7 +507,101 @@ struct D3D11PreviewRenderer::Impl {
             "CreateRenderTargetView");
     }
 
-    void update_shape_constants(UINT width, UINT height, bool enabled, int rotation = 0) {
+    bool switch_swap_chain_format(bool enable_hdr) {
+        const auto wanted_format = enable_hdr
+            ? DXGI_FORMAT_R16G16B16A16_FLOAT
+            : DXGI_FORMAT_B8G8R8A8_UNORM;
+        if (wanted_format == swap_chain_format) return true;
+
+        target.Reset();
+        render_view.Reset();
+        render_target.Reset();
+        render_texture.Reset();
+        render_width = render_height = 0;
+        const auto resize_result = swap_chain->ResizeBuffers(
+            0, target_width, target_height, wanted_format, 0);
+        if (FAILED(resize_result)) {
+            recreate_target();
+            logging::write(std::format(
+                "d3d_preview output_switch_failed requested={} stage=resize hr=0x{:08X}",
+                enable_hdr ? "hdr_scrgb" : "sdr_bgra8",
+                static_cast<unsigned>(resize_result)));
+            return false;
+        }
+
+        ComPtr<IDXGISwapChain3> swap_chain3;
+        auto color_result = swap_chain.As(&swap_chain3);
+        if (SUCCEEDED(color_result)) {
+            const auto color_space = enable_hdr
+                ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
+                : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+            UINT support{};
+            color_result = swap_chain3->CheckColorSpaceSupport(color_space, &support);
+            if (SUCCEEDED(color_result) &&
+                (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) != 0) {
+                color_result = swap_chain3->SetColorSpace1(color_space);
+            } else if (SUCCEEDED(color_result)) {
+                color_result = DXGI_ERROR_UNSUPPORTED;
+            }
+        }
+
+        if (FAILED(color_result) && enable_hdr) {
+            // A driver can advertise Advanced Color on the output while
+            // rejecting FP16 for this particular swap chain. Restore SDR once
+            // and remember the failed request until the monitor/source changes.
+            const auto fallback_result = swap_chain->ResizeBuffers(
+                0, target_width, target_height, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+            if (SUCCEEDED(fallback_result) && swap_chain3) {
+                (void)swap_chain3->SetColorSpace1(
+                    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+            }
+            swap_chain_format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            hdr_surface = false;
+            recreate_target();
+            logging::write(std::format(
+                "d3d_preview output_switch_failed requested=hdr_scrgb stage=color_space "
+                "hr=0x{:08X} fallback_hr=0x{:08X}",
+                static_cast<unsigned>(color_result),
+                static_cast<unsigned>(fallback_result)));
+            return false;
+        }
+
+        swap_chain_format = wanted_format;
+        hdr_surface = enable_hdr;
+        recreate_target();
+        color_signature.store(0, std::memory_order_relaxed);
+        logging::write(std::format("d3d_preview output_switched output={}",
+            hdr_surface ? "hdr_scrgb" : "sdr_bgra8"));
+        return SUCCEEDED(color_result);
+    }
+
+    bool update_output_mode(const media::DecodedFrame& frame) {
+        const auto now = std::chrono::steady_clock::now();
+        const auto monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+        if (monitor != configured_monitor || now >= next_color_output_probe) {
+            const auto active_hdr = monitor_has_active_hdr(factory.Get(), window);
+            if (monitor != configured_monitor || active_hdr != configured_monitor_hdr) {
+                logging::write(std::format(
+                    "d3d_preview monitor_changed monitor={} advanced_color={}",
+                    reinterpret_cast<std::uintptr_t>(monitor),
+                    active_hdr ? "true" : "false"));
+            }
+            configured_monitor = monitor;
+            configured_monitor_hdr = active_hdr;
+            next_color_output_probe = now + std::chrono::seconds(1);
+        }
+
+        const auto preference = color_output_preference.load(std::memory_order_relaxed);
+        const bool want_hdr = frame.color.is_hdr() && configured_monitor_hdr &&
+            preference != media::ColorOutputPreference::ForceSdrToneMap;
+        if (want_hdr == requested_hdr_surface) return false;
+        requested_hdr_surface = want_hdr;
+        (void)switch_swap_chain_format(want_hdr);
+        return true;
+    }
+
+    void update_shape_constants(UINT width, UINT height, bool enabled, int rotation = 0,
+        const media::DecodedFrame* frame = nullptr) {
         ShapeConstantData values{};
         values.output_width = static_cast<float>(width);
         values.output_height = static_cast<float>(height);
@@ -345,6 +614,36 @@ struct D3D11PreviewRenderer::Impl {
         values.corner_exponent = curve_exponent;
         values.corner_enabled = enabled && normalized_radius > 0.0F ? 1.0F : 0.0F;
         values.rotation_quarter_turns = static_cast<float>(rotation);
+        values.hdr_surface = hdr_surface ? 1.0F : 0.0F;
+        if (frame) {
+            const auto conversion = media::detail::yuv_conversion_parameters(
+                frame->pixel_format, frame->color.range, frame->color.matrix);
+            values.y_offset = static_cast<float>(conversion.y_offset);
+            values.y_scale = static_cast<float>(conversion.y_scale);
+            values.chroma_offset = static_cast<float>(conversion.chroma_offset);
+            values.chroma_scale = static_cast<float>(conversion.chroma_scale);
+            values.red_cr = static_cast<float>(conversion.red_cr);
+            values.green_cb = static_cast<float>(conversion.green_cb);
+            values.green_cr = static_cast<float>(conversion.green_cr);
+            values.blue_cb = static_cast<float>(conversion.blue_cb);
+            if (frame->color.transfer == coremedia::TransferFunction::Pq)
+                values.transfer_function = 1.0F;
+            else if (frame->color.transfer == coremedia::TransferFunction::Hlg)
+                values.transfer_function = 2.0F;
+            if (frame->color.primaries == coremedia::ColorPrimaries::Bt2020)
+                values.color_primaries = 1.0F;
+            else if (frame->color.primaries == coremedia::ColorPrimaries::DisplayP3)
+                values.color_primaries = 2.0F;
+            const auto preference = color_output_preference.load(std::memory_order_relaxed);
+            values.preserve_hdr = hdr_surface && frame->color.is_hdr() &&
+                preference != media::ColorOutputPreference::ForceSdrToneMap ? 1.0F : 0.0F;
+            if (frame->color.hdr.max_mastering_luminance != 0)
+                values.source_peak_nits = static_cast<float>(
+                    frame->color.hdr.max_mastering_luminance);
+            else if (frame->color.hdr.max_content_light_level != 0)
+                values.source_peak_nits = static_cast<float>(
+                    frame->color.hdr.max_content_light_level);
+        }
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context->Map(shape_constants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped),
@@ -406,6 +705,7 @@ struct D3D11PreviewRenderer::Impl {
     void recreate_video_textures(const media::DecodedFrame& frame) {
         frame_width = frame.width;
         frame_height = frame.height;
+        texture_pixel_format = frame.pixel_format;
         y_view.Reset();
         uv_view.Reset();
         y_texture.Reset();
@@ -416,7 +716,8 @@ struct D3D11PreviewRenderer::Impl {
         description.Height = frame.height;
         description.MipLevels = 1;
         description.ArraySize = 1;
-        description.Format = DXGI_FORMAT_R8_UNORM;
+        description.Format = frame.pixel_format == media::PixelFormat::P010
+            ? DXGI_FORMAT_R16_UNORM : DXGI_FORMAT_R8_UNORM;
         description.SampleDesc.Count = 1;
         description.Usage = D3D11_USAGE_DYNAMIC;
         description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -426,10 +727,12 @@ struct D3D11PreviewRenderer::Impl {
 
         description.Width = (frame.width + 1U) / 2U;
         description.Height = (frame.height + 1U) / 2U;
-        description.Format = DXGI_FORMAT_R8G8_UNORM;
+        description.Format = frame.pixel_format == media::PixelFormat::P010
+            ? DXGI_FORMAT_R16G16_UNORM : DXGI_FORMAT_R8G8_UNORM;
         check(device->CreateTexture2D(&description, nullptr, &uv_texture), "Create UV texture");
         check(device->CreateShaderResourceView(uv_texture.Get(), nullptr, &uv_view), "Create UV view");
-        logging::write(std::format("d3d_preview textures={}x{}", frame.width, frame.height));
+        logging::write(std::format("d3d_preview textures={}x{} format={}",
+            frame.width, frame.height, media::pixel_format_name(frame.pixel_format)));
     }
 
     std::pair<UINT, UINT> limited_render_size(const media::DecodedFrame& frame) const {
@@ -472,7 +775,7 @@ struct D3D11PreviewRenderer::Impl {
         description.Height = height;
         description.MipLevels = 1;
         description.ArraySize = 1;
-        description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        description.Format = swap_chain_format;
         description.SampleDesc.Count = 1;
         description.Usage = D3D11_USAGE_DEFAULT;
         description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
@@ -492,15 +795,21 @@ struct D3D11PreviewRenderer::Impl {
     }
 
     void upload(const media::DecodedFrame& frame) {
-        if (!y_texture || frame.width != frame_width || frame.height != frame_height) {
+        if (!y_texture || frame.width != frame_width || frame.height != frame_height ||
+            frame.pixel_format != texture_pixel_format) {
             recreate_video_textures(frame);
         }
         const auto source_stride = static_cast<std::size_t>(std::abs(frame.stride));
+        const auto component_bytes = frame.pixel_format == media::PixelFormat::P010 ? 2U : 1U;
+        const auto y_row_bytes = static_cast<std::size_t>(frame.width) * component_bytes;
+        const auto uv_components = static_cast<std::size_t>((frame.width + 1U) / 2U) * 2U;
+        const auto uv_row_bytes = uv_components * component_bytes;
         const auto allocated_height = allocated_nv12_height(frame, source_stride);
         const auto y_bytes = source_stride * allocated_height;
         const auto required = y_bytes + source_stride * ((allocated_height + 1U) / 2U);
-        if (source_stride < frame.width || frame.nv12.size() < required) {
-            throw std::runtime_error("invalid NV12 frame layout for D3D preview");
+        if (source_stride < std::max(y_row_bytes, uv_row_bytes) ||
+            frame.nv12.size() < required) {
+            throw std::runtime_error("invalid NV12/P010 frame layout for D3D preview");
         }
         const auto padding = leading_padding_rows(frame);
         const auto* source_y_plane = frame.nv12.data();
@@ -514,9 +823,19 @@ struct D3D11PreviewRenderer::Impl {
             const auto source_row = row + padding;
             if (source_row < frame.height) {
                 std::memcpy(destination, source_y_plane +
-                    static_cast<std::size_t>(source_row) * source_stride, frame.width);
+                    static_cast<std::size_t>(source_row) * source_stride, y_row_bytes);
             } else {
-                std::memset(destination, 16, frame.width);
+                if (frame.pixel_format == media::PixelFormat::P010) {
+                    const auto black = frame.color.range == coremedia::ColorRange::Full
+                        ? std::uint16_t{} : static_cast<std::uint16_t>(64U << 6U);
+                    std::fill_n(static_cast<std::uint16_t*>(mapped.pData) +
+                        static_cast<std::size_t>(row) * (mapped.RowPitch / 2U),
+                        frame.width, black);
+                } else {
+                    std::memset(destination,
+                        frame.color.range == coremedia::ColorRange::Full ? 0 : 16,
+                        y_row_bytes);
+                }
             }
         }
         context->Unmap(y_texture.Get(), 0);
@@ -529,9 +848,15 @@ struct D3D11PreviewRenderer::Impl {
             const auto source_row = row + padding / 2U;
             if (source_row < uv_height) {
                 std::memcpy(destination, source_uv_plane +
-                    static_cast<std::size_t>(source_row) * source_stride, frame.width);
+                    static_cast<std::size_t>(source_row) * source_stride, uv_row_bytes);
             } else {
-                std::memset(destination, 128, frame.width);
+                if (frame.pixel_format == media::PixelFormat::P010) {
+                    std::fill_n(static_cast<std::uint16_t*>(mapped.pData) +
+                        static_cast<std::size_t>(row) * (mapped.RowPitch / 2U),
+                        uv_components, static_cast<std::uint16_t>(512U << 6U));
+                } else {
+                    std::memset(destination, 128, uv_row_bytes);
+                }
             }
         }
         context->Unmap(uv_texture.Get(), 0);
@@ -541,6 +866,30 @@ struct D3D11PreviewRenderer::Impl {
         (void)resize_if_needed();
         if (target_width == 0 || target_height == 0) return;
         upload(frame);
+
+        const auto signature =
+            (static_cast<std::uint64_t>(frame.pixel_format) << 32U) |
+            (static_cast<std::uint64_t>(frame.color.primaries) << 24U) |
+            (static_cast<std::uint64_t>(frame.color.transfer) << 16U) |
+            (static_cast<std::uint64_t>(frame.color.matrix) << 8U) |
+            static_cast<std::uint64_t>(frame.color.range);
+        if (signature != color_signature.load(std::memory_order_relaxed)) {
+            color_signature.store(signature, std::memory_order_relaxed);
+            const auto preference = color_output_preference.load(std::memory_order_relaxed);
+            logging::write(std::format(
+                "d3d_preview color format={} primaries={} transfer={} matrix={} range={} "
+                "source_hdr={} output={} policy={}",
+                media::pixel_format_name(frame.pixel_format),
+                media::color_primaries_name(frame.color.primaries),
+                media::transfer_function_name(frame.color.transfer),
+                media::matrix_coefficients_name(frame.color.matrix),
+                media::color_range_name(frame.color.range),
+                frame.color.is_hdr() ? "true" : "false",
+                hdr_surface && frame.color.is_hdr() &&
+                    preference != media::ColorOutputPreference::ForceSdrToneMap
+                    ? "hdr_scrgb" : "sdr_tonemap",
+                static_cast<unsigned>(preference)));
+        }
 
         const auto turns = ((rotation_quarter_turns.load(std::memory_order_relaxed) % 4) + 4) % 4;
         const bool swaps_axes = (turns & 1) != 0;
@@ -600,7 +949,7 @@ struct D3D11PreviewRenderer::Impl {
             context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             context->VSSetShader(vertex_shader.Get(), nullptr, 0);
             context->PSSetShader(pixel_shader.Get(), nullptr, 0);
-            update_shape_constants(output_width, output_height, apply_corner, rotation);
+            update_shape_constants(output_width, output_height, apply_corner, rotation, &frame);
             ID3D11ShaderResourceView* nv12_views[] = {y_view.Get(), uv_view.Get()};
             context->PSSetShaderResources(0, 2, nv12_views);
             context->PSSetSamplers(0, 1, sampler.GetAddressOf());
@@ -706,7 +1055,8 @@ struct D3D11PreviewRenderer::Impl {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     continue;
                 }
-                if (!force_refresh && !target_resized &&
+                const bool output_mode_changed = update_output_mode(*frame);
+                if (!force_refresh && !target_resized && !output_mode_changed &&
                     frame->timestamp_100ns == last_timestamp) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     continue;
@@ -776,6 +1126,14 @@ void D3D11PreviewRenderer::set_corner_profile(float normalized_radius,
 void D3D11PreviewRenderer::set_rotation(std::int32_t quarter_turns) noexcept {
     if (!impl_) return;
     impl_->rotation_quarter_turns.store(quarter_turns, std::memory_order_relaxed);
+    impl_->refresh_requested.store(true, std::memory_order_release);
+}
+
+void D3D11PreviewRenderer::set_color_output_preference(
+    media::ColorOutputPreference preference) noexcept {
+    if (!impl_) return;
+    impl_->color_output_preference.store(preference, std::memory_order_relaxed);
+    impl_->color_signature.store(0, std::memory_order_relaxed);
     impl_->refresh_requested.store(true, std::memory_order_release);
 }
 

@@ -2,6 +2,7 @@
 
 #include "IpcProtocol.h"
 #include "DlnaRenderer.h"
+#include "HttpUrl.h"
 
 #include <Windows.h>
 #include <bcrypt.h>
@@ -13,21 +14,71 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <deque>
 #include <filesystem>
 #include <format>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
 
 constexpr char StartExport[] = "?fgServerStart@@YAPEAXQEBDIIPEAVIAirServerCallback@@@Z";
 constexpr char StopExport[] = "?fgServerStop@@YAXPEAX@Z";
+
+std::once_flag diagnostic_salt_once;
+std::array<unsigned char, 32> diagnostic_salt{};
+bool diagnostic_salt_ready{};
+
+void initialize_diagnostic_salt() noexcept {
+    diagnostic_salt_ready = BCryptGenRandom(nullptr, diagnostic_salt.data(),
+        static_cast<ULONG>(diagnostic_salt.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) >= 0;
+}
+
+std::string anonymous_label(std::string_view value) noexcept {
+    try {
+        if (value.empty()) return "anon-empty";
+        if (value.size() > std::numeric_limits<ULONG>::max()) return "anon-too-large";
+        std::call_once(diagnostic_salt_once, initialize_diagnostic_salt);
+        if (!diagnostic_salt_ready) return "anon-unavailable";
+
+        BCRYPT_ALG_HANDLE algorithm{};
+        BCRYPT_HASH_HANDLE hash{};
+        std::array<unsigned char, 32> digest{};
+        bool success = BCryptOpenAlgorithmProvider(
+            &algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) >= 0;
+        success = success && BCryptCreateHash(
+            algorithm, &hash, nullptr, 0, nullptr, 0, 0) >= 0;
+        success = success && BCryptHashData(hash, diagnostic_salt.data(),
+            static_cast<ULONG>(diagnostic_salt.size()), 0) >= 0;
+        success = success && BCryptHashData(hash,
+            reinterpret_cast<PUCHAR>(const_cast<char*>(value.data())),
+            static_cast<ULONG>(value.size()), 0) >= 0;
+        success = success && BCryptFinishHash(hash, digest.data(),
+            static_cast<ULONG>(digest.size()), 0) >= 0;
+        if (hash) BCryptDestroyHash(hash);
+        if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+        if (!success) return "anon-unavailable";
+
+        constexpr char hex[] = "0123456789abcdef";
+        std::string result = "anon-";
+        result.reserve(result.size() + 24);
+        for (std::size_t index = 0; index < 12; ++index) {
+            result.push_back(hex[digest[index] >> 4]);
+            result.push_back(hex[digest[index] & 0x0f]);
+        }
+        return result;
+    } catch (...) {
+        return "anon-unavailable";
+    }
+}
 
 struct SFgAudioFrame {
     unsigned long long pts;
@@ -111,12 +162,20 @@ std::optional<DeviceMetadata> parse_device_metadata(std::string_view message) {
     };
 }
 
-bool write_all(HANDLE pipe, const void* source, std::size_t size) noexcept {
+bool write_all(HANDLE pipe, const void* source, std::size_t size,
+    DWORD* failure_reason = nullptr) noexcept {
     const auto* bytes = static_cast<const std::uint8_t*>(source);
     while (size != 0) {
         DWORD written{};
         const auto request = static_cast<DWORD>(std::min<std::size_t>(size, 1024U * 1024U));
-        if (!WriteFile(pipe, bytes, request, &written, nullptr) || written == 0) return false;
+        if (!WriteFile(pipe, bytes, request, &written, nullptr)) {
+            if (failure_reason) *failure_reason = GetLastError();
+            return false;
+        }
+        if (written == 0) {
+            if (failure_reason) *failure_reason = ERROR_BROKEN_PIPE;
+            return false;
+        }
         bytes += written;
         size -= written;
     }
@@ -144,14 +203,23 @@ public:
 
     bool send(iPhoneMirror::wireless::MessageHeader header,
         std::span<const std::uint8_t> payload = {}) noexcept {
-        if (payload.size() > iPhoneMirror::wireless::MaxPayloadBytes) return false;
+        if (payload.size() > iPhoneMirror::wireless::MaxPayloadBytes) {
+            rejected_payloads_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
         try {
             header.payload_size = static_cast<std::uint32_t>(payload.size());
             const auto message_bytes = sizeof(header) + payload.size();
-            if (message_bytes > MaxQueuedBytes) return false;
+            if (message_bytes > MaxQueuedBytes) {
+                rejected_capacity_.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            }
 
             std::unique_lock lock(mutex_);
-            if (closing_) return false;
+            if (closing_) {
+                rejected_closing_.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            }
 
             if (header.type == iPhoneMirror::wireless::MessageType::Video) {
                 for (auto position = queue_.begin(); position != queue_.end();) {
@@ -160,6 +228,7 @@ public:
                             iPhoneMirror::wireless::DeviceIdBytes) == 0) {
                         buffered_bytes_ -= position->size();
                         --buffered_messages_;
+                        replaced_video_frames_.fetch_add(1, std::memory_order_relaxed);
                         position = queue_.erase(position);
                     }
                     else ++position;
@@ -179,7 +248,24 @@ public:
                     expendable = std::ranges::find_if(queue_, [](const QueuedMessage& queued) {
                         return queued.header.type == iPhoneMirror::wireless::MessageType::Log;
                     });
-                if (expendable == queue_.end()) return false;
+                if (expendable == queue_.end()) {
+                    rejected_capacity_.fetch_add(1, std::memory_order_relaxed);
+                    return false;
+                }
+                switch (expendable->header.type) {
+                case iPhoneMirror::wireless::MessageType::Audio:
+                    dropped_audio_.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                case iPhoneMirror::wireless::MessageType::Video:
+                    dropped_video_.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                case iPhoneMirror::wireless::MessageType::Log:
+                    dropped_logs_.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                default:
+                    dropped_other_.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                }
                 buffered_bytes_ -= expendable->size();
                 --buffered_messages_;
                 queue_.erase(expendable);
@@ -191,23 +277,29 @@ public:
             QueuedMessage message{.header = header};
             message.payload.assign(payload.begin(), payload.end());
             message.header.sequence = ++sequence_;
+            queue_.push_back(std::move(message));
             buffered_bytes_ += message_bytes;
             ++buffered_messages_;
-            queue_.push_back(std::move(message));
             lock.unlock();
             condition_.notify_one();
+            enqueued_messages_.fetch_add(1, std::memory_order_relaxed);
             return true;
         } catch (...) {
+            allocation_failures_.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
     }
 
-    bool send_text(iPhoneMirror::wireless::MessageType type, const char* text) noexcept {
-        const std::string_view value = text ? std::string_view(text) : std::string_view{};
+    bool send_text(iPhoneMirror::wireless::MessageType type,
+        std::string_view text) noexcept {
         iPhoneMirror::wireless::MessageHeader header;
         header.type = type;
         return send(header, std::span(
-            reinterpret_cast<const std::uint8_t*>(value.data()), value.size()));
+            reinterpret_cast<const std::uint8_t*>(text.data()), text.size()));
+    }
+
+    bool send_text(iPhoneMirror::wireless::MessageType type, const char* text) noexcept {
+        return send_text(type, text ? std::string_view(text) : std::string_view{});
     }
 
     bool send_device(iPhoneMirror::wireless::MessageHeader header,
@@ -225,6 +317,32 @@ public:
         copy_text(header.product_type, metadata.product_type.c_str());
         copy_text(header.os_version, metadata.os_version.c_str());
         return send(header);
+    }
+
+    [[nodiscard]] std::string summary() const {
+        std::scoped_lock lock(mutex_);
+        return std::format(
+            "ipc_summary enqueued={} written={} queued={} queued_bytes={} "
+            "written_bytes={} "
+            "replaced_video={} dropped_audio={} dropped_video={} dropped_log={} "
+            "dropped_other={} rejected_payload={} rejected_capacity={} "
+            "rejected_closing={} allocation_failures={} write_failures={} "
+            "last_write_error={} write_dropped_messages={}",
+            enqueued_messages_.load(std::memory_order_relaxed),
+            written_messages_.load(std::memory_order_relaxed), buffered_messages_,
+            buffered_bytes_, written_bytes_.load(std::memory_order_relaxed),
+            replaced_video_frames_.load(std::memory_order_relaxed),
+            dropped_audio_.load(std::memory_order_relaxed),
+            dropped_video_.load(std::memory_order_relaxed),
+            dropped_logs_.load(std::memory_order_relaxed),
+            dropped_other_.load(std::memory_order_relaxed),
+            rejected_payloads_.load(std::memory_order_relaxed),
+            rejected_capacity_.load(std::memory_order_relaxed),
+            rejected_closing_.load(std::memory_order_relaxed),
+            allocation_failures_.load(std::memory_order_relaxed),
+            write_failures_.load(std::memory_order_relaxed),
+            last_write_error_.load(std::memory_order_relaxed),
+            write_dropped_messages_.load(std::memory_order_relaxed));
     }
 
     void shutdown() noexcept {
@@ -260,7 +378,9 @@ private:
     template <std::size_t Size>
     static void copy_text(char (&destination)[Size], const char* source) noexcept {
         if (!source) return;
-        const auto length = std::min<std::size_t>(std::strlen(source), Size - 1);
+        // SDK callback strings are expected to be NUL terminated, but bound
+        // the probe so a malformed callback cannot scan arbitrary memory.
+        const auto length = strnlen_s(source, Size - 1);
         std::memcpy(destination, source, length);
         destination[length] = '\0';
     }
@@ -279,24 +399,35 @@ private:
                 queue_.pop_front();
             }
 
-            const auto written = write_all(pipe_, &message.header, sizeof(message.header)) &&
+            DWORD write_error = ERROR_SUCCESS;
+            const auto written = write_all(pipe_, &message.header, sizeof(message.header),
+                &write_error) &&
                 (message.payload.empty() ||
-                    write_all(pipe_, message.payload.data(), message.payload.size()));
+                    write_all(pipe_, message.payload.data(), message.payload.size(),
+                        &write_error));
             std::scoped_lock lock(mutex_);
             buffered_bytes_ -= message.size();
             --buffered_messages_;
             if (!written) {
+                write_failures_.fetch_add(1, std::memory_order_relaxed);
+                last_write_error_.store(write_error, std::memory_order_relaxed);
+                write_dropped_messages_.fetch_add(
+                    static_cast<std::uint64_t>(buffered_messages_),
+                    std::memory_order_relaxed);
                 closing_ = true;
                 queue_.clear();
                 buffered_bytes_ = 0;
                 buffered_messages_ = 0;
                 return;
             }
+            written_messages_.fetch_add(1, std::memory_order_relaxed);
+            written_bytes_.fetch_add(static_cast<std::uint64_t>(message.size()),
+                std::memory_order_relaxed);
         }
     }
 
     HANDLE pipe_{};
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable condition_;
     std::deque<QueuedMessage> queue_;
     std::size_t buffered_bytes_{};
@@ -304,6 +435,21 @@ private:
     std::uint64_t sequence_{};
     bool closing_{};
     std::thread worker_;
+    std::atomic_uint64_t enqueued_messages_{};
+    std::atomic_uint64_t written_messages_{};
+    std::atomic_uint64_t written_bytes_{};
+    std::atomic_uint64_t replaced_video_frames_{};
+    std::atomic_uint64_t dropped_audio_{};
+    std::atomic_uint64_t dropped_video_{};
+    std::atomic_uint64_t dropped_logs_{};
+    std::atomic_uint64_t dropped_other_{};
+    std::atomic_uint64_t rejected_payloads_{};
+    std::atomic_uint64_t rejected_capacity_{};
+    std::atomic_uint64_t rejected_closing_{};
+    std::atomic_uint64_t allocation_failures_{};
+    std::atomic_uint64_t write_failures_{};
+    std::atomic_uint32_t last_write_error_{};
+    std::atomic_uint64_t write_dropped_messages_{};
 };
 
 class AirPlayCallback final : public IAirServerCallback {
@@ -311,19 +457,23 @@ public:
     explicit AirPlayCallback(IpcWriter& writer) : writer_(writer) {}
 
     void connected(const char* remote_name, const char* remote_device_id) override {
-        diagnostic(std::format("callback connected remote={} device={}",
-            safe_text(remote_name), safe_text(remote_device_id)));
         iPhoneMirror::wireless::MessageHeader header;
         header.type = iPhoneMirror::wireless::MessageType::Connected;
-        writer_.send_device(header, remote_name, remote_device_id);
+        const auto sent = writer_.send_device(header, remote_name, remote_device_id);
+        connected_callbacks_.fetch_add(1, std::memory_order_relaxed);
+        diagnostic(std::format("callback connected remote_fp={} device_fp={} sent={}",
+            anonymous_label(safe_text(remote_name)),
+            anonymous_label(safe_text(remote_device_id)), sent));
     }
 
     void disconnected(const char* remote_name, const char* remote_device_id) override {
-        diagnostic(std::format("callback disconnected remote={} device={}",
-            safe_text(remote_name), safe_text(remote_device_id)));
         iPhoneMirror::wireless::MessageHeader header;
         header.type = iPhoneMirror::wireless::MessageType::Disconnected;
-        writer_.send_device(header, remote_name, remote_device_id);
+        const auto sent = writer_.send_device(header, remote_name, remote_device_id);
+        disconnected_callbacks_.fetch_add(1, std::memory_order_relaxed);
+        diagnostic(std::format("callback disconnected remote_fp={} device_fp={} sent={}",
+            anonymous_label(safe_text(remote_name)),
+            anonymous_label(safe_text(remote_device_id)), sent));
     }
 
     void outputAudio(SFgAudioFrame* data, const char* remote_name,
@@ -331,11 +481,13 @@ public:
         const auto callback_index = audio_callbacks_.fetch_add(1,
             std::memory_order_relaxed) + 1;
         if (!data) {
+            rejected_audio_.fetch_add(1, std::memory_order_relaxed);
             diagnostic("audio callback rejected: null frame");
             return;
         }
         if (!data->data || data->dataLen == 0 || data->dataLen >
             iPhoneMirror::wireless::MaxPayloadBytes) {
+            rejected_audio_.fetch_add(1, std::memory_order_relaxed);
             diagnostic(std::format(
                 "audio callback rejected index={} bytes={} rate={} channels={} bits={}",
                 callback_index, data->dataLen, data->sampleRate, data->channels,
@@ -349,6 +501,7 @@ public:
         header.bits_per_sample = data->bitsPerSample;
         const auto sent = writer_.send_device(header, remote_name, remote_device_id,
             std::span(data->data, data->dataLen));
+        if (!sent) send_failures_.fetch_add(1, std::memory_order_relaxed);
         if (callback_index == 1 || callback_index % 500 == 0) {
             diagnostic(std::format(
                 "audio callback index={} bytes={} rate={} channels={} bits={} sent={}",
@@ -362,12 +515,14 @@ public:
         const auto callback_index = video_callbacks_.fetch_add(1,
             std::memory_order_relaxed) + 1;
         if (!data) {
+            rejected_video_.fetch_add(1, std::memory_order_relaxed);
             diagnostic("video callback rejected: null frame");
             return;
         }
         if (!data->data || data->width == 0 || data->height == 0 ||
             data->width > 8192 || data->height > 8192 || data->dataTotalLen == 0 ||
             data->dataTotalLen > iPhoneMirror::wireless::MaxPayloadBytes) {
+            rejected_video_.fetch_add(1, std::memory_order_relaxed);
             diagnostic(std::format(
                 "video callback rejected index={} size={}x{} bytes={} data={}",
                 callback_index, data->width, data->height, data->dataTotalLen,
@@ -377,6 +532,7 @@ public:
         const auto plane_total = static_cast<std::uint64_t>(data->dataLen[0]) +
             data->dataLen[1] + data->dataLen[2];
         if (plane_total > data->dataTotalLen || data->pitch[0] < data->width) {
+            rejected_video_.fetch_add(1, std::memory_order_relaxed);
             diagnostic(std::format(
                 "video callback rejected index={} size={}x{} pitches={}/{}/{} "
                 "planes={}/{}/{} total={}", callback_index, data->width, data->height,
@@ -395,6 +551,7 @@ public:
         }
         const auto sent = writer_.send_device(header, remote_name, remote_device_id,
             std::span(data->data, data->dataTotalLen));
+        if (!sent) send_failures_.fetch_add(1, std::memory_order_relaxed);
         if (callback_index == 1 || callback_index % 300 == 0) {
             diagnostic(std::format(
                 "video callback index={} size={}x{} pitches={}/{}/{} "
@@ -407,37 +564,91 @@ public:
 
     void videoPlay(char* url, double volume, double start_position) override {
         iPhoneMirror::wireless::MessageHeader header;
-        std::string_view location = url ? std::string_view(url) : std::string_view{};
-        if (!location.empty() && location.size() <= 16U * 1024U &&
-            (location.starts_with("http://") || location.starts_with("https://"))) {
+        // Keep URL inspection bounded. A malformed SDK pointer or an
+        // unterminated URL must be rejected rather than read without limit.
+        std::string_view location = url
+            ? safe_text(url, 16U * 1024U + 1U) : std::string_view{};
+        if (location == "iphonemirror://pause") {
+            diagnostic("media control request action=pause source=airplay_url");
+            mediaPause();
+            return;
+        }
+        if (location == "iphonemirror://resume") {
+            diagnostic("media control request action=resume source=airplay_url");
+            mediaResume();
+            return;
+        }
+        if (location == "iphonemirror://seek") {
+            diagnostic(std::format(
+                "media control request action=seek source=airplay_url position={:.3f}",
+                start_position));
+            mediaSeek(start_position);
+            return;
+        }
+        if (iPhoneMirror::wireless::is_valid_http_url(location)) {
             header.type = iPhoneMirror::wireless::MessageType::MediaPlay;
-            header.media_position = std::max(0.0, start_position);
-            header.media_volume = volume;
+            header.media_position = std::isfinite(start_position)
+                ? std::max(0.0, start_position) : 0.0;
+            header.media_volume = std::isfinite(volume)
+                ? std::clamp(volume, 0.0, 1.0) : 1.0;
+            bool sent{};
             {
                 std::scoped_lock lock(playback_mutex_);
-                header.media_command_id = ++media_command_id_;
-                playback_ = {
+                header.media_command_id = media_command_id_ + 1;
+                const PlaybackState next_playback{
                     .command_id = header.media_command_id,
                     .position = header.media_position,
                     .rate = 1.0,
                     .updated_at = std::chrono::steady_clock::now(),
                 };
+                sent = writer_.send(header, std::span(
+                    reinterpret_cast<const std::uint8_t*>(location.data()),
+                    location.size()));
+                if (sent) {
+                    media_command_id_ = header.media_command_id;
+                    playback_ = next_playback;
+                }
             }
-            writer_.send(header, std::span(
-                reinterpret_cast<const std::uint8_t*>(location.data()), location.size()));
-            diagnostic(std::format("media play command={} start={:.3f} url_bytes={}",
-                header.media_command_id, header.media_position, location.size()));
+            if (!sent) media_send_failures_.fetch_add(1, std::memory_order_relaxed);
+            diagnostic(std::format("media play command={} start={:.3f} url_bytes={} sent={}",
+                header.media_command_id, header.media_position, location.size(), sent));
             return;
         }
 
         header.type = iPhoneMirror::wireless::MessageType::MediaStop;
+        bool sent{};
         {
             std::scoped_lock lock(playback_mutex_);
-            header.media_command_id = ++media_command_id_;
-            playback_ = {.command_id = header.media_command_id};
+            header.media_command_id = media_command_id_ + 1;
+            const PlaybackState next_playback{
+                .command_id = header.media_command_id,
+            };
+            sent = writer_.send(header);
+            if (sent) {
+                media_command_id_ = header.media_command_id;
+                playback_ = next_playback;
+            }
         }
-        writer_.send(header);
-        diagnostic(std::format("media stop command={}", header.media_command_id));
+        if (!sent) media_send_failures_.fetch_add(1, std::memory_order_relaxed);
+        diagnostic(std::format("media stop command={} reason=invalid_or_unsupported_url "
+            "url_bytes={} sent={}", header.media_command_id, location.size(), sent));
+    }
+
+    void mediaPause() noexcept {
+        send_media_control(iPhoneMirror::wireless::MessageType::MediaPause, 0);
+    }
+
+    void mediaResume() noexcept {
+        send_media_control(iPhoneMirror::wireless::MessageType::MediaResume, 0);
+    }
+
+    void mediaSeek(double position) noexcept {
+        if (!std::isfinite(position) || position < 0) {
+            diagnostic("media seek rejected: position is not finite or is negative");
+            return;
+        }
+        send_media_control(iPhoneMirror::wireless::MessageType::MediaSeek,
+            position);
     }
 
     void videoGetPlayInfo(double* duration, double* position, double* rate) override {
@@ -458,21 +669,66 @@ public:
     void updatePlayback(const iPhoneMirror::wireless::MessageHeader& header) noexcept {
         if (header.type != iPhoneMirror::wireless::MessageType::PlaybackState) return;
         std::scoped_lock lock(playback_mutex_);
-        if (header.media_command_id != playback_.command_id) return;
+        if (header.media_command_id != playback_.command_id || playback_.stopped) {
+            const auto ignored = ignored_playback_updates_.fetch_add(
+                1, std::memory_order_relaxed) + 1;
+            if (ignored == 1 || ignored % 100 == 0) {
+                diagnosticf(
+                    "playback update ignored command={} expected={} stopped={} index={}",
+                    header.media_command_id, playback_.command_id, playback_.stopped,
+                    ignored);
+            }
+            return;
+        }
         playback_.duration = std::max(0.0, header.media_duration);
         playback_.position = std::max(0.0, header.media_position);
         playback_.rate = header.media_rate;
         playback_.updated_at = std::chrono::steady_clock::now();
     }
 
-    void setVolume(float, const char*, const char*) override {}
+    bool stopPlaybackFromController(std::uint64_t command_id) noexcept {
+        {
+            std::scoped_lock lock(playback_mutex_);
+            if (command_id == 0 || command_id != playback_.command_id) {
+                diagnosticf("media stop request rejected command={} expected={}",
+                    command_id, playback_.command_id);
+                return false;
+            }
+            if (playback_.rate != 0) {
+                playback_.position += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - playback_.updated_at).count() *
+                    playback_.rate;
+                if (playback_.duration > 0)
+                    playback_.position = std::clamp(
+                        playback_.position, 0.0, playback_.duration);
+            }
+            playback_.rate = 0;
+            playback_.stopped = true;
+            playback_.updated_at = std::chrono::steady_clock::now();
+        }
+        diagnosticf("media stop requested by controller command={}", command_id);
+        return true;
+    }
+
+    void setVolume(float volume, const char* remote_name,
+        const char* remote_device_id) override {
+        const auto valid = std::isfinite(volume);
+        diagnostic(std::format(
+            "callback volume remote_fp={} device_fp={} value={:.3f} valid={}",
+            anonymous_label(safe_text(remote_name)),
+            anonymous_label(safe_text(remote_device_id)),
+            valid ? std::clamp(volume, 0.0F, 1.0F) : 0.0F, valid));
+    }
 
     void log(int level, const char* message) override {
         const auto text = safe_text(message);
         if (const auto metadata = parse_device_metadata(text)) {
-            writer_.send_device_info(*metadata);
-            diagnostic(std::format("device metadata device={} model={} os={}",
-                metadata->device_id, metadata->product_type, metadata->os_version));
+            const auto sent = writer_.send_device_info(*metadata);
+            diagnostic(std::format("device metadata device_fp={} model={} os={} sent={}",
+                anonymous_label(metadata->device_id), metadata->product_type,
+                metadata->os_version,
+                sent));
+            if (!sent) send_failures_.fetch_add(1, std::memory_order_relaxed);
             return;
         }
         const auto log_index = log_callbacks_.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -480,26 +736,103 @@ public:
         // handshake in full, then retain errors only so a long stream cannot
         // flood the media pipe or the application log.
         if (log_index <= 512 || level <= 4) {
-            diagnostic(std::format("airplay level={} {}", level, text));
+            diagnostic(std::format("airplay level={} message_bytes={} message_fp={}",
+                level, text.size(), anonymous_label(text)));
+        } else {
+            suppressed_log_callbacks_.fetch_add(1, std::memory_order_relaxed);
         }
     }
 
 private:
-    static std::string_view safe_text(const char* value) noexcept {
-        return value ? std::string_view(value) : std::string_view("<null>");
+    static std::string_view safe_text(const char* value,
+        std::size_t maximum = 64U * 1024U) noexcept {
+        return value ? std::string_view(value, strnlen_s(value, maximum))
+                     : std::string_view("<null>");
+    }
+
+    template <typename... Args>
+    void diagnosticf(std::format_string<Args...> pattern, Args&&... args) noexcept {
+        try {
+            const auto message = std::format(pattern, std::forward<Args>(args)...);
+            diagnostic(message);
+        } catch (...) {
+            // Diagnostics must never terminate an SDK callback on allocation
+            // or formatting failure.
+        }
     }
 
     void diagnostic(std::string_view message) noexcept {
-        writer_.send_text(iPhoneMirror::wireless::MessageType::Log,
-            std::string(message).c_str());
+        writer_.send_text(iPhoneMirror::wireless::MessageType::Log, message);
     }
 
+    void send_media_control(iPhoneMirror::wireless::MessageType type,
+        double position) noexcept {
+        if (!std::isfinite(position) || position < 0) {
+            diagnostic("media control rejected: invalid position");
+            return;
+        }
+        iPhoneMirror::wireless::MessageHeader header;
+        header.type = type;
+        bool sent{};
+        {
+            std::scoped_lock lock(playback_mutex_);
+            header.media_command_id = media_command_id_ + 1;
+            auto next_playback = playback_;
+            if (type == iPhoneMirror::wireless::MessageType::MediaSeek) {
+                next_playback.position = position;
+            } else {
+                auto current = next_playback.position;
+                if (next_playback.rate != 0) {
+                    current += std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - next_playback.updated_at).count() *
+                        next_playback.rate;
+                }
+                next_playback.position = current;
+                next_playback.rate = type == iPhoneMirror::wireless::MessageType::MediaPause
+                    ? 0.0 : 1.0;
+            }
+            next_playback.command_id = header.media_command_id;
+            next_playback.updated_at = std::chrono::steady_clock::now();
+            header.media_position = next_playback.position;
+            sent = writer_.send(header);
+            if (sent) {
+                media_command_id_ = header.media_command_id;
+                playback_ = next_playback;
+            }
+        }
+        if (!sent) media_send_failures_.fetch_add(1, std::memory_order_relaxed);
+        diagnosticf("media control type={} command={} position={:.3f} sent={}",
+            static_cast<unsigned>(type), header.media_command_id,
+            header.media_position, sent);
+    }
+
+public:
+    [[nodiscard]] std::string summary() const {
+        return std::format(
+            "callback_summary connected={} disconnected={} audio={} video={} "
+            "audio_rejected={} video_rejected={} send_failures={} media_send_failures={} "
+            "ignored_playback_updates={} airplay_logs={} suppressed_airplay_logs={}",
+            connected_callbacks_.load(std::memory_order_relaxed),
+            disconnected_callbacks_.load(std::memory_order_relaxed),
+            audio_callbacks_.load(std::memory_order_relaxed),
+            video_callbacks_.load(std::memory_order_relaxed),
+            rejected_audio_.load(std::memory_order_relaxed),
+            rejected_video_.load(std::memory_order_relaxed),
+            send_failures_.load(std::memory_order_relaxed),
+            media_send_failures_.load(std::memory_order_relaxed),
+            ignored_playback_updates_.load(std::memory_order_relaxed),
+            log_callbacks_.load(std::memory_order_relaxed),
+            suppressed_log_callbacks_.load(std::memory_order_relaxed));
+    }
+
+private:
     IpcWriter& writer_;
     struct PlaybackState {
         std::uint64_t command_id{};
         double duration{};
         double position{};
         double rate{};
+        bool stopped{};
         std::chrono::steady_clock::time_point updated_at{std::chrono::steady_clock::now()};
     };
     std::mutex playback_mutex_;
@@ -508,6 +841,14 @@ private:
     std::atomic_uint64_t audio_callbacks_{};
     std::atomic_uint64_t video_callbacks_{};
     std::atomic_uint64_t log_callbacks_{};
+    std::atomic_uint64_t connected_callbacks_{};
+    std::atomic_uint64_t disconnected_callbacks_{};
+    std::atomic_uint64_t rejected_audio_{};
+    std::atomic_uint64_t rejected_video_{};
+    std::atomic_uint64_t send_failures_{};
+    std::atomic_uint64_t media_send_failures_{};
+    std::atomic_uint64_t ignored_playback_updates_{};
+    std::atomic_uint64_t suppressed_log_callbacks_{};
 };
 
 std::wstring argument_value(int argc, wchar_t** argv, std::wstring_view name) {
@@ -642,17 +983,35 @@ HANDLE connect_pipe(const std::wstring& pipe_name) {
     return INVALID_HANDLE_VALUE;
 }
 
-bool receive_playback_updates(HANDLE pipe, AirPlayCallback& callback) noexcept {
+bool receive_playback_updates(HANDLE pipe, AirPlayCallback& callback,
+    iPhoneMirror::wireless::DlnaRenderer& dlna, DWORD* failure_reason = nullptr) noexcept {
+    if (failure_reason) *failure_reason = ERROR_SUCCESS;
     DWORD available{};
     while (PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) {
         if (available < sizeof(iPhoneMirror::wireless::MessageHeader)) return true;
         iPhoneMirror::wireless::MessageHeader header;
-        if (!read_all(pipe, &header, sizeof(header))) return false;
+        if (!read_all(pipe, &header, sizeof(header))) {
+            if (failure_reason) *failure_reason = GetLastError();
+            return false;
+        }
         if (header.magic != iPhoneMirror::wireless::IpcMagic ||
             header.version != iPhoneMirror::wireless::IpcVersion ||
-            header.payload_size != 0) return false;
-        callback.updatePlayback(header);
+            header.payload_size != 0) {
+            if (failure_reason) *failure_reason = ERROR_INVALID_DATA;
+            return false;
+        }
+        if (header.type == iPhoneMirror::wireless::MessageType::PlaybackState) {
+            callback.updatePlayback(header);
+        } else if (header.type ==
+            iPhoneMirror::wireless::MessageType::MediaStopRequest) {
+            if (callback.stopPlaybackFromController(header.media_command_id))
+                dlna.set_transport_stopped();
+        } else {
+            if (failure_reason) *failure_reason = ERROR_INVALID_DATA;
+            return false;
+        }
     }
+    if (failure_reason) *failure_reason = GetLastError();
     return false;
 }
 
@@ -677,10 +1036,18 @@ int wmain(int argc, wchar_t** argv) {
     const auto pipe = connect_pipe(pipe_name);
     if (pipe == INVALID_HANDLE_VALUE) return 3;
     IpcWriter writer(pipe);
+    writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+        std::format("wireless_host startup pid={} parent_arg={} mode_arg={} "
+            "capability={}x{}@{} raop_port={} airplay_port={} dlna_port={} ssdp_port={}",
+            GetCurrentProcessId(), utf8(parent_text), utf8(receiver_mode),
+            capability_width, capability_height, capability_fps, raop_port,
+            airplay_port, dlna_port, dlna_ssdp_port));
 
     if (!supported_capability(capability_width, capability_height, capability_fps)) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-            "Unsupported AirPlay display capability profile");
+            std::format("wireless_host capability_rejected width={} height={} fps={}",
+                capability_width, capability_height, capability_fps));
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
         writer.shutdown();
         CloseHandle(pipe);
         return 7;
@@ -703,7 +1070,8 @@ int wmain(int argc, wchar_t** argv) {
     const auto pairing_seed = stable_airplay_pairing_seed(device_id);
     if (pairing_seed.empty()) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-            "Could not create the stable AirPlay pairing identity");
+            "wireless_host pairing_identity_failed");
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
         writer.shutdown();
         CloseHandle(pipe);
         return 8;
@@ -721,10 +1089,13 @@ int wmain(int argc, wchar_t** argv) {
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32 |
         LOAD_LIBRARY_SEARCH_USER_DIRS);
     if (!library) {
-        const auto message = std::format("Could not load airplay2dll.dll: Win32 {}",
-            GetLastError());
+        const auto error = GetLastError();
+        const auto message = std::format(
+            "wireless_host airplay_library_failed file={} custom_path={} win32={}",
+            library_path.filename().string(), !library_override.empty(), error);
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-            message.c_str());
+            message);
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
         writer.shutdown();
         CloseHandle(pipe);
         if (search_cookie) RemoveDllDirectory(search_cookie);
@@ -735,7 +1106,8 @@ int wmain(int argc, wchar_t** argv) {
     const auto stop_server = reinterpret_cast<StopServer>(GetProcAddress(library, StopExport));
     if (!start_server || !stop_server) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-            "AirPlay receiver exports do not match the pinned version");
+            "wireless_host airplay_exports_missing");
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
         writer.shutdown();
         FreeLibrary(library);
         CloseHandle(pipe);
@@ -746,16 +1118,17 @@ int wmain(int argc, wchar_t** argv) {
     AirPlayCallback callback(writer);
     auto receiver_name = utf8(effective_receiver_name);
     writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-        std::format("wireless host starting receiver={} capability={}x{}@{} "
+        std::format("wireless_host server_start receiver_fp={} capability={}x{}@{} "
             "mode={} raop_port={} airplay_port={} dlna_port={} dlna_ssdp_port={}",
-            receiver_name, capability_width,
+            anonymous_label(receiver_name), capability_width,
             capability_height, capability_fps,
             utf8(effective_mode), raop_port, airplay_port, dlna_port,
             dlna_ssdp_port).c_str());
     const auto server = start_server(receiver_name.c_str(), raop_port, airplay_port, &callback);
     if (!server) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-            "AirPlay receiver initialization failed");
+            "wireless_host airplay_server_start_failed");
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
         writer.shutdown();
         FreeLibrary(library);
         CloseHandle(pipe);
@@ -768,7 +1141,8 @@ int wmain(int argc, wchar_t** argv) {
         static_cast<DWORD>(std::size(public_key)));
     if (public_key_length != 64 && library_override.empty()) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-            "AirPlay receiver did not publish a valid pairing public key");
+            std::format("wireless_host pairing_public_key_invalid length={}",
+                public_key_length));
         stop_server(server);
         writer.shutdown();
         FreeLibrary(library);
@@ -778,8 +1152,8 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (public_key_length == 64) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-            std::format("wireless host pairing_public_key={}",
-                utf8(std::wstring_view(public_key, public_key_length))).c_str());
+            std::format("wireless_host pairing_public_key_valid=true bytes={}",
+                public_key_length));
     }
 
     iPhoneMirror::wireless::DlnaRenderer dlna;
@@ -794,44 +1168,99 @@ int wmain(int argc, wchar_t** argv) {
                     callback.videoPlay(mutable_url.data(), 1.0, position);
                 },
                 .stop = [&callback] { callback.videoPlay(nullptr, 0, 0); },
+                .pause = [&callback] { callback.mediaPause(); },
+                .resume = [&callback] { callback.mediaResume(); },
+                .seek = [&callback](double position) { callback.mediaSeek(position); },
                 .get_play_info = [&callback](double* duration, double* position,
                                      double* rate) {
                     callback.videoGetPlayInfo(duration, position, rate);
                 },
                 .log = [&writer](std::string_view message) {
                     writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-                        std::string(message).c_str());
+                        message);
                 },
             });
         if (!dlna_started) {
             writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-                "DLNA video receiver could not start; close other casting receivers using UDP 1900");
+                "wireless_host dlna_start_failed; udp_ports_may_be_in_use");
         }
     }
     writer.send_text(iPhoneMirror::wireless::MessageType::Log,
-        "wireless host receiver initialized");
-    writer.send(iPhoneMirror::wireless::MessageHeader{
+        std::format("wireless_host receiver_ready mode={} dlna_enabled={}",
+            utf8(effective_mode), dlna_enabled));
+    const auto ready_sent = writer.send(iPhoneMirror::wireless::MessageHeader{
         .type = iPhoneMirror::wireless::MessageType::Ready});
+    writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+        std::format("wireless_host ready_ipc sent={}", ready_sent));
 
     const auto stop_event = OpenEventW(SYNCHRONIZE, FALSE, stop_event_name.c_str());
+    const auto stop_event_error = stop_event ? ERROR_SUCCESS : GetLastError();
     HANDLE parent{};
+    DWORD parent_error = ERROR_SUCCESS;
     if (!parent_text.empty()) {
         try {
             parent = OpenProcess(SYNCHRONIZE, FALSE,
                 static_cast<DWORD>(std::stoul(parent_text)));
-        } catch (...) {}
+            if (!parent) parent_error = GetLastError();
+        } catch (...) {
+            parent_error = ERROR_INVALID_PARAMETER;
+        }
     }
-    HANDLE waits[2] = {stop_event, parent};
-    const DWORD wait_count = stop_event && parent ? 2U : 1U;
-    if (stop_event) {
-        while (WaitForMultipleObjects(wait_count, waits, FALSE, 50) == WAIT_TIMEOUT)
-            if (!receive_playback_updates(pipe, callback)) break;
+    HANDLE waits[2]{};
+    DWORD wait_count{};
+    if (stop_event) waits[wait_count++] = stop_event;
+    if (parent) waits[wait_count++] = parent;
+    std::string wait_reason = wait_count == 0 ? "no_wait_handles" : "unknown";
+    DWORD wait_error = ERROR_SUCCESS;
+    const auto wait_started = std::chrono::steady_clock::now();
+    if (stop_event_error != ERROR_SUCCESS || parent_error != ERROR_SUCCESS) {
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+            std::format("wireless_host wait_handles stop_event={} stop_error={} "
+                "parent={} parent_error={}", stop_event != nullptr, stop_event_error,
+                parent != nullptr, parent_error));
     }
+    while (wait_count != 0) {
+        const auto result = WaitForMultipleObjects(wait_count, waits, FALSE, 50);
+        if (result == WAIT_TIMEOUT) {
+            DWORD receive_error{};
+            if (!receive_playback_updates(pipe, callback, dlna, &receive_error)) {
+                wait_reason = "ipc_disconnected_or_protocol_error";
+                wait_error = receive_error;
+                break;
+            }
+            continue;
+        }
+        if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + wait_count) {
+            const auto index = result - WAIT_OBJECT_0;
+            wait_reason = (waits[index] == stop_event) ? "stop_event" : "parent_exit";
+        } else {
+            wait_reason = "wait_failed";
+            wait_error = GetLastError();
+        }
+        break;
+    }
+    const auto wait_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - wait_started).count();
+    writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+        std::format("wireless_host wait_end reason={} error={} duration_ms={}",
+            wait_reason, wait_error, wait_duration));
 
-    writer.send_text(iPhoneMirror::wireless::MessageType::Log, "wireless host stopping dlna");
+    writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+        "wireless_host shutdown_begin");
+    const auto dlna_stop_started = std::chrono::steady_clock::now();
     dlna.stop();
-    writer.send_text(iPhoneMirror::wireless::MessageType::Log, "wireless host dlna stopped");
+    const auto dlna_stop_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - dlna_stop_started).count();
+    writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+        std::format("wireless_host dlna_stopped duration_ms={}", dlna_stop_duration));
+    const auto server_stop_started = std::chrono::steady_clock::now();
     stop_server(server);
+    const auto server_stop_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - server_stop_started).count();
+    writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+        std::format("wireless_host airplay_stopped duration_ms={}", server_stop_duration));
+    writer.send_text(iPhoneMirror::wireless::MessageType::Log, callback.summary());
+    writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
     writer.shutdown();
     if (parent) CloseHandle(parent);
     if (stop_event) CloseHandle(stop_event);

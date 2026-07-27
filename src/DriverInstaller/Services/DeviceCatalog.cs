@@ -9,16 +9,23 @@ internal sealed class DeviceCatalog
 {
     private const string AppleVendorPrefix = "VID_05AC&PID_";
     private const uint CrSuccess = 0;
+    private const uint DevNodePresent = 0x00000008;
 
     internal IReadOnlyList<AppleDeviceRecord> GetAppleDevices(bool includeMetadata = true)
     {
+        var timer = Stopwatch.StartNew();
         var devices = new List<AppleDeviceRecord>();
         var metadata = includeMetadata
             ? AppleDeviceMetadataReader.TryReadAll()
             : new Dictionary<string, AppleDeviceMetadata>(StringComparer.OrdinalIgnoreCase);
         using var usb = Registry.LocalMachine.OpenSubKey(
             @"SYSTEM\CurrentControlSet\Enum\USB", writable: false);
-        if (usb is null) return devices;
+        if (usb is null)
+        {
+            DriverLogger.WriteWarning("device-catalog", "usb_registry_unavailable",
+                ("include_metadata", includeMetadata), ("elapsed_ms", timer.ElapsedMilliseconds));
+            return devices;
+        }
 
         foreach (var hardwareName in usb.GetSubKeyNames()
                      .Where(name => name.StartsWith(AppleVendorPrefix,
@@ -52,12 +59,17 @@ internal sealed class DeviceCatalog
             }
         }
 
-        return devices
+        var result = devices
             .OrderByDescending(device => device.IsPresent)
             .ThenBy(device => device.ModelName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(device => device.Serial, StringComparer.OrdinalIgnoreCase)
             .Select((device, index) => device with { DeviceNumber = index + 1 })
             .ToArray();
+        DriverLogger.WriteEvent("device-catalog", "enumeration_completed",
+            ("include_metadata", includeMetadata), ("count", result.Length),
+            ("connected", result.Count(device => device.IsPresent)),
+            ("metadata_count", metadata.Count), ("elapsed_ms", timer.ElapsedMilliseconds));
+        return result;
     }
 
     internal AppleDeviceRecord? FindExact(string instanceId, string serial) =>
@@ -74,11 +86,17 @@ internal sealed class DeviceCatalog
                  })
         {
             if (!TryQueryService(serviceName, out var running)) continue;
-            return new AppleSupportStatus(true, running, serviceName,
+            var result = new AppleSupportStatus(true, running, serviceName,
                 DriverLocalization.Get(running ? "AppleServiceRunning" : "AppleServiceStopped"));
+            DriverLogger.WriteEvent("device-catalog", "apple_support_status",
+                ("installed", result.ServiceInstalled), ("running", result.ServiceRunning),
+                ("service", result.ServiceName));
+            return result;
         }
-        return new AppleSupportStatus(false, false, null,
+        var missing = new AppleSupportStatus(false, false, null,
             DriverLocalization.Get("AppleSupportMissing"));
+        DriverLogger.WriteWarning("device-catalog", "apple_support_missing");
+        return missing;
     }
 
     internal LibUsbStackStatus InspectLibUsbStack()
@@ -92,9 +110,15 @@ internal sealed class DeviceCatalog
             var dll64Path = Path.Combine(Environment.SystemDirectory, "libusb0.dll");
             var dll32Path = Path.Combine(Path.GetDirectoryName(Environment.SystemDirectory)!,
                 "SysWOW64", "libusb0.dll");
-            var filesMatch = HashMatches(driverPath, DriverConstants.DriverHash) &&
-                             HashMatches(dll64Path, DriverConstants.Dll64Hash) &&
-                             HashMatches(dll32Path, DriverConstants.Dll32Hash);
+            var driverMatch = HashMatches(driverPath, DriverConstants.DriverHash);
+            var dll64Match = HashMatches(dll64Path, DriverConstants.Dll64Hash);
+            var dll32Match = HashMatches(dll32Path, DriverConstants.Dll32Hash);
+            var filesMatch = driverMatch && dll64Match && dll32Match;
+            DriverLogger.WriteEvent("device-catalog", "libusb_hash_status",
+                ("driver", driverMatch), ("dll64", dll64Match), ("dll32", dll32Match),
+                ("expected_driver", DriverLogger.HashTag(DriverConstants.DriverHash)),
+                ("expected_dll64", DriverLogger.HashTag(DriverConstants.Dll64Hash)),
+                ("expected_dll32", DriverLogger.HashTag(DriverConstants.Dll32Hash)));
             var version = File.Exists(driverPath)
                 ? FileVersionInfo.GetVersionInfo(driverPath).FileVersion
                 : null;
@@ -104,19 +128,24 @@ internal sealed class DeviceCatalog
                 !filesMatch ? DriverLocalization.Get("LibUsbFilesMismatch") :
                 running ? DriverLocalization.Format("LibUsbRunning", version ?? DriverLocalization.Get("UnknownVersion")) :
                 DriverLocalization.Get("LibUsbReadyOnConnect");
-            return new LibUsbStackStatus(installed, running, filesMatch, version, diagnostic);
+            var result = new LibUsbStackStatus(installed, running, filesMatch, version, diagnostic);
+            DriverLogger.WriteEvent("device-catalog", "libusb_status",
+                ("installed", installed), ("running", running), ("files_match", filesMatch),
+                ("version", version));
+            return result;
         }
         catch (Exception error)
         {
+            DriverLogger.WriteException("device-catalog", "libusb_inspection_failed", error);
             return new LibUsbStackStatus(false, false, false, null,
-                DriverLocalization.Get("LibUsbCheckFailed") + error.Message);
+                DriverLocalization.Get("LibUsbCheckFailed") + DriverLogger.Sanitize(error.Message));
         }
     }
 
     internal static string[] ReadMultiString(RegistryKey key, string name) =>
         key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) switch
         {
-            string[] values => values,
+            string[] values => values.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray(),
             string value when !string.IsNullOrWhiteSpace(value) => [value],
             _ => [],
         };
@@ -159,7 +188,8 @@ internal sealed class DeviceCatalog
 
     private static bool IsDevicePresent(string instanceId) =>
         CM_Locate_DevNodeW(out var node, instanceId, 0) == CrSuccess &&
-        CM_Get_DevNode_Status(out _, out _, node, 0) == CrSuccess;
+        CM_Get_DevNode_Status(out var status, out var problem, node, 0) == CrSuccess &&
+        problem == 0 && (status & DevNodePresent) != 0;
 
     private static bool TryQueryService(string name, out bool running)
     {

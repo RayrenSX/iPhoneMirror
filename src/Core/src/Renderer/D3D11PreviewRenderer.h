@@ -35,6 +35,7 @@ public:
     // previews remain rectangular because their WPF panel owns that shape.
     void set_corner_profile(float normalized_radius, float curve_exponent) noexcept;
     void set_rotation(std::int32_t quarter_turns) noexcept;
+    void set_color_output_preference(media::ColorOutputPreference preference) noexcept;
 
 private:
     struct Impl;

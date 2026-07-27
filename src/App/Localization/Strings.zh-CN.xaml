@@ -25,9 +25,9 @@
     <system:String x:Key="IndependentWindowUnpin">取消置顶</system:String>
     <system:String x:Key="IndependentWindowFix">固定窗口</system:String>
     <system:String x:Key="IndependentWindowUnfix">取消固定</system:String>
-    <system:String x:Key="IndependentWindowClose">关闭</system:String>
     <system:String x:Key="IndependentWindowRemoveCorners">去除圆角</system:String>
     <system:String x:Key="IndependentWindowKeepCorners">保留圆角</system:String>
+    <system:String x:Key="IndependentWindowClose">关闭</system:String>
     <system:String x:Key="IndependentWindowRotateLeft">向左旋转</system:String>
     <system:String x:Key="IndependentWindowRotateRight">向右旋转</system:String>
     <system:String x:Key="IndependentWindowMute">静音</system:String>
@@ -66,7 +66,7 @@
     <system:String x:Key="OpenObsWindow">打开 OBS 专用窗口</system:String>
     <system:String x:Key="ProjectionActions">投屏操作</system:String>
     <system:String x:Key="StartMirroring">开始投屏</system:String>
-    <system:String x:Key="StopMirroring">暂停投屏</system:String>
+    <system:String x:Key="StopMirroring">停止投屏</system:String>
     <system:String x:Key="FooterVersion">iPhoneMirror 1.1.0 Preview 1</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">正在检查 Apple USB 环境…</system:String>
@@ -201,6 +201,21 @@
     <system:String x:Key="UsbProjectionModeSelectedFormat">已选择：{0}</system:String>
     <system:String x:Key="UsbProjectionModeRestarting">正在按新模式重新连接当前有线设备...</system:String>
     <system:String x:Key="UsbProjectionModeAppliedFormat">已应用：{0}</system:String>
+    <system:String x:Key="DecoderPreferenceLabel">解码器</system:String>
+    <system:String x:Key="DecoderAuto">自动（推荐）</system:String>
+    <system:String x:Key="DecoderHardwarePreferred">硬件优先</system:String>
+    <system:String x:Key="DecoderSoftwareCompatible">软件兼容</system:String>
+    <system:String x:Key="ColorOutputLabel">HDR 与色彩输出</system:String>
+    <system:String x:Key="ColorOutputAuto">自动检测（推荐）</system:String>
+    <system:String x:Key="ColorOutputSdrToneMap">SDR 色调映射</system:String>
+    <system:String x:Key="ColorOutputPreferHdr">HDR 优先（显示器支持时）</system:String>
+    <system:String x:Key="VideoPipelinePreferenceHelp">自动模式会根据编解码格式、GPU 和显示器能力选择；切换活动会话的选项会重新连接当前设备。</system:String>
+    <system:String x:Key="DecoderPreferenceSelectedFormat">已选择解码器：{0}</system:String>
+    <system:String x:Key="ColorOutputSelectedFormat">已选择色彩输出：{0}</system:String>
+    <system:String x:Key="VideoPipelineRestarting">正在按新的视频管线设置重新连接当前设备...</system:String>
+    <system:String x:Key="DecoderPreferenceAppliedFormat">已应用解码器：{0}</system:String>
+    <system:String x:Key="ColorOutputAppliedFormat">已应用色彩输出：{0}</system:String>
+    <system:String x:Key="VideoPipelineAppliedFormat">已应用视频管线：{0}</system:String>
     <system:String x:Key="WindowTitleConnectivity">iPhoneMirror - iPhone/iPad 投屏</system:String>
     <system:String x:Key="AppSubtitleConnectivity">Windows USB 低延迟与 AirPlay 无线投屏</system:String>
     <system:String x:Key="WirelessReceiverTitle">无线 AirPlay</system:String>
@@ -252,8 +267,22 @@
     <system:String x:Key="MediaCastLoadingVideo">正在加载投放的视频...</system:String>
     <system:String x:Key="MediaCastPlaybackEnded">视频播放完毕</system:String>
     <system:String x:Key="MediaCastPlaybackFailedFormat">视频投放播放失败：{0}</system:String>
+    <system:String x:Key="MediaCastLiveRecoveringFormat">直播流暂时中断，正在重新连接：{0}</system:String>
     <system:String x:Key="MediaCastInvalidUrl">收到的视频地址无效或不是 HTTP(S) 地址。</system:String>
     <system:String x:Key="MediaCastStopped">视频应用投屏已停止</system:String>
+    <system:String x:Key="MediaCastStopRequestFailed">接收端未接受停止投屏请求。</system:String>
+    <system:String x:Key="MediaCastStopRequestFailedFormat">无法通知投屏发送端停止：{0}</system:String>
     <system:String x:Key="MediaCastPlayReceived">已收到视频应用投屏请求</system:String>
+    <system:String x:Key="MediaCastDeviceName">视频应用投屏</system:String>
+    <system:String x:Key="MediaCastDeviceModel">AirPlay / DLNA 视频</system:String>
+    <system:String x:Key="MediaCastDeviceConnection">网络媒体投放</system:String>
+    <system:String x:Key="MediaCastDeviceActive">正在投放视频</system:String>
+    <system:String x:Key="MediaCastFpsDisplayFormat">≤ {0} fps</system:String>
+    <system:String x:Key="MediaCastFpsCapabilityFormat">接收上限 {0} fps</system:String>
+    <system:String x:Key="MediaCastOriginalResolution">媒体原始分辨率</system:String>
+    <system:String x:Key="MediaCastNetworkStream">网络流</system:String>
+    <system:String x:Key="MediaCastAudioActive">媒体音频</system:String>
+    <system:String x:Key="MediaCastAudioMuted">已静音</system:String>
+    <system:String x:Key="MediaCastSystemDecoder">系统媒体解码</system:String>
     <system:String x:Key="UnknownError">未知错误</system:String>
 </ResourceDictionary>

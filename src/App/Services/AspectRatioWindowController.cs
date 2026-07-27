@@ -77,7 +77,10 @@ internal sealed class AspectRatioWindowController : IDisposable
         var aspect = width / (double)height;
         // Reject transient/corrupt native status while still allowing normal
         // portrait, landscape, tablet, and external-display shapes.
-        return aspect is >= 0.20 and <= 5.0 ? aspect : null;
+        // URL-video senders may expose ultrawide masters, vertical shorts, or
+        // anamorphic/intermediate dimensions. Preserve those legitimate shapes
+        // while still rejecting zero and clearly corrupt geometry.
+        return aspect is >= 0.05 and <= 20.0 ? aspect : null;
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)

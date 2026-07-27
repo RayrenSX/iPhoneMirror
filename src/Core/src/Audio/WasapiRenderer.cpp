@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <stdexcept>
 
 using Microsoft::WRL::ComPtr;
@@ -55,27 +56,50 @@ WAVEFORMATEX make_wave_format(const coremedia::AudioStreamBasicDescription& form
 
 } // namespace
 
-WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& format,
-    bool playback_enabled, float volume)
-    : format_(format), block_align_(format.bytes_per_frame),
-      capacity_frames_(std::max<std::size_t>(8192,
-          static_cast<std::size_t>(format.sample_rate / 6.0))),
-      ring_(capacity_frames_ * block_align_) {
+namespace detail {
+
+std::optional<WasapiBufferLayout> checked_wasapi_buffer_layout(
+    const coremedia::AudioStreamBasicDescription& format) noexcept {
     const bool pcm16_interleaved = format.format_id == LinearPcm &&
         (format.format_flags & PcmIsFloat) == 0 &&
         (format.format_flags & PcmIsBigEndian) == 0 &&
         (format.format_flags & PcmIsSignedInteger) != 0 &&
         (format.format_flags & PcmIsNonInterleaved) == 0 &&
+        std::isfinite(format.sample_rate) &&
         format.sample_rate >= 8000.0 && format.sample_rate <= 192000.0 &&
         format.channels_per_frame >= 1 && format.channels_per_frame <= 8 &&
         format.bits_per_channel == 16 &&
         format.bytes_per_frame == format.channels_per_frame * 2U;
-    if (!pcm16_interleaved) {
+    if (!pcm16_interleaved) return std::nullopt;
+
+    const auto frames = std::max<std::size_t>(8192,
+        static_cast<std::size_t>(format.sample_rate / 6.0));
+    const auto align = static_cast<std::size_t>(format.bytes_per_frame);
+    if (frames > std::numeric_limits<std::size_t>::max() / align) {
+        return std::nullopt;
+    }
+    return WasapiBufferLayout{
+        .block_align = format.bytes_per_frame,
+        .capacity_frames = frames,
+        .capacity_bytes = frames * align,
+    };
+}
+
+} // namespace detail
+
+WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& format,
+    bool playback_enabled, float volume)
+    : format_(format) {
+    const auto layout = detail::checked_wasapi_buffer_layout(format);
+    if (!layout) {
         throw std::invalid_argument(std::format(
             "unsupported QuickTime audio format id=0x{:08X} flags=0x{:X} rate={} channels={} bits={} bpf={}",
             format.format_id, format.format_flags, format.sample_rate,
             format.channels_per_frame, format.bits_per_channel, format.bytes_per_frame));
     }
+    block_align_ = layout->block_align;
+    capacity_frames_ = layout->capacity_frames;
+    ring_.resize(layout->capacity_bytes);
 
     playback_enabled_.store(playback_enabled, std::memory_order_relaxed);
     const auto initial_volume = std::isfinite(volume) ? std::clamp(volume, 0.0F, 1.0F) : 1.0F;
@@ -87,24 +111,31 @@ WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& for
     data_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     render_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!stop_event_ || !data_event_ || !render_event_) {
-        if (render_event_) CloseHandle(as_handle(render_event_));
-        if (data_event_) CloseHandle(as_handle(data_event_));
-        if (stop_event_) CloseHandle(as_handle(stop_event_));
-        stop_event_ = data_event_ = render_event_ = nullptr;
+        close_events();
         throw std::runtime_error("CreateEvent for WASAPI failed");
     }
-    logging::write(std::format(
-        "wasapi source rate={} channels={} bits={} block_align={} capacity_frames={}",
-        format.sample_rate, format.channels_per_frame, format.bits_per_channel,
-        block_align_, capacity_frames_));
-    worker_ = std::jthread([this](std::stop_token token) { run(token); });
+    try {
+        logging::write(std::format(
+            "wasapi source rate={} channels={} bits={} block_align={} capacity_frames={}",
+            format.sample_rate, format.channels_per_frame, format.bits_per_channel,
+            block_align_, capacity_frames_));
+        worker_ = std::jthread([this](std::stop_token token) { run(token); });
+    } catch (...) {
+        close_events();
+        throw;
+    }
 }
 
 WasapiRenderer::~WasapiRenderer() {
     stop();
+    close_events();
+}
+
+void WasapiRenderer::close_events() noexcept {
     if (render_event_) CloseHandle(as_handle(render_event_));
     if (data_event_) CloseHandle(as_handle(data_event_));
     if (stop_event_) CloseHandle(as_handle(stop_event_));
+    stop_event_ = data_event_ = render_event_ = nullptr;
 }
 
 void WasapiRenderer::stop() noexcept {

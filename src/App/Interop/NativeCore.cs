@@ -36,6 +36,9 @@ internal enum MediaCastCommand : uint
     None,
     Play,
     Stop,
+    Pause,
+    Resume,
+    Seek,
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -145,6 +148,11 @@ internal sealed class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void im_shutdown();
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
+        CharSet = CharSet.Unicode)]
+    private static extern int im_log_message(
+        [MarshalAs(UnmanagedType.LPWStr)] string message);
+
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_refresh_devices([Out] NativeDeviceInfo[]? devices, ref uint count);
 
@@ -182,6 +190,8 @@ internal sealed class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_media_cast_set_playback_state(
         ulong commandId, double duration, double position, double rate);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_media_cast_request_stop();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_get_environment(ref NativeEnvironmentInfo environment);
@@ -271,33 +281,56 @@ internal sealed class NativeCore : IDisposable
 
     private static long _selectedPreviewSession;
     private static nint _selectedPreviewWindow;
+    private static readonly object PreviewSelectionGate = new();
 
     internal static void SelectPreviewSession(ulong handle)
     {
-        var previous = unchecked((ulong)Interlocked.Exchange(ref _selectedPreviewSession,
-            unchecked((long)handle)));
-        if (previous != 0 && previous != handle && _selectedPreviewWindow != 0)
-            im_session_detach_preview(previous, _selectedPreviewWindow);
-        else if (previous == 0 && handle != 0) im_detach_preview_window();
+        lock (PreviewSelectionGate)
+        {
+            var previous = unchecked((ulong)_selectedPreviewSession);
+            if (previous == handle) return;
+
+            // Release the HWND before publishing its new owner. Flip-model
+            // swap chains cannot overlap on the same window, even briefly.
+            if (_selectedPreviewWindow != 0)
+            {
+                if (previous != 0)
+                    im_session_detach_preview(previous, _selectedPreviewWindow);
+                else
+                    im_detach_preview_window();
+            }
+            else if (previous == 0 && handle != 0)
+            {
+                im_detach_preview_window();
+            }
+
+            _selectedPreviewSession = unchecked((long)handle);
+        }
     }
 
     internal static bool AttachPreviewWindow(nint hwnd)
     {
         if (hwnd == 0) return false;
-        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
-        var attached = handle != 0 ? im_session_attach_preview(handle, hwnd) == 0
-            : im_attach_preview_window(hwnd) == 0;
-        if (attached) _selectedPreviewWindow = hwnd;
-        return attached;
+        lock (PreviewSelectionGate)
+        {
+            var handle = unchecked((ulong)_selectedPreviewSession);
+            var attached = handle != 0 ? im_session_attach_preview(handle, hwnd) == 0
+                : im_attach_preview_window(hwnd) == 0;
+            if (attached) _selectedPreviewWindow = hwnd;
+            return attached;
+        }
     }
 
     internal static void DetachPreviewWindow()
     {
-        var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
-        if (handle != 0 && _selectedPreviewWindow != 0)
-            im_session_detach_preview(handle, _selectedPreviewWindow);
-        else im_detach_preview_window();
-        _selectedPreviewWindow = 0;
+        lock (PreviewSelectionGate)
+        {
+            var handle = unchecked((ulong)_selectedPreviewSession);
+            if (handle != 0 && _selectedPreviewWindow != 0)
+                im_session_detach_preview(handle, _selectedPreviewWindow);
+            else im_detach_preview_window();
+            _selectedPreviewWindow = 0;
+        }
     }
 
     internal static bool AttachDevicePreview(ulong handle, nint hwnd) =>
@@ -320,9 +353,12 @@ internal sealed class NativeCore : IDisposable
     {
         try
         {
-            var handle = unchecked((ulong)Interlocked.Read(ref _selectedPreviewSession));
-            return (handle != 0 ? im_session_force_preview_refresh(handle)
-                : im_force_preview_refresh()) == 0;
+            lock (PreviewSelectionGate)
+            {
+                var handle = unchecked((ulong)_selectedPreviewSession);
+                return (handle != 0 ? im_session_force_preview_refresh(handle)
+                    : im_force_preview_refresh()) == 0;
+            }
         }
         catch (EntryPointNotFoundException)
         {
@@ -471,6 +507,28 @@ internal sealed class NativeCore : IDisposable
         double duration, double position, double rate) =>
         im_media_cast_set_playback_state(commandId, duration, position, rate) == 0;
 
+    public (bool Success, string Message) RequestMediaCastStop()
+    {
+        var result = im_media_cast_request_stop();
+        return result == 0
+            ? (true, LocalizationService.Get("MediaCastStopped"))
+            : (false, GetLastError(LocalizationService.Get(
+                "MediaCastStopRequestFailed")));
+    }
+
+    public bool WriteLog(string message)
+    {
+        if (!_initialized || string.IsNullOrWhiteSpace(message)) return false;
+        try
+        {
+            return im_log_message(message) == 0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
+
     public void StopMediaCastReceiver() => im_media_cast_receiver_stop();
 
     public IReadOnlyList<NativeDeviceInfo> GetWirelessDevices()
@@ -514,12 +572,13 @@ internal sealed class NativeCore : IDisposable
 
     public (bool Success, ulong Handle, string Message) CreateDeviceSession(string udid,
         uint width, uint height, uint fps, bool playAudio, double volume,
-        uint usbWidth = 0, uint usbHeight = 0, uint usbProjectionMode = 0)
+        uint usbWidth = 0, uint usbHeight = 0, uint usbProjectionMode = 0,
+        uint decoderPreference = 0, uint colorOutputPreference = 0)
     {
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 12,
+            ApiVersion = 15,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,
@@ -530,6 +589,8 @@ internal sealed class NativeCore : IDisposable
         options.Reserved[0] = usbWidth;
         options.Reserved[1] = usbHeight;
         options.Reserved[2] = Math.Min(usbProjectionMode, 2U);
+        options.Reserved[3] = Math.Min(decoderPreference, 2U);
+        options.Reserved[4] = Math.Min(colorOutputPreference, 2U);
         var result = im_session_create(udid, ref options, out var handle);
         return result == 0
             ? (true, handle, LocalizationService.Get("CaptureStarted"))
@@ -543,7 +604,7 @@ internal sealed class NativeCore : IDisposable
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 12,
+            ApiVersion = 15,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,

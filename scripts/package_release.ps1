@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.1.0-preview.1',
+    [string]$Version = '1.2.1',
     [switch]$SkipBuild,
     [switch]$GenerateSbom
 )
@@ -10,33 +10,261 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
 $ReleaseRoot = Join-Path $Root 'outputs\releases'
-$StagingRoot = Join-Path $Root 'outputs\release-staging'
+$StagingBase = Join-Path $Root 'outputs\release-staging'
+$StagingRoot = Join-Path $StagingBase ([Guid]::NewGuid().ToString('N'))
 $PackageName = "iPhoneMirror-v$Version-win-x64"
 $PackageRoot = Join-Path $StagingRoot $PackageName
 $ArchivePath = Join-Path $ReleaseRoot "$PackageName.zip"
+$LatestArchivePath = Join-Path $ReleaseRoot "$PackageName-latest.zip"
 $SbomAsset = Join-Path $ReleaseRoot "$PackageName-sbom.spdx.json"
 $ChecksumPath = Join-Path $ReleaseRoot 'SHA256SUMS.txt'
+$StagedArchive = Join-Path $StagingRoot "$PackageName.zip"
+$StagedLatestArchive = Join-Path $StagingRoot "$PackageName-latest.zip"
+$StagedSbomAsset = Join-Path $StagingRoot "$PackageName-sbom.spdx.json"
+$StagedChecksum = Join-Path $StagingRoot 'SHA256SUMS.txt'
 $LegacyArchive = Join-Path $Root 'outputs\iPhoneMirror-video-app-discovery-fix.zip'
+$PreserveStagingRoot = $false
+
+$RequiredArtifacts = @(
+    'iPhoneMirror.exe',
+    'iPhoneMirror.Core.dll',
+    'iPhoneMirror.Driver.exe',
+    'libusb-1.0.dll',
+    'LICENSE',
+    'THIRD_PARTY_NOTICES.md',
+    'licenses\libusb-COPYING.txt',
+    'Wireless\iPhoneMirror.WirelessHost.exe',
+    'Wireless\airplay2dll.dll',
+    'Wireless\avcodec-58.dll',
+    'Wireless\avutil-56.dll',
+    'Wireless\dnssd.dll',
+    'Wireless\swresample-3.dll',
+    'Wireless\swscale-5.dll',
+    'Wireless\licenses\LICENSE-FFMPEG-LGPL-2.1.txt',
+    'Wireless\licenses\LICENSE-MIT.txt',
+    'Wireless\licenses\LICENSE-PLAYFAIR-GPL-3.0.md',
+    'Wireless\licenses\NOTICE-FDK-AAC.txt',
+    'Wireless\licenses\SOURCE.md',
+    'Wireless\licenses\SHA256SUMS.txt'
+)
+
+function Get-ProjectVersion([string]$ProjectPath) {
+    [xml]$project = Get-Content -LiteralPath $ProjectPath -Raw
+    $versions = @($project.Project.PropertyGroup | ForEach-Object {
+        if ($null -ne $_.Version -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.Version)) {
+            ([string]$_.Version).Trim()
+        }
+    } | Select-Object -Unique)
+    if ($versions.Count -ne 1) {
+        throw "Project must declare exactly one Version: $ProjectPath"
+    }
+    return $versions[0]
+}
+
+function Assert-ProductVersion([string]$Path, [string]$ExpectedVersion) {
+    $actual = (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion
+    $semanticVersion = if ($null -eq $actual) { '' } else {
+        ($actual -split '\+', 2)[0]
+    }
+    if (-not [string]::Equals($semanticVersion, $ExpectedVersion,
+            [StringComparison]::Ordinal)) {
+        throw "Embedded product version mismatch: $Path (expected $ExpectedVersion, found $actual)"
+    }
+}
+
+function Assert-SafeWorkspaceDirectory([string]$Path) {
+    $workspace = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not $fullPath.StartsWith($workspace + '\',
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Directory is outside the workspace: $fullPath"
+    }
+    $current = [IO.DirectoryInfo]::new($fullPath)
+    while ($null -ne $current -and
+        $current.FullName.Length -ge $workspace.Length) {
+        if ($current.Exists -and
+            ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing a release directory containing a reparse point: $($current.FullName)"
+        }
+        if ([string]::Equals($current.FullName, $workspace,
+                [StringComparison]::OrdinalIgnoreCase)) { break }
+        $current = $current.Parent
+    }
+}
+
+function Assert-PublishedOutput {
+    Assert-SafeWorkspaceDirectory $PublishRoot
+    if (-not (Test-Path -LiteralPath $PublishRoot -PathType Container)) {
+        throw "Published output is missing: $PublishRoot"
+    }
+    $reparseItems = @(Get-ChildItem -LiteralPath $PublishRoot -Recurse -Force |
+        Where-Object {
+            ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        })
+    if ($reparseItems.Count -ne 0) {
+        throw "Published output contains a reparse point: $($reparseItems[0].FullName)"
+    }
+    foreach ($relative in $RequiredArtifacts) {
+        if (-not (Test-Path -LiteralPath (Join-Path $PublishRoot $relative) -PathType Leaf)) {
+            throw "Published artifact is missing: $relative"
+        }
+    }
+
+    $fullPublishRoot = (Resolve-Path -LiteralPath $PublishRoot).Path.TrimEnd('\')
+    $actualArtifacts = @(Get-ChildItem -LiteralPath $PublishRoot -Recurse -File |
+        ForEach-Object { $_.FullName.Substring($fullPublishRoot.Length + 1) })
+    $unexpected = @($actualArtifacts | Where-Object { $_ -notin $RequiredArtifacts })
+    if ($unexpected.Count -ne 0) {
+        throw "Unexpected files in published output: $($unexpected -join ', ')"
+    }
+
+    Assert-ProductVersion (Join-Path $PublishRoot 'iPhoneMirror.exe') $Version
+    Assert-ProductVersion (Join-Path $PublishRoot 'iPhoneMirror.Driver.exe') $Version
+    Assert-ProductVersion (Join-Path $PublishRoot 'iPhoneMirror.Core.dll') $Version
+
+    $wirelessManifest = Join-Path $PublishRoot 'Wireless\licenses\SHA256SUMS.txt'
+    $entries = foreach ($line in Get-Content -LiteralPath $wirelessManifest) {
+        if ($line -notmatch '^([0-9a-fA-F]{64})\s{2}(.+)$') {
+            throw "Invalid published wireless hash entry: $line"
+        }
+        [PSCustomObject]@{ Hash = $Matches[1]; Name = [IO.Path]::GetFileName($Matches[2]) }
+    }
+    if (@($entries).Count -eq 0) { throw 'Published wireless hash manifest is empty.' }
+    $expectedWirelessBinaries = @(
+        'airplay2dll.dll', 'avcodec-58.dll', 'avutil-56.dll',
+        'swresample-3.dll', 'swscale-5.dll'
+    )
+    $manifestNames = @($entries | ForEach-Object { $_.Name } | Select-Object -Unique)
+    $missingHashes = @($expectedWirelessBinaries | Where-Object { $_ -notin $manifestNames })
+    $unexpectedHashes = @($manifestNames | Where-Object { $_ -notin $expectedWirelessBinaries })
+    if ($missingHashes.Count -ne 0 -or $unexpectedHashes.Count -ne 0 -or
+        @($entries).Count -ne $expectedWirelessBinaries.Count) {
+        throw 'Published wireless hash manifest does not exactly cover the receiver binaries.'
+    }
+    foreach ($entry in $entries) {
+        $binary = Join-Path (Join-Path $PublishRoot 'Wireless') $entry.Name
+        if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+            throw "Published wireless binary is missing: $($entry.Name)"
+        }
+        $actual = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash
+        if ($actual -ne $entry.Hash) {
+            throw "Published wireless hash mismatch: $($entry.Name)"
+        }
+    }
+
+    $sourceLicense = Join-Path $Root 'third_party\libusb\COPYING'
+    $publishedLicense = Join-Path $PublishRoot 'licenses\libusb-COPYING.txt'
+    if ((Get-FileHash -LiteralPath $sourceLicense -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $publishedLicense -Algorithm SHA256).Hash) {
+        throw 'Published libusb license does not match the vendored license.'
+    }
+}
+
+function Publish-StagedAssets([object[]]$Assets, [string[]]$RemovePaths) {
+    Assert-SafeWorkspaceDirectory $ReleaseRoot
+    New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
+    $backupRoot = Join-Path $StagingRoot '_previous-release'
+    New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+    # Existing assets remain recoverable until every staged copy verifies.
+    $changes = [Collections.Generic.List[object]]::new()
+    try {
+        $index = 0
+        foreach ($asset in $Assets) {
+            if (Test-Path -LiteralPath $asset.Final -PathType Container) {
+                throw "Release asset path is a directory: $($asset.Final)"
+            }
+            if (Test-Path -LiteralPath $asset.Final -PathType Leaf) {
+                $finalItem = Get-Item -LiteralPath $asset.Final -Force
+                if (($finalItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "Release asset is a reparse point: $($asset.Final)"
+                }
+            }
+            $backup = Join-Path $backupRoot "$index.bak"
+            $hadOriginal = Test-Path -LiteralPath $asset.Final -PathType Leaf
+            if ($hadOriginal) {
+                Copy-Item -LiteralPath $asset.Final -Destination $backup -Force
+            }
+            $changes.Add([PSCustomObject]@{
+                Final = $asset.Final; Backup = $backup; HadOriginal = $hadOriginal
+            })
+            Copy-Item -LiteralPath $asset.Staged -Destination $asset.Final -Force
+            if ((Get-FileHash -LiteralPath $asset.Staged -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath $asset.Final -Algorithm SHA256).Hash) {
+                throw "Release asset copy verification failed: $($asset.Final)"
+            }
+            ++$index
+        }
+        foreach ($path in $RemovePaths) {
+            if (-not (Test-Path -LiteralPath $path)) { continue }
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Release cleanup path is not a file: $path"
+            }
+            $removeItem = Get-Item -LiteralPath $path -Force
+            if (($removeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Release cleanup path is a reparse point: $path"
+            }
+            $backup = Join-Path $backupRoot "$index.bak"
+            Copy-Item -LiteralPath $path -Destination $backup -Force
+            $changes.Add([PSCustomObject]@{
+                Final = $path; Backup = $backup; HadOriginal = $true
+            })
+            Remove-Item -LiteralPath $path -Force
+            ++$index
+        }
+    }
+    catch {
+        $publishError = $_
+        $rollbackErrors = @()
+        for ($index = $changes.Count - 1; $index -ge 0; --$index) {
+            $change = $changes[$index]
+            try {
+                if ($change.HadOriginal) {
+                    if (-not (Test-Path -LiteralPath $change.Backup -PathType Leaf)) {
+                        throw "Release backup is missing: $($change.Backup)"
+                    }
+                    Copy-Item -LiteralPath $change.Backup `
+                        -Destination $change.Final -Force
+                }
+                elseif (Test-Path -LiteralPath $change.Final -PathType Leaf) {
+                    Remove-Item -LiteralPath $change.Final -Force
+                }
+            }
+            catch {
+                $rollbackErrors += $_.Exception.Message
+            }
+        }
+        if ($rollbackErrors.Count -ne 0) {
+            $script:PreserveStagingRoot = $true
+            throw "Release publication failed: $($publishError.Exception.Message) " +
+                "Rollback was incomplete: $($rollbackErrors -join '; '). " +
+                "Recovery files were retained under $backupRoot."
+        }
+        throw $publishError
+    }
+}
 
 Push-Location $Root
 try {
+    foreach ($project in @(
+        'src\App\iPhoneMirror.App.csproj',
+        'src\DriverInstaller\iPhoneMirror.DriverInstaller.csproj'
+    )) {
+        $projectVersion = Get-ProjectVersion (Join-Path $Root $project)
+        if (-not [string]::Equals($projectVersion, $Version,
+                [StringComparison]::Ordinal)) {
+            throw "Package version $Version does not match $project version $projectVersion."
+        }
+    }
+
     if (-not $SkipBuild) {
         & (Join-Path $Root 'build.ps1') -Configuration Release
         if ($LASTEXITCODE -ne 0) { throw "Release build failed: $LASTEXITCODE" }
     }
 
-    foreach ($requiredExecutable in @('iPhoneMirror.exe', 'iPhoneMirror.Driver.exe')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $PublishRoot $requiredExecutable))) {
-            throw "Published executable is missing: $requiredExecutable. Run the Release build first."
-        }
-    }
-
-    foreach ($path in @($StagingRoot, $ReleaseRoot)) {
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Recurse -Force
-        }
-        New-Item -ItemType Directory -Path $path | Out-Null
-    }
+    Assert-PublishedOutput
+    Assert-SafeWorkspaceDirectory $StagingRoot
+    New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null
 
     Copy-Item -LiteralPath $PublishRoot -Destination $PackageRoot -Recurse
 
@@ -155,32 +383,63 @@ try {
 
         [IO.File]::WriteAllText($GeneratedSbom.FullName,
             ($Sbom | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
-        Copy-Item -LiteralPath $GeneratedSbom.FullName -Destination $SbomAsset -Force
+        Copy-Item -LiteralPath $GeneratedSbom.FullName -Destination $StagedSbomAsset -Force
     }
 
-    Compress-Archive -LiteralPath $PackageRoot -DestinationPath $ArchivePath `
+    Compress-Archive -LiteralPath $PackageRoot -DestinationPath $StagedArchive `
         -CompressionLevel Optimal
+    Copy-Item -LiteralPath $StagedArchive -Destination $StagedLatestArchive
 
-    $assets = @($ArchivePath)
-    if (Test-Path -LiteralPath $SbomAsset) { $assets += $SbomAsset }
-    $checksumLines = foreach ($asset in $assets) {
-        $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
-        "$hash  $([IO.Path]::GetFileName($asset))"
+    $assets = @(
+        [PSCustomObject]@{ Path = $StagedArchive; Name = [IO.Path]::GetFileName($ArchivePath) },
+        [PSCustomObject]@{ Path = $StagedLatestArchive; Name = [IO.Path]::GetFileName($LatestArchivePath) }
+    )
+    if ($GenerateSbom) {
+        $assets += [PSCustomObject]@{
+            Path = $StagedSbomAsset
+            Name = [IO.Path]::GetFileName($SbomAsset)
+        }
     }
-    [IO.File]::WriteAllText($ChecksumPath,
+    $checksumLines = foreach ($asset in $assets) {
+        $hash = (Get-FileHash -LiteralPath $asset.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  $($asset.Name)"
+    }
+    [IO.File]::WriteAllText($StagedChecksum,
         ($checksumLines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+
+    $publishAssets = @(
+        [PSCustomObject]@{ Staged = $StagedArchive; Final = $ArchivePath },
+        [PSCustomObject]@{ Staged = $StagedLatestArchive; Final = $LatestArchivePath }
+    )
+    if ($GenerateSbom) {
+        $publishAssets += [PSCustomObject]@{ Staged = $StagedSbomAsset; Final = $SbomAsset }
+    }
+    $publishAssets += [PSCustomObject]@{ Staged = $StagedChecksum; Final = $ChecksumPath }
+    $removePaths = if ($GenerateSbom) { @() } else { @($SbomAsset) }
+    Publish-StagedAssets $publishAssets $removePaths
 
     if (Test-Path -LiteralPath $LegacyArchive) {
         Remove-Item -LiteralPath $LegacyArchive -Force
     }
-    Remove-Item -LiteralPath $StagingRoot -Recurse -Force
 
     Write-Host "Release package: $ArchivePath" -ForegroundColor Green
+    Write-Host "Latest alias:    $LatestArchivePath" -ForegroundColor Green
     Write-Host "Checksums:      $ChecksumPath" -ForegroundColor Green
-    if (Test-Path -LiteralPath $SbomAsset) {
+    if ($GenerateSbom) {
         Write-Host "SBOM:           $SbomAsset" -ForegroundColor Green
     }
 }
 finally {
-    Pop-Location
+    try {
+        if ($PreserveStagingRoot) {
+            Write-Warning "Release staging was retained for recovery: $StagingRoot"
+        }
+        elseif (Test-Path -LiteralPath $StagingRoot) {
+            Assert-SafeWorkspaceDirectory $StagingRoot
+            Remove-Item -LiteralPath $StagingRoot -Recurse -Force
+        }
+    }
+    finally {
+        Pop-Location
+    }
 }

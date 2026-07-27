@@ -11,6 +11,8 @@ internal sealed class DeviceSessionManager(NativeCore core)
     private readonly HashSet<string> _pausedWirelessDevices =
         new(StringComparer.OrdinalIgnoreCase);
 
+    internal event Action<string, ulong>? SessionHandleChanged;
+
     internal IReadOnlyList<KeyValuePair<string, DeviceCaptureState>> Entries
     {
         get { lock (_gate) return _states.ToArray(); }
@@ -42,6 +44,26 @@ internal sealed class DeviceSessionManager(NativeCore core)
         lock (_gate) _states[state.Udid] = state;
     }
 
+    internal void SetHandle(DeviceCaptureState state, ulong handle)
+    {
+        var changed = false;
+        lock (_gate)
+        {
+            if (state.Handle != handle)
+            {
+                state.Handle = handle;
+                changed = true;
+            }
+        }
+        if (!changed) return;
+        try { SessionHandleChanged?.Invoke(state.Udid, handle); }
+        catch
+        {
+            // Session ownership changes must complete even if a UI observer
+            // fails while closing a stale window.
+        }
+    }
+
     internal bool Remove(string udid)
     {
         lock (_gate) return _states.Remove(udid);
@@ -63,16 +85,27 @@ internal sealed class DeviceSessionManager(NativeCore core)
 
     internal async Task StopAndDestroyAsync(DeviceCaptureState state)
     {
-        var handle = state.Handle;
-        if (handle == 0) return;
+        ulong handle;
+        lock (_gate)
+        {
+            handle = state.Handle;
+            if (handle == 0 || state.IsStopping) return;
+            state.IsStopping = true;
+        }
+        // Revoke the handle before yielding so no preview can attach while
+        // native teardown is releasing the decoder and USB configuration.
+        SetHandle(state, 0);
         try
         {
             await Task.Run(() => core.StopDeviceSession(handle));
         }
         finally
         {
-            core.DestroyDeviceSession(handle);
-            state.Handle = 0;
+            try { core.DestroyDeviceSession(handle); }
+            finally
+            {
+                lock (_gate) state.IsStopping = false;
+            }
         }
     }
 }

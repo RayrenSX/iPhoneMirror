@@ -5,6 +5,78 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-07-27
+
+### Added
+
+- Add HDR-aware AVC/HEVC decoding with `avc1`, `avc3`, `hvc1` and `hev1`
+  sample-entry support, 8-bit NV12 and 10-bit P010 output, BT.601/709/2020 and
+  Display P3 color metadata, PQ/HLG transfer handling, HDR-to-SDR tone mapping
+  and FP16 scRGB output on HDR-enabled displays.
+- Add per-device decoder and color-output policies. Automatic, hardware-first
+  and software-compatibility modes select Media Foundation transforms and
+  recover through deterministic fallback when configuration or runtime decode
+  fails.
+- Add simultaneous wired-device sessions with independent capture, decode,
+  audio, preview and shutdown ownership. USB-C iPad and newer iPhone layouts
+  are discovered through dynamic QuickTime configurations, interfaces,
+  alternate settings and endpoints rather than fixed descriptors.
+- Add structured application, native-core, USB, decoder, renderer, media-cast,
+  driver and shutdown diagnostics with bounded log rotation and privacy-safe
+  device fingerprints.
+
+### Changed
+
+- Route video-app casting through the same main preview, detached window,
+  fullscreen, context-menu, screenshot and statistics experience used by USB
+  and AirPlay mirroring. Video casting uses a native Windows title bar and
+  standard DWM corners, while mirroring keeps its borderless device-shaped
+  window and corner toggle.
+- Replace URL reloads used as playback controls with explicit pause, resume and
+  seek IPC commands. The main Stop button now sends the receiver protocol stop
+  request and remains synchronized with remote playback state.
+- Negotiate HDR output dynamically for the monitor containing each preview
+  window, including monitor moves and Windows Advanced Color changes, while
+  keeping ordinary SDR previews on the lower-bandwidth BGRA8 path.
+- Make release builds stage the freshly compiled native core and wireless host
+  before both normal builds and publishing, ensuring UI smoke tests and release
+  packages execute the same binaries.
+
+### Fixed
+
+- Fix live and HLS video streams that connected successfully but never started,
+  including bounded recovery for transient network and media-backend failures.
+- Fix video-cast status overlays remaining over active playback, missing stream
+  resolution/frame-rate/audio statistics, blocked device-tab switching and
+  application hangs during playback completion or teardown.
+- Fix detached-window dragging stalls, double-click fullscreen, title-bar and
+  corner-policy inconsistencies, and incorrect removal of the mirroring corner
+  option.
+- Fix phantom wired-device cards by reconciling usbmux identity with USB serial
+  and physical-port topology and rejecting ambiguous topology matches.
+- Fix iPad activation failures and cross-device USB reassociation during
+  QuickTime re-enumeration, including PID/address changes after configuration
+  switching.
+- Fix duplicate flip-model swap chains on the main preview HWND. Preview
+  ownership is serialized across legacy and multi-session renderers, repeated
+  attachment is idempotent, and switching or stopping one device no longer
+  disrupts another active session.
+- Fix asynchronous Media Foundation event handling, transform shutdown, sample
+  ownership and parameter/color changes that require decoder reconstruction.
+- Harden driver operations, packaging paths, reparse-point checks, payload
+  validation and elevated-process result handling.
+
+### Verification
+
+- Pass Release native protocol, wireless-host, application-logic and driver
+  tests with zero build warnings or errors.
+- Pass two-device USB testing with both sessions streaming concurrently,
+  stable selection across refreshes, independent stop behavior and two
+  QuickTime shutdown messages per device.
+- Pass integrated video-cast, AirPlay media-control and native window-chrome
+  smoke tests, including pause, seek, resume, remote stop, detached-window
+  fullscreen and zero preview swap-chain attachment failures.
+
 ## [1.1.0-preview.1] - 2026-07-17
 
 ### Added

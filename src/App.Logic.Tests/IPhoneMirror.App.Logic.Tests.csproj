@@ -19,6 +19,10 @@
     <Compile Include="..\App\Localization\LocalizationService.cs" Link="LocalizationService.cs" />
     <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
     <Compile Include="..\App\Services\NativeLogTailReader.cs" Link="NativeLogTailReader.cs" />
+    <Compile Include="..\App\Services\AppLog.cs" Link="AppLog.cs" />
+    <Compile Include="..\App\Services\MediaSourceClassifier.cs" Link="MediaSourceClassifier.cs" />
+    <Compile Include="..\App\Services\MediaCastEventGate.cs" Link="MediaCastEventGate.cs" />
+    <Compile Include="..\App\Services\MediaRecoveryBackoff.cs" Link="MediaRecoveryBackoff.cs" />
     <Compile Include="..\App\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "DlnaRenderer.h"
+#include "HttpUrl.h"
 
 #include <WinSock2.h>
 #include <WS2tcpip.h>
@@ -110,27 +111,39 @@ std::optional<std::string> xml_value(std::string_view xml, std::string_view name
     return std::nullopt;
 }
 
-double parse_dlna_time(std::string_view value) noexcept {
+std::optional<double> parse_dlna_time(std::string_view value) noexcept {
     unsigned hours{}, minutes{};
     double seconds{};
     const auto first = value.find(':');
     const auto second = first == std::string_view::npos ? first : value.find(':', first + 1);
-    if (first == std::string_view::npos || second == std::string_view::npos) return 0;
+    if (first == std::string_view::npos || second == std::string_view::npos)
+        return std::nullopt;
     const auto parse_unsigned = [](std::string_view text, unsigned& output) {
         const auto [end, error] = std::from_chars(
             text.data(), text.data() + text.size(), output);
         return error == std::errc{} && end == text.data() + text.size();
     };
     if (!parse_unsigned(value.substr(0, first), hours) ||
-        !parse_unsigned(value.substr(first + 1, second - first - 1), minutes)) return 0;
+        !parse_unsigned(value.substr(first + 1, second - first - 1), minutes) ||
+        minutes >= 60) return std::nullopt;
     try {
-        seconds = std::stod(std::string(value.substr(second + 1)));
-    } catch (...) { return 0; }
-    return hours * 3600.0 + minutes * 60.0 + seconds;
+        const auto seconds_text = std::string(value.substr(second + 1));
+        std::size_t consumed{};
+        seconds = std::stod(seconds_text, &consumed);
+        if (consumed != seconds_text.size()) return std::nullopt;
+    } catch (...) { return std::nullopt; }
+    if (!std::isfinite(seconds) || seconds < 0 || seconds >= 60)
+        return std::nullopt;
+    const auto result = static_cast<double>(hours) * 3600.0 +
+        static_cast<double>(minutes) * 60.0 + seconds;
+    if (!std::isfinite(result) || result > 7.0 * 24.0 * 60.0 * 60.0)
+        return std::nullopt;
+    return result;
 }
 
 std::string format_dlna_time(double seconds) {
-    seconds = std::max(0.0, seconds);
+    constexpr double maximum = 7.0 * 24.0 * 60.0 * 60.0;
+    seconds = std::isfinite(seconds) ? std::clamp(seconds, 0.0, maximum) : 0.0;
     const auto total = static_cast<unsigned long long>(seconds);
     return std::format("{:02}:{:02}:{:02}", total / 3600,
         total / 60 % 60, total % 60);
@@ -143,21 +156,54 @@ struct HttpRequest {
     std::string body;
 };
 
-bool send_all(SOCKET socket, std::string_view data) noexcept {
-    while (!data.empty()) {
+bool wait_socket(SOCKET socket, short events, const std::atomic_bool& stopping,
+    std::chrono::steady_clock::time_point deadline) noexcept {
+    while (!stopping.load(std::memory_order_acquire) &&
+        std::chrono::steady_clock::now() < deadline) {
+        WSAPOLLFD descriptor{.fd = socket, .events = events};
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        const auto timeout = static_cast<int>(std::clamp<std::int64_t>(
+            remaining.count(), 1, 100));
+        const auto result = WSAPoll(&descriptor, 1, timeout);
+        if (result > 0) return descriptor.revents != 0;
+        if (result == SOCKET_ERROR && WSAGetLastError() != WSAEINTR) return false;
+    }
+    return false;
+}
+
+bool send_all(SOCKET socket, std::string_view data,
+    const std::atomic_bool& stopping) noexcept {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!data.empty() && wait_socket(socket, POLLWRNORM, stopping, deadline)) {
         const auto sent = send(socket, data.data(),
             static_cast<int>(std::min<std::size_t>(data.size(), INT_MAX)), 0);
+        if (sent == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK) continue;
         if (sent <= 0) return false;
         data.remove_prefix(static_cast<std::size_t>(sent));
     }
-    return true;
+    return data.empty();
 }
 
-std::optional<HttpRequest> read_request(SOCKET socket) {
+std::optional<HttpRequest> read_request(SOCKET socket,
+    const std::atomic_bool& stopping) {
     std::string bytes;
     std::array<char, 4096> buffer{};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto receive = [&](char* destination, int capacity) {
+        while (!stopping.load(std::memory_order_acquire) &&
+            std::chrono::steady_clock::now() < deadline) {
+            if (!wait_socket(socket, POLLRDNORM, stopping, deadline))
+                return SOCKET_ERROR;
+            const auto count = recv(socket, destination, capacity, 0);
+            if (count >= 0) return count;
+            const auto error = WSAGetLastError();
+            if (error != WSAEWOULDBLOCK) return SOCKET_ERROR;
+        }
+        return SOCKET_ERROR;
+    };
     while (bytes.find("\r\n\r\n") == std::string::npos && bytes.size() < 64U * 1024U) {
-        const auto count = recv(socket, buffer.data(), static_cast<int>(buffer.size()), 0);
+        const auto count = receive(buffer.data(), static_cast<int>(buffer.size()));
         if (count <= 0) return std::nullopt;
         bytes.append(buffer.data(), static_cast<std::size_t>(count));
     }
@@ -202,10 +248,11 @@ std::optional<HttpRequest> read_request(SOCKET socket) {
         const auto expect = request.headers.find("expect");
         if (expect != request.headers.end() &&
             lower(expect->second).find("100-continue") != std::string::npos &&
-            !send_all(socket, "HTTP/1.1 100 Continue\r\n\r\n")) return std::nullopt;
+            !send_all(socket, "HTTP/1.1 100 Continue\r\n\r\n", stopping))
+            return std::nullopt;
     }
     while (bytes.size() - body_at < content_length) {
-        const auto count = recv(socket, buffer.data(), static_cast<int>(buffer.size()), 0);
+        const auto count = receive(buffer.data(), static_cast<int>(buffer.size()));
         if (count <= 0) return std::nullopt;
         bytes.append(buffer.data(), static_cast<std::size_t>(count));
     }
@@ -334,14 +381,26 @@ struct DlnaRenderer::Impl {
     std::thread ssdp_thread;
     bool winsock_started{};
     std::mutex state_mutex;
+    std::mutex http_listener_mutex;
     std::string media_uri;
+    std::vector<std::string> interfaces;
     double media_start{};
     float volume{1.0F};
     bool muted{};
     std::string transport_state{"STOPPED"};
+    std::atomic_uint64_t http_requests{};
+    std::atomic_uint64_t http_parse_failures{};
+    std::atomic_uint64_t http_responses{};
+    std::atomic_uint64_t http_send_failures{};
+    std::atomic_uint64_t soap_requests{};
+    std::atomic_uint64_t ssdp_searches{};
 
-    void log(std::string_view message) const {
-        if (callbacks.log) callbacks.log(message);
+    void log(std::string_view message) const noexcept {
+        try {
+            if (callbacks.log) callbacks.log(message);
+        } catch (...) {
+            // Diagnostics must not terminate the HTTP or SSDP worker.
+        }
     }
 
     std::string description() const {
@@ -550,11 +609,14 @@ struct DlnaRenderer::Impl {
         const auto rendering = request.path.find("renderingcontrol") != std::string::npos;
         const auto service = avtransport ? AvTransportType :
             connection ? ConnectionManagerType : RenderingControlType;
+        const auto soap_index = soap_requests.fetch_add(1, std::memory_order_relaxed) + 1;
+        log(std::format("dlna soap request={} action={} service={} body_bytes={}",
+            soap_index, action.empty() ? "<unknown>" : action, service,
+            request.body.size()));
 
         if (action == "SetAVTransportURI" && avtransport) {
             const auto uri = xml_value(request.body, "CurrentURI");
-            if (!uri || uri->size() > 16U * 1024U ||
-                (!uri->starts_with("http://") && !uri->starts_with("https://")))
+            if (!uri || !iPhoneMirror::wireless::is_valid_http_url(*uri))
                 return {service, soap_error(714, "Illegal MIME-type")};
             {
                 std::scoped_lock lock(state_mutex);
@@ -567,15 +629,22 @@ struct DlnaRenderer::Impl {
         else if (action == "Play" && avtransport) {
             std::string uri;
             double start{};
+            bool resuming{};
             {
                 std::scoped_lock lock(state_mutex);
                 uri = media_uri;
                 start = media_start;
-                transport_state = "PLAYING";
+                resuming = transport_state == "PAUSED_PLAYBACK";
+                if (!uri.empty()) transport_state = "PLAYING";
             }
             if (uri.empty()) return {service, soap_error(701, "Transition not available")};
-            if (callbacks.play) callbacks.play(uri, start);
-            log(std::format("dlna Play start={:.3f}", start));
+            if (resuming) {
+                if (callbacks.resume) callbacks.resume();
+                log("dlna Resume");
+            } else {
+                if (callbacks.play) callbacks.play(uri, start);
+                log(std::format("dlna Play start={:.3f}", start));
+            }
         }
         else if (action == "Stop" && avtransport) {
             {
@@ -586,18 +655,24 @@ struct DlnaRenderer::Impl {
             log("dlna Stop");
         }
         else if (action == "Pause" && avtransport) {
-            std::scoped_lock lock(state_mutex);
-            transport_state = "PAUSED_PLAYBACK";
+            {
+                std::scoped_lock lock(state_mutex);
+                transport_state = "PAUSED_PLAYBACK";
+            }
+            if (callbacks.pause) callbacks.pause();
+            log("dlna Pause");
         }
         else if (action == "Seek" && avtransport) {
             const auto target = xml_value(request.body, "Target");
-            std::string uri;
-            if (target) {
+            const auto position = target ? parse_dlna_time(*target) : std::nullopt;
+            if (!position)
+                return {service, soap_error(402, "Invalid Args")};
+            {
                 std::scoped_lock lock(state_mutex);
-                media_start = parse_dlna_time(*target);
-                uri = media_uri;
+                media_start = *position;
             }
-            if (!uri.empty() && callbacks.play) callbacks.play(uri, media_start);
+            if (callbacks.seek) callbacks.seek(*position);
+            log(std::format("dlna Seek position={:.3f}", *position));
         }
         else if (action == "GetTransportInfo" && avtransport) {
             std::string state;
@@ -649,8 +724,9 @@ struct DlnaRenderer::Impl {
         else if (action == "GetProtocolInfo" && connection) {
             constexpr std::string_view sink =
                 "http-get:*:video/mp4:*,http-get:*:video/mpeg:*,"
-                "http-get:*:video/x-matroska:*,http-get:*:application/vnd.apple.mpegurl:*,"
-                "http-get:*:application/x-mpegURL:*,http-get:*:audio/mpeg:*,http-get:*:*:*";
+                "http-get:*:video/x-ms-wmv:*,http-get:*:application/vnd.apple.mpegurl:*,"
+                "http-get:*:application/x-mpegURL:*,http-get:*:audio/mpeg:*,"
+                "http-get:*:audio/mp4:*,http-get:*:video/x-matroska:*,http-get:*:*:*";
             return {service, soap_envelope(service, action,
                 std::format("<Source></Source><Sink>{}</Sink>", sink))};
         }
@@ -700,33 +776,53 @@ struct DlnaRenderer::Impl {
     }
 
     void handle_http(SOCKET client) {
-        const auto request = read_request(client);
-        if (!request) return;
-        log(std::format("dlna http method={} path={}", request->method, request->path));
+        const auto request_index = http_requests.fetch_add(1, std::memory_order_relaxed) + 1;
+        const auto started = std::chrono::steady_clock::now();
+        const auto request = read_request(client, stopping);
+        if (!request) {
+            http_parse_failures.fetch_add(1, std::memory_order_relaxed);
+            log(std::format("dlna http request={} rejected stopping={} duration_ms={}",
+                request_index, stopping.load(std::memory_order_acquire),
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - started).count()));
+            return;
+        }
         std::string response;
+        int status = 404;
+        std::string_view route = "not_found";
         if (request->method == "GET" &&
             (request->path == "/dlna/device.xml" || request->path == "/device.xml")) {
             response = http_response(200, "OK", "text/xml; charset=\"utf-8\"", description());
+            status = 200;
+            route = "device_description";
         }
         else if (request->method == "GET" && request->path == "/dlna/avtransport.xml") {
             response = http_response(200, "OK", "text/xml; charset=\"utf-8\"",
                 avtransport_scpd());
+            status = 200;
+            route = "avtransport_scpd";
         }
         else if (request->method == "GET" &&
             request->path == "/dlna/connectionmanager.xml") {
             response = http_response(200, "OK", "text/xml; charset=\"utf-8\"",
                 connectionmanager_scpd());
+            status = 200;
+            route = "connectionmanager_scpd";
         }
         else if (request->method == "GET" &&
             request->path == "/dlna/renderingcontrol.xml") {
             response = http_response(200, "OK", "text/xml; charset=\"utf-8\"",
                 renderingcontrol_scpd());
+            status = 200;
+            route = "renderingcontrol_scpd";
         }
         else if (request->method == "POST" &&
             request->path.starts_with("/dlna/control/")) {
             const auto [_, body] = handle_soap(*request);
             const auto error = body.find("<s:Fault>") != std::string::npos;
-            response = http_response(error ? 500 : 200, error ? "Internal Server Error" : "OK",
+            status = error ? 500 : 200;
+            route = error ? "soap_fault" : "soap";
+            response = http_response(status, error ? "Internal Server Error" : "OK",
                 "text/xml; charset=\"utf-8\"", body,
                 "EXT:\r\n");
         }
@@ -734,39 +830,69 @@ struct DlnaRenderer::Impl {
             request->path.starts_with("/dlna/event/")) {
             response = http_response(200, "OK", "text/plain", "",
                 std::format("SID: {}\r\nTIMEOUT: Second-1800\r\n", uuid));
+            status = 200;
+            route = "subscribe";
         }
         else if (request->method == "UNSUBSCRIBE" &&
             request->path.starts_with("/dlna/event/")) {
             response = http_response(200, "OK", "text/plain", "");
+            status = 200;
+            route = "unsubscribe";
         }
         else response = http_response(404, "Not Found", "text/plain", "Not Found");
-        send_all(client, response);
+        const auto sent = send_all(client, response, stopping);
+        if (!sent) http_send_failures.fetch_add(1, std::memory_order_relaxed);
+        http_responses.fetch_add(1, std::memory_order_relaxed);
+        const auto query_at = request->path.find('?');
+        const auto logged_path = std::string_view(request->path).substr(
+            0, query_at == std::string::npos ? request->path.size() : query_at);
+        const auto query_bytes = query_at == std::string::npos
+            ? std::size_t{}
+            : request->path.size() - query_at - 1;
+        log(std::format("dlna http request={} method={} path={} route={} status={} "
+            "query_bytes={} body_bytes={} response_bytes={} sent={} duration_ms={}",
+            request_index, request->method, logged_path, route, status, query_bytes,
+            request->body.size(), response.size(), sent,
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started).count()));
     }
 
     void http_loop() {
         while (!stopping.load(std::memory_order_acquire)) {
             sockaddr_storage remote{};
             int length = sizeof(remote);
-            const auto client = accept(http_socket, reinterpret_cast<sockaddr*>(&remote), &length);
+            SOCKET client{INVALID_SOCKET};
+            {
+                // Keep the listener value stable across accept so stop cannot
+                // close it and let Windows reuse the numeric SOCKET first.
+                std::scoped_lock lock(http_listener_mutex);
+                if (stopping.load(std::memory_order_acquire) ||
+                    http_socket == INVALID_SOCKET) break;
+                client = accept(http_socket,
+                    reinterpret_cast<sockaddr*>(&remote), &length);
+            }
             if (client == INVALID_SOCKET) {
                 if (!stopping.load(std::memory_order_acquire))
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 continue;
             }
-            // A socket accepted from a nonblocking listener can inherit that
-            // mode on Windows. SOAP clients are allowed to split headers and
-            // bodies across TCP packets, so switch the connected socket back
-            // to blocking I/O before the bounded request reader starts.
-            u_long blocking = 0;
-            if (ioctlsocket(client, FIONBIO, &blocking) != 0) {
+            // Explicit nonblocking I/O plus bounded WSAPoll slices lets stop
+            // join this worker without closing an accepted socket cross-thread.
+            u_long nonblocking = 1;
+            if (ioctlsocket(client, FIONBIO, &nonblocking) != 0) {
                 closesocket(client);
                 continue;
             }
-            DWORD timeout = 5000;
-            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
-                reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-            handle_http(client);
-            shutdown(client, SD_BOTH);
+            if (stopping.load(std::memory_order_acquire)) {
+                closesocket(client);
+                break;
+            }
+            try {
+                handle_http(client);
+            } catch (...) {
+                http_parse_failures.fetch_add(1, std::memory_order_relaxed);
+                log("dlna http handler failed with an exception");
+            }
             closesocket(client);
         }
     }
@@ -799,11 +925,13 @@ struct DlnaRenderer::Impl {
     }
 
     void send_notify(bool alive) {
+        log(std::format("dlna ssdp notify state={} interfaces={}",
+            alive ? "alive" : "byebye", interfaces.size()));
         sockaddr_in target{};
         target.sin_family = AF_INET;
         target.sin_port = htons(ssdp_port);
         if (inet_pton(AF_INET, MulticastAddress.data(), &target.sin_addr) != 1) return;
-        for (const auto& address : local_ipv4_addresses()) {
+        for (const auto& address : interfaces) {
             in_addr local{};
             if (inet_pton(AF_INET, address.c_str(), &local) != 1) continue;
             setsockopt(ssdp_socket, IPPROTO_IP, IP_MULTICAST_IF,
@@ -856,7 +984,10 @@ struct DlnaRenderer::Impl {
                         if (lower(st) == "ssdp:all" || lower(st) == lower(type))
                             send_search_response(remote, type, usn);
                     }
-                    log(std::format("dlna ssdp search st={} responses_sent", st));
+                    const auto search_index = ssdp_searches.fetch_add(
+                        1, std::memory_order_relaxed) + 1;
+                    log(std::format(
+                        "dlna ssdp search={} st={} responses_sent", search_index, st));
                 }
             }
             else if (WSAGetLastError() == WSAEWOULDBLOCK) {
@@ -877,30 +1008,60 @@ DlnaRenderer::~DlnaRenderer() { stop(); }
 bool DlnaRenderer::start(std::string friendly_name, std::string uuid,
     std::uint16_t http_port, std::uint16_t ssdp_port, Callbacks callbacks) {
     stop();
+    impl_->callbacks = std::move(callbacks);
     WSADATA winsock{};
-    if (WSAStartup(MAKEWORD(2, 2), &winsock) != 0) return false;
+    const auto winsock_error = WSAStartup(MAKEWORD(2, 2), &winsock);
+    if (winsock_error != 0) {
+        impl_->log(std::format("dlna startup failed stage=winsock_startup winsock={}",
+            winsock_error));
+        return false;
+    }
     impl_->winsock_started = true;
     impl_->name = std::move(friendly_name);
     impl_->uuid = std::move(uuid);
     impl_->http_port = http_port;
     impl_->ssdp_port = ssdp_port;
-    impl_->callbacks = std::move(callbacks);
+    {
+        std::scoped_lock lock(impl_->state_mutex);
+        impl_->media_uri.clear();
+        impl_->media_start = 0;
+        impl_->volume = 1.0F;
+        impl_->muted = false;
+        impl_->transport_state = "STOPPED";
+    }
     impl_->stopping.store(false, std::memory_order_release);
+    impl_->http_requests.store(0, std::memory_order_relaxed);
+    impl_->http_parse_failures.store(0, std::memory_order_relaxed);
+    impl_->http_responses.store(0, std::memory_order_relaxed);
+    impl_->http_send_failures.store(0, std::memory_order_relaxed);
+    impl_->soap_requests.store(0, std::memory_order_relaxed);
+    impl_->ssdp_searches.store(0, std::memory_order_relaxed);
 
     impl_->http_socket = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP,
         nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
-    if (impl_->http_socket == INVALID_SOCKET) return false;
+    if (impl_->http_socket == INVALID_SOCKET) {
+        impl_->log(std::format("dlna startup failed stage=http_socket winsock={}",
+            WSAGetLastError()));
+        stop();
+        return false;
+    }
     BOOL exclusive = TRUE;
     setsockopt(impl_->http_socket, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
         reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
     sockaddr_in http_address{AF_INET, htons(http_port), {.S_un = {.S_addr = INADDR_ANY}}};
     if (bind(impl_->http_socket, reinterpret_cast<const sockaddr*>(&http_address),
             sizeof(http_address)) != 0 || listen(impl_->http_socket, 16) != 0) {
+        impl_->log(std::format(
+            "dlna startup failed stage=http_bind_or_listen port={} winsock={}",
+            http_port, WSAGetLastError()));
         stop();
         return false;
     }
     u_long nonblocking = 1;
     if (ioctlsocket(impl_->http_socket, FIONBIO, &nonblocking) != 0) {
+        impl_->log(std::format(
+            "dlna startup failed stage=http_nonblocking winsock={}",
+            WSAGetLastError()));
         stop();
         return false;
     }
@@ -908,6 +1069,8 @@ bool DlnaRenderer::start(std::string friendly_name, std::string uuid,
     impl_->ssdp_socket = WSASocketW(AF_INET, SOCK_DGRAM, IPPROTO_UDP,
         nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
     if (impl_->ssdp_socket == INVALID_SOCKET) {
+        impl_->log(std::format("dlna startup failed stage=ssdp_socket winsock={}",
+            WSAGetLastError()));
         stop();
         return false;
     }
@@ -923,47 +1086,71 @@ bool DlnaRenderer::start(std::string friendly_name, std::string uuid,
     }
     in_addr multicast{};
     if (inet_pton(AF_INET, MulticastAddress.data(), &multicast) != 1) {
+        impl_->log("dlna startup failed stage=multicast_address");
         stop();
         return false;
     }
-    auto interfaces = local_ipv4_addresses();
-    interfaces.emplace_back("127.0.0.1");
+    impl_->interfaces = local_ipv4_addresses();
+    impl_->interfaces.emplace_back("127.0.0.1");
     bool joined{};
-    for (const auto& address : interfaces) {
+    std::size_t interface_index{};
+    for (const auto& address : impl_->interfaces) {
+        ++interface_index;
         ip_mreq membership{.imr_multiaddr = multicast};
         if (inet_pton(AF_INET, address.c_str(), &membership.imr_interface) != 1)
             continue;
         if (setsockopt(impl_->ssdp_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                 reinterpret_cast<const char*>(&membership), sizeof(membership)) == 0) {
             joined = true;
-            impl_->log(std::format("dlna multicast joined interface={}", address));
+            impl_->log(std::format("dlna multicast joined interface_index={}",
+                interface_index));
         }
-        else impl_->log(std::format("dlna multicast join failed interface={} winsock={}",
-            address, WSAGetLastError()));
+        else impl_->log(std::format(
+            "dlna multicast join failed interface_index={} winsock={}",
+            interface_index, WSAGetLastError()));
     }
     if (!joined) {
+        impl_->log(std::format(
+            "dlna startup failed stage=multicast_join interfaces={}",
+            impl_->interfaces.size()));
         stop();
         return false;
     }
     u_long ssdp_nonblocking = 1;
     if (ioctlsocket(impl_->ssdp_socket, FIONBIO, &ssdp_nonblocking) != 0) {
+        impl_->log(std::format(
+            "dlna startup failed stage=ssdp_nonblocking winsock={}",
+            WSAGetLastError()));
         stop();
         return false;
     }
-    impl_->http_thread = std::thread([this] { impl_->http_loop(); });
-    impl_->ssdp_thread = std::thread([this] { impl_->ssdp_loop(); });
-    impl_->log(std::format("dlna renderer ready name={} uuid={} http_port={} ssdp_port={}",
-        impl_->name, impl_->uuid, impl_->http_port, impl_->ssdp_port));
+    try {
+        impl_->http_thread = std::thread([this] { impl_->http_loop(); });
+        impl_->ssdp_thread = std::thread([this] { impl_->ssdp_loop(); });
+    } catch (const std::exception& error) {
+        impl_->log(std::format("dlna worker startup failed error={}", error.what()));
+        stop();
+        return false;
+    }
+    impl_->log(std::format(
+        "dlna renderer ready name_bytes={} uuid_bytes={} http_port={} ssdp_port={}",
+        impl_->name.size(), impl_->uuid.size(), impl_->http_port, impl_->ssdp_port));
     return true;
 }
 
 void DlnaRenderer::stop() noexcept {
     if (!impl_) return;
+    const auto was_started = impl_->winsock_started;
     impl_->stopping.store(true, std::memory_order_release);
-    if (impl_->http_socket != INVALID_SOCKET) {
-        shutdown(impl_->http_socket, SD_BOTH);
-        closesocket(impl_->http_socket);
-        impl_->http_socket = INVALID_SOCKET;
+    {
+        // Close the listener before joining so the worker cannot return to an
+        // accept path after its active client has been interrupted.
+        std::scoped_lock lock(impl_->http_listener_mutex);
+        if (impl_->http_socket != INVALID_SOCKET) {
+            shutdown(impl_->http_socket, SD_BOTH);
+            closesocket(impl_->http_socket);
+            impl_->http_socket = INVALID_SOCKET;
+        }
     }
     if (impl_->http_thread.joinable()) impl_->http_thread.join();
 
@@ -975,10 +1162,32 @@ void DlnaRenderer::stop() noexcept {
         closesocket(impl_->ssdp_socket);
         impl_->ssdp_socket = INVALID_SOCKET;
     }
+    if (was_started) {
+        try {
+            impl_->log(std::format(
+                "dlna summary http_requests={} responses={} parse_failures={} "
+                "send_failures={} soap_requests={} ssdp_searches={}",
+                impl_->http_requests.load(std::memory_order_relaxed),
+                impl_->http_responses.load(std::memory_order_relaxed),
+                impl_->http_parse_failures.load(std::memory_order_relaxed),
+                impl_->http_send_failures.load(std::memory_order_relaxed),
+                impl_->soap_requests.load(std::memory_order_relaxed),
+                impl_->ssdp_searches.load(std::memory_order_relaxed)));
+        } catch (...) {
+            // Shutdown diagnostics are best-effort.
+        }
+    }
     if (impl_->winsock_started) {
         WSACleanup();
         impl_->winsock_started = false;
     }
+}
+
+void DlnaRenderer::set_transport_stopped() noexcept {
+    if (!impl_) return;
+    std::scoped_lock lock(impl_->state_mutex);
+    impl_->transport_state = "STOPPED";
+    impl_->media_start = 0;
 }
 
 } // namespace iPhoneMirror::wireless

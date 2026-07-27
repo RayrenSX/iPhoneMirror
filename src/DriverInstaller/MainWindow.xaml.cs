@@ -140,14 +140,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (!result.Success)
             {
                 OperationStatus = result.Message;
-                DriverLogger.Write("Apple support install failed: " + result.Message);
+                DriverLogger.WriteError("ui", "apple_support_install_failed",
+                    ("message", result.Message));
                 ShowFailure(result.Message);
             }
             else OperationStatus = L("AppleSupportReady");
         }
         catch (Exception error)
         {
-            DriverLogger.Write("Apple support UI error: " + error);
+            DriverLogger.WriteException("ui", "apple_support_install_exception", error);
             OperationStatus = error.Message;
             ShowFailure(error.Message);
         }
@@ -176,7 +177,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return true;
         }
         OperationStatus = result.Message;
-        return ShowFailure(result.Message);
+        ShowFailure(result.Message);
+        return false;
     }
 
     private async Task InstallAllAsync()
@@ -263,7 +265,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception error)
         {
-            DriverLogger.Write("Quick install failed: " + error);
+            DriverLogger.WriteException("ui", "quick_install_failed", error);
             OperationStatus = error.Message;
             ShowFailure(error.Message + "\n" + F("LogSuffix", DriverLogger.Path));
         }
@@ -279,7 +281,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var deadline = DateTime.UtcNow + timeout;
         do
         {
-            if (_catalog.GetAppleDevices().Any(device => device.IsPresent)) return true;
+            var present = await Task.Run(() => _catalog
+                .GetAppleDevices(includeMetadata: false)
+                .Any(device => device.IsPresent));
+            if (present) return true;
             OperationStatus = L("WaitingForDevice");
             await Task.Delay(500);
         } while (DateTime.UtcNow < deadline);
@@ -316,6 +321,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             verb, kind == DriverOperationKind.Uninstall);
         if (!answer) return;
 
+        var targetInstanceId = device.InstanceId;
+        var targetSerial = device.Serial;
+
         IsBusy = true;
         try
         {
@@ -328,11 +336,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     var failure = result.Message + (string.IsNullOrWhiteSpace(result.LogPath)
                         ? string.Empty : "\n" + F("LogSuffix", result.LogPath));
                     OperationStatus = failure;
-                    DriverLogger.Write(failure);
+                    DriverLogger.WriteError("ui", "driver_operation_failed",
+                        ("kind", kind), ("attempt", attempt + 1),
+                        ("message", result.Message),
+                        ("operation_log", DriverLogger.DescribePath(result.LogPath)));
                     if (!ShowFailure(failure)) break;
                     await RefreshCoreAsync();
-                    device = SelectedDevice;
-                    if (device is null) break;
+                    device = Devices.FirstOrDefault(candidate =>
+                        string.Equals(candidate.InstanceId, targetInstanceId,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(candidate.Serial, targetSerial,
+                            StringComparison.OrdinalIgnoreCase));
+                    if (device is null ||
+                        kind is DriverOperationKind.Install or DriverOperationKind.Repair &&
+                        (!device.IsPresent || !_appleSupport.Ready) ||
+                        kind == DriverOperationKind.Uninstall && !device.HasLibUsb0Filter)
+                    {
+                        DriverLogger.WriteWarning("ui", "driver_retry_target_unavailable",
+                            ("kind", kind),
+                            ("device", DriverLogger.DeviceFingerprint(targetSerial)));
+                        OperationStatus = F("SelectedDeviceDisconnected", DriverLogger.Path);
+                        break;
+                    }
                     continue;
                 }
 
@@ -354,7 +379,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception error)
         {
-            DriverLogger.Write($"Driver operation UI error: {error}");
+            DriverLogger.WriteException("ui", "driver_operation_exception", error,
+                ("kind", kind));
             OperationStatus = error.Message;
             ShowFailure(error.Message);
         }
@@ -399,8 +425,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var deadline = DateTime.UtcNow + timeout;
         do
         {
-            var device = _catalog.FindExact(instanceId, serial);
-            if (device?.IsPresent == expected) return true;
+            var device = await Task.Run(() => _catalog.FindExact(instanceId, serial));
+            var present = device?.IsPresent == true;
+            if (present == expected) return true;
             OperationStatus = L(expected ? "WaitingReconnect" : "WaitingDisconnect");
             await Task.Delay(500);
         } while (DateTime.UtcNow < deadline);
@@ -411,7 +438,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (IsBusy) return;
         IsBusy = true;
-        try { await RefreshCoreAsync(); }
+        try
+        {
+            await RefreshCoreAsync();
+        }
+        catch (Exception error)
+        {
+            DriverLogger.WriteException("ui", "status_refresh_failed", error);
+            OperationStatus = error.Message;
+        }
         finally { IsBusy = false; }
     }
 

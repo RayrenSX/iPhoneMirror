@@ -1,10 +1,12 @@
 #include "Capture/WirelessReceiverHub.h"
 
+#include "HttpUrl.h"
 #include "Audio/WasapiRenderer.h"
 #include "IpcProtocol.h"
 #include "Logging.h"
 
 #include <Windows.h>
+#include <objbase.h>
 #include <sddl.h>
 
 #include <algorithm>
@@ -143,6 +145,10 @@ std::string narrow(std::wstring_view text) {
     return result;
 }
 
+std::string anonymous_label(std::wstring_view text) {
+    return iPhoneMirror::logging::fingerprint(narrow(text));
+}
+
 template <std::size_t Size>
 std::wstring header_text(const char (&value)[Size]) {
     return widen(std::string_view(value, strnlen_s(value, Size)));
@@ -197,6 +203,38 @@ bool convert_i420_to_nv12(const wireless::MessageHeader& header,
     }
     return true;
 }
+
+void MediaCommandQueue::reset() noexcept {
+    commands_.clear();
+    latest_id_ = 0;
+}
+
+bool MediaCommandQueue::push(MediaCastCommand command) {
+    if (command.id == 0 || command.id <= latest_id_) return false;
+    latest_id_ = command.id;
+    if (commands_.size() >= MaxPendingCommands) {
+        const auto expendable = std::ranges::find_if(commands_, [](const auto& queued) {
+            return queued.type == MediaCastCommandType::Pause ||
+                queued.type == MediaCastCommandType::Resume ||
+                queued.type == MediaCastCommandType::Seek;
+        });
+        if (expendable != commands_.end()) commands_.erase(expendable);
+        else commands_.pop_front();
+    }
+    commands_.push_back(std::move(command));
+    return true;
+}
+
+MediaCastCommand MediaCommandQueue::pop() {
+    if (commands_.empty()) return {};
+    auto command = std::move(commands_.front());
+    commands_.pop_front();
+    return command;
+}
+
+std::uint64_t MediaCommandQueue::latest_id() const noexcept { return latest_id_; }
+
+std::size_t MediaCommandQueue::size() const noexcept { return commands_.size(); }
 
 } // namespace detail
 
@@ -322,17 +360,26 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     auto frame = std::make_shared<media::DecodedFrame>();
     if (!detail::convert_i420_to_nv12(header, payload, frame->nv12, frame->stride)) {
         if (++rejected_video_messages_ == 1)
-            logging::write(std::format("wireless_video rejected device={} size={}x{}",
-                narrow(id_), header.width, header.height));
+            logging::write(std::format("wireless_video rejected device_fp={} size={}x{}",
+                anonymous_label(id_), header.width, header.height));
         return;
     }
     frame->width = header.width;
     frame->height = header.height;
+    frame->pixel_format = media::PixelFormat::Nv12;
+    frame->color.primaries = coremedia::ColorPrimaries::Bt709;
+    frame->color.transfer = coremedia::TransferFunction::Bt709;
+    frame->color.matrix = coremedia::MatrixCoefficients::Bt709;
+    frame->color.range = coremedia::ColorRange::Limited;
     frame->timestamp_100ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         received_at - started_at_).count() / 100;
     frame->received_at = received_at;
 
     std::scoped_lock lock(mutex_);
+    // The hub can observe a frame concurrently with a disconnect callback.
+    // Re-check the connection while holding the stream lock so a late frame
+    // cannot repopulate a device that was just cleared.
+    if (!connected_) return;
     latest_frame_ = frame;
     render_queue_.push_back(frame);
     const auto queue_limit = attachments_ == 0 ? 1U : 4U;
@@ -351,8 +398,8 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     snapshot_.latency_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - received_at).count();
     if (snapshot_.video_frames == 1)
-        logging::write(std::format("wireless_video published device={} size={}x{} stride={} bytes={}",
-            narrow(id_), frame->width, frame->height, frame->stride, frame->nv12.size()));
+        logging::write(std::format("wireless_video published device_fp={} size={}x{} stride={} bytes={}",
+            anonymous_label(id_), frame->width, frame->height, frame->stride, frame->nv12.size()));
 }
 
 void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
@@ -361,7 +408,8 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
         header.channels > 8 || header.sample_rate < 8000 || header.sample_rate > 192000 ||
         payload.size() % (static_cast<std::size_t>(header.channels) * 2U) != 0) {
         if (++rejected_audio_messages_ == 1)
-            logging::write(std::format("wireless_audio rejected device={}", narrow(id_)));
+            logging::write(std::format("wireless_audio rejected device_fp={}",
+                anonymous_label(id_)));
         return;
     }
     bool attached{};
@@ -371,6 +419,13 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
     }
     if (attached) {
         std::scoped_lock lock(audio_mutex_);
+        // detach() releases mutex_ before stopping the renderer. Re-check
+        // attachments after taking audio_mutex_ to avoid creating a new
+        // renderer in the gap between those two operations.
+        {
+            std::scoped_lock stream_lock(mutex_);
+            if (!connected_ || attachments_ == 0) return;
+        }
         const auto format_changed = audio_sample_rate_ != header.sample_rate ||
             audio_channels_ != header.channels || audio_bits_ != header.bits_per_sample;
         if (format_changed || (!audio_renderer_ && !audio_renderer_failed_)) {
@@ -395,13 +450,14 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
                     audio_volume_.load(std::memory_order_relaxed));
             } catch (const std::exception& error) {
                 audio_renderer_failed_ = true;
-                logging::write(std::format("wireless audio playback disabled for {}: {}",
-                    narrow(id_), error.what()));
+                logging::write(std::format("wireless audio playback disabled for device_fp={}: {}",
+                    anonymous_label(id_), error.what()));
             }
         }
         if (audio_renderer_) audio_renderer_->enqueue(payload);
     }
     std::scoped_lock lock(mutex_);
+    if (!connected_ || attachments_ == 0) return;
     ++snapshot_.audio_packets;
     snapshot_.audio_sample_rate = header.sample_rate;
     snapshot_.audio_channels = header.channels;
@@ -438,16 +494,17 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
     std::scoped_lock lifecycle_lock(lifecycle_mutex_);
     // A crashed host leaves a signaled process handle and a joinable reader
     // thread behind. Reap that stale state before starting its replacement.
-    if (process_ && WaitForSingleObject(as_handle(process_), 0) != WAIT_TIMEOUT)
+    if (process_ && (WaitForSingleObject(as_handle(process_), 0) != WAIT_TIMEOUT ||
+            pipe_disconnected_.load(std::memory_order_acquire)))
         stop_locked();
-    if (worker_.joinable() || process_) return;
+    if (worker_.joinable() || playback_worker_.joinable() || process_) return;
     if (!std::filesystem::is_regular_file(host_path))
         throw std::runtime_error("wireless host executable is missing");
     receiver_name_ = std::move(receiver_name);
     host_path_ = std::move(host_path);
     {
         std::scoped_lock lock(mutex_);
-        media_command_ = {};
+        media_commands_.reset();
     }
     const auto suffix = unique_ipc_suffix();
     pipe_name_ = L"\\\\.\\pipe\\iPhoneMirror-AirPlay-Hub-" + suffix;
@@ -499,11 +556,19 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
     process_ = process.hProcess;
     stopping_.store(false, std::memory_order_release);
     ready_.store(false, std::memory_order_release);
+    pipe_disconnected_.store(false, std::memory_order_release);
+    {
+        std::scoped_lock lock(playback_mutex_);
+        playback_update_ = {};
+    }
     logging::write(std::format(
-        "wireless_hub host_started pid={} receiver={} capability={}x{}@{} mode=combined host={}",
-        process.dwProcessId, narrow(receiver_name_), width, height, frame_rate,
-        narrow(host_path_)));
+        "wireless_hub host_started pid={} receiver_fp={} capability={}x{}@{} "
+        "mode=combined host_file={}", process.dwProcessId,
+        anonymous_label(receiver_name_), width, height, frame_rate,
+        narrow(std::filesystem::path(host_path_).filename().wstring())));
     worker_ = std::jthread([this](std::stop_token token) { run(token); });
+    playback_worker_ = std::jthread(
+        [this](std::stop_token token) { run_playback_writer(token); });
 }
 
 void WirelessReceiverHub::stop() noexcept {
@@ -512,10 +577,15 @@ void WirelessReceiverHub::stop() noexcept {
 }
 
 void WirelessReceiverHub::stop_locked() noexcept {
-    if (!worker_.joinable() && !process_) return;
+    if (!worker_.joinable() && !playback_worker_.joinable() && !process_) return;
     stopping_.store(true, std::memory_order_release);
     ready_.store(false, std::memory_order_release);
     if (stop_event_) SetEvent(as_handle(stop_event_));
+    if (playback_worker_.joinable()) {
+        playback_worker_.request_stop();
+        CancelSynchronousIo(playback_worker_.native_handle());
+    }
+    playback_condition_.notify_all();
     if (pipe_) {
         CancelIoEx(as_handle(pipe_), nullptr);
         DisconnectNamedPipe(as_handle(pipe_));
@@ -524,6 +594,7 @@ void WirelessReceiverHub::stop_locked() noexcept {
         worker_.request_stop();
         worker_.join();
     }
+    if (playback_worker_.joinable()) playback_worker_.join();
     if (process_) {
         if (WaitForSingleObject(as_handle(process_), 3000) == WAIT_TIMEOUT) {
             TerminateProcess(as_handle(process_), 1);
@@ -546,7 +617,8 @@ void WirelessReceiverHub::stop_locked() noexcept {
 
 bool WirelessReceiverHub::running() const noexcept {
     std::scoped_lock lifecycle_lock(lifecycle_mutex_);
-    return process_ && WaitForSingleObject(as_handle(process_), 0) == WAIT_TIMEOUT;
+    return process_ && !pipe_disconnected_.load(std::memory_order_acquire) &&
+        WaitForSingleObject(as_handle(process_), 0) == WAIT_TIMEOUT;
 }
 
 bool WirelessReceiverHub::ready() const noexcept {
@@ -580,25 +652,109 @@ std::shared_ptr<WirelessClientStream> WirelessReceiverHub::attach(
     return stream;
 }
 
-MediaCastCommand WirelessReceiverHub::media_command() const {
+MediaCastCommand WirelessReceiverHub::take_media_command() {
     std::scoped_lock lock(mutex_);
-    return media_command_;
+    return media_commands_.pop();
 }
 
 bool WirelessReceiverHub::update_media_playback(std::uint64_t command_id,
     double duration, double position, double rate) noexcept {
     if (!std::isfinite(duration) || !std::isfinite(position) || !std::isfinite(rate) ||
-        duration < 0 || position < 0) return false;
-    std::scoped_lock lifecycle_lock(lifecycle_mutex_);
-    if (!pipe_ || !process_) return false;
-    wireless::MessageHeader header;
-    header.type = wireless::MessageType::PlaybackState;
-    header.media_command_id = command_id;
-    header.media_duration = duration;
-    header.media_position = position;
-    header.media_rate = rate;
-    std::scoped_lock write_lock(pipe_write_mutex_);
-    return write_all(as_handle(pipe_), &header, sizeof(header));
+        command_id == 0 || duration < 0 || position < 0 ||
+        stopping_.load(std::memory_order_acquire) ||
+        !ready_.load(std::memory_order_acquire)) return false;
+    {
+        // The UI publishes twice per second. Keep only the newest snapshot so
+        // a stalled receiver can never apply backpressure to the WPF thread.
+        // Assign fields individually: a UI stop queues a non-lossy control
+        // beside this coalesced state and must not be cleared by the final
+        // rate=0 report emitted during local player teardown.
+        std::scoped_lock lock(playback_mutex_);
+        if (playback_update_.stopped_command_id == command_id) return true;
+        playback_update_.command_id = command_id;
+        playback_update_.duration = duration;
+        playback_update_.position = position;
+        playback_update_.rate = rate;
+        playback_update_.pending = true;
+    }
+    playback_condition_.notify_one();
+    return true;
+}
+
+bool WirelessReceiverHub::request_media_stop() noexcept {
+    if (stopping_.load(std::memory_order_acquire) ||
+        !ready_.load(std::memory_order_acquire)) {
+        logging::write("wireless_hub media_stop_request rejected: host not ready");
+        return false;
+    }
+    std::uint64_t command_id{};
+    {
+        std::scoped_lock lock(mutex_);
+        command_id = media_commands_.latest_id();
+    }
+    if (command_id == 0) {
+        logging::write("wireless_hub media_stop_request rejected: no active command");
+        return false;
+    }
+    {
+        std::scoped_lock lock(playback_mutex_);
+        playback_update_.stop_requested = true;
+        playback_update_.stop_command_id = command_id;
+        playback_update_.stopped_command_id = command_id;
+        if (playback_update_.pending && playback_update_.command_id == command_id)
+            playback_update_.pending = false;
+    }
+    playback_condition_.notify_one();
+    logging::write(std::format(
+        "wireless_hub media_stop_request queued command={}", command_id));
+    return true;
+}
+
+void WirelessReceiverHub::run_playback_writer(std::stop_token stop_token) noexcept {
+    while (!stop_token.stop_requested()) {
+        PlaybackUpdate update;
+        bool send_stop{};
+        {
+            std::unique_lock lock(playback_mutex_);
+            if (!playback_condition_.wait(lock, stop_token,
+                    [this] { return playback_update_.pending ||
+                        playback_update_.stop_requested ||
+                        pipe_disconnected_.load(std::memory_order_acquire); })) break;
+            if (pipe_disconnected_.load(std::memory_order_acquire)) break;
+            send_stop = playback_update_.stop_requested;
+            if (send_stop) {
+                update.stop_command_id = playback_update_.stop_command_id;
+                playback_update_.stop_requested = false;
+            } else {
+                update = playback_update_;
+                playback_update_.pending = false;
+            }
+        }
+
+        wireless::MessageHeader header;
+        if (send_stop) {
+            header.type = wireless::MessageType::MediaStopRequest;
+            header.media_command_id = update.stop_command_id;
+        } else {
+            header.type = wireless::MessageType::PlaybackState;
+            header.media_command_id = update.command_id;
+            header.media_duration = update.duration;
+            header.media_position = update.position;
+            header.media_rate = update.rate;
+        }
+        std::scoped_lock write_lock(pipe_write_mutex_);
+        if (!pipe_ || !write_all(as_handle(pipe_), &header, sizeof(header))) {
+            if (!stopping_.load(std::memory_order_acquire))
+                logging::write("wireless_hub playback writer disconnected");
+            ready_.store(false, std::memory_order_release);
+            pipe_disconnected_.store(true, std::memory_order_release);
+            playback_condition_.notify_all();
+            break;
+        }
+        if (send_stop) logging::write(std::format(
+            "wireless_hub media_stop_request sent command={}",
+            update.stop_command_id));
+    }
 }
 
 void WirelessReceiverHub::run(std::stop_token stop_token) noexcept {
@@ -624,6 +780,8 @@ void WirelessReceiverHub::run(std::stop_token stop_token) noexcept {
             logging::write(std::format("wireless_hub error: {}", error.what()));
     }
     ready_.store(false, std::memory_order_release);
+    pipe_disconnected_.store(true, std::memory_order_release);
+    playback_condition_.notify_all();
     if (!stopping_.load(std::memory_order_acquire)) mark_all_disconnected();
 }
 
@@ -636,8 +794,10 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
         break;
     case wireless::MessageType::Connected: {
         const auto stream = get_or_create(header, true);
-        if (stream) logging::write(std::format("wireless_hub connected id={} name={}",
-            narrow(stream->device().id), narrow(stream->device().name)));
+        if (stream) logging::write(std::format(
+            "wireless_hub connected id_fp={} name_fp={}",
+            anonymous_label(stream->device().id),
+            anonymous_label(stream->device().name)));
         break;
     }
     case wireless::MessageType::Disconnected: {
@@ -646,15 +806,16 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
             auto device = stream->device();
             const auto name = header_text(header.device_name);
             stream->set_identity(name.empty() ? device.name : name, false);
-            logging::write(std::format("wireless_hub disconnected id={}", narrow(device.id)));
+            logging::write(std::format("wireless_hub disconnected id_fp={}",
+                anonymous_label(device.id)));
         }
         break;
     }
     case wireless::MessageType::Video:
-        if (const auto stream = get_or_create(header, true)) stream->publish_video(header, payload);
+        if (const auto stream = find_connected(header)) stream->publish_video(header, payload);
         break;
     case wireless::MessageType::Audio:
-        if (const auto stream = get_or_create(header, true)) stream->publish_audio(header, payload);
+        if (const auto stream = find_connected(header)) stream->publish_audio(header, payload);
         break;
     case wireless::MessageType::Log:
         logging::write("airplay_host: " + std::string(
@@ -667,27 +828,39 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
                 header_text(header.os_version));
             const auto device = stream->device();
             logging::write(std::format(
-                "wireless_hub metadata id={} model={} os={}", narrow(device.id),
+                "wireless_hub metadata id_fp={} model={} os={}",
+                anonymous_label(device.id),
                 narrow(device.product_type), narrow(device.os_version)));
         }
         break;
     }
     case wireless::MessageType::MediaPlay: {
-        if (header.media_command_id == 0 || payload.empty() || payload.size() > 16U * 1024U)
+        if (header.media_command_id == 0 || payload.empty() ||
+            payload.size() > 16U * 1024U ||
+            !std::isfinite(header.media_position) || header.media_position < 0 ||
+            !std::isfinite(header.media_volume))
             throw std::runtime_error("invalid media play command");
-        const auto url = widen(std::string_view(
-            reinterpret_cast<const char*>(payload.data()), payload.size()));
-        if (!url.starts_with(L"http://") && !url.starts_with(L"https://"))
+        const auto encoded_url = std::string_view(
+            reinterpret_cast<const char*>(payload.data()), payload.size());
+        if (!wireless::is_valid_http_url(encoded_url))
             throw std::runtime_error("media play URL is not HTTP(S)");
+        const auto url = widen(encoded_url);
+        bool accepted{};
         {
             std::scoped_lock lock(mutex_);
-            media_command_ = {
+            accepted = media_commands_.push({
                 .id = header.media_command_id,
                 .type = MediaCastCommandType::Play,
                 .url = url,
                 .start_position = std::max(0.0, header.media_position),
-                .volume = header.media_volume,
-            };
+                .volume = std::clamp(header.media_volume, 0.0, 1.0),
+            });
+        }
+        if (!accepted) {
+            logging::write(std::format(
+                "wireless_hub media_play ignored stale_command={}",
+                header.media_command_id));
+            break;
         }
         logging::write(std::format("wireless_hub media_play command={} url_bytes={}",
             header.media_command_id, payload.size()));
@@ -698,14 +871,39 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
             throw std::runtime_error("invalid media stop command");
         {
             std::scoped_lock lock(mutex_);
-            media_command_ = {
+            if (!media_commands_.push({
                 .id = header.media_command_id,
                 .type = MediaCastCommandType::Stop,
-            };
+            })) break;
         }
         logging::write(std::format("wireless_hub media_stop command={}",
             header.media_command_id));
         break;
+    case wireless::MessageType::MediaPause:
+    case wireless::MessageType::MediaResume:
+    case wireless::MessageType::MediaSeek: {
+        if (header.media_command_id == 0 || !payload.empty() ||
+            !std::isfinite(header.media_position) || header.media_position < 0)
+            throw std::runtime_error("invalid media playback control command");
+        const auto type = header.type == wireless::MessageType::MediaPause
+            ? MediaCastCommandType::Pause
+            : header.type == wireless::MessageType::MediaResume
+                ? MediaCastCommandType::Resume
+                : MediaCastCommandType::Seek;
+        {
+            std::scoped_lock lock(mutex_);
+            if (!media_commands_.push({
+                .id = header.media_command_id,
+                .type = type,
+                .start_position = header.media_position,
+            })) break;
+        }
+        logging::write(std::format(
+            "wireless_hub media_control type={} command={} position={:.3f}",
+            static_cast<unsigned>(type), header.media_command_id,
+            header.media_position));
+        break;
+    }
     case wireless::MessageType::PlaybackState:
         throw std::runtime_error("unexpected playback state from wireless host");
     default:
@@ -730,6 +928,16 @@ std::shared_ptr<WirelessClientStream> WirelessReceiverHub::get_or_create(
     }
     if (mark_connected) stream->set_identity(std::move(name), true);
     return stream;
+}
+
+std::shared_ptr<WirelessClientStream> WirelessReceiverHub::find_connected(
+    const wireless::MessageHeader& header) const {
+    const auto id = header_text(header.device_id);
+    if (id.empty()) return nullptr;
+    std::scoped_lock lock(mutex_);
+    const auto found = clients_.find(id);
+    if (found == clients_.end() || !found->second->connected()) return nullptr;
+    return found->second;
 }
 
 void WirelessReceiverHub::mark_all_disconnected() noexcept {

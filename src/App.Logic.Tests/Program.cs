@@ -33,6 +33,10 @@ Equal("phone-a", StableDeviceSelection.ChooseUdid(["phone-a", "phone-b"], "missi
 Equal("airplay://phone-b", StableDeviceSelection.ChooseUdid(
         ["phone-a", "airplay://phone-b"], "phone-a", "phone-a", "AIRPLAY://PHONE-B"),
     "new wireless connection is selected once");
+Equal("media-cast://active", StableDeviceSelection.ChooseUdid(
+        ["media-cast://active", "airplay://phone-b"], "media-cast://active", null,
+        "airplay://phone-b", preferNewlyConnectedWireless: false),
+    "active media cast is not displaced by its AirPlay connection");
 Equal("airplay://phone-b", StableDeviceSelection.FindNewlyConnected(
         ["airplay://phone-a"], ["airplay://phone-a", "airplay://phone-b"]),
     "new wireless edge is detected");
@@ -121,12 +125,163 @@ Equal(true, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 3
     "wireless 720p weak-network profile is supported");
 Equal(false, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 60),
     "unsupported wireless profile combinations are rejected");
+Equal(true, MediaSourceClassifier.IsLikelyLive(
+        new Uri("https://example.test/video.m3u8")),
+    "HLS extension is classified as live");
+Equal(true, MediaSourceClassifier.IsLikelyLive(
+        new Uri("https://example.test/live/playlist")),
+    "extensionless live playlist is classified as live");
+Equal(true, MediaSourceClassifier.IsLikelyLive(
+        new Uri("https://example.test/watch?id=1&format=m3u8")),
+    "HLS query hint is classified as live");
+Equal(false, MediaSourceClassifier.IsLikelyLive(
+        new Uri("https://example.test/library/video.mp4")),
+    "ordinary MP4 remains on-demand media");
+
+// MediaElement events do not identify the Source that raised them. A fresh
+// backend is bound for every load so delayed events can be rejected by both
+// casting generation and sender identity.
+var mediaEvents = new MediaCastEventGate();
+var firstBackend = new object();
+var firstMediaGeneration = mediaEvents.BeginGeneration();
+Equal(true, mediaEvents.TryBind(firstMediaGeneration, firstBackend),
+    "first media backend binds to its generation");
+Equal(true, mediaEvents.IsCurrent(firstMediaGeneration, firstBackend),
+    "current media backend event is accepted");
+var recoveredBackend = new object();
+Equal(true, mediaEvents.TryBind(firstMediaGeneration, recoveredBackend),
+    "live recovery can replace the backend within one cast generation");
+Equal(false, mediaEvents.IsCurrent(firstMediaGeneration, firstBackend),
+    "late event from the pre-recovery backend is rejected");
+Equal(true, mediaEvents.IsCurrent(firstMediaGeneration, recoveredBackend),
+    "event from the recovered backend is accepted");
+mediaEvents.Invalidate();
+Equal(false, mediaEvents.IsCurrent(firstMediaGeneration, recoveredBackend),
+    "late event after stop is rejected");
+var secondBackend = new object();
+var secondMediaGeneration = mediaEvents.BeginGeneration();
+Equal(true, mediaEvents.TryBind(secondMediaGeneration, secondBackend),
+    "new cast backend binds to the new generation");
+Equal(false, mediaEvents.TryBind(firstMediaGeneration, firstBackend),
+    "stale generation cannot replace the current backend");
+Equal(true, mediaEvents.IsCurrent(secondMediaGeneration, secondBackend),
+    "stale bind attempt leaves the new backend current");
+
+var recoveryNow = DateTimeOffset.Parse("2026-07-27T00:00:00Z");
+var mediaRecovery = new MediaRecoveryBackoff(() => recoveryNow,
+    maximumAttempts: 5, stablePlaybackWindow: TimeSpan.FromSeconds(10));
+var recoveryDelays = new List<double>();
+for (var index = 0; index < 5; ++index)
+{
+    mediaRecovery.MarkOpened();
+    Equal(true, mediaRecovery.TryGetNext(out _, out var delay),
+        "short-lived live playback remains recoverable");
+    recoveryDelays.Add(delay.TotalMilliseconds);
+}
+Equal(true, recoveryDelays.SequenceEqual([250, 500, 1000, 2000, 4000]),
+    "live recovery uses increasing backoff across short opens");
+Equal(false, mediaRecovery.TryGetNext(out _, out _),
+    "live recovery has a session-level retry budget");
+mediaRecovery.Reset();
+mediaRecovery.MarkOpened();
+recoveryNow += TimeSpan.FromSeconds(11);
+Equal(true, mediaRecovery.TryGetNext(out var stableAttempt, out var stableDelay) &&
+    stableAttempt == 1 && stableDelay == TimeSpan.FromMilliseconds(250),
+    "stable playback resets live recovery backoff");
 Equal<string?>(null,
     WirelessReceiverConfiguration.FindExecutable(Path.GetTempPath(),
         Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.exe")),
     "wireless receiver discovery rejects missing executables");
 
 var logPath = Path.Combine(Path.GetTempPath(), $"iPhoneMirror-log-{Guid.NewGuid():N}.txt");
+
+var sensitiveDeviceId = "00008110001234567890abcd1234567890abcdef";
+var deviceToken = AppLog.Device(sensitiveDeviceId);
+Equal(true, deviceToken.StartsWith("device#", StringComparison.Ordinal),
+    "device log identity uses an anonymous token");
+Equal(deviceToken, AppLog.Device(sensitiveDeviceId),
+    "device log identity remains stable within diagnostics");
+Equal(false, deviceToken.Contains(sensitiveDeviceId, StringComparison.OrdinalIgnoreCase),
+    "device log identity does not contain the raw serial");
+Equal("media-cast", AppLog.Device("media-cast://active"),
+    "media virtual device has a non-sensitive fixed identity");
+var privateMediaSource = new Uri(
+    "https://private.example.local/library/personal-video.m3u8?access_token=secret");
+Equal("https/m3u8?query=True", AppLog.MediaSource(privateMediaSource),
+    "media source diagnostics retain format without host, path, or query values");
+Equal("relative/unknown?query=False",
+    AppLog.MediaSource(new Uri("../private/video.mp4?token=secret", UriKind.Relative)),
+    "relative media source diagnostics are safe and non-throwing");
+var sanitizedLog = AppLog.Sanitize(
+    $"failed {privateMediaSource} device={sensitiveDeviceId}\r\nC:\\Users\\Private\\secret.txt");
+Equal(false, sanitizedLog.Contains("private.example.local", StringComparison.OrdinalIgnoreCase),
+    "log sanitization removes media hosts");
+Equal(false, sanitizedLog.Contains("access_token", StringComparison.OrdinalIgnoreCase),
+    "log sanitization removes media query names and values");
+Equal(false, sanitizedLog.Contains(sensitiveDeviceId, StringComparison.OrdinalIgnoreCase),
+    "log sanitization removes raw device serials");
+Equal(false, sanitizedLog.Contains("C:\\Users", StringComparison.OrdinalIgnoreCase),
+    "log sanitization removes local paths");
+Equal(false, sanitizedLog.Contains('\n'),
+    "log sanitization produces a single-line entry");
+var modernDeviceId = "00008110-001234567890ABCD";
+var credentialLog = AppLog.Sanitize(
+    "Authorization: Bearer bearer-secret-value\n" +
+    "Proxy-Authorization: Basic YmFzaWMtc2VjcmV0\n" +
+    "Cookie: session=cookie-secret; csrf=cookie-csrf\n" +
+    "Authorization=opaque-authorization-secret\n" +
+    "Cookie=assignment-cookie-secret; assignment-csrf-secret\n" +
+    "token=bare-token password=\"quoted password\" api_key:'api-secret' " +
+    $"server=private.internal endpoint=192.168.10.20:8080 device={modernDeviceId} " +
+    "mac=AA:BB:CC:DD:EE:FF path=/Users/Private/Movies/video.mp4");
+foreach (var secret in new[]
+         {
+             "bearer-secret-value", "YmFzaWMtc2VjcmV0", "cookie-secret",
+             "cookie-csrf", "bare-token", "quoted password", "api-secret",
+             "opaque-authorization-secret", "assignment-cookie-secret",
+             "assignment-csrf-secret",
+             "private.internal", "192.168.10.20", modernDeviceId,
+             "AA:BB:CC:DD:EE:FF", "/Users/Private",
+         })
+    Equal(false, credentialLog.Contains(secret, StringComparison.OrdinalIgnoreCase),
+        $"log sanitization removes sensitive value {secret}");
+Equal(true, credentialLog.Contains("<redacted>", StringComparison.Ordinal),
+    "credential fields retain a redaction marker");
+Equal(false, credentialLog.Contains('\n'),
+    "credential header redaction remains single-line");
+var structuredLog = AppLog.Event("capture_state",
+    ("device", sensitiveDeviceId), ("handle", 17UL), ("state", "Streaming"));
+Equal(false, structuredLog.Contains(sensitiveDeviceId, StringComparison.OrdinalIgnoreCase),
+    "structured event values are sanitized before persistence");
+Equal(true, structuredLog.Contains("handle=17", StringComparison.Ordinal),
+    "structured event preserves non-sensitive numeric context");
+var injectedEvent = AppLog.Event("capture state=forged\nnext",
+    ("bad key=injected", "value\nforged=true"),
+    ("oversized", new string('x', 5000)));
+Equal(false, injectedEvent.Contains('\n'),
+    "structured event flattens newline injection");
+Equal(false, injectedEvent.Contains("bad key", StringComparison.Ordinal),
+    "structured event normalizes field keys");
+Equal(true, injectedEvent.Length < 600,
+    "structured event bounds an individual field");
+var manyFields = Enumerable.Range(0, 10)
+    .Select(index => (object?)($"field_{index}", new string('y', 384)))
+    .ToArray();
+var boundedEvent = AppLog.Event("bounded_event", manyFields);
+Equal(true, boundedEvent.Length <= 2048,
+    "structured event bounds total line length");
+Equal(true, boundedEvent.EndsWith("truncated=true", StringComparison.Ordinal),
+    "structured event marks total-line truncation");
+Equal(2048, AppLog.Message(new string('z', 5000)).Length,
+    "direct application log message is bounded");
+Equal(true, NativeLogTailReader.IsUiEventLine(
+        "12:00:00.000 [seq=42] [info] [app] ui_event action refreshed"),
+    "structured native UI event is recognized for duplicate suppression");
+Equal(true, NativeLogTailReader.IsUiEventLine("ui_event action refreshed"),
+    "unprefixed native UI event remains recognized");
+Equal(false, NativeLogTailReader.IsUiEventLine(
+        "12:00:00.000 [seq=43] [info] [capture] frame ready"),
+    "non-UI native event remains visible");
 try
 {
     var reader = new NativeLogTailReader(logPath);
@@ -208,6 +363,22 @@ Equal(UsbProjectionMode.AirPlay, deviceA.UsbProjectionMode,
     "device A keeps its independent USB projection mode");
 Equal(UsbProjectionMode.Aisi, deviceB.UsbProjectionMode,
     "device B keeps its independent USB projection mode");
+Equal(DecoderPreference.Auto, deviceA.DecoderPreference,
+    "decoder selection defaults to capability-based automatic fallback");
+Equal(ColorOutputPreference.Auto, deviceA.ColorOutputPreference,
+    "color output defaults to automatic HDR display detection");
+deviceA.DecoderPreference = DecoderPreference.HardwarePreferred;
+deviceA.ColorOutputPreference = ColorOutputPreference.PreferHdrWhenSupported;
+deviceB.DecoderPreference = DecoderPreference.SoftwareCompatible;
+deviceB.ColorOutputPreference = ColorOutputPreference.ForceSdrToneMap;
+Equal(DecoderPreference.HardwarePreferred, deviceA.DecoderPreference,
+    "device A keeps its independent decoder policy");
+Equal(DecoderPreference.SoftwareCompatible, deviceB.DecoderPreference,
+    "device B keeps its independent decoder policy");
+Equal(ColorOutputPreference.PreferHdrWhenSupported, deviceA.ColorOutputPreference,
+    "device A keeps its independent HDR output policy");
+Equal(ColorOutputPreference.ForceSdrToneMap, deviceB.ColorOutputPreference,
+    "device B keeps its independent SDR tone-map policy");
 deviceB.FrameRate = 24;
 Equal((ulong)11, deviceA.Handle, "switching device does not release first session");
 Equal(60, deviceA.FrameRate, "device A settings remain independent");

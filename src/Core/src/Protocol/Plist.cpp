@@ -17,6 +17,13 @@ struct Tag {
 };
 
 void append_utf8(std::string& out, std::uint32_t codepoint) {
+    const bool valid_xml_character = codepoint == 0x09 || codepoint == 0x0a ||
+        codepoint == 0x0d || (codepoint >= 0x20 && codepoint <= 0xd7ff) ||
+        (codepoint >= 0xe000 && codepoint <= 0xfffd) ||
+        (codepoint >= 0x10000 && codepoint <= 0x10ffff);
+    if (!valid_xml_character) {
+        throw ParseError("invalid Unicode code point in XML entity");
+    }
     if (codepoint <= 0x7f) {
         out.push_back(static_cast<char>(codepoint));
     } else if (codepoint <= 0x7ff) {
@@ -26,7 +33,7 @@ void append_utf8(std::string& out, std::uint32_t codepoint) {
         out.push_back(static_cast<char>(0xe0 | (codepoint >> 12)));
         out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f)));
         out.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
-    } else if (codepoint <= 0x10ffff) {
+    } else {
         out.push_back(static_cast<char>(0xf0 | (codepoint >> 18)));
         out.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f)));
         out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f)));
@@ -222,6 +229,7 @@ private:
         if (tag.name == "data") return Value::Data(parse_text(tag));
         if (tag.name == "integer") {
             const std::string text = parse_text(tag);
+            if (text.empty()) throw ParseError("empty plist integer");
             errno = 0;
             char* end{};
             const auto value = std::strtoll(text.c_str(), &end, 0);
@@ -230,6 +238,7 @@ private:
         }
         if (tag.name == "real") {
             const std::string text = parse_text(tag);
+            if (text.empty()) throw ParseError("empty plist real");
             char* end{};
             const double value = std::strtod(text.c_str(), &end);
             if (end != text.c_str() + text.size() || !std::isfinite(value)) {

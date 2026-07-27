@@ -16,6 +16,7 @@ struct CMTime {
 
     [[nodiscard]] double seconds() const noexcept;
     [[nodiscard]] bool valid() const noexcept;
+    [[nodiscard]] std::optional<std::int64_t> to_100ns() const noexcept;
 };
 
 struct AudioStreamBasicDescription {
@@ -51,6 +52,60 @@ struct SampleTimingInfo {
     CMTime decode_timestamp;
 };
 
+enum class VideoCodec : std::uint8_t {
+    Unknown,
+    H264,
+    Hevc,
+};
+
+enum class ColorPrimaries : std::uint8_t {
+    Unspecified,
+    Bt709,
+    Bt2020,
+    DisplayP3,
+};
+
+enum class TransferFunction : std::uint8_t {
+    Unspecified,
+    Bt709,
+    Srgb,
+    Pq,
+    Hlg,
+};
+
+enum class MatrixCoefficients : std::uint8_t {
+    Unspecified,
+    Bt601,
+    Bt709,
+    Bt2020,
+};
+
+enum class ColorRange : std::uint8_t {
+    Unspecified,
+    Limited,
+    Full,
+};
+
+struct HdrStaticMetadata {
+    std::uint32_t max_content_light_level{};
+    std::uint32_t max_frame_average_light_level{};
+    std::uint32_t max_mastering_luminance{};
+    // 0.0001-nit units, matching CTA-861.3 and DXGI HDR10 metadata.
+    std::uint32_t min_mastering_luminance{};
+};
+
+struct VideoColorDescription {
+    ColorPrimaries primaries{ColorPrimaries::Unspecified};
+    TransferFunction transfer{TransferFunction::Unspecified};
+    MatrixCoefficients matrix{MatrixCoefficients::Unspecified};
+    ColorRange range{ColorRange::Unspecified};
+    HdrStaticMetadata hdr;
+
+    [[nodiscard]] bool is_hdr() const noexcept {
+        return transfer == TransferFunction::Pq || transfer == TransferFunction::Hlg;
+    }
+};
+
 struct FormatDescription {
     std::uint32_t media_type{};
     std::uint32_t width{};
@@ -59,12 +114,18 @@ struct FormatDescription {
     std::optional<AudioStreamBasicDescription> audio;
     std::vector<std::uint8_t> extensions;
     std::vector<std::uint8_t> decoder_configuration_record;
+    std::vector<std::vector<std::uint8_t>> video_parameter_sets;
     std::vector<std::vector<std::uint8_t>> sequence_parameter_sets;
     std::vector<std::vector<std::uint8_t>> picture_parameter_sets;
     std::uint8_t nalu_length_size{4};
+    std::uint8_t chroma_format{1};
+    std::uint8_t bit_depth_luma{8};
+    std::uint8_t bit_depth_chroma{8};
+    VideoColorDescription color;
 
     [[nodiscard]] bool is_video() const noexcept;
     [[nodiscard]] bool is_audio() const noexcept;
+    [[nodiscard]] VideoCodec video_codec() const noexcept;
 };
 
 struct SampleBuffer {
