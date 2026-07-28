@@ -1010,7 +1010,44 @@ bool is_code_integrity_error(DWORD error) noexcept {
             error <= ERROR_SYSTEM_INTEGRITY_WHQL_NOT_SATISFIED);
 }
 
+DWORD probe_image(const std::filesystem::path& path) noexcept {
+    const auto file = CreateFileW(path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return GetLastError();
+    const auto image = CreateFileMappingW(file, nullptr,
+        PAGE_READONLY | SEC_IMAGE, 0, 0, nullptr);
+    const auto error = image ? ERROR_SUCCESS : GetLastError();
+    if (image) CloseHandle(image);
+    CloseHandle(file);
+    return error;
+}
+
+DWORD probe_runtime_images(const std::filesystem::path& library_path) noexcept {
+    try {
+        const auto directory = library_path.parent_path();
+        const std::array paths{
+            library_path,
+            directory / L"avcodec-58.dll",
+            directory / L"avutil-56.dll",
+            directory / L"dnssd.dll",
+            directory / L"swresample-3.dll",
+            directory / L"swscale-5.dll",
+        };
+        for (const auto& path : paths) {
+            const auto error = probe_image(path);
+            if (error != ERROR_SUCCESS) return error;
+        }
+        return ERROR_SUCCESS;
+    } catch (...) {
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+}
+
 int preflight_airplay_runtime(const std::filesystem::path& path) noexcept {
+    const auto image_error = probe_runtime_images(path);
+    if (image_error != ERROR_SUCCESS)
+        return is_code_integrity_error(image_error) ? 40 : 41;
     const auto loaded = load_airplay_library(path);
     if (!loaded.library) {
         close_airplay_library(loaded);
@@ -1072,6 +1109,7 @@ bool receive_playback_updates(HANDLE pipe, AirPlayCallback& callback,
 int wmain(int argc, wchar_t** argv) {
     // LoadLibrary failures must be reported through IPC/preflight instead of a
     // system "Bad Image" dialog that incorrectly describes policy blocks as corruption.
+    SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS);
     SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
     const auto pipe_name = argument_value(argc, argv, L"--pipe");
     const auto stop_event_name = argument_value(argc, argv, L"--stop-event");

@@ -76,4 +76,18 @@ if(IPHONEMIRROR_BUILD_TESTS)
         $<TARGET_FILE:iPhoneMirror.WirelessHost>
         --check-runtime --library $<TARGET_FILE:iPhoneMirror.WirelessHost.Stub>)
     set_tests_properties(WirelessHostRuntimePreflight PROPERTIES TIMEOUT 10)
+
+    add_executable(iPhoneMirror.WirelessHost.PreflightSmoke
+        tests/WirelessHostPreflightSmoke.cpp)
+    target_compile_definitions(iPhoneMirror.WirelessHost.PreflightSmoke PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.WirelessHost.PreflightSmoke PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    add_dependencies(iPhoneMirror.WirelessHost.PreflightSmoke
+        iPhoneMirror.WirelessHost iPhoneMirror.WirelessHost.Stub)
+    add_test(NAME WirelessHostInvalidImagePreflight COMMAND
+        iPhoneMirror.WirelessHost.PreflightSmoke
+        $<TARGET_FILE:iPhoneMirror.WirelessHost>
+        $<TARGET_FILE:iPhoneMirror.WirelessHost.Stub>)
+    set_tests_properties(WirelessHostInvalidImagePreflight PROPERTIES TIMEOUT 10)
 endif()

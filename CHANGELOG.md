@@ -5,6 +5,19 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-07-29
+
+### Fixed
+
+- Suppress critical-error dialogs in the main process before any wireless child
+  process starts so the setting is inherited during process initialization.
+- Validate every bundled AirPlay/FFmpeg image with a non-executing `SEC_IMAGE`
+  mapping before resolving DLL dependencies. Windows code-integrity failures now
+  return through the in-app diagnostic path without displaying the misleading
+  `avutil-56.dll` Bad Image dialog.
+- Add an invalid-image preflight test that verifies malformed runtime images fail
+  silently with the expected diagnostic exit code.
+
 ## [1.4.0] - 2026-07-28
 
 ### Added
@@ -496,7 +509,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.2.1...v1.2.2
