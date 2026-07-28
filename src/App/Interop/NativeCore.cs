@@ -7,6 +7,7 @@ internal enum NativeResult : int
 {
     Ok = 0,
     BufferTooSmall = -3,
+    CaptureBackendUnavailable = -7,
 }
 
 internal enum ConnectionState : int
@@ -50,6 +51,7 @@ internal enum DecoderRuntimeMode : uint
     Unknown,
     Hardware,
     Software,
+    External,
 }
 
 internal enum MediaCastCommand : uint
@@ -147,6 +149,17 @@ internal struct NativeVideoFrameInfo
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NativeAudioPacketInfo
+{
+    public uint StructSize;
+    public uint ApiVersion;
+    public ulong Sequence;
+    public uint SampleRate;
+    public ushort Channels;
+    public ushort BitsPerSample;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NativeCaptureOptions
 {
     public uint StructSize;
@@ -173,6 +186,8 @@ internal struct NativeMediaCastRequest
 }
 
 public sealed record VideoFrame(uint Width, uint Height, uint Stride, long Timestamp100Ns, byte[] Pixels);
+internal sealed record AudioPacket(ulong Sequence, uint SampleRate,
+    ushort Channels, ushort BitsPerSample, byte[] Pcm);
 internal sealed record MediaCastRequest(ulong CommandId, MediaCastCommand Command,
     string Url, double StartPosition, double Volume);
 
@@ -181,6 +196,8 @@ internal sealed class NativeCore : IDisposable
     private const string Library = "iPhoneMirror.Core";
     private bool _initialized;
     private byte[]? _frameBuffer;
+    private byte[]? _outputFrameBuffer;
+    private byte[]? _outputAudioBuffer;
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_initialize();
@@ -316,6 +333,10 @@ internal sealed class NativeCore : IDisposable
     private static extern int im_session_copy_latest_video_frame(ulong handle,
         ref NativeVideoFrameInfo info, [Out] byte[]? buffer, ref uint bufferSize,
         uint maxWidth, uint maxHeight);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_copy_next_audio_packet(ulong handle,
+        ulong afterSequence, ref NativeAudioPacketInfo info, [Out] byte[]? buffer,
+        ref uint bufferSize);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_force_preview_refresh(ulong handle);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -627,7 +648,7 @@ internal sealed class NativeCore : IDisposable
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 15,
+            ApiVersion = 16,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,
@@ -653,7 +674,7 @@ internal sealed class NativeCore : IDisposable
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 15,
+            ApiVersion = 16,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,
@@ -703,13 +724,11 @@ internal sealed class NativeCore : IDisposable
         if (handle == 0) return false;
         try
         {
-            lock (PreviewSelectionGate)
-            {
-                if (unchecked((ulong)_selectedPreviewSession) != handle ||
-                    _selectedPreviewWindow == 0) return false;
-                return im_session_get_video_output_status(handle,
-                    _selectedPreviewWindow, ref status) == 0;
-            }
+            // Decoder state belongs to the capture session, not to whichever
+            // HWND currently owns its preview. Passing no HWND deliberately
+            // avoids treating a detached, hidden, or transitioning preview as
+            // an unavailable decoder and leaving the UI at "detecting".
+            return im_session_get_video_output_status(handle, 0, ref status) == 0;
         }
         catch (Exception error) when (error is EntryPointNotFoundException or
                                       DllNotFoundException)
@@ -863,6 +882,52 @@ internal sealed class NativeCore : IDisposable
         }
         if (result != 0 || _frameBuffer is null) return null;
         return new VideoFrame(info.Width, info.Height, info.Stride, info.Timestamp100Ns, _frameBuffer);
+    }
+
+    internal VideoFrame? GetDeviceOutputFrame(ulong handle, uint width, uint height)
+    {
+        if (handle == 0) return null;
+        var info = new NativeVideoFrameInfo
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>(),
+        };
+        uint size = (uint)(_outputFrameBuffer?.Length ?? 0);
+        var result = im_session_copy_latest_video_frame(handle, ref info,
+            _outputFrameBuffer, ref size, width, height);
+        if (result == (int)NativeResult.BufferTooSmall)
+        {
+            _outputFrameBuffer = new byte[size];
+            info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
+            result = im_session_copy_latest_video_frame(handle, ref info,
+                _outputFrameBuffer, ref size, width, height);
+        }
+        if (result != 0 || _outputFrameBuffer is null) return null;
+        return new VideoFrame(info.Width, info.Height, info.Stride,
+            info.Timestamp100Ns, _outputFrameBuffer);
+    }
+
+    internal AudioPacket? GetDeviceOutputAudioPacket(ulong handle,
+        ulong afterSequence)
+    {
+        if (handle == 0) return null;
+        var info = new NativeAudioPacketInfo
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeAudioPacketInfo>(),
+        };
+        uint size = (uint)(_outputAudioBuffer?.Length ?? 0);
+        var result = im_session_copy_next_audio_packet(handle, afterSequence,
+            ref info, _outputAudioBuffer, ref size);
+        if (result == (int)NativeResult.BufferTooSmall)
+        {
+            _outputAudioBuffer = new byte[size];
+            info.StructSize = (uint)Marshal.SizeOf<NativeAudioPacketInfo>();
+            result = im_session_copy_next_audio_packet(handle, afterSequence,
+                ref info, _outputAudioBuffer, ref size);
+        }
+        if (result == (int)NativeResult.CaptureBackendUnavailable) return null;
+        if (result != 0 || _outputAudioBuffer is null || size == 0) return null;
+        return new AudioPacket(info.Sequence, info.SampleRate, info.Channels,
+            info.BitsPerSample, _outputAudioBuffer.AsSpan(0, checked((int)size)).ToArray());
     }
 
     private static string GetLastError(string fallback)

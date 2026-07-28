@@ -995,7 +995,8 @@ std::int32_t IM_CALL im_copy_latest_video_frame(iPhoneMirror::VideoFrameInfo* in
     const auto capacity = *buffer_size;
     *buffer_size = required;
     if (!buffer || capacity < required) return static_cast<std::int32_t>(iPhoneMirror::Result::BufferTooSmall);
-    if (!nv12_to_bgra(*frame, buffer)) return fail(iPhoneMirror::Result::ProtocolError, L"NV12/P010 视频帧布局无效");
+    if (!nv12_to_bgra(*frame, buffer))
+        return fail(iPhoneMirror::Result::ProtocolError, L"NV12/P010 视频帧布局无效");
     last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
@@ -1447,7 +1448,7 @@ std::int32_t IM_CALL im_session_get_video_output_status(
     if (!status || status->struct_size != sizeof(iPhoneMirror::VideoOutputStatus))
         return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid VideoOutputStatus");
     const auto window = static_cast<HWND>(hwnd);
-    if (!window || !IsWindow(window))
+    if (window && !IsWindow(window))
         return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid preview HWND");
     auto context = find_multi_session(handle);
     if (!context)
@@ -1461,8 +1462,8 @@ std::int32_t IM_CALL im_session_get_video_output_status(
         decoder_status = context->capture->decoder_switch_status();
     }
 
-    iPhoneMirror::renderer::OutputDiagnostics diagnostics;
-    {
+    iPhoneMirror::renderer::OutputDiagnostics diagnostics{};
+    if (window) {
         std::scoped_lock lock(context->renderers_mutex);
         const auto found = context->renderers.find(window);
         if (found == context->renderers.end() || !found->second)
@@ -1768,6 +1769,49 @@ std::int32_t IM_CALL im_session_copy_latest_video_frame(iPhoneMirror::SessionHan
         : nv12_to_bgra_scaled(*frame, buffer, width, height);
     return converted ? static_cast<std::int32_t>(iPhoneMirror::Result::Ok)
         : fail(iPhoneMirror::Result::ProtocolError, L"Invalid decoded NV12 frame");
+}
+
+std::int32_t IM_CALL im_session_copy_next_audio_packet(
+    iPhoneMirror::SessionHandle handle, std::uint64_t after_sequence,
+    iPhoneMirror::AudioPacketInfo* info, std::uint8_t* buffer,
+    std::uint32_t* buffer_size) {
+    if (!info || info->struct_size != sizeof(iPhoneMirror::AudioPacketInfo) ||
+        !buffer_size)
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"Invalid audio packet request");
+    auto context = find_multi_session(handle);
+    if (!context)
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"Unknown session handle");
+    std::shared_ptr<const iPhoneMirror::capture::AudioPacket> packet;
+    {
+        std::shared_lock lock(context->lifecycle_mutex);
+        if (!context->capture || context->stopped)
+            return fail(iPhoneMirror::Result::InvalidArgument,
+                L"Session is stopped");
+        packet = context->capture->next_audio_packet(after_sequence);
+    }
+    if (!packet)
+        return static_cast<std::int32_t>(
+            iPhoneMirror::Result::CaptureBackendUnavailable);
+    if (packet->pcm.size() > std::numeric_limits<std::uint32_t>::max())
+        return fail(iPhoneMirror::Result::InternalError,
+            L"Audio packet is too large");
+    const auto required = static_cast<std::uint32_t>(packet->pcm.size());
+    info->api_version = iPhoneMirror::ApiVersion;
+    info->sequence = packet->sequence;
+    info->sample_rate = packet->sample_rate;
+    info->channels = packet->channels;
+    info->bits_per_sample = packet->bits_per_sample;
+    const auto capacity = *buffer_size;
+    *buffer_size = required;
+    if (!buffer || capacity < required)
+        return static_cast<std::int32_t>(
+            iPhoneMirror::Result::BufferTooSmall);
+    if (required != 0)
+        std::memcpy(buffer, packet->pcm.data(), required);
+    last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
 std::int32_t IM_CALL im_session_force_preview_refresh(iPhoneMirror::SessionHandle handle) {

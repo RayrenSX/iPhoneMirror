@@ -21,6 +21,9 @@
         <SolidColorBrush x:Key="OnAccentBrush" Color="#0D0D0D"/>
         <SolidColorBrush x:Key="SuccessBrush" Color="#D2D2D2"/>
         <SolidColorBrush x:Key="WarningBrush" Color="#BDBDBD"/>
+        <SolidColorBrush x:Key="StatusAppliedBrush" Color="#7BC995"/>
+        <SolidColorBrush x:Key="StatusPendingBrush" Color="#D6B35A"/>
+        <SolidColorBrush x:Key="StatusFailedBrush" Color="#E06C75"/>
 
         <SolidColorBrush x:Key="ComboBackgroundBrush" Color="#111111"/>
         <SolidColorBrush x:Key="ComboHoverBrush" Color="#1B1B1B"/>

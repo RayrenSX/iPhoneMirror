@@ -21,7 +21,8 @@ public partial class ImageSettingsWindow : Window
     };
     private bool _ready;
     private bool _saved;
-    private bool _closingForShutdown;
+    private bool _skipRevertOnClose;
+    private bool _dirty;
 
     internal ImageAdjustmentValues Values => new(
         BrightnessSlider.Value, ContrastSlider.Value,
@@ -57,6 +58,7 @@ public partial class ImageSettingsWindow : Window
         RoutedPropertyChangedEventArgs<double> e)
     {
         if (!_ready) return;
+        _dirty = true;
         _previewTimer.Stop();
         _previewTimer.Start();
     }
@@ -72,6 +74,7 @@ public partial class ImageSettingsWindow : Window
         _previewTimer.Stop();
         if (!Apply(_save, Values)) return;
         _saved = true;
+        _dirty = false;
         Close();
     }
 
@@ -87,8 +90,12 @@ public partial class ImageSettingsWindow : Window
     private void OnWindowClosing(object? sender, CancelEventArgs e)
     {
         _previewTimer.Stop();
-        if (_saved || _closingForShutdown) return;
-        _ = Apply(_revert, _originalValues);
+        if (_saved || _skipRevertOnClose) return;
+        if (Apply(_revert, _originalValues)) return;
+
+        // Keep the window available so the user can retry or save instead of
+        // silently leaving an unsaved native preview active.
+        e.Cancel = true;
     }
 
     private bool Apply(
@@ -102,7 +109,26 @@ public partial class ImageSettingsWindow : Window
 
     internal void CloseForShutdown()
     {
-        _closingForShutdown = true;
+        _skipRevertOnClose = true;
         Close();
+    }
+
+    internal void CloseForSessionInvalidation()
+    {
+        _skipRevertOnClose = true;
+        Close();
+    }
+
+    internal void SetEditingEnabled(bool enabled)
+    {
+        AdjustmentPanel.IsEnabled = enabled;
+        ResetButton.IsEnabled = enabled;
+        SaveButton.IsEnabled = enabled;
+        if (!enabled)
+        {
+            _previewTimer.Stop();
+            return;
+        }
+        if (_dirty) _ = Apply(_preview, Values);
     }
 }

@@ -22,6 +22,8 @@ public:
     [[nodiscard]] std::int64_t latest_frame_timestamp() const override;
     [[nodiscard]] std::shared_ptr<const media::DecodedFrame> latest_frame() const override;
     [[nodiscard]] std::shared_ptr<const media::DecodedFrame> next_render_frame() override;
+    [[nodiscard]] std::shared_ptr<const AudioPacket> next_audio_packet(
+        std::uint64_t after_sequence) const override;
     void set_audio_enabled(bool enabled) noexcept override;
     void set_audio_volume(float volume) noexcept override;
     void set_target_fps(std::uint32_t target_fps) noexcept override;

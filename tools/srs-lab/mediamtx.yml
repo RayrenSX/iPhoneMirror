@@ -1,0 +1,25 @@
+logLevel: info
+logDestinations: [stdout]
+
+api: true
+apiAddress: 127.0.0.1:9997
+
+rtsp: false
+hls: false
+playback: false
+moq: false
+
+rtmp: true
+rtmpAddress: 127.0.0.1:1935
+
+webrtc: true
+webrtcAddress: 127.0.0.1:1985
+webrtcLocalUDPAddress: 127.0.0.1:8000
+webrtcLocalTCPAddress: ''
+webrtcAdditionalHosts: [127.0.0.1]
+
+srt: true
+srtAddress: 127.0.0.1:10080
+
+paths:
+  all_others:

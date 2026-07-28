@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace iPhoneMirror::capture {
 
@@ -38,6 +39,14 @@ struct Snapshot {
     std::wstring message{L"Idle"};
 };
 
+struct AudioPacket {
+    std::uint64_t sequence{};
+    std::uint32_t sample_rate{};
+    std::uint16_t channels{};
+    std::uint16_t bits_per_sample{};
+    std::vector<std::uint8_t> pcm;
+};
+
 struct CapturePreferences {
     std::uint32_t render_max_width{};
     std::uint32_t render_max_height{};
@@ -66,6 +75,7 @@ enum class DecoderRuntimeMode : std::uint32_t {
     Unknown = 0,
     Hardware = 1,
     Software = 2,
+    External = 3,
 };
 
 struct DecoderSwitchStatus {
@@ -85,6 +95,8 @@ public:
     [[nodiscard]] virtual std::int64_t latest_frame_timestamp() const = 0;
     [[nodiscard]] virtual std::shared_ptr<const media::DecodedFrame> latest_frame() const = 0;
     [[nodiscard]] virtual std::shared_ptr<const media::DecodedFrame> next_render_frame() = 0;
+    [[nodiscard]] virtual std::shared_ptr<const AudioPacket> next_audio_packet(
+        std::uint64_t after_sequence) const = 0;
     virtual void set_audio_enabled(bool enabled) noexcept = 0;
     virtual void set_audio_volume(float volume) noexcept = 0;
     virtual void set_target_fps(std::uint32_t target_fps) noexcept = 0;

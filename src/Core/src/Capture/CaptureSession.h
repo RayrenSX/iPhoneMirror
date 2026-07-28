@@ -111,6 +111,8 @@ public:
     [[nodiscard]] std::int64_t latest_frame_timestamp() const override;
     [[nodiscard]] std::shared_ptr<const media::DecodedFrame> latest_frame() const override;
     [[nodiscard]] std::shared_ptr<const media::DecodedFrame> next_render_frame() override;
+    [[nodiscard]] std::shared_ptr<const AudioPacket> next_audio_packet(
+        std::uint64_t after_sequence) const override;
     void set_audio_enabled(bool enabled) noexcept override;
     void set_audio_volume(float volume) noexcept override;
     void set_target_fps(std::uint32_t target_fps) noexcept override;
@@ -141,8 +143,10 @@ private:
     detail::DecoderSwitchCoordinator decoder_switch_;
     std::atomic_int requested_display_orientation_{};
     std::atomic_uint64_t native_probe_size_{};
-    std::mutex audio_mutex_;
+    mutable std::mutex audio_mutex_;
     std::unique_ptr<audio::WasapiRenderer> audio_renderer_;
+    std::deque<std::shared_ptr<const AudioPacket>> audio_output_queue_;
+    std::uint64_t audio_output_sequence_{};
 
     void run(std::stop_token stop_token) noexcept;
     void set_state(State state, std::wstring message);

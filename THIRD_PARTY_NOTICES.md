@@ -65,4 +65,24 @@ pipe. The application and native capture core do not link to the receiver DLL.
 - Exact hashes, source links and license files:
   `third_party/airplay-server/SOURCE.md`
 
+## FFmpeg 8.1.2 media-output runtime
+
+The application-side recording and live-video output uses an FFmpeg essentials
+build staged at `tools/ffmpeg/` in the release package. It is prepared by
+`scripts/prepare_ffmpeg.ps1`, which verifies the published archive SHA-256
+before copying `ffmpeg.exe`, the license, build README and source record into
+the application output. This runtime is independent of the older FFmpeg DLLs
+distributed with AirPlayServer.
+
+- Binary package: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip
+- Upstream FFmpeg source: https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
+- License for the distributed essentials build: GNU General Public License v3
+- Included license and build/source metadata: `tools/ffmpeg/LICENSE.txt`,
+  `tools/ffmpeg/README.txt` and `tools/ffmpeg/SOURCE.txt`
+- Pinned archive and extracted-file hashes:
+  `scripts/ffmpeg-runtime-manifest.psd1`
+- The build enables GPL components such as libx264 and is therefore distributed
+  under GPLv3 terms. It encodes projection video and, when available, muxes the
+  captured iPhone PCM audio into recordings and live-streaming output.
+
 All third-party components are provided without warranty.

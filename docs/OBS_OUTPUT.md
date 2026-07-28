@@ -44,21 +44,23 @@ var path = ScreenshotService.CreateDefaultPath();
 ScreenshotService.CapturePng(_core.GetLatestVideoFrame, path);
 ```
 
-## 录屏阶段
+## 内建录制、推流与虚拟摄像头
 
-当前立即可用的无损集成方式是由 OBS 对独立预览窗口执行“开始录制”。应用内建录屏
-不应再捕获桌面窗口；正确路线是在 C++ 核心中把解码后的 NV12 帧和 48 kHz PCM
-同时送入 Media Foundation Sink Writer，使用硬件 H.264/HEVC 编码并生成 MP4。
-这样可以保持原始时间戳、避免 GPU→屏幕→捕获的二次拷贝，并能正确进行音画同步。
+“录制与推流”窗口可把当前会话的投屏帧送入随应用发布的 FFmpeg 8 运行时，输出
+MP4、RTMP、SRT 或 WebRTC/WHIP。输出尺寸固定，横竖屏切换时以黑边保持比例，停止时
+会等待 FFmpeg 完成文件或网络输出收尾。虚拟摄像头使用 Windows 11 Media Foundation
+软件摄像头 API；首次安装媒体源需要管理员权限，之后由普通用户会话启动。
 
-后续内建录屏需包含：
+录制、推流和虚拟摄像头的默认尺寸统一取当前预览的实际输出分辨率。输出设置窗口保持
+打开时，预览方向或尺寸变化会更新仍处于默认值的控件，但不会覆盖用户手动选择的尺寸。
 
-- 有界视频/音频队列，停止时 drain/finalize；
-- NV12 原始时间戳直接写入视频流；
-- PCM 写入 AAC 编码流，并以首个共同时间戳归零；
-- 编码器过载时丢弃旧视频帧，但不丢音频；
-- 临时文件 + 成功 finalize 后原子重命名，避免崩溃留下伪完整 MP4。
+录制按钮会立即写入应用临时目录；点击“停止输出”并完成 MP4 索引后，应用才弹出保存
+位置和文件名。取消保存不会删除录制，下次打开窗口或重启应用后仍可继续保存。投屏 PCM
+可用时会编码为 AAC（WHIP 使用立体声 Opus）；音频暂不可用时仍会立即开始纯视频输出，
+不会因等待音频而阻止录制。虚拟摄像头只输出视频，OBS 中需要声音时可继续使用“应用程序
+音频捕获”选择 `iPhoneMirror.exe`。独立预览窗口仍保留为无需安装组件的稳定回退方式。
 
-虚拟摄像头只解决视频来源，通常不携带系统音频，因此不是本项目录屏/OBS 音频的
-第一选择。更低开销的专业 OBS 路线是后续增加 OBS source plugin，共享 D3D11 纹理
-并通过 OBS 音频 API 直接提交 PCM。
+本地协议与设备验证页位于 `tools/srs-lab`。运行
+`tools/srs-lab/Start-SrsLab.ps1` 后访问 `http://127.0.0.1:8090`，可检查 RTMP、SRT、
+WHIP/WHEP 和 `iPhoneMirror Virtual Camera`。启动脚本优先使用 Docker SRS；Docker 不可用
+时会自动下载并校验 MediaMTX Windows 后端。页面会显示当前后端对应的实际推流地址。

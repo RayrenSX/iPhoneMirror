@@ -45,6 +45,12 @@ internal sealed class DeviceCaptureState
     internal bool HasSession => Handle != 0;
     internal bool ErrorShown { get; set; }
 
+    // A settings window is tied to the native session that existed when it
+    // opened. The state object intentionally survives reconnects, so object
+    // identity alone cannot distinguish the old session from its replacement.
+    internal bool MatchesSessionHandle(ulong expectedHandle) =>
+        !IsStopping && Handle == expectedHandle;
+
     internal bool HasPendingVideoSettings => !HasAppliedVideoSettings ||
         RenderWidth != AppliedRenderWidth || RenderHeight != AppliedRenderHeight ||
         FrameRate != AppliedFrameRate ||

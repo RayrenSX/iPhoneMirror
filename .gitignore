@@ -40,12 +40,14 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+tools/srs-lab/.runtime/
 
 # Never publish local signing credentials
 *.pfx
 *.p12
 *.pem
 *.key
+*.crt
 *.snk
 .env
 .env.*

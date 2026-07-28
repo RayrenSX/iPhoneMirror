@@ -79,6 +79,8 @@ public:
     [[nodiscard]] std::int64_t latest_frame_timestamp() const;
     [[nodiscard]] std::shared_ptr<const media::DecodedFrame> latest_frame() const;
     [[nodiscard]] std::shared_ptr<const media::DecodedFrame> next_render_frame();
+    [[nodiscard]] std::shared_ptr<const AudioPacket> next_audio_packet(
+        std::uint64_t after_sequence) const;
     void set_audio_enabled(bool enabled) noexcept;
     void set_audio_volume(float volume) noexcept;
     void set_target_fps(std::uint32_t target_fps) noexcept;
@@ -102,8 +104,10 @@ private:
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
     std::atomic<float> audio_volume_{1.0F};
-    std::mutex audio_mutex_;
+    mutable std::mutex audio_mutex_;
     std::unique_ptr<audio::WasapiRenderer> audio_renderer_;
+    std::deque<std::shared_ptr<const AudioPacket>> audio_output_queue_;
+    std::uint64_t audio_output_sequence_{};
     std::uint32_t audio_sample_rate_{};
     std::uint16_t audio_channels_{};
     std::uint16_t audio_bits_{};

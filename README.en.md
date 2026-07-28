@@ -257,6 +257,9 @@ self-contained WPF application under `outputs/iPhoneMirror`, including:
 outputs/iPhoneMirror/iPhoneMirror.exe
 outputs/iPhoneMirror/iPhoneMirror.Driver.exe
 outputs/iPhoneMirror/iPhoneMirror.Core.dll
+outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.dll
+outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.Admin.exe
+outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
 outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 ```
 
@@ -280,7 +283,7 @@ the [upgrade roadmap](docs/ROADMAP.md); roadmap items are not implemented featur
 
 ## Current limitations
 
-- OBS uses Window Capture; there is no virtual camera yet.
+- Built-in recording and RTMP, SRT, and WebRTC/WHIP output include mirrored PCM audio when available and start immediately as video-only output otherwise; MP4, RTMP, and SRT encode AAC while WHIP encodes Opus.
 - The app is not commercially code-signed.
 - The external driver installation matrix needs broader testing.
 - Apple does not publish Screen Capture as a stable third-party API.

@@ -780,6 +780,22 @@ void test_decoder_switch_transaction() {
         "a request arriving during commit is published as the next generation");
 }
 
+void test_wireless_decoder_status() {
+    using iPhoneMirror::capture::DecoderRuntimeMode;
+    using iPhoneMirror::capture::DecoderSwitchPhase;
+    using iPhoneMirror::capture::WirelessCaptureSession;
+    using iPhoneMirror::media::DecoderPreference;
+
+    WirelessCaptureSession session(nullptr, L"test-wireless-device", {});
+    session.set_decoder_preference(DecoderPreference::HardwarePreferred);
+    const auto status = session.decoder_switch_status();
+    check(status.phase == DecoderSwitchPhase::Applied &&
+        status.requested == DecoderPreference::HardwarePreferred &&
+        status.applied == DecoderPreference::HardwarePreferred &&
+        status.runtime_mode == DecoderRuntimeMode::External,
+        "wireless session reports the external receiver decoder instead of detecting forever");
+}
+
 void test_capture_media_safety_helpers() {
     using iPhoneMirror::capture::detail::VideoQueueAction;
     using iPhoneMirror::capture::detail::VideoQueueBudget;
@@ -1045,7 +1061,7 @@ void test_wireless_i420_conversion() {
         header, std::span(i420).first(11), nv12, stride),
         "wireless conversion rejects truncated planes");
     check(sizeof(iPhoneMirror::wireless::MessageHeader) == 392 &&
-        iPhoneMirror::ApiVersion == 15 &&
+        iPhoneMirror::ApiVersion == 16 &&
         header.magic == iPhoneMirror::wireless::IpcMagic &&
         header.version == iPhoneMirror::wireless::IpcVersion &&
         iPhoneMirror::wireless::IpcVersion == 6,
@@ -1251,6 +1267,7 @@ int main() {
         test_libusb_runtime();
         test_media_foundation_decoder();
         test_decoder_switch_transaction();
+        test_wireless_decoder_status();
         test_capture_media_safety_helpers();
         test_capture_preflight_without_device();
         test_image_adjustment_api_validation();

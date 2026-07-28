@@ -24,5 +24,8 @@
     <Compile Include="..\App\Services\MediaCastEventGate.cs" Link="MediaCastEventGate.cs" />
     <Compile Include="..\App\Services\MediaRecoveryBackoff.cs" Link="MediaRecoveryBackoff.cs" />
     <Compile Include="..\App\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />
+    <Compile Include="..\App\Services\MediaOutputService.cs" Link="MediaOutputService.cs" />
+    <Compile Include="..\App\Services\PendingRecordingStore.cs" Link="PendingRecordingStore.cs" />
+    <Compile Include="MediaOutputTestInterop.cs" />
   </ItemGroup>
 </Project>

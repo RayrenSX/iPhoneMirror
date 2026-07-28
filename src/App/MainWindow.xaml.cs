@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,6 +14,7 @@ using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
+using Microsoft.Win32;
 
 namespace IPhoneMirror.App;
 
@@ -53,6 +55,12 @@ public partial class MainWindow : Window
     private CancellationTokenSource _mediaRecoveryCancellation = new();
     private Uri? _mediaSource;
     private NativePreviewWindow? _mediaCastPreviewWindow;
+    private ProjectionSettingsWindow? _projectionSettingsWindow;
+    private MediaOutputSettingsWindow? _mediaOutputSettingsWindow;
+    private string? _projectionSettingsUdid;
+    private ulong _projectionSettingsSessionHandle;
+    private string? _mediaOutputSettingsUdid;
+    private ulong _mediaOutputSettingsSessionHandle;
     private string? _lastPlaybackReportError;
 
     private static readonly TimeSpan DeviceDragHoldDuration = TimeSpan.FromMilliseconds(350);
@@ -65,9 +73,12 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.DeviceVideoSizeChanged += OnDeviceVideoSizeChanged;
+        _viewModel.DeviceSessionHandleChanged += OnDeviceSessionHandleChanged;
         _viewModel.MediaCastCommandReceived += OnMediaCastCommandReceived;
         _viewModel.MediaCastStopRequested += OnMediaCastStopRequested;
         _viewModel.MediaCastAudioSettingsChanged += OnMediaCastAudioSettingsChanged;
+        _viewModel.ProjectionSettingsRequested += OnProjectionSettingsRequested;
+        _viewModel.MediaOutputSettingsRequested += OnMediaOutputSettingsRequested;
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _refreshTimer.Tick += (_, _) => _ = _viewModel.RefreshAsync();
         _logTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -110,9 +121,12 @@ public partial class MainWindow : Window
         _shutdownStarted = true;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.DeviceVideoSizeChanged -= OnDeviceVideoSizeChanged;
+        _viewModel.DeviceSessionHandleChanged -= OnDeviceSessionHandleChanged;
         _viewModel.MediaCastCommandReceived -= OnMediaCastCommandReceived;
         _viewModel.MediaCastStopRequested -= OnMediaCastStopRequested;
         _viewModel.MediaCastAudioSettingsChanged -= OnMediaCastAudioSettingsChanged;
+        _viewModel.ProjectionSettingsRequested -= OnProjectionSettingsRequested;
+        _viewModel.MediaOutputSettingsRequested -= OnMediaOutputSettingsRequested;
         _refreshTimer.Stop();
         _logTimer.Stop();
         _mediaCastTimer.Stop();
@@ -130,6 +144,10 @@ public partial class MainWindow : Window
             }
             try
             {
+                _projectionSettingsWindow?.Close();
+                _projectionSettingsWindow = null;
+                _mediaOutputSettingsWindow?.Close();
+                _mediaOutputSettingsWindow = null;
                 _secondaryMirrors.Dispose();
             }
             catch (Exception error)
@@ -1149,7 +1167,10 @@ public partial class MainWindow : Window
         return _mediaOpened;
     }
 
-    private async void OnPreviewWindowClick(object sender, RoutedEventArgs e)
+    private async void OnPreviewWindowClick(object sender, RoutedEventArgs e) =>
+        await OpenPreviewWindowAsync();
+
+    private async Task OpenPreviewWindowAsync()
     {
         try
         {
@@ -1182,6 +1203,126 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnProjectionSettingsRequested(string udid)
+    {
+        var sessionHandle = _viewModel.GetDeviceSessionHandle(udid);
+        if (!DeviceViewModel.UdidEquals(_viewModel.SelectedDevice?.Udid, udid)) return;
+        if (_projectionSettingsWindow is not null)
+        {
+            if (DeviceViewModel.UdidEquals(_projectionSettingsUdid, udid) &&
+                _projectionSettingsSessionHandle == sessionHandle)
+            {
+                _projectionSettingsWindow.Activate();
+                _projectionSettingsWindow.Focus();
+                return;
+            }
+            _projectionSettingsWindow.Close();
+        }
+        var window = new ProjectionSettingsWindow(_viewModel,
+            () =>
+            {
+                RefreshPreview();
+                return Task.CompletedTask;
+            },
+            ToggleActiveFullScreenAsync,
+            OpenPreviewWindowAsync,
+            CaptureScreenshotAsync,
+            () => OnMediaOutputSettingsRequested(udid, sessionHandle))
+        {
+            Owner = this,
+        };
+        _projectionSettingsWindow = window;
+        _projectionSettingsUdid = udid;
+        _projectionSettingsSessionHandle = sessionHandle;
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_projectionSettingsWindow, window))
+            {
+                _projectionSettingsWindow = null;
+                _projectionSettingsUdid = null;
+                _projectionSettingsSessionHandle = 0;
+            }
+        };
+        _viewModel.AddDiagnosticLog(AppLog.Event("projection_settings_window_opened",
+            ("device", AppLog.Device(udid)),
+            ("handle", AppLog.Handle(sessionHandle))));
+        window.Show();
+    }
+
+    private void OnMediaOutputSettingsRequested() => OnMediaOutputSettingsRequested(
+        _viewModel.SelectedDevice?.Udid, _viewModel.CurrentSessionHandle);
+
+    private void OnMediaOutputSettingsRequested(string? udid, ulong sessionHandle)
+    {
+        if (string.IsNullOrWhiteSpace(udid) ||
+            !DeviceViewModel.UdidEquals(_viewModel.SelectedDevice?.Udid, udid) ||
+            _viewModel.CurrentSessionHandle != sessionHandle)
+            return;
+        if (_mediaOutputSettingsWindow is not null)
+        {
+            if (DeviceViewModel.UdidEquals(_mediaOutputSettingsUdid, udid) &&
+                _mediaOutputSettingsSessionHandle == sessionHandle)
+            {
+                _mediaOutputSettingsWindow.Activate();
+                _mediaOutputSettingsWindow.Focus();
+                return;
+            }
+            _mediaOutputSettingsWindow.Close();
+        }
+        var window = new MediaOutputSettingsWindow(_viewModel)
+        {
+            Owner = this,
+        };
+        _mediaOutputSettingsWindow = window;
+        _mediaOutputSettingsUdid = udid;
+        _mediaOutputSettingsSessionHandle = sessionHandle;
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_mediaOutputSettingsWindow, window))
+            {
+                _mediaOutputSettingsWindow = null;
+                _mediaOutputSettingsUdid = null;
+                _mediaOutputSettingsSessionHandle = 0;
+            }
+        };
+        _viewModel.AddDiagnosticLog(AppLog.Event("media_output_window_opened",
+            ("device", AppLog.Device(udid)),
+            ("handle", AppLog.Handle(sessionHandle))));
+        window.Show();
+    }
+
+    private void OnDeviceSessionHandleChanged(string udid, ulong sessionHandle)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() =>
+                OnDeviceSessionHandleChanged(udid, sessionHandle));
+            return;
+        }
+        if (_projectionSettingsWindow is not null &&
+            DeviceViewModel.UdidEquals(_projectionSettingsUdid, udid) &&
+            _projectionSettingsSessionHandle != sessionHandle)
+        {
+            _viewModel.AddDiagnosticLog(AppLog.Event(
+                "projection_settings_session_invalidated",
+                ("device", AppLog.Device(udid)),
+                ("old_handle", AppLog.Handle(_projectionSettingsSessionHandle)),
+                ("new_handle", AppLog.Handle(sessionHandle))));
+            _projectionSettingsWindow.Close();
+        }
+        if (_mediaOutputSettingsWindow is not null &&
+            DeviceViewModel.UdidEquals(_mediaOutputSettingsUdid, udid) &&
+            _mediaOutputSettingsSessionHandle != sessionHandle)
+        {
+            _viewModel.AddDiagnosticLog(AppLog.Event(
+                "media_output_settings_session_invalidated",
+                ("device", AppLog.Device(udid)),
+                ("old_handle", AppLog.Handle(_mediaOutputSettingsSessionHandle)),
+                ("new_handle", AppLog.Handle(sessionHandle))));
+            _mediaOutputSettingsWindow.Close();
+        }
+    }
+
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainViewModel.AdvancedSettingsVisibility) &&
@@ -1201,6 +1342,27 @@ public partial class MainWindow : Window
             nameof(MainViewModel.SelectedDevice) or nameof(MainViewModel.SelectedModel) or
             nameof(MainViewModel.CurrentSessionHandle))
         {
+            if (e.PropertyName == nameof(MainViewModel.SelectedDevice))
+            {
+                if (_projectionSettingsWindow is not null &&
+                    !DeviceViewModel.UdidEquals(_projectionSettingsUdid,
+                        _viewModel.SelectedDevice?.Udid))
+                    _projectionSettingsWindow.Close();
+                if (_mediaOutputSettingsWindow is not null &&
+                    !DeviceViewModel.UdidEquals(_mediaOutputSettingsUdid,
+                        _viewModel.SelectedDevice?.Udid))
+                    _mediaOutputSettingsWindow.Close();
+            }
+            else if (e.PropertyName == nameof(MainViewModel.CurrentSessionHandle))
+            {
+                var currentHandle = _viewModel.CurrentSessionHandle;
+                if (_projectionSettingsWindow is not null &&
+                    _projectionSettingsSessionHandle != currentHandle)
+                    _projectionSettingsWindow.Close();
+                if (_mediaOutputSettingsWindow is not null &&
+                    _mediaOutputSettingsSessionHandle != currentHandle)
+                    _mediaOutputSettingsWindow.Close();
+            }
             _secondaryMirrors.UpdateDevice(
                 _viewModel.SelectedDevice,
                 _viewModel.SourceVideoWidth,
@@ -1394,7 +1556,19 @@ public partial class MainWindow : Window
         }
         try
         {
-            var path = ScreenshotService.CreateDefaultPath();
+            var suggested = ScreenshotService.CreateDefaultPath();
+            var dialog = new SaveFileDialog
+            {
+                Title = LocalizationService.Get("ScreenshotSaveTitle"),
+                Filter = LocalizationService.Get("ScreenshotPngFilter"),
+                DefaultExt = ".png",
+                AddExtension = true,
+                OverwritePrompt = true,
+                InitialDirectory = Path.GetDirectoryName(suggested),
+                FileName = Path.GetFileName(suggested),
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            var path = dialog.FileName;
             var saved = _mediaCastActive && _viewModel.IsMediaCastSelected
                 ? ScreenshotService.CaptureVisualPng(MediaCastPlayerHost, path)
                 : await Task.Run(() => _viewModel.CaptureScreenshot(path));

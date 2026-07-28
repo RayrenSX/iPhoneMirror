@@ -82,6 +82,7 @@ const wchar_t* runtime_name(iPhoneMirror::DecoderRuntimeMode runtime) noexcept {
     case iPhoneMirror::DecoderRuntimeMode::Unknown: return L"unknown";
     case iPhoneMirror::DecoderRuntimeMode::Hardware: return L"hardware";
     case iPhoneMirror::DecoderRuntimeMode::Software: return L"software";
+    case iPhoneMirror::DecoderRuntimeMode::External: return L"external";
     }
     return L"invalid";
 }
@@ -171,7 +172,7 @@ bool wait_for_decoder_commit(Session& session, const Step& step,
         }
 
         if (status.decoder_switch_state > iPhoneMirror::DecoderSwitchState::Failed ||
-            status.decoder_runtime_mode > iPhoneMirror::DecoderRuntimeMode::Software) {
+            status.decoder_runtime_mode > iPhoneMirror::DecoderRuntimeMode::External) {
             std::wcerr << L"invalid decoder status enum for " << session.name << L'\n';
             return false;
         }

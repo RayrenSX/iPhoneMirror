@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Models;
@@ -74,6 +76,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     internal event Action? MediaCastStopRequested;
     internal event Action<bool, double>? MediaCastAudioSettingsChanged;
     internal event Action<string, ulong>? DeviceSessionHandleChanged;
+    internal event Action<string>? ProjectionSettingsRequested;
+    internal event Action? MediaOutputSettingsRequested;
     private readonly NativeCore _core;
     private readonly IPhoneFilterDriverService _filterDriver = new();
     private readonly DriverManagerLauncher _driverManager = new();
@@ -86,8 +90,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private readonly NativeLogTailReader _logReader = new();
     private readonly CaptureShutdownCoordinator _shutdownCoordinator = new();
     private readonly DeviceSessionManager _sessions;
+    private readonly MediaOutputService _mediaOutput;
+    private readonly VirtualCameraService _virtualCamera;
     private readonly Dictionary<string, ImageSettingsWindow> _imageSettingsWindows =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _settingsGate = new(1, 1);
+    private readonly SemaphoreSlim _mediaOutputGate = new(1, 1);
     private IReadOnlyList<NativeDeviceInfo> _lastUsbDevices = [];
     private bool _disposed;
     private DeviceViewModel? _selectedDevice;
@@ -96,6 +104,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private string _driverState = string.Empty;
     private bool _isCapturing;
     private bool _isBusy;
+    private bool _isSettingsDialogOpen;
+    private bool _isMediaOutputTransitioning;
     private string? _activeCaptureUdid;
     private int _manualRefreshPending;
     private string _resolution = "—";
@@ -111,6 +121,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private bool _advancedMode;
     private string _settingsStatus = string.Empty;
     private string _decoderStatus = string.Empty;
+    private string _decoderStatusTone = "Hidden";
+    private string _mediaOutputStatus = string.Empty;
+    private string _mediaOutputTone = "Hidden";
+    private string _mediaOutputCapabilitiesText = string.Empty;
+    private bool _mediaOutputCapabilitiesLoaded;
+    private MediaOutputCapabilities _mediaOutputCapabilities = new(
+        false, false, false, false, false, false, false,
+        string.Empty, string.Empty, string.Empty);
+    private VirtualCameraCapabilities _virtualCameraCapabilities = new(
+        false, false, false, false, false, string.Empty);
+    private string _virtualCameraStatusText = string.Empty;
+    private string? _mediaOutputUdid;
+    private string? _pendingRecordingPath;
     private string? _settingsStatusKey = "StatusDefaultSettings";
     private object?[] _settingsStatusArguments = [];
     private string _logText = string.Empty;
@@ -187,6 +210,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand RefreshCommand { get; }
     public RelayCommand ApplyVideoSettingsCommand { get; }
     public RelayCommand MoreImageSettingsCommand { get; }
+    public RelayCommand MediaOutputSettingsCommand { get; }
     public RelayCommand ClearLogCommand { get; }
     public RelayCommand AdvancedSettingsCommand { get; }
     public RelayCommand ApplyWirelessSettingsCommand { get; }
@@ -197,6 +221,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public bool IsMediaCastSelected => SelectedDevice?.IsMediaCast == true;
     public Visibility WiredVideoLimitSettingsVisibility => IsWirelessSelected || IsMediaCastSelected
         ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility VideoSettingsVisibility => SelectedDevice is not null &&
+        !IsMediaCastSelected ? Visibility.Visible : Visibility.Collapsed;
     public Visibility WirelessActualVideoSettingsVisibility => IsWirelessSelected && !IsMediaCastSelected
         ? Visibility.Visible : Visibility.Collapsed;
     public Visibility WirelessTopSettingsVisibility => IsWirelessSelected && !IsMediaCastSelected
@@ -257,6 +283,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _sessions.Get(SelectedDevice.Udid);
     public ulong CurrentSessionHandle => CurrentDeviceSession?.Handle ?? 0;
     public bool HasCaptureSession => CurrentDeviceSession?.HasSession == true;
+    public Visibility PreviewAndObsVisibility => HasCaptureSession
+        ? Visibility.Visible : Visibility.Collapsed;
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) { StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); } } }
     public bool IsBusy
     {
@@ -273,9 +301,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
             OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
             OnPropertyChanged(nameof(CanChangeVideoPipeline));
+            OnPropertyChanged(nameof(CanChangeDecoderPipeline));
             OnPropertyChanged(nameof(CanOpenImageSettings));
+            NotifyMediaOutputStateChanged();
+            foreach (var window in _imageSettingsWindows.Values.ToArray())
+                window.SetEditingEnabled(!value);
         }
     }
+    private bool IsSettingsInteractionBlocked => IsBusy || _isSettingsDialogOpen;
     public string DeviceCount => LocalizationService.Format("DeviceCountFormat", Devices.Count);
     public string SelectedName => SelectedDevice?.DisplayName ?? LocalizationService.Get("NoDeviceSelected");
     public string SelectedModel => SelectedDevice?.ModelDisplay ?? "—";
@@ -304,7 +337,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         get => _selectedResolutionPreset;
         set
         {
-            if (value is null) return;
+            if (value is null || IsSettingsInteractionBlocked) return;
             if (!Set(ref _selectedResolutionPreset, value)) return;
             if (CurrentDeviceSession is { } session)
             {
@@ -324,6 +357,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         get => _selectedFrameRate;
         set
         {
+            if (IsSettingsInteractionBlocked) return;
             if (!Set(ref _selectedFrameRate, value)) return;
             if (CurrentDeviceSession is { } session) session.FrameRate = value;
             if (SelectedDevice is { IsWireless: false, IsMediaCast: false })
@@ -409,7 +443,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         set
         {
             var device = SelectedDevice;
-            if (value is null || device is null || device.IsWireless || IsBusy) return;
+            if (value is null || device is null || device.IsWireless ||
+                IsSettingsInteractionBlocked) return;
             var state = GetOrCreateDeviceState(device);
             if (state.UsbProjectionMode == value.Mode) return;
             state.UsbProjectionMode = value.Mode;
@@ -430,7 +465,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public bool CanChangeUsbProjectionMode => SelectedDevice is not null &&
-        !IsWirelessSelected && !IsMediaCastSelected && !IsBusy;
+        !IsWirelessSelected && !IsMediaCastSelected && !IsSettingsInteractionBlocked;
 
     private DecoderPreference CurrentDecoderPreference =>
         CurrentDeviceSession?.DecoderPreference ?? DecoderPreference.Auto;
@@ -442,8 +477,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         set
         {
             var device = SelectedDevice;
-            if (value is null || device is null || device.IsWireless ||
-                device.IsMediaCast || IsBusy) return;
+            if (value is null || device is null || device.IsMediaCast ||
+                IsSettingsInteractionBlocked) return;
             var state = GetOrCreateDeviceState(device);
             if (state.DecoderPreference == value.Preference) return;
             state.DecoderPreference = value.Preference;
@@ -458,10 +493,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public bool CanChangeVideoPipeline => SelectedDevice is not null &&
-        !IsWirelessSelected && !IsMediaCastSelected && !IsBusy;
+        !IsWirelessSelected && !IsMediaCastSelected && !IsSettingsInteractionBlocked;
+
+    public bool CanChangeDecoderPipeline => SelectedDevice is not null &&
+        !IsMediaCastSelected && !IsSettingsInteractionBlocked;
 
     public bool CanOpenImageSettings => SelectedDevice is not null &&
-        !IsMediaCastSelected && !IsBusy;
+        !IsMediaCastSelected && !IsSettingsInteractionBlocked;
 
     private static (bool Success, string Message) InvokeDeviceSetting(Action action)
     {
@@ -474,6 +512,92 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         get => _decoderStatus;
         private set => Set(ref _decoderStatus, value);
     }
+    public string DecoderStatusTone
+    {
+        get => _decoderStatusTone;
+        private set
+        {
+            if (!Set(ref _decoderStatusTone, value)) return;
+            OnPropertyChanged(nameof(DecoderStatusVisibility));
+        }
+    }
+    public Visibility DecoderStatusVisibility =>
+        DecoderStatusTone == "Hidden" ? Visibility.Collapsed : Visibility.Visible;
+    public string MediaOutputStatus
+    {
+        get => _mediaOutputStatus;
+        private set => Set(ref _mediaOutputStatus, value);
+    }
+    public string MediaOutputTone
+    {
+        get => _mediaOutputTone;
+        private set
+        {
+            if (!Set(ref _mediaOutputTone, value)) return;
+            OnPropertyChanged(nameof(MediaOutputStatusVisibility));
+        }
+    }
+    public Visibility MediaOutputStatusVisibility =>
+        MediaOutputTone == "Hidden" ? Visibility.Collapsed : Visibility.Visible;
+    public string MediaOutputCapabilitiesText
+    {
+        get => _mediaOutputCapabilitiesText;
+        private set => Set(ref _mediaOutputCapabilitiesText, value);
+    }
+    public string VirtualCameraStatusText
+    {
+        get => _virtualCameraStatusText;
+        private set => Set(ref _virtualCameraStatusText, value);
+    }
+    public string VirtualCameraInstallActionText => LocalizationService.Get(
+        _virtualCameraCapabilities.UpdateRequired
+            ? "UpdateVirtualCamera" : "InstallVirtualCamera");
+    public bool IsMediaOutputRunning =>
+        _mediaOutput.IsRunning || _virtualCamera.IsRunning;
+    public bool IsMediaOutputTransitioning => _isMediaOutputTransitioning;
+    public bool CanStopMediaOutput => IsMediaOutputRunning && !IsMediaOutputTransitioning;
+    public bool CanStartMediaOutput => CurrentSessionHandle != 0 &&
+        !IsMediaCastSelected && !IsBusy && !IsMediaOutputRunning &&
+        !IsMediaOutputTransitioning;
+    internal string? PendingRecordingPath =>
+        !string.IsNullOrWhiteSpace(_pendingRecordingPath) &&
+        File.Exists(_pendingRecordingPath) ? _pendingRecordingPath : null;
+    public bool CanRecordMediaOutput =>
+        _mediaOutputCapabilities.Supports(MediaOutputKind.Recording);
+    public bool CanStreamRtmp =>
+        _mediaOutputCapabilities.Supports(MediaOutputKind.Rtmp);
+    public bool CanStreamSrt =>
+        _mediaOutputCapabilities.Supports(MediaOutputKind.Srt);
+    public bool CanStreamWhip =>
+        _mediaOutputCapabilities.Supports(MediaOutputKind.Whip);
+    public bool CanUseVirtualCamera => CanStartMediaOutput &&
+        _virtualCameraCapabilities.BackendAvailable &&
+        _virtualCameraCapabilities.Supported &&
+        _virtualCameraCapabilities.Registered &&
+        !_virtualCameraCapabilities.UpdateRequired;
+    public bool CanInstallVirtualCamera => !IsMediaOutputRunning &&
+        !IsMediaOutputTransitioning &&
+        _virtualCameraCapabilities.BackendAvailable &&
+        _virtualCameraCapabilities.Supported &&
+        (!_virtualCameraCapabilities.Registered ||
+         _virtualCameraCapabilities.UpdateRequired);
+    public bool CanUninstallVirtualCamera => !IsMediaOutputRunning &&
+        !IsMediaOutputTransitioning &&
+        _virtualCameraCapabilities.BackendAvailable &&
+        _virtualCameraCapabilities.Registered;
+    public Visibility VirtualCameraInstallVisibility =>
+        _virtualCameraCapabilities.BackendAvailable &&
+        _virtualCameraCapabilities.Supported &&
+        (!_virtualCameraCapabilities.Registered ||
+         _virtualCameraCapabilities.UpdateRequired)
+            ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility VirtualCameraStartVisibility =>
+        _virtualCameraCapabilities.Registered &&
+        !_virtualCameraCapabilities.UpdateRequired
+            ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility VirtualCameraUninstallVisibility =>
+        _virtualCameraCapabilities.Registered
+            ? Visibility.Visible : Visibility.Collapsed;
     public string TargetResolutionDisplay => IsMediaCastSelected
         ? LocalizationService.Get("MediaCastOriginalResolution")
         : LocalizationService.Format("RenderLimitFormat", SelectedResolutionPreset.Label);
@@ -491,14 +615,30 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _driverState = LocalizationService.Get("StatusDetecting");
         _audioDisplay = LocalizationService.Get("StatusWaiting");
         _settingsStatus = LocalizationService.Get("StatusDefaultSettings");
+        _mediaOutputStatus = LocalizationService.Get("MediaOutputIdle");
+        _mediaOutputCapabilitiesText = LocalizationService.Get("MediaOutputCapabilitiesUnknown");
+        _virtualCameraStatusText = LocalizationService.Get("VirtualCameraChecking");
         _logText = LocalizationService.Get("StatusWaitingLog");
         _selectedLanguage = LocalizationService.SelectedLanguage;
         _core = new NativeCore();
         _wireless = new WirelessReceiverController(_core);
         _mediaCast = new MediaCastReceiverController(_core);
         _sessions = new DeviceSessionManager(_core);
+        _mediaOutput = new MediaOutputService(_core.GetDeviceOutputFrame,
+            _core.GetDeviceOutputAudioPacket);
+        _mediaOutput.StatusChanged += OnMediaOutputStatusChanged;
+        _pendingRecordingPath = PendingRecordingStore.FindLatest();
+        _virtualCamera = new VirtualCameraService(_core.GetDeviceOutputFrame);
+        _virtualCamera.StatusChanged += OnMediaOutputStatusChanged;
         _sessions.SessionHandleChanged += (udid, handle) =>
+        {
+            // Settings windows are bound to the native session that existed
+            // when they opened. Never let one follow a replacement handle.
+            InvalidateImageSettingsWindow(udid);
+            if (IsMediaOutputRunning && DeviceViewModel.UdidEquals(_mediaOutputUdid, udid))
+                _ = StopMediaOutputAsync();
             DeviceSessionHandleChanged?.Invoke(udid, handle);
+        };
         AddDiagnosticLog(AppLog.Event("app_start",
             ("pid", Environment.ProcessId),
             ("runtime", Environment.Version),
@@ -518,9 +658,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         // timer refreshes remain best-effort and never build up a queue.
         RefreshCommand = new RelayCommand(() => _ = RefreshAsync(forceDeviceEnumeration: true));
         ApplyVideoSettingsCommand = new RelayCommand(() => _ = ApplyVideoSettingsAsync(),
-            () => !IsBusy);
+            () => !IsSettingsInteractionBlocked);
         MoreImageSettingsCommand = new RelayCommand(ShowImageSettings,
             () => CanOpenImageSettings);
+        MediaOutputSettingsCommand = new RelayCommand(
+            () => MediaOutputSettingsRequested?.Invoke(), () => SelectedDevice is not null);
         ClearLogCommand = new RelayCommand(ClearVisibleLog);
         AdvancedSettingsCommand = new RelayCommand(ShowAdvancedSettings, () => IsAdvancedMode);
         OpenDriverManagerCommand = new RelayCommand(() => OpenDriverManager());
@@ -687,12 +829,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                      DeviceViewModel.IsWirelessUdid(pair.Key) &&
                      !connectedIds.Contains(pair.Key)).ToArray())
         {
+            InvalidateImageSettingsWindow(pair.Key);
             AddDiagnosticLog(AppLog.Event("wireless_device_removed",
                 ("device", AppLog.Device(pair.Key)),
                 ("had_session", pair.Value.Handle != 0),
                 ("handle", AppLog.Handle(pair.Value.Handle))));
             if (pair.Value.Handle != 0)
+            {
+                await StopMediaOutputForSessionAsync(pair.Key);
                 await _sessions.StopAndDestroyAsync(pair.Value);
+            }
             _sessions.Remove(pair.Key);
             _sessions.SetWirelessPaused(pair.Key, false);
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, pair.Key))
@@ -990,10 +1136,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedConnection));
         OnPropertyChanged(nameof(IsWirelessSelected));
         OnPropertyChanged(nameof(IsMediaCastSelected));
+        OnPropertyChanged(nameof(PreviewAndObsVisibility));
         OnPropertyChanged(nameof(TargetResolutionDisplay));
         OnPropertyChanged(nameof(TargetFpsDisplay));
         OnPropertyChanged(nameof(AudioDetailDisplay));
         OnPropertyChanged(nameof(WiredVideoLimitSettingsVisibility));
+        OnPropertyChanged(nameof(VideoSettingsVisibility));
         OnPropertyChanged(nameof(WirelessActualVideoSettingsVisibility));
         OnPropertyChanged(nameof(WirelessTopSettingsVisibility));
         OnPropertyChanged(nameof(WirelessBottomSettingsVisibility));
@@ -1002,18 +1150,25 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
         OnPropertyChanged(nameof(SelectedDecoderPreference));
         OnPropertyChanged(nameof(CanChangeVideoPipeline));
+        OnPropertyChanged(nameof(CanChangeDecoderPipeline));
         OnPropertyChanged(nameof(AdvancedSettingsVisibility));
         OnPropertyChanged(nameof(PlaybackVolume));
         OnPropertyChanged(nameof(PlayAudio));
+        NotifyMediaOutputStateChanged();
+        MediaOutputSettingsCommand.NotifyCanExecuteChanged();
     }
 
     private void NotifyCaptureSessionChanged()
     {
         OnPropertyChanged(nameof(HasCaptureSession));
+        OnPropertyChanged(nameof(PreviewAndObsVisibility));
         OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
         OnPropertyChanged(nameof(CanChangeVideoPipeline));
+        OnPropertyChanged(nameof(CanChangeDecoderPipeline));
+        NotifyMediaOutputStateChanged();
         StartCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
+        MediaOutputSettingsCommand.NotifyCanExecuteChanged();
     }
 
     private static bool IsActiveCaptureState(CaptureState state) => state is
@@ -1052,7 +1207,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void ResetPreviewState()
     {
-        DecoderStatus = string.Empty;
+        SetDecoderStatus(string.Empty, "Hidden");
         _lastVideoOutputSignature = null;
         _sourceVideoWidth = 0;
         _sourceVideoHeight = 0;
@@ -1124,7 +1279,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("message", created.Message)));
             // Handle is not observable itself; explicitly refresh the style
             // trigger and command availability as soon as creation finishes.
-            OnPropertyChanged(nameof(HasCaptureSession));
             StartCommand.NotifyCanExecuteChanged();
             StopCommand.NotifyCanExecuteChanged();
             var result = (created.Success, created.Message);
@@ -1168,6 +1322,18 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     }
 
     private async Task ApplyVideoSettingsAsync()
+    {
+        if (_disposed) return;
+        if (IsSettingsInteractionBlocked || !await _settingsGate.WaitAsync(0))
+        {
+            SetSettingsStatus("ImageAdjustmentsBusy");
+            return;
+        }
+        try { await ApplyVideoSettingsCoreAsync(); }
+        finally { _settingsGate.Release(); }
+    }
+
+    private async Task ApplyVideoSettingsCoreAsync()
     {
         if (_disposed || IsBusy) return;
         var requestedDevice = SelectedDevice;
@@ -1235,35 +1401,27 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                   currentState.Handle != requestedHandle))
                 return;
 
-            var pipeline = (Success: true, Message: string.Empty);
-            var hasPipelineSettings = !requestedDevice.IsWireless;
-            if (hasPipelineSettings)
+            var pipeline = _core.SetDevicePipelinePreferences(requestedHandle,
+                (uint)requestedDecoder, 1U);
+            var render = (Success: true, Message: string.Empty);
+            if (!requestedDevice.IsWireless)
             {
-                pipeline = _core.SetDevicePipelinePreferences(requestedHandle,
-                    (uint)requestedDecoder, 1U);
-            }
-            var adjustments = _core.SetDeviceImageAdjustments(requestedHandle,
-                requestedBrightness, requestedContrast, requestedSaturation,
-                requestedGamma);
-            if (adjustments.Success)
-                requestedState.MarkImageAdjustmentsApplied(requestedBrightness,
-                    requestedContrast, requestedSaturation, requestedGamma);
-            var render = _core.SetDeviceVideoPreferences(requestedHandle,
-                requestedPreset.Width, requestedPreset.Height,
-                (uint)requestedFrameRate);
-            if (render.Success)
-            {
-                requestedState.MarkRenderSettingsApplied(
+                render = _core.SetDeviceVideoPreferences(requestedHandle,
                     requestedPreset.Width, requestedPreset.Height,
-                    requestedFrameRate);
+                    (uint)requestedFrameRate);
+                if (render.Success)
+                {
+                    requestedState.MarkRenderSettingsApplied(
+                        requestedPreset.Width, requestedPreset.Height,
+                        requestedFrameRate);
+                }
             }
-            var success = pipeline.Success && adjustments.Success && render.Success;
+            var success = pipeline.Success && render.Success;
             var targetStillSelected = DeviceViewModel.UdidEquals(
                 SelectedDevice?.Udid, requestedUdid);
             failureMessage = string.Join("; ", new[]
             {
                 pipeline.Success ? string.Empty : pipeline.Message,
-                adjustments.Success ? string.Empty : adjustments.Message,
                 render.Success ? string.Empty : render.Message,
             }.Where(message => !string.IsNullOrWhiteSpace(message)));
             AddDiagnosticLog(AppLog.Event("video_settings_result",
@@ -1271,7 +1429,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("handle", AppLog.Handle(requestedHandle)),
                 ("success", success),
                 ("pipeline_success", pipeline.Success),
-                ("adjustments_success", adjustments.Success),
                 ("render_success", render.Success),
                 ("decoder", requestedDecoder),
                 ("brightness", requestedBrightness), ("contrast", requestedContrast),
@@ -1292,16 +1449,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     requestedPreset.Label, requestedFrameRate, render.Message));
                 if (targetStillSelected)
                 {
-                    if (requestedDevice is
-                        { IsWireless: false, IsMediaCast: false })
+                    if (requestedDevice is { IsWireless: false })
                     {
                         SetSettingsStatus("VideoSettingsAppliedFormat", requestedPreset,
                             requestedFrameRate, DecoderPreferenceLabel(requestedDecoder));
                     }
                     else
                     {
-                        SetSettingsStatus("AppliedRenderFormat", requestedPreset,
-                            requestedFrameRate);
+                        SetSettingsStatus("DecoderPreferenceSubmittedFormat",
+                            DecoderPreferenceLabel(requestedDecoder));
                     }
                 }
             }
@@ -1425,6 +1581,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             }
             stoppedState = requestedState;
             var stoppedUdid = stoppedState.Udid;
+            await StopMediaOutputForSessionAsync(stoppedState.Udid);
             await _sessions.StopAndDestroyAsync(stoppedState);
             if (DeviceViewModel.IsWirelessUdid(stoppedUdid))
             {
@@ -1868,6 +2025,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (preserveIfSelected &&
                 DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
                 return;
+            await StopMediaOutputForSessionAsync(state.Udid);
             await _sessions.StopAndDestroyAsync(state);
             AddDiagnosticLog(AppLog.Event("independent_session_stop_complete",
                 ("device", AppLog.Device(udid)),
@@ -1957,16 +2115,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private void UpdateVideoOutputStatus()
     {
         var handle = CurrentSessionHandle;
-        if (handle == 0 || SelectedDevice is not
-            { IsWireless: false, IsMediaCast: false })
+        if (handle == 0 || SelectedDevice is null || SelectedDevice.IsMediaCast)
         {
-            DecoderStatus = string.Empty;
+            SetDecoderStatus(string.Empty, "Hidden");
             _lastVideoOutputSignature = null;
             return;
         }
         if (!_core.TryGetDeviceVideoOutputStatus(handle, out var status))
         {
-            DecoderStatus = LocalizationService.Get("DecoderStatusDetecting");
+            SetDecoderStatus(LocalizationService.Get("DecoderStatusDetecting"),
+                "Detecting");
             return;
         }
 
@@ -1980,7 +2138,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ? status.DecoderSwitchState
                 : DecoderSwitchState.Pending;
         var runtimeMode = status.DecoderRuntimeMode is
-            DecoderRuntimeMode.Hardware or DecoderRuntimeMode.Software
+            DecoderRuntimeMode.Hardware or DecoderRuntimeMode.Software or
+            DecoderRuntimeMode.External
                 ? status.DecoderRuntimeMode
                 : DecoderRuntimeMode.Unknown;
         if (CurrentDeviceSession is { } state && state.Handle == handle)
@@ -2024,7 +2183,20 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 DecoderPreferenceLabel(requestedDecoder),
                 DecoderRuntimeModeLabel(runtimeMode)),
         };
-        DecoderStatus = decoderStatus;
+        var tone = decoderState switch
+        {
+            DecoderSwitchState.Applied when runtimeMode != DecoderRuntimeMode.Unknown =>
+                "Applied",
+            DecoderSwitchState.Failed => "Failed",
+            _ => "Pending",
+        };
+        SetDecoderStatus(decoderStatus, tone);
+    }
+
+    private void SetDecoderStatus(string text, string tone)
+    {
+        DecoderStatus = text;
+        DecoderStatusTone = tone;
     }
 
     private void UpdateEnvironmentStatus(NativeEnvironmentInfo environment)
@@ -2394,6 +2566,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             DecoderRuntimeMode.Hardware => "DecoderRuntimeHardware",
             DecoderRuntimeMode.Software => "DecoderRuntimeSoftware",
+            DecoderRuntimeMode.External => "DecoderRuntimeExternal",
             _ => "DecoderRuntimeUnknown",
         });
 
@@ -2436,6 +2609,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(TargetResolutionDisplay));
         OnPropertyChanged(nameof(TargetFpsDisplay));
         OnPropertyChanged(nameof(AudioDetailDisplay));
+        OnPropertyChanged(nameof(VirtualCameraInstallActionText));
         OnPropertyChanged(nameof(AppliedWirelessProfileDisplay));
         if (_lastEnvironment is { } environment) UpdateEnvironmentStatus(environment);
         else
@@ -2464,14 +2638,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private void ShowImageSettings()
     {
         var device = SelectedDevice;
-        if (device is null || device.IsMediaCast || IsBusy) return;
+        if (device is null || device.IsMediaCast) return;
         _ = GetOrCreateDeviceState(device);
         ShowImageSettings(device.Udid);
     }
 
-    internal void ShowImageSettings(string udid)
+    internal void ShowImageSettings(string udid, nint ownerHwnd = 0)
     {
-        if (_disposed || IsBusy || string.IsNullOrWhiteSpace(udid) ||
+        if (_disposed || string.IsNullOrWhiteSpace(udid) ||
             DeviceViewModel.IsMediaCastUdid(udid)) return;
         if (_imageSettingsWindows.TryGetValue(udid, out var existing))
         {
@@ -2479,46 +2653,136 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             existing.Focus();
             return;
         }
+        if (IsSettingsInteractionBlocked)
+        {
+            SetSettingsStatus("ImageAdjustmentsBusy");
+            AddUiLog(LocalizationService.Get("ImageAdjustmentsBusy"));
+            return;
+        }
         if (!_sessions.TryGet(udid, out var state)) return;
+        var expectedHandle = state.Handle;
         var original = new ImageAdjustmentValues(state.Brightness, state.Contrast,
             state.Saturation, state.Gamma);
         var window = new ImageSettingsWindow(original,
-            values => PreviewImageAdjustments(udid, values),
-            values => SaveImageAdjustments(udid, values),
-            values => RevertImageAdjustments(udid, values))
-        {
-            Owner = Application.Current?.MainWindow,
-            Topmost = true,
-        };
+            values => PreviewImageAdjustments(udid, state, expectedHandle, values),
+            values => SaveImageAdjustments(udid, state, expectedHandle, values),
+            values => RevertImageAdjustments(udid, state, expectedHandle, values));
+        var mainWindow = Application.Current?.MainWindow;
+        var restoreMainWindowEnabled = mainWindow?.IsEnabled == true;
+        if (ownerHwnd == 0 && mainWindow is not null)
+            window.Owner = mainWindow;
+        else if (ownerHwnd != 0)
+            new WindowInteropHelper(window).Owner = ownerHwnd;
         _imageSettingsWindows[udid] = window;
-        window.Closed += (_, _) =>
+        var completed = false;
+        void CompleteWindow()
         {
+            if (completed) return;
+            completed = true;
             if (_imageSettingsWindows.TryGetValue(udid, out var tracked) &&
                 ReferenceEquals(tracked, window))
                 _imageSettingsWindows.Remove(udid);
+            SetSettingsDialogOpen(false);
+            if (restoreMainWindowEnabled && mainWindow is not null)
+                mainWindow.IsEnabled = true;
+        }
+        window.Closed += (_, _) =>
+        {
+            CompleteWindow();
         };
         AddDiagnosticLog(AppLog.Event("image_adjustments_window_opened",
-            ("device", AppLog.Device(udid)), ("handle", AppLog.Handle(state.Handle))));
-        window.Show();
+            ("device", AppLog.Device(udid)), ("handle", AppLog.Handle(expectedHandle))));
+        // Keep the WPF main window blocked so image and video settings remain
+        // serialized, but use a modeless window. ShowDialog disables every
+        // top-level HWND on this UI thread, including the native independent
+        // preview that opened the adjustment window.
+        SetSettingsDialogOpen(true);
+        if (restoreMainWindowEnabled && mainWindow is not null)
+            mainWindow.IsEnabled = false;
+        try
+        {
+            window.Show();
+            window.Activate();
+            window.Focus();
+        }
+        catch (Exception error)
+        {
+            CompleteWindow();
+            try { window.CloseForShutdown(); } catch { }
+            SetSettingsStatus("ImageAdjustmentsUpdateFailed");
+            AddDiagnosticLog(AppLog.Event("image_adjustments_window_failed",
+                ("device", AppLog.Device(udid)),
+                ("handle", AppLog.Handle(expectedHandle)),
+                ("owner", AppLog.Handle((ulong)ownerHwnd)),
+                ("error", AppLog.Error(error))));
+        }
+    }
+
+    internal void ShowProjectionSettings(string udid)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(udid)) return;
+        if (IsSettingsInteractionBlocked)
+        {
+            SetSettingsStatus("ImageAdjustmentsBusy");
+            AddUiLog(LocalizationService.Get("ImageAdjustmentsBusy"));
+            return;
+        }
+        var device = Devices.FirstOrDefault(candidate =>
+            DeviceViewModel.UdidEquals(candidate.Udid, udid));
+        if (device is null || device.IsMediaCast) return;
+        SetSelectedDevice(device, updateDriverStatus: true);
+        ProjectionSettingsRequested?.Invoke(udid);
+    }
+
+    private void SetSettingsDialogOpen(bool value)
+    {
+        if (_isSettingsDialogOpen == value) return;
+        _isSettingsDialogOpen = value;
+        ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
+        MoreImageSettingsCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
+        OnPropertyChanged(nameof(CanChangeVideoPipeline));
+        OnPropertyChanged(nameof(CanChangeDecoderPipeline));
+        OnPropertyChanged(nameof(CanOpenImageSettings));
     }
 
     private (bool Success, string Message) PreviewImageAdjustments(
-        string udid, ImageAdjustmentValues values)
+        string udid, DeviceCaptureState expectedState, ulong expectedHandle,
+        ImageAdjustmentValues values)
     {
-        if (_disposed || !_sessions.TryGet(udid, out var state) || state.IsStopping)
-            return (false, LocalizationService.Get("ImageAdjustmentsUpdateFailed"));
-        if (state.Handle == 0) return (true, string.Empty);
-        return _core.SetDeviceImageAdjustments(state.Handle,
-            values.Brightness, values.Contrast, values.Saturation, values.Gamma);
+        return RunImageSettingsOperation(() =>
+        {
+            if (_disposed || !_sessions.TryGet(udid, out var state) ||
+                !ReferenceEquals(state, expectedState) ||
+                !state.MatchesSessionHandle(expectedHandle))
+                return (false, LocalizationService.Get("ImageAdjustmentsUpdateFailed"));
+            if (expectedHandle == 0) return (true, string.Empty);
+            return _core.SetDeviceImageAdjustments(state.Handle,
+                values.Brightness, values.Contrast, values.Saturation, values.Gamma);
+        });
     }
 
     private (bool Success, string Message) SaveImageAdjustments(
-        string udid, ImageAdjustmentValues values)
+        string udid, DeviceCaptureState expectedState, ulong expectedHandle,
+        ImageAdjustmentValues values)
     {
-        if (_disposed || !_sessions.TryGet(udid, out var state) || state.IsStopping)
+        return RunImageSettingsOperation(() =>
+            SaveImageAdjustmentsLocked(udid, expectedState, expectedHandle, values));
+    }
+
+    private (bool Success, string Message) SaveImageAdjustmentsLocked(
+        string udid, DeviceCaptureState expectedState, ulong expectedHandle,
+        ImageAdjustmentValues values)
+    {
+        if (_disposed || !_sessions.TryGet(udid, out var state) ||
+            !ReferenceEquals(state, expectedState) ||
+            !state.MatchesSessionHandle(expectedHandle))
             return (false, LocalizationService.Get("ImageAdjustmentsUpdateFailed"));
-        var hadSession = state.Handle != 0;
-        var result = PreviewImageAdjustments(udid, values);
+        var hadSession = expectedHandle != 0;
+        var result = !hadSession
+            ? (Success: true, Message: string.Empty)
+            : _core.SetDeviceImageAdjustments(state.Handle, values.Brightness,
+                values.Contrast, values.Saturation, values.Gamma);
         if (!result.Success)
         {
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
@@ -2545,10 +2809,20 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     }
 
     private (bool Success, string Message) RevertImageAdjustments(
-        string udid, ImageAdjustmentValues original)
+        string udid, DeviceCaptureState expectedState, ulong expectedHandle,
+        ImageAdjustmentValues original)
     {
-        var result = !_sessions.TryGet(udid, out var state) || state.IsStopping ||
-            state.Handle == 0
+        return RunImageSettingsOperation(() =>
+            RevertImageAdjustmentsLocked(udid, expectedState, expectedHandle, original));
+    }
+
+    private (bool Success, string Message) RevertImageAdjustmentsLocked(
+        string udid, DeviceCaptureState expectedState, ulong expectedHandle,
+        ImageAdjustmentValues original)
+    {
+        var result = !_sessions.TryGet(udid, out var state) ||
+            !ReferenceEquals(state, expectedState) ||
+            !state.MatchesSessionHandle(expectedHandle) || expectedHandle == 0
             ? (Success: true, Message: string.Empty)
             : _core.SetDeviceImageAdjustments(state.Handle,
                 original.Brightness, original.Contrast,
@@ -2562,6 +2836,472 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             SetSettingsStatus("ApplySettingsFailedFormat", result.Message);
         return result;
     }
+
+    private (bool Success, string Message) RunImageSettingsOperation(
+        Func<(bool Success, string Message)> operation)
+    {
+        if (!_settingsGate.Wait(0))
+            return (false, LocalizationService.Get("ImageAdjustmentsBusy"));
+        try { return operation(); }
+        finally { _settingsGate.Release(); }
+    }
+
+    private void InvalidateImageSettingsWindow(string udid)
+    {
+        if (!_imageSettingsWindows.Remove(udid, out var window)) return;
+        window.CloseForSessionInvalidation();
+    }
+
+    internal async Task EnsureMediaOutputCapabilitiesAsync()
+    {
+        if (_disposed) return;
+        RefreshVirtualCameraCapabilities();
+        if (_mediaOutputCapabilitiesLoaded) return;
+        MediaOutputCapabilitiesText = LocalizationService.Get("MediaOutputChecking");
+        var capabilities = await MediaOutputService.ProbeAsync(_shutdownCancellation.Token);
+        _mediaOutputCapabilities = capabilities;
+        _mediaOutputCapabilitiesLoaded = true;
+        MediaOutputCapabilitiesText = capabilities.FfmpegAvailable
+            ? LocalizationService.Format("MediaOutputCapabilitiesFormat",
+                capabilities.HasRtmp ? "RTMP" : "—",
+                capabilities.HasSrt ? "SRT" : "—",
+                capabilities.HasWhip ? "WebRTC/WHIP" : "—",
+                string.IsNullOrWhiteSpace(capabilities.PreferredH264Encoder)
+                    ? "—" : capabilities.PreferredH264Encoder)
+            : LocalizationService.Format("MediaOutputUnavailableFormat", capabilities.Detail);
+        OnPropertyChanged(nameof(CanRecordMediaOutput));
+        OnPropertyChanged(nameof(CanStreamRtmp));
+        OnPropertyChanged(nameof(CanStreamSrt));
+        OnPropertyChanged(nameof(CanStreamWhip));
+        OnPropertyChanged(nameof(CanStartMediaOutput));
+        OnPropertyChanged(nameof(CanUseVirtualCamera));
+        OnPropertyChanged(nameof(CanInstallVirtualCamera));
+        OnPropertyChanged(nameof(CanUninstallVirtualCamera));
+        OnPropertyChanged(nameof(VirtualCameraInstallVisibility));
+        OnPropertyChanged(nameof(VirtualCameraStartVisibility));
+        OnPropertyChanged(nameof(VirtualCameraUninstallVisibility));
+        AddDiagnosticLog(AppLog.Event("media_output_capabilities",
+            ("ffmpeg", capabilities.FfmpegAvailable),
+            ("path", capabilities.FfmpegPath),
+            ("encoder", capabilities.PreferredH264Encoder),
+            ("rtmp", capabilities.HasRtmp),
+            ("srt", capabilities.HasSrt),
+            ("whip", capabilities.HasWhip),
+            ("detail", capabilities.Detail)));
+    }
+
+    private void RefreshVirtualCameraCapabilities()
+    {
+        _virtualCameraCapabilities = VirtualCameraService.Probe();
+        VirtualCameraStatusText = !_virtualCameraCapabilities.BackendAvailable
+            ? LocalizationService.Get("VirtualCameraBackendMissing")
+            : !_virtualCameraCapabilities.Supported
+                ? LocalizationService.Get("VirtualCameraUnsupported")
+                : !_virtualCameraCapabilities.Registered
+                    ? LocalizationService.Get("VirtualCameraInstallRequired")
+                    : _virtualCameraCapabilities.UpdateRequired
+                        ? LocalizationService.Get("VirtualCameraUpdateRequired")
+                        : _virtualCamera.IsRunning
+                            ? LocalizationService.Get("VirtualCameraRunning")
+                            : LocalizationService.Get("VirtualCameraReady");
+        OnPropertyChanged(nameof(CanUseVirtualCamera));
+        OnPropertyChanged(nameof(CanInstallVirtualCamera));
+        OnPropertyChanged(nameof(CanUninstallVirtualCamera));
+        OnPropertyChanged(nameof(VirtualCameraInstallVisibility));
+        OnPropertyChanged(nameof(VirtualCameraStartVisibility));
+        OnPropertyChanged(nameof(VirtualCameraUninstallVisibility));
+        OnPropertyChanged(nameof(VirtualCameraInstallActionText));
+        AddDiagnosticLog(AppLog.Event("virtual_camera_capabilities",
+            ("backend", _virtualCameraCapabilities.BackendAvailable),
+            ("supported", _virtualCameraCapabilities.Supported),
+            ("registered", _virtualCameraCapabilities.Registered),
+            ("updateRequired", _virtualCameraCapabilities.UpdateRequired),
+            ("running", _virtualCameraCapabilities.Running),
+            ("detail", _virtualCameraCapabilities.Detail)));
+    }
+
+    internal async Task<(bool Success, string Message)> StartRecordingAsync(
+        uint width, uint height, int frameRate, int bitrateKbps)
+    {
+        if (PendingRecordingPath is not null)
+            return (false, LocalizationService.Get("RecordingPendingSave"));
+        var path = PendingRecordingStore.CreatePath();
+        var request = new MediaOutputRequest(MediaOutputKind.Recording, path,
+            NormalizeOutputWidth(width), NormalizeOutputHeight(height), frameRate, bitrateKbps);
+        var result = await StartMediaOutputAsync(request);
+        if (result.Success) _pendingRecordingPath = path;
+        else
+        {
+            try { File.Delete(path); } catch { }
+        }
+        return result;
+    }
+
+    internal void MarkPendingRecordingSaved(string path)
+    {
+        if (string.Equals(_pendingRecordingPath, path,
+                StringComparison.OrdinalIgnoreCase))
+            _pendingRecordingPath = PendingRecordingStore.FindLatest();
+    }
+
+    internal async Task<(bool Success, string Message)> StartStreamingAsync(
+        MediaOutputKind kind, string destination, string authorization,
+        uint width, uint height, int frameRate, int bitrateKbps)
+    {
+        if (kind is MediaOutputKind.Recording)
+            return (false, LocalizationService.Get("MediaOutputInvalidProtocol"));
+        var request = new MediaOutputRequest(kind, destination,
+            NormalizeOutputWidth(width), NormalizeOutputHeight(height),
+            frameRate, bitrateKbps, authorization);
+        return await StartMediaOutputAsync(request);
+    }
+
+    internal async Task<(bool Success, string Message)> InstallVirtualCameraAsync()
+    {
+        await _mediaOutputGate.WaitAsync(_shutdownCancellation.Token);
+        SetMediaOutputTransitioning(true);
+        try
+        {
+            await EnsureMediaOutputCapabilitiesAsync();
+            if (IsMediaOutputRunning)
+                return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
+            if (!_virtualCameraCapabilities.BackendAvailable ||
+                !_virtualCameraCapabilities.Supported)
+                return (false, VirtualCameraStatusText);
+            var updating = _virtualCameraCapabilities.UpdateRequired;
+            SetMediaOutputStatus(LocalizationService.Get(updating
+                    ? "VirtualCameraUpdating" : "VirtualCameraInstalling"),
+                "Pending");
+            await VirtualCameraService.InstallAsync(_shutdownCancellation.Token);
+            RefreshVirtualCameraCapabilities();
+            if (!_virtualCameraCapabilities.Registered ||
+                _virtualCameraCapabilities.UpdateRequired)
+                throw new InvalidOperationException(
+                    LocalizationService.Get("VirtualCameraInstallNotDetected"));
+            var message = LocalizationService.Get(updating
+                ? "VirtualCameraUpdated" : "VirtualCameraInstalled");
+            SetMediaOutputStatus(message, "Applied");
+            AddDiagnosticLog(AppLog.Event("virtual_camera_installed"));
+            return (true, message);
+        }
+        catch (Exception error)
+        {
+            RefreshVirtualCameraCapabilities();
+            var message = LocalizationService.Format(
+                "VirtualCameraInstallFailedFormat", error.Message);
+            SetMediaOutputStatus(message, "Failed");
+            AddDiagnosticLog(AppLog.Event("virtual_camera_install_failed",
+                ("error", AppLog.Error(error))));
+            return (false, message);
+        }
+        finally
+        {
+            SetMediaOutputTransitioning(false);
+            _mediaOutputGate.Release();
+        }
+    }
+
+    internal async Task<(bool Success, string Message)> UninstallVirtualCameraAsync()
+    {
+        await _mediaOutputGate.WaitAsync(_shutdownCancellation.Token);
+        SetMediaOutputTransitioning(true);
+        try
+        {
+            if (IsMediaOutputRunning)
+                return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
+            SetMediaOutputStatus(LocalizationService.Get("VirtualCameraUninstalling"),
+                "Pending");
+            await VirtualCameraService.UninstallAsync(_shutdownCancellation.Token);
+            RefreshVirtualCameraCapabilities();
+            if (_virtualCameraCapabilities.Registered)
+                throw new InvalidOperationException(
+                    LocalizationService.Get("VirtualCameraUninstallStillDetected"));
+            var message = LocalizationService.Get("VirtualCameraUninstalled");
+            SetMediaOutputStatus(message, "Applied");
+            AddDiagnosticLog(AppLog.Event("virtual_camera_uninstalled"));
+            return (true, message);
+        }
+        catch (Exception error)
+        {
+            RefreshVirtualCameraCapabilities();
+            var message = LocalizationService.Format(
+                "VirtualCameraUninstallFailedFormat", error.Message);
+            SetMediaOutputStatus(message, "Failed");
+            AddDiagnosticLog(AppLog.Event("virtual_camera_uninstall_failed",
+                ("error", AppLog.Error(error))));
+            return (false, message);
+        }
+        finally
+        {
+            SetMediaOutputTransitioning(false);
+            _mediaOutputGate.Release();
+        }
+    }
+
+    internal async Task<(bool Success, string Message)> StartVirtualCameraAsync(
+        uint width, uint height, int frameRate)
+    {
+        if (_disposed) return (false, LocalizationService.Get("CaptureStopped"));
+        await _mediaOutputGate.WaitAsync(_shutdownCancellation.Token);
+        SetMediaOutputTransitioning(true);
+        try
+        {
+            await EnsureMediaOutputCapabilitiesAsync();
+            if (IsMediaOutputRunning)
+                return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
+            var handle = CurrentSessionHandle;
+            var device = SelectedDevice;
+            if (!_virtualCameraCapabilities.Registered ||
+                _virtualCameraCapabilities.UpdateRequired || device is null ||
+                device.IsMediaCast || handle == 0 ||
+                !_sessions.TryGet(device.Udid, out var expectedState) ||
+                !expectedState.MatchesSessionHandle(handle))
+                return (false, _virtualCameraCapabilities.Registered &&
+                    !_virtualCameraCapabilities.UpdateRequired
+                        ? LocalizationService.Get("MediaOutputNoSession")
+                        : VirtualCameraStatusText);
+            width = NormalizeOutputWidth(width);
+            height = NormalizeOutputHeight(height);
+            frameRate = Math.Clamp(frameRate, 10, 60);
+            await _virtualCamera.StartAsync(handle, width, height,
+                frameRate, _shutdownCancellation.Token);
+            if (_disposed || !_sessions.TryGet(device.Udid, out var currentState) ||
+                !ReferenceEquals(expectedState, currentState) ||
+                currentState.Handle != handle ||
+                !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
+            {
+                await _virtualCamera.StopAsync();
+                var staleMessage = LocalizationService.Get("MediaOutputNoSession");
+                SetMediaOutputStatus(staleMessage, "Failed");
+                return (false, staleMessage);
+            }
+            _mediaOutputUdid = device.Udid;
+            RefreshVirtualCameraCapabilities();
+            var message = LocalizationService.Get("VirtualCameraStarted");
+            SetMediaOutputStatus(message, "Applied");
+            NotifyMediaOutputStateChanged();
+            AddDiagnosticLog(AppLog.Event("virtual_camera_started",
+                ("device", AppLog.Device(device.Udid)),
+                ("handle", AppLog.Handle(handle)),
+                ("size", $"{width}x{height}"), ("fps", frameRate)));
+            return (true, message);
+        }
+        catch (Exception error)
+        {
+            RefreshVirtualCameraCapabilities();
+            var message = LocalizationService.Format(
+                "MediaOutputStartFailedFormat", error.Message);
+            SetMediaOutputStatus(message, "Failed");
+            AddDiagnosticLog(AppLog.Event("virtual_camera_start_failed",
+                ("error", AppLog.Error(error))));
+            return (false, message);
+        }
+        finally
+        {
+            SetMediaOutputTransitioning(false);
+            _mediaOutputGate.Release();
+        }
+    }
+
+    internal async Task StopMediaOutputAsync()
+    {
+        await _mediaOutputGate.WaitAsync();
+        SetMediaOutputTransitioning(true);
+        try { await StopMediaOutputLockedAsync(); }
+        finally
+        {
+            SetMediaOutputTransitioning(false);
+            _mediaOutputGate.Release();
+        }
+    }
+
+    private async Task StopMediaOutputForSessionAsync(string udid)
+    {
+        await _mediaOutputGate.WaitAsync();
+        SetMediaOutputTransitioning(true);
+        try
+        {
+            if (DeviceViewModel.UdidEquals(_mediaOutputUdid, udid))
+                await StopMediaOutputLockedAsync();
+        }
+        finally
+        {
+            SetMediaOutputTransitioning(false);
+            _mediaOutputGate.Release();
+        }
+    }
+
+    private async Task StopMediaOutputLockedAsync()
+    {
+        if (!IsMediaOutputRunning) return;
+        SetMediaOutputStatus(LocalizationService.Get("MediaOutputStopping"), "Pending");
+        if (_mediaOutput.IsRunning) await _mediaOutput.StopAsync();
+        if (_virtualCamera.IsRunning) await _virtualCamera.StopAsync();
+        _mediaOutputUdid = null;
+        RefreshVirtualCameraCapabilities();
+        NotifyMediaOutputStateChanged();
+    }
+
+    internal (uint Width, uint Height) SuggestedMediaOutputSize()
+    {
+        var state = CurrentDeviceSession;
+        var width = SourceVideoWidth;
+        var height = SourceVideoHeight;
+        if (width == 0 || height == 0)
+        {
+            width = state?.AppliedRenderWidth > 0
+                ? state.AppliedRenderWidth : state?.RenderWidth ?? 0;
+            height = state?.AppliedRenderHeight > 0
+                ? state.AppliedRenderHeight : state?.RenderHeight ?? 0;
+        }
+        if (width == 0 || height == 0)
+        {
+            width = SelectedResolutionPreset.Width;
+            height = SelectedResolutionPreset.Height;
+        }
+        if (width == 0 || height == 0)
+        {
+            width = 1280;
+            height = 720;
+        }
+        if (width > 3840 || height > 2160)
+        {
+            var scale = Math.Min(3840.0 / width, 2160.0 / height);
+            width = (uint)Math.Max(160, Math.Round(width * scale));
+            height = (uint)Math.Max(160, Math.Round(height * scale));
+        }
+        return (NormalizeOutputWidth(width), NormalizeOutputHeight(height));
+    }
+
+    private async Task<(bool Success, string Message)> StartMediaOutputAsync(
+        MediaOutputRequest request)
+    {
+        if (_disposed) return (false, LocalizationService.Get("CaptureStopped"));
+        await _mediaOutputGate.WaitAsync(_shutdownCancellation.Token);
+        SetMediaOutputTransitioning(true);
+        try
+        {
+            await EnsureMediaOutputCapabilitiesAsync();
+            if (IsMediaOutputRunning)
+                return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
+            var handle = CurrentSessionHandle;
+            var device = SelectedDevice;
+            if (device is null || device.IsMediaCast || handle == 0 ||
+                !_sessions.TryGet(device.Udid, out var expectedState) ||
+                !expectedState.MatchesSessionHandle(handle))
+                return (false, LocalizationService.Get("MediaOutputNoSession"));
+            await _mediaOutput.StartAsync(handle, request, _mediaOutputCapabilities,
+                _shutdownCancellation.Token);
+            if (_disposed || !_sessions.TryGet(device.Udid, out var currentState) ||
+                !ReferenceEquals(expectedState, currentState) ||
+                currentState.Handle != handle ||
+                !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
+            {
+                await _mediaOutput.StopAsync();
+                var staleMessage = LocalizationService.Get("MediaOutputNoSession");
+                SetMediaOutputStatus(staleMessage, "Failed");
+                AddDiagnosticLog(AppLog.Event("media_output_start_invalidated",
+                    ("device", AppLog.Device(device.Udid)),
+                    ("handle", AppLog.Handle(handle))));
+                return (false, staleMessage);
+            }
+            _mediaOutputUdid = device.Udid;
+            SetMediaOutputStatus(LocalizationService.Format(
+                request.Kind == MediaOutputKind.Recording
+                    ? "MediaOutputRecordingFormat"
+                    : "MediaOutputStreamingFormat",
+                MediaOutputKindLabel(request.Kind)), "Applied");
+            NotifyMediaOutputStateChanged();
+            AddUiLog(MediaOutputStatus);
+            AddDiagnosticLog(AppLog.Event("media_output_started",
+                ("device", AppLog.Device(device.Udid)),
+                ("handle", AppLog.Handle(handle)),
+                ("kind", request.Kind),
+                ("size", $"{request.Width}x{request.Height}"),
+                ("fps", request.FrameRate),
+                ("bitrate_kbps", request.BitrateKbps)));
+            return (true, MediaOutputStatus);
+        }
+        catch (Exception error)
+        {
+            var message = LocalizationService.Format(
+                "MediaOutputStartFailedFormat", error.Message);
+            SetMediaOutputStatus(message, "Failed");
+            AddDiagnosticLog(AppLog.Event("media_output_start_failed",
+                ("kind", request.Kind), ("error", AppLog.Error(error))));
+            return (false, message);
+        }
+        finally
+        {
+            SetMediaOutputTransitioning(false);
+            _mediaOutputGate.Release();
+        }
+    }
+
+    private void OnMediaOutputStatusChanged(string message, bool failed)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            _ = dispatcher.BeginInvoke(() => OnMediaOutputStatusChanged(message, failed));
+            return;
+        }
+        var localized = message switch
+        {
+            "Recording" => LocalizationService.Get("MediaOutputRecording"),
+            "Live" => LocalizationService.Get("MediaOutputStreaming"),
+            "VirtualCamera" => LocalizationService.Get("VirtualCameraRunning"),
+            "Stopped" => LocalizationService.Get("MediaOutputStopped"),
+            _ => message,
+        };
+        if (failed) SetMediaOutputStatus(
+            LocalizationService.Format("MediaOutputFailedFormat", localized), "Failed");
+        else SetMediaOutputStatus(localized, localized == LocalizationService.Get("MediaOutputStopped")
+            ? "Hidden" : "Applied");
+        if (!IsMediaOutputRunning) _mediaOutputUdid = null;
+        if (_virtualCameraCapabilities.BackendAvailable)
+            RefreshVirtualCameraCapabilities();
+        NotifyMediaOutputStateChanged();
+    }
+
+    private void NotifyMediaOutputStateChanged()
+    {
+        OnPropertyChanged(nameof(IsMediaOutputRunning));
+        OnPropertyChanged(nameof(IsMediaOutputTransitioning));
+        OnPropertyChanged(nameof(CanStopMediaOutput));
+        OnPropertyChanged(nameof(CanStartMediaOutput));
+        OnPropertyChanged(nameof(CanUseVirtualCamera));
+        OnPropertyChanged(nameof(CanInstallVirtualCamera));
+        OnPropertyChanged(nameof(CanUninstallVirtualCamera));
+        OnPropertyChanged(nameof(VirtualCameraUninstallVisibility));
+    }
+
+    private void SetMediaOutputTransitioning(bool value)
+    {
+        if (_isMediaOutputTransitioning == value) return;
+        _isMediaOutputTransitioning = value;
+        NotifyMediaOutputStateChanged();
+    }
+
+    private void SetMediaOutputStatus(string text, string tone)
+    {
+        MediaOutputStatus = text;
+        MediaOutputTone = tone;
+    }
+
+    private static uint NormalizeOutputWidth(uint value) =>
+        Math.Clamp(value == 0 ? 1280U : value & ~1U, 160U, 3840U);
+
+    private static uint NormalizeOutputHeight(uint value) =>
+        Math.Clamp(value == 0 ? 720U : value & ~1U, 160U, 2160U);
+
+    private static string MediaOutputKindLabel(MediaOutputKind kind) => kind switch
+    {
+        MediaOutputKind.Rtmp => "RTMP",
+        MediaOutputKind.Srt => "SRT",
+        MediaOutputKind.Whip => "WebRTC/WHIP",
+        _ => "MP4",
+    };
 
     private void ShowAdvancedSettings()
     {
@@ -2606,6 +3346,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             await _coreGate.WaitAsync();
             gateHeld = true;
             if (_disposed) return;
+            await StopMediaOutputForSessionAsync(state.Udid);
             await _sessions.StopAndDestroyAsync(state);
             ClearSelectedSessionState(state.Udid);
             // libusb0 restores the phone's normal configuration during the
@@ -2635,7 +3376,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 }
 
                 _sessions.SetHandle(state, created.Handle);
-                OnPropertyChanged(nameof(HasCaptureSession));
+                NotifyCaptureSessionChanged();
                 var deadline = DateTime.UtcNow.AddSeconds(6);
                 var ready = false;
                 while (DateTime.UtcNow < deadline)
@@ -2697,7 +3438,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     return;
                 }
                 try { await _sessions.StopAndDestroyAsync(state); } catch { }
-                OnPropertyChanged(nameof(HasCaptureSession));
+                NotifyCaptureSessionChanged();
             }
             throw lastFailure ?? new InvalidOperationException(created.Message);
         }
@@ -2715,7 +3456,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("error", AppLog.Error(error))));
             _sessions.SetHandle(state, 0);
             ClearSelectedSessionState(state.Udid);
-            OnPropertyChanged(nameof(HasCaptureSession));
+            NotifyCaptureSessionChanged();
         }
         finally
         {
@@ -2737,6 +3478,18 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _disposed = true;
         _shutdownCancellation.Cancel();
         LocalizationService.LanguageChanged -= OnLanguageChanged;
+        _mediaOutput.StatusChanged -= OnMediaOutputStatusChanged;
+        _virtualCamera.StatusChanged -= OnMediaOutputStatusChanged;
+        try
+        {
+            await _mediaOutput.DisposeAsync();
+            await _virtualCamera.DisposeAsync();
+        }
+        catch (Exception error)
+        {
+            AddDiagnosticLog(AppLog.Event("media_output_shutdown_failed",
+                ("error", AppLog.Error(error))));
+        }
         AddDiagnosticLog(AppLog.Event("app_shutdown_wait_core_gate"));
         await _coreGate.WaitAsync();
         AddDiagnosticLog(AppLog.Event("app_shutdown_core_gate_acquired"));

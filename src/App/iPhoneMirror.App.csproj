@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.2.2</Version>
-    <AssemblyVersion>1.2.2.0</AssemblyVersion>
-    <FileVersion>1.2.2.0</FileVersion>
+    <Version>1.3.0</Version>
+    <AssemblyVersion>1.3.0.0</AssemblyVersion>
+    <FileVersion>1.3.0.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>
@@ -38,6 +38,27 @@
     <Content Include="native\iPhoneMirror.Core.dll" Condition="Exists('native\iPhoneMirror.Core.dll')">
       <Link>iPhoneMirror.Core.dll</Link>
       <TargetPath>iPhoneMirror.Core.dll</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="native\iPhoneMirror.VirtualCamera.dll" Condition="Exists('native\iPhoneMirror.VirtualCamera.dll')">
+      <Link>iPhoneMirror.VirtualCamera.dll</Link>
+      <TargetPath>iPhoneMirror.VirtualCamera.dll</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="native\iPhoneMirror.VirtualCamera.Admin.exe" Condition="Exists('native\iPhoneMirror.VirtualCamera.Admin.exe')">
+      <Link>iPhoneMirror.VirtualCamera.Admin.exe</Link>
+      <TargetPath>iPhoneMirror.VirtualCamera.Admin.exe</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="native\tools\ffmpeg\ffmpeg.exe;native\tools\ffmpeg\LICENSE.txt;native\tools\ffmpeg\README.txt;native\tools\ffmpeg\SOURCE.txt" Condition="Exists('native\tools\ffmpeg\ffmpeg.exe')">
+      <Link>tools\ffmpeg\%(Filename)%(Extension)</Link>
+      <TargetPath>tools\ffmpeg\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>

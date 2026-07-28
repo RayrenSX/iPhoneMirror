@@ -41,6 +41,11 @@ std::shared_ptr<const media::DecodedFrame> WirelessCaptureSession::next_render_f
     return stream_ ? stream_->next_render_frame() : nullptr;
 }
 
+std::shared_ptr<const AudioPacket> WirelessCaptureSession::next_audio_packet(
+    std::uint64_t after_sequence) const {
+    return stream_ ? stream_->next_audio_packet(after_sequence) : nullptr;
+}
+
 void WirelessCaptureSession::set_audio_enabled(bool enabled) noexcept {
     preferences_.play_audio = enabled;
     if (stream_) stream_->set_audio_enabled(enabled);
@@ -66,13 +71,17 @@ void WirelessCaptureSession::set_decoder_preference(
 }
 
 DecoderSwitchStatus WirelessCaptureSession::decoder_switch_status() const noexcept {
+    // The wireless host publishes decoded I420/NV12 frames over IPC. Its
+    // decoder is outside this process, so this session must not report an
+    // indeterminate hardware path forever or claim a software implementation
+    // that it cannot inspect.
     return {
         preferences_.decoder_preference,
         preferences_.decoder_preference,
         1,
         1,
         DecoderSwitchPhase::Applied,
-        DecoderRuntimeMode::Unknown,
+        DecoderRuntimeMode::External,
     };
 }
 

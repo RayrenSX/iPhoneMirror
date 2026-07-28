@@ -19,3 +19,4 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_subdirectory(src/Core)
 add_subdirectory(src/WirelessHost)
+add_subdirectory(src/VirtualCamera)

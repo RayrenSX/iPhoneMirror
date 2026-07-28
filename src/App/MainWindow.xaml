@@ -561,24 +561,70 @@
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="1"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <Grid Grid.Row="0" Margin="13,10">
+                        <Grid Grid.Row="0" Margin="13,10"
+                              Visibility="{Binding DecoderStatusVisibility}">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="10"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}"
-                                     VerticalAlignment="Center"/>
+                            <Ellipse Width="6" Height="6" VerticalAlignment="Center">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{StaticResource StatusPendingBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding DecoderStatusTone}" Value="Applied">
+                                                <Setter Property="Fill" Value="{StaticResource StatusAppliedBrush}"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding DecoderStatusTone}" Value="Failed">
+                                                <Setter Property="Fill" Value="{StaticResource StatusFailedBrush}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
                             <TextBlock Grid.Column="2" Text="{Binding DecoderStatus}"
                                        Foreground="{StaticResource MutedTextBrush}"
                                        FontSize="11" TextWrapping="Wrap"
                                        AutomationProperties.AutomationId="DecoderStatusText"/>
                         </Grid>
-                        <Border Grid.Row="1" Background="{StaticResource BorderSoftBrush}"/>
-                        <Grid Grid.Row="2">
+                        <Border Grid.Row="1" Height="1" Background="{StaticResource BorderSoftBrush}"
+                                Visibility="{Binding DecoderStatusVisibility}"/>
+                        <Grid Grid.Row="2" Margin="13,10"
+                              Visibility="{Binding MediaOutputStatusVisibility}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Ellipse Width="6" Height="6" VerticalAlignment="Center">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{StaticResource StatusPendingBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding MediaOutputTone}" Value="Applied">
+                                                <Setter Property="Fill" Value="{StaticResource StatusAppliedBrush}"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding MediaOutputTone}" Value="Failed">
+                                                <Setter Property="Fill" Value="{StaticResource StatusFailedBrush}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Grid.Column="2" Text="{Binding MediaOutputStatus}"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="11" TextWrapping="Wrap"
+                                       AutomationProperties.AutomationId="MediaOutputStatusText"/>
+                        </Grid>
+                        <Border Grid.Row="3" Height="1" Background="{StaticResource BorderSoftBrush}"
+                                Visibility="{Binding MediaOutputStatusVisibility}"/>
+                        <Grid Grid.Row="4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="1"/>
@@ -739,32 +785,49 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource ControlSectionCard}">
+                        <Border>
+                            <Border.Style>
+                                <Style TargetType="Border"
+                                       BasedOn="{StaticResource ControlSectionCard}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasCaptureSession}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsMediaCasting}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource ImageAndSound}" Style="{StaticResource ControlSectionTitle}"/>
-                                <StackPanel Visibility="{Binding WiredVideoLimitSettingsVisibility}">
+                                <StackPanel Visibility="{Binding VideoSettingsVisibility}">
                                     <TextBlock Text="{DynamicResource RenderLimitHelp}"
                                                Foreground="{StaticResource MutedTextBrush}" FontSize="9"
-                                               TextWrapping="Wrap" Margin="0,4,0,1"/>
+                                               TextWrapping="Wrap" Margin="0,4,0,1"
+                                               Visibility="{Binding WiredVideoLimitSettingsVisibility}"/>
 
-                                    <TextBlock Text="{DynamicResource RenderResolutionLimit}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
-                                    <ComboBox x:Name="ResolutionComboBox"
-                                              ItemsSource="{Binding ResolutionPresets}"
-                                              DisplayMemberPath="Label"
-                                              IsEnabled="{Binding CanChangeVideoPipeline}"
-                                              SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
+                                    <StackPanel Visibility="{Binding WiredVideoLimitSettingsVisibility}">
+                                        <TextBlock Text="{DynamicResource RenderResolutionLimit}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                        <ComboBox x:Name="ResolutionComboBox"
+                                                  ItemsSource="{Binding ResolutionPresets}"
+                                                  DisplayMemberPath="Label"
+                                                  IsEnabled="{Binding CanChangeVideoPipeline}"
+                                                  SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
 
-                                    <TextBlock Text="{DynamicResource TargetFrameRate}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
-                                    <ComboBox x:Name="FrameRateComboBox"
-                                              ItemsSource="{Binding FrameRates}"
-                                              IsEnabled="{Binding CanChangeVideoPipeline}"
-                                              SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
+                                        <TextBlock Text="{DynamicResource TargetFrameRate}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                        <ComboBox x:Name="FrameRateComboBox"
+                                                  ItemsSource="{Binding FrameRates}"
+                                                  IsEnabled="{Binding CanChangeVideoPipeline}"
+                                                  SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
+                                    </StackPanel>
 
                                     <TextBlock Text="{DynamicResource DecoderPreferenceLabel}"
                                                Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
                                     <ComboBox ItemsSource="{Binding DecoderPreferences}"
                                               DisplayMemberPath="Label"
-                                              IsEnabled="{Binding CanChangeVideoPipeline}"
+                                              IsEnabled="{Binding CanChangeDecoderPipeline}"
                                               SelectedItem="{Binding SelectedDecoderPreference, Mode=TwoWay}"/>
 
                                     <TextBlock Text="{DynamicResource VideoPipelinePreferenceHelp}"
@@ -815,7 +878,9 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource ControlSectionCard}">
+                        <Border x:Name="PreviewAndObsCard"
+                                Style="{StaticResource ControlSectionCard}"
+                                Visibility="{Binding PreviewAndObsVisibility}">
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource PreviewAndObs}" Style="{StaticResource ControlSectionTitle}"/>
                                 <UniformGrid Columns="2" Margin="0,10,0,0">
@@ -828,6 +893,12 @@
                                     <Button x:Name="ScreenshotButton" Content="{DynamicResource Screenshot}"
                                             Click="OnScreenshotClick" Style="{StaticResource ToolButton}" Margin="4,4,0,0"/>
                                 </UniformGrid>
+                                <Button Content="{DynamicResource MediaOutputButton}"
+                                        Command="{Binding MediaOutputSettingsCommand}"
+                                        Style="{StaticResource ToolButton}"
+                                        HorizontalAlignment="Stretch"
+                                        MinHeight="44" FontSize="13"
+                                        Margin="0,10,0,0"/>
                                 <TextBlock Text="{DynamicResource ObsWindowHelp}"
                                            Foreground="{StaticResource MutedTextBrush}" FontSize="9"
                                            TextWrapping="Wrap" Margin="0,9,0,0"/>

@@ -5,6 +5,46 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-28
+
+### Added
+
+- Add built-in MP4 recording, RTMP and SRT publishing, WebRTC/WHIP publishing,
+  and a Windows 11 Media Foundation virtual camera backed by the active
+  projection session.
+- Add a session-bound mirroring-settings window and a matching detached-window
+  context-menu command, while retaining decoder and image controls for wireless
+  sessions without showing unsupported resolution or frame-rate controls.
+- Add a loopback-only Stream Lab with automatic SRS/MediaMTX backend selection,
+  RTMP, SRT, WHIP/WHEP and browser virtual-camera verification at `tools/srs-lab`.
+
+### Changed
+
+- Let screenshots prompt for a destination and let recording start immediately,
+  then prompt for its destination after MP4 finalization.
+- Bundle and hash-verify an FFmpeg 8.1.2 runtime used by recording and live
+  video output.
+
+### Fixed
+
+- Bind image-adjustment windows to the exact native session that opened them,
+  close them on session replacement, and prevent normal window close when the
+  pre-edit values cannot be restored.
+- Serialize image and video settings operations while keeping image editing
+  modeless, so concurrent settings surfaces cannot mutate the same transaction.
+- Drive decoder status text and indicator color from native applied, pending,
+  failed and actual-runtime state instead of displaying a fixed success marker
+  or leaving wireless sessions at detecting.
+- Start media output from the newest buffered PCM packet instead of replaying
+  stale native audio, preventing several seconds of initial audio/video skew.
+- Keep video recording and live output running through PCM interruptions by
+  inserting clocked silence, then discard late audio backlog when PCM resumes.
+- Treat FFmpeg finalization timeouts and non-zero exit codes as failures, kill
+  stalled process trees, and never report a potentially damaged MP4 as saved.
+- Write recordings to `.partial.mp4` staging files and promote them only after
+  successful FFmpeg finalization, so crash remnants are not offered as complete
+  recordings after restart.
+
 ## [1.2.2] - 2026-07-28
 
 ### Added
@@ -408,7 +448,10 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.1.0-preview.1...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.2.2...v1.3.0
+[1.2.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.2.1...v1.2.2
+[1.2.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.1.0-preview.1...v1.2.1
 [1.1.0-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.3...v1.1.0-preview.1
 [1.0.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.1-preview.1...v1.0.3
 [1.0.1-preview.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.0.0...v1.0.1-preview.1

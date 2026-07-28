@@ -1,0 +1,191 @@
+<Window x:Class="IPhoneMirror.App.Windows.ProjectionSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{DynamicResource ProjectionSettingsTitle}"
+        Width="500" Height="760" MinWidth="460" MinHeight="620"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="{StaticResource AppBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}">
+    <Window.Resources>
+        <Style x:Key="DetailLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Margin" Value="0,13,0,3"/>
+        </Style>
+        <Style x:Key="ControlSectionCard" TargetType="Border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/>
+            <Setter Property="BorderThickness" Value="0,1,0,0"/>
+            <Setter Property="Padding" Value="0,14,0,0"/>
+            <Setter Property="Margin" Value="0,14,0,0"/>
+        </Style>
+        <Style x:Key="ControlSectionTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource PanelAltBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="8,7"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="14"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="{DynamicResource ProjectionSettingsTitle}"
+                           FontSize="21" FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding SelectedName}" FontSize="13" Margin="0,5,0,0"/>
+                <TextBlock Text="{Binding SelectedConnection}" FontSize="10"
+                           Foreground="{StaticResource MutedTextBrush}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="{DynamicResource StartMirroring}" Command="{Binding StartCommand}"
+                        Style="{StaticResource ToolButton}" MinWidth="72" Margin="0,0,8,0"/>
+                <Button Content="{DynamicResource StopMirroring}" Command="{Binding StopCommand}"
+                        Style="{StaticResource ToolButton}" MinWidth="72"/>
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="2" Style="{StaticResource CardBorder}" Padding="18,4,10,18">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="0,0,8,0">
+                    <Border Style="{StaticResource ControlSectionCard}"
+                            Visibility="{Binding WirelessTopSettingsVisibility}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource WirelessReceiverTitle}"
+                                       Style="{StaticResource ControlSectionTitle}"/>
+                            <TextBlock Text="{DynamicResource WirelessResolutionLabel}"
+                                       Style="{StaticResource DetailLabel}"/>
+                            <ComboBox ItemsSource="{Binding WirelessDisplayProfiles}"
+                                      DisplayMemberPath="Label"
+                                      SelectedItem="{Binding SelectedWirelessDisplayProfile, Mode=TwoWay}"/>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding WirelessReceiverName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource RoundedTextBox}" MaxLength="63" Height="36"/>
+                                <Button Grid.Column="2" Content="{DynamicResource ApplyWirelessSettings}"
+                                        Command="{Binding ApplyWirelessSettingsCommand}"
+                                        Style="{StaticResource ToolButton}"/>
+                            </Grid>
+                            <TextBlock Text="{Binding WirelessStatus}" FontSize="10" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}" Margin="0,7,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource ControlSectionCard}"
+                            Visibility="{Binding VideoSettingsVisibility}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource ImageAndSound}"
+                                       Style="{StaticResource ControlSectionTitle}"/>
+                            <StackPanel Visibility="{Binding WiredVideoLimitSettingsVisibility}">
+                                <TextBlock Text="{DynamicResource RenderResolutionLimit}"
+                                           Style="{StaticResource DetailLabel}"/>
+                                <ComboBox ItemsSource="{Binding ResolutionPresets}" DisplayMemberPath="Label"
+                                          IsEnabled="{Binding CanChangeVideoPipeline}"
+                                          SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
+                                <TextBlock Text="{DynamicResource TargetFrameRate}"
+                                           Style="{StaticResource DetailLabel}"/>
+                                <ComboBox ItemsSource="{Binding FrameRates}"
+                                          IsEnabled="{Binding CanChangeVideoPipeline}"
+                                          SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
+                            </StackPanel>
+                            <TextBlock Text="{DynamicResource DecoderPreferenceLabel}"
+                                       Style="{StaticResource DetailLabel}"/>
+                            <ComboBox ItemsSource="{Binding DecoderPreferences}" DisplayMemberPath="Label"
+                                      IsEnabled="{Binding CanChangeDecoderPipeline}"
+                                      SelectedItem="{Binding SelectedDecoderPreference, Mode=TwoWay}"/>
+                            <Grid Margin="0,11,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Content="{DynamicResource ApplyVideoSettings}"
+                                        Command="{Binding ApplyVideoSettingsCommand}"
+                                        Style="{StaticResource ToolButton}"/>
+                                <Button Grid.Column="2" Content="{DynamicResource MoreImageSettingsButton}"
+                                        Command="{Binding MoreImageSettingsCommand}"
+                                        Style="{StaticResource ToolButton}"/>
+                            </Grid>
+                            <TextBlock Text="{Binding SettingsStatus}" FontSize="10" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}" Margin="0,7,0,0"/>
+                            <TextBlock Text="{Binding DecoderStatus}" FontSize="10" TextWrapping="Wrap"
+                                       Visibility="{Binding DecoderStatusVisibility}"
+                                       Foreground="{StaticResource MutedTextBrush}" Margin="0,5,0,0"/>
+
+                            <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,14,0,12"/>
+                            <CheckBox Content="{DynamicResource PlayAudioWindows}"
+                                      IsChecked="{Binding PlayAudio, Mode=TwoWay}"/>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{DynamicResource PlaybackVolume}"
+                                           Foreground="{StaticResource MutedTextBrush}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding PlaybackVolume, StringFormat={}{0:F0}%}"/>
+                            </Grid>
+                            <Slider Minimum="0" Maximum="100"
+                                    Value="{Binding PlaybackVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    Margin="0,5,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border>
+                        <Border.Style>
+                            <Style TargetType="Border"
+                                   BasedOn="{StaticResource ControlSectionCard}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasCaptureSession}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsMediaCasting}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource PreviewAndObs}"
+                                       Style="{StaticResource ControlSectionTitle}"/>
+                            <UniformGrid Columns="2" Margin="0,10,0,0">
+                                <Button Content="{DynamicResource RefreshFrame}" Click="OnRefreshClick"
+                                        Style="{StaticResource ToolButton}" Margin="0,0,4,4"/>
+                                <Button Content="{DynamicResource FullScreenPreview}" Click="OnFullScreenClick"
+                                        Style="{StaticResource ToolButton}" Margin="4,0,0,4"/>
+                                <Button Content="{DynamicResource SeparateWindow}" Click="OnSeparateWindowClick"
+                                        Style="{StaticResource ToolButton}" Margin="0,4,4,0"/>
+                                <Button Content="{DynamicResource Screenshot}" Click="OnScreenshotClick"
+                                        Style="{StaticResource ToolButton}" Margin="4,4,0,0"/>
+                            </UniformGrid>
+                            <Button Content="{DynamicResource MediaOutputButton}"
+                                    Click="OnMediaOutputClick"
+                                    Style="{StaticResource ToolButton}"
+                                    HorizontalAlignment="Stretch"
+                                    MinHeight="44" FontSize="13"
+                                    Margin="0,10,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,11 @@
+LIBRARY "iPhoneMirror.VirtualCamera.dll"
+EXPORTS
+    DllCanUnloadNow PRIVATE
+    DllGetClassObject PRIVATE
+    im_vcam_get_status
+    im_vcam_publish_bgra
+    im_vcam_register_media_source
+    im_vcam_start
+    im_vcam_start_ex
+    im_vcam_stop
+    im_vcam_unregister_media_source

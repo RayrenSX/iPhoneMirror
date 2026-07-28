@@ -332,6 +332,16 @@ std::shared_ptr<const media::DecodedFrame> WirelessClientStream::next_render_fra
     return frame;
 }
 
+std::shared_ptr<const AudioPacket> WirelessClientStream::next_audio_packet(
+    std::uint64_t after_sequence) const {
+    std::scoped_lock lock(audio_mutex_);
+    const auto found = std::find_if(audio_output_queue_.begin(),
+        audio_output_queue_.end(), [after_sequence](const auto& packet) {
+            return packet && packet->sequence > after_sequence;
+        });
+    return found == audio_output_queue_.end() ? nullptr : *found;
+}
+
 void WirelessClientStream::set_audio_enabled(bool enabled) noexcept {
     play_audio_.store(enabled, std::memory_order_relaxed);
     std::scoped_lock lock(audio_mutex_);
@@ -426,6 +436,15 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
             std::scoped_lock stream_lock(mutex_);
             if (!connected_ || attachments_ == 0) return;
         }
+        auto packet = std::make_shared<AudioPacket>();
+        packet->sequence = ++audio_output_sequence_;
+        packet->sample_rate = header.sample_rate;
+        packet->channels = header.channels;
+        packet->bits_per_sample = header.bits_per_sample;
+        packet->pcm.assign(payload.begin(), payload.end());
+        audio_output_queue_.push_back(std::move(packet));
+        while (audio_output_queue_.size() > 256)
+            audio_output_queue_.pop_front();
         const auto format_changed = audio_sample_rate_ != header.sample_rate ||
             audio_channels_ != header.channels || audio_bits_ != header.bits_per_sample;
         if (format_changed || (!audio_renderer_ && !audio_renderer_failed_)) {
@@ -480,6 +499,7 @@ void WirelessClientStream::stop_audio_renderer() noexcept {
     {
         std::scoped_lock lock(audio_mutex_);
         renderer = std::move(audio_renderer_);
+        audio_output_queue_.clear();
         audio_sample_rate_ = 0;
         audio_channels_ = audio_bits_ = 0;
         audio_renderer_failed_ = false;

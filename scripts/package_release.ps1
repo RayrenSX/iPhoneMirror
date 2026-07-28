@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.2.2',
+    [string]$Version = '1.3.0',
     [switch]$SkipBuild,
     [switch]$GenerateSbom
 )
@@ -24,10 +24,22 @@ $StagedSbomAsset = Join-Path $StagingRoot "$PackageName-sbom.spdx.json"
 $StagedChecksum = Join-Path $StagingRoot 'SHA256SUMS.txt'
 $LegacyArchive = Join-Path $Root 'outputs\iPhoneMirror-video-app-discovery-fix.zip'
 $PreserveStagingRoot = $false
+$MediaOutputManifestPath = Join-Path $Root 'scripts\ffmpeg-runtime-manifest.psd1'
+if (-not (Test-Path -LiteralPath $MediaOutputManifestPath -PathType Leaf)) {
+    throw "Media-output FFmpeg manifest is missing: $MediaOutputManifestPath"
+}
+$MediaOutputManifest = Import-PowerShellDataFile -LiteralPath $MediaOutputManifestPath
+$MediaOutputRuntimeHashes = [Collections.IDictionary]$MediaOutputManifest.Files
 
 $RequiredArtifacts = @(
     'iPhoneMirror.exe',
     'iPhoneMirror.Core.dll',
+    'iPhoneMirror.VirtualCamera.dll',
+    'iPhoneMirror.VirtualCamera.Admin.exe',
+    'tools\ffmpeg\ffmpeg.exe',
+    'tools\ffmpeg\LICENSE.txt',
+    'tools\ffmpeg\README.txt',
+    'tools\ffmpeg\SOURCE.txt',
     'iPhoneMirror.Driver.exe',
     'libusb-1.0.dll',
     'LICENSE',
@@ -158,6 +170,22 @@ function Assert-PublishedOutput {
     if ((Get-FileHash -LiteralPath $sourceLicense -Algorithm SHA256).Hash -ne
         (Get-FileHash -LiteralPath $publishedLicense -Algorithm SHA256).Hash) {
         throw 'Published libusb license does not match the vendored license.'
+    }
+
+    foreach ($entry in $MediaOutputRuntimeHashes.GetEnumerator()) {
+        $name = [string]$entry.Key
+        $published = Join-Path (Join-Path $PublishRoot 'tools\ffmpeg') $name
+        $actual = (Get-FileHash -LiteralPath $published -Algorithm SHA256).Hash
+        if ($actual -ne [string]$entry.Value) {
+            throw "Published media-output runtime hash mismatch for ${name}: expected $($entry.Value), got $actual"
+        }
+    }
+    $sourceRecord = Get-Content -LiteralPath `
+        (Join-Path $PublishRoot 'tools\ffmpeg\SOURCE.txt') -Raw
+    if ($sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.Version) -or
+        $sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.ArchiveSha256) -or
+        $sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.DownloadUrl)) {
+        throw 'Published media-output FFmpeg source record does not match the pinned manifest.'
     }
 }
 
@@ -368,6 +396,17 @@ try {
                 copyrightText = 'NOASSERTION'
                 versionInfo = '4.4.2'
                 supplier = 'Organization: FFmpeg project'
+            },
+            [PSCustomObject][ordered]@{
+                name = 'FFmpeg media-output runtime'
+                SPDXID = 'SPDXRef-Package-FFmpeg-8.1.2-Gyan'
+                downloadLocation = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip'
+                filesAnalyzed = $false
+                licenseConcluded = 'GPL-3.0-only'
+                licenseDeclared = 'GPL-3.0-only'
+                copyrightText = 'NOASSERTION'
+                versionInfo = '8.1.2'
+                supplier = 'Organization: gyan.dev'
             }
         )
         foreach ($NativePackage in $NativePackages) {

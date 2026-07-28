@@ -1,0 +1,299 @@
+<Window x:Class="IPhoneMirror.App.Windows.MediaOutputSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{DynamicResource MediaOutputTitle}"
+        Width="560" Height="660" MinWidth="500" MinHeight="560"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="{StaticResource AppBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}">
+    <Window.Resources>
+        <Style x:Key="DetailLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Margin" Value="0,12,0,4"/>
+        </Style>
+        <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource PanelAltBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="10,7"/>
+        </Style>
+        <Style x:Key="SectionCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Margin" Value="0,12,0,0"/>
+        </Style>
+        <Style x:Key="OutputTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Background" Value="{StaticResource PanelAltBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <TextBlock Text="{TemplateBinding Header}"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsSelected" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="TabRoot" Property="Background" Value="#252525"/>
+                                <Setter TargetName="TabRoot" Property="BorderBrush" Value="#5A5A5A"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource OnAccentBrush}"/>
+                                <Setter TargetName="TabRoot" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="TabRoot" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="TabRoot" Property="Opacity" Value="0.42"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="OutputTabControlStyle" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource OutputTabItemStyle}"/>
+            <Setter Property="ItemsPanel">
+                <Setter.Value>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Rows="1"/>
+                    </ItemsPanelTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <ItemsPresenter x:Name="HeaderPanel"
+                                            KeyboardNavigation.TabIndex="1"
+                                            Panel.ZIndex="1"/>
+                            <ContentPresenter x:Name="PART_SelectedContentHost"
+                                              Grid.Row="1"
+                                              ContentSource="SelectedContent"
+                                              SnapsToDevicePixels="True"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="{DynamicResource MediaOutputTitle}" FontSize="21" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding SelectedName}" FontSize="13" Margin="0,5,0,0"/>
+            <TextBlock Text="{Binding MediaOutputCapabilitiesText}" FontSize="10"
+                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+        </StackPanel>
+
+        <TabControl Grid.Row="2" Style="{StaticResource OutputTabControlStyle}">
+            <TabItem Header="{DynamicResource RecordTab}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Border Style="{StaticResource SectionCard}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource RecordDescription}" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{DynamicResource OutputWidth}" Style="{StaticResource DetailLabel}"/>
+                                    <TextBox x:Name="RecordWidthBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="{DynamicResource OutputHeight}" Style="{StaticResource DetailLabel}"/>
+                                    <TextBox x:Name="RecordHeightBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                </StackPanel>
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{DynamicResource OutputFps}" Style="{StaticResource DetailLabel}"/>
+                                    <TextBox x:Name="RecordFpsBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="{DynamicResource OutputBitrate}" Style="{StaticResource DetailLabel}"/>
+                                    <TextBox x:Name="RecordBitrateBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                </StackPanel>
+                            </Grid>
+                            <Button x:Name="StartRecordingButton"
+                                    Content="{DynamicResource StartRecording}" Click="OnStartRecordingClick"
+                                    IsEnabled="False"
+                                    Style="{StaticResource PrimaryButton}" Margin="0,18,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="{DynamicResource StreamTab}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Border Style="{StaticResource SectionCard}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource StreamDescription}" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                            <TextBlock Text="{DynamicResource StreamProtocol}" Style="{StaticResource DetailLabel}"/>
+                            <ComboBox x:Name="StreamProtocolBox" SelectedIndex="0"
+                                      SelectionChanged="OnStreamProtocolChanged">
+                                <ComboBoxItem x:Name="RtmpProtocolItem" Content="RTMP"
+                                              IsEnabled="{Binding DataContext.CanStreamRtmp, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                <ComboBoxItem x:Name="SrtProtocolItem" Content="SRT"
+                                              IsEnabled="{Binding DataContext.CanStreamSrt, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                <ComboBoxItem x:Name="WhipProtocolItem" Content="WebRTC / WHIP"
+                                              IsEnabled="{Binding DataContext.CanStreamWhip, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                            </ComboBox>
+                            <TextBlock Text="{DynamicResource StreamDestination}" Style="{StaticResource DetailLabel}"/>
+                            <TextBox x:Name="StreamDestinationBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                            <TextBlock Text="{DynamicResource StreamAuthorization}" Style="{StaticResource DetailLabel}"/>
+                            <TextBox x:Name="StreamAuthorizationBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{DynamicResource OutputWidth}" Style="{StaticResource DetailLabel}"/>
+                                    <TextBox x:Name="StreamWidthBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="{DynamicResource OutputHeight}" Style="{StaticResource DetailLabel}"/>
+                                    <TextBox x:Name="StreamHeightBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                </StackPanel>
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{DynamicResource OutputFps}" Style="{StaticResource DetailLabel}"/>
+                                    <TextBox x:Name="StreamFpsBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="{DynamicResource OutputBitrate}" Style="{StaticResource DetailLabel}"/>
+                                    <TextBox x:Name="StreamBitrateBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                </StackPanel>
+                            </Grid>
+                            <Button x:Name="StartStreamingButton"
+                                    Content="{DynamicResource StartStreaming}" Click="OnStartStreamingClick"
+                                    IsEnabled="False"
+                                    Style="{StaticResource PrimaryButton}" Margin="0,18,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="{DynamicResource VirtualCameraTab}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource VirtualCameraDescription}" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource ResolutionLabel}"
+                                           Style="{StaticResource DetailLabel}"/>
+                                <ComboBox x:Name="VirtualCameraResolutionBox">
+                                    <ComboBoxItem x:Name="VirtualCameraCurrentResolutionItem"
+                                                  Visibility="Collapsed"/>
+                                    <ComboBoxItem Content="1280 x 720" Tag="1280x720"/>
+                                    <ComboBoxItem Content="1920 x 1080" Tag="1920x1080"/>
+                                    <ComboBoxItem Content="720 x 1280" Tag="720x1280"/>
+                                    <ComboBoxItem Content="1080 x 1920" Tag="1080x1920"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="{DynamicResource OutputFps}"
+                                           Style="{StaticResource DetailLabel}"/>
+                                <ComboBox x:Name="VirtualCameraFpsBox">
+                                    <ComboBoxItem Content="30 fps" Tag="30"/>
+                                    <ComboBoxItem Content="60 fps" Tag="60"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="{Binding VirtualCameraStatusText}" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" FontSize="12"
+                                   Margin="0,14,0,0"/>
+                        <Button Content="{Binding VirtualCameraInstallActionText}"
+                                Click="OnInstallVirtualCameraClick"
+                                IsEnabled="{Binding CanInstallVirtualCamera}"
+                                Visibility="{Binding VirtualCameraInstallVisibility}"
+                                Style="{StaticResource PrimaryButton}" Margin="0,18,0,0"/>
+                        <Button Content="{DynamicResource StartVirtualCamera}"
+                                Click="OnStartVirtualCameraClick"
+                                IsEnabled="{Binding CanUseVirtualCamera}"
+                                Visibility="{Binding VirtualCameraStartVisibility}"
+                                Style="{StaticResource PrimaryButton}" Margin="0,18,0,0"/>
+                        <Button Content="{DynamicResource UninstallVirtualCamera}"
+                                Click="OnUninstallVirtualCameraClick"
+                                IsEnabled="{Binding CanUninstallVirtualCamera}"
+                                Visibility="{Binding VirtualCameraUninstallVisibility}"
+                                Style="{StaticResource ToolButton}" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <Grid Grid.Row="3" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="FeedbackText" Text="{Binding MediaOutputStatus}"
+                       VerticalAlignment="Center" TextWrapping="Wrap"
+                       Foreground="{StaticResource MutedTextBrush}" FontSize="11"/>
+            <Button Grid.Column="2" Content="{DynamicResource StopMediaOutput}"
+                    Click="OnStopClick" Style="{StaticResource ToolButton}"
+                    IsEnabled="{Binding CanStopMediaOutput}" MinWidth="110"/>
+        </Grid>
+    </Grid>
+</Window>

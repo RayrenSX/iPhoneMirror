@@ -516,6 +516,7 @@ void CaptureSession::stop_audio_renderer() noexcept {
     {
         std::scoped_lock lock(audio_mutex_);
         renderer = std::move(audio_renderer_);
+        audio_output_queue_.clear();
     }
     renderer.reset();
 }
@@ -582,6 +583,16 @@ std::shared_ptr<const media::DecodedFrame> CaptureSession::next_render_frame() {
             selected, depth, dropped, stale_total, pipeline_ms));
     }
     return frame;
+}
+
+std::shared_ptr<const AudioPacket> CaptureSession::next_audio_packet(
+    std::uint64_t after_sequence) const {
+    std::scoped_lock lock(audio_mutex_);
+    const auto found = std::find_if(audio_output_queue_.begin(),
+        audio_output_queue_.end(), [after_sequence](const auto& packet) {
+            return packet && packet->sequence > after_sequence;
+        });
+    return found == audio_output_queue_.end() ? nullptr : *found;
 }
 
 void CaptureSession::set_state(State state, std::wstring message) {
@@ -1510,7 +1521,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     if (enqueued) video_queue_cv.notify_one();
                 }
 
-                if (event.audio_sample && !audio_initialization_disabled) {
+                if (event.audio_sample) {
                     last_audio_activity_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now().time_since_epoch()).count(),
                         std::memory_order_release);
@@ -1523,7 +1534,24 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     }
                     if (audio_format && audio_format->audio) {
                         std::scoped_lock lock(audio_mutex_);
-                        if (!audio_renderer_) {
+                        const auto layout = audio::detail::checked_wasapi_buffer_layout(
+                            *audio_format->audio);
+                        if (layout && !sample.sample_data.empty()) {
+                            auto audio_output = std::make_shared<AudioPacket>();
+                            audio_output->sequence = ++audio_output_sequence_;
+                            audio_output->sample_rate = static_cast<std::uint32_t>(
+                                audio_format->audio->sample_rate);
+                            audio_output->channels = static_cast<std::uint16_t>(
+                                audio_format->audio->channels_per_frame);
+                            audio_output->bits_per_sample = static_cast<std::uint16_t>(
+                                audio_format->audio->bits_per_channel);
+                            audio_output->pcm.assign(sample.sample_data.begin(),
+                                sample.sample_data.end());
+                            audio_output_queue_.push_back(std::move(audio_output));
+                            while (audio_output_queue_.size() > 256)
+                                audio_output_queue_.pop_front();
+                        }
+                        if (!audio_initialization_disabled && !audio_renderer_) {
                             try {
                                 audio_renderer_ = std::make_unique<audio::WasapiRenderer>(
                                     *audio_format->audio,
@@ -1535,7 +1563,8 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                 audio_initialization_disabled = true;
                             }
                         }
-                        if (audio_renderer_) audio_renderer_->enqueue(sample.sample_data);
+                        if (!audio_initialization_disabled && audio_renderer_)
+                            audio_renderer_->enqueue(sample.sample_data);
                     }
                 }
 

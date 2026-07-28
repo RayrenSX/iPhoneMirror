@@ -656,6 +656,7 @@ struct MediaFoundationVideoDecoder::Impl {
     bool dxva_requested{};
     bool acceleration_query_complete{};
     bool acceleration_query_exhausted{};
+    bool saw_dxgi_output{};
     std::uint32_t acceleration_query_attempts{};
     std::chrono::steady_clock::time_point next_acceleration_query{};
     std::uint32_t pending_input_requests{};
@@ -688,6 +689,7 @@ struct MediaFoundationVideoDecoder::Impl {
         dxva_requested = false;
         acceleration_query_complete = false;
         acceleration_query_exhausted = false;
+        saw_dxgi_output = false;
         acceleration_query_attempts = 0;
         next_acceleration_query = {};
         pending_input_requests = 0;
@@ -902,7 +904,8 @@ struct MediaFoundationVideoDecoder::Impl {
         actual_acceleration = preference == DecoderPreference::SoftwareCompatible
             ? detail::DecoderAcceleration::Software
             : candidate.hardware ? detail::DecoderAcceleration::Hardware
-                                 : detail::DecoderAcceleration::Unknown;
+            : !dxva_requested ? detail::DecoderAcceleration::Software
+                              : detail::DecoderAcceleration::Unknown;
         selected_hardware = actual_acceleration == detail::DecoderAcceleration::Hardware;
         configured = true;
         sent_parameter_sets = false;
@@ -994,6 +997,16 @@ struct MediaFoundationVideoDecoder::Impl {
             acceleration_query_complete = true;
         } else if (acceleration_query_attempts >= MaxQueryAttempts) {
             acceleration_query_exhausted = true;
+            // Some inbox MFTs do not expose CODECAPI_AVDecVideoDXVAMode. A
+            // DXGI-backed sample is definitive hardware evidence; after the
+            // bounded query window, CPU-backed output from a software MFT is
+            // definitive enough to avoid reporting "detecting" forever.
+            actual_acceleration = selected_candidate_hardware || saw_dxgi_output
+                ? detail::DecoderAcceleration::Hardware
+                : detail::DecoderAcceleration::Software;
+            selected_hardware =
+                actual_acceleration == detail::DecoderAcceleration::Hardware;
+            acceleration_query_complete = true;
         }
         logging::write(std::format(
             "mf_decoder acceleration candidate={} dxva_requested={} "
@@ -1107,6 +1120,10 @@ struct MediaFoundationVideoDecoder::Impl {
             throw;
         }
         d3d_context->Unmap(readback_texture.Get(), 0);
+        saw_dxgi_output = true;
+        actual_acceleration = detail::DecoderAcceleration::Hardware;
+        selected_hardware = true;
+        acceleration_query_complete = true;
         return true;
     }
 

@@ -16,6 +16,34 @@ static void Sequence(IEnumerable<string> expected, IEnumerable<string> actual, s
             $"{name}: expected [{string.Join(",", expected)}], got [{string.Join(",", actual)}]");
 }
 
+static void Throws<TException>(Action action, string name)
+    where TException : Exception
+{
+    try
+    {
+        action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+    throw new InvalidOperationException($"{name}: expected {typeof(TException).Name}");
+}
+
+static async Task ThrowsAsync<TException>(Func<Task> action, string name)
+    where TException : Exception
+{
+    try
+    {
+        await action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+    throw new InvalidOperationException($"{name}: expected {typeof(TException).Name}");
+}
+
 var localizationDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "Localization"));
 XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
@@ -32,6 +60,17 @@ foreach (var localizationPath in Directory.GetFiles(
     Equal(0, duplicateKeys.Length,
         $"localization resource keys are unique in {Path.GetFileName(localizationPath)}");
 }
+
+var mainWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+    "..", "..", "..", "..", "App", "MainWindow.xaml"));
+var mainWindow = XDocument.Load(mainWindowPath);
+var previewAndObsCard = mainWindow.Descendants()
+    .SingleOrDefault(element =>
+        string.Equals((string?)element.Attribute(xaml + "Name"),
+            "PreviewAndObsCard", StringComparison.Ordinal));
+Equal("{Binding PreviewAndObsVisibility}",
+    (string?)previewAndObsCard?.Attribute("Visibility"),
+    "preview and OBS card follows the active projection session");
 
 // usbmux may reverse its enumeration order on every poll. Existing cards must
 // never move, while a newly connected phone is appended exactly once.
@@ -155,6 +194,354 @@ Equal(true, MediaSourceClassifier.IsLikelyLive(
 Equal(false, MediaSourceClassifier.IsLikelyLive(
         new Uri("https://example.test/library/video.mp4")),
     "ordinary MP4 remains on-demand media");
+
+var ffmpegCapabilities = MediaOutputService.CreateCapabilities("ffmpeg.exe",
+    " V..... h264_mf\n V..... libx264\n A..... aac\n A..... libopus ",
+    "Input:\nrtmp\nOutput:\nrtmp\nsrt", " E flv\n E mpegts\n E whip");
+Equal("libx264", ffmpegCapabilities.PreferredH264Encoder,
+    "libx264 is preferred when software and Media Foundation encoders are available");
+Equal(true, ffmpegCapabilities.Supports(MediaOutputKind.Recording),
+    "recording requires FFmpeg and an H.264 encoder");
+Equal(true, ffmpegCapabilities.Supports(MediaOutputKind.Rtmp),
+    "RTMP requires its protocol and FLV muxer");
+Equal(true, ffmpegCapabilities.Supports(MediaOutputKind.Srt),
+    "SRT requires its protocol and MPEG-TS muxer");
+Equal(true, ffmpegCapabilities.Supports(MediaOutputKind.Whip),
+    "WHIP requires its muxer");
+
+var mediaFoundationOnly = MediaOutputService.CreateCapabilities("ffmpeg.exe",
+    " V..... h264_mf\n A..... aac\n A..... libopus ", "rtmp", "flv");
+Equal("h264_mf", mediaFoundationOnly.PreferredH264Encoder,
+    "Media Foundation encoder is the hardware fallback");
+Equal(false, mediaFoundationOnly.Supports(MediaOutputKind.Srt),
+    "missing SRT capability is gated");
+Equal(string.Empty, MediaOutputService.SelectPreferredH264Encoder(
+        " V..... libx264rgb "),
+    "encoder selection requires an exact FFmpeg encoder token");
+var noEncoder = MediaOutputService.CreateCapabilities("ffmpeg.exe",
+    " V..... hevc_mf ", "rtmp srt", "flv mpegts whip");
+Equal(false, noEncoder.Supports(MediaOutputKind.Recording),
+    "protocol support cannot bypass a missing H.264 encoder");
+Equal(false, noEncoder.Supports(MediaOutputKind.Rtmp),
+    "RTMP is gated when no compatible encoder exists");
+Equal(false, noEncoder.Supports((MediaOutputKind)999),
+    "unknown output kinds are never reported as supported");
+
+var recordingArguments = MediaOutputService.BuildArguments(
+    new MediaOutputRequest(MediaOutputKind.Recording, "capture.mp4", 1280, 720, 30, 6000),
+    ffmpegCapabilities);
+Sequence(["-hide_banner", "-loglevel", "warning", "-nostdin",
+        "-thread_queue_size", "512", "-f", "s16le", "-ar", "48000", "-ac", "2",
+        "-i", @"\\.\pipe\iphoneMirror-audio-test", "-f", "rawvideo",
+        "-pixel_format", "bgra", "-video_size", "1280x720", "-framerate", "30",
+        "-i", "pipe:0", "-map", "1:v:0", "-map", "0:a:0", "-c:v", "libx264",
+        "-preset", "veryfast", "-tune",
+        "zerolatency", "-pix_fmt", "yuv420p", "-g", "60", "-b:v", "6000k",
+        "-maxrate", "6000k", "-bufsize", "12000k", "-c:a", "aac",
+        "-b:a", "192k", "-movflags", "+faststart",
+        "-y", "capture.mp4"],
+    recordingArguments,
+    "recording opens the audio pipe before stdin video and keeps stable mapping");
+
+var silentRecordingArguments = MediaOutputService.BuildArguments(
+    new MediaOutputRequest(MediaOutputKind.Recording, "silent.mp4", 1280, 720, 30, 6000),
+    ffmpegCapabilities, audioPipePath: null, includeAudio: false);
+Equal(true, silentRecordingArguments.Contains("-an", StringComparer.Ordinal),
+    "recording can start without waiting for projection audio");
+Equal(false, silentRecordingArguments.Contains("s16le", StringComparer.Ordinal),
+    "video-only recording does not create an unavailable audio input");
+Sequence(["-movflags", "+faststart", "-y", "silent.mp4"],
+    silentRecordingArguments.TakeLast(4),
+    "video-only recording still finalizes a seekable MP4");
+
+var queuedAudio = new[]
+{
+    new IPhoneMirror.App.Interop.AudioPacket(41, 48000, 2, 16, new byte[4]),
+    new IPhoneMirror.App.Interop.AudioPacket(42, 48000, 2, 16, new byte[4]),
+    new IPhoneMirror.App.Interop.AudioPacket(43, 48000, 2, 16, new byte[4]),
+};
+var newestAudio = MediaOutputService.ReadNewestAvailableAudioPacket(
+    afterSequence => queuedAudio.FirstOrDefault(packet => packet.Sequence > afterSequence),
+    0);
+Equal(43UL, newestAudio?.Sequence ?? 0,
+    "output startup drains queued PCM and starts from the newest packet");
+Throws<InvalidDataException>(() =>
+        MediaOutputService.ReadNewestAvailableAudioPacket(
+            _ => new IPhoneMirror.App.Interop.AudioPacket(
+                7, 48000, 2, 16, new byte[4]), 7),
+    "non-advancing audio sequence is rejected");
+
+var pendingDirectory = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-pending-test-{Guid.NewGuid():N}");
+Directory.CreateDirectory(pendingDirectory);
+try
+{
+    var olderPending = Path.Combine(pendingDirectory, "older.mp4");
+    var newerPending = Path.Combine(pendingDirectory, "newer.mp4");
+    var emptyPending = Path.Combine(pendingDirectory, "incomplete.mp4");
+    var partialPending = PendingRecordingStore.CreateStagingPath(
+        Path.Combine(pendingDirectory, "crashed.mp4"));
+    File.WriteAllBytes(olderPending, [1]);
+    File.WriteAllBytes(newerPending, [2]);
+    File.WriteAllBytes(emptyPending, []);
+    File.WriteAllBytes(partialPending, [3]);
+    File.SetLastWriteTimeUtc(olderPending, DateTime.UtcNow.AddMinutes(-2));
+    File.SetLastWriteTimeUtc(newerPending, DateTime.UtcNow.AddMinutes(-1));
+    File.SetLastWriteTimeUtc(emptyPending, DateTime.UtcNow);
+    File.SetLastWriteTimeUtc(partialPending, DateTime.UtcNow.AddMinutes(1));
+    Equal(newerPending, PendingRecordingStore.FindLatest(pendingDirectory),
+        "restart recovery ignores a newer non-empty partial recording");
+}
+finally
+{
+    Directory.Delete(pendingDirectory, recursive: true);
+}
+
+var rtmpArguments = MediaOutputService.BuildArguments(
+    new MediaOutputRequest(MediaOutputKind.Rtmp, "rtmps://example.test/live", 1920, 1080,
+        60, 9000), mediaFoundationOnly);
+Equal(false, rtmpArguments.Contains("-preset", StringComparer.Ordinal),
+    "h264_mf does not receive libx264-only tuning arguments");
+Sequence(["-f", "flv", "rtmps://example.test/live"], rtmpArguments.TakeLast(3),
+    "RTMP output uses the FLV muxer");
+
+var srtArguments = MediaOutputService.BuildArguments(
+    new MediaOutputRequest(MediaOutputKind.Srt, "srt://example.test:9000", 1280, 720,
+        30, 5000), ffmpegCapabilities);
+Sequence(["-f", "mpegts", "srt://example.test:9000"], srtArguments.TakeLast(3),
+    "SRT output uses the MPEG-TS muxer");
+var whipArguments = MediaOutputService.BuildArguments(
+    new MediaOutputRequest(MediaOutputKind.Whip, "https://example.test/whip", 1280, 720,
+        30, 5000, " Bearer secret "), ffmpegCapabilities);
+Sequence(["-authorization", "secret", "-f", "whip",
+        "https://example.test/whip"], whipArguments.TakeLast(5),
+    "WHIP output passes the token expected by FFmpeg without a duplicate bearer prefix");
+Sequence(["-c:a", "libopus", "-ac", "2", "-b:a", "128k"],
+    whipArguments.SkipWhile(argument => argument != "-c:a").Take(6),
+    "WHIP output always converts source audio to RTC-compatible stereo Opus");
+Equal("opaque-token", MediaOutputService.NormalizeWhipToken(" opaque-token "),
+    "WHIP token normalization preserves an opaque token");
+Equal(string.Empty, MediaOutputService.NormalizeWhipToken("Bearer"),
+    "an empty bearer authorization is omitted");
+Throws<ArgumentOutOfRangeException>(() => MediaOutputService.BuildArguments(
+        new MediaOutputRequest((MediaOutputKind)999, "invalid", 1280, 720, 30, 5000),
+        ffmpegCapabilities),
+    "unknown output kind is rejected during argument construction");
+
+var portraitPixels = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+await using (var portraitOutput = new MemoryStream())
+{
+    await MediaOutputService.WriteFrameAsync(portraitOutput,
+        new IPhoneMirror.App.Interop.VideoFrame(2, 4, 8, 1, portraitPixels),
+        4, 4, new byte[64], CancellationToken.None);
+    var output = portraitOutput.ToArray();
+    Equal(64, output.Length, "portrait output keeps the requested fixed canvas size");
+    for (var row = 0; row < 4; ++row)
+    {
+        Equal(true, output.AsSpan(row * 16, 4).SequenceEqual(new byte[4]),
+            $"portrait row {row} has a black left pillar");
+        Equal(true, output.AsSpan(row * 16 + 4, 8)
+                .SequenceEqual(portraitPixels.AsSpan(row * 8, 8)),
+            $"portrait row {row} is centered without distortion");
+        Equal(true, output.AsSpan(row * 16 + 12, 4).SequenceEqual(new byte[4]),
+            $"portrait row {row} has a black right pillar");
+    }
+}
+
+var landscapePixels = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+await using (var landscapeOutput = new MemoryStream())
+{
+    await MediaOutputService.WriteFrameAsync(landscapeOutput,
+        new IPhoneMirror.App.Interop.VideoFrame(4, 2, 16, 2, landscapePixels),
+        4, 4, new byte[64], CancellationToken.None);
+    var output = landscapeOutput.ToArray();
+    Equal(true, output.AsSpan(0, 16).SequenceEqual(new byte[16]),
+        "landscape output has a black top bar");
+    Equal(true, output.AsSpan(16, 32).SequenceEqual(landscapePixels),
+        "landscape output is vertically centered without distortion");
+    Equal(true, output.AsSpan(48, 16).SequenceEqual(new byte[16]),
+        "landscape output has a black bottom bar");
+}
+
+await ThrowsAsync<InvalidDataException>(() => MediaOutputService.WriteFrameAsync(
+        Stream.Null,
+        new IPhoneMirror.App.Interop.VideoFrame(8, 8, 32, 3, new byte[256]),
+        4, 4, new byte[64], CancellationToken.None),
+    "a native frame larger than the fixed output canvas is rejected");
+
+var processTestRequest = new MediaOutputRequest(MediaOutputKind.Recording,
+    Path.Combine(Path.GetTempPath(), $"process-test-{Guid.NewGuid():N}.mp4"),
+    160, 160, 10, 500);
+await using (var immediateExitOutput = new MediaOutputService((_, _, _) => null,
+    (_, afterSequence) => afterSequence == 0
+        ? new IPhoneMirror.App.Interop.AudioPacket(
+            1, 48000, 2, 16, new byte[4])
+        : null))
+{
+    var immediateExitCapabilities = ffmpegCapabilities with
+    {
+        FfmpegPath = Path.Combine(Environment.SystemDirectory, "whoami.exe"),
+    };
+    await ThrowsAsync<InvalidOperationException>(() => immediateExitOutput.StartAsync(
+            1, processTestRequest, immediateExitCapabilities),
+        "an output process that exits during startup is rejected");
+    Equal(false, immediateExitOutput.IsRunning,
+        "immediate process exit does not publish a running output");
+    Equal(0UL, immediateExitOutput.SessionHandle,
+        "immediate process exit does not retain the session handle");
+}
+
+await using (var failedStartOutput = new MediaOutputService((_, _, _) => null,
+    (_, afterSequence) => afterSequence == 0
+        ? new IPhoneMirror.App.Interop.AudioPacket(
+            1, 48000, 2, 16, new byte[4])
+        : null))
+{
+    var missingExecutableCapabilities = ffmpegCapabilities with
+    {
+        FfmpegPath = Path.Combine(Path.GetTempPath(),
+            $"missing-ffmpeg-{Guid.NewGuid():N}.exe"),
+    };
+    await ThrowsAsync<System.ComponentModel.Win32Exception>(() =>
+            failedStartOutput.StartAsync(1, processTestRequest,
+                missingExecutableCapabilities),
+        "Process.Start failure is propagated after cleanup");
+    Equal(false, failedStartOutput.IsRunning,
+        "Process.Start failure leaves no running output");
+    Equal(0UL, failedStartOutput.SessionHandle,
+        "Process.Start failure leaves no retained session handle");
+}
+
+var installedFfmpegCapabilities = await MediaOutputService.ProbeAsync();
+if (installedFfmpegCapabilities.Supports(MediaOutputKind.Recording))
+{
+    var silentRecordingPath = Path.Combine(Path.GetTempPath(),
+        $"iphone-mirror-silent-recording-{Guid.NewGuid():N}.mp4");
+    long recordingTimestamp = 0;
+    await using var silentRecordingOutput = new MediaOutputService(
+        (_, width, height) => new IPhoneMirror.App.Interop.VideoFrame(
+            width, height, width * 4,
+            Interlocked.Add(ref recordingTimestamp, 1_000_000),
+            new byte[checked((int)(width * height * 4))]),
+        (_, _) => null);
+    try
+    {
+        await silentRecordingOutput.StartAsync(1,
+            new MediaOutputRequest(MediaOutputKind.Recording,
+                silentRecordingPath, 160, 160, 10, 500),
+            installedFfmpegCapabilities);
+        Equal(true, silentRecordingOutput.IsRunning,
+            "video-only recording starts without a PCM packet");
+        await Task.Delay(700);
+        var silentStagingPath = PendingRecordingStore.CreateStagingPath(
+            silentRecordingPath);
+        Equal(false, File.Exists(silentRecordingPath),
+            "an active recording is not exposed as a completed MP4");
+        Equal(true, File.Exists(silentStagingPath),
+            "an active recording writes to the partial MP4 path");
+        await silentRecordingOutput.StopAsync();
+        Equal(false, silentRecordingOutput.IsRunning,
+            "video-only recording stops after FFmpeg finalization");
+        var silentMp4 = File.ReadAllBytes(silentRecordingPath);
+        Equal(true, silentMp4.AsSpan().IndexOf("ftyp"u8) >= 0,
+            "video-only recording writes an MP4 file type box");
+        Equal(true, silentMp4.AsSpan().IndexOf("moov"u8) >= 0,
+            "video-only recording writes the finalized MP4 index");
+        Equal(false, File.Exists(silentStagingPath),
+            "successful finalization atomically promotes and removes the partial MP4");
+    }
+    finally
+    {
+        try { File.Delete(silentRecordingPath); } catch { }
+    }
+
+    var audioRecordingPath = Path.Combine(Path.GetTempPath(),
+        $"iphone-mirror-audio-recording-{Guid.NewGuid():N}.mp4");
+    long audioRecordingTimestamp = 0;
+    long audioSequence = 0;
+    long nextAudioPacketAt = 0;
+    await using var audioRecordingOutput = new MediaOutputService(
+        (_, width, height) => new IPhoneMirror.App.Interop.VideoFrame(
+            width, height, width * 4,
+            Interlocked.Add(ref audioRecordingTimestamp, 1_000_000),
+            new byte[checked((int)(width * height * 4))]),
+        (_, afterSequence) =>
+        {
+            var now = Environment.TickCount64;
+            if (afterSequence != 0 && now < Interlocked.Read(ref nextAudioPacketAt))
+                return null;
+            Interlocked.Exchange(ref nextAudioPacketAt, now + 20);
+            return new IPhoneMirror.App.Interop.AudioPacket(
+                (ulong)Interlocked.Increment(ref audioSequence),
+                48000, 2, 16, new byte[3840]);
+        });
+    try
+    {
+        using var startupTimeout =
+            new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        await audioRecordingOutput.StartAsync(1,
+            new MediaOutputRequest(MediaOutputKind.Recording,
+                audioRecordingPath, 160, 160, 10, 500),
+            installedFfmpegCapabilities, startupTimeout.Token);
+        Equal(true, audioRecordingOutput.IsRunning,
+            "recording with PCM audio completes the FFmpeg pipe handshake");
+        await Task.Delay(700);
+        await audioRecordingOutput.StopAsync();
+        Equal(false, audioRecordingOutput.IsRunning,
+            "recording with PCM audio stops after FFmpeg finalization");
+        var audioMp4 = File.ReadAllBytes(audioRecordingPath);
+        Equal(true, audioMp4.AsSpan().IndexOf("ftyp"u8) >= 0,
+            "recording with PCM audio writes an MP4 file type box");
+        Equal(true, audioMp4.AsSpan().IndexOf("moov"u8) >= 0,
+            "recording with PCM audio writes the finalized MP4 index");
+        Equal(true, audioMp4.AsSpan().IndexOf("soun"u8) >= 0,
+            "recording with PCM audio contains an audio track");
+    }
+    finally
+    {
+        try { File.Delete(audioRecordingPath); } catch { }
+    }
+
+    var interruptedAudioPath = Path.Combine(Path.GetTempPath(),
+        $"iphone-mirror-interrupted-audio-{Guid.NewGuid():N}.mp4");
+    long interruptedVideoTimestamp = 0;
+    await using var interruptedAudioOutput = new MediaOutputService(
+        (_, width, height) => new IPhoneMirror.App.Interop.VideoFrame(
+            width, height, width * 4,
+            Interlocked.Add(ref interruptedVideoTimestamp, 1_000_000),
+            new byte[checked((int)(width * height * 4))]),
+        (_, afterSequence) => afterSequence == 0
+            ? new IPhoneMirror.App.Interop.AudioPacket(
+                1, 48000, 2, 16, new byte[3840])
+            : null);
+    try
+    {
+        using var startupTimeout =
+            new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        await interruptedAudioOutput.StartAsync(1,
+            new MediaOutputRequest(MediaOutputKind.Recording,
+                interruptedAudioPath, 160, 160, 10, 500),
+            installedFfmpegCapabilities, startupTimeout.Token);
+        await Task.Delay(TimeSpan.FromSeconds(5.5));
+        Equal(true, interruptedAudioOutput.IsRunning,
+            "a PCM interruption longer than five seconds does not stop video output");
+        await interruptedAudioOutput.StopAsync();
+        var interruptedMp4 = File.ReadAllBytes(interruptedAudioPath);
+        Equal(true, interruptedMp4.AsSpan().IndexOf("moov"u8) >= 0,
+            "interrupted-audio recording remains a finalized MP4");
+        Equal(true, interruptedMp4.AsSpan().IndexOf("soun"u8) >= 0,
+            "silence insertion preserves the recording audio track");
+    }
+    finally
+    {
+        try { File.Delete(interruptedAudioPath); } catch { }
+        try
+        {
+            File.Delete(PendingRecordingStore.CreateStagingPath(interruptedAudioPath));
+        }
+        catch { }
+    }
+}
 
 // MediaElement events do not identify the Source that raised them. A fresh
 // backend is bound for every load so delayed events can be rejected by both
@@ -405,6 +792,20 @@ deviceB.FrameRate = 24;
 Equal((ulong)11, deviceA.Handle, "switching device does not release first session");
 Equal(60, deviceA.FrameRate, "device A settings remain independent");
 Equal(24, deviceB.FrameRate, "device B settings update independently");
+
+var imageSettingsSession = new DeviceCaptureState
+{
+    Udid = "image-settings-device",
+    Handle = 41,
+};
+Equal(true, imageSettingsSession.MatchesSessionHandle(41),
+    "image settings recognizes the session handle that opened the window");
+imageSettingsSession.Handle = 42;
+Equal(false, imageSettingsSession.MatchesSessionHandle(41),
+    "image settings rejects a replacement session even when its state object is reused");
+imageSettingsSession.IsStopping = true;
+Equal(false, imageSettingsSession.MatchesSessionHandle(42),
+    "image settings rejects a session while it is being torn down");
 
 var videoSettings = new DeviceCaptureState
 {

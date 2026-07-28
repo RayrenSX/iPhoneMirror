@@ -260,6 +260,9 @@ cd iPhoneMirror
 outputs/iPhoneMirror/iPhoneMirror.exe
 outputs/iPhoneMirror/iPhoneMirror.Driver.exe
 outputs/iPhoneMirror/iPhoneMirror.Core.dll
+outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.dll
+outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.Admin.exe
+outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
 outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 ```
 
@@ -291,7 +294,7 @@ iPhone/iPad
 
 ## 当前限制
 
-- 还没有 Media Foundation 虚拟摄像头；OBS 当前使用窗口采集。
+- 内建录制与 RTMP、SRT、WebRTC/WHIP 推流在 PCM 音频可用时会同时输出画面和声音；音频暂不可用时仍可立即输出纯视频。MP4、RTMP 和 SRT 使用 AAC，WHIP 使用 Opus。
 - 主程序尚未商业签名。
 - 外部采集驱动的干净 Win10/Win11 安装矩阵仍需更广泛验证。
 - QuickTime Screen Capture 并非 Apple 公开、稳定的第三方 API。

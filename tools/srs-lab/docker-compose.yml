@@ -1,0 +1,13 @@
+services:
+  srs:
+    image: ossrs/srs:6
+    container_name: iphone-mirror-srs-lab
+    command: ["./objs/srs", "-c", "conf/iphone-mirror-lab.conf"]
+    ports:
+      - "1935:1935"
+      - "1985:1985"
+      - "8080:8080"
+      - "8000:8000/udp"
+      - "10080:10080/udp"
+    volumes:
+      - ./srs.conf:/usr/local/srs/conf/iphone-mirror-lab.conf:ro

@@ -17,7 +17,7 @@
 
 namespace iPhoneMirror {
 
-constexpr std::uint32_t ApiVersion = 15;
+constexpr std::uint32_t ApiVersion = 16;
 using SessionHandle = std::uint64_t;
 constexpr std::size_t MaxUdid = 128;
 constexpr std::size_t MaxName = 128;
@@ -117,11 +117,13 @@ enum class DecoderRuntimeMode : std::uint32_t {
     Unknown = 0,
     Hardware = 1,
     Software = 2,
+    External = 3,
 };
 
-// Per-preview video diagnostics. Renderer values describe the preview attached
-// to hwnd. Decoder values distinguish a policy request from the decoder that
-// has actually committed it on a random-access frame.
+// Per-preview video diagnostics. Passing a null hwnd returns session-level
+// decoder data without renderer diagnostics. With a preview hwnd, renderer
+// values describe that preview. Decoder values distinguish a policy request
+// from the decoder that has actually committed it on a random-access frame.
 struct VideoOutputStatus {
     std::uint32_t struct_size;
     std::uint32_t api_version;
@@ -149,6 +151,15 @@ struct VideoFrameInfo {
     std::uint32_t stride;
     std::uint32_t pixel_format; // 1 = BGRA8
     std::int64_t timestamp_100ns;
+};
+
+struct AudioPacketInfo {
+    std::uint32_t struct_size;
+    std::uint32_t api_version;
+    std::uint64_t sequence;
+    std::uint32_t sample_rate;
+    std::uint16_t channels;
+    std::uint16_t bits_per_sample;
 };
 
 // Versioned capture preferences used by im_start_capture_with_options.
@@ -305,8 +316,8 @@ IM_API std::int32_t IM_CALL im_set_video_preferences(
     std::uint32_t max_height,
     std::uint32_t max_fps);
 // Applies local preview-only image controls. brightness is [-1, 1], contrast
-// and saturation are [0, 2], and gamma is [0.5, 2]. The capture transport and
-// encoded source are unchanged.
+// and saturation are [0, 2], and gamma is [0.5, 2]. Exported BGRA frames used
+// by recording, streaming, screenshots, and virtual cameras are unchanged.
 IM_API std::int32_t IM_CALL im_set_image_adjustments(
     float brightness, float contrast, float saturation, float gamma);
 IM_API std::int32_t IM_CALL im_set_audio_enabled(std::int32_t enabled);
@@ -326,6 +337,9 @@ IM_API std::int32_t IM_CALL im_session_stop(iPhoneMirror::SessionHandle handle);
 IM_API void IM_CALL im_session_destroy(iPhoneMirror::SessionHandle handle);
 IM_API std::int32_t IM_CALL im_session_get_status(
     iPhoneMirror::SessionHandle handle, iPhoneMirror::CaptureStatus* status);
+// hwnd is optional. When it is null, renderer-specific fields are reported as
+// their default/unknown values while decoder state is still returned for the
+// active capture session.
 IM_API std::int32_t IM_CALL im_session_get_video_output_status(
     iPhoneMirror::SessionHandle handle, void* hwnd,
     iPhoneMirror::VideoOutputStatus* status);
@@ -357,6 +371,13 @@ IM_API std::int32_t IM_CALL im_session_copy_latest_video_frame(
     iPhoneMirror::SessionHandle handle, iPhoneMirror::VideoFrameInfo* info,
     std::uint8_t* buffer, std::uint32_t* buffer_size,
     std::uint32_t max_width, std::uint32_t max_height);
+// Copies the oldest buffered PCM packet newer than after_sequence. Audio is
+// signed little-endian interleaved PCM. Callers retain sequence and request
+// the next packet; a slow caller may skip packets evicted by the bounded queue.
+IM_API std::int32_t IM_CALL im_session_copy_next_audio_packet(
+    iPhoneMirror::SessionHandle handle, std::uint64_t after_sequence,
+    iPhoneMirror::AudioPacketInfo* info, std::uint8_t* buffer,
+    std::uint32_t* buffer_size);
 IM_API std::int32_t IM_CALL im_session_force_preview_refresh(
     iPhoneMirror::SessionHandle handle);
 IM_API std::int32_t IM_CALL im_session_set_window_corner_profile(

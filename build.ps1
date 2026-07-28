@@ -30,6 +30,14 @@ $ExpectedWirelessManifestPaths = @(
     'bin/x64/swresample-3.dll',
     'bin/x64/swscale-5.dll'
 )
+$PrepareMediaOutputRuntime = Join-Path $Root 'scripts\prepare_ffmpeg.ps1'
+$MediaOutputManifestPath = Join-Path $Root 'scripts\ffmpeg-runtime-manifest.psd1'
+if (-not (Test-Path -LiteralPath $MediaOutputManifestPath -PathType Leaf)) {
+    throw "Media-output FFmpeg manifest is missing: $MediaOutputManifestPath"
+}
+$MediaOutputManifest = Import-PowerShellDataFile -LiteralPath $MediaOutputManifestPath
+$MediaOutputRuntimeHashes = [Collections.IDictionary]$MediaOutputManifest.Files
+$MediaOutputRuntimeFiles = @($MediaOutputRuntimeHashes.Keys) + @('SOURCE.txt')
 
 function Assert-SafeWorkspaceDirectory([string]$Path) {
     $workspace = [IO.Path]::GetFullPath($Root).TrimEnd('\')
@@ -59,6 +67,38 @@ function Assert-NoReparseChildren([string]$Path) {
         })
     if ($reparse.Count -ne 0) {
         throw "Refusing recursive mutation through a reparse point: $($reparse[0].FullName)"
+    }
+}
+
+function Assert-ExpectedRuntimeDirectory([string]$Path, [string[]]$ExpectedFiles,
+    [string]$Label, [Collections.IDictionary]$ExpectedHashes) {
+    Assert-SafeWorkspaceDirectory $Path
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "$Label directory is missing: $Path"
+    }
+    $directory = Get-Item -LiteralPath $Path -Force
+    if (($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$Label directory is a reparse point: $Path"
+    }
+    Assert-NoReparseChildren $Path
+    $children = @(Get-ChildItem -LiteralPath $Path -Force)
+    $directories = @($children | Where-Object { $_.PSIsContainer })
+    if ($directories.Count -ne 0) {
+        throw "$Label directory contains an unexpected child directory: $($directories[0].Name)"
+    }
+    $actualFiles = @($children | Where-Object { -not $_.PSIsContainer } |
+        ForEach-Object { $_.Name })
+    $missing = @($ExpectedFiles | Where-Object { $_ -notin $actualFiles })
+    $unexpected = @($actualFiles | Where-Object { $_ -notin $ExpectedFiles })
+    if ($missing.Count -ne 0 -or $unexpected.Count -ne 0) {
+        throw "$Label directory does not contain the expected files. Missing: $($missing -join ', '); unexpected: $($unexpected -join ', ')."
+    }
+    foreach ($entry in $ExpectedHashes.GetEnumerator()) {
+        $file = Join-Path $Path ([string]$entry.Key)
+        $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+        if ($actual -ne [string]$entry.Value) {
+            throw "$Label hash mismatch for $($entry.Key): expected $($entry.Value), got $actual"
+        }
     }
 }
 
@@ -136,17 +176,33 @@ try {
 
     if (Test-Path 'src/App/iPhoneMirror.App.csproj') {
         $NativeDll = Join-Path $Root "build/native/src/Core/$Configuration/iPhoneMirror.Core.dll"
+        $VirtualCameraDll = Join-Path $Root `
+            "build/native/src/VirtualCamera/$Configuration/iPhoneMirror.VirtualCamera.dll"
+        $VirtualCameraAdmin = Join-Path $Root `
+            "build/native/src/VirtualCamera/$Configuration/iPhoneMirror.VirtualCamera.Admin.exe"
         $WirelessHost = Join-Path $Root `
             "build/native/src/WirelessHost/$Configuration/iPhoneMirror.WirelessHost.exe"
         $DnsSdShim = Join-Path $Root `
             "build/native/src/WirelessHost/$Configuration/dnssd.dll"
         $AppNative = Join-Path $Root 'src/App/native'
         $AppWireless = Join-Path $AppNative 'Wireless'
+        $AppFfmpeg = Join-Path $AppNative 'tools\ffmpeg'
         Assert-SafeWorkspaceDirectory $AppNative
         Assert-SafeWorkspaceDirectory $AppWireless
+        Assert-SafeWorkspaceDirectory $AppFfmpeg
         New-Item -ItemType Directory -Force -Path $AppNative | Out-Null
         New-Item -ItemType Directory -Force -Path $AppWireless | Out-Null
+        if (-not (Test-Path -LiteralPath $PrepareMediaOutputRuntime -PathType Leaf)) {
+            throw "Media-output FFmpeg preparation script is missing: $PrepareMediaOutputRuntime"
+        }
+        & $PrepareMediaOutputRuntime -Destination $AppFfmpeg
+        Assert-ExpectedRuntimeDirectory $AppFfmpeg $MediaOutputRuntimeFiles `
+            'Media-output FFmpeg runtime' $MediaOutputRuntimeHashes
         Copy-Item $NativeDll (Join-Path $AppNative 'iPhoneMirror.Core.dll') -Force
+        Copy-Item $VirtualCameraDll `
+            (Join-Path $AppNative 'iPhoneMirror.VirtualCamera.dll') -Force
+        Copy-Item $VirtualCameraAdmin `
+            (Join-Path $AppNative 'iPhoneMirror.VirtualCamera.Admin.exe') -Force
         Copy-Item $WirelessHost `
             (Join-Path $AppWireless 'iPhoneMirror.WirelessHost.exe') -Force
         Copy-Item $DnsSdShim (Join-Path $AppWireless 'dnssd.dll') -Force
@@ -202,6 +258,12 @@ try {
         $requiredArtifacts = @(
             'iPhoneMirror.exe',
             'iPhoneMirror.Core.dll',
+            'iPhoneMirror.VirtualCamera.dll',
+            'iPhoneMirror.VirtualCamera.Admin.exe',
+            'tools\ffmpeg\ffmpeg.exe',
+            'tools\ffmpeg\LICENSE.txt',
+            'tools\ffmpeg\README.txt',
+            'tools\ffmpeg\SOURCE.txt',
             'libusb-1.0.dll',
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
@@ -225,6 +287,9 @@ try {
                 throw "Published artifact is missing: $relative"
             }
         }
+        Assert-ExpectedRuntimeDirectory (Join-Path $PublishRoot 'tools\ffmpeg') `
+            $MediaOutputRuntimeFiles 'Published media-output FFmpeg runtime' `
+            $MediaOutputRuntimeHashes
         foreach ($entry in $WirelessHashes) {
             $published = Join-Path (Join-Path $PublishRoot 'Wireless') `
                 ([IO.Path]::GetFileName($entry.Path))
@@ -282,6 +347,8 @@ try {
         $allowedTopLevelFiles = @(
             'iPhoneMirror.exe',
             'iPhoneMirror.Core.dll',
+            'iPhoneMirror.VirtualCamera.dll',
+            'iPhoneMirror.VirtualCamera.Admin.exe',
             'iPhoneMirror.Driver.exe',
             'libusb-1.0.dll',
             'LICENSE',
@@ -291,7 +358,7 @@ try {
             $_.Name -notin $allowedTopLevelFiles
         })
         $unexpectedDirectories = @(Get-ChildItem -LiteralPath $MainPublishRoot -Directory |
-            Where-Object { $_.Name -notin @('Wireless', 'licenses') })
+            Where-Object { $_.Name -notin @('Wireless', 'licenses', 'tools') })
         if ($unexpectedFiles.Count -ne 0 -or $unexpectedDirectories.Count -ne 0) {
             $unexpected = @($unexpectedFiles.Name) + @($unexpectedDirectories.Name)
             throw "Unexpected files in compact application output: $($unexpected -join ', ')"

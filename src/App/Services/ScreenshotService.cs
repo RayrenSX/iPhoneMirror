@@ -69,7 +69,7 @@ internal static class ScreenshotService
 
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var output = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        using var output = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.Read);
         encoder.Save(output);
         return fullPath;
     }
