@@ -1,4 +1,5 @@
 using System.IO;
+using System.Xml.Linq;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
 
@@ -13,6 +14,23 @@ static void Sequence(IEnumerable<string> expected, IEnumerable<string> actual, s
     if (!expected.SequenceEqual(actual, StringComparer.OrdinalIgnoreCase))
         throw new InvalidOperationException(
             $"{name}: expected [{string.Join(",", expected)}], got [{string.Join(",", actual)}]");
+}
+
+var localizationDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+    "..", "..", "..", "..", "App", "Localization"));
+XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+foreach (var localizationPath in Directory.GetFiles(
+             localizationDirectory, "Strings.*.xaml"))
+{
+    var duplicateKeys = XDocument.Load(localizationPath).Descendants()
+        .Select(element => (string?)element.Attribute(xaml + "Key"))
+        .Where(key => !string.IsNullOrWhiteSpace(key))
+        .GroupBy(key => key!, StringComparer.Ordinal)
+        .Where(group => group.Count() > 1)
+        .Select(group => group.Key)
+        .ToArray();
+    Equal(0, duplicateKeys.Length,
+        $"localization resource keys are unique in {Path.GetFileName(localizationPath)}");
 }
 
 // usbmux may reverse its enumeration order on every poll. Existing cards must
@@ -365,24 +383,63 @@ Equal(UsbProjectionMode.Aisi, deviceB.UsbProjectionMode,
     "device B keeps its independent USB projection mode");
 Equal(DecoderPreference.Auto, deviceA.DecoderPreference,
     "decoder selection defaults to capability-based automatic fallback");
-Equal(ColorOutputPreference.Auto, deviceA.ColorOutputPreference,
-    "color output defaults to automatic HDR display detection");
+Equal(0.0, deviceA.Brightness, "brightness defaults to neutral");
+Equal(100.0, deviceA.Contrast, "contrast defaults to neutral");
+Equal(100.0, deviceA.Saturation, "saturation defaults to neutral");
+Equal(100.0, deviceA.Gamma, "gamma defaults to neutral");
 deviceA.DecoderPreference = DecoderPreference.HardwarePreferred;
-deviceA.ColorOutputPreference = ColorOutputPreference.PreferHdrWhenSupported;
+deviceA.Brightness = 12;
+deviceA.Contrast = 118;
 deviceB.DecoderPreference = DecoderPreference.SoftwareCompatible;
-deviceB.ColorOutputPreference = ColorOutputPreference.ForceSdrToneMap;
+deviceB.Saturation = 75;
+deviceB.Gamma = 110;
 Equal(DecoderPreference.HardwarePreferred, deviceA.DecoderPreference,
     "device A keeps its independent decoder policy");
 Equal(DecoderPreference.SoftwareCompatible, deviceB.DecoderPreference,
     "device B keeps its independent decoder policy");
-Equal(ColorOutputPreference.PreferHdrWhenSupported, deviceA.ColorOutputPreference,
-    "device A keeps its independent HDR output policy");
-Equal(ColorOutputPreference.ForceSdrToneMap, deviceB.ColorOutputPreference,
-    "device B keeps its independent SDR tone-map policy");
+Equal(12.0, deviceA.Brightness,
+    "device A keeps its independent brightness adjustment");
+Equal(75.0, deviceB.Saturation,
+    "device B keeps its independent saturation adjustment");
 deviceB.FrameRate = 24;
 Equal((ulong)11, deviceA.Handle, "switching device does not release first session");
 Equal(60, deviceA.FrameRate, "device A settings remain independent");
 Equal(24, deviceB.FrameRate, "device B settings update independently");
+
+var videoSettings = new DeviceCaptureState
+{
+    Udid = "settings-device",
+    RenderWidth = 1920,
+    RenderHeight = 1080,
+    FrameRate = 60,
+    DecoderPreference = DecoderPreference.HardwarePreferred,
+    Brightness = 8,
+    Contrast = 115,
+    Saturation = 90,
+    Gamma = 105,
+};
+Equal(true, videoSettings.HasPendingVideoSettings,
+    "new per-device video settings start pending");
+videoSettings.MarkRenderSettingsApplied(1920, 1080, 60);
+Equal(true, videoSettings.HasPendingVideoSettings,
+    "render success does not mark decoder and image settings as applied");
+videoSettings.MarkImageAdjustmentsApplied(8, 115, 90, 105);
+Equal(true, videoSettings.HasPendingVideoSettings,
+    "image adjustment submission does not claim an asynchronous decoder switch succeeded");
+videoSettings.SynchronizeAppliedDecoderPreference(
+    DecoderPreference.HardwarePreferred);
+Equal(false, videoSettings.HasPendingVideoSettings,
+    "native decoder status completes the submitted per-device settings");
+
+videoSettings.RenderWidth = 1280;
+videoSettings.RenderHeight = 720;
+videoSettings.FrameRate = 30;
+videoSettings.MarkVideoSettingsApplied(1920, 1080, 60,
+    DecoderPreference.HardwarePreferred, 8, 115, 90, 105);
+Equal((uint)1920, videoSettings.AppliedRenderWidth,
+    "applied bookkeeping uses the explicit request snapshot");
+Equal(true, videoSettings.HasPendingVideoSettings,
+    "values changed after a request remain pending instead of being mislabelled applied");
 
 // Even when explicit stop fails, im_shutdown/dispose remains a mandatory
 // defensive cleanup path.

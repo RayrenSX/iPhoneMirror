@@ -4,6 +4,7 @@
 
 #include <Windows.h>
 #include <codecapi.h>
+#include <d3d10_1.h>
 #include <d3d11.h>
 #include <mfapi.h>
 #include <mferror.h>
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <format>
 #include <limits>
@@ -46,6 +48,14 @@ bool environment_enabled(const char* name) noexcept {
     char value[8]{};
     const auto length = GetEnvironmentVariableA(name, value, static_cast<DWORD>(std::size(value)));
     return length > 0 && (value[0] == '1' || value[0] == 'y' || value[0] == 'Y');
+}
+
+std::string_view acceleration_name(detail::DecoderAcceleration value) noexcept {
+    switch (value) {
+    case detail::DecoderAcceleration::Software: return "software";
+    case detail::DecoderAcceleration::Hardware: return "hardware";
+    default: return "unknown";
+    }
 }
 
 std::string narrow_ascii(std::wstring_view value) {
@@ -190,10 +200,12 @@ struct DecoderCandidate {
     CLSID clsid{};
     bool use_clsid{};
     bool hardware{};
+    bool request_dxva{};
     std::string name;
 };
 
-std::vector<DecoderCandidate> enumerate_pass(const GUID& subtype, UINT32 flags) {
+std::vector<DecoderCandidate> enumerate_pass(const GUID& subtype, UINT32 flags,
+    bool request_dxva = false) {
     MFT_REGISTER_TYPE_INFO input{MFMediaType_Video, subtype};
     IMFActivate** raw{};
     UINT32 count{};
@@ -224,10 +236,21 @@ std::vector<DecoderCandidate> enumerate_pass(const GUID& subtype, UINT32 flags) 
         candidates.push_back({
             .activation = std::move(activation),
             .hardware = hardware,
+            .request_dxva = request_dxva || hardware,
             .name = std::move(name),
         });
     }
     CoTaskMemFree(raw);
+    std::string summary;
+    for (const auto& candidate : candidates) {
+        if (!summary.empty()) summary += ',';
+        summary += candidate.name;
+        summary += candidate.hardware ? "[hardware]" :
+            candidate.request_dxva ? "[dxva]" : "[software]";
+    }
+    logging::write(std::format(
+        "mf_decoder enumerate flags=0x{:X} count={} candidates={}",
+        flags, candidates.size(), summary.empty() ? "none" : summary));
     return candidates;
 }
 
@@ -237,8 +260,8 @@ void append_candidates(std::vector<DecoderCandidate>& destination,
 }
 
 std::vector<DecoderCandidate> software_candidates(const GUID& subtype,
-    UINT32 flags) {
-    auto candidates = enumerate_pass(subtype, flags);
+    UINT32 flags, bool request_dxva = false) {
+    auto candidates = enumerate_pass(subtype, flags, request_dxva);
     std::erase_if(candidates, [](const DecoderCandidate& candidate) {
         return candidate.hardware;
     });
@@ -248,7 +271,8 @@ std::vector<DecoderCandidate> software_candidates(const GUID& subtype,
 void append_builtin_candidates(std::vector<DecoderCandidate>& candidates,
     coremedia::VideoCodec codec) {
     const auto add = [&candidates](const CLSID& clsid, std::string name) {
-        candidates.push_back({.clsid = clsid, .use_clsid = true, .name = std::move(name)});
+        candidates.push_back({.clsid = clsid, .use_clsid = true,
+            .name = std::move(name)});
     };
     if (codec == coremedia::VideoCodec::H264) {
         add(CLSID_MSH264DecoderMFT, "MSH264DecoderMFT");
@@ -271,8 +295,12 @@ std::vector<DecoderCandidate> decoder_candidates(coremedia::VideoCodec codec,
             static_cast<UINT32>(MFT_ENUM_FLAG_ALL) | Sorted));
     } else if (preference == DecoderPreference::HardwarePreferred) {
         append_candidates(candidates, enumerate_pass(subtype,
-            static_cast<UINT32>(MFT_ENUM_FLAG_HARDWARE) | Sorted));
-        append_candidates(candidates, software_candidates(subtype, Software));
+            static_cast<UINT32>(MFT_ENUM_FLAG_HARDWARE) | Sorted, true));
+        // Microsoft's inbox decoder is registered as a software MFT but can
+        // use DXVA after receiving a D3D manager. Try that mode before the
+        // identical system MFT without DXVA, which is the reliable fallback.
+        append_candidates(candidates, software_candidates(subtype, Software, true));
+        append_candidates(candidates, software_candidates(subtype, Software, false));
     } else {
         append_candidates(candidates, software_candidates(subtype, Software));
     }
@@ -357,6 +385,72 @@ std::optional<std::uint32_t> checked_video_buffer_size(
 std::optional<std::uint32_t> checked_nv12_buffer_size(
     std::uint32_t width, std::uint32_t height) noexcept {
     return checked_video_buffer_size(width, height, PixelFormat::Nv12);
+}
+
+DecoderAcceleration classify_dxva_mode(std::int32_t mode) noexcept {
+    switch (mode) {
+    case eAVDecVideoDXVAMode_SW:
+        return DecoderAcceleration::Software;
+    case eAVDecVideoDXVAMode_MC:
+    case eAVDecVideoDXVAMode_IDCT:
+    case eAVDecVideoDXVAMode_VLD:
+        return DecoderAcceleration::Hardware;
+    default:
+        return DecoderAcceleration::Unknown;
+    }
+}
+
+std::optional<DxgiReadbackLayout> checked_dxgi_readback_layout(
+    std::uint32_t visible_width, std::uint32_t visible_height,
+    std::uint32_t allocation_width, std::uint32_t allocation_height,
+    std::uint32_t mip_levels, std::uint32_t array_size,
+    std::uint32_t source_subresource, std::uint32_t sample_count,
+    std::uint32_t row_pitch, PixelFormat format) noexcept {
+    if (visible_width == 0 || visible_height == 0 ||
+        visible_width > MaxDecodedVideoDimension ||
+        visible_height > MaxDecodedVideoDimension ||
+        allocation_width < visible_width || allocation_height < visible_height ||
+        mip_levels == 0 || array_size == 0 || sample_count != 1 || row_pitch == 0) {
+        return std::nullopt;
+    }
+
+    const auto maximum_width = static_cast<std::uint64_t>(visible_width) +
+        MaxDxgiAllocationPadding;
+    const auto maximum_height = static_cast<std::uint64_t>(visible_height) +
+        MaxDxgiAllocationPadding;
+    if (allocation_width > maximum_width || allocation_height > maximum_height)
+        return std::nullopt;
+
+    const auto subresource_count = static_cast<std::uint64_t>(mip_levels) * array_size;
+    if (source_subresource >= subresource_count ||
+        source_subresource % mip_levels != 0) {
+        return std::nullopt;
+    }
+
+    const auto component_bytes = format == PixelFormat::P010 ? 2ULL : 1ULL;
+    const auto even_allocation_width = static_cast<std::uint64_t>(allocation_width) +
+        (allocation_width & 1U);
+    const auto minimum_row_pitch = even_allocation_width * component_bytes;
+    const auto row_count = static_cast<std::uint64_t>(allocation_height) +
+        (static_cast<std::uint64_t>(allocation_height) + 1ULL) / 2ULL;
+    if (minimum_row_pitch > std::numeric_limits<std::uint32_t>::max() ||
+        row_count > std::numeric_limits<std::uint32_t>::max() ||
+        row_pitch < minimum_row_pitch || row_pitch % component_bytes != 0 ||
+        row_pitch > static_cast<std::uint32_t>(
+            std::numeric_limits<std::int32_t>::max()) ||
+        row_count > MaxDxgiReadbackBytes / row_pitch) {
+        return std::nullopt;
+    }
+    const auto total_bytes = row_count * row_pitch;
+    if (total_bytes > MaxDxgiReadbackBytes ||
+        total_bytes > std::numeric_limits<std::uint32_t>::max()) {
+        return std::nullopt;
+    }
+    return DxgiReadbackLayout{
+        .minimum_row_pitch = static_cast<std::uint32_t>(minimum_row_pitch),
+        .row_count = static_cast<std::uint32_t>(row_count),
+        .total_bytes = static_cast<std::uint32_t>(total_bytes),
+    };
 }
 
 bool is_random_access_sample(const coremedia::FormatDescription& format,
@@ -541,6 +635,11 @@ struct MediaFoundationVideoDecoder::Impl {
     ComPtr<IMFActivate> active_activation;
     ComPtr<IMFDXGIDeviceManager> d3d_manager;
     ComPtr<ID3D11Device> d3d_device;
+    ComPtr<ID3D11DeviceContext> d3d_context;
+    ComPtr<ID3D11Texture2D> readback_texture;
+    DXGI_FORMAT readback_format{DXGI_FORMAT_UNKNOWN};
+    UINT readback_width{};
+    UINT readback_height{};
     coremedia::FormatDescription format;
     std::vector<DecoderCandidate> candidates;
     std::size_t candidate_index{std::numeric_limits<std::size_t>::max()};
@@ -550,8 +649,15 @@ struct MediaFoundationVideoDecoder::Impl {
     PixelFormat output_format{PixelFormat::Nv12};
     coremedia::VideoColorDescription output_color;
     std::string selected_name;
+    detail::DecoderAcceleration actual_acceleration{detail::DecoderAcceleration::Unknown};
     bool selected_hardware{};
+    bool selected_candidate_hardware{};
     bool asynchronous{};
+    bool dxva_requested{};
+    bool acceleration_query_complete{};
+    bool acceleration_query_exhausted{};
+    std::uint32_t acceleration_query_attempts{};
+    std::chrono::steady_clock::time_point next_acceleration_query{};
     std::uint32_t pending_input_requests{};
     bool configured{};
     bool sent_parameter_sets{};
@@ -568,17 +674,28 @@ struct MediaFoundationVideoDecoder::Impl {
         event_generator.Reset();
         active_activation.Reset();
         d3d_manager.Reset();
+        d3d_context.Reset();
         d3d_device.Reset();
+        readback_texture.Reset();
+        readback_format = DXGI_FORMAT_UNKNOWN;
+        readback_width = readback_height = 0;
         minimum_output_bytes = 0;
         selected_name.clear();
+        actual_acceleration = detail::DecoderAcceleration::Unknown;
         selected_hardware = false;
+        selected_candidate_hardware = false;
         asynchronous = false;
+        dxva_requested = false;
+        acceleration_query_complete = false;
+        acceleration_query_exhausted = false;
+        acceleration_query_attempts = 0;
+        next_acceleration_query = {};
         pending_input_requests = 0;
         configured = false;
         sent_parameter_sets = false;
     }
 
-    void enable_common_attributes() {
+    void enable_common_attributes(bool request_dxva) {
         ComPtr<IMFAttributes> attributes;
         HRESULT low_latency_attribute_result = E_NOINTERFACE;
         bool d3d11_aware{};
@@ -614,25 +731,97 @@ struct MediaFoundationVideoDecoder::Impl {
                 "query asynchronous decoder event generator");
         }
 
-        if (!d3d11_aware || !environment_enabled("IPHONE_MIRROR_MF_D3D11")) return;
-        ComPtr<ID3D11DeviceContext> context;
+        if (!d3d11_aware || !request_dxva) {
+            logging::write(std::format(
+                "mf_decoder d3d11_manager=disabled policy={} d3d11_aware={} requested={}",
+                decoder_preference_name(preference), d3d11_aware ? "true" : "false",
+                request_dxva ? "true" : "false"));
+            return;
+        }
         D3D_FEATURE_LEVEL level{};
         constexpr D3D_FEATURE_LEVEL levels[] = {
             D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
         const auto device_result = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE,
             nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             levels, static_cast<UINT>(std::size(levels)), D3D11_SDK_VERSION,
-            &d3d_device, &level, &context);
-        check(device_result, "create decoder D3D11 device");
+            &d3d_device, &level, &d3d_context);
+        if (FAILED(device_result)) {
+            d3d_device.Reset();
+            d3d_context.Reset();
+            logging::write(std::format(
+                "mf_decoder d3d11_manager=unavailable stage=create_device hr=0x{:08X}",
+                static_cast<unsigned>(device_result)));
+            return;
+        }
+        ComPtr<ID3D10Multithread> multithread;
+        check(d3d_device.As(&multithread),
+            "query decoder D3D multithread protection");
+        (void)multithread->SetMultithreadProtected(TRUE);
+        if (!multithread->GetMultithreadProtected())
+            throw std::runtime_error(
+                "decoder D3D multithread protection could not be enabled");
+        logging::write("mf_decoder d3d11_multithread_protected=true");
         UINT reset_token{};
-        check(MFCreateDXGIDeviceManager(&reset_token, &d3d_manager),
-            "create decoder DXGI device manager");
-        check(d3d_manager->ResetDevice(d3d_device.Get(), reset_token),
-            "reset decoder DXGI device manager");
-        check(transform->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER,
-            reinterpret_cast<ULONG_PTR>(d3d_manager.Get())), "set decoder D3D manager");
+        auto manager_result = MFCreateDXGIDeviceManager(&reset_token, &d3d_manager);
+        if (SUCCEEDED(manager_result))
+            manager_result = d3d_manager->ResetDevice(d3d_device.Get(), reset_token);
+        if (SUCCEEDED(manager_result)) {
+            manager_result = transform->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER,
+                reinterpret_cast<ULONG_PTR>(d3d_manager.Get()));
+        }
+        if (FAILED(manager_result)) {
+            d3d_manager.Reset();
+            d3d_context.Reset();
+            d3d_device.Reset();
+            logging::write(std::format(
+                "mf_decoder d3d11_manager=unavailable stage=attach hr=0x{:08X}",
+                static_cast<unsigned>(manager_result)));
+            return;
+        }
+        dxva_requested = true;
         logging::write(std::format("mf_decoder d3d11_manager=enabled feature_level=0x{:04X}",
             static_cast<unsigned>(level)));
+    }
+
+    void enforce_software_decoding(const DecoderCandidate& candidate) {
+        if (preference != DecoderPreference::SoftwareCompatible) return;
+        if (candidate.hardware || candidate.request_dxva || dxva_requested) {
+            throw std::runtime_error(
+                "software decoder policy selected a hardware/DXVA candidate");
+        }
+        if (format.video_codec() != coremedia::VideoCodec::H264) {
+            // The public CodecAPI only exposes a legacy H.264 acceleration
+            // switch. HEVC software operation is enforced by never attaching
+            // a D3D device manager to the software MFT.
+            logging::write(std::format(
+                "mf_decoder software_enforcement candidate={} codec={} "
+                "method=no_d3d11_manager codecapi=not_available result=software",
+                candidate.name, codec_name(format.video_codec())));
+            return;
+        }
+
+        ComPtr<ICodecAPI> codec_api;
+        auto result = transform.As(&codec_api);
+        VARIANT value;
+        VariantInit(&value);
+        value.vt = VT_UI4;
+        value.ulVal = FALSE;
+        if (SUCCEEDED(result)) {
+            result = codec_api->SetValue(
+                &CODECAPI_AVDecVideoAcceleration_H264, &value);
+        }
+        VariantClear(&value);
+        logging::write(std::format(
+            "mf_decoder software_enforcement candidate={} codec=h264 "
+            "method=CODECAPI_AVDecVideoAcceleration_H264 value=false "
+            "hr=0x{:08X} result={}",
+            candidate.name, static_cast<unsigned>(result),
+            SUCCEEDED(result) ? "software" : "rejected"));
+        if (FAILED(result)) {
+            throw std::runtime_error(std::format(
+                "cannot enforce H.264 software decoding: 0x{:08X}",
+                static_cast<unsigned>(result)));
+        }
     }
 
     void select_output() {
@@ -675,7 +864,8 @@ struct MediaFoundationVideoDecoder::Impl {
                 "activate enumerated video decoder");
             active_activation = candidate.activation;
         }
-        enable_common_attributes();
+        enable_common_attributes(candidate.request_dxva);
+        enforce_software_decoding(candidate);
 
         ComPtr<IMFMediaType> input;
         check(MFCreateMediaType(&input), "create decoder input type");
@@ -693,6 +883,8 @@ struct MediaFoundationVideoDecoder::Impl {
             check(input->SetUINT32(MF_MT_VIDEO_NO_FRAME_ORDERING, TRUE),
                 "disable decoder frame reordering");
         }
+        if (dxva_requested && format.video_codec() == coremedia::VideoCodec::H264)
+            (void)input->SetUINT32(MF_MT_VIDEO_H264_NO_FMOASO, TRUE);
         const auto sequence_header = parameter_sets_annex_b(format);
         if (!sequence_header.empty()) {
             check(input->SetBlob(MF_MT_MPEG_SEQUENCE_HEADER, sequence_header.data(),
@@ -706,13 +898,21 @@ struct MediaFoundationVideoDecoder::Impl {
             "start decoder stream");
         candidate_index = index;
         selected_name = candidate.name;
-        selected_hardware = candidate.hardware;
+        selected_candidate_hardware = candidate.hardware;
+        actual_acceleration = preference == DecoderPreference::SoftwareCompatible
+            ? detail::DecoderAcceleration::Software
+            : candidate.hardware ? detail::DecoderAcceleration::Hardware
+                                 : detail::DecoderAcceleration::Unknown;
+        selected_hardware = actual_acceleration == detail::DecoderAcceleration::Hardware;
         configured = true;
         sent_parameter_sets = false;
         logging::write(std::format(
-            "mf_decoder selected={} hardware={} policy={} codec={} output={} size={}x{} "
+            "mf_decoder selected={} candidate={} dxva_requested={} actual={} "
+            "policy={} codec={} output={} size={}x{} "
             "bit_depth={}/{} primaries={} transfer={} matrix={} range={} hdr={}",
-            selected_name, selected_hardware ? "true" : "false",
+            selected_name, candidate.hardware ? "hardware_mft" : "software_mft",
+            dxva_requested ? "true" : "false",
+            acceleration_name(actual_acceleration),
             decoder_preference_name(preference), codec_name(format.video_codec()),
             pixel_format_name(output_format), format.width, format.height,
             format.bit_depth_luma, format.bit_depth_chroma,
@@ -730,8 +930,11 @@ struct MediaFoundationVideoDecoder::Impl {
                 return;
             } catch (const std::exception& error) {
                 logging::write(std::format(
-                    "mf_decoder candidate_rejected name={} hardware={} reason={}",
-                    candidates[index].name, candidates[index].hardware ? "true" : "false",
+                    "mf_decoder candidate_rejected name={} candidate={} "
+                    "dxva_intent={} reason={}",
+                    candidates[index].name,
+                    candidates[index].hardware ? "hardware_mft" : "software_mft",
+                    candidates[index].request_dxva ? "true" : "false",
                     error.what()));
                 if (!failures.empty()) failures += "; ";
                 failures += candidates[index].name + ": " + error.what();
@@ -755,6 +958,156 @@ struct MediaFoundationVideoDecoder::Impl {
         if (candidates.empty()) throw std::runtime_error("no Media Foundation video decoder is installed");
         waiting_for_random_access = false;
         select_first_working_candidate();
+    }
+
+    void report_acceleration_mode() {
+        constexpr std::uint32_t MaxQueryAttempts = 8;
+        constexpr auto QueryInterval = std::chrono::milliseconds(250);
+        if (preference == DecoderPreference::SoftwareCompatible ||
+            acceleration_query_complete || acceleration_query_exhausted) {
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next_acceleration_query) return;
+        next_acceleration_query = now + QueryInterval;
+        ++acceleration_query_attempts;
+
+        ComPtr<ICodecAPI> codec_api;
+        HRESULT result = transform.As(&codec_api);
+        VARIANT value;
+        VariantInit(&value);
+        if (SUCCEEDED(result))
+            result = codec_api->GetValue(&CODECAPI_AVDecVideoDXVAMode, &value);
+        std::int32_t mode = -1;
+        if (SUCCEEDED(result)) {
+            if (value.vt == VT_UI4 &&
+                value.ulVal <= static_cast<ULONG>(std::numeric_limits<std::int32_t>::max())) {
+                mode = static_cast<std::int32_t>(value.ulVal);
+            }
+            else if (value.vt == VT_I4) mode = value.lVal;
+        }
+        VariantClear(&value);
+        const auto reported = detail::classify_dxva_mode(mode);
+        if (reported != detail::DecoderAcceleration::Unknown) {
+            actual_acceleration = reported;
+            selected_hardware = reported == detail::DecoderAcceleration::Hardware;
+            acceleration_query_complete = true;
+        } else if (acceleration_query_attempts >= MaxQueryAttempts) {
+            acceleration_query_exhausted = true;
+        }
+        logging::write(std::format(
+            "mf_decoder acceleration candidate={} dxva_requested={} "
+            "query_attempt={}/{} query_hr=0x{:08X} dxva_mode={} actual={} state={}",
+            selected_candidate_hardware ? "hardware_mft" : "software_mft",
+            dxva_requested ? "true" : "false", acceleration_query_attempts,
+            MaxQueryAttempts, static_cast<unsigned>(result), mode,
+            acceleration_name(actual_acceleration),
+            acceleration_query_complete ? "resolved" :
+                acceleration_query_exhausted ? "exhausted" : "retry"));
+    }
+
+    bool copy_dxgi_output(IMFSample* sample, DecodedFrame& frame) {
+        if (!sample || !d3d_context) return false;
+        ComPtr<IMFMediaBuffer> buffer;
+        if (FAILED(sample->GetBufferByIndex(0, &buffer))) return false;
+        ComPtr<IMFDXGIBuffer> dxgi_buffer;
+        if (FAILED(buffer.As(&dxgi_buffer))) return false;
+
+        ComPtr<ID3D11Texture2D> source;
+        check(dxgi_buffer->GetResource(IID_PPV_ARGS(&source)),
+            "get decoder DXGI output texture");
+        UINT source_subresource{};
+        check(dxgi_buffer->GetSubresourceIndex(&source_subresource),
+            "get decoder DXGI output subresource");
+        D3D11_TEXTURE2D_DESC description{};
+        source->GetDesc(&description);
+        const auto expected_format = output_format == PixelFormat::P010
+            ? DXGI_FORMAT_P010 : DXGI_FORMAT_NV12;
+        if (description.Format != expected_format ||
+            description.Width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+            description.Height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
+            throw std::runtime_error(std::format(
+                "unexpected decoder DXGI output format={} size={}x{} visible={}x{} "
+                "mips={} array={} subresource={} samples={}",
+                static_cast<unsigned>(description.Format), description.Width,
+                description.Height, format.width, format.height,
+                description.MipLevels, description.ArraySize, source_subresource,
+                description.SampleDesc.Count));
+        }
+        const auto component_bytes = output_format == PixelFormat::P010 ? 2ULL : 1ULL;
+        const auto minimum_pitch_64 =
+            (static_cast<std::uint64_t>(description.Width) +
+                (description.Width & 1U)) * component_bytes;
+        if (minimum_pitch_64 > std::numeric_limits<std::uint32_t>::max() ||
+            !detail::checked_dxgi_readback_layout(
+                format.width, format.height, description.Width, description.Height,
+                description.MipLevels, description.ArraySize, source_subresource,
+                description.SampleDesc.Count,
+                static_cast<std::uint32_t>(minimum_pitch_64), output_format)) {
+            throw std::runtime_error(std::format(
+                "unsafe decoder DXGI source layout size={}x{} visible={}x{} "
+                "mips={} array={} subresource={} samples={} max_padding={} max_bytes={}",
+                description.Width, description.Height, format.width, format.height,
+                description.MipLevels, description.ArraySize, source_subresource,
+                description.SampleDesc.Count, detail::MaxDxgiAllocationPadding,
+                detail::MaxDxgiReadbackBytes));
+        }
+        if (!readback_texture || readback_format != description.Format ||
+            readback_width != description.Width || readback_height != description.Height) {
+            auto readback = description;
+            readback.MipLevels = 1;
+            readback.ArraySize = 1;
+            readback.SampleDesc.Count = 1;
+            readback.SampleDesc.Quality = 0;
+            readback.Usage = D3D11_USAGE_STAGING;
+            readback.BindFlags = 0;
+            readback.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            readback.MiscFlags = 0;
+            check(d3d_device->CreateTexture2D(&readback, nullptr, &readback_texture),
+                "create decoder DXGI readback texture");
+            readback_format = description.Format;
+            readback_width = description.Width;
+            readback_height = description.Height;
+        }
+
+        d3d_context->CopySubresourceRegion(readback_texture.Get(), 0, 0, 0, 0,
+            source.Get(), source_subresource, nullptr);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        check(d3d_context->Map(readback_texture.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+            "map decoder DXGI readback texture");
+        try {
+            const auto source_layout = detail::checked_dxgi_readback_layout(
+                format.width, format.height, description.Width, description.Height,
+                description.MipLevels, description.ArraySize, source_subresource,
+                description.SampleDesc.Count, mapped.RowPitch, output_format);
+            const auto visible_layout = detail::checked_dxgi_readback_layout(
+                format.width, format.height, format.width, format.height,
+                1, 1, 0, 1, mapped.RowPitch, output_format);
+            if (!mapped.pData || !source_layout || !visible_layout) {
+                throw std::runtime_error(std::format(
+                    "invalid decoder DXGI mapped layout row_pitch={} allocation={}x{} "
+                    "visible={}x{} max_bytes={}",
+                    mapped.RowPitch, description.Width, description.Height,
+                    format.width, format.height, detail::MaxDxgiReadbackBytes));
+            }
+            const auto* source_bytes = static_cast<const std::uint8_t*>(mapped.pData);
+            const auto y_bytes = static_cast<std::size_t>(format.height) * mapped.RowPitch;
+            const auto chroma_bytes = static_cast<std::size_t>(
+                (static_cast<std::uint64_t>(format.height) + 1ULL) / 2ULL) *
+                mapped.RowPitch;
+            frame.nv12.reserve(visible_layout->total_bytes);
+            frame.nv12.insert(frame.nv12.end(), source_bytes, source_bytes + y_bytes);
+            const auto* source_chroma = source_bytes +
+                static_cast<std::size_t>(description.Height) * mapped.RowPitch;
+            frame.nv12.insert(frame.nv12.end(), source_chroma,
+                source_chroma + chroma_bytes);
+            frame.stride = static_cast<std::int32_t>(mapped.RowPitch);
+        } catch (...) {
+            d3d_context->Unmap(readback_texture.Get(), 0);
+            throw;
+        }
+        d3d_context->Unmap(readback_texture.Get(), 0);
+        return true;
     }
 
     std::optional<DecodedFrame> receive_output() {
@@ -793,12 +1146,6 @@ struct MediaFoundationVideoDecoder::Impl {
             check(result, "decoder ProcessOutput");
             if (!decoded_sample) return std::nullopt;
 
-            ComPtr<IMFMediaBuffer> contiguous;
-            check(decoded_sample->ConvertToContiguousBuffer(&contiguous),
-                "make decoder output contiguous");
-            BYTE* source{};
-            DWORD current{};
-            check(contiguous->Lock(&source, nullptr, &current), "lock decoder output");
             DecodedFrame frame;
             frame.width = format.width;
             frame.height = format.height;
@@ -807,17 +1154,29 @@ struct MediaFoundationVideoDecoder::Impl {
             // individual samples. Prefer it over the initial media type, as a
             // stream can switch between SDR and HDR without changing geometry.
             frame.color = color_description(decoded_sample, format, &output_color);
-            try {
-                frame.nv12.assign(source, source + current);
-            } catch (...) {
+            if (!copy_dxgi_output(decoded_sample, frame)) {
+                ComPtr<IMFMediaBuffer> contiguous;
+                check(decoded_sample->ConvertToContiguousBuffer(&contiguous),
+                    "make decoder output contiguous");
+                BYTE* source{};
+                DWORD current{};
+                check(contiguous->Lock(&source, nullptr, &current), "lock decoder output");
+                try {
+                    frame.nv12.assign(source, source + current);
+                } catch (...) {
+                    contiguous->Unlock();
+                    throw;
+                }
                 contiguous->Unlock();
-                throw;
             }
-            contiguous->Unlock();
+            report_acceleration_mode();
             LONGLONG time{};
             if (SUCCEEDED(decoded_sample->GetSampleTime(&time))) frame.timestamp_100ns = time;
             UINT32 raw_stride{};
-            if (output_type && SUCCEEDED(output_type->GetUINT32(MF_MT_DEFAULT_STRIDE, &raw_stride))) {
+            if (frame.stride != 0) {
+                // DXGI readback preserves the actual row pitch.
+            } else if (output_type && SUCCEEDED(output_type->GetUINT32(
+                    MF_MT_DEFAULT_STRIDE, &raw_stride))) {
                 frame.stride = static_cast<std::int32_t>(raw_stride);
             } else {
                 frame.stride = static_cast<std::int32_t>(format.width *
@@ -1042,6 +1401,10 @@ DecoderPreference MediaFoundationVideoDecoder::preference() const noexcept {
 
 std::string_view MediaFoundationVideoDecoder::selected_decoder_name() const noexcept {
     return impl_->selected_name;
+}
+
+DecoderAcceleration MediaFoundationVideoDecoder::decoder_acceleration() const noexcept {
+    return impl_->actual_acceleration;
 }
 
 bool MediaFoundationVideoDecoder::selected_decoder_is_hardware() const noexcept {

@@ -110,6 +110,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
     )
     target_compile_options(iPhoneMirror.Core.Tests PRIVATE /W4 /permissive- /utf-8 /EHsc)
     target_link_libraries(iPhoneMirror.Core.Tests PRIVATE
+        iPhoneMirror.Core
         "${PROJECT_SOURCE_DIR}/third_party/libusb/lib/x64/libusb-1.0.lib"
         "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib"
         mfplat mf mfuuid wmcodecdspuuid d3d11 dxgi
@@ -131,6 +132,14 @@ if(IPHONEMIRROR_BUILD_TESTS)
         WORKING_DIRECTORY $<TARGET_FILE_DIR:iPhoneMirror.Core.Tests>
     )
 
+    add_executable(iPhoneMirror.OutputModeState.Tests
+        tests/OutputModeStateTests.cpp)
+    target_include_directories(iPhoneMirror.OutputModeState.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(iPhoneMirror.OutputModeState.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    add_test(NAME OutputModeStateTests COMMAND iPhoneMirror.OutputModeState.Tests)
+
     add_executable(iPhoneMirror.LibUsb0Probe
         tools/LibUsb0Probe.cpp
         src/Transport/LibUsb0Transport.cpp
@@ -143,6 +152,17 @@ if(IPHONEMIRROR_BUILD_TESTS)
     target_compile_options(iPhoneMirror.LibUsb0Probe PRIVATE /W4 /permissive- /utf-8 /EHsc)
     target_link_libraries(iPhoneMirror.LibUsb0Probe PRIVATE
         "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib")
+
+    add_executable(iPhoneMirror.PipelineSwitchProbe
+        tools/PipelineSwitchProbe.cpp)
+    target_include_directories(iPhoneMirror.PipelineSwitchProbe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(iPhoneMirror.PipelineSwitchProbe PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.PipelineSwitchProbe PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.PipelineSwitchProbe PRIVATE
+        iPhoneMirror.Core)
 endif()
 
 install(TARGETS iPhoneMirror.Core

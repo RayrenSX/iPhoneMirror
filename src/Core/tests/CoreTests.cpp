@@ -14,16 +14,21 @@
 #include "iPhoneMirror/CoreApi.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -611,6 +616,168 @@ void test_media_foundation_decoder() {
         check(frames.back().width == 1126 && frames.back().height == 2436, "decoded NV12 dimensions match format");
         check(!frames.back().nv12.empty(), "decoded NV12 frame contains pixels");
     }
+
+    iPhoneMirror::media::MediaFoundationH264Decoder software_decoder(
+        iPhoneMirror::media::DecoderPreference::SoftwareCompatible);
+    software_decoder.configure(*sample.format, 60, 1);
+    check(!software_decoder.selected_decoder_is_hardware(),
+        "software-compatible H264 policy explicitly selects CPU decoding");
+    std::vector<iPhoneMirror::media::DecodedFrame> software_frames;
+    for (int index = 0; index < 8 && software_frames.empty(); ++index) {
+        auto decoded = software_decoder.decode(sample.sample_data,
+            static_cast<std::int64_t>(index) * 166667, 166667);
+        for (auto& frame : decoded) software_frames.push_back(std::move(frame));
+    }
+    if (software_frames.empty()) {
+        auto drained = software_decoder.drain();
+        for (auto& frame : drained) software_frames.push_back(std::move(frame));
+    }
+    check(!software_frames.empty(),
+        "software-compatible Media Foundation decoder still decodes captured H264");
+}
+
+void test_decoder_switch_transaction() {
+    using iPhoneMirror::capture::detail::DecoderPreferenceState;
+    using iPhoneMirror::capture::detail::DecoderPreferenceUpdate;
+    using iPhoneMirror::capture::detail::DecoderSwitchCoordinator;
+    using iPhoneMirror::capture::detail::trial_and_commit_decoder;
+    using iPhoneMirror::capture::DecoderRuntimeMode;
+    using iPhoneMirror::capture::DecoderSwitchPhase;
+    using iPhoneMirror::media::DecoderPreference;
+
+    DecoderSwitchCoordinator coordinator(DecoderPreference::Auto);
+    const auto initial_status = coordinator.status();
+    check(initial_status.phase == DecoderSwitchPhase::Applied &&
+        initial_status.requested == DecoderPreference::Auto &&
+        initial_status.applied == DecoderPreference::Auto &&
+        initial_status.requested_generation == initial_status.applied_generation &&
+        initial_status.runtime_mode == DecoderRuntimeMode::Unknown,
+        "decoder switch status starts applied without inventing an acceleration mode");
+    auto active_decoder = std::make_unique<int>(1);
+    const auto hardware_request = coordinator.request(
+        DecoderPreference::HardwarePreferred);
+    const auto pending_status = coordinator.status();
+    check(pending_status.phase == DecoderSwitchPhase::Pending &&
+        pending_status.requested == DecoderPreference::HardwarePreferred &&
+        pending_status.applied == DecoderPreference::Auto &&
+        pending_status.requested_generation > pending_status.applied_generation,
+        "decoder request remains pending until its trial decode commits");
+    bool trial_completed{};
+    bool commit_observed_trial{};
+    std::vector<int> accepted_output{7};
+    auto replacement = std::make_unique<int>(2);
+    const bool empty_output_committed = trial_and_commit_decoder(
+        coordinator, hardware_request.current, replacement,
+        [&](auto& candidate) {
+            trial_completed = candidate && *candidate == 2;
+            return std::vector<int>{};
+        },
+        [&](std::unique_ptr<int>&& accepted_decoder,
+            std::vector<int>&& trial_output) noexcept {
+            commit_observed_trial = trial_completed;
+            active_decoder.swap(accepted_decoder);
+            accepted_output.swap(trial_output);
+        }, DecoderRuntimeMode::Hardware);
+    check(empty_output_committed && commit_observed_trial &&
+        active_decoder && *active_decoder == 2 && replacement &&
+        *replacement == 1 && accepted_output.empty(),
+        "decoder switch commits only after a successful trial decode, including empty output");
+    const auto hardware_status = coordinator.status();
+    check(hardware_status.phase == DecoderSwitchPhase::Applied &&
+        hardware_status.applied == DecoderPreference::HardwarePreferred &&
+        hardware_status.runtime_mode == DecoderRuntimeMode::Hardware,
+        "committed decoder status exposes the applied policy and actual engine");
+
+    const auto software_request = coordinator.request(
+        DecoderPreference::SoftwareCompatible);
+    replacement = std::make_unique<int>(3);
+    bool failed_candidate_committed{};
+    bool trial_threw{};
+    try {
+        (void)trial_and_commit_decoder(
+            coordinator, software_request.current, replacement,
+            [](auto&) -> std::vector<int> {
+                throw std::runtime_error("synthetic decoder rejection");
+            },
+            [&](auto&&, auto&&) noexcept {
+                failed_candidate_committed = true;
+            });
+    } catch (const std::runtime_error&) {
+        trial_threw = true;
+    }
+    check(trial_threw && !failed_candidate_committed && active_decoder &&
+        *active_decoder == 2 && replacement && *replacement == 3,
+        "failed candidate trial decode retains the known-good decoder");
+    check(coordinator.mark_failed_if_current(software_request.current),
+        "current decoder rejection records a failed generation");
+    const auto failed_status = coordinator.status();
+    check(failed_status.phase == DecoderSwitchPhase::Failed &&
+        failed_status.requested == DecoderPreference::SoftwareCompatible &&
+        failed_status.applied == DecoderPreference::HardwarePreferred &&
+        failed_status.runtime_mode == DecoderRuntimeMode::Hardware,
+        "failed decoder status keeps reporting the known-good active engine");
+
+    const auto stale_request = coordinator.request(DecoderPreference::Auto);
+    replacement = std::make_unique<int>(4);
+    DecoderPreferenceUpdate superseding_request;
+    const bool stale_candidate_committed = trial_and_commit_decoder(
+        coordinator, stale_request.current, replacement,
+        [&](auto&) {
+            superseding_request = coordinator.request(
+                DecoderPreference::HardwarePreferred);
+            return std::vector<int>{11};
+        },
+        [&](auto&&, auto&&) noexcept {
+            failed_candidate_committed = true;
+        });
+    check(!stale_candidate_committed && superseding_request.changed &&
+        coordinator.requested() == superseding_request.current &&
+        active_decoder && *active_decoder == 2 && replacement &&
+        *replacement == 4,
+        "candidate decoded for a superseded generation cannot replace the active decoder");
+    check(!coordinator.mark_failed_if_current(stale_request.current) &&
+        coordinator.status().phase == DecoderSwitchPhase::Pending,
+        "a stale decoder failure cannot poison the superseding request status");
+
+    DecoderSwitchCoordinator synchronized(DecoderPreference::Auto);
+    const DecoderPreferenceState expected = synchronized.request(
+        DecoderPreference::HardwarePreferred).current;
+    std::promise<void> commit_entered_promise;
+    auto commit_entered = commit_entered_promise.get_future();
+    std::promise<void> release_commit_promise;
+    auto release_commit = release_commit_promise.get_future();
+    std::promise<void> setter_finished_promise;
+    auto setter_finished = setter_finished_promise.get_future();
+    bool commit_succeeded{};
+    DecoderPreferenceUpdate concurrent_update;
+    std::jthread commit_thread([&] {
+        commit_succeeded = synchronized.commit_if_current(expected, [&] {
+            commit_entered_promise.set_value();
+            release_commit.wait();
+        });
+    });
+    if (commit_entered.wait_for(std::chrono::seconds(1)) !=
+        std::future_status::ready) {
+        check(false, "decoder commit transaction enters its synchronized boundary");
+        release_commit_promise.set_value();
+        commit_thread.join();
+        return;
+    }
+    std::jthread setter_thread([&] {
+        concurrent_update = synchronized.request(
+            DecoderPreference::SoftwareCompatible);
+        setter_finished_promise.set_value();
+    });
+    check(setter_finished.wait_for(std::chrono::milliseconds(50)) ==
+        std::future_status::timeout,
+        "decoder preference publication cannot cross the final recheck and swap boundary");
+    release_commit_promise.set_value();
+    commit_thread.join();
+    setter_thread.join();
+    check(commit_succeeded && concurrent_update.changed &&
+        concurrent_update.previous == expected &&
+        synchronized.requested() == concurrent_update.current,
+        "a request arriving during commit is published as the next generation");
 }
 
 void test_capture_media_safety_helpers() {
@@ -639,6 +806,61 @@ void test_capture_media_safety_helpers() {
         iPhoneMirror::media::PixelFormat::P010);
     check(maximum_p010 && *maximum_p010 == 201326592,
         "maximum supported P010 allocation remains bounded");
+
+    using iPhoneMirror::media::detail::DecoderAcceleration;
+    check(iPhoneMirror::media::detail::classify_dxva_mode(0) ==
+            DecoderAcceleration::Unknown &&
+        iPhoneMirror::media::detail::classify_dxva_mode(1) ==
+            DecoderAcceleration::Software &&
+        iPhoneMirror::media::detail::classify_dxva_mode(2) ==
+            DecoderAcceleration::Hardware &&
+        iPhoneMirror::media::detail::classify_dxva_mode(3) ==
+            DecoderAcceleration::Hardware &&
+        iPhoneMirror::media::detail::classify_dxva_mode(4) ==
+            DecoderAcceleration::Hardware &&
+        iPhoneMirror::media::detail::classify_dxva_mode(5) ==
+            DecoderAcceleration::Unknown,
+        "DXVA mode classification only resolves documented SW/MC/IDCT/VLD values");
+
+    const auto odd_dxgi_nv12 =
+        iPhoneMirror::media::detail::checked_dxgi_readback_layout(
+            3, 3, 3, 3, 1, 1, 0, 1, 4,
+            iPhoneMirror::media::PixelFormat::Nv12);
+    check(odd_dxgi_nv12 && odd_dxgi_nv12->minimum_row_pitch == 4 &&
+            odd_dxgi_nv12->row_count == 5 && odd_dxgi_nv12->total_bytes == 20,
+        "DXGI NV12 layout rounds odd luma width and chroma height safely");
+    const auto padded_dxgi_p010 =
+        iPhoneMirror::media::detail::checked_dxgi_readback_layout(
+            3, 3, 4, 4, 2, 3, 4, 1, 8,
+            iPhoneMirror::media::PixelFormat::P010);
+    check(padded_dxgi_p010 && padded_dxgi_p010->minimum_row_pitch == 8 &&
+            padded_dxgi_p010->row_count == 6 &&
+            padded_dxgi_p010->total_bytes == 48,
+        "DXGI P010 layout accepts a mip-zero array slice and padded allocation");
+    check(!iPhoneMirror::media::detail::checked_dxgi_readback_layout(
+            3, 3, 4, 4, 2, 3, 3, 1, 8,
+            iPhoneMirror::media::PixelFormat::P010) &&
+        !iPhoneMirror::media::detail::checked_dxgi_readback_layout(
+            3, 3, 4, 4, 1, 1, 0, 2, 8,
+            iPhoneMirror::media::PixelFormat::P010) &&
+        !iPhoneMirror::media::detail::checked_dxgi_readback_layout(
+            3, 3, 516, 4, 1, 1, 0, 1, 1032,
+            iPhoneMirror::media::PixelFormat::P010) &&
+        !iPhoneMirror::media::detail::checked_dxgi_readback_layout(
+            3, 3, 4, 4, 1, 1, 0, 1, 6,
+            iPhoneMirror::media::PixelFormat::P010),
+        "DXGI readback rejects nonzero mips, multisampling, excess padding, and short rows");
+    const auto near_limit_dxgi =
+        iPhoneMirror::media::detail::checked_dxgi_readback_layout(
+            8192, 8192, 8192, 8192, 1, 1, 0, 1, 21844,
+            iPhoneMirror::media::PixelFormat::P010);
+    check(near_limit_dxgi &&
+            near_limit_dxgi->total_bytes <=
+                iPhoneMirror::media::detail::MaxDxgiReadbackBytes &&
+        !iPhoneMirror::media::detail::checked_dxgi_readback_layout(
+            8192, 8192, 8192, 8192, 1, 1, 0, 1, 21846,
+            iPhoneMirror::media::PixelFormat::P010),
+        "DXGI readback enforces the 256 MiB mapped allocation ceiling");
 
     iPhoneMirror::coremedia::VideoColorDescription sdr_color{
         .primaries = iPhoneMirror::coremedia::ColorPrimaries::Bt709,
@@ -760,6 +982,39 @@ void test_capture_media_safety_helpers() {
 void test_capture_preflight_without_device() {
     iPhoneMirror::capture::CaptureSession session("definitely-not-a-real-udid");
     check_throws([&] { session.start(false); }, "capture preflight rejects missing USB device");
+}
+
+void test_image_adjustment_api_validation() {
+    const auto invalid_argument =
+        static_cast<std::int32_t>(iPhoneMirror::Result::InvalidArgument);
+    const auto not_initialized =
+        static_cast<std::int32_t>(iPhoneMirror::Result::NotInitialized);
+
+    check(im_set_image_adjustments(-1.0F, 0.0F, 0.0F, 0.5F) == not_initialized &&
+        im_set_image_adjustments(1.0F, 2.0F, 2.0F, 2.0F) == not_initialized,
+        "image adjustment API accepts every inclusive boundary before initialization");
+    check(im_set_image_adjustments(-1.001F, 1.0F, 1.0F, 1.0F) == invalid_argument &&
+        im_set_image_adjustments(1.001F, 1.0F, 1.0F, 1.0F) == invalid_argument,
+        "image adjustment API rejects brightness outside [-1, 1]");
+    check(im_set_image_adjustments(0.0F, -0.001F, 1.0F, 1.0F) == invalid_argument &&
+        im_set_image_adjustments(0.0F, 2.001F, 1.0F, 1.0F) == invalid_argument,
+        "image adjustment API rejects contrast outside [0, 2]");
+    check(im_set_image_adjustments(0.0F, 1.0F, -0.001F, 1.0F) == invalid_argument &&
+        im_set_image_adjustments(0.0F, 1.0F, 2.001F, 1.0F) == invalid_argument,
+        "image adjustment API rejects saturation outside [0, 2]");
+    check(im_set_image_adjustments(0.0F, 1.0F, 1.0F, 0.499F) == invalid_argument &&
+        im_set_image_adjustments(0.0F, 1.0F, 1.0F, 2.001F) == invalid_argument,
+        "image adjustment API rejects gamma outside [0.5, 2]");
+    check(im_set_image_adjustments(std::numeric_limits<float>::quiet_NaN(),
+              1.0F, 1.0F, 1.0F) == invalid_argument &&
+        im_set_image_adjustments(0.0F, std::numeric_limits<float>::infinity(),
+              1.0F, 1.0F) == invalid_argument,
+        "image adjustment API rejects non-finite values");
+    check(im_session_set_image_adjustments(0, -1.001F, 1.0F, 1.0F, 1.0F) ==
+            invalid_argument &&
+        im_session_set_image_adjustments(0, 0.0F, 1.0F, 1.0F, 0.499F) ==
+            invalid_argument,
+        "session image adjustment API validates values before resolving handles");
 }
 
 void test_wireless_i420_conversion() {
@@ -995,8 +1250,10 @@ int main() {
         test_apple_usb_reenumeration_selection();
         test_libusb_runtime();
         test_media_foundation_decoder();
+        test_decoder_switch_transaction();
         test_capture_media_safety_helpers();
         test_capture_preflight_without_device();
+        test_image_adjustment_api_validation();
         test_wireless_i420_conversion();
         test_wireless_multi_stream_isolation();
         test_media_command_queue();

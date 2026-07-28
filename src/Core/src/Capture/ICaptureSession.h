@@ -49,7 +49,32 @@ struct CapturePreferences {
     UsbProjectionMode usb_projection_mode{UsbProjectionMode::Demo};
     media::DecoderPreference decoder_preference{media::DecoderPreference::Auto};
     media::ColorOutputPreference color_output_preference{
-        media::ColorOutputPreference::Auto};
+        media::ColorOutputPreference::ForceSdrToneMap};
+    float brightness{};
+    float contrast{1.0F};
+    float saturation{1.0F};
+    float gamma{1.0F};
+};
+
+enum class DecoderSwitchPhase : std::uint32_t {
+    Applied = 0,
+    Pending = 1,
+    Failed = 2,
+};
+
+enum class DecoderRuntimeMode : std::uint32_t {
+    Unknown = 0,
+    Hardware = 1,
+    Software = 2,
+};
+
+struct DecoderSwitchStatus {
+    media::DecoderPreference requested{media::DecoderPreference::Auto};
+    media::DecoderPreference applied{media::DecoderPreference::Auto};
+    std::uint64_t requested_generation{1};
+    std::uint64_t applied_generation{1};
+    DecoderSwitchPhase phase{DecoderSwitchPhase::Applied};
+    DecoderRuntimeMode runtime_mode{DecoderRuntimeMode::Unknown};
 };
 
 class ICaptureSession {
@@ -64,6 +89,8 @@ public:
     virtual void set_audio_volume(float volume) noexcept = 0;
     virtual void set_target_fps(std::uint32_t target_fps) noexcept = 0;
     [[nodiscard]] virtual std::uint32_t target_fps() const noexcept = 0;
+    virtual void set_decoder_preference(media::DecoderPreference preference) noexcept = 0;
+    [[nodiscard]] virtual DecoderSwitchStatus decoder_switch_status() const noexcept = 0;
     virtual void request_display_orientation(bool landscape) noexcept = 0;
 };
 

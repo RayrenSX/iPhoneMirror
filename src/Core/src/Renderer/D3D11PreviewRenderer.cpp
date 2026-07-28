@@ -1,4 +1,5 @@
 #include "Renderer/D3D11PreviewRenderer.h"
+#include "Renderer/OutputModeState.h"
 
 #include "Logging.h"
 
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 
@@ -29,11 +31,89 @@ std::uint64_t pack_corner_profile(float normalized_radius, float curve_exponent)
         std::bit_cast<std::uint32_t>(curve_exponent);
 }
 
+constexpr std::uint32_t DiagnosticMonitorShift = 0U;
+constexpr std::uint32_t DiagnosticSourceHdrShift = 2U;
+constexpr std::uint32_t DiagnosticHdrSurfaceShift = 4U;
+constexpr std::uint32_t DiagnosticPreferenceShift = 5U;
+constexpr std::uint32_t DiagnosticMonitorMask = 0x3U << DiagnosticMonitorShift;
+constexpr std::uint32_t DiagnosticSourceHdrMask = 0x3U << DiagnosticSourceHdrShift;
+constexpr std::uint32_t DiagnosticHdrSurfaceMask = 0x1U << DiagnosticHdrSurfaceShift;
+constexpr std::uint32_t DiagnosticPreferenceMask = 0x3U << DiagnosticPreferenceShift;
+
+std::uint32_t publish_diagnostic_field(std::atomic_uint32_t& snapshot,
+    std::uint32_t mask, std::uint32_t value) noexcept {
+    auto current = snapshot.load(std::memory_order_relaxed);
+    for (;;) {
+        const auto desired = (current & ~mask) | (value & mask);
+        if (snapshot.compare_exchange_weak(current, desired,
+            std::memory_order_release, std::memory_order_relaxed)) {
+            return current;
+        }
+    }
+}
+
+OutputDiagnostics unpack_output_diagnostics(std::uint32_t packed) noexcept {
+    OutputDiagnostics diagnostics;
+    diagnostics.monitor_capability = static_cast<MonitorHdrCapability>(
+        (packed & DiagnosticMonitorMask) >> DiagnosticMonitorShift);
+    const auto source_hdr_state = static_cast<std::uint8_t>(
+        (packed & DiagnosticSourceHdrMask) >> DiagnosticSourceHdrShift);
+    diagnostics.source_hdr_known = source_hdr_state != 0;
+    diagnostics.source_hdr = source_hdr_state == 2;
+    diagnostics.actual_hdr_surface = (packed & DiagnosticHdrSurfaceMask) != 0;
+    diagnostics.hdr_effective = output::hdr_output_is_effective(
+        diagnostics.source_hdr,
+        diagnostics.monitor_capability == MonitorHdrCapability::Hdr,
+        diagnostics.actual_hdr_surface);
+    diagnostics.requested_preference = static_cast<media::ColorOutputPreference>(
+        (packed & DiagnosticPreferenceMask) >> DiagnosticPreferenceShift);
+    return diagnostics;
+}
+
 void check(HRESULT result, const char* operation) {
     if (FAILED(result)) {
         throw std::runtime_error(std::format("{} failed: 0x{:08X}", operation,
             static_cast<unsigned>(result)));
     }
+}
+
+DXGI_FORMAT dxgi_format(output::SurfaceFormat format) noexcept {
+    return format == output::SurfaceFormat::Rgba16Float
+        ? DXGI_FORMAT_R16G16B16A16_FLOAT
+        : DXGI_FORMAT_B8G8R8A8_UNORM;
+}
+
+output::SurfaceFormat output_surface_format(DXGI_FORMAT format) noexcept {
+    return format == DXGI_FORMAT_R16G16B16A16_FLOAT
+        ? output::SurfaceFormat::Rgba16Float
+        : output::SurfaceFormat::Bgra8;
+}
+
+output::Failure classify_output_failure(HRESULT result) noexcept {
+    if (SUCCEEDED(result)) return output::Failure::None;
+    if (result == DXGI_ERROR_UNSUPPORTED) return output::Failure::Unsupported;
+    if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET ||
+        result == DXGI_ERROR_DEVICE_HUNG ||
+        result == DXGI_ERROR_DRIVER_INTERNAL_ERROR) {
+        return output::Failure::DeviceLost;
+    }
+    return output::Failure::Transient;
+}
+
+const char* output_failure_name(output::Failure failure) noexcept {
+    switch (failure) {
+    case output::Failure::None: return "none";
+    case output::Failure::Unsupported: return "unsupported";
+    case output::Failure::Transient: return "transient";
+    case output::Failure::DeviceLost: return "device_lost";
+    }
+    return "unknown";
+}
+
+std::uint64_t steady_milliseconds() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<
+        std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count());
 }
 
 ComPtr<ID3DBlob> compile_shader(const char* source, const char* entry, const char* target) {
@@ -64,31 +144,49 @@ std::size_t allocated_nv12_height(const media::DecodedFrame& frame, std::size_t 
     return frame.height;
 }
 
-bool monitor_has_active_hdr(IDXGIFactory1* factory, HWND window) noexcept {
-    if (!factory || !window) return false;
+const char* monitor_hdr_state_name(MonitorHdrCapability state) noexcept {
+    switch (state) {
+    case MonitorHdrCapability::Unknown: return "unknown";
+    case MonitorHdrCapability::Sdr: return "sdr";
+    case MonitorHdrCapability::Hdr: return "hdr";
+    }
+    return "unknown";
+}
+
+MonitorHdrCapability monitor_hdr_state(IDXGIFactory1* factory, HWND window) noexcept {
+    if (!factory || !window) return MonitorHdrCapability::Unknown;
     const auto monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+    if (!monitor) return MonitorHdrCapability::Unknown;
     for (UINT adapter_index{};; ++adapter_index) {
         ComPtr<IDXGIAdapter1> adapter;
-        if (factory->EnumAdapters1(adapter_index, &adapter) == DXGI_ERROR_NOT_FOUND) break;
+        const auto adapter_result = factory->EnumAdapters1(adapter_index, &adapter);
+        if (adapter_result == DXGI_ERROR_NOT_FOUND) break;
+        if (FAILED(adapter_result)) return MonitorHdrCapability::Unknown;
         if (!adapter) continue;
         for (UINT output_index{};; ++output_index) {
             ComPtr<IDXGIOutput> output;
-            if (adapter->EnumOutputs(output_index, &output) == DXGI_ERROR_NOT_FOUND) break;
+            const auto output_result = adapter->EnumOutputs(output_index, &output);
+            if (output_result == DXGI_ERROR_NOT_FOUND) break;
+            if (FAILED(output_result)) return MonitorHdrCapability::Unknown;
             if (!output) continue;
             DXGI_OUTPUT_DESC output_description{};
-            if (FAILED(output->GetDesc(&output_description)) ||
-                output_description.Monitor != monitor) continue;
+            if (FAILED(output->GetDesc(&output_description)))
+                return MonitorHdrCapability::Unknown;
+            if (output_description.Monitor != monitor) continue;
             ComPtr<IDXGIOutput6> output6;
             DXGI_OUTPUT_DESC1 description{};
-            if (FAILED(output.As(&output6)) ||
-                FAILED(output6->GetDesc1(&description))) return false;
+            const auto output6_result = output.As(&output6);
+            if (output6_result == E_NOINTERFACE) return MonitorHdrCapability::Sdr;
+            if (FAILED(output6_result) || FAILED(output6->GetDesc1(&description)))
+                return MonitorHdrCapability::Unknown;
             const bool advanced_color =
                 description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 ||
                 description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-            return advanced_color && description.BitsPerColor >= 10;
+            return advanced_color && description.BitsPerColor >= 10
+                ? MonitorHdrCapability::Hdr : MonitorHdrCapability::Sdr;
         }
     }
-    return false;
+    return MonitorHdrCapability::Unknown;
 }
 
 constexpr const char* VertexShader = R"(
@@ -133,6 +231,10 @@ cbuffer ShapeConstants : register(b0) {
     float preserveHdr;
     float sourcePeakNits;
     float3 colorPadding;
+    float brightness;
+    float contrast;
+    float saturation;
+    float gammaValue;
 };
 
 float2 rotateUv(float2 uv) {
@@ -237,6 +339,13 @@ float3 applyColorOutput(float3 encodedRgb) {
     return encodedRgb;
 }
 
+float3 applyImageAdjustments(float3 rgb) {
+    rgb = (rgb - 0.5) * contrast + 0.5 + brightness;
+    float luminance = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+    rgb = lerp(luminance.xxx, rgb, saturation);
+    return pow(saturate(rgb), 1.0 / max(gammaValue, 0.01));
+}
+
 float4 nv12Main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
     uv = rotateUv(uv);
     float y = max(0.0, yPlane.Sample(linearSampler, uv) - yOffset) * yScale;
@@ -246,7 +355,8 @@ float4 nv12Main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGE
     rgb.r = y + redCr * chroma.y;
     rgb.g = y + greenCb * chroma.x + greenCr * chroma.y;
     rgb.b = y + blueCb * chroma.x;
-    return premultiplyForCorner(applyColorOutput(rgb), position.xy);
+    return premultiplyForCorner(
+        applyImageAdjustments(applyColorOutput(rgb)), position.xy);
 }
 
 float4 copyMain(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
@@ -283,6 +393,17 @@ struct D3D11PreviewRenderer::Impl {
         float preserve_hdr{};
         float source_peak_nits{1000.0F};
         float color_padding[3]{};
+        float brightness{};
+        float contrast{1.0F};
+        float saturation{1.0F};
+        float gamma{1.0F};
+    };
+
+    struct ImageAdjustments {
+        float brightness{};
+        float contrast{1.0F};
+        float saturation{1.0F};
+        float gamma{1.0F};
     };
 
     HWND window{};
@@ -311,8 +432,7 @@ struct D3D11PreviewRenderer::Impl {
     ComPtr<ID3D11Texture2D> render_texture;
     ComPtr<ID3D11RenderTargetView> render_target;
     ComPtr<ID3D11ShaderResourceView> render_view;
-    DXGI_FORMAT swap_chain_format{DXGI_FORMAT_B8G8R8A8_UNORM};
-    bool hdr_surface{};
+    output::State output_state;
 
     std::uint32_t frame_width{};
     std::uint32_t frame_height{};
@@ -336,15 +456,24 @@ struct D3D11PreviewRenderer::Impl {
     // Radius/exponent are published as one atomic value so a live device
     // switch cannot render one frame using a mixed profile.
     std::atomic_uint64_t corner_profile{pack_corner_profile(0.1784F, 2.36F)};
+    std::mutex image_adjustments_mutex;
+    ImageAdjustments image_adjustments;
     std::atomic_int rotation_quarter_turns{};
-    std::atomic<media::ColorOutputPreference> color_output_preference{
-        media::ColorOutputPreference::Auto};
+    std::atomic_uint64_t color_output_policy_generation{};
+    // A single packed load prevents torn diagnostics. Renderer-owned fields
+    // still advance as their underlying facts change, so a newly detected SDR
+    // monitor may legitimately coexist briefly with the previous HDR surface.
+    // Source HDR uses 0=unknown, 1=SDR, 2=HDR.
+    std::atomic_uint32_t diagnostic_output_snapshot{};
     media::PixelFormat texture_pixel_format{media::PixelFormat::Nv12};
     std::atomic_uint64_t color_signature{};
     HMONITOR configured_monitor{};
-    bool configured_monitor_hdr{};
-    bool requested_hdr_surface{};
+    MonitorHdrCapability configured_monitor_hdr{MonitorHdrCapability::Sdr};
+    HMONITOR last_probed_monitor{};
+    bool factory_refresh_pending{true};
+    std::uint64_t monitor_generation{};
     std::chrono::steady_clock::time_point next_color_output_probe{};
+    std::chrono::steady_clock::time_point next_resize_allowed{};
     std::uint32_t scheduled_fps{};
     std::chrono::steady_clock::time_point next_present_due{};
 
@@ -394,12 +523,23 @@ struct D3D11PreviewRenderer::Impl {
         }
         check(dxgi_device->GetAdapter(&adapter), "IDXGIDevice GetAdapter");
         check(adapter->GetParent(IID_PPV_ARGS(&factory)), "query IDXGIFactory2");
-        const bool hdr_monitor = monitor_has_active_hdr(factory.Get(), window);
-        configured_monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
-        configured_monitor_hdr = hdr_monitor;
-        requested_hdr_surface = false;
-        next_color_output_probe = std::chrono::steady_clock::now() +
-            std::chrono::seconds(1);
+        factory_refresh_pending = true;
+        const auto monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+        const auto hdr_monitor = monitor_hdr_state(factory.Get(), window);
+        publish_diagnostic_field(diagnostic_output_snapshot,
+            DiagnosticMonitorMask,
+            static_cast<std::uint32_t>(hdr_monitor) << DiagnosticMonitorShift);
+        last_probed_monitor = monitor;
+        if (hdr_monitor != MonitorHdrCapability::Unknown) {
+            configured_monitor = monitor;
+            configured_monitor_hdr = hdr_monitor;
+            ++monitor_generation;
+            factory_refresh_pending = false;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        next_color_output_probe = now + (hdr_monitor == MonitorHdrCapability::Unknown
+            ? std::chrono::milliseconds(250) : std::chrono::seconds(1));
+        next_resize_allowed = {};
         DXGI_SWAP_CHAIN_DESC1 swap_description{};
         swap_description.Width = target_width;
         swap_description.Height = target_height;
@@ -436,8 +576,6 @@ struct D3D11PreviewRenderer::Impl {
                 }
             }
             swap_chain = std::move(candidate);
-            swap_chain_format = format;
-            hdr_surface = format == DXGI_FORMAT_R16G16B16A16_FLOAT;
             return S_OK;
         };
         const auto swap_result = create_swap_chain(swap_description.Format);
@@ -491,113 +629,278 @@ struct D3D11PreviewRenderer::Impl {
         sampler_description.MaxLOD = D3D11_FLOAT32_MAX;
         check(device->CreateSamplerState(&sampler_description, &sampler), "CreateSamplerState");
         recreate_target();
+        output_state = {};
+        output_state.monitor_generation = monitor_generation;
+        output_state.policy_generation =
+            color_output_policy_generation.load(std::memory_order_acquire);
+        output::commit_device_rebuild(output_state,
+            output_surface_format(swap_description.Format),
+            swap_description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT
+                ? output::AppliedColorSpace::Hdr
+                : output::AppliedColorSpace::Sdr,
+            true);
+        publish_diagnostic_field(diagnostic_output_snapshot,
+            DiagnosticHdrSurfaceMask,
+            static_cast<std::uint32_t>(hdr_surface_active()) << DiagnosticHdrSurfaceShift);
         present_black();
         logging::write(std::format(
             "d3d_preview initialized feature_level=0x{:04X} target={}x{} mode={} output={} hdr_monitor={}",
             static_cast<unsigned>(selected), target_width, target_height,
             composition_mode ? "composition" : "hwnd",
-            hdr_surface ? "scrgb_fp16" : "sdr_bgra8", hdr_monitor ? "true" : "false"));
+            output_state.applied_color_space == output::AppliedColorSpace::Hdr
+                ? "scrgb_fp16" : "sdr_bgra8",
+            monitor_hdr_state_name(hdr_monitor)));
     }
 
-    void recreate_target() {
-        target.Reset();
-        ComPtr<ID3D11Texture2D> back_buffer;
-        check(swap_chain->GetBuffer(0, IID_PPV_ARGS(&back_buffer)), "swap chain GetBuffer");
-        check(device->CreateRenderTargetView(back_buffer.Get(), nullptr, &target),
-            "CreateRenderTargetView");
-    }
-
-    bool switch_swap_chain_format(bool enable_hdr) {
-        const auto wanted_format = enable_hdr
-            ? DXGI_FORMAT_R16G16B16A16_FLOAT
-            : DXGI_FORMAT_B8G8R8A8_UNORM;
-        if (wanted_format == swap_chain_format) return true;
+    void release_device_resources() noexcept {
+        if (context) {
+            context->ClearState();
+            context->Flush();
+        }
+        if (composition_visual) (void)composition_visual->SetContent(nullptr);
+        if (composition_device) (void)composition_device->Commit();
 
         target.Reset();
         render_view.Reset();
         render_target.Reset();
         render_texture.Reset();
+        y_view.Reset();
+        uv_view.Reset();
+        y_texture.Reset();
+        uv_texture.Reset();
+        sampler.Reset();
+        shape_constants.Reset();
+        mask_pixel_shader.Reset();
+        copy_pixel_shader.Reset();
+        pixel_shader.Reset();
+        vertex_shader.Reset();
+        composition_visual.Reset();
+        composition_target.Reset();
+        composition_device.Reset();
+        swap_chain.Reset();
+        factory.Reset();
+        context.Reset();
+        device.Reset();
+
+        frame_width = frame_height = 0;
         render_width = render_height = 0;
-        const auto resize_result = swap_chain->ResizeBuffers(
-            0, target_width, target_height, wanted_format, 0);
-        if (FAILED(resize_result)) {
-            recreate_target();
-            logging::write(std::format(
-                "d3d_preview output_switch_failed requested={} stage=resize hr=0x{:08X}",
-                enable_hdr ? "hdr_scrgb" : "sdr_bgra8",
-                static_cast<unsigned>(resize_result)));
-            return false;
-        }
+        local_render_width = local_render_height = 0;
+        using_limited_pass = false;
+        scheduled_fps = 0;
+        next_present_due = {};
+        next_resize_allowed = {};
+        output_state.target_valid = false;
+        output_state.applied_color_space = output::AppliedColorSpace::Invalid;
+        output_state.color_space_monitor_generation = 0;
+        output_state.last_failure = output::Failure::DeviceLost;
+        publish_diagnostic_field(diagnostic_output_snapshot,
+            DiagnosticHdrSurfaceMask, 0);
+    }
 
+    void rebuild_device_resources() {
+        const auto removed_reason = device ? device->GetDeviceRemovedReason() : E_POINTER;
+        logging::write(std::format(
+            "d3d_preview device_rebuild_begin removed_hr=0x{:08X}",
+            static_cast<unsigned>(removed_reason)));
+        release_device_resources();
+        try {
+            initialize();
+            refresh_requested.store(true, std::memory_order_release);
+            color_signature.store(0, std::memory_order_relaxed);
+            logging::write("d3d_preview device_rebuild_complete");
+        } catch (...) {
+            release_device_resources();
+            logging::write("d3d_preview device_rebuild_failed");
+            throw;
+        }
+    }
+
+    bool hdr_surface_active() const noexcept {
+        return output_state.target_valid &&
+            output_state.actual_format == output::SurfaceFormat::Rgba16Float &&
+            output_state.applied_color_space == output::AppliedColorSpace::Hdr;
+    }
+
+    HRESULT try_recreate_target() noexcept {
+        ComPtr<ID3D11Texture2D> back_buffer;
+        auto result = swap_chain
+            ? swap_chain->GetBuffer(0, IID_PPV_ARGS(&back_buffer)) : E_POINTER;
+        if (FAILED(result)) return result;
+        ComPtr<ID3D11RenderTargetView> replacement;
+        result = device->CreateRenderTargetView(
+            back_buffer.Get(), nullptr, &replacement);
+        if (FAILED(result)) return result;
+        target = std::move(replacement);
+        return S_OK;
+    }
+
+    void recreate_target() {
+        target.Reset();
+        check(try_recreate_target(), "recreate swap-chain target");
+    }
+
+    void release_swap_chain_targets() noexcept {
+        ID3D11ShaderResourceView* empty[] = {nullptr, nullptr, nullptr};
+        context->PSSetShaderResources(0, 3, empty);
+        context->OMSetRenderTargets(0, nullptr, nullptr);
+        // Immediate contexts retain binding references after the owning ComPtr
+        // is reset. ResizeBuffers requires every back-buffer reference gone.
+        context->ClearState();
+        context->Flush();
+        target.Reset();
+        render_view.Reset();
+        render_target.Reset();
+        render_texture.Reset();
+        render_width = render_height = 0;
+    }
+
+    HRESULT set_swap_chain_color_space(output::Mode mode) noexcept {
         ComPtr<IDXGISwapChain3> swap_chain3;
-        auto color_result = swap_chain.As(&swap_chain3);
-        if (SUCCEEDED(color_result)) {
-            const auto color_space = enable_hdr
-                ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
-                : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-            UINT support{};
-            color_result = swap_chain3->CheckColorSpaceSupport(color_space, &support);
-            if (SUCCEEDED(color_result) &&
-                (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) != 0) {
-                color_result = swap_chain3->SetColorSpace1(color_space);
-            } else if (SUCCEEDED(color_result)) {
-                color_result = DXGI_ERROR_UNSUPPORTED;
-            }
-        }
-
-        if (FAILED(color_result) && enable_hdr) {
-            // A driver can advertise Advanced Color on the output while
-            // rejecting FP16 for this particular swap chain. Restore SDR once
-            // and remember the failed request until the monitor/source changes.
-            const auto fallback_result = swap_chain->ResizeBuffers(
-                0, target_width, target_height, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
-            if (SUCCEEDED(fallback_result) && swap_chain3) {
-                (void)swap_chain3->SetColorSpace1(
-                    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
-            }
-            swap_chain_format = DXGI_FORMAT_B8G8R8A8_UNORM;
-            hdr_surface = false;
-            recreate_target();
-            logging::write(std::format(
-                "d3d_preview output_switch_failed requested=hdr_scrgb stage=color_space "
-                "hr=0x{:08X} fallback_hr=0x{:08X}",
-                static_cast<unsigned>(color_result),
-                static_cast<unsigned>(fallback_result)));
-            return false;
-        }
-
-        swap_chain_format = wanted_format;
-        hdr_surface = enable_hdr;
-        recreate_target();
-        color_signature.store(0, std::memory_order_relaxed);
-        logging::write(std::format("d3d_preview output_switched output={}",
-            hdr_surface ? "hdr_scrgb" : "sdr_bgra8"));
-        return SUCCEEDED(color_result);
+        auto result = swap_chain.As(&swap_chain3);
+        if (FAILED(result)) return result;
+        const auto color_space = mode == output::Mode::Hdr
+            ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
+            : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+        UINT support{};
+        result = swap_chain3->CheckColorSpaceSupport(color_space, &support);
+        if (FAILED(result)) return result;
+        if ((support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == 0)
+            return DXGI_ERROR_UNSUPPORTED;
+        return swap_chain3->SetColorSpace1(color_space);
     }
 
     bool update_output_mode(const media::DecodedFrame& frame) {
+        publish_diagnostic_field(diagnostic_output_snapshot,
+            DiagnosticSourceHdrMask,
+            (frame.color.is_hdr() ? 2U : 1U) << DiagnosticSourceHdrShift);
         const auto now = std::chrono::steady_clock::now();
         const auto monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
-        if (monitor != configured_monitor || now >= next_color_output_probe) {
-            const auto active_hdr = monitor_has_active_hdr(factory.Get(), window);
-            if (monitor != configured_monitor || active_hdr != configured_monitor_hdr) {
+        if (monitor != last_probed_monitor || now >= next_color_output_probe) {
+            bool factory_refresh_failed{};
+            if (factory && !factory->IsCurrent()) {
+                ComPtr<IDXGIFactory2> replacement;
+                const auto result = CreateDXGIFactory1(IID_PPV_ARGS(&replacement));
+                if (SUCCEEDED(result)) {
+                    factory = std::move(replacement);
+                    factory_refresh_pending = true;
+                } else {
+                    factory_refresh_failed = true;
+                }
                 logging::write(std::format(
-                    "d3d_preview monitor_changed monitor={} advanced_color={}",
-                    reinterpret_cast<std::uintptr_t>(monitor),
-                    active_hdr ? "true" : "false"));
+                    "d3d_preview factory_refresh hr=0x{:08X}",
+                    static_cast<unsigned>(result)));
             }
-            configured_monitor = monitor;
-            configured_monitor_hdr = active_hdr;
-            next_color_output_probe = now + std::chrono::seconds(1);
+            const auto active_hdr = factory_refresh_failed
+                ? MonitorHdrCapability::Unknown : monitor_hdr_state(factory.Get(), window);
+            publish_diagnostic_field(diagnostic_output_snapshot,
+                DiagnosticMonitorMask,
+                static_cast<std::uint32_t>(active_hdr) << DiagnosticMonitorShift);
+            last_probed_monitor = monitor;
+            if (active_hdr == MonitorHdrCapability::Unknown) {
+                // DXGI output enumeration can be briefly unavailable while a
+                // window crosses monitors. Keep the active format/color space
+                // stable and retry without publishing a false SDR transition.
+                next_color_output_probe = now + std::chrono::milliseconds(250);
+                logging::write(std::format(
+                    "d3d_preview monitor_probe monitor={} advanced_color=unknown "
+                    "generation={} retry_ms=250",
+                    reinterpret_cast<std::uintptr_t>(monitor), monitor_generation));
+            } else {
+                const bool capability_changed = monitor != configured_monitor ||
+                    active_hdr != configured_monitor_hdr || factory_refresh_pending;
+                if (capability_changed) ++monitor_generation;
+                if (capability_changed) {
+                    logging::write(std::format(
+                        "d3d_preview monitor_changed monitor={} advanced_color={} generation={}",
+                        reinterpret_cast<std::uintptr_t>(monitor),
+                        monitor_hdr_state_name(active_hdr), monitor_generation));
+                }
+                configured_monitor = monitor;
+                configured_monitor_hdr = active_hdr;
+                factory_refresh_pending = false;
+                next_color_output_probe = now + std::chrono::seconds(1);
+            }
         }
 
-        const auto preference = color_output_preference.load(std::memory_order_relaxed);
-        const bool want_hdr = frame.color.is_hdr() && configured_monitor_hdr &&
+        // The generation is published after the preference. Acquiring it first
+        // guarantees that consuming a new generation also sees its policy.
+        const auto policy_generation =
+            color_output_policy_generation.load(std::memory_order_acquire);
+        const auto preference = unpack_output_diagnostics(
+            diagnostic_output_snapshot.load(std::memory_order_acquire))
+            .requested_preference;
+        const bool want_hdr = frame.color.is_hdr() &&
+            configured_monitor_hdr == MonitorHdrCapability::Hdr &&
             preference != media::ColorOutputPreference::ForceSdrToneMap;
-        if (want_hdr == requested_hdr_surface) return false;
-        requested_hdr_surface = want_hdr;
-        (void)switch_swap_chain_format(want_hdr);
-        return true;
+        const auto desired_mode = want_hdr ? output::Mode::Hdr : output::Mode::Sdr;
+        const auto now_ms = steady_milliseconds();
+        const auto plan = output::plan_update(
+            output_state, desired_mode, monitor_generation,
+            policy_generation, now_ms);
+        if (plan.action == output::Action::None) return false;
+        if (plan.action == output::Action::RebuildDevice) {
+            rebuild_device_resources();
+            return true;
+        }
+
+        struct Backend {
+            Impl& owner;
+            HRESULT resize_hr{S_FALSE};
+            HRESULT color_hr{S_FALSE};
+            HRESULT target_hr{S_FALSE};
+
+            void release_targets() noexcept { owner.release_swap_chain_targets(); }
+            output::Failure resize(output::SurfaceFormat format) noexcept {
+                resize_hr = owner.swap_chain->ResizeBuffers(0,
+                    owner.target_width, owner.target_height, dxgi_format(format), 0);
+                return classify_output_failure(resize_hr);
+            }
+            output::Failure set_color_space(output::Mode mode) noexcept {
+                color_hr = owner.set_swap_chain_color_space(mode);
+                // Some drivers reject SetColorSpace1 with E_INVALIDARG even
+                // after CheckColorSpaceSupport advertises PRESENT support.
+                if (color_hr == E_INVALIDARG) return output::Failure::Unsupported;
+                return classify_output_failure(color_hr);
+            }
+            output::Failure create_target() noexcept {
+                target_hr = owner.try_recreate_target();
+                return classify_output_failure(target_hr);
+            }
+        } backend{*this};
+
+        const auto result = output::execute_transaction(output_state, backend, now_ms);
+        publish_diagnostic_field(diagnostic_output_snapshot,
+            DiagnosticHdrSurfaceMask,
+            static_cast<std::uint32_t>(hdr_surface_active()) << DiagnosticHdrSurfaceShift);
+        if (result.failure != output::Failure::None) {
+            logging::write(std::format(
+                "d3d_preview output_switch_failed requested={} failure={} "
+                "resize_hr=0x{:08X} color_hr=0x{:08X} target_hr=0x{:08X} "
+                "actual_format={} color_space={} target_valid={} retry_at_ms={}",
+                want_hdr ? "hdr_scrgb" : "sdr_bgra8",
+                output_failure_name(result.failure),
+                static_cast<unsigned>(backend.resize_hr),
+                static_cast<unsigned>(backend.color_hr),
+                static_cast<unsigned>(backend.target_hr),
+                static_cast<unsigned>(output_state.actual_format),
+                static_cast<unsigned>(output_state.applied_color_space),
+                output_state.target_valid ? "true" : "false",
+                output_state.retry_not_before_ms));
+        }
+        if (result.rebuild_device) {
+            rebuild_device_resources();
+            return true;
+        }
+        if (result.applied) {
+            color_signature.store(0, std::memory_order_relaxed);
+            logging::write(std::format("d3d_preview output_switched output={}",
+                hdr_surface_active() ? "hdr_scrgb" : "sdr_bgra8"));
+        } else if (!output_state.target_valid) {
+            refresh_requested.store(true, std::memory_order_release);
+        }
+        if (result.needs_redraw)
+            color_signature.store(0, std::memory_order_relaxed);
+        return result.applied || result.needs_redraw;
     }
 
     void update_shape_constants(UINT width, UINT height, bool enabled, int rotation = 0,
@@ -614,7 +917,14 @@ struct D3D11PreviewRenderer::Impl {
         values.corner_exponent = curve_exponent;
         values.corner_enabled = enabled && normalized_radius > 0.0F ? 1.0F : 0.0F;
         values.rotation_quarter_turns = static_cast<float>(rotation);
-        values.hdr_surface = hdr_surface ? 1.0F : 0.0F;
+        values.hdr_surface = hdr_surface_active() ? 1.0F : 0.0F;
+        {
+            std::scoped_lock lock(image_adjustments_mutex);
+            values.brightness = image_adjustments.brightness;
+            values.contrast = image_adjustments.contrast;
+            values.saturation = image_adjustments.saturation;
+            values.gamma = image_adjustments.gamma;
+        }
         if (frame) {
             const auto conversion = media::detail::yuv_conversion_parameters(
                 frame->pixel_format, frame->color.range, frame->color.matrix);
@@ -634,8 +944,10 @@ struct D3D11PreviewRenderer::Impl {
                 values.color_primaries = 1.0F;
             else if (frame->color.primaries == coremedia::ColorPrimaries::DisplayP3)
                 values.color_primaries = 2.0F;
-            const auto preference = color_output_preference.load(std::memory_order_relaxed);
-            values.preserve_hdr = hdr_surface && frame->color.is_hdr() &&
+            const auto preference = unpack_output_diagnostics(
+                diagnostic_output_snapshot.load(std::memory_order_acquire))
+                .requested_preference;
+            values.preserve_hdr = hdr_surface_active() && frame->color.is_hdr() &&
                 preference != media::ColorOutputPreference::ForceSdrToneMap ? 1.0F : 0.0F;
             if (frame->color.hdr.max_mastering_luminance != 0)
                 values.source_peak_nits = static_cast<float>(
@@ -677,28 +989,56 @@ struct D3D11PreviewRenderer::Impl {
     }
 
     void present_black() {
+        if (!target || !output_state.target_valid) return;
         constexpr float black[] = {0, 0, 0, 1};
         constexpr float transparent[] = {0, 0, 0, 0};
         context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
         context->ClearRenderTargetView(target.Get(), composition_mode ? transparent : black);
         if (composition_mode) draw_black_background(rounded_window_enabled());
-        (void)swap_chain->Present(1, 0);
+        check(swap_chain->Present(1, 0), "Present black frame");
     }
 
-    bool resize_if_needed() {
+    bool resize_if_needed(std::chrono::steady_clock::time_point now) {
         RECT rect{};
         if (!GetClientRect(window, &rect)) return false;
         const auto width = static_cast<UINT>(std::max<LONG>(0, rect.right - rect.left));
         const auto height = static_cast<UINT>(std::max<LONG>(0, rect.bottom - rect.top));
         if (width == 0 || height == 0 || (width == target_width && height == target_height))
             return false;
+        // Coalesce WM_SIZE bursts by sampling the newest client size at most
+        // once per present interval. The final mismatch remains pending and
+        // is applied on the next eligible render-thread iteration.
+        if (now < next_resize_allowed) return false;
+        next_resize_allowed = now + std::chrono::milliseconds(16);
         context->OMSetRenderTargets(0, nullptr, nullptr);
         target.Reset();
-        check(swap_chain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0),
-            "ResizeBuffers");
+        output_state.target_valid = false;
+        const auto resize_result = swap_chain->ResizeBuffers(
+            0, width, height, DXGI_FORMAT_UNKNOWN, 0);
+        if (FAILED(resize_result)) {
+            const auto target_result = try_recreate_target();
+            output_state.target_valid = SUCCEEDED(target_result);
+            logging::write(std::format(
+                "d3d_preview resize_failed size={}x{} hr=0x{:08X} "
+                "target_restore_hr=0x{:08X}",
+                width, height, static_cast<unsigned>(resize_result),
+                static_cast<unsigned>(target_result)));
+            if (classify_output_failure(resize_result) == output::Failure::DeviceLost ||
+                classify_output_failure(target_result) == output::Failure::DeviceLost) {
+                output_state.last_failure = output::Failure::DeviceLost;
+                output_state.applied_color_space = output::AppliedColorSpace::Invalid;
+                output_state.color_space_monitor_generation = 0;
+            }
+            check(resize_result, "ResizeBuffers");
+        }
         target_width = width;
         target_height = height;
-        recreate_target();
+        const auto target_result = try_recreate_target();
+        output_state.target_valid = SUCCEEDED(target_result);
+        if (classify_output_failure(target_result) == output::Failure::DeviceLost)
+            output_state.last_failure = output::Failure::DeviceLost;
+        check(target_result, "recreate resized swap-chain target");
+        refresh_requested.store(true, std::memory_order_release);
         return true;
     }
 
@@ -775,7 +1115,7 @@ struct D3D11PreviewRenderer::Impl {
         description.Height = height;
         description.MipLevels = 1;
         description.ArraySize = 1;
-        description.Format = swap_chain_format;
+        description.Format = dxgi_format(output_state.actual_format);
         description.SampleDesc.Count = 1;
         description.Usage = D3D11_USAGE_DEFAULT;
         description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
@@ -863,7 +1203,6 @@ struct D3D11PreviewRenderer::Impl {
     }
 
     void render(const media::DecodedFrame& frame) {
-        (void)resize_if_needed();
         if (target_width == 0 || target_height == 0) return;
         upload(frame);
 
@@ -875,7 +1214,9 @@ struct D3D11PreviewRenderer::Impl {
             static_cast<std::uint64_t>(frame.color.range);
         if (signature != color_signature.load(std::memory_order_relaxed)) {
             color_signature.store(signature, std::memory_order_relaxed);
-            const auto preference = color_output_preference.load(std::memory_order_relaxed);
+            const auto preference = unpack_output_diagnostics(
+                diagnostic_output_snapshot.load(std::memory_order_acquire))
+                .requested_preference;
             logging::write(std::format(
                 "d3d_preview color format={} primaries={} transfer={} matrix={} range={} "
                 "source_hdr={} output={} policy={}",
@@ -885,7 +1226,7 @@ struct D3D11PreviewRenderer::Impl {
                 media::matrix_coefficients_name(frame.color.matrix),
                 media::color_range_name(frame.color.range),
                 frame.color.is_hdr() ? "true" : "false",
-                hdr_surface && frame.color.is_hdr() &&
+                hdr_surface_active() && frame.color.is_hdr() &&
                     preference != media::ColorOutputPreference::ForceSdrToneMap
                     ? "hdr_scrgb" : "sdr_tonemap",
                 static_cast<unsigned>(preference)));
@@ -1009,15 +1350,20 @@ struct D3D11PreviewRenderer::Impl {
         while (!token.stop_requested()) {
             try {
                 if (!IsWindow(window)) break;
-                // The aspect controller can resize a newly opened window
-                // before capture has produced its first frame.  Keep the
-                // composition swap chain matched to the client rectangle even
-                // while idle; otherwise the uncovered area is transparent and
-                // exposes pieces of the main window underneath.
-                const bool target_resized = resize_if_needed();
+                if (output_state.last_failure == output::Failure::DeviceLost ||
+                    !device || !context || !swap_chain) {
+                    rebuild_device_resources();
+                }
+                // Coalesce interactive WM_SIZE bursts independently of media
+                // FPS. A resize iteration bypasses the media deadline below
+                // and immediately presents the newest retained frame.
+                const bool target_resized = resize_if_needed(
+                    std::chrono::steady_clock::now());
                 if (clear_requested.exchange(false, std::memory_order_acq_rel)) {
                     last_frame.reset();
                     last_timestamp = 0;
+                    publish_diagnostic_field(diagnostic_output_snapshot,
+                        DiagnosticSourceHdrMask, 0);
                     refresh_requested.store(false, std::memory_order_release);
                     present_black();
                     logging::write("d3d_preview cleared");
@@ -1036,7 +1382,8 @@ struct D3D11PreviewRenderer::Impl {
                     // lands on the intended vblank. Deadlines advance from the
                     // ideal cadence (not from the last actual present), which
                     // also gives 24/25 fps a correct 2/3-vblank pattern.
-                    if (now + std::chrono::milliseconds(4) < next_present_due) {
+                    if (!target_resized &&
+                        now + std::chrono::milliseconds(4) < next_present_due) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         continue;
                     }
@@ -1056,6 +1403,11 @@ struct D3D11PreviewRenderer::Impl {
                     continue;
                 }
                 const bool output_mode_changed = update_output_mode(*frame);
+                if (!output_state.target_valid || !target) {
+                    refresh_requested.store(true, std::memory_order_release);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
                 if (!force_refresh && !target_resized && !output_mode_changed &&
                     frame->timestamp_100ns == last_timestamp) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1078,7 +1430,20 @@ struct D3D11PreviewRenderer::Impl {
                         rendered_frames, render_ms));
                 }
             } catch (const std::exception& error) {
-                logging::write(std::format("d3d_preview error={}", error.what()));
+                const auto removed_reason = device
+                    ? device->GetDeviceRemovedReason() : E_POINTER;
+                if (FAILED(removed_reason)) {
+                    output_state.last_failure = output::Failure::DeviceLost;
+                    output_state.target_valid = false;
+                    output_state.applied_color_space =
+                        output::AppliedColorSpace::Invalid;
+                    output_state.color_space_monitor_generation = 0;
+                    publish_diagnostic_field(diagnostic_output_snapshot,
+                        DiagnosticHdrSurfaceMask, 0);
+                }
+                logging::write(std::format(
+                    "d3d_preview error={} removed_hr=0x{:08X}",
+                    error.what(), static_cast<unsigned>(removed_reason)));
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
         }
@@ -1132,9 +1497,33 @@ void D3D11PreviewRenderer::set_rotation(std::int32_t quarter_turns) noexcept {
 void D3D11PreviewRenderer::set_color_output_preference(
     media::ColorOutputPreference preference) noexcept {
     if (!impl_) return;
-    impl_->color_output_preference.store(preference, std::memory_order_relaxed);
+    const auto previous_snapshot = publish_diagnostic_field(
+        impl_->diagnostic_output_snapshot,
+        DiagnosticPreferenceMask,
+        static_cast<std::uint32_t>(preference) << DiagnosticPreferenceShift);
+    const auto previous = unpack_output_diagnostics(previous_snapshot)
+        .requested_preference;
+    if (previous != preference) {
+        impl_->color_output_policy_generation.fetch_add(1, std::memory_order_acq_rel);
+    }
     impl_->color_signature.store(0, std::memory_order_relaxed);
     impl_->refresh_requested.store(true, std::memory_order_release);
+}
+
+void D3D11PreviewRenderer::set_image_adjustments(float brightness,
+    float contrast, float saturation, float gamma) noexcept {
+    if (!impl_) return;
+    {
+        std::scoped_lock lock(impl_->image_adjustments_mutex);
+        impl_->image_adjustments = {brightness, contrast, saturation, gamma};
+    }
+    impl_->refresh_requested.store(true, std::memory_order_release);
+}
+
+OutputDiagnostics D3D11PreviewRenderer::output_diagnostics() const noexcept {
+    if (!impl_) return {};
+    return unpack_output_diagnostics(
+        impl_->diagnostic_output_snapshot.load(std::memory_order_acquire));
 }
 
 } // namespace iPhoneMirror::renderer

@@ -26,6 +26,8 @@ public:
     void set_audio_volume(float volume) noexcept override;
     void set_target_fps(std::uint32_t target_fps) noexcept override;
     [[nodiscard]] std::uint32_t target_fps() const noexcept override;
+    void set_decoder_preference(media::DecoderPreference preference) noexcept override;
+    [[nodiscard]] DecoderSwitchStatus decoder_switch_status() const noexcept override;
     void request_display_orientation(bool landscape) noexcept override;
 
 private:

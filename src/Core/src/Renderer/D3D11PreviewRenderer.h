@@ -4,10 +4,27 @@
 
 #include <Windows.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 
 namespace iPhoneMirror::renderer {
+
+enum class MonitorHdrCapability : std::uint8_t {
+    Unknown,
+    Sdr,
+    Hdr,
+};
+
+struct OutputDiagnostics {
+    MonitorHdrCapability monitor_capability{MonitorHdrCapability::Unknown};
+    bool source_hdr_known{};
+    bool source_hdr{};
+    bool actual_hdr_surface{};
+    bool hdr_effective{};
+    media::ColorOutputPreference requested_preference{
+        media::ColorOutputPreference::Auto};
+};
 
 class D3D11PreviewRenderer {
 public:
@@ -36,6 +53,11 @@ public:
     void set_corner_profile(float normalized_radius, float curve_exponent) noexcept;
     void set_rotation(std::int32_t quarter_turns) noexcept;
     void set_color_output_preference(media::ColorOutputPreference preference) noexcept;
+    void set_image_adjustments(float brightness, float contrast,
+        float saturation, float gamma) noexcept;
+    // Lock-free snapshot intended for UI diagnostics. HDR is effective only
+    // for an HDR source on an HDR monitor with a committed FP16/scRGB surface.
+    [[nodiscard]] OutputDiagnostics output_diagnostics() const noexcept;
 
 private:
     struct Impl;

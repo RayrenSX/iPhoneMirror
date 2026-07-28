@@ -398,6 +398,14 @@ bool valid_video_preferences(std::uint32_t width, std::uint32_t height,
     return target_fps <= 120;
 }
 
+bool valid_image_adjustments(float brightness, float contrast,
+    float saturation, float gamma) noexcept {
+    return std::isfinite(brightness) && brightness >= -1.0F && brightness <= 1.0F &&
+        std::isfinite(contrast) && contrast >= 0.0F && contrast <= 2.0F &&
+        std::isfinite(saturation) && saturation >= 0.0F && saturation <= 2.0F &&
+        std::isfinite(gamma) && gamma >= 0.5F && gamma <= 2.0F;
+}
+
 bool valid_capture_option_extensions(const iPhoneMirror::CaptureOptions& options) noexcept {
     return options.reserved[2] <= 2 && options.reserved[3] <= 2 &&
         options.reserved[4] <= 2 &&
@@ -444,6 +452,8 @@ std::int32_t start_capture_locked(const wchar_t* udid,
             preview_renderer->set_max_fps(preferences.target_fps);
             preview_renderer->set_color_output_preference(
                 preferences.color_output_preference);
+            preview_renderer->set_image_adjustments(preferences.brightness,
+                preferences.contrast, preferences.saturation, preferences.gamma);
         }
         if (capture_session) capture_session->stop();
         auto usb_capture = std::make_unique<iPhoneMirror::capture::CaptureSession>(
@@ -1056,6 +1066,10 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
     std::uint32_t render_max_height{};
     float corner_radius{};
     float corner_exponent{};
+    float brightness{};
+    float contrast{1.0F};
+    float saturation{1.0F};
+    float gamma{1.0F};
     iPhoneMirror::media::ColorOutputPreference color_output_preference{};
     {
         std::scoped_lock lock(state_mutex);
@@ -1080,6 +1094,10 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
         corner_radius = preview_corner_radius;
         corner_exponent = preview_corner_exponent;
         color_output_preference = capture_preferences.color_output_preference;
+        brightness = capture_preferences.brightness;
+        contrast = capture_preferences.contrast;
+        saturation = capture_preferences.saturation;
+        gamma = capture_preferences.gamma;
     }
     try {
         auto renderer = std::make_unique<iPhoneMirror::renderer::D3D11PreviewRenderer>(
@@ -1088,6 +1106,7 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
         renderer->set_max_fps(target_fps);
         renderer->set_corner_profile(corner_radius, corner_exponent);
         renderer->set_color_output_preference(color_output_preference);
+        renderer->set_image_adjustments(brightness, contrast, saturation, gamma);
         std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer> displaced;
         bool installed{};
         {
@@ -1105,6 +1124,9 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
                 renderer->set_corner_profile(preview_corner_radius, preview_corner_exponent);
                 renderer->set_color_output_preference(
                     capture_preferences.color_output_preference);
+                renderer->set_image_adjustments(capture_preferences.brightness,
+                    capture_preferences.contrast, capture_preferences.saturation,
+                    capture_preferences.gamma);
                 displaced = std::move(preview_renderer);
                 preview_renderer = std::move(renderer);
                 preview_renderer_window = window;
@@ -1194,6 +1216,26 @@ std::int32_t IM_CALL im_set_video_preferences(std::uint32_t max_width,
         "video preferences local_render_limit={}x{} target_fps={} usb_renegotiated=false",
         capture_preferences.render_max_width, capture_preferences.render_max_height,
         max_fps));
+    last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_set_image_adjustments(float brightness, float contrast,
+    float saturation, float gamma) {
+    if (!valid_image_adjustments(brightness, contrast, saturation, gamma)) {
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"Invalid image adjustments");
+    }
+    std::scoped_lock lock(state_mutex);
+    if (!initialized)
+        return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
+    capture_preferences.brightness = brightness;
+    capture_preferences.contrast = contrast;
+    capture_preferences.saturation = saturation;
+    capture_preferences.gamma = gamma;
+    if (preview_renderer)
+        preview_renderer->set_image_adjustments(
+            brightness, contrast, saturation, gamma);
     last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
@@ -1399,6 +1441,59 @@ std::int32_t IM_CALL im_session_get_status(iPhoneMirror::SessionHandle handle,
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
+std::int32_t IM_CALL im_session_get_video_output_status(
+    iPhoneMirror::SessionHandle handle, void* hwnd,
+    iPhoneMirror::VideoOutputStatus* status) {
+    if (!status || status->struct_size != sizeof(iPhoneMirror::VideoOutputStatus))
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid VideoOutputStatus");
+    const auto window = static_cast<HWND>(hwnd);
+    if (!window || !IsWindow(window))
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid preview HWND");
+    auto context = find_multi_session(handle);
+    if (!context)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+
+    iPhoneMirror::capture::DecoderSwitchStatus decoder_status;
+    {
+        std::shared_lock lock(context->lifecycle_mutex);
+        if (!context->capture || context->stopped)
+            return fail(iPhoneMirror::Result::InvalidArgument, L"Session is stopped");
+        decoder_status = context->capture->decoder_switch_status();
+    }
+
+    iPhoneMirror::renderer::OutputDiagnostics diagnostics;
+    {
+        std::scoped_lock lock(context->renderers_mutex);
+        const auto found = context->renderers.find(window);
+        if (found == context->renderers.end() || !found->second)
+            return fail(iPhoneMirror::Result::InvalidArgument,
+                L"Preview renderer is not attached");
+        diagnostics = found->second->output_diagnostics();
+    }
+
+    status->api_version = iPhoneMirror::ApiVersion;
+    status->monitor_hdr_capability =
+        static_cast<std::uint32_t>(diagnostics.monitor_capability);
+    status->source_hdr_known = diagnostics.source_hdr_known ? 1 : 0;
+    status->source_hdr = diagnostics.source_hdr ? 1 : 0;
+    status->actual_hdr_surface = diagnostics.actual_hdr_surface ? 1 : 0;
+    status->hdr_effective = diagnostics.hdr_effective ? 1 : 0;
+    status->requested_color_output_preference =
+        static_cast<std::uint32_t>(diagnostics.requested_preference);
+    status->requested_decoder_preference =
+        static_cast<std::uint32_t>(decoder_status.requested);
+    status->applied_decoder_preference =
+        static_cast<std::uint32_t>(decoder_status.applied);
+    status->decoder_switch_state = static_cast<iPhoneMirror::DecoderSwitchState>(
+        decoder_status.phase);
+    status->decoder_runtime_mode = static_cast<iPhoneMirror::DecoderRuntimeMode>(
+        decoder_status.runtime_mode);
+    status->requested_decoder_generation = decoder_status.requested_generation;
+    status->applied_decoder_generation = decoder_status.applied_generation;
+    last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
 std::int32_t IM_CALL im_session_attach_preview(iPhoneMirror::SessionHandle handle, void* hwnd) {
     const auto window = static_cast<HWND>(hwnd);
     if (!window || !IsWindow(window))
@@ -1448,6 +1543,9 @@ std::int32_t IM_CALL im_session_attach_preview(iPhoneMirror::SessionHandle handl
             renderer->set_corner_profile(context->corner_radius, context->corner_exponent);
             renderer->set_color_output_preference(
                 context->preferences.color_output_preference);
+            renderer->set_image_adjustments(context->preferences.brightness,
+                context->preferences.contrast, context->preferences.saturation,
+                context->preferences.gamma);
             context->renderers.emplace(window, std::move(renderer));
             iPhoneMirror::logging::write(std::format(
                 "session_preview_attach complete handle={} hwnd=0x{:X}",
@@ -1496,6 +1594,76 @@ std::int32_t IM_CALL im_session_set_video_preferences(iPhoneMirror::SessionHandl
         renderer->set_render_size_limit(width, height);
         renderer->set_max_fps(fps);
     }
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_session_set_image_adjustments(
+    iPhoneMirror::SessionHandle handle, float brightness, float contrast,
+    float saturation, float gamma) {
+    if (!valid_image_adjustments(brightness, contrast, saturation, gamma)) {
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"Invalid image adjustments");
+    }
+    auto context = find_multi_session(handle);
+    if (!context)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    {
+        std::unique_lock lock(context->lifecycle_mutex);
+        if (!context->capture || context->stopped)
+            return fail(iPhoneMirror::Result::InvalidArgument, L"Session is stopped");
+        context->preferences.brightness = brightness;
+        context->preferences.contrast = contrast;
+        context->preferences.saturation = saturation;
+        context->preferences.gamma = gamma;
+    }
+    {
+        std::scoped_lock lock(context->renderers_mutex);
+        for (auto& [_, renderer] : context->renderers)
+            renderer->set_image_adjustments(
+                brightness, contrast, saturation, gamma);
+    }
+    iPhoneMirror::logging::write(std::format(
+        "multi_session image_adjustments handle={} brightness={:.3f} "
+        "contrast={:.3f} saturation={:.3f} gamma={:.3f}",
+        handle, brightness, contrast, saturation, gamma));
+    last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_session_set_pipeline_preferences(
+    iPhoneMirror::SessionHandle handle, std::uint32_t decoder_preference,
+    std::uint32_t color_output_preference) {
+    if (decoder_preference > static_cast<std::uint32_t>(
+            iPhoneMirror::media::DecoderPreference::SoftwareCompatible) ||
+        color_output_preference > static_cast<std::uint32_t>(
+            iPhoneMirror::media::ColorOutputPreference::PreferHdrWhenSupported)) {
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"Invalid decoder or color output preference");
+    }
+    auto context = find_multi_session(handle);
+    if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    const auto decoder = static_cast<iPhoneMirror::media::DecoderPreference>(decoder_preference);
+    const auto color = static_cast<iPhoneMirror::media::ColorOutputPreference>(
+        color_output_preference);
+    {
+        std::unique_lock lock(context->lifecycle_mutex);
+        if (!context->capture || context->stopped)
+            return fail(iPhoneMirror::Result::InvalidArgument, L"Session is stopped");
+        context->preferences.decoder_preference = decoder;
+        context->preferences.color_output_preference = color;
+        context->capture->set_decoder_preference(decoder);
+    }
+    {
+        std::scoped_lock lock(context->renderers_mutex);
+        for (auto& [_, renderer] : context->renderers)
+            renderer->set_color_output_preference(color);
+    }
+    iPhoneMirror::logging::write(std::format(
+        "multi_session pipeline_preferences handle={} decoder={} color_output={} "
+        "transport_restarted=false",
+        handle, iPhoneMirror::media::decoder_preference_name(decoder),
+        static_cast<unsigned>(color)));
+    last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 

@@ -103,6 +103,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  () => viewModel.ActiveDeviceSessionCount,
                  enabled => LogAudioResult(viewModel.SetDeviceAudioEnabled(device.Udid, enabled)),
                  () => LogAudioResult(viewModel.MuteOtherDeviceSessions(device.Udid)),
+                 () => viewModel.ShowImageSettings(device.Udid),
                  out var window, viewModel.AddDiagnosticLog) || window is null)
         {
             if (started.Created)

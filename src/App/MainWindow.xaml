@@ -559,15 +559,35 @@
 
                 <Border x:Name="StatsPanel" Grid.Row="4" Style="{StaticResource CardBorder}" Padding="0">
                     <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="1"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="1"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="1"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="1"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0" Margin="13,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}"
+                                     VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="{Binding DecoderStatus}"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="11" TextWrapping="Wrap"
+                                       AutomationProperties.AutomationId="DecoderStatusText"/>
+                        </Grid>
+                        <Border Grid.Row="1" Background="{StaticResource BorderSoftBrush}"/>
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="1"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="1"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="1"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="13">
                             <TextBlock Text="{DynamicResource ResolutionLabel}" Style="{StaticResource StatLabel}"/>
                             <TextBlock Text="{Binding Resolution}" Style="{StaticResource StatValue}"
@@ -595,6 +615,7 @@
                                        AutomationProperties.AutomationId="AudioValue"/>
                             <TextBlock Text="{Binding AudioDetailDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
                         </StackPanel>
+                        </Grid>
                     </Grid>
                 </Border>
 
@@ -730,11 +751,13 @@
                                     <ComboBox x:Name="ResolutionComboBox"
                                               ItemsSource="{Binding ResolutionPresets}"
                                               DisplayMemberPath="Label"
+                                              IsEnabled="{Binding CanChangeVideoPipeline}"
                                               SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
 
                                     <TextBlock Text="{DynamicResource TargetFrameRate}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
                                     <ComboBox x:Name="FrameRateComboBox"
                                               ItemsSource="{Binding FrameRates}"
+                                              IsEnabled="{Binding CanChangeVideoPipeline}"
                                               SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
 
                                     <TextBlock Text="{DynamicResource DecoderPreferenceLabel}"
@@ -744,21 +767,25 @@
                                               IsEnabled="{Binding CanChangeVideoPipeline}"
                                               SelectedItem="{Binding SelectedDecoderPreference, Mode=TwoWay}"/>
 
-                                    <TextBlock Text="{DynamicResource ColorOutputLabel}"
-                                               Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
-                                    <ComboBox ItemsSource="{Binding ColorOutputPreferences}"
-                                              DisplayMemberPath="Label"
-                                              IsEnabled="{Binding CanChangeVideoPipeline}"
-                                              SelectedItem="{Binding SelectedColorOutputPreference, Mode=TwoWay}"/>
                                     <TextBlock Text="{DynamicResource VideoPipelinePreferenceHelp}"
                                                Foreground="{StaticResource MutedTextBrush}" FontSize="9"
                                                TextWrapping="Wrap" Margin="0,6,0,0"/>
 
-                                    <Button x:Name="ApplyVideoSettingsButton"
-                                            Content="{DynamicResource ApplyVideoSettings}"
-                                            Command="{Binding ApplyVideoSettingsCommand}"
-                                            Style="{StaticResource ToolButton}"
-                                            Margin="0,10,0,0"/>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button x:Name="ApplyVideoSettingsButton"
+                                                Content="{DynamicResource ApplyVideoSettings}"
+                                                Command="{Binding ApplyVideoSettingsCommand}"
+                                                Style="{StaticResource ToolButton}"/>
+                                        <Button Grid.Column="2"
+                                                Content="{DynamicResource MoreImageSettingsButton}"
+                                                Command="{Binding MoreImageSettingsCommand}"
+                                                Style="{StaticResource ToolButton}"/>
+                                    </Grid>
                                     <TextBlock Text="{Binding SettingsStatus}"
                                                Foreground="{StaticResource MutedTextBrush}"
                                                FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>

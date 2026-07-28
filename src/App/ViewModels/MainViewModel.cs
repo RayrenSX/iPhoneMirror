@@ -52,18 +52,23 @@ internal sealed class DecoderPreferenceOption(
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
-internal sealed class ColorOutputPreferenceOption(
-    ColorOutputPreference preference, string labelResourceKey) : INotifyPropertyChanged
-{
-    public ColorOutputPreference Preference { get; } = preference;
-    public string Label => LocalizationService.Get(labelResourceKey);
-    internal void NotifyLanguageChanged() => PropertyChanged?.Invoke(this,
-        new PropertyChangedEventArgs(nameof(Label)));
-    public event PropertyChangedEventHandler? PropertyChanged;
-}
-
 internal sealed class MainViewModel : INotifyPropertyChanged
 {
+    private readonly record struct SessionStartSettings(
+        uint RenderWidth,
+        uint RenderHeight,
+        int FrameRate,
+        bool PlayAudio,
+        double Volume,
+        uint AdvancedUsbWidth,
+        uint AdvancedUsbHeight,
+        UsbProjectionMode UsbProjectionMode,
+        DecoderPreference DecoderPreference,
+        double Brightness,
+        double Contrast,
+        double Saturation,
+        double Gamma);
+
     internal event Action<string, uint, uint>? DeviceVideoSizeChanged;
     internal event Action<MediaCastRequest>? MediaCastCommandReceived;
     internal event Action? MediaCastStopRequested;
@@ -81,6 +86,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private readonly NativeLogTailReader _logReader = new();
     private readonly CaptureShutdownCoordinator _shutdownCoordinator = new();
     private readonly DeviceSessionManager _sessions;
+    private readonly Dictionary<string, ImageSettingsWindow> _imageSettingsWindows =
+        new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<NativeDeviceInfo> _lastUsbDevices = [];
     private bool _disposed;
     private DeviceViewModel? _selectedDevice;
@@ -103,6 +110,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private bool _playAudio = true;
     private bool _advancedMode;
     private string _settingsStatus = string.Empty;
+    private string _decoderStatus = string.Empty;
     private string? _settingsStatusKey = "StatusDefaultSettings";
     private object?[] _settingsStatusArguments = [];
     private string _logText = string.Empty;
@@ -138,6 +146,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private string? _lastMediaCastStatusSignature;
     private string? _lastMediaPollError;
     private string? _lastLogReadError;
+    private string? _lastVideoOutputSignature;
     private CaptureState? _lastLoggedCaptureState;
     private ulong _lastLoggedCaptureHandle;
     private long _driverProbeRevision;
@@ -172,18 +181,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         new(DecoderPreference.HardwarePreferred, "DecoderHardwarePreferred"),
         new(DecoderPreference.SoftwareCompatible, "DecoderSoftwareCompatible"),
     ];
-    public IReadOnlyList<ColorOutputPreferenceOption> ColorOutputPreferences { get; } =
-    [
-        new(ColorOutputPreference.Auto, "ColorOutputAuto"),
-        new(ColorOutputPreference.ForceSdrToneMap, "ColorOutputSdrToneMap"),
-        new(ColorOutputPreference.PreferHdrWhenSupported, "ColorOutputPreferHdr"),
-    ];
-
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
     public RelayCommand MediaCastStopCommand { get; }
     public RelayCommand RefreshCommand { get; }
     public RelayCommand ApplyVideoSettingsCommand { get; }
+    public RelayCommand MoreImageSettingsCommand { get; }
     public RelayCommand ClearLogCommand { get; }
     public RelayCommand AdvancedSettingsCommand { get; }
     public RelayCommand ApplyWirelessSettingsCommand { get; }
@@ -264,11 +267,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             StartCommand.NotifyCanExecuteChanged();
             StopCommand.NotifyCanExecuteChanged();
             ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
+            MoreImageSettingsCommand.NotifyCanExecuteChanged();
             ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
             MediaCastStopCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
             OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
             OnPropertyChanged(nameof(CanChangeVideoPipeline));
+            OnPropertyChanged(nameof(CanOpenImageSettings));
         }
     }
     public string DeviceCount => LocalizationService.Format("DeviceCountFormat", Devices.Count);
@@ -306,7 +311,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 session.RenderWidth = value.Width;
                 session.RenderHeight = value.Height;
             }
-            SetSettingsStatus("PendingSettingsLocalFormat", value, SelectedFrameRate);
+            if (SelectedDevice is { IsWireless: false, IsMediaCast: false })
+                SetPendingVideoSettingsStatus(CurrentDeviceSession);
+            else
+                SetSettingsStatus("PendingSettingsLocalFormat", value, SelectedFrameRate);
             OnPropertyChanged(nameof(TargetResolutionDisplay));
         }
     }
@@ -318,7 +326,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             if (!Set(ref _selectedFrameRate, value)) return;
             if (CurrentDeviceSession is { } session) session.FrameRate = value;
-            SetSettingsStatus("PendingSettingsFormat", SelectedResolutionPreset, value);
+            if (SelectedDevice is { IsWireless: false, IsMediaCast: false })
+                SetPendingVideoSettingsStatus(CurrentDeviceSession);
+            else
+                SetSettingsStatus("PendingSettingsFormat", SelectedResolutionPreset, value);
             OnPropertyChanged(nameof(TargetFpsDisplay));
         }
     }
@@ -437,50 +448,20 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (state.DecoderPreference == value.Preference) return;
             state.DecoderPreference = value.Preference;
             OnPropertyChanged();
-            SetSettingsStatus("DecoderPreferenceSelectedFormat", value.Label);
+            SetPendingVideoSettingsStatus(state);
             AddDiagnosticLog(AppLog.Event("decoder_preference_selected",
                 ("preference", value.Preference),
                 ("device", AppLog.Device(state.Udid)),
-                ("has_session", state.Handle != 0)));
-            if (state.Handle != 0)
-            {
-                SetSettingsStatus("VideoPipelineRestarting");
-                _ = RestartUsbSessionAsync(device, state, "decoder_preference");
-            }
-        }
-    }
-
-    private ColorOutputPreference CurrentColorOutputPreference =>
-        CurrentDeviceSession?.ColorOutputPreference ?? ColorOutputPreference.Auto;
-
-    public ColorOutputPreferenceOption? SelectedColorOutputPreference
-    {
-        get => ColorOutputPreferences.FirstOrDefault(option =>
-            option.Preference == CurrentColorOutputPreference);
-        set
-        {
-            var device = SelectedDevice;
-            if (value is null || device is null || device.IsWireless ||
-                device.IsMediaCast || IsBusy) return;
-            var state = GetOrCreateDeviceState(device);
-            if (state.ColorOutputPreference == value.Preference) return;
-            state.ColorOutputPreference = value.Preference;
-            OnPropertyChanged();
-            SetSettingsStatus("ColorOutputSelectedFormat", value.Label);
-            AddDiagnosticLog(AppLog.Event("color_output_preference_selected",
-                ("preference", value.Preference),
-                ("device", AppLog.Device(state.Udid)),
-                ("has_session", state.Handle != 0)));
-            if (state.Handle != 0)
-            {
-                SetSettingsStatus("VideoPipelineRestarting");
-                _ = RestartUsbSessionAsync(device, state, "color_output");
-            }
+                ("has_session", state.Handle != 0),
+                ("pending_apply", true)));
         }
     }
 
     public bool CanChangeVideoPipeline => SelectedDevice is not null &&
         !IsWirelessSelected && !IsMediaCastSelected && !IsBusy;
+
+    public bool CanOpenImageSettings => SelectedDevice is not null &&
+        !IsMediaCastSelected && !IsBusy;
 
     private static (bool Success, string Message) InvokeDeviceSetting(Action action)
     {
@@ -488,6 +469,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception error) { return (false, error.Message); }
     }
     public string SettingsStatus { get => _settingsStatus; private set => Set(ref _settingsStatus, value); }
+    public string DecoderStatus
+    {
+        get => _decoderStatus;
+        private set => Set(ref _decoderStatus, value);
+    }
     public string TargetResolutionDisplay => IsMediaCastSelected
         ? LocalizationService.Get("MediaCastOriginalResolution")
         : LocalizationService.Format("RenderLimitFormat", SelectedResolutionPreset.Label);
@@ -533,6 +519,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         RefreshCommand = new RelayCommand(() => _ = RefreshAsync(forceDeviceEnumeration: true));
         ApplyVideoSettingsCommand = new RelayCommand(() => _ = ApplyVideoSettingsAsync(),
             () => !IsBusy);
+        MoreImageSettingsCommand = new RelayCommand(ShowImageSettings,
+            () => CanOpenImageSettings);
         ClearLogCommand = new RelayCommand(ClearVisibleLog);
         AdvancedSettingsCommand = new RelayCommand(ShowAdvancedSettings, () => IsAdvancedMode);
         OpenDriverManagerCommand = new RelayCommand(() => OpenDriverManager());
@@ -738,8 +726,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             AddDiagnosticLog(AppLog.Event("wireless_session_create_begin",
                 ("device", AppLog.Device(device.Udid)),
                 ("fps", state.FrameRate), ("audio", state.PlayAudio)));
-            var result = await Task.Run(() => CreateSession(device, state));
+            var startSettings = CaptureSessionStartSettings(state);
+            var result = await Task.Run(() => CreateSession(device, startSettings));
             _sessions.SetHandle(state, result.Success ? result.Handle : 0);
+            if (result.Success) state.MarkVideoSettingsApplied(
+                startSettings.RenderWidth, startSettings.RenderHeight,
+                startSettings.FrameRate, startSettings.DecoderPreference,
+                startSettings.Brightness, startSettings.Contrast,
+                startSettings.Saturation, startSettings.Gamma);
             AddDiagnosticLog(AppLog.Event("wireless_session_create_end",
                 ("device", AppLog.Device(device.Udid)),
                 ("success", result.Success),
@@ -944,6 +938,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             StartCommand.NotifyCanExecuteChanged();
             StopCommand.NotifyCanExecuteChanged();
             ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
+            MoreImageSettingsCommand.NotifyCanExecuteChanged();
             return;
         }
         var session = CurrentDeviceSession;
@@ -952,15 +947,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         NotifyCaptureSessionChanged();
         NativeCore.SelectPreviewSession(session?.Handle ?? 0);
         OnPropertyChanged(nameof(CurrentSessionHandle));
-        if (session is not null)
-        {
-            SelectedFrameRate = session.FrameRate;
-            PlaybackVolume = session.Volume;
-            PlayAudio = session.PlayAudio;
-            SelectedResolutionPreset = ResolutionPresets.FirstOrDefault(preset =>
-                preset.Width == session.RenderWidth && preset.Height == session.RenderHeight)
-                ?? ResolutionPresets[0];
-        }
+        RestoreSelectedVideoControls(session);
+        // Selection restores controls only. These values already belong to
+        // this session; invoking their public setters would resend native
+        // audio commands while another core operation may be in progress.
+        _playbackVolume = session?.Volume ?? 100;
+        _playAudio = session?.PlayAudio ?? true;
+        if (value is { IsWireless: false, IsMediaCast: false })
+            RestoreSelectedSettingsStatus(session);
         CaptureStatus = session?.HasSession == true
             ? LocalizationService.Get("CaptureStreaming")
             : value?.StatusDisplay ?? LocalizationService.Get("StatusWaitingDevice");
@@ -981,6 +975,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         StartCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
         ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
+        MoreImageSettingsCommand.NotifyCanExecuteChanged();
 
         if (updateDriverStatus && !_sessions.AnySession)
             UpdateSelectedDriverStatus();
@@ -1006,7 +1001,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedUsbProjectionMode));
         OnPropertyChanged(nameof(CanChangeUsbProjectionMode));
         OnPropertyChanged(nameof(SelectedDecoderPreference));
-        OnPropertyChanged(nameof(SelectedColorOutputPreference));
         OnPropertyChanged(nameof(CanChangeVideoPipeline));
         OnPropertyChanged(nameof(AdvancedSettingsVisibility));
         OnPropertyChanged(nameof(PlaybackVolume));
@@ -1058,6 +1052,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void ResetPreviewState()
     {
+        DecoderStatus = string.Empty;
+        _lastVideoOutputSignature = null;
         _sourceVideoWidth = 0;
         _sourceVideoHeight = 0;
         OnPropertyChanged(nameof(SourceVideoWidth));
@@ -1080,7 +1076,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             ("resolution", $"{SelectedResolutionPreset.Width}x{SelectedResolutionPreset.Height}"),
             ("fps", SelectedFrameRate), ("audio", PlayAudio),
             ("decoder", requestedState.DecoderPreference),
-            ("color_output", requestedState.ColorOutputPreference),
+            ("brightness", requestedState.Brightness),
+            ("contrast", requestedState.Contrast),
+            ("saturation", requestedState.Saturation),
+            ("gamma", requestedState.Gamma),
             ("usb_mode", requestedState.UsbProjectionMode)));
         IsBusy = true;
         var gateHeld = false;
@@ -1109,8 +1108,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             // top action changes to its red stop state immediately.
             var state = requestedState;
             if (device.IsWireless) _sessions.SetWirelessPaused(device.Udid, false);
-            var created = await Task.Run(() => CreateSession(device, state));
+            var startSettings = CaptureSessionStartSettings(state);
+            var created = await Task.Run(() => CreateSession(device, startSettings));
             _sessions.SetHandle(state, created.Success ? created.Handle : 0);
+            if (created.Success) state.MarkVideoSettingsApplied(
+                startSettings.RenderWidth, startSettings.RenderHeight,
+                startSettings.FrameRate, startSettings.DecoderPreference,
+                startSettings.Brightness, startSettings.Contrast,
+                startSettings.Saturation, startSettings.Gamma);
             AddDiagnosticLog(AppLog.Event("capture_start_result",
                 ("device", AppLog.Device(device.Udid)),
                 ("success", created.Success),
@@ -1165,18 +1170,59 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private async Task ApplyVideoSettingsAsync()
     {
         if (_disposed || IsBusy) return;
-        var requestedUdid = SelectedDevice?.Udid;
-        var requestedHandle = CurrentSessionHandle;
+        var requestedDevice = SelectedDevice;
+        if (requestedDevice is null || requestedDevice.IsMediaCast) return;
+        var requestedUdid = requestedDevice.Udid;
+        var requestedState = GetOrCreateDeviceState(requestedDevice);
+        var requestedHandle = requestedState.Handle;
         var requestedPreset = SelectedResolutionPreset;
         var requestedFrameRate = SelectedFrameRate;
+        var requestedDecoder = requestedState.DecoderPreference;
+        var requestedBrightness = requestedState.Brightness;
+        var requestedContrast = requestedState.Contrast;
+        var requestedSaturation = requestedState.Saturation;
+        var requestedGamma = requestedState.Gamma;
+        requestedState.RenderWidth = requestedPreset.Width;
+        requestedState.RenderHeight = requestedPreset.Height;
+        requestedState.FrameRate = requestedFrameRate;
         var operation = Stopwatch.StartNew();
         AddDiagnosticLog(AppLog.Event("video_settings_begin",
             ("device", AppLog.Device(requestedUdid)),
             ("handle", AppLog.Handle(requestedHandle)),
             ("resolution", $"{requestedPreset.Width}x{requestedPreset.Height}"),
-            ("fps", requestedFrameRate)));
+            ("fps", requestedFrameRate),
+            ("decoder", requestedDecoder),
+            ("brightness", requestedBrightness), ("contrast", requestedContrast),
+            ("saturation", requestedSaturation), ("gamma", requestedGamma)));
+
+        if (requestedHandle == 0)
+        {
+            requestedState.MarkVideoSettingsApplied(
+                requestedPreset.Width, requestedPreset.Height,
+                requestedFrameRate, requestedDecoder, requestedBrightness,
+                requestedContrast, requestedSaturation, requestedGamma);
+            var savedMessage = LocalizationService.Format("VideoSettingsSavedFormat",
+                requestedPreset, requestedFrameRate,
+                DecoderPreferenceLabel(requestedDecoder));
+            if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, requestedUdid))
+                SetSettingsStatus("VideoSettingsSavedFormat", requestedPreset,
+                    requestedFrameRate, DecoderPreferenceLabel(requestedDecoder));
+            AddUiLog(savedMessage);
+            AddDiagnosticLog(AppLog.Event("video_settings_saved",
+                ("device", AppLog.Device(requestedUdid)),
+                ("resolution", $"{requestedPreset.Width}x{requestedPreset.Height}"),
+                ("fps", requestedFrameRate),
+                ("decoder", requestedDecoder),
+                ("brightness", requestedBrightness), ("contrast", requestedContrast),
+                ("saturation", requestedSaturation), ("gamma", requestedGamma),
+                ("elapsed_ms", operation.ElapsedMilliseconds)));
+            return;
+        }
+
         IsBusy = true;
         var gateHeld = false;
+        var offerReconnect = false;
+        var failureMessage = string.Empty;
         try
         {
             await _coreGate.WaitAsync();
@@ -1184,32 +1230,87 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (_disposed) return;
             if (requestedHandle != 0 &&
                 (requestedUdid is null ||
-                 !_sessions.TryGet(requestedUdid, out var requestedState) ||
-                 requestedState.Handle != requestedHandle))
+                  !_sessions.TryGet(requestedUdid, out var currentState) ||
+                  !ReferenceEquals(currentState, requestedState) ||
+                  currentState.Handle != requestedHandle))
                 return;
-            var preference = requestedHandle != 0
-                ? _core.SetDeviceVideoPreferences(requestedHandle,
-                    requestedPreset.Width, requestedPreset.Height, (uint)requestedFrameRate)
-                : _core.SetVideoPreferences(requestedPreset.Width,
-                    requestedPreset.Height, (uint)requestedFrameRate);
+
+            var pipeline = (Success: true, Message: string.Empty);
+            var hasPipelineSettings = !requestedDevice.IsWireless;
+            if (hasPipelineSettings)
+            {
+                pipeline = _core.SetDevicePipelinePreferences(requestedHandle,
+                    (uint)requestedDecoder, 1U);
+            }
+            var adjustments = _core.SetDeviceImageAdjustments(requestedHandle,
+                requestedBrightness, requestedContrast, requestedSaturation,
+                requestedGamma);
+            if (adjustments.Success)
+                requestedState.MarkImageAdjustmentsApplied(requestedBrightness,
+                    requestedContrast, requestedSaturation, requestedGamma);
+            var render = _core.SetDeviceVideoPreferences(requestedHandle,
+                requestedPreset.Width, requestedPreset.Height,
+                (uint)requestedFrameRate);
+            if (render.Success)
+            {
+                requestedState.MarkRenderSettingsApplied(
+                    requestedPreset.Width, requestedPreset.Height,
+                    requestedFrameRate);
+            }
+            var success = pipeline.Success && adjustments.Success && render.Success;
             var targetStillSelected = DeviceViewModel.UdidEquals(
                 SelectedDevice?.Udid, requestedUdid);
-            if (targetStillSelected) SetRawSettingsStatus(preference.Message);
-            AddUiLog(LocalizationService.Format("AppliedRenderLogFormat",
-                requestedPreset.Label, requestedFrameRate, preference.Message));
+            failureMessage = string.Join("; ", new[]
+            {
+                pipeline.Success ? string.Empty : pipeline.Message,
+                adjustments.Success ? string.Empty : adjustments.Message,
+                render.Success ? string.Empty : render.Message,
+            }.Where(message => !string.IsNullOrWhiteSpace(message)));
             AddDiagnosticLog(AppLog.Event("video_settings_result",
                 ("device", AppLog.Device(requestedUdid)),
                 ("handle", AppLog.Handle(requestedHandle)),
-                ("success", preference.Success),
+                ("success", success),
+                ("pipeline_success", pipeline.Success),
+                ("adjustments_success", adjustments.Success),
+                ("render_success", render.Success),
+                ("decoder", requestedDecoder),
+                ("brightness", requestedBrightness), ("contrast", requestedContrast),
+                ("saturation", requestedSaturation), ("gamma", requestedGamma),
+                ("transport_restarted", false),
                 ("elapsed_ms", operation.ElapsedMilliseconds),
-                ("message", preference.Message)));
-            if (!preference.Success) return;
-
-            if (targetStillSelected)
-                SetSettingsStatus("AppliedRenderFormat", requestedPreset, requestedFrameRate);
+                ("message", failureMessage)));
+            if (!success)
+            {
+                if (targetStillSelected)
+                    SetSettingsStatus("ApplySettingsFailedFormat", failureMessage);
+                offerReconnect = requestedHandle != 0 && requestedDevice is
+                    { IsWireless: false, IsMediaCast: false };
+            }
+            else
+            {
+                AddUiLog(LocalizationService.Format("AppliedRenderLogFormat",
+                    requestedPreset.Label, requestedFrameRate, render.Message));
+                if (targetStillSelected)
+                {
+                    if (requestedDevice is
+                        { IsWireless: false, IsMediaCast: false })
+                    {
+                        SetSettingsStatus("VideoSettingsAppliedFormat", requestedPreset,
+                            requestedFrameRate, DecoderPreferenceLabel(requestedDecoder));
+                    }
+                    else
+                    {
+                        SetSettingsStatus("AppliedRenderFormat", requestedPreset,
+                            requestedFrameRate);
+                    }
+                }
+            }
         }
         catch (Exception error)
         {
+            failureMessage = error.Message;
+            offerReconnect = requestedHandle != 0 && requestedDevice is
+                { IsWireless: false, IsMediaCast: false };
             AddDiagnosticLog(AppLog.Event("video_settings_failed",
                 ("device", AppLog.Device(requestedUdid)),
                 ("handle", AppLog.Handle(requestedHandle)),
@@ -1223,6 +1324,58 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             IsBusy = false;
             if (gateHeld) _coreGate.Release();
         }
+
+        if (!offerReconnect || _disposed || requestedDevice is null ||
+            requestedState is null || requestedState.Handle != requestedHandle ||
+            !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, requestedUdid)) return;
+
+        var reconnectBody = LocalizationService.Format("VideoSettingsReconnectBodyFormat",
+            failureMessage, DecoderPreferenceLabel(requestedDecoder));
+        if (!AppPromptWindow.Confirm(
+                LocalizationService.Get("VideoSettingsReconnectTitle"), reconnectBody))
+        {
+            SetSettingsStatus("VideoSettingsReconnectCancelled");
+            AddDiagnosticLog(AppLog.Event("video_settings_reconnect_cancelled",
+                ("device", AppLog.Device(requestedUdid)),
+                ("handle", AppLog.Handle(requestedHandle)),
+                ("error", failureMessage)));
+            return;
+        }
+
+        // ShowDialog pumps dispatcher work. The original session can disappear
+        // or be replaced while the confirmation window is open; a stale answer
+        // must never restart a newer handle or a device that is no longer selected.
+        if (_disposed || IsBusy || requestedUdid is null ||
+            !_sessions.TryGet(requestedUdid, out var confirmedState) ||
+            !ReferenceEquals(confirmedState, requestedState) ||
+            confirmedState.Handle != requestedHandle ||
+            confirmedState.RenderWidth != requestedPreset.Width ||
+            confirmedState.RenderHeight != requestedPreset.Height ||
+            confirmedState.FrameRate != requestedFrameRate ||
+            confirmedState.DecoderPreference != requestedDecoder ||
+            Math.Abs(confirmedState.Brightness - requestedBrightness) > 0.001 ||
+            Math.Abs(confirmedState.Contrast - requestedContrast) > 0.001 ||
+            Math.Abs(confirmedState.Saturation - requestedSaturation) > 0.001 ||
+            Math.Abs(confirmedState.Gamma - requestedGamma) > 0.001 ||
+            !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, requestedUdid))
+        {
+            AddDiagnosticLog(AppLog.Event("video_settings_reconnect_stale",
+                ("device", AppLog.Device(requestedUdid)),
+                ("expected_handle", AppLog.Handle(requestedHandle)),
+                ("current_handle", AppLog.Handle(requestedState.Handle)),
+                ("selected", AppLog.Device(SelectedDevice?.Udid)),
+                ("busy", IsBusy)));
+            return;
+        }
+
+        AddDiagnosticLog(AppLog.Event("video_settings_reconnect_confirmed",
+            ("device", AppLog.Device(requestedUdid)),
+            ("handle", AppLog.Handle(requestedHandle)),
+            ("decoder", requestedDecoder),
+            ("brightness", requestedBrightness), ("contrast", requestedContrast),
+            ("saturation", requestedSaturation), ("gamma", requestedGamma)));
+        SetSettingsStatus("VideoPipelineRestarting");
+        await RestartUsbSessionAsync(requestedDevice, requestedState, "video_settings");
     }
 
     private async Task StopAsync()
@@ -1669,8 +1822,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 Volume = 100,
             };
             _sessions.Set(state);
-            var result = await Task.Run(() => CreateSession(device, state));
+            var startSettings = CaptureSessionStartSettings(state);
+            var result = await Task.Run(() => CreateSession(device, startSettings));
             _sessions.SetHandle(state, result.Success ? result.Handle : 0);
+            if (result.Success) state.MarkVideoSettingsApplied(
+                startSettings.RenderWidth, startSettings.RenderHeight,
+                startSettings.FrameRate, startSettings.DecoderPreference,
+                startSettings.Brightness, startSettings.Contrast,
+                startSettings.Saturation, startSettings.Gamma);
             AddDiagnosticLog(AppLog.Event("independent_session_result",
                 ("device", AppLog.Device(device.Udid)),
                 ("success", result.Success), ("created", result.Success),
@@ -1751,6 +1910,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void ApplyCaptureStatus(NativeCaptureStatus status)
     {
+        UpdateVideoOutputStatus();
         _lastCaptureStatus = status;
         _lastCaptureStatusHandle = CurrentSessionHandle;
         var statusChanged = _lastLoggedCaptureHandle != CurrentSessionHandle ||
@@ -1792,6 +1952,79 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         AudioDisplay = status.AudioSampleRate > 0
             ? $"{status.AudioSampleRate / 1000.0:F0} kHz · {status.AudioChannels} ch"
             : LocalizationService.Get("StatusWaiting");
+    }
+
+    private void UpdateVideoOutputStatus()
+    {
+        var handle = CurrentSessionHandle;
+        if (handle == 0 || SelectedDevice is not
+            { IsWireless: false, IsMediaCast: false })
+        {
+            DecoderStatus = string.Empty;
+            _lastVideoOutputSignature = null;
+            return;
+        }
+        if (!_core.TryGetDeviceVideoOutputStatus(handle, out var status))
+        {
+            DecoderStatus = LocalizationService.Get("DecoderStatusDetecting");
+            return;
+        }
+
+        var requestedDecoder = (DecoderPreference)Math.Min(
+            status.RequestedDecoderPreference, 2U);
+        var appliedDecoder = (DecoderPreference)Math.Min(
+            status.AppliedDecoderPreference, 2U);
+        var decoderState = status.DecoderSwitchState is
+            DecoderSwitchState.Applied or DecoderSwitchState.Pending or
+            DecoderSwitchState.Failed
+                ? status.DecoderSwitchState
+                : DecoderSwitchState.Pending;
+        var runtimeMode = status.DecoderRuntimeMode is
+            DecoderRuntimeMode.Hardware or DecoderRuntimeMode.Software
+                ? status.DecoderRuntimeMode
+                : DecoderRuntimeMode.Unknown;
+        if (CurrentDeviceSession is { } state && state.Handle == handle)
+        {
+            var wasPending = state.HasPendingVideoSettings;
+            state.SynchronizeAppliedDecoderPreference(appliedDecoder);
+            if (wasPending != state.HasPendingVideoSettings)
+                RestoreSelectedSettingsStatus(state);
+        }
+
+        var signature = $"{handle}:{requestedDecoder}:" +
+            $"{appliedDecoder}:{decoderState}:{runtimeMode}:" +
+            $"{status.RequestedDecoderGeneration}:" +
+            $"{status.AppliedDecoderGeneration}";
+        if (!string.Equals(signature, _lastVideoOutputSignature,
+                StringComparison.Ordinal))
+        {
+            _lastVideoOutputSignature = signature;
+            AddDiagnosticLog(AppLog.Event("video_output_status",
+                ("device", AppLog.Device(SelectedDevice?.Udid)),
+                ("handle", AppLog.Handle(handle)),
+                ("decoder_requested", requestedDecoder),
+                ("decoder_applied", appliedDecoder),
+                ("decoder_state", decoderState),
+                ("decoder_runtime", runtimeMode),
+                ("decoder_requested_generation", status.RequestedDecoderGeneration),
+                ("decoder_applied_generation", status.AppliedDecoderGeneration)));
+        }
+
+        var decoderStatus = decoderState switch
+        {
+            DecoderSwitchState.Applied => LocalizationService.Format(
+                "DecoderStatusAppliedFormat", DecoderPreferenceLabel(appliedDecoder),
+                DecoderRuntimeModeLabel(runtimeMode)),
+            DecoderSwitchState.Failed => LocalizationService.Format(
+                "DecoderStatusFailedFormat", DecoderPreferenceLabel(appliedDecoder),
+                DecoderRuntimeModeLabel(runtimeMode),
+                DecoderPreferenceLabel(requestedDecoder)),
+            _ => LocalizationService.Format("DecoderStatusPendingFormat",
+                DecoderPreferenceLabel(appliedDecoder),
+                DecoderPreferenceLabel(requestedDecoder),
+                DecoderRuntimeModeLabel(runtimeMode)),
+        };
+        DecoderStatus = decoderStatus;
     }
 
     private void UpdateEnvironmentStatus(NativeEnvironmentInfo environment)
@@ -2053,23 +2286,48 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    private SessionStartSettings CaptureSessionStartSettings(
+        DeviceCaptureState state) => new(
+            state.RenderWidth,
+            state.RenderHeight,
+            state.FrameRate,
+            state.PlayAudio,
+            state.Volume,
+            IsAdvancedMode ? state.AdvancedUsbWidth : 0,
+            IsAdvancedMode ? state.AdvancedUsbHeight : 0,
+            state.UsbProjectionMode,
+            state.DecoderPreference,
+            state.Brightness,
+            state.Contrast,
+            state.Saturation,
+            state.Gamma);
+
     private (bool Success, ulong Handle, string Message) CreateSession(
-        DeviceViewModel device, DeviceCaptureState state)
+        DeviceViewModel device, SessionStartSettings settings)
     {
         if (device.IsWireless)
         {
             return _core.CreateWirelessSession(device.Udid,
-                state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
-                state.PlayAudio, state.Volume / 100.0);
+                settings.RenderWidth, settings.RenderHeight,
+                (uint)settings.FrameRate, settings.PlayAudio,
+                settings.Volume / 100.0);
         }
-        return _core.CreateDeviceSession(device.Udid,
-            state.RenderWidth, state.RenderHeight, (uint)state.FrameRate,
-            state.PlayAudio, state.Volume / 100.0,
-            IsAdvancedMode ? state.AdvancedUsbWidth : 0,
-            IsAdvancedMode ? state.AdvancedUsbHeight : 0,
-            (uint)state.UsbProjectionMode,
-            (uint)state.DecoderPreference,
-            (uint)state.ColorOutputPreference);
+        var created = _core.CreateDeviceSession(device.Udid,
+            settings.RenderWidth, settings.RenderHeight,
+            (uint)settings.FrameRate, settings.PlayAudio,
+            settings.Volume / 100.0,
+            settings.AdvancedUsbWidth, settings.AdvancedUsbHeight,
+            (uint)settings.UsbProjectionMode,
+            (uint)settings.DecoderPreference,
+            1U);
+        if (!created.Success) return created;
+        var adjustments = _core.SetDeviceImageAdjustments(created.Handle,
+            settings.Brightness, settings.Contrast, settings.Saturation,
+            settings.Gamma);
+        if (adjustments.Success) return created;
+        try { _core.StopDeviceSession(created.Handle); } catch { }
+        _core.DestroyDeviceSession(created.Handle);
+        return (false, 0, adjustments.Message);
     }
 
     private DeviceCaptureState GetOrCreateDeviceState(DeviceViewModel device)
@@ -2086,6 +2344,64 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         };
         _sessions.Set(state);
         return state;
+    }
+
+    private void RestoreSelectedVideoControls(DeviceCaptureState? state)
+    {
+        var frameRate = state?.FrameRate ?? 60;
+        if (_selectedFrameRate != frameRate)
+        {
+            _selectedFrameRate = frameRate;
+            OnPropertyChanged(nameof(SelectedFrameRate));
+            OnPropertyChanged(nameof(TargetFpsDisplay));
+        }
+
+        var preset = state is null ? ResolutionPresets[0] :
+            ResolutionPresets.FirstOrDefault(candidate =>
+                candidate.Width == state.RenderWidth &&
+                candidate.Height == state.RenderHeight) ?? ResolutionPresets[0];
+        if (ReferenceEquals(_selectedResolutionPreset, preset)) return;
+        _selectedResolutionPreset = preset;
+        OnPropertyChanged(nameof(SelectedResolutionPreset));
+        OnPropertyChanged(nameof(TargetResolutionDisplay));
+    }
+
+    private void RestoreSelectedSettingsStatus(DeviceCaptureState? state)
+    {
+        if (state is null)
+        {
+            SetSettingsStatus("StatusDefaultSettings");
+            return;
+        }
+        if (state.HasPendingVideoSettings)
+        {
+            SetPendingVideoSettingsStatus(state);
+            return;
+        }
+
+        SetSettingsStatus(state.Handle == 0
+                ? "VideoSettingsSavedFormat" : "VideoSettingsAppliedFormat",
+            SelectedResolutionPreset, SelectedFrameRate,
+            DecoderPreferenceLabel(state.DecoderPreference));
+    }
+
+    private string DecoderPreferenceLabel(DecoderPreference preference) =>
+        DecoderPreferences.FirstOrDefault(option => option.Preference == preference)?.Label ??
+        preference.ToString();
+
+    private static string DecoderRuntimeModeLabel(DecoderRuntimeMode mode) =>
+        LocalizationService.Get(mode switch
+        {
+            DecoderRuntimeMode.Hardware => "DecoderRuntimeHardware",
+            DecoderRuntimeMode.Software => "DecoderRuntimeSoftware",
+            _ => "DecoderRuntimeUnknown",
+        });
+
+    private void SetPendingVideoSettingsStatus(DeviceCaptureState? state)
+    {
+        var decoder = state?.DecoderPreference ?? DecoderPreference.Auto;
+        SetSettingsStatus("PendingVideoSettingsFormat", SelectedResolutionPreset,
+            SelectedFrameRate, DecoderPreferenceLabel(decoder));
     }
 
     private void SetSettingsStatus(string resourceKey, params object?[] arguments)
@@ -2110,7 +2426,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         foreach (var profile in WirelessDisplayProfiles) profile.NotifyLanguageChanged();
         foreach (var mode in UsbProjectionModes) mode.NotifyLanguageChanged();
         foreach (var preference in DecoderPreferences) preference.NotifyLanguageChanged();
-        foreach (var preference in ColorOutputPreferences) preference.NotifyLanguageChanged();
 
         foreach (var device in Devices) device.NotifyLanguageChanged();
 
@@ -2144,6 +2459,108 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     {
         IsAdvancedMode = true;
         AdvancedSettingsCommand.NotifyCanExecuteChanged();
+    }
+
+    private void ShowImageSettings()
+    {
+        var device = SelectedDevice;
+        if (device is null || device.IsMediaCast || IsBusy) return;
+        _ = GetOrCreateDeviceState(device);
+        ShowImageSettings(device.Udid);
+    }
+
+    internal void ShowImageSettings(string udid)
+    {
+        if (_disposed || IsBusy || string.IsNullOrWhiteSpace(udid) ||
+            DeviceViewModel.IsMediaCastUdid(udid)) return;
+        if (_imageSettingsWindows.TryGetValue(udid, out var existing))
+        {
+            existing.Activate();
+            existing.Focus();
+            return;
+        }
+        if (!_sessions.TryGet(udid, out var state)) return;
+        var original = new ImageAdjustmentValues(state.Brightness, state.Contrast,
+            state.Saturation, state.Gamma);
+        var window = new ImageSettingsWindow(original,
+            values => PreviewImageAdjustments(udid, values),
+            values => SaveImageAdjustments(udid, values),
+            values => RevertImageAdjustments(udid, values))
+        {
+            Owner = Application.Current?.MainWindow,
+            Topmost = true,
+        };
+        _imageSettingsWindows[udid] = window;
+        window.Closed += (_, _) =>
+        {
+            if (_imageSettingsWindows.TryGetValue(udid, out var tracked) &&
+                ReferenceEquals(tracked, window))
+                _imageSettingsWindows.Remove(udid);
+        };
+        AddDiagnosticLog(AppLog.Event("image_adjustments_window_opened",
+            ("device", AppLog.Device(udid)), ("handle", AppLog.Handle(state.Handle))));
+        window.Show();
+    }
+
+    private (bool Success, string Message) PreviewImageAdjustments(
+        string udid, ImageAdjustmentValues values)
+    {
+        if (_disposed || !_sessions.TryGet(udid, out var state) || state.IsStopping)
+            return (false, LocalizationService.Get("ImageAdjustmentsUpdateFailed"));
+        if (state.Handle == 0) return (true, string.Empty);
+        return _core.SetDeviceImageAdjustments(state.Handle,
+            values.Brightness, values.Contrast, values.Saturation, values.Gamma);
+    }
+
+    private (bool Success, string Message) SaveImageAdjustments(
+        string udid, ImageAdjustmentValues values)
+    {
+        if (_disposed || !_sessions.TryGet(udid, out var state) || state.IsStopping)
+            return (false, LocalizationService.Get("ImageAdjustmentsUpdateFailed"));
+        var hadSession = state.Handle != 0;
+        var result = PreviewImageAdjustments(udid, values);
+        if (!result.Success)
+        {
+            if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
+                SetSettingsStatus("ApplySettingsFailedFormat", result.Message);
+            return result;
+        }
+        state.Brightness = values.Brightness;
+        state.Contrast = values.Contrast;
+        state.Saturation = values.Saturation;
+        state.Gamma = values.Gamma;
+        state.MarkImageAdjustmentsApplied(values.Brightness, values.Contrast,
+            values.Saturation, values.Gamma);
+        var statusKey = hadSession
+            ? "ImageAdjustmentsApplied" : "ImageAdjustmentsSaved";
+        if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
+            SetSettingsStatus(statusKey);
+        AddUiLog(LocalizationService.Get(statusKey));
+        AddDiagnosticLog(AppLog.Event("image_adjustments_saved",
+            ("device", AppLog.Device(udid)), ("handle", AppLog.Handle(state.Handle)),
+            ("brightness", values.Brightness), ("contrast", values.Contrast),
+            ("saturation", values.Saturation), ("gamma", values.Gamma),
+            ("applied_live", hadSession)));
+        return (true, LocalizationService.Get(statusKey));
+    }
+
+    private (bool Success, string Message) RevertImageAdjustments(
+        string udid, ImageAdjustmentValues original)
+    {
+        var result = !_sessions.TryGet(udid, out var state) || state.IsStopping ||
+            state.Handle == 0
+            ? (Success: true, Message: string.Empty)
+            : _core.SetDeviceImageAdjustments(state.Handle,
+                original.Brightness, original.Contrast,
+                original.Saturation, original.Gamma);
+        AddDiagnosticLog(AppLog.Event("image_adjustments_reverted",
+            ("device", AppLog.Device(udid)), ("success", result.Success),
+            ("brightness", original.Brightness), ("contrast", original.Contrast),
+            ("saturation", original.Saturation), ("gamma", original.Gamma),
+            ("message", result.Success ? string.Empty : result.Message)));
+        if (!result.Success && DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
+            SetSettingsStatus("ApplySettingsFailedFormat", result.Message);
+        return result;
     }
 
     private void ShowAdvancedSettings()
@@ -2182,6 +2599,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     {
         if (_disposed || device.IsWireless || IsBusy || state.Handle == 0) return;
         IsBusy = true;
+        var startSettings = CaptureSessionStartSettings(state);
         var gateHeld = false;
         try
         {
@@ -2200,7 +2618,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 await Task.Delay(attempt == 1 ? 1500 : 2500,
                     _shutdownCancellation.Token);
                 if (_disposed) return;
-                created = await Task.Run(() => CreateSession(device, state));
+                created = await Task.Run(() => CreateSession(device, startSettings));
                 if (_disposed)
                 {
                     if (created.Success)
@@ -2236,14 +2654,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 }
                 if (ready)
                 {
+                    state.MarkVideoSettingsApplied(
+                        startSettings.RenderWidth, startSettings.RenderHeight,
+                        startSettings.FrameRate, startSettings.DecoderPreference,
+                        startSettings.Brightness, startSettings.Contrast,
+                        startSettings.Saturation, startSettings.Gamma);
                     var appliedMode = UsbProjectionModes.FirstOrDefault(option =>
                         option.Mode == state.UsbProjectionMode)?.Label ?? state.UsbProjectionMode.ToString();
                     var appliedDecoder = DecoderPreferences.FirstOrDefault(option =>
                         option.Preference == state.DecoderPreference)?.Label ??
                         state.DecoderPreference.ToString();
-                    var appliedColor = ColorOutputPreferences.FirstOrDefault(option =>
-                        option.Preference == state.ColorOutputPreference)?.Label ??
-                        state.ColorOutputPreference.ToString();
                     if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, state.Udid))
                     {
                         IsCapturing = true;
@@ -2251,8 +2671,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                         OnPropertyChanged(nameof(CurrentSessionHandle));
                         if (reason == "decoder_preference")
                             SetSettingsStatus("DecoderPreferenceAppliedFormat", appliedDecoder);
-                        else if (reason == "color_output")
-                            SetSettingsStatus("ColorOutputAppliedFormat", appliedColor);
+                        else if (reason == "image_adjustments")
+                            SetSettingsStatus("ImageAdjustmentsApplied");
                         else if (reason == "usb_display")
                             SetSettingsStatus("VideoPipelineAppliedFormat",
                                 $"USB {state.AdvancedUsbWidth}x{state.AdvancedUsbHeight}");
@@ -2262,12 +2682,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     AddUiLog(AppLog.Event("video pipeline restarted",
                         ("reason", reason), ("mode", state.UsbProjectionMode),
                         ("decoder", state.DecoderPreference),
-                        ("color_output", state.ColorOutputPreference),
+                        ("brightness", state.Brightness),
+                        ("contrast", state.Contrast),
+                        ("saturation", state.Saturation), ("gamma", state.Gamma),
                         ("device", AppLog.Device(state.Udid))));
                     AddDiagnosticLog(AppLog.Event("video_pipeline_restart_complete",
                         ("reason", reason), ("mode", state.UsbProjectionMode),
                         ("decoder", state.DecoderPreference),
-                        ("color_output", state.ColorOutputPreference),
+                        ("brightness", state.Brightness),
+                        ("contrast", state.Contrast),
+                        ("saturation", state.Saturation), ("gamma", state.Gamma),
                         ("device", AppLog.Device(state.Udid)),
                         ("handle", AppLog.Handle(state.Handle))));
                     return;
@@ -2307,6 +2731,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         AddDiagnosticLog(AppLog.Event("app_shutdown_begin",
             ("sessions", _sessions.Values.Count(state => state.Handle != 0)),
             ("media_cast", _isMediaCasting), ("uptime_ms", _lifetime.ElapsedMilliseconds)));
+        foreach (var window in _imageSettingsWindows.Values.ToArray())
+            window.CloseForShutdown();
+        _imageSettingsWindows.Clear();
         _disposed = true;
         _shutdownCancellation.Cancel();
         LocalizationService.LanguageChanged -= OnLanguageChanged;

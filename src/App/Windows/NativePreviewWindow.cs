@@ -92,10 +92,12 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly MenuItem _muteMenuItem;
     private readonly MenuItem _muteThisItem;
     private readonly MenuItem _muteOthersItem;
+    private readonly MenuItem? _imageSettingsItem;
     private readonly Func<bool>? _isAudioEnabled;
     private readonly Func<int>? _connectedDeviceCount;
     private readonly Action<bool>? _setAudioEnabled;
     private readonly Action? _muteOtherWindows;
+    private readonly Action? _showImageSettings;
     private readonly Action<string>? _logDiagnostic;
     private readonly ulong _sessionHandle;
     private readonly double _cornerRadius;
@@ -126,6 +128,7 @@ internal sealed class NativePreviewWindow : IDisposable
          double cornerRadius, double cornerExponent,
          Func<bool>? isAudioEnabled = null, Func<int>? connectedDeviceCount = null,
          Action<bool>? setAudioEnabled = null, Action? muteOtherWindows = null,
+         Action? showImageSettings = null,
          FrameworkElement? managedContent = null, Action? managedContentDetached = null,
          Action<string>? logDiagnostic = null)
     {
@@ -139,6 +142,7 @@ internal sealed class NativePreviewWindow : IDisposable
         _connectedDeviceCount = connectedDeviceCount;
         _setAudioEnabled = setAudioEnabled;
         _muteOtherWindows = muteOtherWindows;
+        _showImageSettings = showImageSettings;
         _logDiagnostic = logDiagnostic;
         _managedContent = managedContent;
         _managedContentOriginalLayoutTransform = managedContent?.LayoutTransform;
@@ -186,6 +190,12 @@ internal sealed class NativePreviewWindow : IDisposable
             _cornerItem = new MenuItem { Style = itemStyle };
             _cornerItem.Click += (_, _) => ToggleCorners();
             _contextMenu.Items.Add(_cornerItem);
+            if (_showImageSettings is not null)
+            {
+                _imageSettingsItem = new MenuItem { Style = itemStyle };
+                _imageSettingsItem.Click += (_, _) => ShowImageSettings();
+                _contextMenu.Items.Add(_imageSettingsItem);
+            }
         }
         _contextMenu.Items.Add(rotateLeftItem);
         _contextMenu.Items.Add(rotateRightItem);
@@ -283,6 +293,7 @@ internal sealed class NativePreviewWindow : IDisposable
         uint sourceHeight, string title, double cornerRadius, double cornerExponent,
         Func<bool> isAudioEnabled, Func<int> connectedDeviceCount,
         Action<bool> setAudioEnabled, Action muteOtherWindows,
+        Action showImageSettings,
         out NativePreviewWindow? window, Action<string>? logDiagnostic = null)
     {
         window = null;
@@ -295,6 +306,7 @@ internal sealed class NativePreviewWindow : IDisposable
                 hwnd => NativeCore.AttachDevicePreview(handle, hwnd),
                  handle, cornerRadius, cornerExponent, isAudioEnabled,
                  connectedDeviceCount, setAudioEnabled, muteOtherWindows,
+                 showImageSettings,
                  logDiagnostic: logDiagnostic);
             if (!candidate._attachPreview(candidate._handle))
             {
@@ -341,7 +353,7 @@ internal sealed class NativePreviewWindow : IDisposable
                     content.InvalidateVisual();
                     return true;
                 }, 0, 0, 1, isAudioEnabled, connectedDeviceCount, setAudioEnabled,
-                 muteOtherWindows,
+                 muteOtherWindows, null,
                  content, contentDetached, logDiagnostic: logDiagnostic);
             candidate._attached = true;
             _ = ShowWindow(candidate._handle, SwShow);
@@ -581,6 +593,9 @@ internal sealed class NativePreviewWindow : IDisposable
             _cornerItem.Header = LocalizationService.Get(
                 _cornersEnabled ? "IndependentWindowRemoveCorners" :
                     "IndependentWindowKeepCorners");
+        if (_imageSettingsItem is not null)
+            _imageSettingsItem.Header = LocalizationService.Get(
+                "IndependentWindowImageSettings");
         _muteMenuItem.Header = LocalizationService.Get("IndependentWindowMute");
         _muteThisItem.Header = LocalizationService.Get(
             _isAudioEnabled?.Invoke() == false
@@ -609,6 +624,13 @@ internal sealed class NativePreviewWindow : IDisposable
         _muteOtherWindows();
         UpdateContextMenuLabels();
         Log("independent_window_mute_others", ("mode", WindowMode));
+    }
+
+    private void ShowImageSettings()
+    {
+        if (_disposed || _showImageSettings is null) return;
+        _showImageSettings();
+        Log("independent_window_image_settings", ("mode", WindowMode));
     }
 
     private void ToggleTopMost()

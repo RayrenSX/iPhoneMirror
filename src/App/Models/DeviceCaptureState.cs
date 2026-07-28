@@ -14,13 +14,6 @@ internal enum DecoderPreference : uint
     SoftwareCompatible = 2,
 }
 
-internal enum ColorOutputPreference : uint
-{
-    Auto = 0,
-    ForceSdrToneMap = 1,
-    PreferHdrWhenSupported = 2,
-}
-
 internal sealed class DeviceCaptureState
 {
     internal required string Udid { get; init; }
@@ -35,7 +28,63 @@ internal sealed class DeviceCaptureState
     internal uint AdvancedUsbHeight { get; set; }
     internal UsbProjectionMode UsbProjectionMode { get; set; } = UsbProjectionMode.Demo;
     internal DecoderPreference DecoderPreference { get; set; } = DecoderPreference.Auto;
-    internal ColorOutputPreference ColorOutputPreference { get; set; } = ColorOutputPreference.Auto;
+    internal double Brightness { get; set; }
+    internal double Contrast { get; set; } = 100;
+    internal double Saturation { get; set; } = 100;
+    internal double Gamma { get; set; } = 100;
+    internal uint AppliedRenderWidth { get; private set; }
+    internal uint AppliedRenderHeight { get; private set; }
+    internal int AppliedFrameRate { get; private set; } = 60;
+    internal DecoderPreference AppliedDecoderPreference { get; private set; } =
+        DecoderPreference.Auto;
+    internal double AppliedBrightness { get; private set; }
+    internal double AppliedContrast { get; private set; } = 100;
+    internal double AppliedSaturation { get; private set; } = 100;
+    internal double AppliedGamma { get; private set; } = 100;
+    internal bool HasAppliedVideoSettings { get; private set; }
     internal bool HasSession => Handle != 0;
     internal bool ErrorShown { get; set; }
+
+    internal bool HasPendingVideoSettings => !HasAppliedVideoSettings ||
+        RenderWidth != AppliedRenderWidth || RenderHeight != AppliedRenderHeight ||
+        FrameRate != AppliedFrameRate ||
+        DecoderPreference != AppliedDecoderPreference ||
+        Math.Abs(Brightness - AppliedBrightness) > 0.001 ||
+        Math.Abs(Contrast - AppliedContrast) > 0.001 ||
+        Math.Abs(Saturation - AppliedSaturation) > 0.001 ||
+        Math.Abs(Gamma - AppliedGamma) > 0.001;
+
+    internal void MarkVideoSettingsApplied(uint renderWidth, uint renderHeight,
+        int frameRate, DecoderPreference decoderPreference, double brightness,
+        double contrast, double saturation, double gamma)
+    {
+        MarkRenderSettingsApplied(renderWidth, renderHeight, frameRate);
+        AppliedDecoderPreference = decoderPreference;
+        MarkImageAdjustmentsApplied(brightness, contrast, saturation, gamma);
+    }
+
+    internal void MarkRenderSettingsApplied(uint renderWidth,
+        uint renderHeight, int frameRate)
+    {
+        AppliedRenderWidth = renderWidth;
+        AppliedRenderHeight = renderHeight;
+        AppliedFrameRate = frameRate;
+        HasAppliedVideoSettings = true;
+    }
+
+    internal void MarkImageAdjustmentsApplied(double brightness,
+        double contrast, double saturation, double gamma)
+    {
+        AppliedBrightness = brightness;
+        AppliedContrast = contrast;
+        AppliedSaturation = saturation;
+        AppliedGamma = gamma;
+        HasAppliedVideoSettings = true;
+    }
+
+    internal void SynchronizeAppliedDecoderPreference(
+        DecoderPreference decoderPreference)
+    {
+        AppliedDecoderPreference = decoderPreference;
+    }
 }

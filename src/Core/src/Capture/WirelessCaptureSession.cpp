@@ -60,6 +60,22 @@ std::uint32_t WirelessCaptureSession::target_fps() const noexcept {
     return stream_ ? stream_->target_fps() : preferences_.target_fps;
 }
 
+void WirelessCaptureSession::set_decoder_preference(
+    media::DecoderPreference preference) noexcept {
+    preferences_.decoder_preference = preference;
+}
+
+DecoderSwitchStatus WirelessCaptureSession::decoder_switch_status() const noexcept {
+    return {
+        preferences_.decoder_preference,
+        preferences_.decoder_preference,
+        1,
+        1,
+        DecoderSwitchPhase::Applied,
+        DecoderRuntimeMode::Unknown,
+    };
+}
+
 void WirelessCaptureSession::request_display_orientation(bool) noexcept {}
 
 } // namespace iPhoneMirror::capture

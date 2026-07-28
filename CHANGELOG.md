@@ -5,6 +5,60 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-07-28
+
+### Added
+
+- Add per-device brightness, contrast, saturation and gamma controls in a
+  dedicated image-adjustment window. Slider changes preview immediately;
+  Save commits them, while Back, Escape or closing the window restores the
+  values that were active when it opened.
+- Add an Adjust image command to each detached device-preview context menu.
+  The adjustment window is modeless and remains usable alongside the main
+  window and other preview windows.
+- Add explicit decoder request, pending, active and fallback diagnostics in
+  the status bar below the preview, including the actual hardware or software
+  decoder selected by Media Foundation.
+- Add native C API coverage and device-isolated application-logic coverage for
+  image controls, decoder switching and localization resource integrity.
+
+### Changed
+
+- Remove the HDR output selector from the application because the upstream
+  mirroring driver does not provide an HDR mirror stream. The local renderer
+  now consistently requests SDR output and retains deterministic tone mapping
+  for any HDR-tagged input encountered through a compatible source.
+- Keep the main video settings focused on resolution, frame rate and decoder.
+  Decoder changes are submitted only by Apply video settings; a failed live
+  switch can offer an explicit, user-confirmed device reconnect.
+- Freeze per-device session-start settings into immutable snapshots so device
+  selection or edits in another window cannot mix settings during concurrent
+  session creation.
+
+### Fixed
+
+- Fix decoder selection being reported as applied before the native decoder
+  committed the change or reached the next keyframe.
+- Fix multi-device settings leaking between devices, including new devices
+  inheriting the previously selected device's controls and saved non-preset
+  values being overwritten while switching selection.
+- Fix partial video-setting failures being recorded as a complete success.
+  Render limits, image controls and decoder state now commit independently
+  according to their native results.
+- Fix image-adjustment dialogs blocking the main window or being hidden behind
+  always-on-top detached previews.
+- Fix duplicate localization keys that could pass compilation but crash WPF
+  during application startup.
+
+### Verification
+
+- Pass native protocol, output-mode, wireless-host, application-logic and
+  driver-installer tests.
+- Pass Release builds for the WPF application and driver manager with zero
+  warnings and zero errors.
+- Pass Windows UI smoke checks for the main settings layout, modeless image
+  adjustment window and minimum-size control alignment.
+
 ## [1.2.1] - 2026-07-27
 
 ### Added

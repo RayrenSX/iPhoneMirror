@@ -107,6 +107,40 @@ struct CaptureStatus {
     wchar_t message[MaxStatus];
 };
 
+enum class DecoderSwitchState : std::uint32_t {
+    Applied = 0,
+    Pending = 1,
+    Failed = 2,
+};
+
+enum class DecoderRuntimeMode : std::uint32_t {
+    Unknown = 0,
+    Hardware = 1,
+    Software = 2,
+};
+
+// Per-preview video diagnostics. Renderer values describe the preview attached
+// to hwnd. Decoder values distinguish a policy request from the decoder that
+// has actually committed it on a random-access frame.
+struct VideoOutputStatus {
+    std::uint32_t struct_size;
+    std::uint32_t api_version;
+    std::uint32_t monitor_hdr_capability; // 0=unknown, 1=SDR, 2=HDR
+    std::int32_t source_hdr_known;
+    std::int32_t source_hdr;
+    std::int32_t actual_hdr_surface;
+    // True only for an HDR source on an HDR display with a committed
+    // scRGB/FP16 surface; requesting HDR alone is never reported as effective.
+    std::int32_t hdr_effective;
+    std::uint32_t requested_color_output_preference;
+    std::uint32_t requested_decoder_preference;
+    std::uint32_t applied_decoder_preference;
+    DecoderSwitchState decoder_switch_state;
+    DecoderRuntimeMode decoder_runtime_mode;
+    std::uint64_t requested_decoder_generation;
+    std::uint64_t applied_decoder_generation;
+};
+
 struct VideoFrameInfo {
     std::uint32_t struct_size;
     std::uint32_t api_version;
@@ -270,6 +304,11 @@ IM_API std::int32_t IM_CALL im_set_video_preferences(
     std::uint32_t max_width,
     std::uint32_t max_height,
     std::uint32_t max_fps);
+// Applies local preview-only image controls. brightness is [-1, 1], contrast
+// and saturation are [0, 2], and gamma is [0.5, 2]. The capture transport and
+// encoded source are unchanged.
+IM_API std::int32_t IM_CALL im_set_image_adjustments(
+    float brightness, float contrast, float saturation, float gamma);
 IM_API std::int32_t IM_CALL im_set_audio_enabled(std::int32_t enabled);
 IM_API std::int32_t IM_CALL im_set_audio_volume(float volume);
 
@@ -287,12 +326,24 @@ IM_API std::int32_t IM_CALL im_session_stop(iPhoneMirror::SessionHandle handle);
 IM_API void IM_CALL im_session_destroy(iPhoneMirror::SessionHandle handle);
 IM_API std::int32_t IM_CALL im_session_get_status(
     iPhoneMirror::SessionHandle handle, iPhoneMirror::CaptureStatus* status);
+IM_API std::int32_t IM_CALL im_session_get_video_output_status(
+    iPhoneMirror::SessionHandle handle, void* hwnd,
+    iPhoneMirror::VideoOutputStatus* status);
 IM_API std::int32_t IM_CALL im_session_attach_preview(
     iPhoneMirror::SessionHandle handle, void* hwnd);
 IM_API void IM_CALL im_session_detach_preview(iPhoneMirror::SessionHandle handle, void* hwnd);
 IM_API std::int32_t IM_CALL im_session_set_video_preferences(
     iPhoneMirror::SessionHandle handle, std::uint32_t max_width,
     std::uint32_t max_height, std::uint32_t max_fps);
+IM_API std::int32_t IM_CALL im_session_set_image_adjustments(
+    iPhoneMirror::SessionHandle handle, float brightness, float contrast,
+    float saturation, float gamma);
+// Updates only the active video pipeline. Decoder changes are committed on the
+// next random-access frame; color output changes are applied to every attached
+// renderer. The USB/AirPlay transport remains connected.
+IM_API std::int32_t IM_CALL im_session_set_pipeline_preferences(
+    iPhoneMirror::SessionHandle handle, std::uint32_t decoder_preference,
+    std::uint32_t color_output_preference);
 IM_API std::int32_t IM_CALL im_session_set_audio_enabled(
     iPhoneMirror::SessionHandle handle, std::int32_t enabled);
 IM_API std::int32_t IM_CALL im_session_set_audio_volume(

@@ -29,6 +29,12 @@ enum class PixelFormat : std::uint8_t {
     P010,
 };
 
+enum class DecoderAcceleration : std::uint8_t {
+    Unknown,
+    Software,
+    Hardware,
+};
+
 [[nodiscard]] std::string_view decoder_preference_name(DecoderPreference value) noexcept;
 [[nodiscard]] std::string_view pixel_format_name(PixelFormat value) noexcept;
 [[nodiscard]] std::string_view codec_name(coremedia::VideoCodec value) noexcept;
@@ -40,11 +46,28 @@ enum class PixelFormat : std::uint8_t {
 namespace detail {
 
 inline constexpr std::uint32_t MaxDecodedVideoDimension = 8192;
+inline constexpr std::uint32_t MaxDxgiAllocationPadding = 512;
+inline constexpr std::uint64_t MaxDxgiReadbackBytes = 256ULL * 1024ULL * 1024ULL;
+
+using DecoderAcceleration = ::iPhoneMirror::media::DecoderAcceleration;
+
+struct DxgiReadbackLayout {
+    std::uint32_t minimum_row_pitch{};
+    std::uint32_t row_count{};
+    std::uint32_t total_bytes{};
+};
 
 [[nodiscard]] std::optional<std::uint32_t> checked_video_buffer_size(
     std::uint32_t width, std::uint32_t height, PixelFormat format) noexcept;
 [[nodiscard]] std::optional<std::uint32_t> checked_nv12_buffer_size(
     std::uint32_t width, std::uint32_t height) noexcept;
+[[nodiscard]] DecoderAcceleration classify_dxva_mode(std::int32_t mode) noexcept;
+[[nodiscard]] std::optional<DxgiReadbackLayout> checked_dxgi_readback_layout(
+    std::uint32_t visible_width, std::uint32_t visible_height,
+    std::uint32_t allocation_width, std::uint32_t allocation_height,
+    std::uint32_t mip_levels, std::uint32_t array_size,
+    std::uint32_t source_subresource, std::uint32_t sample_count,
+    std::uint32_t row_pitch, PixelFormat format) noexcept;
 [[nodiscard]] bool is_random_access_sample(const coremedia::FormatDescription& format,
     std::span<const std::uint8_t> length_prefixed_sample) noexcept;
 
@@ -112,6 +135,7 @@ public:
 
     [[nodiscard]] DecoderPreference preference() const noexcept;
     [[nodiscard]] std::string_view selected_decoder_name() const noexcept;
+    [[nodiscard]] DecoderAcceleration decoder_acceleration() const noexcept;
     [[nodiscard]] bool selected_decoder_is_hardware() const noexcept;
     [[nodiscard]] PixelFormat output_pixel_format() const noexcept;
 

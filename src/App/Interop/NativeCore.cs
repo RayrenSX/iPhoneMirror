@@ -31,6 +31,27 @@ internal enum CaptureState : int
     Error,
 }
 
+internal enum MonitorHdrCapability : uint
+{
+    Unknown,
+    Sdr,
+    Hdr,
+}
+
+internal enum DecoderSwitchState : uint
+{
+    Applied,
+    Pending,
+    Failed,
+}
+
+internal enum DecoderRuntimeMode : uint
+{
+    Unknown,
+    Hardware,
+    Software,
+}
+
 internal enum MediaCastCommand : uint
 {
     None,
@@ -92,6 +113,25 @@ internal struct NativeCaptureStatus
     public uint AudioSampleRate;
     public uint AudioChannels;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 192)] public string Message;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeVideoOutputStatus
+{
+    public uint StructSize;
+    public uint ApiVersion;
+    public MonitorHdrCapability MonitorHdrCapability;
+    public int SourceHdrKnown;
+    public int SourceHdr;
+    public int ActualHdrSurface;
+    public int HdrEffective;
+    public uint RequestedColorOutputPreference;
+    public uint RequestedDecoderPreference;
+    public uint AppliedDecoderPreference;
+    public DecoderSwitchState DecoderSwitchState;
+    public DecoderRuntimeMode DecoderRuntimeMode;
+    public ulong RequestedDecoderGeneration;
+    public ulong AppliedDecoderGeneration;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -252,11 +292,20 @@ internal sealed class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_get_status(ulong handle, ref NativeCaptureStatus status);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_get_video_output_status(ulong handle, nint hwnd,
+        ref NativeVideoOutputStatus status);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_attach_preview(ulong handle, nint hwnd);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void im_session_detach_preview(ulong handle, nint hwnd);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_set_video_preferences(ulong handle, uint width, uint height, uint fps);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_pipeline_preferences(ulong handle,
+        uint decoderPreference, uint colorOutputPreference);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_image_adjustments(ulong handle,
+        float brightness, float contrast, float saturation, float gamma);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_set_audio_enabled(ulong handle, int enabled);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -644,12 +693,79 @@ internal sealed class NativeCore : IDisposable
         return status;
     }
 
+    public bool TryGetDeviceVideoOutputStatus(ulong handle,
+        out NativeVideoOutputStatus status)
+    {
+        status = new NativeVideoOutputStatus
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeVideoOutputStatus>(),
+        };
+        if (handle == 0) return false;
+        try
+        {
+            lock (PreviewSelectionGate)
+            {
+                if (unchecked((ulong)_selectedPreviewSession) != handle ||
+                    _selectedPreviewWindow == 0) return false;
+                return im_session_get_video_output_status(handle,
+                    _selectedPreviewWindow, ref status) == 0;
+            }
+        }
+        catch (Exception error) when (error is EntryPointNotFoundException or
+                                      DllNotFoundException)
+        {
+            return false;
+        }
+    }
+
     public (bool Success, string Message) SetDeviceVideoPreferences(ulong handle,
         uint width, uint height, uint fps)
     {
         var result = im_session_set_video_preferences(handle, width, height, fps);
         return result == 0 ? (true, LocalizationService.Get("VideoPreferencesApplied"))
             : (false, GetLastError(LocalizationService.Get("VideoPreferencesUpdateFailed")));
+    }
+
+    public (bool Success, string Message) SetDevicePipelinePreferences(ulong handle,
+        uint decoderPreference, uint colorOutputPreference)
+    {
+        if (handle == 0) return (false, LocalizationService.Get("VideoPreferencesUpdateFailed"));
+        try
+        {
+            var result = im_session_set_pipeline_preferences(handle,
+                Math.Min(decoderPreference, 2U), Math.Min(colorOutputPreference, 2U));
+            return result == 0
+                ? (true, LocalizationService.Get("VideoPreferencesApplied"))
+                : (false, GetLastError(LocalizationService.Get("VideoPreferencesUpdateFailed")));
+        }
+        catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
+        {
+            return (false, error.Message);
+        }
+    }
+
+    public (bool Success, string Message) SetDeviceImageAdjustments(ulong handle,
+        double brightness, double contrast, double saturation, double gamma)
+    {
+        if (handle == 0)
+            return (false, LocalizationService.Get("VideoPreferencesUpdateFailed"));
+        try
+        {
+            var result = im_session_set_image_adjustments(handle,
+                Math.Clamp((float)brightness / 100.0f, -1.0f, 1.0f),
+                Math.Clamp((float)contrast / 100.0f, 0.0f, 2.0f),
+                Math.Clamp((float)saturation / 100.0f, 0.0f, 2.0f),
+                Math.Clamp((float)gamma / 100.0f, 0.5f, 2.0f));
+            return result == 0
+                ? (true, LocalizationService.Get("ImageAdjustmentsApplied"))
+                : (false, GetLastError(LocalizationService.Get(
+                    "ImageAdjustmentsUpdateFailed")));
+        }
+        catch (Exception error) when (error is EntryPointNotFoundException or
+                                      DllNotFoundException)
+        {
+            return (false, error.Message);
+        }
     }
 
     public void SetDeviceAudioEnabled(ulong handle, bool enabled)

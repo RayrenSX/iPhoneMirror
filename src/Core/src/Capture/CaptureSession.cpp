@@ -75,6 +75,17 @@ bool same_video_decoder_configuration(const coremedia::FormatDescription& left,
             right_color.hdr.min_mastering_luminance;
 }
 
+DecoderRuntimeMode decoder_runtime_mode(media::DecoderAcceleration acceleration) noexcept {
+    switch (acceleration) {
+    case media::DecoderAcceleration::Hardware:
+        return DecoderRuntimeMode::Hardware;
+    case media::DecoderAcceleration::Software:
+        return DecoderRuntimeMode::Software;
+    default:
+        return DecoderRuntimeMode::Unknown;
+    }
+}
+
 std::wstring widen(std::string_view utf8) {
     if (utf8.empty()) return {};
     const int length = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
@@ -393,7 +404,8 @@ CaptureSession::CaptureSession(std::string serial, CapturePreferences preference
     : serial_(std::move(serial)), preferences_(preferences), product_type_(std::move(product_type)),
       target_fps_(preferences.target_fps),
       play_audio_(preferences.play_audio),
-      audio_volume_(std::clamp(preferences.audio_volume, 0.0F, 1.0F)) {}
+      audio_volume_(std::clamp(preferences.audio_volume, 0.0F, 1.0F)),
+      decoder_switch_(preferences.decoder_preference) {}
 CaptureSession::~CaptureSession() { stop(); }
 
 void CaptureSession::start(bool use_usbdk) {
@@ -478,6 +490,20 @@ void CaptureSession::set_target_fps(std::uint32_t target_fps) noexcept {
 
 std::uint32_t CaptureSession::target_fps() const noexcept {
     return target_fps_.load(std::memory_order_relaxed);
+}
+
+void CaptureSession::set_decoder_preference(media::DecoderPreference preference) noexcept {
+    const auto update = decoder_switch_.request(preference);
+    if (!update.changed) return;
+    logging::write(std::format(
+        "video_worker decoder_switch requested from={} to={} generation={}",
+        media::decoder_preference_name(update.previous.preference),
+        media::decoder_preference_name(update.current.preference),
+        update.current.generation));
+}
+
+DecoderSwitchStatus CaptureSession::decoder_switch_status() const noexcept {
+    return decoder_switch_.status();
 }
 
 void CaptureSession::request_display_orientation(bool landscape) noexcept {
@@ -583,7 +609,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         target_fps(),
         play_audio_.load(std::memory_order_relaxed),
         audio_volume_.load(std::memory_order_relaxed),
-        media::decoder_preference_name(preferences_.decoder_preference),
+        media::decoder_preference_name(decoder_switch_.requested().preference),
         static_cast<unsigned>(preferences_.color_output_preference)));
     std::unique_ptr<CaptureConnection> usb;
     quicktime::StreamDecoder decoder;
@@ -915,6 +941,14 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             std::unique_ptr<media::MediaFoundationVideoDecoder> video_decoder;
             std::optional<coremedia::FormatDescription> current_format;
             std::optional<coremedia::FormatDescription> configured_format;
+            const auto initial_decoder_status = decoder_switch_.status();
+            auto active_decoder_preference = initial_decoder_status.applied;
+            auto active_decoder_runtime_mode = initial_decoder_status.runtime_mode;
+            auto applied_decoder_generation =
+                initial_decoder_status.applied_generation;
+            auto retry_decoder_generation = applied_decoder_generation;
+            auto next_decoder_switch_retry = std::chrono::steady_clock::time_point{};
+            std::uint64_t preference_switch_wait_samples{};
             std::uint64_t video_decode_count{};
             std::uint64_t video_output_count{};
             int orientation_candidate{};
@@ -953,6 +987,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     video_decoder.reset();
                     current_format.reset();
                     configured_format.reset();
+                    decoder_switch_.set_applied_runtime_mode(
+                        {active_decoder_preference, applied_decoder_generation},
+                        DecoderRuntimeMode::Unknown);
+                    active_decoder_runtime_mode = DecoderRuntimeMode::Unknown;
                     input_times.clear();
                     logging::write("video_worker decoder_reset reason=queue_overflow_keyframe");
                 }
@@ -962,8 +1000,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 if (!video_decoder || !configured_format ||
                     !same_video_decoder_configuration(*configured_format, format)) {
                     video_decoder = std::make_unique<media::MediaFoundationVideoDecoder>(
-                        preferences_.decoder_preference);
+                        active_decoder_preference);
                     video_decoder->configure(format, 60, 1);
+                    active_decoder_runtime_mode = decoder_runtime_mode(
+                        video_decoder->decoder_acceleration());
+                    decoder_switch_.set_applied_runtime_mode(
+                        {active_decoder_preference, applied_decoder_generation},
+                        active_decoder_runtime_mode);
                     configured_format = format;
                 }
                 auto& sample = pending.sample;
@@ -1005,13 +1048,150 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                 timing.presentation_timestamp.value, timing.presentation_timestamp.timescale));
                         }
                     }
+
+                    std::vector<media::DecodedFrame> decoded_frames;
+                    bool decoded_by_replacement{};
+                    const auto requested = decoder_switch_.requested();
+                    const auto requested_generation = requested.generation;
+                    if (requested_generation != applied_decoder_generation) {
+                        const auto requested_preference = requested.preference;
+                        if (requested_generation != retry_decoder_generation) {
+                            retry_decoder_generation = requested_generation;
+                            next_decoder_switch_retry = {};
+                            preference_switch_wait_samples = 0;
+                        }
+                        if (requested_preference == active_decoder_preference) {
+                            const bool coalesced = decoder_switch_.commit_if_current(
+                                requested, [&] {
+                                    applied_decoder_generation = requested_generation;
+                                }, active_decoder_runtime_mode);
+                            if (coalesced) {
+                                next_decoder_switch_retry = {};
+                                preference_switch_wait_samples = 0;
+                                logging::write(std::format(
+                                    "video_worker decoder_switch coalesced generation={} policy={}",
+                                    applied_decoder_generation,
+                                    media::decoder_preference_name(active_decoder_preference)));
+                            }
+                        } else if (!media::detail::is_random_access_sample(
+                                format, encoded_sample)) {
+                            ++preference_switch_wait_samples;
+                            if (preference_switch_wait_samples <= 3 ||
+                                preference_switch_wait_samples % 60 == 0) {
+                                logging::write(std::format(
+                                    "video_worker decoder_switch waiting_for_keyframe "
+                                    "generation={} observed_samples={}",
+                                    requested_generation,
+                                    preference_switch_wait_samples));
+                            }
+                        } else if (std::chrono::steady_clock::now() >=
+                            next_decoder_switch_retry) {
+                            try {
+                                auto replacement =
+                                    std::make_unique<media::MediaFoundationVideoDecoder>(
+                                        requested_preference);
+                                replacement->configure(format, 60, 1);
+                                const bool applied = detail::trial_and_commit_decoder(
+                                    decoder_switch_, requested, replacement,
+                                    [&](auto& candidate) {
+                                        return candidate->decode(encoded_sample,
+                                            timestamp_100ns, duration_100ns);
+                                    },
+                                    [&](std::unique_ptr<media::MediaFoundationVideoDecoder>&&
+                                            accepted_decoder,
+                                        std::vector<media::DecodedFrame>&& accepted_frames) noexcept {
+                                        video_decoder.swap(accepted_decoder);
+                                        decoded_frames.swap(accepted_frames);
+                                        active_decoder_preference = requested_preference;
+                                        active_decoder_runtime_mode =
+                                            DecoderRuntimeMode::Unknown;
+                                        applied_decoder_generation = requested_generation;
+                                    });
+                                if (!applied) {
+                                    const auto latest_request = decoder_switch_.requested();
+                                    retry_decoder_generation = latest_request.generation;
+                                    next_decoder_switch_retry = {};
+                                    preference_switch_wait_samples = 0;
+                                    logging::write(std::format(
+                                        "video_worker decoder_switch superseded configured_generation={} "
+                                        "latest_generation={} latest_policy={}",
+                                        requested_generation, latest_request.generation,
+                                        media::decoder_preference_name(
+                                            latest_request.preference)));
+                                } else {
+                                    decoded_by_replacement = true;
+                                    retry_decoder_generation = requested_generation;
+                                    next_decoder_switch_retry = {};
+                                    preference_switch_wait_samples = 0;
+                                    input_times.clear();
+                                    logging::write(std::format(
+                                        "video_worker decoder_switch applied generation={} "
+                                        "policy={} selected={} actual={} trial_output_frames={}",
+                                        applied_decoder_generation,
+                                        media::decoder_preference_name(
+                                            active_decoder_preference),
+                                        video_decoder->selected_decoder_name(),
+                                        active_decoder_runtime_mode ==
+                                                DecoderRuntimeMode::Hardware
+                                            ? "hardware"
+                                            : active_decoder_runtime_mode ==
+                                                    DecoderRuntimeMode::Software
+                                                ? "software"
+                                                : "unknown",
+                                        decoded_frames.size()));
+                                }
+                            } catch (const std::exception& error) {
+                                // Retain the known-good decoder and feed it this
+                                // IDR. A policy request must never terminate the
+                                // transport.
+                                const bool failure_recorded =
+                                    decoder_switch_.mark_failed_if_current(requested);
+                                next_decoder_switch_retry =
+                                    std::chrono::steady_clock::now() +
+                                    std::chrono::seconds(5);
+                                preference_switch_wait_samples = 0;
+                                logging::write(std::format(
+                                    "video_worker decoder_switch rejected generation={} "
+                                    "requested={} retained={} retry_ms=5000 reason={}",
+                                    requested_generation,
+                                    media::decoder_preference_name(requested_preference),
+                                    media::decoder_preference_name(
+                                        active_decoder_preference),
+                                    error.what()));
+                                if (!failure_recorded) {
+                                    logging::write(std::format(
+                                        "video_worker decoder_switch rejection_superseded "
+                                        "generation={}", requested_generation));
+                                }
+                            }
+                        }
+                    }
+
+                    if (!decoded_by_replacement) {
+                        decoded_frames = video_decoder->decode(
+                            encoded_sample, timestamp_100ns, duration_100ns);
+                    }
+                    const auto observed_runtime_mode = decoder_runtime_mode(
+                        video_decoder->decoder_acceleration());
+                    if (observed_runtime_mode != active_decoder_runtime_mode) {
+                        active_decoder_runtime_mode = observed_runtime_mode;
+                        decoder_switch_.set_applied_runtime_mode(
+                            {active_decoder_preference, applied_decoder_generation},
+                            active_decoder_runtime_mode);
+                        logging::write(std::format(
+                            "video_worker decoder_runtime generation={} mode={}",
+                            applied_decoder_generation,
+                            active_decoder_runtime_mode == DecoderRuntimeMode::Hardware
+                                ? "hardware"
+                                : active_decoder_runtime_mode == DecoderRuntimeMode::Software
+                                    ? "software"
+                                    : "unknown"));
+                    }
                     input_times.emplace_back(timestamp_100ns, pending.received_at);
                     // Normal decoder reordering is under a few dozen frames.
                     // Bound diagnostic metadata independently of media data in
                     // case a malformed stream stops returning timestamps.
                     while (input_times.size() > 512) input_times.pop_front();
-                    auto decoded_frames = video_decoder->decode(
-                        encoded_sample, timestamp_100ns, duration_100ns);
                     const double decode_ms = std::chrono::duration<double, std::milli>(
                         std::chrono::steady_clock::now() - decode_started).count();
                     const bool report_decode = video_decode_count % 120 == 0 ||

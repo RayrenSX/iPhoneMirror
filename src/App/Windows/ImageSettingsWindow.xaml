@@ -1,0 +1,109 @@
+<Window x:Class="IPhoneMirror.App.Windows.ImageSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{DynamicResource MoreImageSettingsTitle}"
+        Width="560" Height="590" MinWidth="520" MinHeight="540"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        PreviewKeyDown="OnPreviewKeyDown"
+        Closing="OnWindowClosing"
+        Background="{StaticResource AppBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}">
+    <Window.Resources>
+        <Style x:Key="AdjustmentLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="AdjustmentValue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="28,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="20"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="{DynamicResource MoreImageSettingsTitle}"
+                       FontSize="22" FontWeight="SemiBold"/>
+            <TextBlock Text="{DynamicResource MoreImageSettingsSubtitle}"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       FontSize="12" TextWrapping="Wrap" Margin="0,7,0,0"/>
+        </StackPanel>
+
+        <Border Grid.Row="2" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                CornerRadius="8" Padding="20,16">
+            <StackPanel>
+                <Grid>
+                    <TextBlock Text="{DynamicResource BrightnessLabel}" Style="{StaticResource AdjustmentLabel}"/>
+                    <TextBlock Text="{Binding ElementName=BrightnessSlider, Path=Value, StringFormat={}{0:F0}}"
+                               Style="{StaticResource AdjustmentValue}"/>
+                </Grid>
+                <Slider x:Name="BrightnessSlider" Minimum="-100" Maximum="100"
+                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
+                        ValueChanged="OnAdjustmentValueChanged"/>
+
+                <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,16"/>
+                <Grid>
+                    <TextBlock Text="{DynamicResource ContrastLabel}" Style="{StaticResource AdjustmentLabel}"/>
+                    <TextBlock Text="{Binding ElementName=ContrastSlider, Path=Value, StringFormat={}{0:F0}%}"
+                               Style="{StaticResource AdjustmentValue}"/>
+                </Grid>
+                <Slider x:Name="ContrastSlider" Minimum="0" Maximum="200"
+                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
+                        ValueChanged="OnAdjustmentValueChanged"/>
+
+                <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,16"/>
+                <Grid>
+                    <TextBlock Text="{DynamicResource SaturationLabel}" Style="{StaticResource AdjustmentLabel}"/>
+                    <TextBlock Text="{Binding ElementName=SaturationSlider, Path=Value, StringFormat={}{0:F0}%}"
+                               Style="{StaticResource AdjustmentValue}"/>
+                </Grid>
+                <Slider x:Name="SaturationSlider" Minimum="0" Maximum="200"
+                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
+                        ValueChanged="OnAdjustmentValueChanged"/>
+
+                <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,16"/>
+                <Grid>
+                    <TextBlock Text="{DynamicResource GammaLabel}" Style="{StaticResource AdjustmentLabel}"/>
+                    <TextBlock Text="{Binding ElementName=GammaSlider, Path=Value, StringFormat={}{0:F0}%}"
+                               Style="{StaticResource AdjustmentValue}"/>
+                </Grid>
+                <Slider x:Name="GammaSlider" Minimum="50" Maximum="200"
+                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
+                        ValueChanged="OnAdjustmentValueChanged"/>
+            </StackPanel>
+        </Border>
+
+        <TextBlock x:Name="FeedbackText" Grid.Row="3"
+                   Foreground="{StaticResource WarningBrush}" FontSize="11"
+                   TextWrapping="Wrap" Margin="0,8,0,10"/>
+
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button Content="{DynamicResource ResetImageSettings}" Width="108"
+                    Click="OnResetClick"/>
+            <Button Grid.Column="2" Content="{DynamicResource BackImageSettings}" Width="96"
+                    Click="OnBackClick"/>
+            <Button Grid.Column="4" Content="{DynamicResource Save}" Width="108"
+                    Style="{StaticResource PrimaryButton}" IsDefault="True"
+                    Click="OnSaveClick"/>
+        </Grid>
+    </Grid>
+</Window>

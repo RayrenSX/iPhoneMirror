@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Capture/DecoderSwitchCoordinator.h"
 #include "Capture/ICaptureSession.h"
 #include "Protocol/QuickTimeSession.h"
 
@@ -114,6 +115,8 @@ public:
     void set_audio_volume(float volume) noexcept override;
     void set_target_fps(std::uint32_t target_fps) noexcept override;
     [[nodiscard]] std::uint32_t target_fps() const noexcept override;
+    void set_decoder_preference(media::DecoderPreference preference) noexcept override;
+    [[nodiscard]] DecoderSwitchStatus decoder_switch_status() const noexcept override;
     void request_display_orientation(bool landscape) noexcept override;
 
 private:
@@ -135,6 +138,7 @@ private:
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
     std::atomic<float> audio_volume_{1.0F};
+    detail::DecoderSwitchCoordinator decoder_switch_;
     std::atomic_int requested_display_orientation_{};
     std::atomic_uint64_t native_probe_size_{};
     std::mutex audio_mutex_;
