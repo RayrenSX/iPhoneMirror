@@ -4,8 +4,8 @@
         Width="520" SizeToContent="Height" MinHeight="250" MaxHeight="540"
         ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        Foreground="{StaticResource TextBrush}" ShowInTaskbar="False">
-    <Border Background="{StaticResource AppBackgroundBrush}" BorderBrush="#454545"
+        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False">
+    <Border Background="{DynamicResource AppBackgroundBrush}" BorderBrush="#454545"
             BorderThickness="1" CornerRadius="8">
         <Grid Margin="24">
             <Grid.RowDefinitions>
@@ -18,8 +18,8 @@
                 <Button Content="×" HorizontalAlignment="Right" Width="32" Height="32"
                         MinHeight="32" Padding="0" FontSize="18" Click="OnCancelClick"/>
             </Grid>
-            <Border Grid.Row="2" Background="{StaticResource PanelBrush}"
-                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+            <Border Grid.Row="2" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                     CornerRadius="8" Padding="16">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="300">
                     <TextBlock Text="{Binding PromptBody}" TextWrapping="Wrap"

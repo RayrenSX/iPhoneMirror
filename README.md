@@ -84,10 +84,22 @@ iPhoneMirror 当前不提供手机触控或远程控制，也没有内建视频�
 
 ## 下载
 
-前往 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 下载最新的
-`iPhoneMirror-*-win-x64.zip`，解压后运行 `iPhoneMirror.exe`。发布包自带 .NET
-运行时，无需另外安装 .NET Desktop Runtime。压缩包同时包含独立的
-`iPhoneMirror.Driver.exe` 驱动管理器，不需要另外下载驱动工具。
+前往 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases)，优先下载
+`iPhoneMirror-Setup-v*-x64.exe`。安装向导支持简体中文和 English，可选择安装目录，
+默认安装到 `C:\Program Files\iPhoneMirror`，并创建开始菜单入口；桌面快捷方式为可选项。
+需要免安装版本时，也可以下载 `iPhoneMirror-v*-win-x64.zip`，完整解压后运行
+`iPhoneMirror.exe`。若 Windows 对 ZIP 版无线 DLL 报“损坏的映像”或错误
+`0xc0e90002`，请改用 Setup；必须使用 ZIP 时，先在下载文件的“属性”中勾选
+“解除锁定”，再重新解压，不能只处理已解压出的单个 DLL。
+
+两种发布包都自带 .NET 运行时和独立的 `iPhoneMirror.Driver.exe` 驱动管理器，
+无需另装 .NET Desktop Runtime 或单独下载驱动工具。可使用同一 Release 中的
+`SHA256SUMS.txt` 验证下载文件完整性。
+
+程序默认在启动后后台检查 GitHub Release。发现更新时会显示版本、发布日期和 Markdown
+更新说明；点击“立即更新”即可下载、校验并启动覆盖安装，完成后自动重新打开程序。
+“关于”页面可手动检查更新，并可分别控制启动检查、自动下载、正式版/Beta 提醒和主题。
+网络不可用或检查超时不会影响正常启动。
 
 完整操作说明见 [使用教程](docs/USER_GUIDE.md)。
 
@@ -125,7 +137,8 @@ iPhoneMirror 当前不提供手机触控或远程控制，也没有内建视频�
 
 ## 快速开始
 
-1. 解压 Release 包，运行 `iPhoneMirror.exe`。
+1. 运行 Release 中的 Setup 安装程序并从开始菜单启动 iPhoneMirror；使用 ZIP 版时，
+   完整解压后运行 `iPhoneMirror.exe`。
 2. 使用数据线连接 iPhone 或 iPad，保持解锁，并在设备上选择“信任此电脑”。
 3. 点击顶部“驱动管理器”，为目标设备执行一键安装；工具会按需补齐 Apple USB
    支持和采集过滤驱动。
@@ -265,6 +278,14 @@ outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.Admin.exe
 outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
 outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 ```
+
+生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
+
+```powershell
+./scripts/package_release.ps1 -Version 1.4.0 -GenerateSbom
+```
+
+Inno Setup 6.7.3 及其简体中文翻译会按固定 SHA256 下载到 `work/tools`，无需全局安装。
 
 只构建并运行核心测试：
 

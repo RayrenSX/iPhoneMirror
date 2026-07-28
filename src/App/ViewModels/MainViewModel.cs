@@ -621,8 +621,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _logText = LocalizationService.Get("StatusWaitingLog");
         _selectedLanguage = LocalizationService.SelectedLanguage;
         _core = new NativeCore();
-        _wireless = new WirelessReceiverController(_core);
-        _mediaCast = new MediaCastReceiverController(_core);
+        var wirelessReceiver = new WirelessReceiverService();
+        _wireless = new WirelessReceiverController(_core, wirelessReceiver);
+        _mediaCast = new MediaCastReceiverController(_core, wirelessReceiver);
         _sessions = new DeviceSessionManager(_core);
         _mediaOutput = new MediaOutputService(_core.GetDeviceOutputFrame,
             _core.GetDeviceOutputAudioPacket);

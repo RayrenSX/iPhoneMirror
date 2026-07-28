@@ -2,6 +2,7 @@ using System.IO;
 using System.Xml.Linq;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
+using IPhoneMirror.App.Updater;
 
 static void Equal<T>(T expected, T actual, string name)
 {
@@ -71,6 +72,117 @@ var previewAndObsCard = mainWindow.Descendants()
 Equal("{Binding PreviewAndObsVisibility}",
     (string?)previewAndObsCard?.Attribute("Visibility"),
     "preview and OBS card follows the active projection session");
+
+Equal(true, SemanticVersion.Parse("v1.2.0") > SemanticVersion.Parse("v1.1.9"),
+    "semantic version compares numeric minor and patch components");
+Equal(true, SemanticVersion.Parse("1.3.0") >
+    SemanticVersion.Parse("1.3.0-beta.9"),
+    "stable release is newer than prerelease with the same core version");
+Equal(true, SemanticVersion.Parse("1.3.0-beta.10") >
+    SemanticVersion.Parse("1.3.0-beta.2"),
+    "numeric prerelease identifiers compare numerically");
+Equal(false, SemanticVersion.TryParse("1.02.0", out _),
+    "semantic version rejects leading zeroes");
+Equal(false, SemanticVersion.TryParse("1.2.0-beta.02", out _),
+    "semantic version rejects leading zeroes in numeric prerelease identifiers");
+
+const string releaseFixture = """
+[
+  {
+    "tag_name": "v1.4.0-beta.1",
+    "name": "Beta",
+    "body": "beta notes",
+    "published_at": "2026-07-28T10:00:00Z",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      { "name": "iPhoneMirror-Setup-v1.4.0-beta.1-x64.exe", "size": 30,
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.4.0-beta.1/setup.exe" }
+    ]
+  },
+  {
+    "tag_name": "v1.3.1",
+    "name": "Stable",
+    "body": "# Added\nFeature",
+    "published_at": "2026-07-27T10:00:00Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "iPhoneMirror-v1.3.1-win-x64.zip", "size": 20,
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.1/app.zip" },
+      { "name": "iPhoneMirror-Setup-v1.3.1-x64.exe", "size": 10,
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.1/setup.exe" },
+      { "name": "SHA256SUMS.txt", "size": 5,
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.1/SHA256SUMS.txt" }
+    ]
+  }
+]
+""";
+var stableRelease = ReleaseParser.ParseLatest(releaseFixture,
+    includeStable: true, includePrerelease: false);
+Equal("v1.3.1", stableRelease?.TagName,
+    "stable update channel ignores prereleases");
+Equal("iPhoneMirror-Setup-v1.3.1-x64.exe", stableRelease?.PreferredAsset?.Name,
+    "release parser prefers x64 Setup EXE over ZIP");
+var betaRelease = ReleaseParser.ParseLatest(releaseFixture,
+    includeStable: true, includePrerelease: true);
+Equal("v1.4.0-beta.1", betaRelease?.TagName,
+    "beta update channel selects the newest allowed prerelease");
+Equal("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    ReleaseParser.FindExpectedSha256(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  iPhoneMirror-Setup-v1.3.1-x64.exe\n",
+        "iPhoneMirror-Setup-v1.3.1-x64.exe"),
+    "checksum parser matches the selected asset exactly");
+const string nonInstallerExeFixture = """
+[
+  {
+    "tag_name": "v1.3.2",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "iPhoneMirror.Driver.exe", "size": 10,
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.2/driver.exe" },
+      { "name": "iPhoneMirror-v1.3.2-win-x64.zip", "size": 20,
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.2/app.zip" }
+    ]
+  }
+]
+""";
+Equal("iPhoneMirror-v1.3.2-win-x64.zip",
+    ReleaseParser.ParseLatest(nonInstallerExeFixture, true, false)?.PreferredAsset?.Name,
+    "release parser never launches a non-installer EXE as an update");
+
+var updateSettingsRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-update-settings-{Guid.NewGuid():N}");
+try
+{
+    var settingsStore = new UpdateSettingsStore(
+        Path.Combine(updateSettingsRoot, "settings.json"));
+    var savedSettings = new UpdateSettings
+    {
+        CheckOnStartup = false,
+        AutoDownload = true,
+        NotifyStableReleases = true,
+        NotifyPrereleaseReleases = true,
+        Theme = AppTheme.Light,
+    };
+    settingsStore.Save(savedSettings);
+    var loadedSettings = settingsStore.Load();
+    Equal(false, loadedSettings.CheckOnStartup,
+        "update settings preserve startup check preference");
+    Equal(true, loadedSettings.AutoDownload,
+        "update settings preserve auto-download preference");
+    Equal(AppTheme.Light, loadedSettings.Theme,
+        "update settings preserve theme preference");
+}
+finally
+{
+    if (Directory.Exists(updateSettingsRoot))
+        Directory.Delete(updateSettingsRoot, recursive: true);
+}
+Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
+        .Contains("/RESTARTAPP=1", StringComparison.Ordinal),
+    "one-click installer update requests application restart");
 
 // usbmux may reverse its enumeration order on every poll. Existing cards must
 // never move, while a newly connected phone is appended exactly once.
@@ -182,6 +294,16 @@ Equal(true, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 3
     "wireless 720p weak-network profile is supported");
 Equal(false, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 60),
     "unsupported wireless profile combinations are rejected");
+Equal(true, WirelessReceiverService.IsCodeIntegrityError(4551),
+    "wireless runtime recognizes Windows system integrity policy violations");
+Equal(true, WirelessReceiverService.IsCodeIntegrityError(577),
+    "wireless runtime recognizes invalid image hash policy failures");
+Equal(WirelessRuntimeProbeStatus.CodeIntegrityBlocked,
+    WirelessRuntimeProbeResult.FromExitCode(40).Status,
+    "wireless runtime preflight maps policy blocks to a dedicated status");
+Equal(WirelessRuntimeProbeStatus.Incompatible,
+    WirelessRuntimeProbeResult.FromExitCode(42).Status,
+    "wireless runtime preflight maps missing exports to incompatibility");
 Equal(true, MediaSourceClassifier.IsLikelyLive(
         new Uri("https://example.test/video.m3u8")),
     "HLS extension is classified as live");

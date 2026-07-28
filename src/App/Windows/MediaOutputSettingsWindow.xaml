@@ -4,33 +4,33 @@
         Title="{DynamicResource MediaOutputTitle}"
         Width="560" Height="660" MinWidth="500" MinHeight="560"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
-        Background="{StaticResource AppBackgroundBrush}"
-        Foreground="{StaticResource TextBrush}">
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}">
     <Window.Resources>
         <Style x:Key="DetailLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="Margin" Value="0,12,0,4"/>
         </Style>
         <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Background" Value="{StaticResource PanelAltBrush}"/>
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="MinHeight" Value="36"/>
             <Setter Property="Padding" Value="10,7"/>
         </Style>
         <Style x:Key="SectionCard" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="8"/>
             <Setter Property="Padding" Value="16"/>
             <Setter Property="Margin" Value="0,12,0,0"/>
         </Style>
         <Style x:Key="OutputTabItemStyle" TargetType="TabItem">
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
-            <Setter Property="Background" Value="{StaticResource PanelAltBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Margin" Value="0"/>
             <Setter Property="Padding" Value="14,8"/>
@@ -60,9 +60,9 @@
                                 <Setter TargetName="TabRoot" Property="BorderBrush" Value="#5A5A5A"/>
                             </MultiTrigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource OnAccentBrush}"/>
-                                <Setter TargetName="TabRoot" Property="Background" Value="{StaticResource AccentBrush}"/>
-                                <Setter TargetName="TabRoot" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}"/>
+                                <Setter TargetName="TabRoot" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                <Setter TargetName="TabRoot" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="TabRoot" Property="Opacity" Value="0.42"/>
@@ -117,7 +117,7 @@
             <TextBlock Text="{DynamicResource MediaOutputTitle}" FontSize="21" FontWeight="SemiBold"/>
             <TextBlock Text="{Binding SelectedName}" FontSize="13" Margin="0,5,0,0"/>
             <TextBlock Text="{Binding MediaOutputCapabilitiesText}" FontSize="10"
-                       Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                       Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
         </StackPanel>
 
         <TabControl Grid.Row="2" Style="{StaticResource OutputTabControlStyle}">
@@ -126,7 +126,7 @@
                     <Border Style="{StaticResource SectionCard}">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource RecordDescription}" TextWrapping="Wrap"
-                                       Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="12"/>
                             <Grid Margin="0,12,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -171,7 +171,7 @@
                     <Border Style="{StaticResource SectionCard}">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource StreamDescription}" TextWrapping="Wrap"
-                                       Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="12"/>
                             <TextBlock Text="{DynamicResource StreamProtocol}" Style="{StaticResource DetailLabel}"/>
                             <ComboBox x:Name="StreamProtocolBox" SelectedIndex="0"
                                       SelectionChanged="OnStreamProtocolChanged">
@@ -230,7 +230,7 @@
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="{DynamicResource VirtualCameraDescription}" TextWrapping="Wrap"
-                                   Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="12"/>
                         <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -259,7 +259,7 @@
                             </StackPanel>
                         </Grid>
                         <TextBlock Text="{Binding VirtualCameraStatusText}" TextWrapping="Wrap"
-                                   Foreground="{StaticResource MutedTextBrush}" FontSize="12"
+                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="12"
                                    Margin="0,14,0,0"/>
                         <Button Content="{Binding VirtualCameraInstallActionText}"
                                 Click="OnInstallVirtualCameraClick"
@@ -290,7 +290,7 @@
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="FeedbackText" Text="{Binding MediaOutputStatus}"
                        VerticalAlignment="Center" TextWrapping="Wrap"
-                       Foreground="{StaticResource MutedTextBrush}" FontSize="11"/>
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
             <Button Grid.Column="2" Content="{DynamicResource StopMediaOutput}"
                     Click="OnStopClick" Style="{StaticResource ToolButton}"
                     IsEnabled="{Binding CanStopMediaOutput}" MinWidth="110"/>

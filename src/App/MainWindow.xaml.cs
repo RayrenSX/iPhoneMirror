@@ -12,6 +12,7 @@ using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
 using Microsoft.Win32;
@@ -22,6 +23,8 @@ namespace IPhoneMirror.App;
 // frames no longer pass through WPF WriteableBitmap or CompositionTarget.
 public partial class MainWindow : Window
 {
+    public string VersionText => $"iPhoneMirror {VersionManager.DisplayVersion}";
+
     private readonly MainViewModel _viewModel;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _logTimer;
@@ -105,6 +108,12 @@ public partial class MainWindow : Window
             ("width", ActualWidth.ToString("F0")),
             ("height", ActualHeight.ToString("F0"))));
         _ = _viewModel.RefreshAsync();
+    }
+
+    private void OnAboutClick(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current is App app)
+            app.ShowAboutWindow(this);
     }
 
     private async void OnClosing(object? sender, CancelEventArgs e)

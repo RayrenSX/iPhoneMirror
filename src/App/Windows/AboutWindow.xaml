@@ -1,0 +1,123 @@
+<Window x:Class="IPhoneMirror.App.Windows.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{DynamicResource AboutTitle}"
+        Width="760" Height="620" MinWidth="680" MinHeight="540"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Foreground="{DynamicResource TextBrush}"
+        AutomationProperties.AutomationId="AboutWindow">
+    <Window.Resources>
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="18,10"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabRoot" Background="{TemplateBinding Background}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabRoot" Property="Background"
+                                        Value="{DynamicResource PanelAltBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabRoot" Property="Background"
+                                        Value="{DynamicResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="18"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Grid>
+            <StackPanel>
+                <TextBlock Text="iPhoneMirror" FontSize="26" FontWeight="SemiBold"/>
+                <TextBlock Text="{DynamicResource AboutSubtitle}"
+                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,0"/>
+            </StackPanel>
+            <Button HorizontalAlignment="Right" Width="38" Height="38" MinHeight="38"
+                    Padding="0" Click="OnCloseClick" ToolTip="{DynamicResource Close}">
+                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+            </Button>
+        </Grid>
+        <TabControl Grid.Row="2" Background="Transparent" BorderThickness="0">
+            <TabItem Header="{DynamicResource AboutTitle}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,22,12,0">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="96"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Width="76" Height="76" CornerRadius="8"
+                                    Background="{DynamicResource PanelAltBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                <Image Source="pack://application:,,,/Assets/iPhoneMirror.ico"
+                                       Width="58" Height="58"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="iPhoneMirror" FontSize="22" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding VersionText}" FontSize="14"
+                                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,0"/>
+                                <TextBlock Text="{DynamicResource AboutDescription}"
+                                           TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                        <Separator Margin="0,24" Background="{DynamicResource BorderSoftBrush}"/>
+                        <TextBlock Text="{DynamicResource UpdateStatusTitle}" FontSize="15"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding UpdateStatus}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource MutedTextBrush}" Margin="0,7,0,12"/>
+                        <WrapPanel>
+                            <Button Content="{DynamicResource CheckForUpdates}" Click="OnCheckUpdatesClick"
+                                    Style="{StaticResource PrimaryButton}" MinWidth="138" Margin="0,0,8,8"/>
+                            <Button Content="GitHub" Click="OnGitHubClick" MinWidth="100" Margin="0,0,8,8"/>
+                            <Button Content="{DynamicResource Changelog}" Click="OnChangelogClick"
+                                    MinWidth="110" Margin="0,0,8,8"/>
+                            <Button Content="{DynamicResource LicenseInformation}" Click="OnLicenseClick"
+                                    MinWidth="118" Margin="0,0,8,8"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="{DynamicResource UpdateSettingsTitle}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,22,12,0">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource UpdateSettingsTitle}" FontSize="20"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock Text="{DynamicResource UpdateSettingsDescription}"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   TextWrapping="Wrap" Margin="0,6,0,18"/>
+                        <CheckBox Content="{DynamicResource CheckOnStartup}"
+                                  IsChecked="{Binding CheckOnStartup}" Margin="0,0,0,14"/>
+                        <CheckBox Content="{DynamicResource AutoDownloadUpdates}"
+                                  IsChecked="{Binding AutoDownload}" Margin="0,0,0,14"/>
+                        <CheckBox Content="{DynamicResource NotifyStableReleases}"
+                                  IsChecked="{Binding NotifyStableReleases}" Margin="0,0,0,14"/>
+                        <CheckBox Content="{DynamicResource NotifyPrereleaseReleases}"
+                                  IsChecked="{Binding NotifyPrereleaseReleases}" Margin="0,0,0,20"/>
+                        <Separator Margin="0,4,0,20" Background="{DynamicResource BorderSoftBrush}"/>
+                        <TextBlock Text="{DynamicResource ThemeTitle}" FontSize="15"
+                                   FontWeight="SemiBold"/>
+                        <ComboBox ItemsSource="{Binding ThemeChoices}" DisplayMemberPath="Label"
+                                  SelectedValuePath="Value" SelectedValue="{Binding SelectedTheme}"
+                                  Width="230" HorizontalAlignment="Left" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>

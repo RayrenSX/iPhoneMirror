@@ -9,6 +9,7 @@ internal sealed class MediaCastReceiverController(
     private readonly WirelessReceiverService _receiver = receiver ?? new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _startError;
+    private DateTime _automaticStartNotBeforeUtc;
 
     internal bool Running { get; private set; }
     internal bool Ready { get; private set; }
@@ -24,7 +25,16 @@ internal sealed class MediaCastReceiverController(
             Running = status.Running;
             Ready = status.Ready;
             if (Running) return true;
+            if (DateTime.UtcNow < _automaticStartNotBeforeUtc) return false;
             if (_receiver.ExecutablePath is not { } hostPath) return false;
+            var runtime = await Task.Run(_receiver.ProbeRuntime);
+            if (!runtime.Success)
+            {
+                Running = Ready = false;
+                _startError = WirelessReceiverService.DescribeProbeFailure(runtime);
+                _automaticStartNotBeforeUtc = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+                return false;
+            }
             var result = await Task.Run(() => core.StartMediaCastReceiver(
                 WirelessReceiverConfiguration.DefaultReceiverName, hostPath));
             Running = result.Success;

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.3.0',
+    [string]$Version = '1.4.0',
     [switch]$SkipBuild,
     [switch]$GenerateSbom
 )
@@ -18,10 +18,13 @@ $ArchivePath = Join-Path $ReleaseRoot "$PackageName.zip"
 $LatestArchivePath = Join-Path $ReleaseRoot "$PackageName-latest.zip"
 $SbomAsset = Join-Path $ReleaseRoot "$PackageName-sbom.spdx.json"
 $ChecksumPath = Join-Path $ReleaseRoot 'SHA256SUMS.txt'
+$InstallerName = "iPhoneMirror-Setup-v$Version-x64.exe"
+$InstallerPath = Join-Path $ReleaseRoot $InstallerName
 $StagedArchive = Join-Path $StagingRoot "$PackageName.zip"
 $StagedLatestArchive = Join-Path $StagingRoot "$PackageName-latest.zip"
 $StagedSbomAsset = Join-Path $StagingRoot "$PackageName-sbom.spdx.json"
 $StagedChecksum = Join-Path $StagingRoot 'SHA256SUMS.txt'
+$StagedInstaller = Join-Path $StagingRoot $InstallerName
 $LegacyArchive = Join-Path $Root 'outputs\iPhoneMirror-video-app-discovery-fix.zip'
 $PreserveStagingRoot = $false
 $MediaOutputManifestPath = Join-Path $Root 'scripts\ffmpeg-runtime-manifest.psd1'
@@ -44,6 +47,8 @@ $RequiredArtifacts = @(
     'libusb-1.0.dll',
     'LICENSE',
     'THIRD_PARTY_NOTICES.md',
+    'CHANGELOG.md',
+    'tools\updater\Apply-ZipUpdate.ps1',
     'licenses\libusb-COPYING.txt',
     'Wireless\iPhoneMirror.WirelessHost.exe',
     'Wireless\airplay2dll.dll',
@@ -77,7 +82,7 @@ function Get-ProjectVersion([string]$ProjectPath) {
 function Assert-ProductVersion([string]$Path, [string]$ExpectedVersion) {
     $actual = (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion
     $semanticVersion = if ($null -eq $actual) { '' } else {
-        ($actual -split '\+', 2)[0]
+        ($actual -split '\+', 2)[0].Trim()
     }
     if (-not [string]::Equals($semanticVersion, $ExpectedVersion,
             [StringComparison]::Ordinal)) {
@@ -293,6 +298,12 @@ try {
     Assert-PublishedOutput
     Assert-SafeWorkspaceDirectory $StagingRoot
     New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null
+    & (Join-Path $Root 'scripts\build_installer.ps1') -Version $Version `
+        -SkipAppBuild -SourceDirectory $PublishRoot -OutputDirectory $StagingRoot
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path -LiteralPath $StagedInstaller -PathType Leaf)) {
+        throw "Windows installer build failed: $LASTEXITCODE"
+    }
 
     Copy-Item -LiteralPath $PublishRoot -Destination $PackageRoot -Recurse
 
@@ -430,6 +441,7 @@ try {
     Copy-Item -LiteralPath $StagedArchive -Destination $StagedLatestArchive
 
     $assets = @(
+        [PSCustomObject]@{ Path = $StagedInstaller; Name = $InstallerName },
         [PSCustomObject]@{ Path = $StagedArchive; Name = [IO.Path]::GetFileName($ArchivePath) },
         [PSCustomObject]@{ Path = $StagedLatestArchive; Name = [IO.Path]::GetFileName($LatestArchivePath) }
     )
@@ -447,6 +459,7 @@ try {
         ($checksumLines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
 
     $publishAssets = @(
+        [PSCustomObject]@{ Staged = $StagedInstaller; Final = $InstallerPath },
         [PSCustomObject]@{ Staged = $StagedArchive; Final = $ArchivePath },
         [PSCustomObject]@{ Staged = $StagedLatestArchive; Final = $LatestArchivePath }
     )
@@ -462,6 +475,7 @@ try {
     }
 
     Write-Host "Release package: $ArchivePath" -ForegroundColor Green
+    Write-Host "Windows setup:  $InstallerPath" -ForegroundColor Green
     Write-Host "Latest alias:    $LatestArchivePath" -ForegroundColor Green
     Write-Host "Checksums:      $ChecksumPath" -ForegroundColor Green
     if ($GenerateSbom) {

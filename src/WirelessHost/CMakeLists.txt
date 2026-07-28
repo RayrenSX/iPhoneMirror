@@ -72,4 +72,8 @@ if(IPHONEMIRROR_BUILD_TESTS)
         $<TARGET_FILE:iPhoneMirror.WirelessHost>
         $<TARGET_FILE:iPhoneMirror.WirelessHost.Stub>)
     set_tests_properties(WirelessHostSmoke PROPERTIES TIMEOUT 20)
+    add_test(NAME WirelessHostRuntimePreflight COMMAND
+        $<TARGET_FILE:iPhoneMirror.WirelessHost>
+        --check-runtime --library $<TARGET_FILE:iPhoneMirror.WirelessHost.Stub>)
+    set_tests_properties(WirelessHostRuntimePreflight PROPERTIES TIMEOUT 10)
 endif()

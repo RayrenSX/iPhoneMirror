@@ -4,29 +4,29 @@
         Title="{DynamicResource ProjectionSettingsTitle}"
         Width="500" Height="760" MinWidth="460" MinHeight="620"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
-        Background="{StaticResource AppBackgroundBrush}"
-        Foreground="{StaticResource TextBrush}">
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}">
     <Window.Resources>
         <Style x:Key="DetailLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="Margin" Value="0,13,0,3"/>
         </Style>
         <Style x:Key="ControlSectionCard" TargetType="Border">
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
             <Setter Property="BorderThickness" Value="0,1,0,0"/>
             <Setter Property="Padding" Value="0,14,0,0"/>
             <Setter Property="Margin" Value="0,14,0,0"/>
         </Style>
         <Style x:Key="ControlSectionTitle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
         <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Background" Value="{StaticResource PanelAltBrush}"/>
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="MinHeight" Value="36"/>
             <Setter Property="Padding" Value="8,7"/>
@@ -49,7 +49,7 @@
                            FontSize="21" FontWeight="SemiBold"/>
                 <TextBlock Text="{Binding SelectedName}" FontSize="13" Margin="0,5,0,0"/>
                 <TextBlock Text="{Binding SelectedConnection}" FontSize="10"
-                           Foreground="{StaticResource MutedTextBrush}"/>
+                           Foreground="{DynamicResource MutedTextBrush}"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button Content="{DynamicResource StartMirroring}" Command="{Binding StartCommand}"
@@ -85,7 +85,7 @@
                                         Style="{StaticResource ToolButton}"/>
                             </Grid>
                             <TextBlock Text="{Binding WirelessStatus}" FontSize="10" TextWrapping="Wrap"
-                                       Foreground="{StaticResource MutedTextBrush}" Margin="0,7,0,0"/>
+                                       Foreground="{DynamicResource MutedTextBrush}" Margin="0,7,0,0"/>
                         </StackPanel>
                     </Border>
 
@@ -125,12 +125,12 @@
                                         Style="{StaticResource ToolButton}"/>
                             </Grid>
                             <TextBlock Text="{Binding SettingsStatus}" FontSize="10" TextWrapping="Wrap"
-                                       Foreground="{StaticResource MutedTextBrush}" Margin="0,7,0,0"/>
+                                       Foreground="{DynamicResource MutedTextBrush}" Margin="0,7,0,0"/>
                             <TextBlock Text="{Binding DecoderStatus}" FontSize="10" TextWrapping="Wrap"
                                        Visibility="{Binding DecoderStatusVisibility}"
-                                       Foreground="{StaticResource MutedTextBrush}" Margin="0,5,0,0"/>
+                                       Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,0"/>
 
-                            <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,14,0,12"/>
+                            <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,14,0,12"/>
                             <CheckBox Content="{DynamicResource PlayAudioWindows}"
                                       IsChecked="{Binding PlayAudio, Mode=TwoWay}"/>
                             <Grid Margin="0,10,0,0">
@@ -139,7 +139,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="{DynamicResource PlaybackVolume}"
-                                           Foreground="{StaticResource MutedTextBrush}"/>
+                                           Foreground="{DynamicResource MutedTextBrush}"/>
                                 <TextBlock Grid.Column="1" Text="{Binding PlaybackVolume, StringFormat={}{0:F0}%}"/>
                             </Grid>
                             <Slider Minimum="0" Maximum="100"

@@ -16,6 +16,7 @@ function Get-ResourceKeys([string]$Path) {
 
 $Chinese = Get-ResourceKeys (Join-Path $App 'Localization\Strings.zh-CN.xaml')
 $English = Get-ResourceKeys (Join-Path $App 'Localization\Strings.en-US.xaml')
+$ApplicationResources = Get-ResourceKeys (Join-Path $App 'App.xaml')
 $difference = @(Compare-Object $Chinese $English)
 if ($difference.Count -ne 0) {
     $difference | Format-Table | Out-String | Write-Error
@@ -37,7 +38,9 @@ Get-ChildItem -LiteralPath $App -Recurse -File -Include *.xaml,*.cs |
         }
     }
 
-$missing = @($used | Where-Object { $_ -notin $Chinese } | Sort-Object)
+$missing = @($used | Where-Object {
+    $_ -notin $Chinese -and $_ -notin $ApplicationResources
+} | Sort-Object)
 if ($missing.Count -ne 0) {
     throw "Missing localization keys: $($missing -join ', ')"
 }

@@ -85,4 +85,18 @@ distributed with AirPlayServer.
   under GPLv3 terms. It encodes projection video and, when available, muxes the
   captured iPhone PCM audio into recordings and live-streaming output.
 
+## Markdig Markdown processor
+
+The in-app update window uses Markdig 1.3.2 to parse GitHub Release notes into
+safe WPF document elements. Markdig is distributed under the BSD 2-Clause
+License. Source and license: https://github.com/xoofx/markdig
+
+## Inno Setup installer engine
+
+The Windows Setup executable is built with Inno Setup 6.7.3. The compiler is
+downloaded from the official JRSoftware GitHub release and verified against the
+SHA-256 recorded in `scripts/inno-runtime-manifest.psd1`. The generated Setup
+engine is redistributed under the Inno Setup License:
+https://jrsoftware.org/files/is/license.txt
+
 All third-party components are provided without warranty.

@@ -25,12 +25,28 @@
 
 ## Download
 
-Download `iPhoneMirror-*-win-x64.zip` from
-[Releases](https://github.com/RayrenSX/iPhoneMirror/releases), extract it and
-run `iPhoneMirror.exe`. The package is self-contained and does not require a
-separate .NET Desktop Runtime. It also includes the standalone
-`iPhoneMirror.Driver.exe` driver manager; no separate driver-tool download is
-required.
+Download `iPhoneMirror-Setup-v*-x64.exe` from
+[Releases](https://github.com/RayrenSX/iPhoneMirror/releases). The bilingual
+Setup wizard supports a custom destination, defaults to
+`C:\Program Files\iPhoneMirror`, creates Start menu entries, and offers an
+optional desktop shortcut. For portable use, download
+`iPhoneMirror-v*-win-x64.zip`, extract it completely, and run
+`iPhoneMirror.exe`. If Windows reports **Bad Image** or `0xc0e90002` for a
+wireless DLL, use Setup. If portable use is required, open the downloaded
+ZIP's Properties, select **Unblock**, and extract it again; unblocking one
+already-extracted DLL is not sufficient.
+
+Both packages are self-contained and include the standalone
+`iPhoneMirror.Driver.exe` driver manager. They do not require a separate .NET
+Desktop Runtime or driver-tool download. Verify downloads against the
+`SHA256SUMS.txt` asset from the same Release.
+
+By default the app checks GitHub Releases after startup. When an update is
+available, it shows the version, publication date, and Markdown release notes;
+**Update now** downloads, verifies, and launches the in-place upgrade, then
+restarts the app. The About page also provides manual checks, stable/Beta
+channel controls, automatic downloads, and theme settings. Network failures and
+timeouts never block normal startup.
 
 The [complete user guide (Chinese)](docs/USER_GUIDE.md) covers every main interface and workflow.
 
@@ -131,7 +147,8 @@ the selection applies only to the current USB device.
 
 ## Quick start
 
-1. Extract the Release ZIP and run `iPhoneMirror.exe`.
+1. Run the Release Setup and launch iPhoneMirror from the Start menu. For the
+   portable package, extract the ZIP completely and run `iPhoneMirror.exe`.
 2. Connect the iPhone or iPad over USB, unlock it and choose **Trust This Computer**.
 3. Click **Driver manager** in the top bar and run one-click installation for the
    target device. The tool installs missing Apple USB support and the capture
@@ -262,6 +279,15 @@ outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.Admin.exe
 outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
 outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 ```
+
+Build all Release assets (Setup, ZIP, checksums, and SBOM):
+
+```powershell
+./scripts/package_release.ps1 -Version 1.4.0 -GenerateSbom
+```
+
+The script downloads hash-pinned Inno Setup 6.7.3 and its Simplified Chinese
+translation into `work/tools`; no global Inno Setup installation is required.
 
 ## Architecture
 

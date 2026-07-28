@@ -1,5 +1,6 @@
 using System.IO;
 using System.ComponentModel;
+using System.Diagnostics;
 using IPhoneMirror.App.Localization;
 
 namespace IPhoneMirror.App.Services;
@@ -68,6 +69,29 @@ internal static class WirelessReceiverConfiguration
     }
 }
 
+internal enum WirelessRuntimeProbeStatus
+{
+    Ready,
+    CodeIntegrityBlocked,
+    Incompatible,
+    LoadFailed,
+    TimedOut,
+}
+
+internal readonly record struct WirelessRuntimeProbeResult(
+    WirelessRuntimeProbeStatus Status, int ErrorCode)
+{
+    internal bool Success => Status == WirelessRuntimeProbeStatus.Ready;
+
+    internal static WirelessRuntimeProbeResult FromExitCode(int exitCode) => exitCode switch
+    {
+        0 => new(WirelessRuntimeProbeStatus.Ready, 0),
+        40 => new(WirelessRuntimeProbeStatus.CodeIntegrityBlocked, exitCode),
+        42 => new(WirelessRuntimeProbeStatus.Incompatible, exitCode),
+        _ => new(WirelessRuntimeProbeStatus.LoadFailed, exitCode),
+    };
+}
+
 internal sealed class WirelessReceiverService
 {
     private static readonly string[] RequiredRuntimeFiles =
@@ -79,6 +103,8 @@ internal sealed class WirelessReceiverService
         "swresample-3.dll",
         "swscale-5.dll",
     ];
+    private readonly object _probeLock = new();
+    private WirelessRuntimeProbeResult? _successfulProbe;
 
     internal string? ExecutablePath => WirelessReceiverConfiguration.FindExecutable(
         AppContext.BaseDirectory,
@@ -95,4 +121,69 @@ internal sealed class WirelessReceiverService
                 File.Exists(Path.Combine(directory, file)));
         }
     }
+
+    internal WirelessRuntimeProbeResult ProbeRuntime()
+    {
+        lock (_probeLock)
+        {
+            if (_successfulProbe is { } cached) return cached;
+            var executable = ExecutablePath;
+            if (executable is null)
+                return new(WirelessRuntimeProbeStatus.LoadFailed, -1);
+            try
+            {
+                var start = new ProcessStartInfo
+                {
+                    FileName = executable,
+                    WorkingDirectory = Path.GetDirectoryName(executable)!,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                start.ArgumentList.Add("--check-runtime");
+                using var process = Process.Start(start);
+                if (process is null)
+                    return new(WirelessRuntimeProbeStatus.LoadFailed, -1);
+                if (!process.WaitForExit(5000))
+                {
+                    try { process.Kill(entireProcessTree: true); }
+                    catch { }
+                    return new(WirelessRuntimeProbeStatus.TimedOut, -1);
+                }
+                var result = WirelessRuntimeProbeResult.FromExitCode(process.ExitCode);
+                if (result.Success) _successfulProbe = result;
+                return result;
+            }
+            catch (Win32Exception error) when (IsCodeIntegrityError(error.NativeErrorCode))
+            {
+                return new(WirelessRuntimeProbeStatus.CodeIntegrityBlocked,
+                    error.NativeErrorCode);
+            }
+            catch (Win32Exception error)
+            {
+                return new(WirelessRuntimeProbeStatus.LoadFailed, error.NativeErrorCode);
+            }
+            catch
+            {
+                return new(WirelessRuntimeProbeStatus.LoadFailed, -1);
+            }
+        }
+    }
+
+    internal static bool IsCodeIntegrityError(int errorCode) =>
+        errorCode is 577 or 1260 ||
+        errorCode is >= 4550 and <= 4559 ||
+        errorCode is >= 4580 and <= 4583;
+
+    internal static string DescribeProbeFailure(WirelessRuntimeProbeResult result) =>
+        result.Status switch
+        {
+            WirelessRuntimeProbeStatus.CodeIntegrityBlocked =>
+                LocalizationService.Get("WirelessRuntimeCodeIntegrityBlocked"),
+            WirelessRuntimeProbeStatus.Incompatible =>
+                LocalizationService.Get("WirelessRuntimeIncompatible"),
+            WirelessRuntimeProbeStatus.TimedOut =>
+                LocalizationService.Get("WirelessRuntimeProbeTimedOut"),
+            _ => LocalizationService.Format("WirelessRuntimeLoadFailedFormat",
+                result.ErrorCode),
+        };
 }

@@ -9,7 +9,7 @@
         Icon="pack://application:,,,/Assets/iPhoneMirror.ico"
         Width="1420" Height="860" MinWidth="1240" MinHeight="680"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource AppBackgroundBrush}"
+        Background="{DynamicResource AppBackgroundBrush}"
         PreviewKeyDown="OnPreviewKeyDown">
     <Window.Resources>
         <Style TargetType="ListBox">
@@ -28,8 +28,8 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Card" Background="{StaticResource PanelAltBrush}"
-                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                        <Border x:Name="Card" Background="{DynamicResource PanelAltBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                 CornerRadius="5" Padding="14">
                             <ContentPresenter/>
                         </Border>
@@ -39,7 +39,7 @@
                                 <Setter TargetName="Card" Property="BorderBrush" Value="#5A5A5A"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                                 <Setter TargetName="Card" Property="Background" Value="#242424"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -48,36 +48,36 @@
             </Setter>
         </Style>
         <Style x:Key="StatLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="FontSize" Value="12"/>
         </Style>
         <Style x:Key="StatValue" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontSize" Value="20"/>
             <Setter Property="FontWeight" Value="Medium"/>
             <Setter Property="Margin" Value="0,4,0,0"/>
         </Style>
         <Style x:Key="DetailLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="Margin" Value="0,13,0,3"/>
         </Style>
         <Style x:Key="ControlSectionCard" TargetType="Border">
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoftBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
             <Setter Property="BorderThickness" Value="0,1,0,0"/>
             <Setter Property="CornerRadius" Value="0"/>
             <Setter Property="Padding" Value="0,14,0,0"/>
             <Setter Property="Margin" Value="0,14,0,0"/>
         </Style>
         <Style x:Key="ControlSectionTitle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
         <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Background" Value="{StaticResource PanelAltBrush}"/>
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="MinHeight" Value="36"/>
             <Setter Property="Padding" Value="8,7"/>
@@ -89,7 +89,7 @@
             <Setter Property="Padding" Value="7,6"/>
             <Setter Property="MinHeight" Value="38"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -232,16 +232,18 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="iPhoneMirror" FontSize="24" FontWeight="SemiBold"/>
-                <TextBlock Text="{DynamicResource AppSubtitleConnectivity}" Foreground="{StaticResource MutedTextBrush}"
+                <TextBlock Text="{DynamicResource AppSubtitleConnectivity}" Foreground="{DynamicResource MutedTextBrush}"
                            FontSize="12" Margin="0,4,0,0"/>
             </StackPanel>
             <Border Grid.Column="1" Padding="0" VerticalAlignment="Center"
                     Background="Transparent" BorderThickness="0" MaxWidth="360">
                 <StackPanel Orientation="Horizontal">
-                    <Ellipse Width="6" Height="6" Fill="{StaticResource WarningBrush}" Margin="0,0,8,0"/>
+                    <Ellipse Width="6" Height="6" Fill="{DynamicResource WarningBrush}" Margin="0,0,8,0"/>
                     <TextBlock Text="{Binding DriverState}" FontSize="12" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
@@ -261,7 +263,12 @@
                     ToolTip="{DynamicResource DriverManagerToolTip}"
                     AutomationProperties.AutomationId="DriverManagerButton"
                     VerticalAlignment="Center" FontSize="13"/>
-            <Button x:Name="CaptureActionButton" Grid.Column="7"
+            <Button Grid.Column="7" Width="40" Height="40" MinHeight="40" Padding="0"
+                    Click="OnAboutClick" ToolTip="{DynamicResource AboutToolTip}"
+                    AutomationProperties.AutomationId="AboutButton">
+                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE946;" FontSize="16"/>
+            </Button>
+            <Button x:Name="CaptureActionButton" Grid.Column="9"
                     AutomationProperties.AutomationId="CaptureActionButton"
                     Style="{StaticResource CaptureActionButton}"
                     VerticalAlignment="Center"/>
@@ -288,7 +295,7 @@
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0">
                         <TextBlock Text="{DynamicResource DevicesTitle}" FontSize="16" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding DeviceCount}" Foreground="{StaticResource MutedTextBrush}"
+                        <TextBlock Text="{Binding DeviceCount}" Foreground="{DynamicResource MutedTextBrush}"
                                    HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12"/>
                     </Grid>
                     <Border Grid.Row="2" Style="{StaticResource ControlSectionCard}" Margin="0" Padding="12">
@@ -296,20 +303,20 @@
                             <Grid>
                                 <TextBlock Text="{DynamicResource CurrentDevice}" Style="{StaticResource ControlSectionTitle}"/>
                                 <TextBlock Text="{Binding SelectedConnection}" HorizontalAlignment="Right"
-                                           Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
+                                           Foreground="{DynamicResource MutedTextBrush}" FontSize="10"/>
                             </Grid>
                             <TextBlock Text="{Binding SelectedName}" FontSize="15" FontWeight="SemiBold"
                                        TextTrimming="CharacterEllipsis" Margin="0,9,0,0"/>
-                            <TextBlock Text="{Binding SelectedModel}" Foreground="{StaticResource MutedTextBrush}"
+                            <TextBlock Text="{Binding SelectedModel}" Foreground="{DynamicResource MutedTextBrush}"
                                        FontSize="11" Margin="0,3,0,0"/>
-                            <TextBlock Text="{Binding SelectedOs}" Foreground="{StaticResource MutedTextBrush}" FontSize="11"/>
+                            <TextBlock Text="{Binding SelectedOs}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
                             <TextBlock Text="{Binding SelectedUdid}" FontFamily="Consolas" FontSize="9"
                                        AutomationProperties.AutomationId="SelectedDeviceUdidText"
-                                       Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis"
+                                       Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis"
                                        Margin="0,7,0,0"/>
                         </StackPanel>
                     </Border>
-                    <Border Grid.Row="3" Height="1" Background="{StaticResource BorderSoftBrush}"
+                    <Border Grid.Row="3" Height="1" Background="{DynamicResource BorderSoftBrush}"
                             VerticalAlignment="Center" Margin="2,0"/>
                     <ListBox x:Name="DeviceListBox" Grid.Row="4" ItemsSource="{Binding Devices}"
                              AutomationProperties.AutomationId="DeviceListBox"
@@ -392,18 +399,18 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <Border Width="32" Height="48" CornerRadius="6" BorderThickness="2"
-                                            BorderBrush="{StaticResource MutedTextBrush}" VerticalAlignment="Top">
-                                        <Ellipse Width="3" Height="3" Fill="{StaticResource MutedTextBrush}"
+                                            BorderBrush="{DynamicResource MutedTextBrush}" VerticalAlignment="Top">
+                                        <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedTextBrush}"
                                                  VerticalAlignment="Top" Margin="0,4,0,0"/>
                                     </Border>
                                     <StackPanel Grid.Column="1">
                                         <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="14"
                                                    TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock Text="{Binding ModelDisplay}" Foreground="{StaticResource MutedTextBrush}"
+                                        <TextBlock Text="{Binding ModelDisplay}" Foreground="{DynamicResource MutedTextBrush}"
                                                    FontSize="11" Margin="0,3,0,0"/>
-                                        <TextBlock Text="{Binding OsDisplay}" Foreground="{StaticResource MutedTextBrush}"
+                                        <TextBlock Text="{Binding OsDisplay}" Foreground="{DynamicResource MutedTextBrush}"
                                                    FontSize="11"/>
-                                        <TextBlock Text="{Binding StatusDisplay}" Foreground="{StaticResource SuccessBrush}"
+                                        <TextBlock Text="{Binding StatusDisplay}" Foreground="{DynamicResource SuccessBrush}"
                                                    FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Grid>
@@ -413,8 +420,8 @@
                     <StackPanel Grid.Row="5">
                         <Button x:Name="RefreshDevicesButton"
                                 Content="{DynamicResource RefreshDevices}" Command="{Binding RefreshCommand}"
-                                Background="{StaticResource PanelAltBrush}"/>
-                        <TextBlock Text="{DynamicResource KeepUnlocked}" Foreground="{StaticResource MutedTextBrush}"
+                                Background="{DynamicResource PanelAltBrush}"/>
+                        <TextBlock Text="{DynamicResource KeepUnlocked}" Foreground="{DynamicResource MutedTextBrush}"
                                    FontSize="11" TextAlignment="Center" Margin="0,9,0,0"/>
                     </StackPanel>
                 </Grid>
@@ -432,11 +439,11 @@
                 </Grid.RowDefinitions>
 
                 <Border x:Name="EnvironmentPanel" Grid.Row="0" Style="{StaticResource CardBorder}" Padding="14">
-                    <TextBlock Text="{Binding EnvironmentStatus}" Foreground="{StaticResource WarningBrush}"
+                    <TextBlock Text="{Binding EnvironmentStatus}" Foreground="{DynamicResource WarningBrush}"
                                FontSize="12" TextWrapping="Wrap"/>
                 </Border>
 
-                <Border x:Name="PreviewPanel" Grid.Row="2" Background="#050505" BorderBrush="{StaticResource BorderBrush}"
+                <Border x:Name="PreviewPanel" Grid.Row="2" Background="#050505" BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1" CornerRadius="8" ClipToBounds="True"
                         HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                         MinWidth="0" MinHeight="0" SnapsToDevicePixels="True">
@@ -478,10 +485,11 @@
                                     </Grid>
                                 </Border>
                                 <TextBlock Text="{DynamicResource StatusWaitingDevice}"
+                                           Foreground="#F7F7F7"
                                            FontSize="21" FontWeight="SemiBold" TextAlignment="Center"
                                            Margin="0,20,0,0"/>
                                 <TextBlock Text="{DynamicResource KeepUnlocked}"
-                                           Foreground="{StaticResource MutedTextBrush}" FontSize="12"
+                                           Foreground="#B8B8B8" FontSize="12"
                                            TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0"/>
                             </StackPanel>
 
@@ -503,14 +511,15 @@
                                     <Grid>
                                         <Border Width="30" Height="4" CornerRadius="2" Background="#666666"
                                                 VerticalAlignment="Top" Margin="0,8,0,0"/>
-                                        <TextBlock Text="{Binding SelectedConnection}" Foreground="{StaticResource MutedTextBrush}"
+                                        <TextBlock Text="{Binding SelectedConnection}" Foreground="#B8B8B8"
                                                    FontWeight="SemiBold" FontSize="12"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Grid>
                                 </Border>
-                                <TextBlock Text="{Binding SelectedName}" FontSize="20" FontWeight="SemiBold"
+                                <TextBlock Text="{Binding SelectedName}" Foreground="#F7F7F7"
+                                           FontSize="20" FontWeight="SemiBold"
                                            TextAlignment="Center" Margin="0,20,0,0"/>
-                                <TextBlock Text="{Binding CaptureStatus}" Foreground="{StaticResource MutedTextBrush}"
+                                <TextBlock Text="{Binding CaptureStatus}" Foreground="#B8B8B8"
                                            FontSize="12" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0"/>
                             </StackPanel>
                         </Grid>
@@ -545,6 +554,7 @@
                                     Background="#D9202020" CornerRadius="8" Padding="20,12">
                                 <TextBlock x:Name="MediaCastStatusText"
                                            Text="{DynamicResource MediaCastWaitingVideo}"
+                                           Foreground="#F7F7F7"
                                            FontSize="14" TextWrapping="Wrap" TextAlignment="Center"
                                            MaxWidth="560"/>
                             </Border>
@@ -576,24 +586,24 @@
                             <Ellipse Width="6" Height="6" VerticalAlignment="Center">
                                 <Ellipse.Style>
                                     <Style TargetType="Ellipse">
-                                        <Setter Property="Fill" Value="{StaticResource StatusPendingBrush}"/>
+                                        <Setter Property="Fill" Value="{DynamicResource StatusPendingBrush}"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding DecoderStatusTone}" Value="Applied">
-                                                <Setter Property="Fill" Value="{StaticResource StatusAppliedBrush}"/>
+                                                <Setter Property="Fill" Value="{DynamicResource StatusAppliedBrush}"/>
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding DecoderStatusTone}" Value="Failed">
-                                                <Setter Property="Fill" Value="{StaticResource StatusFailedBrush}"/>
+                                                <Setter Property="Fill" Value="{DynamicResource StatusFailedBrush}"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </Ellipse.Style>
                             </Ellipse>
                             <TextBlock Grid.Column="2" Text="{Binding DecoderStatus}"
-                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Foreground="{DynamicResource MutedTextBrush}"
                                        FontSize="11" TextWrapping="Wrap"
                                        AutomationProperties.AutomationId="DecoderStatusText"/>
                         </Grid>
-                        <Border Grid.Row="1" Height="1" Background="{StaticResource BorderSoftBrush}"
+                        <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderSoftBrush}"
                                 Visibility="{Binding DecoderStatusVisibility}"/>
                         <Grid Grid.Row="2" Margin="13,10"
                               Visibility="{Binding MediaOutputStatusVisibility}">
@@ -605,24 +615,24 @@
                             <Ellipse Width="6" Height="6" VerticalAlignment="Center">
                                 <Ellipse.Style>
                                     <Style TargetType="Ellipse">
-                                        <Setter Property="Fill" Value="{StaticResource StatusPendingBrush}"/>
+                                        <Setter Property="Fill" Value="{DynamicResource StatusPendingBrush}"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding MediaOutputTone}" Value="Applied">
-                                                <Setter Property="Fill" Value="{StaticResource StatusAppliedBrush}"/>
+                                                <Setter Property="Fill" Value="{DynamicResource StatusAppliedBrush}"/>
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding MediaOutputTone}" Value="Failed">
-                                                <Setter Property="Fill" Value="{StaticResource StatusFailedBrush}"/>
+                                                <Setter Property="Fill" Value="{DynamicResource StatusFailedBrush}"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </Ellipse.Style>
                             </Ellipse>
                             <TextBlock Grid.Column="2" Text="{Binding MediaOutputStatus}"
-                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Foreground="{DynamicResource MutedTextBrush}"
                                        FontSize="11" TextWrapping="Wrap"
                                        AutomationProperties.AutomationId="MediaOutputStatusText"/>
                         </Grid>
-                        <Border Grid.Row="3" Height="1" Background="{StaticResource BorderSoftBrush}"
+                        <Border Grid.Row="3" Height="1" Background="{DynamicResource BorderSoftBrush}"
                                 Visibility="{Binding MediaOutputStatusVisibility}"/>
                         <Grid Grid.Row="4">
                             <Grid.ColumnDefinitions>
@@ -638,35 +648,35 @@
                             <TextBlock Text="{DynamicResource ResolutionLabel}" Style="{StaticResource StatLabel}"/>
                             <TextBlock Text="{Binding Resolution}" Style="{StaticResource StatValue}"
                                        AutomationProperties.AutomationId="ResolutionValue"/>
-                            <TextBlock Text="{Binding TargetResolutionDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding TargetResolutionDisplay}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
-                        <Border Grid.Column="1" Background="{StaticResource BorderSoftBrush}" Margin="0,10"/>
+                        <Border Grid.Column="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,10"/>
                         <StackPanel Grid.Column="2" Margin="13">
                             <TextBlock Text="{DynamicResource FrameRateLabel}" Style="{StaticResource StatLabel}"/>
                             <TextBlock Text="{Binding FpsDisplay}" Style="{StaticResource StatValue}"
                                        AutomationProperties.AutomationId="FrameRateValue"/>
-                            <TextBlock Text="{Binding TargetFpsDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
+                            <TextBlock Text="{Binding TargetFpsDisplay}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10"/>
                         </StackPanel>
-                        <Border Grid.Column="3" Background="{StaticResource BorderSoftBrush}" Margin="0,10"/>
+                        <Border Grid.Column="3" Background="{DynamicResource BorderSoftBrush}" Margin="0,10"/>
                         <StackPanel Grid.Column="4" Margin="13">
                             <TextBlock Text="{DynamicResource LatencyLabel}" Style="{StaticResource StatLabel}"/>
                             <TextBlock Text="{Binding LatencyDisplay}" Style="{StaticResource StatValue}"
                                        AutomationProperties.AutomationId="LatencyValue"/>
-                            <TextBlock Text="{DynamicResource EndToEndLabel}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
+                            <TextBlock Text="{DynamicResource EndToEndLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10"/>
                         </StackPanel>
-                        <Border Grid.Column="5" Background="{StaticResource BorderSoftBrush}" Margin="0,10"/>
+                        <Border Grid.Column="5" Background="{DynamicResource BorderSoftBrush}" Margin="0,10"/>
                         <StackPanel Grid.Column="6" Margin="13">
                             <TextBlock Text="{DynamicResource AudioLabel}" Style="{StaticResource StatLabel}"/>
                             <TextBlock Text="{Binding AudioDisplay}" Style="{StaticResource StatValue}"
                                        AutomationProperties.AutomationId="AudioValue"/>
-                            <TextBlock Text="{Binding AudioDetailDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
+                            <TextBlock Text="{Binding AudioDetailDisplay}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10"/>
                         </StackPanel>
                         </Grid>
                     </Grid>
                 </Border>
 
                 <Expander x:Name="LogExpander" Grid.Row="6" Header="{DynamicResource LiveLogHeader}"
-                          Foreground="{StaticResource TextBrush}" IsExpanded="False"
+                          Foreground="{DynamicResource TextBrush}" IsExpanded="False"
                           Expanded="OnLogExpanded" Collapsed="OnLogCollapsed">
                     <Border Style="{StaticResource CardBorder}" Padding="10" Margin="0,6,0,0">
                         <Grid>
@@ -677,10 +687,10 @@
                             </Grid.RowDefinitions>
                             <Grid>
                                 <TextBlock Text="{Binding LogPathDisplay}" FontFamily="Consolas" FontSize="10"
-                                           Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                           Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
                                 <Button Content="{DynamicResource ClearView}" Command="{Binding ClearLogCommand}"
                                         HorizontalAlignment="Right" Padding="10,4" FontSize="11"
-                                        Background="{StaticResource PanelAltBrush}"/>
+                                        Background="{DynamicResource PanelAltBrush}"/>
                             </Grid>
                             <Border Grid.Row="2"
                                     Background="#0B0B0B"
@@ -692,7 +702,7 @@
                                          IsReadOnly="True" FontFamily="Consolas" FontSize="10"
                                          Foreground="#D7D7D7" Background="Transparent" BorderThickness="0"
                                          Padding="10" TextWrapping="NoWrap"
-                                         SelectionBrush="{StaticResource AccentBrush}" SelectionOpacity="0.35"
+                                         SelectionBrush="{DynamicResource AccentBrush}" SelectionOpacity="0.35"
                                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                          TextChanged="OnLogTextChanged"/>
                             </Border>
@@ -711,13 +721,13 @@
                         <Border Style="{StaticResource ControlSectionCard}"
                                 Visibility="{Binding WirelessTopSettingsVisibility}">
                             <StackPanel>
-                                <Grid><TextBlock Text="{DynamicResource WirelessReceiverTitle}" Style="{StaticResource ControlSectionTitle}"/><TextBlock Text="{DynamicResource WirelessServiceAlwaysOn}" HorizontalAlignment="Right" Foreground="{StaticResource SuccessBrush}" FontSize="10"/></Grid>
+                                <Grid><TextBlock Text="{DynamicResource WirelessReceiverTitle}" Style="{StaticResource ControlSectionTitle}"/><TextBlock Text="{DynamicResource WirelessServiceAlwaysOn}" HorizontalAlignment="Right" Foreground="{DynamicResource SuccessBrush}" FontSize="10"/></Grid>
                                 <TextBlock Text="{DynamicResource WirelessResolutionLabel}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
                                 <ComboBox ItemsSource="{Binding WirelessDisplayProfiles}" DisplayMemberPath="Label" SelectedItem="{Binding SelectedWirelessDisplayProfile, Mode=TwoWay}"/>
-                                <TextBlock Text="{DynamicResource WirelessResolutionHelp}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                <TextBlock Text="{DynamicResource WirelessResolutionHelp}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                 <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox Text="{Binding WirelessReceiverName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource RoundedTextBox}" MaxLength="63" Height="36" ToolTip="{DynamicResource WirelessReceiverNameLabel}"/><Button Grid.Column="2" Content="{DynamicResource ApplyWirelessSettings}" Command="{Binding ApplyWirelessSettingsCommand}" Style="{StaticResource ToolButton}" MinWidth="64"/></Grid>
-                                <TextBlock Text="{Binding WirelessStatus}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" TextWrapping="Wrap" Margin="1,8,0,0"/>
-                                <TextBlock Text="{Binding AppliedWirelessProfileDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" Margin="1,4,0,0"/>
+                                <TextBlock Text="{Binding WirelessStatus}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" TextWrapping="Wrap" Margin="1,8,0,0"/>
+                                <TextBlock Text="{Binding AppliedWirelessProfileDisplay}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" Margin="1,4,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -757,7 +767,7 @@
                                     </ListBox>
                                 </Border>
                                 <TextBlock Text="{DynamicResource UsbProjectionPerDeviceHint}"
-                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Foreground="{DynamicResource MutedTextBrush}"
                                            FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
                             </StackPanel>
                         </Border>
@@ -768,20 +778,20 @@
                                     <TextBlock Text="{DynamicResource CurrentDevice}" Style="{StaticResource ControlSectionTitle}"/>
                                     <TextBlock Text="{Binding SelectedConnection}"
                                                HorizontalAlignment="Right"
-                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="10"/>
                                 </Grid>
                                 <TextBlock Text="{Binding SelectedName}" FontSize="15" FontWeight="SemiBold"
                                            TextTrimming="CharacterEllipsis" Margin="0,11,0,0"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                     <TextBlock Text="{Binding SelectedModel}" FontSize="11"/>
-                                    <TextBlock Text="  ·  " Foreground="{StaticResource MutedTextBrush}" FontSize="11"/>
-                                    <TextBlock Text="{Binding SelectedOs}" Foreground="{StaticResource MutedTextBrush}" FontSize="11"/>
+                                    <TextBlock Text="  ·  " Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
+                                    <TextBlock Text="{Binding SelectedOs}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
                                 </StackPanel>
                                 <TextBlock Text="UDID" Style="{StaticResource DetailLabel}" Margin="0,9,0,3"/>
                                 <TextBlock Text="{Binding SelectedUdid}" FontFamily="Consolas" FontSize="9"
                                            AutomationProperties.AutomationId="SelectedDeviceUdidText"
-                                           Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
+                                           Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 
@@ -804,7 +814,7 @@
                                 <TextBlock Text="{DynamicResource ImageAndSound}" Style="{StaticResource ControlSectionTitle}"/>
                                 <StackPanel Visibility="{Binding VideoSettingsVisibility}">
                                     <TextBlock Text="{DynamicResource RenderLimitHelp}"
-                                               Foreground="{StaticResource MutedTextBrush}" FontSize="9"
+                                               Foreground="{DynamicResource MutedTextBrush}" FontSize="9"
                                                TextWrapping="Wrap" Margin="0,4,0,1"
                                                Visibility="{Binding WiredVideoLimitSettingsVisibility}"/>
 
@@ -831,7 +841,7 @@
                                               SelectedItem="{Binding SelectedDecoderPreference, Mode=TwoWay}"/>
 
                                     <TextBlock Text="{DynamicResource VideoPipelinePreferenceHelp}"
-                                               Foreground="{StaticResource MutedTextBrush}" FontSize="9"
+                                               Foreground="{DynamicResource MutedTextBrush}" FontSize="9"
                                                TextWrapping="Wrap" Margin="0,6,0,0"/>
 
                                     <Grid Margin="0,10,0,0">
@@ -850,11 +860,11 @@
                                                 Style="{StaticResource ToolButton}"/>
                                     </Grid>
                                     <TextBlock Text="{Binding SettingsStatus}"
-                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                 </StackPanel>
 
-                                <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,12,0,11"/>
+                                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,12,0,11"/>
                                 <CheckBox x:Name="AudioPlaybackCheckBox"
                                           Content="{DynamicResource PlayAudioWindows}"
                                           IsChecked="{Binding PlayAudio, Mode=TwoWay}"/>
@@ -863,12 +873,12 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{DynamicResource PlaybackVolume}" Foreground="{StaticResource MutedTextBrush}"
+                                    <TextBlock Text="{DynamicResource PlaybackVolume}" Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="10" VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="1"
                                                Text="{Binding PlaybackVolume, StringFormat={}{0:F0}%}"
                                                Width="42" TextAlignment="Right"
-                                               Foreground="{StaticResource AccentHoverBrush}"
+                                               Foreground="{DynamicResource AccentHoverBrush}"
                                                FontSize="10" FontWeight="SemiBold"/>
                                 </Grid>
                                 <Slider x:Name="VolumeSlider"
@@ -900,7 +910,7 @@
                                         MinHeight="44" FontSize="13"
                                         Margin="0,10,0,0"/>
                                 <TextBlock Text="{DynamicResource ObsWindowHelp}"
-                                           Foreground="{StaticResource MutedTextBrush}" FontSize="9"
+                                           Foreground="{DynamicResource MutedTextBrush}" FontSize="9"
                                            TextWrapping="Wrap" Margin="0,9,0,0"/>
                             </StackPanel>
                         </Border>
@@ -922,7 +932,7 @@
                                                Style="{StaticResource ControlSectionTitle}"/>
                                     <TextBlock Text="{DynamicResource WirelessServiceAlwaysOn}"
                                                HorizontalAlignment="Right" VerticalAlignment="Center"
-                                               Foreground="{StaticResource SuccessBrush}" FontSize="10"/>
+                                               Foreground="{DynamicResource SuccessBrush}" FontSize="10"/>
                                 </Grid>
                                 <TextBlock Text="{DynamicResource WirelessResolutionLabel}"
                                            Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
@@ -931,7 +941,7 @@
                                           SelectedItem="{Binding SelectedWirelessDisplayProfile, Mode=TwoWay}"
                                           AutomationProperties.AutomationId="WirelessResolutionComboBox"/>
                                 <TextBlock Text="{DynamicResource WirelessResolutionHelp}"
-                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Foreground="{DynamicResource MutedTextBrush}"
                                            FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                 <Grid Margin="0,10,0,0">
                                     <Grid.ColumnDefinitions>
@@ -948,14 +958,14 @@
                                             Style="{StaticResource ToolButton}" MinWidth="64"/>
                                 </Grid>
                                 <StackPanel Orientation="Horizontal" Margin="1,8,0,0">
-                                    <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}"
+                                    <Ellipse Width="6" Height="6" Fill="{DynamicResource SuccessBrush}"
                                              VerticalAlignment="Center" Margin="0,0,7,0"/>
                                     <TextBlock Text="{Binding WirelessStatus}"
-                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="10" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding AppliedWirelessProfileDisplay}"
-                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Foreground="{DynamicResource MutedTextBrush}"
                                            FontSize="9" TextWrapping="Wrap" Margin="1,4,0,0"/>
                             </StackPanel>
                         </Border>
@@ -967,18 +977,18 @@
                                                Style="{StaticResource ControlSectionTitle}"/>
                                     <TextBlock Text="{DynamicResource WirelessServiceAlwaysOn}"
                                                HorizontalAlignment="Right" VerticalAlignment="Center"
-                                               Foreground="{StaticResource SuccessBrush}" FontSize="10"/>
+                                               Foreground="{DynamicResource SuccessBrush}" FontSize="10"/>
                                 </Grid>
                                 <TextBlock Text="{DynamicResource MediaCastDescription}"
-                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Foreground="{DynamicResource MutedTextBrush}"
                                            FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                 <TextBlock Text="{Binding MediaCastReceiverName}"
                                            FontSize="13" FontWeight="SemiBold" Margin="0,10,0,0"/>
                                 <StackPanel Orientation="Horizontal" Margin="1,7,0,0">
-                                    <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}"
+                                    <Ellipse Width="6" Height="6" Fill="{DynamicResource SuccessBrush}"
                                              VerticalAlignment="Center" Margin="0,0,7,0"/>
                                     <TextBlock Text="{Binding MediaCastStatus}"
-                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="10" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </StackPanel>
@@ -989,8 +999,9 @@
         </Grid>
 
         <Grid x:Name="FooterPanel" Grid.Row="3" Margin="0,16,0,0">
-            <TextBlock Text="{DynamicResource FooterConnectivity}" Foreground="{StaticResource MutedTextBrush}" FontSize="10"/>
-            <TextBlock Text="{DynamicResource FooterVersionCurrent}" Foreground="{StaticResource MutedTextBrush}"
+            <TextBlock Text="{DynamicResource FooterConnectivity}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10"/>
+            <TextBlock Text="{Binding VersionText, RelativeSource={RelativeSource AncestorType=Window}}"
+                       Foreground="{DynamicResource MutedTextBrush}"
                        FontSize="10" HorizontalAlignment="Right" Cursor="Hand"
                        MouseLeftButtonDown="OnVersionClick"/>
         </Grid>

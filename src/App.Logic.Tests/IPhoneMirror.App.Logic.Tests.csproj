@@ -26,6 +26,12 @@
     <Compile Include="..\App\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />
     <Compile Include="..\App\Services\MediaOutputService.cs" Link="MediaOutputService.cs" />
     <Compile Include="..\App\Services\PendingRecordingStore.cs" Link="PendingRecordingStore.cs" />
+    <Compile Include="..\App\Updater\SemanticVersion.cs" Link="Updater\SemanticVersion.cs" />
+    <Compile Include="..\App\Updater\ReleaseParser.cs" Link="Updater\ReleaseParser.cs" />
+    <Compile Include="..\App\Updater\UpdateSettingsStore.cs" Link="Updater\UpdateSettingsStore.cs" />
+    <Compile Include="..\App\Updater\GitHubReleaseClient.cs" Link="Updater\GitHubReleaseClient.cs" />
+    <Compile Include="..\App\Updater\VersionManager.cs" Link="Updater\VersionManager.cs" />
+    <Compile Include="..\App\Updater\UpdateInstallerLauncher.cs" Link="Updater\UpdateInstallerLauncher.cs" />
     <Compile Include="MediaOutputTestInterop.cs" />
   </ItemGroup>
 </Project>

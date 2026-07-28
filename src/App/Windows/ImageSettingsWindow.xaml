@@ -6,17 +6,17 @@
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
         PreviewKeyDown="OnPreviewKeyDown"
         Closing="OnWindowClosing"
-        Background="{StaticResource AppBackgroundBrush}"
-        Foreground="{StaticResource TextBrush}">
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}">
     <Window.Resources>
         <Style x:Key="AdjustmentLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
         <Style x:Key="AdjustmentValue" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="HorizontalAlignment" Value="Right"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
@@ -38,20 +38,20 @@
             <TextBlock Text="{DynamicResource MoreImageSettingsTitle}"
                        FontSize="22" FontWeight="SemiBold"/>
             <TextBlock Text="{DynamicResource MoreImageSettingsSubtitle}"
-                       Foreground="{StaticResource MutedTextBrush}"
+                       Foreground="{DynamicResource MutedTextBrush}"
                        FontSize="12" TextWrapping="Wrap" Margin="0,7,0,0"/>
         </StackPanel>
 
-        <Border Grid.Row="2" Background="{StaticResource PanelAltBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+        <Border Grid.Row="2" Background="{DynamicResource PanelAltBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                 CornerRadius="6" Padding="14,11">
             <TextBlock Text="{DynamicResource ImageAdjustmentsPreviewOnlyNotice}"
-                       Foreground="{StaticResource WarningBrush}" FontSize="12"
+                       Foreground="{DynamicResource WarningBrush}" FontSize="12"
                        LineHeight="18" TextWrapping="Wrap"/>
         </Border>
 
-        <Border x:Name="AdjustmentPanel" Grid.Row="4" Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+        <Border x:Name="AdjustmentPanel" Grid.Row="4" Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                 CornerRadius="8" Padding="20,16">
             <StackPanel>
                 <Grid>
@@ -63,7 +63,7 @@
                         TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
-                <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,16"/>
+                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,16"/>
                 <Grid>
                     <TextBlock Text="{DynamicResource ContrastLabel}" Style="{StaticResource AdjustmentLabel}"/>
                     <TextBlock Text="{Binding ElementName=ContrastSlider, Path=Value, StringFormat={}{0:F0}%}"
@@ -73,7 +73,7 @@
                         TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
-                <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,16"/>
+                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,16"/>
                 <Grid>
                     <TextBlock Text="{DynamicResource SaturationLabel}" Style="{StaticResource AdjustmentLabel}"/>
                     <TextBlock Text="{Binding ElementName=SaturationSlider, Path=Value, StringFormat={}{0:F0}%}"
@@ -83,7 +83,7 @@
                         TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
-                <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,16"/>
+                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,16"/>
                 <Grid>
                     <TextBlock Text="{DynamicResource GammaLabel}" Style="{StaticResource AdjustmentLabel}"/>
                     <TextBlock Text="{Binding ElementName=GammaSlider, Path=Value, StringFormat={}{0:F0}%}"
@@ -96,7 +96,7 @@
         </Border>
 
         <TextBlock x:Name="FeedbackText" Grid.Row="5"
-                   Foreground="{StaticResource WarningBrush}" FontSize="11"
+                   Foreground="{DynamicResource WarningBrush}" FontSize="11"
                    TextWrapping="Wrap" Margin="0,8,0,10"/>
 
         <Grid Grid.Row="6">

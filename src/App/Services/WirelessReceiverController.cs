@@ -56,6 +56,17 @@ internal sealed class WirelessReceiverController(
 
             var hostPath = _receiver.ExecutablePath;
             if (hostPath is null) return new(false, null, false);
+            var runtime = await Task.Run(_receiver.ProbeRuntime);
+            if (!runtime.Success)
+            {
+                Running = Ready = false;
+                var error = WirelessReceiverService.DescribeProbeFailure(runtime);
+                var isNewRuntimeError = !string.Equals(StartError, error,
+                    StringComparison.Ordinal);
+                StartError = error;
+                _automaticStartNotBeforeUtc = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+                return new(false, error, isNewRuntimeError);
+            }
             var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(
                 receiverName ?? AppliedReceiverName);
             if (receiverName is not null) ReceiverName = sanitized;

@@ -267,6 +267,8 @@ try {
             'libusb-1.0.dll',
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
+            'CHANGELOG.md',
+            'tools\updater\Apply-ZipUpdate.ps1',
             'licenses\libusb-COPYING.txt',
             'Wireless\iPhoneMirror.WirelessHost.exe',
             'Wireless\airplay2dll.dll',
@@ -352,7 +354,8 @@ try {
             'iPhoneMirror.Driver.exe',
             'libusb-1.0.dll',
             'LICENSE',
-            'THIRD_PARTY_NOTICES.md'
+            'THIRD_PARTY_NOTICES.md',
+            'CHANGELOG.md'
         )
         $unexpectedFiles = @(Get-ChildItem -LiteralPath $MainPublishRoot -File | Where-Object {
             $_.Name -notin $allowedTopLevelFiles

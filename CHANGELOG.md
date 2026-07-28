@@ -5,6 +5,54 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-28
+
+### Added
+
+- Add a standard x64 Windows Setup executable with a selectable installation
+  directory, Program Files default, registered uninstall entry, localized Start
+  menu shortcuts, optional desktop shortcut and a stable AppUserModelID.
+- Add an independent GitHub Release updater with semantic-version comparison,
+  stable and Beta channels, startup/manual checks, installer-first asset
+  selection, streamed progress and optional automatic download.
+- Add SHA256 verification from `SHA256SUMS.txt`, interrupted-download cleanup,
+  retry support, automatic installer launch, in-place upgrades and a privileged
+  ZIP fallback when a release does not contain a Setup executable.
+- Add Fluent-style About, update settings and update windows with Markdown
+  release-note rendering, Mica/rounded-window integration, entrance animation,
+  download percentage and transfer-speed reporting.
+- Add system, dark and light themes and expose version, GitHub, changelog,
+  license and manual update actions from the About page.
+
+### Changed
+
+- Include `CHANGELOG.md` and the ZIP update helper in both installed and portable
+  distributions, and include the Setup executable in release checksums.
+- Pin and hash-verify Inno Setup 6.7.3 and its official Simplified Chinese
+  translation for reproducible bilingual installer builds.
+- Wait for the old application process to exit before the ZIP updater replaces
+  files, then relaunch the upgraded executable.
+
+### Fixed
+
+- Keep startup update failures isolated from application startup and show
+  actionable inline errors for network failures, timeouts and corrupt downloads.
+- Preserve user configuration and downloaded updates by default on uninstall,
+  while prompting users before deleting those files.
+- Prevent unrelated utility executables from being selected as update installers;
+  only assets explicitly named as Setup/Installer executables take precedence.
+- Replace the stale preview footer with the assembly-derived `v1.4.0` version.
+- Preflight the AirPlay/FFmpeg runtime without system dialogs, recognize Windows
+  code-integrity errors such as `0xc0e90002`, show actionable Setup/ZIP guidance,
+  and back off retries instead of repeatedly displaying a misleading Bad Image
+  dialog.
+- Update every theme-managed brush dynamically so light/dark changes apply to
+  existing windows, while keeping fixed high-contrast text on the black preview
+  surface.
+- Add an isolated installer test that verifies a simulated `1.3.0` to `1.4.0`
+  upgrade, uninstall registration and shortcuts, retained user data, and explicit
+  user-data deletion without touching the production installation.
+
 ## [1.3.0] - 2026-07-28
 
 ### Added
@@ -448,7 +496,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.1.0-preview.1...v1.2.1

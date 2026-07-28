@@ -857,6 +857,12 @@ std::wstring argument_value(int argc, wchar_t** argv, std::wstring_view name) {
     return {};
 }
 
+bool has_argument(int argc, wchar_t** argv, std::wstring_view name) noexcept {
+    for (int index = 1; index < argc; ++index)
+        if (std::wstring_view(argv[index]) == name) return true;
+    return false;
+}
+
 unsigned int argument_uint(int argc, wchar_t** argv, std::wstring_view name,
     unsigned int fallback) noexcept {
     const auto value = argument_value(argc, argv, name);
@@ -971,6 +977,52 @@ std::filesystem::path executable_directory() {
     return std::filesystem::path(path).parent_path();
 }
 
+struct AirPlayLibraryLoad {
+    HMODULE library{};
+    DLL_DIRECTORY_COOKIE search_cookie{};
+    DWORD error{};
+};
+
+AirPlayLibraryLoad load_airplay_library(const std::filesystem::path& path) noexcept {
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
+    const auto search_cookie = AddDllDirectory(path.parent_path().c_str());
+    const auto library = LoadLibraryExW(path.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32 |
+        LOAD_LIBRARY_SEARCH_USER_DIRS);
+    return {
+        .library = library,
+        .search_cookie = search_cookie,
+        .error = library ? ERROR_SUCCESS : GetLastError(),
+    };
+}
+
+void close_airplay_library(const AirPlayLibraryLoad& loaded) noexcept {
+    if (loaded.library) FreeLibrary(loaded.library);
+    if (loaded.search_cookie) RemoveDllDirectory(loaded.search_cookie);
+}
+
+bool is_code_integrity_error(DWORD error) noexcept {
+    return error == ERROR_INVALID_IMAGE_HASH ||
+        error == ERROR_ACCESS_DISABLED_BY_POLICY ||
+        (error >= ERROR_SYSTEM_INTEGRITY_ROLLBACK_DETECTED &&
+            error <= ERROR_SYSTEM_INTEGRITY_REPUTATION_OFFLINE) ||
+        (error >= ERROR_SYSTEM_INTEGRITY_REPUTATION_UNFRIENDLY_FILE &&
+            error <= ERROR_SYSTEM_INTEGRITY_WHQL_NOT_SATISFIED);
+}
+
+int preflight_airplay_runtime(const std::filesystem::path& path) noexcept {
+    const auto loaded = load_airplay_library(path);
+    if (!loaded.library) {
+        close_airplay_library(loaded);
+        return is_code_integrity_error(loaded.error) ? 40 : 41;
+    }
+    const auto exports_available =
+        GetProcAddress(loaded.library, StartExport) != nullptr &&
+        GetProcAddress(loaded.library, StopExport) != nullptr;
+    close_airplay_library(loaded);
+    return exports_available ? 0 : 42;
+}
+
 HANDLE connect_pipe(const std::wstring& pipe_name) {
     for (int attempt = 0; attempt < 100; ++attempt) {
         const auto pipe = CreateFileW(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
@@ -1018,6 +1070,9 @@ bool receive_playback_updates(HANDLE pipe, AirPlayCallback& callback,
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    // LoadLibrary failures must be reported through IPC/preflight instead of a
+    // system "Bad Image" dialog that incorrectly describes policy blocks as corruption.
+    SetThreadErrorMode(SEM_FAILCRITICALERRORS, nullptr);
     const auto pipe_name = argument_value(argc, argv, L"--pipe");
     const auto stop_event_name = argument_value(argc, argv, L"--stop-event");
     const auto receiver_name_wide = argument_value(argc, argv, L"--name");
@@ -1031,6 +1086,12 @@ int wmain(int argc, wchar_t** argv) {
     const auto airplay_port = argument_uint(argc, argv, L"--airplay-port", 7001);
     const auto dlna_port = argument_uint(argc, argv, L"--dlna-port", 8090);
     const auto dlna_ssdp_port = argument_uint(argc, argv, L"--dlna-ssdp-port", 1900);
+    const auto directory = executable_directory();
+    const auto library_path = library_override.empty()
+        ? directory / L"airplay2dll.dll"
+        : std::filesystem::absolute(std::filesystem::path(library_override));
+    if (has_argument(argc, argv, L"--check-runtime"))
+        return preflight_airplay_runtime(library_path);
     if (pipe_name.empty() || stop_event_name.empty()) return 2;
 
     const auto pipe = connect_pipe(pipe_name);
@@ -1079,26 +1140,20 @@ int wmain(int argc, wchar_t** argv) {
     SetEnvironmentVariableW(
         L"IPHONE_MIRROR_AIRPLAY_PAIRING_SEED", pairing_seed.c_str());
 
-    const auto directory = executable_directory();
-    const auto library_path = library_override.empty()
-        ? directory / L"airplay2dll.dll"
-        : std::filesystem::absolute(std::filesystem::path(library_override));
-    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
-    const auto search_cookie = AddDllDirectory(library_path.parent_path().c_str());
-    const auto library = LoadLibraryExW(library_path.c_str(), nullptr,
-        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32 |
-        LOAD_LIBRARY_SEARCH_USER_DIRS);
+    const auto loaded_library = load_airplay_library(library_path);
+    const auto library = loaded_library.library;
     if (!library) {
-        const auto error = GetLastError();
+        const auto error = loaded_library.error;
         const auto message = std::format(
-            "wireless_host airplay_library_failed file={} custom_path={} win32={}",
-            library_path.filename().string(), !library_override.empty(), error);
+            "wireless_host airplay_library_failed file={} custom_path={} win32={} "
+            "code_integrity={}", library_path.filename().string(),
+            !library_override.empty(), error, is_code_integrity_error(error));
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
             message);
         writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
         writer.shutdown();
         CloseHandle(pipe);
-        if (search_cookie) RemoveDllDirectory(search_cookie);
+        close_airplay_library(loaded_library);
         return 4;
     }
 
@@ -1109,9 +1164,8 @@ int wmain(int argc, wchar_t** argv) {
             "wireless_host airplay_exports_missing");
         writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
         writer.shutdown();
-        FreeLibrary(library);
+        close_airplay_library(loaded_library);
         CloseHandle(pipe);
-        if (search_cookie) RemoveDllDirectory(search_cookie);
         return 5;
     }
 
@@ -1130,9 +1184,8 @@ int wmain(int argc, wchar_t** argv) {
             "wireless_host airplay_server_start_failed");
         writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
         writer.shutdown();
-        FreeLibrary(library);
+        close_airplay_library(loaded_library);
         CloseHandle(pipe);
-        if (search_cookie) RemoveDllDirectory(search_cookie);
         return 6;
     }
     wchar_t public_key[65]{};
@@ -1145,9 +1198,8 @@ int wmain(int argc, wchar_t** argv) {
                 public_key_length));
         stop_server(server);
         writer.shutdown();
-        FreeLibrary(library);
+        close_airplay_library(loaded_library);
         CloseHandle(pipe);
-        if (search_cookie) RemoveDllDirectory(search_cookie);
         return 9;
     }
     if (public_key_length == 64) {
@@ -1264,8 +1316,7 @@ int wmain(int argc, wchar_t** argv) {
     writer.shutdown();
     if (parent) CloseHandle(parent);
     if (stop_event) CloseHandle(stop_event);
-    FreeLibrary(library);
+    close_airplay_library(loaded_library);
     CloseHandle(pipe);
-    if (search_cookie) RemoveDllDirectory(search_cookie);
     return 0;
 }

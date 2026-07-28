@@ -1,0 +1,93 @@
+<Window x:Class="IPhoneMirror.App.Windows.UpdateWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{DynamicResource UpdateWindowTitle}" Width="760" Height="700"
+        MinWidth="660" MinHeight="580" WindowStartupLocation="CenterOwner"
+        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False"
+        AutomationProperties.AutomationId="UpdateWindow" Opacity="0">
+    <Window.RenderTransform>
+        <TranslateTransform x:Name="EntranceTransform" Y="16"/>
+    </Window.RenderTransform>
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="18"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="18"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="18"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid>
+            <StackPanel>
+                <TextBlock Text="{DynamicResource UpdateWindowTitle}" FontSize="25"
+                           FontWeight="SemiBold"/>
+                <TextBlock Text="{DynamicResource UpdateWindowSubtitle}"
+                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,0"/>
+            </StackPanel>
+            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Background="{DynamicResource AccentBrush}" CornerRadius="6" Padding="12,7">
+                <TextBlock Text="{Binding LatestVersion}" Foreground="{DynamicResource OnAccentBrush}"
+                           FontWeight="SemiBold"/>
+            </Border>
+        </Grid>
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="24"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="24"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="{DynamicResource CurrentVersionLabel}"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
+                <TextBlock Text="{Binding CurrentVersion}" FontSize="16" FontWeight="SemiBold"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock Text="{DynamicResource LatestVersionLabel}"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
+                <TextBlock Text="{Binding LatestVersion}" FontSize="16" FontWeight="SemiBold"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+            <StackPanel Grid.Column="4">
+                <TextBlock Text="{DynamicResource PublishedAtLabel}"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
+                <TextBlock Text="{Binding PublishedAt}" FontSize="16" FontWeight="SemiBold"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+        </Grid>
+        <Border Grid.Row="4" Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                CornerRadius="8" Padding="18">
+            <FlowDocumentScrollViewer x:Name="ReleaseNotesViewer"
+                                      VerticalScrollBarVisibility="Auto"
+                                      Background="Transparent" BorderThickness="0"
+                                      IsToolBarVisible="False"/>
+        </Border>
+        <Grid Grid.Row="6">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <StackPanel Visibility="{Binding ProgressVisibility}">
+                <ProgressBar Height="7" Minimum="0" Maximum="100" Value="{Binding ProgressValue}"
+                             IsIndeterminate="{Binding IsIndeterminate}"/>
+                <Grid Margin="0,8,0,0">
+                    <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding SpeedText}" HorizontalAlignment="Right"
+                               Foreground="{DynamicResource MutedTextBrush}"/>
+                </Grid>
+            </StackPanel>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"
+                        Margin="0,16,0,0">
+                <Button Content="{DynamicResource RemindLater}" Click="OnLaterClick"
+                        MinWidth="112" Margin="0,0,8,0"/>
+                <Button Content="{Binding UpdateButtonText}" Click="OnUpdateClick"
+                        IsEnabled="{Binding CanUpdate}" Style="{StaticResource PrimaryButton}"
+                        MinWidth="132"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
