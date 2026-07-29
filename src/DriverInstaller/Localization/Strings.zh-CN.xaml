@@ -100,6 +100,8 @@
     <system:String x:Key="DeviceModelFormat">设备型号 {0}</system:String>
     <system:String x:Key="AppleServiceRunning">Apple USB 服务正在运行</system:String>
     <system:String x:Key="AppleServiceStopped">Apple USB 服务已安装但未运行</system:String>
+    <system:String x:Key="AppleServiceMissing">Apple USB 驱动已安装，但缺少 Apple Mobile Device Service</system:String>
+    <system:String x:Key="AppleUsbDriverMissing">Apple Mobile Device Service 已安装，但缺少 Apple USB 驱动包</system:String>
     <system:String x:Key="AppleSupportMissing">未检测到 Apple Devices 或 Apple Mobile Device Support</system:String>
     <system:String x:Key="LibUsbMissing">libusb0 共享服务尚未安装</system:String>
     <system:String x:Key="LibUsbFilesMismatch">libusb0 文件缺失或与受信任版本不一致</system:String>
@@ -123,6 +125,6 @@
     <system:String x:Key="AppleInstallerFailed">Apple 官方安装包执行失败，退出代码 {0}。
 {1}
 日志：{2}</system:String>
-    <system:String x:Key="AppleServiceNotReady">Apple USB 支持已安装，但 Apple Mobile Device Service 尚未就绪。请连接并解锁 iPhone 后重新检测。
+    <system:String x:Key="AppleServiceNotReady">Apple USB 支持不完整：服务或 Apple USB 驱动包尚未就绪。请连接并解锁 iPhone 后重新检测。
 日志：{0}</system:String>
 </ResourceDictionary>

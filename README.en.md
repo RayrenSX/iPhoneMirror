@@ -55,6 +55,11 @@ desktop iTunes package containing Apple Mobile Device Support. Wireless
 discovery uses the DNS-SD support built into Windows 10/11; no Bonjour service
 or administrator access is required.
 
+The driver manager now installs missing Apple USB support automatically. It
+prefers the pinned Apple Devices Microsoft Store product through `winget`, then
+falls back to Apple's signed desktop iTunes package from Apple's official HTTPS
+download. Apple binaries are not redistributed by iPhoneMirror.
+
 ## Project description
 
 iPhoneMirror is a local Windows 10/11 x64 iPhone/iPad mirroring tool. It keeps
@@ -187,6 +192,9 @@ repairing the driver and reconnecting the device when prompted, return to the
 main app and click **Start Mirroring** again. UI logs are stored at
 `%LOCALAPPDATA%\iPhoneMirror.Driver\Logs\driver-ui.log`; elevated operation logs
 are stored under `%ProgramData%\iPhoneMirror.Driver`.
+
+The complete bundled/external driver inventory is documented in
+[`docs/DRIVER_DEPENDENCIES.md`](docs/DRIVER_DEPENDENCIES.md).
 
 ## Diagnostic logs
 

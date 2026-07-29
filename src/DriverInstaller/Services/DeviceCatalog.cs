@@ -80,23 +80,74 @@ internal sealed class DeviceCatalog
 
     internal AppleSupportStatus InspectAppleSupport()
     {
+        string? installedService = null;
+        var serviceRunning = false;
         foreach (var serviceName in new[]
                  {
                      "Apple Mobile Device Service", "AppleMobileDeviceService",
                  })
         {
-            if (!TryQueryService(serviceName, out var running)) continue;
-            var result = new AppleSupportStatus(true, running, serviceName,
-                DriverLocalization.Get(running ? "AppleServiceRunning" : "AppleServiceStopped"));
-            DriverLogger.WriteEvent("device-catalog", "apple_support_status",
-                ("installed", result.ServiceInstalled), ("running", result.ServiceRunning),
-                ("service", result.ServiceName));
-            return result;
+            if (!TryQueryService(serviceName, out serviceRunning)) continue;
+            installedService = serviceName;
+            break;
         }
-        var missing = new AppleSupportStatus(false, false, null,
-            DriverLocalization.Get("AppleSupportMissing"));
-        DriverLogger.WriteWarning("device-catalog", "apple_support_missing");
-        return missing;
+
+        var driverInf = FindAppleUsbDriverPackage();
+        var serviceInstalled = installedService is not null;
+        var driverInstalled = driverInf is not null;
+        var diagnosticKey = ResolveAppleSupportDiagnosticKey(serviceInstalled,
+            serviceRunning, driverInstalled);
+        var result = new AppleSupportStatus(serviceInstalled, serviceRunning,
+            installedService, driverInstalled, driverInf,
+            DriverLocalization.Get(diagnosticKey));
+        var fields = new (string Key, object? Value)[]
+        {
+            ("service_installed", result.ServiceInstalled),
+            ("service_running", result.ServiceRunning),
+            ("service", result.ServiceName),
+            ("usb_driver_installed", result.UsbDriverInstalled),
+            ("usb_driver_inf", result.UsbDriverInf),
+        };
+        if (result.Ready)
+            DriverLogger.WriteEvent("device-catalog", "apple_support_status", fields);
+        else
+            DriverLogger.WriteWarning("device-catalog", "apple_support_status", fields);
+        return result;
+    }
+
+    internal static string ResolveAppleSupportDiagnosticKey(bool serviceInstalled,
+        bool serviceRunning, bool driverInstalled) =>
+        !driverInstalled ? serviceInstalled ? "AppleUsbDriverMissing" : "AppleSupportMissing" :
+        !serviceInstalled ? "AppleServiceMissing" :
+        serviceRunning ? "AppleServiceRunning" : "AppleServiceStopped";
+
+    internal static string? FindAppleUsbDriverPackage(string? driverStoreRoot = null)
+    {
+        driverStoreRoot ??= Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            "System32", "DriverStore", "FileRepository");
+        if (!Directory.Exists(driverStoreRoot)) return null;
+
+        // Apple Devices uses appleusb.inf. Desktop iTunes releases use
+        // usbaapl64.inf (or usbaapl.inf on older packages).
+        foreach (var infName in new[] { "appleusb.inf", "usbaapl64.inf", "usbaapl.inf" })
+        {
+            try
+            {
+                foreach (var directory in Directory.EnumerateDirectories(driverStoreRoot,
+                             infName + "_*", SearchOption.TopDirectoryOnly))
+                {
+                    if (File.Exists(Path.Combine(directory, infName))) return infName;
+                }
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                DriverLogger.WriteException("device-catalog",
+                    "apple_driver_store_inspection_failed", error,
+                    ("driver_inf", infName));
+            }
+        }
+        return null;
     }
 
     internal LibUsbStackStatus InspectLibUsbStack()

@@ -52,6 +52,7 @@ $RequiredArtifacts = @(
     'LICENSE',
     'THIRD_PARTY_NOTICES.md',
     'CHANGELOG.md',
+    'DRIVER_DEPENDENCIES.md',
     'tools\updater\Apply-ZipUpdate.ps1',
     'licenses\libusb-COPYING.txt',
     'licenses\libusb-win32-COPYING-LGPL.txt',

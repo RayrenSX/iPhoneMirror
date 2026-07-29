@@ -172,6 +172,11 @@ USB 配置；关闭主窗口也会执行同一清理流程。
 `%LOCALAPPDATA%\iPhoneMirror.Driver\Logs\driver-ui.log`，管理员操作日志位于
 `%ProgramData%\iPhoneMirror.Driver`。
 
+如果电脑完全没有 Apple USB 支持，驱动管理器会优先通过 `winget` 从 Microsoft Store
+安装固定产品 ID 的 Apple Devices；Store 不可用时，再从 Apple 官方 HTTPS 下载并验证
+Apple 签名的桌面版 iTunes 安装包。项目不会重新分发 Apple 专有二进制文件。完整驱动
+依赖清单见 [`docs/DRIVER_DEPENDENCIES.md`](docs/DRIVER_DEPENDENCIES.md)。
+
 ## 诊断日志
 
 主程序会把托管界面与业务错误写入

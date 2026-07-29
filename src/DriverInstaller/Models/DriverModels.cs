@@ -48,9 +48,11 @@ internal sealed record AppleSupportStatus(
     bool ServiceInstalled,
     bool ServiceRunning,
     string? ServiceName,
+    bool UsbDriverInstalled,
+    string? UsbDriverInf,
     string Diagnostic)
 {
-    internal bool Ready => ServiceInstalled && ServiceRunning;
+    internal bool Ready => ServiceInstalled && ServiceRunning && UsbDriverInstalled;
 }
 
 internal sealed record LibUsbStackStatus(

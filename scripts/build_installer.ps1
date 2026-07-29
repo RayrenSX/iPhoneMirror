@@ -34,7 +34,8 @@ try {
     if ($actualVersion -ne $Version) {
         throw "Installer version $Version does not match application version $actualVersion."
     }
-    foreach ($required in @('CHANGELOG.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+    foreach ($required in @('CHANGELOG.md', 'DRIVER_DEPENDENCIES.md', 'LICENSE',
+            'THIRD_PARTY_NOTICES.md',
             'tools\updater\Apply-ZipUpdate.ps1', 'libusb0.dll', 'msvcp140.dll',
             'vcruntime140.dll', 'vcruntime140_1.dll',
             'Wireless\msvcp140.dll', 'Wireless\vcruntime140.dll',

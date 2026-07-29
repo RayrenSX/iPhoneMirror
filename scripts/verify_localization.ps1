@@ -4,6 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $App = Join-Path $Root 'src\App'
+$DriverInstaller = Join-Path $Root 'src\DriverInstaller'
 
 function Get-ResourceKeys([string]$Path) {
     $xml = [xml](Get-Content -Raw -LiteralPath $Path -Encoding utf8)
@@ -45,9 +46,21 @@ if ($missing.Count -ne 0) {
     throw "Missing localization keys: $($missing -join ', ')"
 }
 
+$DriverChinese = Get-ResourceKeys (Join-Path $DriverInstaller `
+    'Localization\Strings.zh-CN.xaml')
+$DriverEnglish = Get-ResourceKeys (Join-Path $DriverInstaller `
+    'Localization\Strings.en-US.xaml')
+$driverDifference = @(Compare-Object $DriverChinese $DriverEnglish)
+if ($driverDifference.Count -ne 0) {
+    $driverDifference | Format-Table | Out-String | Write-Error
+    throw 'Driver localization dictionaries do not contain the same keys.'
+}
+
 [pscustomobject]@{
     ChineseKeys = $Chinese.Count
     EnglishKeys = $English.Count
     ReferencedKeys = $used.Count
     MissingKeys = 0
+    DriverChineseKeys = $DriverChinese.Count
+    DriverEnglishKeys = $DriverEnglish.Count
 }

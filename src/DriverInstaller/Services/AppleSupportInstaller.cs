@@ -12,8 +12,9 @@ internal sealed record AppleSupportInstallResult(
 
 /// <summary>
 /// Installs Apple USB support without requiring the user to open Apple Devices.
-/// An offline AppleMobileDeviceSupport MSI is preferred; the official Apple
-/// iTunes installer is the network fallback. No Apple package is bundled.
+/// An offline AppleMobileDeviceSupport MSI is preferred, then Apple Devices is
+/// installed from Microsoft Store through winget. The official Apple iTunes
+/// installer remains the network fallback. No Apple package is bundled.
 /// </summary>
 internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
 {
@@ -26,7 +27,9 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         var current = catalog.InspectAppleSupport();
         DriverLogger.WriteEvent("apple-support", "install_requested",
             ("operation", operationId), ("service_installed", current.ServiceInstalled),
-            ("service_running", current.ServiceRunning));
+            ("service_running", current.ServiceRunning),
+            ("usb_driver_installed", current.UsbDriverInstalled),
+            ("usb_driver_inf", current.UsbDriverInf));
         if (current.Ready)
         {
             DriverLogger.WriteEvent("apple-support", "already_ready",
@@ -69,11 +72,35 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         }
         else
         {
+            var wingetResult = await TryInstallAppleDevicesWithWingetAsync(operationId);
+            if (wingetResult is not null && wingetResult.ExitCode == 0)
+            {
+                var storeReady = await WaitAndRecoverAppleSupportAsync(
+                    TimeSpan.FromMinutes(3), operationId);
+                if (storeReady.Ready)
+                {
+                    DriverLogger.WriteEvent("apple-support", "store_install_completed",
+                        ("operation", operationId), ("success", true),
+                        ("usb_driver_inf", storeReady.UsbDriverInf),
+                        ("elapsed_ms", timer.ElapsedMilliseconds));
+                    return new AppleSupportInstallResult(true, false,
+                        storeReady.Diagnostic);
+                }
+                DriverLogger.WriteWarning("apple-support", "store_install_not_ready",
+                    ("operation", operationId),
+                    ("service_installed", storeReady.ServiceInstalled),
+                    ("service_running", storeReady.ServiceRunning),
+                    ("usb_driver_installed", storeReady.UsbDriverInstalled),
+                    ("usb_driver_inf", storeReady.UsbDriverInf));
+            }
+
             var setup = FindLocalItunesSetup();
             try
             {
                 DriverLogger.WriteEvent("apple-support", "itunes_fallback_selected",
-                    ("operation", operationId), ("local_package", setup is not null));
+                    ("operation", operationId), ("local_package", setup is not null),
+                    ("winget_attempted", wingetResult is not null),
+                    ("winget_exit_code", wingetResult?.ExitCode));
                 setup ??= await DownloadOfficialItunesAsync(operationId);
             }
             catch (Exception error)
@@ -111,35 +138,22 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             }
         }
 
-        var ready = await WaitForAppleSupportAsync(TimeSpan.FromSeconds(90), operationId);
+        var ready = await WaitAndRecoverAppleSupportAsync(TimeSpan.FromSeconds(90),
+            operationId);
         if (ready.Ready)
         {
             DriverLogger.WriteEvent("apple-support", "install_completed",
                 ("operation", operationId), ("success", true),
+                ("usb_driver_inf", ready.UsbDriverInf),
                 ("elapsed_ms", timer.ElapsedMilliseconds));
             return new AppleSupportInstallResult(true, false, ready.Diagnostic);
-        }
-
-        if (ready.ServiceInstalled && ready.ServiceName is not null)
-        {
-            var started = await StartServiceElevatedAsync(ready.ServiceName, operationId);
-            if (started)
-            {
-                ready = await WaitForAppleSupportAsync(TimeSpan.FromSeconds(30), operationId);
-                if (ready.Ready)
-                {
-                    DriverLogger.WriteEvent("apple-support", "install_completed",
-                        ("operation", operationId), ("success", true),
-                        ("service_start_required", true),
-                        ("elapsed_ms", timer.ElapsedMilliseconds));
-                    return new AppleSupportInstallResult(true, false, ready.Diagnostic);
-                }
-            }
         }
 
         DriverLogger.WriteError("apple-support", "install_not_ready",
             ("operation", operationId), ("service_installed", ready.ServiceInstalled),
             ("service_running", ready.ServiceRunning),
+            ("usb_driver_installed", ready.UsbDriverInstalled),
+            ("usb_driver_inf", ready.UsbDriverInf),
             ("elapsed_ms", timer.ElapsedMilliseconds));
         return new AppleSupportInstallResult(false, false,
             DriverLocalization.Format("AppleServiceNotReady", packageLog));
@@ -177,21 +191,112 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             ("operation", operationId), ("polls", polls),
             ("timeout_ms", timeout.TotalMilliseconds),
             ("service_installed", status.ServiceInstalled),
-            ("service_running", status.ServiceRunning));
+            ("service_running", status.ServiceRunning),
+            ("usb_driver_installed", status.UsbDriverInstalled),
+            ("usb_driver_inf", status.UsbDriverInf));
         return status;
     }
 
     internal static string? FindWinget()
     {
-        var candidates = new List<string>();
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (!string.IsNullOrWhiteSpace(local))
-            candidates.Add(Path.Combine(local, "Microsoft", "WindowsApps", "winget.exe"));
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        candidates.AddRange(path.Split(Path.PathSeparator,
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(directory => Path.Combine(directory.Trim('"'), "winget.exe")));
-        return candidates.FirstOrDefault(File.Exists);
+        if (string.IsNullOrWhiteSpace(local)) return null;
+        var alias = Path.Combine(local, "Microsoft", "WindowsApps", "winget.exe");
+        return File.Exists(alias) ? alias : null;
+    }
+
+    internal static string[] BuildWingetInstallArguments() =>
+    [
+        "install", "--id", DriverConstants.AppleStoreProductId, "--exact",
+        "--source", DriverConstants.AppleStoreSource,
+        "--accept-source-agreements", "--accept-package-agreements",
+        "--silent", "--disable-interactivity",
+    ];
+
+    private async Task<AppleSupportStatus> WaitAndRecoverAppleSupportAsync(
+        TimeSpan timeout, string operationId)
+    {
+        var status = await WaitForAppleSupportAsync(timeout, operationId);
+        if (status.Ready || !status.ServiceInstalled || status.ServiceRunning ||
+            status.ServiceName is null)
+            return status;
+
+        if (!await StartServiceElevatedAsync(status.ServiceName, operationId)) return status;
+        return await WaitForAppleSupportAsync(TimeSpan.FromSeconds(30), operationId);
+    }
+
+    private static async Task<ProcessResult?> TryInstallAppleDevicesWithWingetAsync(
+        string operationId)
+    {
+        var winget = FindWinget();
+        if (winget is null)
+        {
+            DriverLogger.WriteWarning("apple-support", "winget_unavailable",
+                ("operation", operationId));
+            return null;
+        }
+
+        var timer = Stopwatch.StartNew();
+        DriverLogger.WriteEvent("apple-support", "winget_install_start",
+            ("operation", operationId),
+            ("product", DriverConstants.AppleStoreProductId),
+            ("source", DriverConstants.AppleStoreSource));
+        try
+        {
+            var result = await RunCapturedProcessAsync(winget,
+                BuildWingetInstallArguments(), TimeSpan.FromMinutes(20));
+            var fields = new (string Key, object? Value)[]
+            {
+                ("operation", operationId), ("exit_code", result.ExitCode),
+                ("elapsed_ms", timer.ElapsedMilliseconds),
+                ("output", LimitOutput(result.CombinedOutput)),
+            };
+            if (result.ExitCode == 0)
+                DriverLogger.WriteEvent("apple-support", "winget_install_exit", fields);
+            else
+                DriverLogger.WriteWarning("apple-support", "winget_install_exit", fields);
+            return result;
+        }
+        catch (Exception error)
+        {
+            DriverLogger.WriteException("apple-support", "winget_install_failed", error,
+                ("operation", operationId), ("elapsed_ms", timer.ElapsedMilliseconds));
+            return new ProcessResult(-1, string.Empty, error.Message);
+        }
+    }
+
+    private static async Task<ProcessResult> RunCapturedProcessAsync(string executable,
+        IReadOnlyList<string> arguments, TimeSpan timeout)
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = executable,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("The package manager did not start.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        using var cancellation = new CancellationTokenSource(timeout);
+        try
+        {
+            await process.WaitForExitAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch { }
+            throw new TimeoutException("Apple Devices installation timed out.");
+        }
+        return new ProcessResult(process.ExitCode, await standardOutput, await standardError);
     }
 
     private static string? FindOfflineMsi()

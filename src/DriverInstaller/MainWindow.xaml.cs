@@ -15,7 +15,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DriverOperationClient _operations = new();
     private readonly AppleSupportInstaller _appleInstaller;
     private AppleDeviceRecord? _selectedDevice;
-    private AppleSupportStatus _appleSupport = new(false, false, null, L("CheckPending"));
+    private AppleSupportStatus _appleSupport = new(false, false, null, false, null,
+        L("CheckPending"));
     private LibUsbStackStatus _libUsb = new(false, false, false, null, L("CheckPending"));
     private bool _isBusy;
     private bool _isAdvancedMode;

@@ -157,6 +157,12 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
+    <Content Include="..\..\docs\DRIVER_DEPENDENCIES.md">
+      <Link>DRIVER_DEPENDENCIES.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
     <Content Include="tools\updater\Apply-ZipUpdate.ps1">
       <Link>tools\updater\Apply-ZipUpdate.ps1</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

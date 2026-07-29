@@ -174,6 +174,10 @@ try {
             dotnet run --no-restore --project $Project --configuration $Configuration
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $Project ($LASTEXITCODE)" }
         }
+        & (Join-Path $Root 'scripts\test_vc_runtime_version.ps1') | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "VC runtime version parser tests failed: $LASTEXITCODE"
+        }
     }
 
     if (Test-Path 'src/App/iPhoneMirror.App.csproj') {
@@ -283,6 +287,7 @@ try {
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
             'CHANGELOG.md',
+            'DRIVER_DEPENDENCIES.md',
             'tools\updater\Apply-ZipUpdate.ps1',
             'licenses\libusb-COPYING.txt',
             'licenses\libusb-win32-COPYING-LGPL.txt',
@@ -378,7 +383,8 @@ try {
             'vcruntime140_1.dll',
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
-            'CHANGELOG.md'
+            'CHANGELOG.md',
+            'DRIVER_DEPENDENCIES.md'
         )
         $unexpectedFiles = @(Get-ChildItem -LiteralPath $MainPublishRoot -File | Where-Object {
             $_.Name -notin $allowedTopLevelFiles

@@ -46,8 +46,9 @@ remaining signed runtime and kernel-driver payload under
 
 The driver manager does not copy proprietary Aisi binaries. Apple USB support
 is installed from a signed offline AppleMobileDeviceSupport MSI when available,
-or from Apple's official iTunes installer when the user authorizes that fallback.
-Apple software is not redistributed in this repository.
+from the Apple Devices Microsoft Store product through Windows Package Manager,
+or from Apple's official HTTPS iTunes installer as a compatibility fallback.
+Apple software is not redistributed in this repository or its release assets.
 
 ## Microsoft Visual C++ runtime
 

@@ -5,6 +5,26 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Install Apple Devices non-interactively from its pinned Microsoft Store
+  product ID through `winget` when Apple USB support is completely absent.
+- Audit the Apple USB driver package separately from Apple Mobile Device
+  Service, recognizing modern `appleusb.inf` and legacy `usbaapl64.inf` /
+  `usbaapl.inf` packages before reporting the wired environment as ready.
+
+### Changed
+
+- Keep the Apple-signed desktop iTunes package as an official HTTPS fallback
+  when Microsoft Store or `winget` is unavailable, while continuing to prefer
+  a trusted offline AppleMobileDeviceSupport MSI when supplied by the user.
+
+### Fixed
+
+- Accept Microsoft VC Runtime file versions with runner-specific suffixes such
+  as `14.29.30157.0 built by: cloudtest`, fixing the Windows GitHub Actions
+  publish failure while retaining Microsoft signature and copy verification.
+
 ## [1.4.2] - 2026-07-29
 
 ### Added

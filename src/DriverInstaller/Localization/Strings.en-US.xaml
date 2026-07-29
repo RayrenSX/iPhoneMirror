@@ -100,6 +100,8 @@ Only this device's libusb0 filter is changed. Apple's official driver is not rep
     <system:String x:Key="DeviceModelFormat">Model {0}</system:String>
     <system:String x:Key="AppleServiceRunning">Apple USB service is running</system:String>
     <system:String x:Key="AppleServiceStopped">Apple USB support is installed but the service is stopped</system:String>
+    <system:String x:Key="AppleServiceMissing">The Apple USB driver is installed, but Apple Mobile Device Service is missing</system:String>
+    <system:String x:Key="AppleUsbDriverMissing">Apple Mobile Device Service is installed, but the Apple USB driver package is missing</system:String>
     <system:String x:Key="AppleSupportMissing">Apple Devices or Apple Mobile Device Support was not found</system:String>
     <system:String x:Key="LibUsbMissing">The libusb0 shared service is not installed</system:String>
     <system:String x:Key="LibUsbFilesMismatch">libusb0 files are missing or do not match the trusted version</system:String>
@@ -123,6 +125,6 @@ Log: {2}</system:String>
     <system:String x:Key="AppleInstallerFailed">The official Apple installer failed with exit code {0}.
 {1}
 Log: {2}</system:String>
-    <system:String x:Key="AppleServiceNotReady">Apple USB support is installed, but Apple Mobile Device Service is not ready. Connect and unlock the iPhone, then check again.
+    <system:String x:Key="AppleServiceNotReady">Apple USB support is incomplete: the service or Apple USB driver package is not ready. Connect and unlock the iPhone, then check again.
 Log: {0}</system:String>
 </ResourceDictionary>

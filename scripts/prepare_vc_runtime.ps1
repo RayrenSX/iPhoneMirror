@@ -6,6 +6,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ScriptRoot 'VcRuntimeVersion.ps1')
 $RequiredRuntimeFiles = @(
     'msvcp140.dll',
     'vcruntime140.dll',
@@ -77,7 +79,7 @@ function Find-VcRuntimeDirectory {
                     (Join-Path $crtDirectory.FullName 'vcruntime140.dll')
                 [PSCustomObject]@{
                     Directory = $crtDirectory.FullName
-                    Version = [Version]$runtime.VersionInfo.FileVersion
+                    Version = ConvertTo-VcRuntimeVersion $runtime.VersionInfo.FileVersion
                 }
             }
         }

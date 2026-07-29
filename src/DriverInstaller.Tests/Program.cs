@@ -343,6 +343,60 @@ Run("read-only device catalog", () =>
 
 Run("winget discovery is side-effect free", () => _ = AppleSupportInstaller.FindWinget());
 
+Run("Apple support requires both service and USB driver", () =>
+{
+    False(new AppleSupportStatus(true, true, "Apple Mobile Device Service",
+        false, null, string.Empty).Ready);
+    False(new AppleSupportStatus(false, false, null,
+        true, "appleusb.inf", string.Empty).Ready);
+    True(new AppleSupportStatus(true, true, "Apple Mobile Device Service",
+        true, "appleusb.inf", string.Empty).Ready);
+    Equal("AppleUsbDriverMissing",
+        DeviceCatalog.ResolveAppleSupportDiagnosticKey(true, true, false));
+    Equal("AppleServiceMissing",
+        DeviceCatalog.ResolveAppleSupportDiagnosticKey(false, false, true));
+});
+
+Run("Apple USB driver package detection", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(root);
+        var recoveryOnly = Path.Combine(root, "applekis.inf_amd64_test");
+        Directory.CreateDirectory(recoveryOnly);
+        File.WriteAllText(Path.Combine(recoveryOnly, "applekis.inf"), string.Empty);
+        Equal<string?>(null, DeviceCatalog.FindAppleUsbDriverPackage(root));
+
+        var modern = Path.Combine(root, "appleusb.inf_amd64_test");
+        Directory.CreateDirectory(modern);
+        File.WriteAllText(Path.Combine(modern, "appleusb.inf"), string.Empty);
+        Equal("appleusb.inf", DeviceCatalog.FindAppleUsbDriverPackage(root));
+
+        Directory.Delete(modern, recursive: true);
+        var desktop = Path.Combine(root, "usbaapl64.inf_amd64_test");
+        Directory.CreateDirectory(desktop);
+        File.WriteAllText(Path.Combine(desktop, "usbaapl64.inf"), string.Empty);
+        Equal("usbaapl64.inf", DeviceCatalog.FindAppleUsbDriverPackage(root));
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+});
+
+Run("winget Apple Devices command is pinned to Microsoft Store", () =>
+{
+    var arguments = AppleSupportInstaller.BuildWingetInstallArguments();
+    True(arguments.Contains(DriverConstants.AppleStoreProductId));
+    True(arguments.Contains(DriverConstants.AppleStoreSource));
+    True(arguments.Contains("--exact"));
+    True(arguments.Contains("--accept-source-agreements"));
+    True(arguments.Contains("--accept-package-agreements"));
+    True(arguments.Contains("--disable-interactivity"));
+});
+
 if (failures.Count != 0)
 {
     Console.Error.WriteLine(string.Join(Environment.NewLine, failures));
