@@ -42,10 +42,50 @@ if ($ArchiveValid) {
 }
 if (-not $ArchiveValid) {
     $DownloadPath = "$ArchivePath.download"
-    if (Test-Path -LiteralPath $DownloadPath) {
-        Remove-Item -LiteralPath $DownloadPath -Force
+    $MaximumAttempts = 4
+    $RetryDelaysSeconds = @(5, 15, 30)
+    for ($Attempt = 1; $Attempt -le $MaximumAttempts; $Attempt++) {
+        if (Test-Path -LiteralPath $DownloadPath) {
+            Remove-Item -LiteralPath $DownloadPath -Force
+        }
+
+        try {
+            Write-Host "Downloading FFmpeg runtime (attempt $Attempt of $MaximumAttempts)..."
+            Invoke-WebRequest -Uri $DownloadUrl -OutFile $DownloadPath `
+                -UseBasicParsing -TimeoutSec 300
+            break
+        }
+        catch {
+            if (Test-Path -LiteralPath $DownloadPath) {
+                Remove-Item -LiteralPath $DownloadPath -Force
+            }
+
+            $StatusCode = $null
+            if ($null -ne $_.Exception.Response -and
+                $null -ne $_.Exception.Response.StatusCode) {
+                $StatusCode = [int]$_.Exception.Response.StatusCode
+            }
+            $IsTransientFailure = $null -eq $StatusCode -or
+                $StatusCode -eq 408 -or
+                $StatusCode -eq 429 -or
+                $StatusCode -ge 500
+
+            if (-not $IsTransientFailure -or $Attempt -eq $MaximumAttempts) {
+                throw
+            }
+
+            $DelaySeconds = $RetryDelaysSeconds[$Attempt - 1]
+            $FailureDescription = if ($null -eq $StatusCode) {
+                $_.Exception.Message
+            }
+            else {
+                "HTTP $StatusCode"
+            }
+            Write-Warning "FFmpeg download failed with $FailureDescription. Retrying in $DelaySeconds seconds."
+            Start-Sleep -Seconds $DelaySeconds
+        }
     }
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $DownloadPath -UseBasicParsing
+
     $ActualHash = (Get-FileHash -LiteralPath $DownloadPath -Algorithm SHA256).Hash
     if ($ActualHash -ne $ExpectedSha256) {
         Remove-Item -LiteralPath $DownloadPath -Force
