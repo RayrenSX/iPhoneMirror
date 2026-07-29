@@ -5,6 +5,8 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-07-29
+
 ### Added
 
 - Install Apple Devices non-interactively from its pinned Microsoft Store
@@ -582,7 +584,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.3...HEAD
+[1.4.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.3.0...v1.4.0

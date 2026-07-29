@@ -848,7 +848,7 @@ Equal(false, diagnosticEntry.Contains("private-token",
 Equal(1, diagnosticEntry.Count(character => character == '\n'),
     "persistent diagnostic entry remains one physical line");
 Equal(true, DiagnosticLogger.FormatEntry("INFO", "test", "version",
-        ("version", "1.4.2.0")).Contains("version=1.4.2.0",
+        ("version", "1.4.3.0")).Contains("version=1.4.3.0",
         StringComparison.Ordinal),
     "persistent diagnostics preserve an application version");
 var diagnosticDirectory = Path.Combine(Path.GetTempPath(),
