@@ -444,7 +444,7 @@ void test_configured_media_source(FramePublisher& publisher) {
                      "read configured sample time");
             if (frame != 0)
                 timestamps_are_monotonic = timestamps_are_monotonic &&
-                    sample_time - previous_time == duration;
+                    sample_time - previous_time >= duration;
             previous_time = sample_time;
         }
         if (sample_has_nonblack_luma(sample.Get(), 998, 2160))

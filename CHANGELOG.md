@@ -26,6 +26,8 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ### Fixed
 
+- Make the virtual-camera timeline stress test accept intentional real-time
+  catch-up gaps while still rejecting overlapping or non-monotonic samples.
 - Accept Microsoft VC Runtime file versions with runner-specific suffixes such
   as `14.29.30157.0 built by: cloudtest`, fixing the Windows GitHub Actions
   publish failure while retaining Microsoft signature and copy verification.
