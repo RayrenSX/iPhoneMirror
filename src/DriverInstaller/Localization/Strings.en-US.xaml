@@ -7,7 +7,7 @@
     <system:String x:Key="Refresh">Refresh</system:String>
     <system:String x:Key="AppleUsbEnvironment">Apple USB environment</system:String>
     <system:String x:Key="CaptureFilterDriver">Capture filter driver</system:String>
-    <system:String x:Key="InstallAppleDevices">Install Apple Devices</system:String>
+    <system:String x:Key="InstallAppleDevices">Install Apple USB support</system:String>
     <system:String x:Key="PrepareTitle">Prepare mirroring environment</system:String>
     <system:String x:Key="PrepareDescription">Automatically detect and install Apple USB support, the shared capture driver, and the capture filter for the connected iPhone.</system:String>
     <system:String x:Key="InstallAll">Install all drivers</system:String>
@@ -26,6 +26,14 @@
     <system:String x:Key="Installed">Installed</system:String>
     <system:String x:Key="CheckPending">Checking</system:String>
     <system:String x:Key="AppleSupportPreparing">Preparing Apple USB support...</system:String>
+    <system:String x:Key="AppleSupportStartingService">Starting Apple Mobile Device Service...</system:String>
+    <system:String x:Key="AppleSupportInstallingStore">Installing the Apple USB driver from Microsoft Store...</system:String>
+    <system:String x:Key="AppleSupportDownloadingCompatibility">Downloading the Apple USB driver and service compatibility component...</system:String>
+    <system:String x:Key="AppleSupportDownloadProgress">Downloading the Apple service component: {0}% ({1:F1}/{2:F1} MB)</system:String>
+    <system:String x:Key="AppleSupportDownloadProgressUnknown">Downloading the Apple service component: {0:F1} MB downloaded</system:String>
+    <system:String x:Key="AppleSupportExtractingCompatibility">Extracting the service component from the official Apple installer...</system:String>
+    <system:String x:Key="AppleSupportInstallingCompatibility">Installing the Apple Mobile Device Service compatibility component...</system:String>
+    <system:String x:Key="AppleSupportVerifying">Verifying the Apple USB driver and service...</system:String>
     <system:String x:Key="AppleSupportReady">Apple USB support is ready.</system:String>
     <system:String x:Key="RequiredAppleInstallTitle">Apple installation required</system:String>
     <system:String x:Key="RequiredAppleInstallBody">Complete this step, then click Recheck. The tool will not operate the store window for you.</system:String>
@@ -51,6 +59,14 @@
     <system:String x:Key="Cancel">Cancel</system:String>
     <system:String x:Key="Continue">Continue</system:String>
     <system:String x:Key="Acknowledge">Got it</system:String>
+    <system:String x:Key="DeviceTrustTitle">Confirm device trust</system:String>
+    <system:String x:Key="DeviceTrustAction">Unlock the iPhone or iPad and check its screen</system:String>
+    <system:String x:Key="DeviceTrustExplanation">Windows has changed a driver and may detect the device again. If “Trust This Computer?” appears on the device, tap Trust and enter the device passcode.</system:String>
+    <system:String x:Key="DeviceTrustQuestion">What happened on the device?</system:String>
+    <system:String x:Key="DeviceTrustConfirmed">The prompt appeared and I tapped Trust</system:String>
+    <system:String x:Key="DeviceTrustNoPrompt">No prompt appeared (this computer was already trusted)</system:String>
+    <system:String x:Key="DeviceTrustNotHandled">Not handled yet</system:String>
+    <system:String x:Key="DeviceTrustPending">Driver changes are complete. Unlock the device and tap Trust before mirroring.</system:String>
     <system:String x:Key="RequiredActionTitle">Action required</system:String>
     <system:String x:Key="SimpleNoDevice">Connect an iPhone and click the button. The tool will detect and install what is missing.</system:String>
     <system:String x:Key="LogSuffix">Log: {0}</system:String>
@@ -120,11 +136,14 @@ Only this device's libusb0 filter is changed. Apple's official driver is not rep
     <system:String x:Key="OfflineMsiFailed">The offline AppleMobileDeviceSupport MSI failed with exit code {0}.
 {1}
 Log: {2}</system:String>
-    <system:String x:Key="AppleDownloadUnavailable">The official Apple installer could not be obtained automatically. The official installation page was opened.</system:String>
+    <system:String x:Key="AppleDownloadUnavailable">The official Apple installer could not be obtained automatically. The Apple Devices page was opened in Microsoft Store.</system:String>
+    <system:String x:Key="AppleCompatibilityDownloadUnavailable">The missing Apple Mobile Device Service compatibility component could not be downloaded. Check the network and retry; details were written to the log.</system:String>
     <system:String x:Key="AppleSignatureInvalid">The Apple installer failed Windows signature validation and was not executed.</system:String>
-    <system:String x:Key="AppleInstallerFailed">The official Apple installer failed with exit code {0}.
+    <system:String x:Key="AppleInstallerFailed">The Apple Mobile Device Support component failed with exit code {0}.
 {1}
 Log: {2}</system:String>
+    <system:String x:Key="AppleRestartRequired">Apple Mobile Device Support was installed, but Windows must restart to finish registering the driver and service. Restart the PC, then check again.
+Log: {0}</system:String>
     <system:String x:Key="AppleServiceNotReady">Apple USB support is incomplete: the service or Apple USB driver package is not ready. Connect and unlock the iPhone, then check again.
 Log: {0}</system:String>
 </ResourceDictionary>

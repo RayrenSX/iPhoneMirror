@@ -7,7 +7,7 @@
     <system:String x:Key="Refresh">刷新</system:String>
     <system:String x:Key="AppleUsbEnvironment">Apple USB 环境</system:String>
     <system:String x:Key="CaptureFilterDriver">采集过滤驱动</system:String>
-    <system:String x:Key="InstallAppleDevices">安装 Apple Devices</system:String>
+    <system:String x:Key="InstallAppleDevices">安装 Apple USB 支持</system:String>
     <system:String x:Key="PrepareTitle">一键准备投屏环境</system:String>
     <system:String x:Key="PrepareDescription">自动检测并安装 Apple USB 支持、共享采集驱动，以及当前已连接 iPhone 的采集过滤器。</system:String>
     <system:String x:Key="InstallAll">一键安装全部驱动</system:String>
@@ -26,6 +26,14 @@
     <system:String x:Key="Installed">已安装</system:String>
     <system:String x:Key="CheckPending">正在检查</system:String>
     <system:String x:Key="AppleSupportPreparing">正在准备 Apple USB 支持…</system:String>
+    <system:String x:Key="AppleSupportStartingService">正在启动 Apple Mobile Device Service…</system:String>
+    <system:String x:Key="AppleSupportInstallingStore">正在从 Microsoft Store 安装 Apple USB 驱动…</system:String>
+    <system:String x:Key="AppleSupportDownloadingCompatibility">正在下载 Apple USB 驱动与服务兼容组件…</system:String>
+    <system:String x:Key="AppleSupportDownloadProgress">正在下载 Apple 服务组件：{0}%（{1:F1}/{2:F1} MB）</system:String>
+    <system:String x:Key="AppleSupportDownloadProgressUnknown">正在下载 Apple 服务组件：已下载 {0:F1} MB</system:String>
+    <system:String x:Key="AppleSupportExtractingCompatibility">正在从 Apple 官方安装包提取服务组件…</system:String>
+    <system:String x:Key="AppleSupportInstallingCompatibility">正在安装 Apple Mobile Device Service 兼容组件…</system:String>
+    <system:String x:Key="AppleSupportVerifying">正在验证 Apple USB 驱动和服务…</system:String>
     <system:String x:Key="AppleSupportReady">Apple USB 支持已就绪。</system:String>
     <system:String x:Key="RequiredAppleInstallTitle">需要完成 Apple 官方安装</system:String>
     <system:String x:Key="RequiredAppleInstallBody">请完成当前这一步后点击“重新检测”。工具不会自动操作商店窗口。</system:String>
@@ -51,6 +59,14 @@
     <system:String x:Key="Cancel">取消</system:String>
     <system:String x:Key="Continue">继续</system:String>
     <system:String x:Key="Acknowledge">知道了</system:String>
+    <system:String x:Key="DeviceTrustTitle">确认设备信任状态</system:String>
+    <system:String x:Key="DeviceTrustAction">请解锁 iPhone 或 iPad，并查看设备屏幕</system:String>
+    <system:String x:Key="DeviceTrustExplanation">Windows 刚刚变更了驱动，可能会重新识别设备。如果设备出现“要信任此电脑吗？”，请点击“信任”并输入设备密码。</system:String>
+    <system:String x:Key="DeviceTrustQuestion">设备上出现了什么情况？</system:String>
+    <system:String x:Key="DeviceTrustConfirmed">出现了提示，我已点击“信任”</system:String>
+    <system:String x:Key="DeviceTrustNoPrompt">没有出现提示（此前已信任此电脑）</system:String>
+    <system:String x:Key="DeviceTrustNotHandled">尚未处理</system:String>
+    <system:String x:Key="DeviceTrustPending">驱动变更已完成。投屏前请解锁设备，并在设备上点击“信任”。</system:String>
     <system:String x:Key="RequiredActionTitle">需要你的操作</system:String>
     <system:String x:Key="SimpleNoDevice">连接 iPhone 后点击按钮，工具会自动完成检测和安装。</system:String>
     <system:String x:Key="LogSuffix">日志：{0}</system:String>
@@ -120,11 +136,14 @@
     <system:String x:Key="OfflineMsiFailed">离线 AppleMobileDeviceSupport MSI 安装失败，退出代码 {0}。
 {1}
 日志：{2}</system:String>
-    <system:String x:Key="AppleDownloadUnavailable">无法自动获得 Apple 官方安装包，已打开 Apple 官方安装入口。</system:String>
+    <system:String x:Key="AppleDownloadUnavailable">无法自动获得 Apple 官方安装包，已打开 Microsoft Store 中的 Apple Devices 页面。</system:String>
+    <system:String x:Key="AppleCompatibilityDownloadUnavailable">无法下载缺失的 Apple Mobile Device Service 兼容组件。请检查网络后重试，详细原因已写入日志。</system:String>
     <system:String x:Key="AppleSignatureInvalid">Apple 安装包签名无法通过 Windows 验证，已拒绝执行。</system:String>
-    <system:String x:Key="AppleInstallerFailed">Apple 官方安装包执行失败，退出代码 {0}。
+    <system:String x:Key="AppleInstallerFailed">Apple Mobile Device Support 组件安装失败，退出代码 {0}。
 {1}
 日志：{2}</system:String>
+    <system:String x:Key="AppleRestartRequired">Apple Mobile Device Support 已安装，但 Windows 需要重启才能完成驱动和服务注册。请重启电脑后重新检测。
+日志：{0}</system:String>
     <system:String x:Key="AppleServiceNotReady">Apple USB 支持不完整：服务或 Apple USB 驱动包尚未就绪。请连接并解锁 iPhone 后重新检测。
 日志：{0}</system:String>
 </ResourceDictionary>

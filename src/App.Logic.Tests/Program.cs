@@ -78,6 +78,27 @@ foreach (var localizationPath in Directory.GetFiles(
         $"no-PING recovery recommends an original or MFi cable in {Path.GetFileName(localizationPath)}");
 }
 
+var captureRecoveryWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+    "..", "..", "..", "..", "App", "Windows", "CaptureRecoveryWindow.xaml"));
+var captureRecoveryWindow = XDocument.Load(captureRecoveryWindowPath);
+foreach (var actionKey in new[]
+         {
+             "CaptureNoPingRestartAction", "CaptureNoPingCableAction",
+         })
+{
+    var action = captureRecoveryWindow.Descendants()
+        .SingleOrDefault(element => string.Equals((string?)element.Attribute("Text"),
+            $"{{DynamicResource {actionKey}}}", StringComparison.Ordinal));
+    Equal(true, action is not null, $"no-PING window contains {actionKey}");
+    Equal(true, double.TryParse((string?)action?.Attribute("FontSize"),
+                   System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.InvariantCulture, out var fontSize) &&
+               fontSize >= 18,
+        $"{actionKey} remains visually prominent");
+    Equal("SemiBold", (string?)action?.Attribute("FontWeight"),
+        $"{actionKey} remains emphasized");
+}
+
 var mainWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "MainWindow.xaml"));
 var mainWindow = XDocument.Load(mainWindowPath);

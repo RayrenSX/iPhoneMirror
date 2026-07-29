@@ -129,8 +129,12 @@
     <system:String x:Key="CaptureStopped">Mirroring stopped</system:String>
     <system:String x:Key="CaptureError">Mirroring error</system:String>
     <system:String x:Key="CaptureErrorFormat">Mirroring error: {0}</system:String>
-    <system:String x:Key="CaptureNoPingTitle">iPhone mirroring connection timed out</system:String>
-    <system:String x:Key="CaptureNoPingRecovery">The iPhone is connected, but it did not respond to the mirroring handshake.&#x0A;&#x0A;Restart the iPhone, then reconnect it with an Apple original or MFi-certified cable and try again.&#x0A;&#x0A;Keep the iPhone unlocked while retrying.</system:String>
+    <system:String x:Key="CaptureNoPingTitle">iPhone/iPad mirroring connection timed out</system:String>
+    <system:String x:Key="CaptureNoPingRecovery">The device is connected, but it did not respond to the mirroring handshake.&#x0A;&#x0A;Restart the iPhone or iPad, then reconnect it with an Apple original or MFi-certified cable and try again.&#x0A;&#x0A;Keep the device unlocked while retrying.</system:String>
+    <system:String x:Key="CaptureNoPingSummary">The device is connected, but it did not respond to the mirroring handshake. Complete these two steps before retrying:</system:String>
+    <system:String x:Key="CaptureNoPingRestartAction">Restart the iPhone or iPad</system:String>
+    <system:String x:Key="CaptureNoPingCableAction">Replace the cable with an Apple original or MFi-certified cable</system:String>
+    <system:String x:Key="CaptureNoPingUnlockHint">Keep the device unlocked when reconnecting and starting mirroring again.</system:String>
     <system:String x:Key="StartRequested">Mirroring start requested</system:String>
     <system:String x:Key="StartFailedFormat">Could not start mirroring: {0}</system:String>
     <system:String x:Key="StopSessionReleased">Mirroring stopped and session resources were released</system:String>

@@ -78,7 +78,7 @@ internal sealed class DeviceCatalog
             string.Equals(device.Serial, DriverConstants.NormalizeSerial(serial),
                 StringComparison.OrdinalIgnoreCase));
 
-    internal AppleSupportStatus InspectAppleSupport()
+    internal AppleSupportStatus InspectAppleSupport(bool writeLog = true)
     {
         string? installedService = null;
         var serviceRunning = false;
@@ -108,10 +108,13 @@ internal sealed class DeviceCatalog
             ("usb_driver_installed", result.UsbDriverInstalled),
             ("usb_driver_inf", result.UsbDriverInf),
         };
-        if (result.Ready)
-            DriverLogger.WriteEvent("device-catalog", "apple_support_status", fields);
-        else
-            DriverLogger.WriteWarning("device-catalog", "apple_support_status", fields);
+        if (writeLog)
+        {
+            if (result.Ready)
+                DriverLogger.WriteEvent("device-catalog", "apple_support_status", fields);
+            else
+                DriverLogger.WriteWarning("device-catalog", "apple_support_status", fields);
+        }
         return result;
     }
 

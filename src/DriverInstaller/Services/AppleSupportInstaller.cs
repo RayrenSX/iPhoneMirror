@@ -10,17 +10,26 @@ internal sealed record AppleSupportInstallResult(
     bool RequiresStoreInteraction,
     string Message);
 
+internal enum ServiceStartOutcome
+{
+    Started,
+    Cancelled,
+    Failed,
+}
+
 /// <summary>
 /// Installs Apple USB support without requiring the user to open Apple Devices.
-/// An offline AppleMobileDeviceSupport MSI is preferred, then Apple Devices is
-/// installed from Microsoft Store through winget. The official Apple iTunes
-/// installer remains the network fallback. No Apple package is bundled.
+/// An offline AppleMobileDeviceSupport MSI is preferred. Apple Devices is
+/// installed from Microsoft Store only when the Apple USB INF is missing; the
+/// official Apple package supplies the missing service MSI. No Apple package
+/// is bundled.
 /// </summary>
 internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
 {
     private static readonly HttpClient Http = CreateHttpClient();
 
-    internal async Task<AppleSupportInstallResult> InstallAsync()
+    internal async Task<AppleSupportInstallResult> InstallAsync(
+        IProgress<string>? progress = null)
     {
         var operationId = Guid.NewGuid().ToString("N");
         var timer = Stopwatch.StartNew();
@@ -36,29 +45,41 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 ("operation", operationId), ("elapsed_ms", timer.ElapsedMilliseconds));
             return new AppleSupportInstallResult(true, false, current.Diagnostic);
         }
-        if (current.ServiceInstalled && current.ServiceName is not null &&
-            await StartServiceElevatedAsync(current.ServiceName, operationId))
+        if (ShouldRecoverExistingService(current))
         {
-            current = await WaitForAppleSupportAsync(TimeSpan.FromSeconds(30), operationId);
-            if (current.Ready)
+            ReportProgress(progress, "AppleSupportStartingService");
+            var startOutcome = await StartServiceElevatedAsync(
+                current.ServiceName!, operationId);
+            if (startOutcome == ServiceStartOutcome.Cancelled)
+                return new AppleSupportInstallResult(false, false,
+                    DriverLocalization.Get("UacCancelled"));
+            if (startOutcome == ServiceStartOutcome.Started)
             {
-                DriverLogger.WriteEvent("apple-support", "service_recovered",
-                    ("operation", operationId), ("elapsed_ms", timer.ElapsedMilliseconds));
-                return new AppleSupportInstallResult(true, false, current.Diagnostic);
+                current = await WaitForAppleSupportAsync(TimeSpan.FromSeconds(30), operationId);
+                if (current.Ready)
+                {
+                    DriverLogger.WriteEvent("apple-support", "service_recovered",
+                        ("operation", operationId),
+                        ("elapsed_ms", timer.ElapsedMilliseconds));
+                    return new AppleSupportInstallResult(true, false, current.Diagnostic);
+                }
             }
         }
 
         DriverPayload.CreateSafeDirectory(DriverConstants.PackagesRoot);
         var packageLog = Path.Combine(DriverConstants.PackagesRoot, "apple-support-install.log");
+        int? installerExitCode = null;
         var offlineMsi = FindOfflineMsi();
         if (offlineMsi is not null)
         {
+            ReportProgress(progress, "AppleSupportInstallingCompatibility");
             var packageHash = DriverPayload.ComputeHash(offlineMsi);
             DriverLogger.WriteEvent("apple-support", "offline_package_selected",
                 ("operation", operationId), ("package", DriverLogger.DescribePath(offlineMsi)),
                 ("signature", "trusted"),
                 ("sha256", DriverLogger.HashTag(packageHash)));
             var result = await RunMsiAsync(offlineMsi, packageHash, packageLog, operationId);
+            installerExitCode = result.ExitCode;
             if (!IsInstallerSuccess(result.ExitCode))
             {
                 DriverLogger.WriteError("apple-support", "offline_install_failed",
@@ -72,11 +93,27 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         }
         else
         {
-            var wingetResult = await TryInstallAppleDevicesWithWingetAsync(operationId);
+            ProcessResult? wingetResult = null;
+            if (ShouldInstallAppleDevicesFromStore(current))
+            {
+                ReportProgress(progress, "AppleSupportInstallingStore");
+                wingetResult = await TryInstallAppleDevicesWithWingetAsync(operationId);
+            }
+            else
+            {
+                DriverLogger.WriteEvent("apple-support", "store_install_skipped",
+                    ("operation", operationId),
+                    ("reason", "usb_driver_present_service_not_ready"),
+                    ("service_installed", current.ServiceInstalled),
+                    ("service_running", current.ServiceRunning),
+                    ("usb_driver_inf", current.UsbDriverInf));
+            }
+
             if (wingetResult is not null && wingetResult.ExitCode == 0)
             {
+                ReportProgress(progress, "AppleSupportVerifying");
                 var storeReady = await WaitAndRecoverAppleSupportAsync(
-                    TimeSpan.FromMinutes(3), operationId);
+                    TimeSpan.FromSeconds(20), operationId);
                 if (storeReady.Ready)
                 {
                     DriverLogger.WriteEvent("apple-support", "store_install_completed",
@@ -92,24 +129,34 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                     ("service_running", storeReady.ServiceRunning),
                     ("usb_driver_installed", storeReady.UsbDriverInstalled),
                     ("usb_driver_inf", storeReady.UsbDriverInf));
+                current = storeReady;
             }
 
             var setup = FindLocalItunesSetup();
             try
             {
+                ReportProgress(progress, setup is null
+                    ? "AppleSupportDownloadingCompatibility"
+                    : "AppleSupportInstallingCompatibility");
                 DriverLogger.WriteEvent("apple-support", "itunes_fallback_selected",
                     ("operation", operationId), ("local_package", setup is not null),
                     ("winget_attempted", wingetResult is not null),
                     ("winget_exit_code", wingetResult?.ExitCode));
-                setup ??= await DownloadOfficialItunesAsync(operationId);
+                setup ??= await DownloadOfficialItunesAsync(operationId, progress);
             }
             catch (Exception error)
             {
                 DriverLogger.WriteException("apple-support", "package_acquisition_failed", error,
                     ("operation", operationId), ("elapsed_ms", timer.ElapsedMilliseconds));
-                OpenMicrosoftStore();
-                return new AppleSupportInstallResult(false, true,
-                    DriverLocalization.Get("AppleDownloadUnavailable") + "\n" +
+                var storeCanSupplyMissingDriver =
+                    ShouldInstallAppleDevicesFromStore(current);
+                if (storeCanSupplyMissingDriver) OpenMicrosoftStore();
+                var messageKey = storeCanSupplyMissingDriver
+                    ? "AppleDownloadUnavailable"
+                    : "AppleCompatibilityDownloadUnavailable";
+                return new AppleSupportInstallResult(false,
+                    storeCanSupplyMissingDriver,
+                    DriverLocalization.Get(messageKey) + "\n" +
                     DriverLogger.Sanitize(error.Message));
             }
 
@@ -123,21 +170,23 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 return new AppleSupportInstallResult(false, false,
                     DriverLocalization.Get("AppleSignatureInvalid"));
 
-            var result = await RunElevatedAsync(setup, ["/quiet", "/norestart"],
-                TimeSpan.FromMinutes(20), operationId, "itunes-installer", setup,
-                packageHash);
+            ReportProgress(progress, "AppleSupportExtractingCompatibility");
+            var result = await ExtractAndInstallMobileDeviceSupportAsync(setup,
+                packageHash, packageLog, operationId, progress);
+            installerExitCode = result.ExitCode;
             if (!IsInstallerSuccess(result.ExitCode))
             {
-                DriverLogger.WriteError("apple-support", "itunes_install_failed",
+                DriverLogger.WriteError("apple-support", "mobile_device_support_install_failed",
                     ("operation", operationId), ("exit_code", result.ExitCode),
                     ("elapsed_ms", timer.ElapsedMilliseconds),
                     ("output", LimitOutput(result.CombinedOutput)));
                 return new AppleSupportInstallResult(false, false,
                     DriverLocalization.Format("AppleInstallerFailed", result.ExitCode,
-                        LimitOutput(result.CombinedOutput), DriverLogger.Path));
+                        LimitOutput(result.CombinedOutput), packageLog));
             }
         }
 
+        ReportProgress(progress, "AppleSupportVerifying");
         var ready = await WaitAndRecoverAppleSupportAsync(TimeSpan.FromSeconds(90),
             operationId);
         if (ready.Ready)
@@ -155,6 +204,13 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             ("usb_driver_installed", ready.UsbDriverInstalled),
             ("usb_driver_inf", ready.UsbDriverInf),
             ("elapsed_ms", timer.ElapsedMilliseconds));
+        if (installerExitCode is { } exitCode && IsRestartRequired(exitCode))
+        {
+            DriverLogger.WriteWarning("apple-support", "install_restart_required",
+                ("operation", operationId), ("exit_code", exitCode));
+            return new AppleSupportInstallResult(false, false,
+                DriverLocalization.Format("AppleRestartRequired", packageLog));
+        }
         return new AppleSupportInstallResult(false, false,
             DriverLocalization.Format("AppleServiceNotReady", packageLog));
     }
@@ -168,16 +224,18 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
     }
 
     internal async Task<AppleSupportStatus> WaitForAppleSupportAsync(TimeSpan timeout,
-        string? operationId = null)
+        string? operationId = null, bool returnWhenServiceCanBeRecovered = false)
     {
         var timer = Stopwatch.StartNew();
         var deadline = DateTime.UtcNow + timeout;
         var polls = 0;
+        DriverLogger.WriteEvent("apple-support", "wait_start",
+            ("operation", operationId), ("timeout_ms", timeout.TotalMilliseconds));
         AppleSupportStatus status;
         do
         {
             polls++;
-            status = catalog.InspectAppleSupport();
+            status = catalog.InspectAppleSupport(writeLog: false);
             if (status.Ready)
             {
                 DriverLogger.WriteEvent("apple-support", "wait_ready",
@@ -185,7 +243,16 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                     ("elapsed_ms", timer.ElapsedMilliseconds));
                 return status;
             }
-            await Task.Delay(500);
+            if (returnWhenServiceCanBeRecovered &&
+                ShouldRecoverExistingService(status))
+            {
+                DriverLogger.WriteEvent("apple-support", "wait_service_recoverable",
+                    ("operation", operationId), ("polls", polls),
+                    ("service", status.ServiceName),
+                    ("elapsed_ms", timer.ElapsedMilliseconds));
+                return status;
+            }
+            await Task.Delay(1000);
         } while (DateTime.UtcNow < deadline);
         DriverLogger.WriteWarning("apple-support", "wait_timeout",
             ("operation", operationId), ("polls", polls),
@@ -213,15 +280,28 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         "--silent", "--disable-interactivity",
     ];
 
+    internal static bool ShouldInstallAppleDevicesFromStore(AppleSupportStatus status) =>
+        !status.UsbDriverInstalled;
+
+    internal static bool ShouldRecoverExistingService(AppleSupportStatus status) =>
+        status.UsbDriverInstalled && status.ServiceInstalled &&
+        !status.ServiceRunning && status.ServiceName is not null;
+
+    private static void ReportProgress(IProgress<string>? progress, string resourceKey) =>
+        progress?.Report(DriverLocalization.Get(resourceKey));
+
     private async Task<AppleSupportStatus> WaitAndRecoverAppleSupportAsync(
         TimeSpan timeout, string operationId)
     {
-        var status = await WaitForAppleSupportAsync(timeout, operationId);
+        var status = await WaitForAppleSupportAsync(timeout, operationId,
+            returnWhenServiceCanBeRecovered: true);
         if (status.Ready || !status.ServiceInstalled || status.ServiceRunning ||
             status.ServiceName is null)
             return status;
 
-        if (!await StartServiceElevatedAsync(status.ServiceName, operationId)) return status;
+        if (await StartServiceElevatedAsync(status.ServiceName, operationId) !=
+            ServiceStartOutcome.Started)
+            return status;
         return await WaitForAppleSupportAsync(TimeSpan.FromSeconds(30), operationId);
     }
 
@@ -266,7 +346,8 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
     }
 
     private static async Task<ProcessResult> RunCapturedProcessAsync(string executable,
-        IReadOnlyList<string> arguments, TimeSpan timeout)
+        IReadOnlyList<string> arguments, TimeSpan timeout,
+        string? workingDirectory = null)
     {
         var start = new ProcessStartInfo
         {
@@ -276,6 +357,11 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        if (workingDirectory is not null)
+        {
+            DriverPayload.EnsureNoReparsePoints(workingDirectory);
+            start.WorkingDirectory = workingDirectory;
+        }
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
 
         using var process = Process.Start(start)
@@ -294,7 +380,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 if (!process.HasExited) process.Kill(entireProcessTree: true);
             }
             catch { }
-            throw new TimeoutException("Apple Devices installation timed out.");
+            throw new TimeoutException("The Apple support process timed out.");
         }
         return new ProcessResult(process.ExitCode, await standardOutput, await standardError);
     }
@@ -303,8 +389,9 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
     {
         var candidates = new[]
         {
-            Path.Combine(AppContext.BaseDirectory, "AppleMobileDeviceSupport64.msi"),
-            Path.Combine(DriverConstants.PackagesRoot, "AppleMobileDeviceSupport64.msi"),
+            Path.Combine(AppContext.BaseDirectory, DriverConstants.AppleSupportMsiFileName),
+            Path.Combine(DriverConstants.PackagesRoot,
+                DriverConstants.AppleSupportMsiFileName),
         };
         return candidates.FirstOrDefault(IsTrustedAppleMsi);
     }
@@ -320,7 +407,8 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             DriverPayload.IsTrustedAppleSignature(path));
     }
 
-    private static async Task<string> DownloadOfficialItunesAsync(string operationId)
+    private static async Task<string> DownloadOfficialItunesAsync(string operationId,
+        IProgress<string>? progress)
     {
         var destination = Path.Combine(DriverConstants.PackagesRoot, "iTunes64Setup.exe");
         if (File.Exists(destination) && DriverPayload.IsTrustedAppleSignature(destination))
@@ -359,6 +447,8 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             {
                 var buffer = new byte[64 * 1024];
                 long total = 0;
+                var lastReportedPercent = -1;
+                long lastReportedBytes = 0;
                 int read;
                 while ((read = await source.ReadAsync(buffer)) != 0)
                 {
@@ -367,6 +457,9 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                         throw new InvalidOperationException(
                             "The Apple installer exceeded the size limit.");
                     await target.WriteAsync(buffer.AsMemory(0, read));
+                    ReportDownloadProgress(progress, total,
+                        response.Content.Headers.ContentLength,
+                        ref lastReportedPercent, ref lastReportedBytes);
                 }
                 await target.FlushAsync();
                 DriverLogger.WriteEvent("apple-support", "download_body_complete",
@@ -397,6 +490,94 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
     private static bool IsTrustedAppleMsi(string path) =>
         File.Exists(path) && DriverPayload.IsTrustedAppleSignature(path);
 
+    private static void ReportDownloadProgress(IProgress<string>? progress,
+        long downloadedBytes, long? totalBytes, ref int lastReportedPercent,
+        ref long lastReportedBytes)
+    {
+        if (progress is null) return;
+        const double bytesPerMegabyte = 1024d * 1024d;
+        if (totalBytes is > 0)
+        {
+            var percent = (int)Math.Clamp(downloadedBytes * 100L / totalBytes.Value,
+                0, 100);
+            if (percent == lastReportedPercent) return;
+            lastReportedPercent = percent;
+            progress.Report(DriverLocalization.Format("AppleSupportDownloadProgress",
+                percent, downloadedBytes / bytesPerMegabyte,
+                totalBytes.Value / bytesPerMegabyte));
+            return;
+        }
+
+        if (downloadedBytes - lastReportedBytes < 1024 * 1024) return;
+        lastReportedBytes = downloadedBytes;
+        progress.Report(DriverLocalization.Format("AppleSupportDownloadProgressUnknown",
+            downloadedBytes / bytesPerMegabyte));
+    }
+
+    private static async Task<ProcessResult> ExtractAndInstallMobileDeviceSupportAsync(
+        string setup, string setupHash, string packageLog, string operationId,
+        IProgress<string>? progress)
+    {
+        var extractionRoot = Path.Combine(DriverConstants.PackagesRoot,
+            "itunes-extract-" + Guid.NewGuid().ToString("N"));
+        DriverPayload.CreateSafeDirectory(extractionRoot);
+        try
+        {
+            DriverLogger.WriteEvent("apple-support", "itunes_extract_start",
+                ("operation", operationId),
+                ("directory", DriverLogger.DescribePath(extractionRoot)));
+            ProcessResult extraction;
+            using (DriverPayload.LockAndValidateApplePackage(setup, setupHash))
+            {
+                extraction = await RunCapturedProcessAsync(setup, ["/extract"],
+                    TimeSpan.FromMinutes(5), extractionRoot);
+            }
+            DriverLogger.WriteEvent("apple-support", "itunes_extract_exit",
+                ("operation", operationId), ("exit_code", extraction.ExitCode),
+                ("output", LimitOutput(extraction.CombinedOutput)));
+            if (!IsInstallerSuccess(extraction.ExitCode))
+            {
+                DriverLogger.WriteError("apple-support", "itunes_extract_failed",
+                    ("operation", operationId), ("exit_code", extraction.ExitCode));
+                return extraction;
+            }
+
+            DriverPayload.EnsureNoReparsePoints(extractionRoot);
+            var msi = DriverPayload.GetSafeChildPath(extractionRoot,
+                DriverConstants.AppleSupportMsiFileName);
+            if (!IsTrustedAppleMsi(msi))
+                throw new InvalidOperationException(
+                    "The extracted Apple Mobile Device Support package is missing or untrusted.");
+            var msiHash = DriverPayload.ComputeHash(msi);
+            DriverLogger.WriteEvent("apple-support", "extracted_package_verified",
+                ("operation", operationId),
+                ("package", DriverLogger.DescribePath(msi)),
+                ("signature", "trusted"),
+                ("sha256", DriverLogger.HashTag(msiHash)));
+            ReportProgress(progress, "AppleSupportInstallingCompatibility");
+            return await RunMsiAsync(msi, msiHash, packageLog, operationId);
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(extractionRoot))
+                {
+                    DriverPayload.EnsureNoReparsePoints(extractionRoot);
+                    Directory.Delete(extractionRoot, recursive: true);
+                }
+                DriverLogger.WriteEvent("apple-support", "itunes_extract_cleanup",
+                    ("operation", operationId), ("success", true));
+            }
+            catch (Exception error)
+            {
+                DriverLogger.WriteException("apple-support", "itunes_extract_cleanup_failed",
+                    error, ("operation", operationId),
+                    ("directory", DriverLogger.DescribePath(extractionRoot)));
+            }
+        }
+    }
+
     private static async Task<ProcessResult> RunMsiAsync(string msi, string packageHash,
         string logPath, string operationId)
     {
@@ -407,13 +588,16 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
 
     private static bool IsInstallerSuccess(int exitCode) => exitCode is 0 or 1641 or 3010;
 
-    private async Task<bool> StartServiceElevatedAsync(string serviceName, string operationId)
+    internal static bool IsRestartRequired(int exitCode) => exitCode is 1641 or 3010;
+
+    private async Task<ServiceStartOutcome> StartServiceElevatedAsync(string serviceName,
+        string operationId)
     {
         if (serviceName is not ("Apple Mobile Device Service" or "AppleMobileDeviceService"))
         {
             DriverLogger.WriteWarning("apple-support", "service_start_rejected",
                 ("operation", operationId), ("service", serviceName));
-            return false;
+            return ServiceStartOutcome.Failed;
         }
         var sc = Path.Combine(Environment.SystemDirectory, "sc.exe");
         var timer = Stopwatch.StartNew();
@@ -428,14 +612,16 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 ("operation", operationId), ("service", serviceName),
                 ("exit_code", result.ExitCode), ("success", success),
                 ("elapsed_ms", timer.ElapsedMilliseconds));
-            return success;
+            return success ? ServiceStartOutcome.Started :
+                result.ExitCode == 1223 ? ServiceStartOutcome.Cancelled :
+                ServiceStartOutcome.Failed;
         }
         catch (Exception error)
         {
             DriverLogger.WriteException("apple-support", "service_start_exception", error,
                 ("operation", operationId), ("service", serviceName),
                 ("elapsed_ms", timer.ElapsedMilliseconds));
-            return false;
+            return ServiceStartOutcome.Failed;
         }
     }
 

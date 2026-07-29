@@ -129,8 +129,12 @@
     <system:String x:Key="CaptureStopped">投屏已停止</system:String>
     <system:String x:Key="CaptureError">投屏出现错误</system:String>
     <system:String x:Key="CaptureErrorFormat">投屏错误：{0}</system:String>
-    <system:String x:Key="CaptureNoPingTitle">iPhone 投屏连接超时</system:String>
-    <system:String x:Key="CaptureNoPingRecovery">iPhone 已连接，但长时间没有响应投屏握手。&#x0A;&#x0A;请重启 iPhone，然后使用 Apple 原装或 MFi 认证数据线重新连接后重试。&#x0A;&#x0A;重试时请保持 iPhone 解锁。</system:String>
+    <system:String x:Key="CaptureNoPingTitle">iPhone/iPad 投屏连接超时</system:String>
+    <system:String x:Key="CaptureNoPingRecovery">设备已连接，但长时间没有响应投屏握手。&#x0A;&#x0A;请重启 iPhone 或 iPad，然后使用 Apple 原装或 MFi 认证数据线重新连接后重试。&#x0A;&#x0A;重试时请保持设备解锁。</system:String>
+    <system:String x:Key="CaptureNoPingSummary">设备已连接，但长时间没有响应投屏握手。再次尝试前，请优先完成以下两项操作：</system:String>
+    <system:String x:Key="CaptureNoPingRestartAction">重启 iPhone 或 iPad</system:String>
+    <system:String x:Key="CaptureNoPingCableAction">更换 Apple 原装或 MFi 认证数据线</system:String>
+    <system:String x:Key="CaptureNoPingUnlockHint">重新连接并开始投屏时，请保持设备处于解锁状态。</system:String>
     <system:String x:Key="StartRequested">已请求开始投屏</system:String>
     <system:String x:Key="StartFailedFormat">开始投屏失败：{0}</system:String>
     <system:String x:Key="StopSessionReleased">投屏已停止，会话资源已释放</system:String>

@@ -1214,10 +1214,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             var name = Devices.FirstOrDefault(device =>
                 DeviceViewModel.UdidEquals(device.Udid, state.Udid))?.DisplayName ?? state.Udid;
             var noPing = CaptureErrorGuidance.IsNoPingTimeout(status.Message);
-            AppPromptWindow.Inform(noPing
-                    ? LocalizationService.Get("CaptureNoPingTitle")
-                    : LocalizationService.Format("DeviceCaptureErrorTitleFormat", name),
-                CaptureErrorGuidance.UserMessage(status.Message));
+            if (noPing)
+                CaptureRecoveryWindow.ShowRecovery();
+            else
+                AppPromptWindow.Inform(
+                    LocalizationService.Format("DeviceCaptureErrorTitleFormat", name),
+                    CaptureErrorGuidance.UserMessage(status.Message));
         }
     }
 
@@ -2126,8 +2128,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             CurrentDeviceSession is { ErrorShown: false } failedSession)
         {
             failedSession.ErrorShown = true;
-            AppPromptWindow.Inform(LocalizationService.Get("CaptureNoPingTitle"),
-                CaptureErrorGuidance.UserMessage(status.Message));
+            CaptureRecoveryWindow.ShowRecovery();
         }
         Resolution = status.Width > 0 && status.Height > 0 ? $"{status.Width}×{status.Height}" : "—";
         if (status.Width > 0 && status.Height > 0 &&

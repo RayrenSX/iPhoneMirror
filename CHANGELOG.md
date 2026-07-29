@@ -5,6 +5,32 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-07-29
+
+### Added
+
+- Ask users to report the iPhone/iPad trust-prompt state after Apple USB,
+  parent-driver, and capture-filter changes, with explicit choices for trusted,
+  previously trusted, or not yet handled states.
+- Show a dedicated no-PING recovery window that gives device restart and an
+  Apple original or MFi-certified cable strong visual priority.
+
+### Fixed
+
+- Skip the Microsoft Store reinstall when a trusted Apple USB INF is already
+  present but Apple Mobile Device Service is missing, and proceed directly to
+  the signed Apple desktop compatibility package.
+- Extract and install only Apple's signed `AppleMobileDeviceSupport64.msi`
+  from the official package instead of installing the complete iTunes desktop
+  application, with Authenticode, SHA256 and file-lock verification before
+  elevation.
+- Replace the three-minute, twice-per-second Apple support status log flood
+  with concise wait summaries, download percentage, and visible install and
+  verification phases in the driver manager.
+- Stop immediately when service-start elevation is cancelled, report Windows
+  Installer reboot-required exit codes, link failures to the verbose MSI log,
+  and include that log in the application's cleanup workflow.
+
 ## [1.4.3] - 2026-07-29
 
 ### Added
@@ -586,7 +612,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.4...HEAD
+[1.4.4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.0...v1.4.1

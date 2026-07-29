@@ -357,6 +357,35 @@ Run("Apple support requires both service and USB driver", () =>
         DeviceCatalog.ResolveAppleSupportDiagnosticKey(false, false, true));
 });
 
+Run("Apple support install path distinguishes a missing service from a missing INF", () =>
+{
+    True(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
+        new AppleSupportStatus(false, false, null,
+            false, null, string.Empty)));
+    True(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
+        new AppleSupportStatus(true, true, "Apple Mobile Device Service",
+            false, null, string.Empty)));
+    False(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
+        new AppleSupportStatus(false, false, null,
+            true, "appleusb.inf", string.Empty)));
+    False(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
+        new AppleSupportStatus(true, true, "Apple Mobile Device Service",
+            true, "usbaapl64.inf", string.Empty)));
+
+    False(AppleSupportInstaller.ShouldRecoverExistingService(
+        new AppleSupportStatus(true, false, "Apple Mobile Device Service",
+            false, null, string.Empty)));
+    False(AppleSupportInstaller.ShouldRecoverExistingService(
+        new AppleSupportStatus(false, false, null,
+            true, "appleusb.inf", string.Empty)));
+    True(AppleSupportInstaller.ShouldRecoverExistingService(
+        new AppleSupportStatus(true, false, "Apple Mobile Device Service",
+            true, "appleusb.inf", string.Empty)));
+    False(AppleSupportInstaller.ShouldRecoverExistingService(
+        new AppleSupportStatus(true, true, "Apple Mobile Device Service",
+            true, "appleusb.inf", string.Empty)));
+});
+
 Run("Apple USB driver package detection", () =>
 {
     var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
@@ -395,6 +424,14 @@ Run("winget Apple Devices command is pinned to Microsoft Store", () =>
     True(arguments.Contains("--accept-source-agreements"));
     True(arguments.Contains("--accept-package-agreements"));
     True(arguments.Contains("--disable-interactivity"));
+});
+
+Run("Apple installer restart exit codes are recognized", () =>
+{
+    False(AppleSupportInstaller.IsRestartRequired(0));
+    True(AppleSupportInstaller.IsRestartRequired(1641));
+    True(AppleSupportInstaller.IsRestartRequired(3010));
+    False(AppleSupportInstaller.IsRestartRequired(1223));
 });
 
 if (failures.Count != 0)

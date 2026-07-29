@@ -7,6 +7,7 @@ internal static partial class DriverConstants
     internal const string ElevatedSwitch = "--elevated-driver-operation";
     internal const string AppleStoreProductId = "9NP83LWLPZ9K";
     internal const string AppleStoreSource = "msstore";
+    internal const string AppleSupportMsiFileName = "AppleMobileDeviceSupport64.msi";
     internal const string OfficialItunesDownloadUrl =
         "https://www.apple.com/itunes/download/win64";
     internal const string QqGroupNumber = "1050045279";

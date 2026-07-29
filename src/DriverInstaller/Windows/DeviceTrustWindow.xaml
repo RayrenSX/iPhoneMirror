@@ -1,0 +1,58 @@
+<Window x:Class="IPhoneMirror.DriverInstaller.Windows.DeviceTrustWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{DynamicResource DeviceTrustTitle}" Width="580" Height="470"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Foreground="{StaticResource TextBrush}" ShowInTaskbar="False">
+    <Border Background="{StaticResource AppBackground}" BorderBrush="#555555"
+            BorderThickness="1" CornerRadius="8">
+        <Grid Margin="26">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="16"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="14"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="18"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Grid MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                <TextBlock Text="{DynamicResource DeviceTrustTitle}"
+                           FontSize="22" FontWeight="SemiBold"/>
+                <Button Content="X" HorizontalAlignment="Right" Width="32" Height="32"
+                        MinHeight="32" Padding="0" FontSize="14" FontWeight="Normal"
+                        Click="OnNotHandledClick"/>
+            </Grid>
+
+            <Border Grid.Row="2" Background="#2C2515" BorderBrush="#8A6D2F"
+                    BorderThickness="1" CornerRadius="6" Padding="16,14">
+                <StackPanel>
+                    <TextBlock Text="{DynamicResource DeviceTrustAction}"
+                               Foreground="{StaticResource WarningBrush}"
+                               FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <TextBlock Text="{DynamicResource DeviceTrustExplanation}"
+                               Foreground="{StaticResource TextBrush}"
+                               FontSize="13" LineHeight="20" TextWrapping="Wrap"
+                               Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Grid.Row="4">
+                <TextBlock Text="{DynamicResource DeviceTrustQuestion}"
+                           FontSize="15" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                <Button Content="{DynamicResource DeviceTrustConfirmed}"
+                        Style="{StaticResource PrimaryButton}" Height="48"
+                        HorizontalContentAlignment="Center" Click="OnTrustedClick"/>
+                <Button Content="{DynamicResource DeviceTrustNoPrompt}"
+                        Height="48" Margin="0,8,0,0"
+                        HorizontalContentAlignment="Center" Click="OnNoPromptClick"/>
+            </StackPanel>
+
+            <Button Grid.Row="6" Content="{DynamicResource DeviceTrustNotHandled}"
+                    HorizontalAlignment="Right" MinWidth="132"
+                    Style="{StaticResource DangerButton}" Click="OnNotHandledClick"/>
+        </Grid>
+    </Border>
+</Window>

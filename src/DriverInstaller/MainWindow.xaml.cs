@@ -123,12 +123,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void OnInstallAppleSupportClick(object sender, RoutedEventArgs e)
     {
         if (IsBusy) return;
+        var driverChanged = false;
         IsBusy = true;
         try
         {
             DriverLogger.Write("Apple support install requested.");
             OperationStatus = L("AppleSupportPreparing");
-            var result = await _appleInstaller.InstallAsync();
+            var progress = CreateAppleSupportProgress();
+            var result = await _appleInstaller.InstallAsync(progress);
             if (result.RequiresStoreInteraction)
             {
                 var action = new RequiredActionWindow(
@@ -136,7 +138,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     result.Message + "\n\n" + L("RequiredAppleInstallBody"),
                     L("Recheck")) { Owner = this }.ShowDialog();
                 if (action == true)
-                    result = await _appleInstaller.InstallAsync();
+                    result = await _appleInstaller.InstallAsync(progress);
             }
             if (!result.Success)
             {
@@ -145,7 +147,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     ("message", result.Message));
                 ShowFailure(result.Message);
             }
-            else OperationStatus = L("AppleSupportReady");
+            else
+            {
+                driverChanged = true;
+                OperationStatus = L("AppleSupportReady");
+            }
         }
         catch (Exception error)
         {
@@ -157,12 +163,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             IsBusy = false;
             await RefreshAsync();
+            if (driverChanged) ConfirmDeviceTrustAfterChange("apple-support");
         }
     }
 
     private async Task<bool> EnsureAppleSupportReadyAsync()
     {
-        var result = await _appleInstaller.InstallAsync();
+        var progress = CreateAppleSupportProgress();
+        var result = await _appleInstaller.InstallAsync(progress);
         if (result.RequiresStoreInteraction)
         {
             var action = new RequiredActionWindow(
@@ -170,7 +178,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 result.Message + "\n\n" + L("RequiredAppleInstallBody"),
                 L("Recheck")) { Owner = this }.ShowDialog();
             if (action != true) return false;
-            result = await _appleInstaller.InstallAsync();
+            result = await _appleInstaller.InstallAsync(progress);
         }
         if (result.Success)
         {
@@ -182,6 +190,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return false;
     }
 
+    private IProgress<string> CreateAppleSupportProgress() =>
+        new Progress<string>(status => OperationStatus = status);
+
     private async Task InstallAllAsync()
     {
         if (IsBusy) return;
@@ -189,10 +200,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             L("QuickInstallTitle"), L("QuickInstallBody"), L("StartInstall"));
         if (!answer) return;
 
+        var driverChanged = false;
         IsBusy = true;
         try
         {
+            var appleSupportWasReady = _appleSupport.Ready;
             if (!await EnsureAppleSupportReadyAsync()) return;
+            driverChanged |= !appleSupportWasReady;
             await RefreshCoreAsync();
             if (!Devices.Any(device => device.IsPresent))
             {
@@ -226,6 +240,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     ShowFailure(parent.Message + "\n" + F("LogSuffix", parent.LogPath));
                     return;
                 }
+                driverChanged = true;
                 if (!await GuideReconnectAsync(device.InstanceId,
                         DriverOperationKind.ParentRepair)) return;
                 await RefreshCoreAsync();
@@ -256,6 +271,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ShowFailure(result.Message + "\n" + F("LogSuffix", result.LogPath));
                 return;
             }
+            driverChanged = true;
             if (result.RequiresReplug &&
                 !await GuideReconnectAsync(device.InstanceId, kind))
             {
@@ -274,6 +290,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             IsBusy = false;
             await RefreshAsync();
+            if (driverChanged) ConfirmDeviceTrustAfterChange("quick-install");
         }
     }
 
@@ -325,6 +342,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var targetInstanceId = device.InstanceId;
         var targetSerial = device.Serial;
 
+        var driverChanged = false;
         IsBusy = true;
         try
         {
@@ -362,6 +380,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     continue;
                 }
 
+                driverChanged = true;
                 if (result.RequiresReplug)
                 {
                     var reconnected = await GuideReconnectAsync(device.InstanceId, kind);
@@ -389,7 +408,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             IsBusy = false;
             await RefreshAsync();
+            if (driverChanged) ConfirmDeviceTrustAfterChange(kind.ToString());
         }
+    }
+
+    private void ConfirmDeviceTrustAfterChange(string change)
+    {
+        var response = DeviceTrustWindow.Ask(this);
+        DriverLogger.WriteEvent("ui", "device_trust_response",
+            ("change", change), ("response", response));
+        if (response == DeviceTrustResponse.NotHandled)
+            OperationStatus = L("DeviceTrustPending");
     }
 
     private async Task<bool> GuideReconnectAsync(string instanceId, DriverOperationKind kind)

@@ -107,6 +107,11 @@ internal static class DiagnosticLogger
                 "iPhoneMirror.Driver", "Logs");
             result = Add(result, CleanupDirectory(driverDirectory, now,
                 includeActiveLogs));
+            var driverPackagesDirectory = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "iPhoneMirror.Driver", "Packages");
+            result = Add(result, CleanupDirectory(driverPackagesDirectory, now,
+                includeActiveLogs));
             result = Add(result, CleanupLegacyNativeLogs(now, includeActiveLogs));
             if (includeActiveLogs) _sessionStarted = false;
             return result;
