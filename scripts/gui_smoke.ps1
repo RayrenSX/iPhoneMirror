@@ -8,7 +8,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Exe = Join-Path $Root 'outputs\iPhoneMirror\iPhoneMirror.exe'
-$Log = Join-Path $env:TEMP 'iPhoneMirror-capture.log'
+$Log = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) `
+    'iPhoneMirror\Logs\capture.log'
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes

@@ -94,6 +94,8 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         catch (Exception error) when (error is DllNotFoundException or
             EntryPointNotFoundException or BadImageFormatException)
         {
+            DiagnosticLogger.ExceptionOnce("virtual-camera-probe", "virtual_camera",
+                "probe_failed", error);
             return new(false, false, false, false, false, error.Message);
         }
     }
@@ -117,6 +119,8 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         catch (Exception error) when (error is IOException or
             UnauthorizedAccessException or CryptographicException)
         {
+            DiagnosticLogger.ExceptionOnce("virtual-camera-version", "virtual_camera",
+                "component_comparison_failed", error);
             return false;
         }
     }
@@ -198,9 +202,15 @@ internal sealed class VirtualCameraService : IAsyncDisposable
                 CancellationToken.None);
             StatusChanged?.Invoke("VirtualCamera", false);
         }
-        catch
+        catch (Exception error)
         {
-            try { await Task.Run(im_vcam_stop); } catch { }
+            DiagnosticLogger.Exception("virtual_camera", "start_failed", error);
+            try { await Task.Run(im_vcam_stop); }
+            catch (Exception cleanupError)
+            {
+                DiagnosticLogger.Exception("virtual_camera",
+                    "failed_start_cleanup_failed", cleanupError);
+            }
             throw;
         }
         finally
@@ -224,7 +234,11 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         }
         if (task is null)
         {
-            try { await Task.Run(im_vcam_stop); } catch { }
+            try { await Task.Run(im_vcam_stop); }
+            catch (Exception error)
+            {
+                DiagnosticLogger.Exception("virtual_camera", "idle_stop_failed", error);
+            }
             return;
         }
         try { await task; }
@@ -290,6 +304,10 @@ internal sealed class VirtualCameraService : IAsyncDisposable
             {
                 _lifecycleGate.Release();
             }
+            if (failure is not null)
+                DiagnosticLogger.Exception("virtual_camera", "session_failed", failure,
+                    ("handle", AppLog.Handle(sessionHandle)),
+                    ("size", $"{width}x{height}"), ("fps", frameRate));
             StatusChanged?.Invoke(failure?.Message ?? "Stopped",
                 failure is not null);
         }

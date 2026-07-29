@@ -1,4 +1,5 @@
 using System.Windows;
+using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Windows;
 
@@ -42,10 +43,11 @@ public partial class ProjectionSettingsWindow : Window
     private static async Task RunAsync(Func<Task> action)
     {
         try { await action(); }
-        catch
+        catch (Exception error)
         {
             // The main window actions already publish localized UI and
             // diagnostic errors; the floating panel must remain usable.
+            DiagnosticLogger.Exception("window", "projection_action_failed", error);
         }
     }
 }

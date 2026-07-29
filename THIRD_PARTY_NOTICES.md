@@ -30,10 +30,11 @@ links to the library.
 ## libusb-win32 1.2.6.0
 
 `third_party/libusb-win32/` contains the public compatibility header and the
-x64 dynamic import library used by the native core. The standalone driver
-manager also carries the signed upstream runtime payload under
-`src/DriverInstaller/Assets/libusb-win32-1.2.6.0/`; it is intentionally absent
-from the main iPhoneMirror application output.
+x64 dynamic import library used by the native core. The main application ships
+the signed upstream x64 `libusb0.dll` user-mode runtime so it can start before
+the capture filter is installed. The standalone driver manager carries the
+remaining signed runtime and kernel-driver payload under
+`src/DriverInstaller/Assets/libusb-win32-1.2.6.0/`.
 
 - Project: https://github.com/mcuee/libusb-win32
 - Release archive: https://sourceforge.net/projects/libusb-win32/files/libusb-win32-releases/1.2.6.0/
@@ -47,6 +48,20 @@ The driver manager does not copy proprietary Aisi binaries. Apple USB support
 is installed from a signed offline AppleMobileDeviceSupport MSI when available,
 or from Apple's official iTunes installer when the user authorizes that fallback.
 Apple software is not redistributed in this repository.
+
+## Microsoft Visual C++ runtime
+
+The Windows release includes app-local x64 copies of `msvcp140.dll`,
+`vcruntime140.dll` and `vcruntime140_1.dll`. They satisfy the runtime imports of
+the bundled libusb and AirPlayServer binaries on clean Windows installations.
+The build copies these files only from an installed Visual Studio Redistributable
+directory after validating their Microsoft Authenticode signatures.
+
+- Publisher: Microsoft Corporation
+- Deployment documentation:
+  https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
+- License terms:
+  https://visualstudio.microsoft.com/license-terms/
 
 ## AirPlayServer 1.1.0 wireless receiver
 

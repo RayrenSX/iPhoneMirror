@@ -504,7 +504,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private static (bool Success, string Message) InvokeDeviceSetting(Action action)
     {
         try { action(); return (true, string.Empty); }
-        catch (Exception error) { return (false, error.Message); }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("settings", "device_setting_failed", error);
+            return (false, error.Message);
+        }
     }
     public string SettingsStatus { get => _settingsStatus; private set => Set(ref _settingsStatus, value); }
     public string DecoderStatus
@@ -1194,15 +1198,26 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             NativeCaptureStatus status;
             try { status = await Task.Run(() => _core.GetDeviceSessionStatus(state.Handle)); }
-            catch { continue; }
+            catch (Exception error)
+            {
+                DiagnosticLogger.ExceptionOnce(
+                    $"background-session-status-{state.Handle:x}", "capture",
+                    "background_session_status_failed", error,
+                    ("device", AppLog.Device(state.Udid)),
+                    ("handle", AppLog.Handle(state.Handle)));
+                continue;
+            }
             if (status.Width != 0 && status.Height != 0)
                 DeviceVideoSizeChanged?.Invoke(state.Udid, status.Width, status.Height);
             if (status.State != CaptureState.Error || state.ErrorShown) continue;
             state.ErrorShown = true;
             var name = Devices.FirstOrDefault(device =>
                 DeviceViewModel.UdidEquals(device.Udid, state.Udid))?.DisplayName ?? state.Udid;
-            AppPromptWindow.Inform(LocalizationService.Format(
-                "DeviceCaptureErrorTitleFormat", name), status.Message);
+            var noPing = CaptureErrorGuidance.IsNoPingTimeout(status.Message);
+            AppPromptWindow.Inform(noPing
+                    ? LocalizationService.Get("CaptureNoPingTitle")
+                    : LocalizationService.Format("DeviceCaptureErrorTitleFormat", name),
+                CaptureErrorGuidance.UserMessage(status.Message));
         }
     }
 
@@ -1880,8 +1895,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     {
         var safeMessage = AppLog.Message(message);
         if (string.IsNullOrWhiteSpace(safeMessage)) return;
+        DiagnosticLogger.Info("ui", "action", ("message", safeMessage));
         try { _ = _core.WriteLog($"action {safeMessage}"); }
-        catch { /* Logging must not break a user action or shutdown path. */ }
+        catch (Exception error)
+        {
+            DiagnosticLogger.ExceptionOnce("native-ui-log", "logging",
+                "native_ui_write_failed", error);
+        }
         AddLogLine($"{DateTime.Now:HH:mm:ss.fff} [UI] {safeMessage}");
         PublishLogText();
     }
@@ -1891,8 +1911,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         var safeMessage = AppLog.Message(message);
         if (!string.IsNullOrWhiteSpace(safeMessage))
         {
+            DiagnosticLogger.Info("application", "diagnostic",
+                ("message", safeMessage));
             try { _ = _core.WriteLog($"diagnostic {safeMessage}"); }
-            catch { /* Diagnostics are best-effort during native teardown. */ }
+            catch (Exception error)
+            {
+                DiagnosticLogger.ExceptionOnce("native-diagnostic-log", "logging",
+                    "native_diagnostic_write_failed", error);
+            }
         }
     }
 
@@ -2095,6 +2121,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _activeCaptureUdid = null;
         if (status.State is not CaptureState.Idle || SelectedDevice is null)
             CaptureStatus = GetCaptureStatusText(status, IsWirelessSelected);
+        if (status.State == CaptureState.Error &&
+            CaptureErrorGuidance.IsNoPingTimeout(status.Message) &&
+            CurrentDeviceSession is { ErrorShown: false } failedSession)
+        {
+            failedSession.ErrorShown = true;
+            AppPromptWindow.Inform(LocalizationService.Get("CaptureNoPingTitle"),
+                CaptureErrorGuidance.UserMessage(status.Message));
+        }
         Resolution = status.Width > 0 && status.Height > 0 ? $"{status.Width}×{status.Height}" : "—";
         if (status.Width > 0 && status.Height > 0 &&
             (status.Width != _sourceVideoWidth || status.Height != _sourceVideoHeight))
@@ -2300,6 +2334,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             }
             catch (Exception error)
             {
+                DiagnosticLogger.Exception("driver", "exact_backend_probe_failed", error,
+                    ("device", AppLog.Device(device.Udid)),
+                    ("required", requireExactBackend));
                 if (requireExactBackend)
                     return new(IPhoneFilterDriverState.Error, status.InstalledVersion,
                         $"Exact libusb0 device verification failed: {error.Message}");
@@ -2420,6 +2457,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         CaptureState.Streaming => LocalizationService.Get(wireless ? "WirelessStreaming" : "CaptureStreaming"),
         CaptureState.Stopping => LocalizationService.Get(wireless ? "WirelessStopping" : "CaptureStopping"),
         CaptureState.Stopped => LocalizationService.Get(wireless ? "WirelessStopped" : "CaptureStopped"),
+        CaptureState.Error when CaptureErrorGuidance.IsNoPingTimeout(status.Message) =>
+            CaptureErrorGuidance.UserMessage(status.Message),
         _ => LocalizationService.Get("CaptureError"),
     };
 
@@ -2498,7 +2537,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             settings.Brightness, settings.Contrast, settings.Saturation,
             settings.Gamma);
         if (adjustments.Success) return created;
-        try { _core.StopDeviceSession(created.Handle); } catch { }
+        try { _core.StopDeviceSession(created.Handle); }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("capture", "failed_session_rollback_stop",
+                error, ("handle", AppLog.Handle(created.Handle)));
+        }
         _core.DestroyDeviceSession(created.Handle);
         return (false, 0, adjustments.Message);
     }
@@ -2709,7 +2753,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception error)
         {
             CompleteWindow();
-            try { window.CloseForShutdown(); } catch { }
+            try { window.CloseForShutdown(); }
+            catch (Exception closeError)
+            {
+                DiagnosticLogger.Exception("window", "failed_window_cleanup", closeError);
+            }
             SetSettingsStatus("ImageAdjustmentsUpdateFailed");
             AddDiagnosticLog(AppLog.Event("image_adjustments_window_failed",
                 ("device", AppLog.Device(udid)),
@@ -2933,7 +2981,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (result.Success) _pendingRecordingPath = path;
         else
         {
-            try { File.Delete(path); } catch { }
+            try { File.Delete(path); }
+            catch (Exception error) when (error is IOException or
+                                          UnauthorizedAccessException)
+            {
+                DiagnosticLogger.Exception("recording", "failed_output_cleanup",
+                    error, ("file", Path.GetFileName(path)));
+            }
         }
         return result;
     }
@@ -3386,7 +3440,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     if (_disposed) return;
                     NativeCaptureStatus status;
                     try { status = await Task.Run(() => _core.GetDeviceSessionStatus(created.Handle)); }
-                    catch (Exception error) { lastFailure = error; break; }
+                    catch (Exception error)
+                    {
+                        DiagnosticLogger.Exception("capture", "restart_status_failed",
+                            error, ("device", AppLog.Device(state.Udid)),
+                            ("handle", AppLog.Handle(created.Handle)));
+                        lastFailure = error;
+                        break;
+                    }
                     if (status.State == CaptureState.Streaming) { ready = true; break; }
                     if (status.State == CaptureState.Error || status.State == CaptureState.Stopped)
                     {
@@ -3438,7 +3499,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                         ("handle", AppLog.Handle(state.Handle))));
                     return;
                 }
-                try { await _sessions.StopAndDestroyAsync(state); } catch { }
+                try { await _sessions.StopAndDestroyAsync(state); }
+                catch (Exception cleanupError)
+                {
+                    DiagnosticLogger.Exception("capture", "restart_cleanup_failed",
+                        cleanupError, ("device", AppLog.Device(state.Udid)));
+                }
                 NotifyCaptureSessionChanged();
             }
             throw lastFailure ?? new InvalidOperationException(created.Message);
@@ -3536,7 +3602,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     ("elapsed_ms", shutdownTimer.ElapsedMilliseconds),
                     ("error", AppLog.Error(error))));
             }
-            catch { }
+            catch (Exception loggingError)
+            {
+                DiagnosticLogger.Exception("logging", "shutdown_log_failed",
+                    loggingError);
+            }
             throw;
         }
         finally

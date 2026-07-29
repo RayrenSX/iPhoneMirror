@@ -5,6 +5,56 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-07-29
+
+### Added
+
+- Add a process-wide managed diagnostic logger at
+  `%LOCALAPPDATA%\iPhoneMirror\Logs\application.log`, available before native
+  initialization and after native shutdown, with structured timestamps,
+  process/thread context, exception type, HRESULT, source and sanitized detail.
+- Capture WPF dispatcher, AppDomain and unobserved task exceptions in both the
+  main app and driver manager, and persist handled failures from updates,
+  settings, media output, virtual camera, wireless probing and cleanup paths.
+- Add a Diagnostics tab to About with the log directory, an open-folder action,
+  retention information and one-click cleanup for app/driver logs and update
+  downloads.
+- Write startup failures, environment details and the native-runtime inventory
+  to `%LOCALAPPDATA%\iPhoneMirror\Logs\startup.log`, and show a project-styled
+  recovery window with the log location instead of terminating silently.
+
+### Changed
+
+- Store native capture diagnostics at
+  `%LOCALAPPDATA%\iPhoneMirror\Logs\capture.log` instead of the temporary
+  directory, and persist one-click updater Setup logs beside it.
+- Rotate managed logs at 8 MB, retain four archives, cap the combined log
+  directory at 64 MB, remove files older than 14 days and retain a bounded TEMP
+  fallback log when LocalAppData is unavailable.
+- Validate required native files before core initialization and include file
+  size/version details plus optional wireless, FFmpeg and virtual-camera
+  components in startup crash diagnostics.
+
+### Fixed
+
+- Stop silently discarding failures while loading/saving settings, probing
+  optional runtimes, rolling back sessions, finalizing recordings, cleaning
+  helper processes and checking background capture sessions.
+- Bundle the signed, hash-pinned x64 `libusb0.dll` user-mode runtime beside the
+  native core. The app now starts on a clean Windows machine before the capture
+  filter driver is installed, so users can reach the built-in driver manager.
+- Detect the wired QuickTime `no PING` handshake timeout and show a localized,
+  actionable recovery prompt that asks the user to restart the iPhone and retry
+  with an Apple original or MFi-certified cable while keeping the phone unlocked.
+- Include signed app-local copies of `VCRUNTIME140.dll`,
+  `VCRUNTIME140_1.dll` and `MSVCP140.dll` in both the Setup and portable ZIP.
+  This fixes the startup `DllNotFoundException` at `im_initialize()` on clean
+  Windows systems without the Visual C++ Redistributable already installed.
+- Place the same runtime beside `iPhoneMirror.WirelessHost.exe`, so wireless
+  mirroring does not depend on a machine-wide Visual C++ installation either.
+- Require all six runtime copies in publish, packaging and installer upgrade
+  checks, preventing a future release from silently omitting them.
+
 ## [1.4.1] - 2026-07-29
 
 ### Fixed
@@ -509,7 +559,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.2.2...v1.3.0

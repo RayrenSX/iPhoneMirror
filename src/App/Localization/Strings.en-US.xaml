@@ -129,6 +129,8 @@
     <system:String x:Key="CaptureStopped">Mirroring stopped</system:String>
     <system:String x:Key="CaptureError">Mirroring error</system:String>
     <system:String x:Key="CaptureErrorFormat">Mirroring error: {0}</system:String>
+    <system:String x:Key="CaptureNoPingTitle">iPhone mirroring connection timed out</system:String>
+    <system:String x:Key="CaptureNoPingRecovery">The iPhone is connected, but it did not respond to the mirroring handshake.&#x0A;&#x0A;Restart the iPhone, then reconnect it with an Apple original or MFi-certified cable and try again.&#x0A;&#x0A;Keep the iPhone unlocked while retrying.</system:String>
     <system:String x:Key="StartRequested">Mirroring start requested</system:String>
     <system:String x:Key="StartFailedFormat">Could not start mirroring: {0}</system:String>
     <system:String x:Key="StopSessionReleased">Mirroring stopped and session resources were released</system:String>
@@ -391,6 +393,14 @@
     <system:String x:Key="LicenseInformation">License information</system:String>
     <system:String x:Key="UpdateSettingsTitle">Update settings</system:String>
     <system:String x:Key="UpdateSettingsDescription">Control background checks, automatic downloads, release channels, and the app theme.</system:String>
+    <system:String x:Key="DiagnosticsTitle">Diagnostics</system:String>
+    <system:String x:Key="DiagnosticsDescription">Application errors, capture-core events, and update workflows are written to local logs for troubleshooting failures on other PCs.</system:String>
+    <system:String x:Key="DiagnosticsLocation">Log location</system:String>
+    <system:String x:Key="DiagnosticsRetentionSummary">Logs are capped at 8–16 MB per file; files older than 14 days or beyond a 64 MB total are cleaned automatically.</system:String>
+    <system:String x:Key="OpenLogs">Open log folder</system:String>
+    <system:String x:Key="CleanLogs">Clean logs and update cache</system:String>
+    <system:String x:Key="DiagnosticsCleanedFormat">Cleanup complete: removed {0} files and freed {1}; {2} in-use or inaccessible files were skipped.</system:String>
+    <system:String x:Key="DiagnosticsCleanupFailedFormat">Cleanup failed: {0}</system:String>
     <system:String x:Key="CheckOnStartup">Check for updates at startup</system:String>
     <system:String x:Key="AutoDownloadUpdates">Start downloading automatically when an update is found</system:String>
     <system:String x:Key="NotifyStableReleases">Notify me about stable releases</system:String>

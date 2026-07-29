@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Localization;
 
@@ -97,8 +98,9 @@ internal static class LocalizationService
             var settings = JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(SettingsPath));
             return settings?.Language ?? SystemLanguage;
         }
-        catch
+        catch (Exception error)
         {
+            DiagnosticLogger.Exception("localization", "language_load_failed", error);
             return SystemLanguage;
         }
     }
@@ -112,9 +114,10 @@ internal static class LocalizationService
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(
                 new UserSettings(language), new JsonSerializerOptions { WriteIndented = true }));
         }
-        catch
+        catch (Exception error)
         {
             // Language switching must remain usable even if settings cannot be saved.
+            DiagnosticLogger.Exception("localization", "language_save_failed", error);
         }
     }
 

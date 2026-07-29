@@ -31,6 +31,8 @@ $ExpectedWirelessManifestPaths = @(
     'bin/x64/swscale-5.dll'
 )
 $PrepareMediaOutputRuntime = Join-Path $Root 'scripts\prepare_ffmpeg.ps1'
+$PrepareVcRuntime = Join-Path $Root 'scripts\prepare_vc_runtime.ps1'
+$PrepareLibUsb0Runtime = Join-Path $Root 'scripts\prepare_libusb0_runtime.ps1'
 $MediaOutputManifestPath = Join-Path $Root 'scripts\ffmpeg-runtime-manifest.psd1'
 if (-not (Test-Path -LiteralPath $MediaOutputManifestPath -PathType Leaf)) {
     throw "Media-output FFmpeg manifest is missing: $MediaOutputManifestPath"
@@ -208,6 +210,15 @@ try {
         Copy-Item $DnsSdShim (Join-Path $AppWireless 'dnssd.dll') -Force
         Copy-Item (Join-Path $Root 'third_party/libusb/bin/x64/libusb-1.0.dll') `
             (Join-Path $AppNative 'libusb-1.0.dll') -Force
+        if (-not (Test-Path -LiteralPath $PrepareLibUsb0Runtime -PathType Leaf)) {
+            throw "libusb0 runtime preparation script is missing: $PrepareLibUsb0Runtime"
+        }
+        & $PrepareLibUsb0Runtime -DestinationDirectory $AppNative | Out-Host
+        if (-not (Test-Path -LiteralPath $PrepareVcRuntime -PathType Leaf)) {
+            throw "Visual C++ runtime preparation script is missing: $PrepareVcRuntime"
+        }
+        & $PrepareVcRuntime -DestinationDirectory $AppNative `
+            -AdditionalDestinationDirectories $AppWireless | Out-Host
     }
 
     if ($NoPublish) {
@@ -265,12 +276,20 @@ try {
             'tools\ffmpeg\README.txt',
             'tools\ffmpeg\SOURCE.txt',
             'libusb-1.0.dll',
+            'libusb0.dll',
+            'msvcp140.dll',
+            'vcruntime140.dll',
+            'vcruntime140_1.dll',
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
             'CHANGELOG.md',
             'tools\updater\Apply-ZipUpdate.ps1',
             'licenses\libusb-COPYING.txt',
+            'licenses\libusb-win32-COPYING-LGPL.txt',
             'Wireless\iPhoneMirror.WirelessHost.exe',
+            'Wireless\msvcp140.dll',
+            'Wireless\vcruntime140.dll',
+            'Wireless\vcruntime140_1.dll',
             'Wireless\airplay2dll.dll',
             'Wireless\avcodec-58.dll',
             'Wireless\avutil-56.dll',
@@ -353,6 +372,10 @@ try {
             'iPhoneMirror.VirtualCamera.Admin.exe',
             'iPhoneMirror.Driver.exe',
             'libusb-1.0.dll',
+            'libusb0.dll',
+            'msvcp140.dll',
+            'vcruntime140.dll',
+            'vcruntime140_1.dll',
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
             'CHANGELOG.md'

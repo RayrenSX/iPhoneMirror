@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Updater;
 
@@ -54,9 +55,13 @@ internal sealed class UpdateSettingsStore
             return JsonSerializer.Deserialize<UpdateSettings>(
                 File.ReadAllText(_path), JsonOptions) ?? new UpdateSettings();
         }
-        catch (JsonException) { return new UpdateSettings(); }
-        catch (IOException) { return new UpdateSettings(); }
-        catch (UnauthorizedAccessException) { return new UpdateSettings(); }
+        catch (Exception error) when (error is JsonException or IOException or
+                                      UnauthorizedAccessException)
+        {
+            DiagnosticLogger.Exception("settings", "load_failed", error,
+                ("file", Path.GetFileName(_path)));
+            return new UpdateSettings();
+        }
     }
 
     internal void Save(UpdateSettings settings)
@@ -73,7 +78,13 @@ internal sealed class UpdateSettingsStore
         }
         finally
         {
-            try { File.Delete(temporary); } catch { }
+            try { File.Delete(temporary); }
+            catch (Exception error) when (error is IOException or
+                                          UnauthorizedAccessException)
+            {
+                DiagnosticLogger.Exception("settings", "temporary_cleanup_failed",
+                    error, ("file", Path.GetFileName(temporary)));
+            }
         }
     }
 }

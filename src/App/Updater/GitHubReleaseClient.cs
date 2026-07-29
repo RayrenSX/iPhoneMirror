@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Updater;
 
@@ -19,6 +20,9 @@ internal sealed record DownloadedUpdate(
 
 internal sealed class GitHubReleaseClient : IDisposable
 {
+    private const long MaximumUpdateBytes = 2L * 1024 * 1024 * 1024;
+    private const int MaximumReleaseListCharacters = 4 * 1024 * 1024;
+    private const int MaximumChecksumCharacters = 1024 * 1024;
     private static readonly Uri ReleasesUri = new(
         "https://api.github.com/repos/RayrenSX/iPhoneMirror/releases?per_page=20");
     private readonly HttpClient _httpClient;
@@ -41,6 +45,9 @@ internal sealed class GitHubReleaseClient : IDisposable
     internal async Task<ReleaseInfo?> GetLatestAsync(UpdateSettings settings,
         CancellationToken cancellationToken = default)
     {
+        DiagnosticLogger.Info("updater", "release_check_begin",
+            ("stable", settings.NotifyStableReleases),
+            ("prerelease", settings.NotifyPrereleaseReleases));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
         using var response = await _httpClient.GetAsync(ReleasesUri,
@@ -49,8 +56,13 @@ internal sealed class GitHubReleaseClient : IDisposable
         if (response.Content.Headers.ContentLength is > 4 * 1024 * 1024)
             throw new InvalidDataException("GitHub returned an unexpectedly large release list.");
         var json = await response.Content.ReadAsStringAsync(timeout.Token);
-        return ReleaseParser.ParseLatest(json, settings.NotifyStableReleases,
+        if (json.Length > MaximumReleaseListCharacters)
+            throw new InvalidDataException("GitHub returned an unexpectedly large release list.");
+        var release = ReleaseParser.ParseLatest(json, settings.NotifyStableReleases,
             settings.NotifyPrereleaseReleases);
+        DiagnosticLogger.Info("updater", "release_check_complete",
+            ("release", release?.TagName ?? "none"));
+        return release;
     }
 
     internal async Task<DownloadedUpdate> DownloadAsync(ReleaseInfo release,
@@ -59,15 +71,24 @@ internal sealed class GitHubReleaseClient : IDisposable
     {
         var asset = release.PreferredAsset ?? throw new InvalidOperationException(
             "This release does not provide a Windows installer or ZIP package.");
+        var fileName = Path.GetFileName(asset.Name);
+        if (!string.Equals(fileName, asset.Name, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(fileName))
+            throw new InvalidDataException("The update asset has an unsafe file name.");
+        if (asset.Size > MaximumUpdateBytes)
+            throw new InvalidDataException("The update package is unexpectedly large.");
         var directory = Path.Combine(_downloadRoot,
             SanitizeDirectoryName(release.TagName));
         Directory.CreateDirectory(directory);
-        var destination = Path.Combine(directory, asset.Name);
+        var destination = Path.Combine(directory, fileName);
         var partial = destination + ".download";
         TryDelete(partial);
         TryDelete(destination);
         try
         {
+            DiagnosticLogger.Info("updater", "download_begin",
+                ("release", release.TagName), ("asset", asset.Name),
+                ("bytes", asset.Size));
             using var timeout =
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromMinutes(30));
@@ -75,10 +96,15 @@ internal sealed class GitHubReleaseClient : IDisposable
             var verified = await VerifyIfAvailableAsync(release, asset, partial,
                 timeout.Token);
             File.Move(partial, destination, overwrite: true);
+            DiagnosticLogger.Info("updater", "download_complete",
+                ("release", release.TagName), ("asset", asset.Name),
+                ("sha256_verified", verified));
             return new DownloadedUpdate(release, asset, destination, verified);
         }
-        catch
+        catch (Exception error)
         {
+            DiagnosticLogger.Exception("updater", "download_failed", error,
+                ("release", release.TagName), ("asset", asset.Name));
             TryDelete(partial);
             throw;
         }
@@ -92,6 +118,8 @@ internal sealed class GitHubReleaseClient : IDisposable
         response.EnsureSuccessStatusCode();
         var total = response.Content.Headers.ContentLength ??
             (asset.Size > 0 ? asset.Size : null);
+        if (total > MaximumUpdateBytes)
+            throw new InvalidDataException("The update package is unexpectedly large.");
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
         await using var output = new FileStream(destination, FileMode.CreateNew,
             FileAccess.Write, FileShare.None, 128 * 1024,
@@ -105,6 +133,8 @@ internal sealed class GitHubReleaseClient : IDisposable
             if (count == 0) break;
             await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
             received = checked(received + count);
+            if (received > MaximumUpdateBytes)
+                throw new InvalidDataException("The update package exceeded the size limit.");
             var seconds = Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
             progress?.Report(new UpdateDownloadProgress(received, total,
                 received / seconds));
@@ -123,6 +153,8 @@ internal sealed class GitHubReleaseClient : IDisposable
             HttpCompletionOption.ResponseContentRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         var manifest = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (manifest.Length > MaximumChecksumCharacters)
+            throw new InvalidDataException("The checksum manifest is unexpectedly large.");
         var expected = ReleaseParser.FindExpectedSha256(manifest, asset.Name) ??
             throw new InvalidDataException(
                 $"SHA256SUMS.txt does not contain {asset.Name}.");
@@ -152,15 +184,65 @@ internal sealed class GitHubReleaseClient : IDisposable
                          SearchOption.AllDirectories))
                 TryDelete(file);
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (Exception error) when (error is IOException or
+                                      UnauthorizedAccessException)
+        {
+            DiagnosticLogger.Exception("updater", "interrupted_cleanup_failed", error);
+        }
+    }
+
+    internal static LogCleanupResult CleanupOldDownloads(string? root = null,
+        bool includeCompleted = false)
+    {
+        root ??= Path.Combine(UpdateSettingsStore.UserDataDirectory, "Updates");
+        if (!Directory.Exists(root)) return default;
+        var deleted = 0;
+        long bytes = 0;
+        var skipped = 0;
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            if (!includeCompleted && !file.EndsWith(".download",
+                    StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                var length = new FileInfo(file).Length;
+                File.Delete(file);
+                ++deleted;
+                bytes += length;
+            }
+            catch (Exception error) when (error is IOException or
+                                          UnauthorizedAccessException)
+            {
+                ++skipped;
+                DiagnosticLogger.Exception("updater", "cached_file_cleanup_failed",
+                    error, ("file", Path.GetFileName(file)));
+            }
+        }
+        try
+        {
+            foreach (var directory in Directory.EnumerateDirectories(root, "*",
+                         SearchOption.AllDirectories).OrderByDescending(value => value.Length))
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                    Directory.Delete(directory);
+        }
+        catch (Exception error) when (error is IOException or
+                                      UnauthorizedAccessException)
+        {
+            ++skipped;
+            DiagnosticLogger.Exception("updater", "cache_directory_cleanup_failed", error);
+        }
+        return new LogCleanupResult(deleted, bytes, skipped);
     }
 
     private static void TryDelete(string path)
     {
         try { File.Delete(path); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (Exception error) when (error is IOException or
+                                      UnauthorizedAccessException)
+        {
+            DiagnosticLogger.Exception("updater", "file_delete_failed", error,
+                ("file", Path.GetFileName(path)));
+        }
     }
 
     public void Dispose()

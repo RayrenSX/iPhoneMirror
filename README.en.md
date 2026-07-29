@@ -163,8 +163,9 @@ the same cleanup path.
 
 > [!WARNING]
 > Do not use Zadig to replace the Apple parent driver with WinUSB/libusb.
-> iPhoneMirror no longer bundles or installs capture drivers. Use the separate
-> driver utility for any `libusb0` UpperFilter changes.
+> iPhoneMirror only bundles the `libusb0.dll` user-mode runtime required to
+> start the application. It does not install or enable the kernel capture
+> filter; use the separate driver utility for any `libusb0` UpperFilter changes.
 
 ## Wired driver management
 
@@ -186,6 +187,20 @@ repairing the driver and reconnecting the device when prompted, return to the
 main app and click **Start Mirroring** again. UI logs are stored at
 `%LOCALAPPDATA%\iPhoneMirror.Driver\Logs\driver-ui.log`; elevated operation logs
 are stored under `%ProgramData%\iPhoneMirror.Driver`.
+
+## Diagnostic logs
+
+The main app writes managed UI and workflow errors to
+`%LOCALAPPDATA%\iPhoneMirror\Logs\application.log`. USB, decoder, and rendering
+core diagnostics are stored beside it in `capture.log`. Startup failures also
+write `startup.log`, and one-click updates create timestamped
+`installer-update-*.log` files. If LocalAppData is temporarily unavailable,
+critical managed errors fall back to `%TEMP%\iPhoneMirror-fallback.log`.
+
+Use **About → Diagnostics** to open the log folder or clean logs and downloaded
+update packages immediately. Logs rotate automatically, files older than 14
+days are removed, and the main log directory is capped at 64 MB. Files that are
+currently in use are skipped without interrupting mirroring.
 
 > [!NOTE]
 > This automatic check applies only to wired USB devices. Wireless AirPlay
@@ -283,7 +298,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.4.1 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.4.2 -GenerateSbom
 ```
 
 The script downloads hash-pinned Inno Setup 6.7.3 and its Simplified Chinese

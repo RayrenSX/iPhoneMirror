@@ -17,17 +17,39 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        LocalizationService.Initialize();
-        AppIdentity.Initialize();
-        UpdateSettings = _settingsStore.Load();
-        ThemeService.Apply(UpdateSettings.Theme);
-        GitHubReleaseClient.CleanupInterruptedDownloads();
-        EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
-            new RoutedEventHandler((sender, _) => ThemeService.Attach((Window)sender)));
-        base.OnStartup(e);
-        MainWindow = new MainWindow();
-        MainWindow.ContentRendered += OnMainWindowContentRendered;
-        MainWindow.Show();
+        StartupDiagnostics.Initialize();
+        DispatcherUnhandledException += (_, args) =>
+            StartupDiagnostics.Write("WPF dispatcher", args.Exception);
+        try
+        {
+            DiagnosticLogger.Info("lifecycle", "startup_begin",
+                ("arguments", e.Args.Length));
+            LocalizationService.Initialize();
+            AppIdentity.Initialize();
+            StartupDiagnostics.ValidateRequiredRuntime();
+            UpdateSettings = _settingsStore.Load();
+            ThemeService.Apply(UpdateSettings.Theme);
+            GitHubReleaseClient.CleanupInterruptedDownloads();
+            EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
+                new RoutedEventHandler((sender, _) => ThemeService.Attach((Window)sender)));
+            base.OnStartup(e);
+            MainWindow = new MainWindow();
+            MainWindow.ContentRendered += OnMainWindowContentRendered;
+            MainWindow.Show();
+            DiagnosticLogger.Info("lifecycle", "startup_complete");
+        }
+        catch (Exception error)
+        {
+            var logPath = StartupDiagnostics.Write("Application startup", error);
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            try { new StartupErrorWindow(error, logPath).ShowDialog(); }
+            catch (Exception dialogError)
+            {
+                DiagnosticLogger.Exception("startup", "error_dialog_failed",
+                    dialogError);
+            }
+            Shutdown(-1);
+        }
     }
 
     private async void OnMainWindowContentRendered(object? sender, EventArgs e)
@@ -41,9 +63,10 @@ public partial class App : Application
             if (release is not null && MainWindow is not null)
                 ShowUpdateWindow(release, MainWindow, UpdateSettings.AutoDownload);
         }
-        catch
+        catch (Exception error)
         {
             // Startup update checks are best-effort and never block mirroring.
+            DiagnosticLogger.Exception("updater", "startup_check_failed", error);
         }
     }
 
@@ -92,13 +115,21 @@ public partial class App : Application
     internal void SaveUpdateSettings()
     {
         try { _settingsStore.Save(UpdateSettings); }
-        catch { }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("settings", "save_failed", error);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         SaveUpdateSettings();
-        _releaseClient.Dispose();
+        try { _releaseClient.Dispose(); }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("updater", "client_dispose_failed", error);
+        }
+        DiagnosticLogger.Shutdown(e.ApplicationExitCode);
         base.OnExit(e);
     }
 }

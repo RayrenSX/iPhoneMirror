@@ -45,6 +45,8 @@ internal sealed class DriverManagerLauncher
         }
         catch (Exception error)
         {
+            DiagnosticLogger.Exception("driver", "manager_launch_failed", error,
+                ("file", Path.GetFileName(executablePath)));
             return new(false, executablePath, error.Message);
         }
     }
@@ -95,9 +97,11 @@ internal sealed class DriverManagerLauncher
                     _ = SetForegroundWindow(process.MainWindowHandle);
                     return true;
                 }
-                catch
+                catch (Exception error)
                 {
                     // A protected or exiting process is not a usable existing window.
+                    DiagnosticLogger.ExceptionOnce("driver-window-enumeration",
+                        "driver", "existing_window_probe_failed", error);
                 }
             }
         }

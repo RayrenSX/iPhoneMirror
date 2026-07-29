@@ -4,6 +4,11 @@ using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Updater;
 
+var diagnosticTestRoot = Path.Combine(Path.GetTempPath(),
+    $"iPhoneMirror-test-logs-{Guid.NewGuid():N}");
+Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY",
+    diagnosticTestRoot, EnvironmentVariableTarget.Process);
+
 static void Equal<T>(T expected, T actual, string name)
 {
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
@@ -51,7 +56,8 @@ XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
 foreach (var localizationPath in Directory.GetFiles(
              localizationDirectory, "Strings.*.xaml"))
 {
-    var duplicateKeys = XDocument.Load(localizationPath).Descendants()
+    var localization = XDocument.Load(localizationPath);
+    var duplicateKeys = localization.Descendants()
         .Select(element => (string?)element.Attribute(xaml + "Key"))
         .Where(key => !string.IsNullOrWhiteSpace(key))
         .GroupBy(key => key!, StringComparer.Ordinal)
@@ -60,6 +66,16 @@ foreach (var localizationPath in Directory.GetFiles(
         .ToArray();
     Equal(0, duplicateKeys.Length,
         $"localization resource keys are unique in {Path.GetFileName(localizationPath)}");
+    var noPingRecovery = localization.Descendants()
+        .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
+            "CaptureNoPingRecovery", StringComparison.Ordinal)).Value;
+    Equal(true,
+        noPingRecovery.Contains("Restart", StringComparison.OrdinalIgnoreCase) ||
+        noPingRecovery.Contains("重启", StringComparison.Ordinal),
+        $"no-PING recovery asks the user to restart in {Path.GetFileName(localizationPath)}");
+    Equal(true,
+        noPingRecovery.Contains("MFi", StringComparison.OrdinalIgnoreCase),
+        $"no-PING recovery recommends an original or MFi cable in {Path.GetFileName(localizationPath)}");
 }
 
 var mainWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -85,6 +101,21 @@ Equal(false, SemanticVersion.TryParse("1.02.0", out _),
     "semantic version rejects leading zeroes");
 Equal(false, SemanticVersion.TryParse("1.2.0-beta.02", out _),
     "semantic version rejects leading zeroes in numeric prerelease identifiers");
+Equal(true, StartupDiagnostics.UserMessage(new DllNotFoundException(), true)
+    .Contains("原生组件", StringComparison.Ordinal),
+    "startup diagnostics explain native dependency load failures");
+Equal(true, StartupDiagnostics.UserMessage(new FileNotFoundException(), false)
+    .Contains("native component", StringComparison.OrdinalIgnoreCase),
+    "startup preflight missing-file failures use native dependency guidance");
+Equal(true, CaptureErrorGuidance.IsNoPingTimeout(
+        "QuickTime endpoint opened but iPhone sent no PING; keep the device unlocked"),
+    "capture guidance recognizes the native no-PING timeout");
+Equal(true, CaptureErrorGuidance.IsNoPingTimeout(
+        "quicktime endpoint opened but iphone SENT NO ping"),
+    "capture guidance recognizes no-PING diagnostics case-insensitively");
+Equal(false, CaptureErrorGuidance.IsNoPingTimeout(
+        "QuickTime endpoint opened; waiting PING"),
+    "capture guidance does not treat an in-progress handshake as a timeout");
 
 const string releaseFixture = """
 [
@@ -183,6 +214,9 @@ finally
 Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
         .Contains("/RESTARTAPP=1", StringComparison.Ordinal),
     "one-click installer update requests application restart");
+Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
+        .Contains("/LOG=", StringComparison.Ordinal),
+    "one-click installer update persists an installer log");
 
 // usbmux may reverse its enumeration order on every poll. Existing cards must
 // never move, while a newly connected phone is appended exactly once.
@@ -801,6 +835,49 @@ Equal(true, boundedEvent.EndsWith("truncated=true", StringComparison.Ordinal),
     "structured event marks total-line truncation");
 Equal(2048, AppLog.Message(new string('z', 5000)).Length,
     "direct application log message is bounded");
+var diagnosticEntry = DiagnosticLogger.FormatEntry("ERROR", "test", "failure",
+    ("device", sensitiveDeviceId),
+    ("secret", "token=private-token"),
+    ("detail", "failed\nC:\\Users\\Private\\secret.txt"));
+Equal(false, diagnosticEntry.Contains(sensitiveDeviceId,
+        StringComparison.OrdinalIgnoreCase),
+    "persistent diagnostic entry redacts device identifiers");
+Equal(false, diagnosticEntry.Contains("private-token",
+        StringComparison.OrdinalIgnoreCase),
+    "persistent diagnostic entry redacts credentials");
+Equal(1, diagnosticEntry.Count(character => character == '\n'),
+    "persistent diagnostic entry remains one physical line");
+Equal(true, DiagnosticLogger.FormatEntry("INFO", "test", "version",
+        ("version", "1.4.2.0")).Contains("version=1.4.2.0",
+        StringComparison.Ordinal),
+    "persistent diagnostics preserve an application version");
+var diagnosticDirectory = Path.Combine(Path.GetTempPath(),
+    $"iPhoneMirror-diagnostics-{Guid.NewGuid():N}");
+Directory.CreateDirectory(diagnosticDirectory);
+try
+{
+    var activeDiagnosticPath = Path.Combine(diagnosticDirectory, "test.log");
+    await File.WriteAllTextAsync(activeDiagnosticPath, new string('x', 128));
+    var sessionStarted = true;
+    Equal(true, DiagnosticLogger.TryRotateIfNeeded(activeDiagnosticPath,
+            64, 2, ref sessionStarted),
+        "diagnostic logger rotates an oversized active file");
+    Equal(false, sessionStarted,
+        "diagnostic rotation requires a new session header");
+    Equal(true, File.Exists(activeDiagnosticPath + ".1"),
+        "diagnostic rotation retains the previous file");
+    var expiredPath = Path.Combine(diagnosticDirectory, "expired.log.1");
+    await File.WriteAllTextAsync(expiredPath, "expired");
+    File.SetLastWriteTimeUtc(expiredPath, DateTime.UtcNow.AddDays(-30));
+    var cleanupResult = DiagnosticLogger.CleanupDirectory(diagnosticDirectory,
+        DateTimeOffset.UtcNow, includeActiveLogs: false);
+    Equal(true, cleanupResult.DeletedFiles >= 1 && !File.Exists(expiredPath),
+        "diagnostic cleanup removes expired archives");
+}
+finally
+{
+    Directory.Delete(diagnosticDirectory, recursive: true);
+}
 Equal(true, NativeLogTailReader.IsUiEventLine(
         "12:00:00.000 [seq=42] [info] [app] ui_event action refreshed"),
     "structured native UI event is recognized for duplicate suppression");
@@ -981,3 +1058,5 @@ catch (InvalidOperationException error) when (error.Message == "stop failed")
 Sequence(["stop", "dispose"], failureOrder, "core is disposed after stop failure");
 
 Console.WriteLine("App logic tests passed.");
+if (Directory.Exists(diagnosticTestRoot))
+    Directory.Delete(diagnosticTestRoot, recursive: true);

@@ -118,6 +118,32 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
+            <TabItem Header="{DynamicResource DiagnosticsTitle}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,22,12,0">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource DiagnosticsTitle}" FontSize="20"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock Text="{DynamicResource DiagnosticsDescription}"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   TextWrapping="Wrap" Margin="0,6,0,18"/>
+                        <TextBlock Text="{DynamicResource DiagnosticsLocation}" FontSize="15"
+                                   FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding DiagnosticPath}" IsReadOnly="True"
+                                 Margin="0,9,0,16" Padding="10,7"
+                                 TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding DiagnosticStatus}"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   TextWrapping="Wrap" Margin="0,0,0,14"/>
+                        <WrapPanel>
+                            <Button Content="{DynamicResource OpenLogs}" Click="OnOpenLogsClick"
+                                    Style="{StaticResource PrimaryButton}" MinWidth="126"
+                                    Margin="0,0,8,8"/>
+                            <Button Content="{DynamicResource CleanLogs}" Click="OnCleanLogsClick"
+                                    MinWidth="126" Margin="0,0,8,8"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>

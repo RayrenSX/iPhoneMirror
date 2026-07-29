@@ -292,9 +292,11 @@ internal sealed class NativePreviewWindow : IDisposable
             _logDiagnostic?.Invoke(AppLog.Event(eventName,
                 fields.Select(field => (object?)field).ToArray()));
         }
-        catch
+        catch (Exception error)
         {
             // Diagnostics must never interfere with HWND ownership or teardown.
+            DiagnosticLogger.ExceptionOnce("preview-log-callback", "logging",
+                "preview_log_callback_failed", error);
         }
     }
 

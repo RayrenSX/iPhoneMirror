@@ -14,6 +14,24 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        DispatcherUnhandledException += (_, args) =>
+            DriverLogger.WriteException("runtime", "dispatcher_unhandled_exception",
+                args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception error)
+                DriverLogger.WriteException("runtime", "unhandled_exception", error,
+                    ("terminating", args.IsTerminating));
+            else
+                DriverLogger.WriteError("runtime", "unhandled_non_exception",
+                    ("terminating", args.IsTerminating));
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            DriverLogger.WriteException("runtime", "unobserved_task_exception",
+                args.Exception);
+            args.SetObserved();
+        };
         if (ElevatedDriverHost.IsRequested(e.Args))
         {
             _elevatedHost = true;

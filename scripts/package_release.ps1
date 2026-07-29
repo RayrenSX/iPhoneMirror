@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.4.1',
+    [string]$Version = '1.4.2',
     [switch]$SkipBuild,
     [switch]$GenerateSbom
 )
@@ -45,12 +45,20 @@ $RequiredArtifacts = @(
     'tools\ffmpeg\SOURCE.txt',
     'iPhoneMirror.Driver.exe',
     'libusb-1.0.dll',
+    'libusb0.dll',
+    'msvcp140.dll',
+    'vcruntime140.dll',
+    'vcruntime140_1.dll',
     'LICENSE',
     'THIRD_PARTY_NOTICES.md',
     'CHANGELOG.md',
     'tools\updater\Apply-ZipUpdate.ps1',
     'licenses\libusb-COPYING.txt',
+    'licenses\libusb-win32-COPYING-LGPL.txt',
     'Wireless\iPhoneMirror.WirelessHost.exe',
+    'Wireless\msvcp140.dll',
+    'Wireless\vcruntime140.dll',
+    'Wireless\vcruntime140_1.dll',
     'Wireless\airplay2dll.dll',
     'Wireless\avcodec-58.dll',
     'Wireless\avutil-56.dll',
@@ -175,6 +183,18 @@ function Assert-PublishedOutput {
     if ((Get-FileHash -LiteralPath $sourceLicense -Algorithm SHA256).Hash -ne
         (Get-FileHash -LiteralPath $publishedLicense -Algorithm SHA256).Hash) {
         throw 'Published libusb license does not match the vendored license.'
+    }
+
+    $libUsb0Runtime = Join-Path $PublishRoot 'libusb0.dll'
+    $expectedLibUsb0Hash =
+        '4F18B5D2C28AA66B648C8683C6D09B52B92CBBEE85984BBEFAD5F38A64BC2A14'
+    if ((Get-FileHash -LiteralPath $libUsb0Runtime -Algorithm SHA256).Hash -ne
+        $expectedLibUsb0Hash) {
+        throw 'Published libusb0 runtime does not match the pinned upstream binary.'
+    }
+    if ((Get-AuthenticodeSignature -LiteralPath $libUsb0Runtime).Status -ne
+        [System.Management.Automation.SignatureStatus]::Valid) {
+        throw 'Published libusb0 runtime Authenticode signature is not valid.'
     }
 
     foreach ($entry in $MediaOutputRuntimeHashes.GetEnumerator()) {
@@ -352,6 +372,8 @@ try {
         $RootPackage.licenseDeclared = 'GPL-3.0-only'
         $RootPackage.licenseConcluded = 'NOASSERTION'
         $RootPackage.copyrightText = 'Copyright (c) 2026 RayrenSX and third-party contributors'
+        $VcRuntimeVersion = (Get-Item -LiteralPath `
+            (Join-Path $PublishRoot 'vcruntime140.dll')).VersionInfo.ProductVersion
 
         $NativePackages = @(
             [PSCustomObject][ordered]@{
@@ -418,6 +440,17 @@ try {
                 copyrightText = 'NOASSERTION'
                 versionInfo = '8.1.2'
                 supplier = 'Organization: gyan.dev'
+            },
+            [PSCustomObject][ordered]@{
+                name = 'Microsoft Visual C++ x64 runtime'
+                SPDXID = 'SPDXRef-Package-Microsoft-Visual-Cpp-Runtime'
+                downloadLocation = 'https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist'
+                filesAnalyzed = $false
+                licenseConcluded = 'NOASSERTION'
+                licenseDeclared = 'NOASSERTION'
+                copyrightText = 'Copyright Microsoft Corporation'
+                versionInfo = $VcRuntimeVersion
+                supplier = 'Organization: Microsoft Corporation'
             }
         )
         foreach ($NativePackage in $NativePackages) {

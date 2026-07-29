@@ -16,7 +16,7 @@ internal sealed class NativeLogTailReader
     internal NativeLogTailReader(string? path = null)
     {
         Path = path ?? Environment.GetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE")
-            ?? System.IO.Path.Combine(System.IO.Path.GetTempPath(), "iPhoneMirror-capture.log");
+            ?? DiagnosticLogger.NativeLogPath;
     }
 
     internal string Path { get; }

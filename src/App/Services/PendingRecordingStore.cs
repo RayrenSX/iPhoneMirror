@@ -41,7 +41,12 @@ internal static class PendingRecordingStore
                 .Select(file => file.FullName)
                 .FirstOrDefault();
         }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
+        catch (Exception error) when (error is IOException or
+                                      UnauthorizedAccessException)
+        {
+            DiagnosticLogger.Exception("recording", "pending_recording_scan_failed",
+                error, ("directory", Path.GetFileName(directory)));
+            return null;
+        }
     }
 }

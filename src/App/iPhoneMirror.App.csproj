@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.4.1</Version>
-    <AssemblyVersion>1.4.1.0</AssemblyVersion>
-    <FileVersion>1.4.1.0</FileVersion>
+    <Version>1.4.2</Version>
+    <AssemblyVersion>1.4.2.0</AssemblyVersion>
+    <FileVersion>1.4.2.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>
@@ -74,6 +74,21 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
+    <Content Include="native\libusb0.dll" Condition="Exists('native\libusb0.dll')">
+      <Link>libusb0.dll</Link>
+      <TargetPath>libusb0.dll</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="native\msvcp140.dll;native\vcruntime140.dll;native\vcruntime140_1.dll"
+             Condition="Exists('native\vcruntime140.dll')">
+      <Link>%(Filename)%(Extension)</Link>
+      <TargetPath>%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
     <Content Include="native\Wireless\iPhoneMirror.WirelessHost.exe" Condition="Exists('native\Wireless\iPhoneMirror.WirelessHost.exe')">
       <Link>Wireless\iPhoneMirror.WirelessHost.exe</Link>
       <TargetPath>Wireless\iPhoneMirror.WirelessHost.exe</TargetPath>
@@ -84,6 +99,14 @@
     <Content Include="native\Wireless\dnssd.dll" Condition="Exists('native\Wireless\dnssd.dll')">
       <Link>Wireless\dnssd.dll</Link>
       <TargetPath>Wireless\dnssd.dll</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="native\Wireless\msvcp140.dll;native\Wireless\vcruntime140.dll;native\Wireless\vcruntime140_1.dll"
+             Condition="Exists('native\Wireless\vcruntime140.dll')">
+      <Link>Wireless\%(Filename)%(Extension)</Link>
+      <TargetPath>Wireless\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
@@ -117,6 +140,13 @@
     </Content>
     <Content Include="..\..\THIRD_PARTY_NOTICES.md" Condition="Exists('..\..\THIRD_PARTY_NOTICES.md')">
       <Link>THIRD_PARTY_NOTICES.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="..\DriverInstaller\Assets\libusb-win32-1.2.6.0\COPYING_LGPL.txt">
+      <Link>licenses\libusb-win32-COPYING-LGPL.txt</Link>
+      <TargetPath>licenses\libusb-win32-COPYING-LGPL.txt</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>

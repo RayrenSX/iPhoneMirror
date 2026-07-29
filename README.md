@@ -150,7 +150,8 @@ USB 配置；关闭主窗口也会执行同一清理流程。
 
 > [!WARNING]
 > 不要使用 Zadig 把 Apple 父设备替换为 WinUSB/libusb。iPhoneMirror 只在目标
-> Apple `usbccgp` 设备实例上检测 `libusb0` UpperFilter，不再内置或安装驱动。
+> Apple `usbccgp` 设备实例上检测 `libusb0` UpperFilter。主程序只携带启动所需的
+> `libusb0.dll` 用户态运行库，不会自行安装或启用内核过滤驱动。
 > 驱动变更请交给独立驱动工具完成。
 
 ## 有线驱动管理
@@ -170,6 +171,18 @@ USB 配置；关闭主窗口也会执行同一清理流程。
 重新插拔设备后，再回到主程序点击“开始投屏”。驱动管理器界面日志位于
 `%LOCALAPPDATA%\iPhoneMirror.Driver\Logs\driver-ui.log`，管理员操作日志位于
 `%ProgramData%\iPhoneMirror.Driver`。
+
+## 诊断日志
+
+主程序会把托管界面与业务错误写入
+`%LOCALAPPDATA%\iPhoneMirror\Logs\application.log`，把 USB、解码和渲染核心日志写入
+同目录的 `capture.log`。启动失败会额外写入 `startup.log`；一键更新启动安装程序时会
+生成 `installer-update-时间.log`。如果 LocalAppData 暂时不可写，关键托管错误会回退到
+`%TEMP%\iPhoneMirror-fallback.log`。
+
+“关于 → 诊断”可以直接打开日志目录或立即清理日志和已下载的更新缓存。程序也会自动
+轮转日志，清理超过 14 天的旧文件，并将主日志目录总量限制在 64 MB。清理时正在使用的
+文件会安全跳过，不会中断投屏。
 
 > [!NOTE]
 > 以上自动检查只针对 USB 有线设备。无线 AirPlay 来源不会读取或要求 `libusb0`，
@@ -282,7 +295,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.4.1 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.4.2 -GenerateSbom
 ```
 
 Inno Setup 6.7.3 及其简体中文翻译会按固定 SHA256 下载到 `work/tools`，无需全局安装。

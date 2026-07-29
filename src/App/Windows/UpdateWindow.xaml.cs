@@ -102,10 +102,14 @@ public partial class UpdateWindow : Window, INotifyPropertyChanged
         }
         catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
         {
+            DiagnosticLogger.Info("updater", "download_cancelled",
+                ("release", _release.TagName));
             StatusText = LocalizationService.Get("UpdateDownloadCancelled");
         }
         catch (Exception error)
         {
+            DiagnosticLogger.Exception("updater", "update_workflow_failed", error,
+                ("release", _release.TagName));
             StatusText = string.Format(LocalizationService.Get("UpdateDownloadFailedFormat"),
                 FriendlyError(error));
             UpdateButtonText = LocalizationService.Get("RetryUpdate");

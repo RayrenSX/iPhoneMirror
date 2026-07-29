@@ -52,15 +52,19 @@ internal sealed class DeviceSessionManager(NativeCore core)
             if (state.Handle != handle)
             {
                 state.Handle = handle;
+                if (handle != 0) state.ErrorShown = false;
                 changed = true;
             }
         }
         if (!changed) return;
         try { SessionHandleChanged?.Invoke(state.Udid, handle); }
-        catch
+        catch (Exception error)
         {
             // Session ownership changes must complete even if a UI observer
             // fails while closing a stale window.
+            DiagnosticLogger.Exception("capture", "session_handle_observer_failed",
+                error, ("device", AppLog.Device(state.Udid)),
+                ("handle", AppLog.Handle(handle)));
         }
     }
 

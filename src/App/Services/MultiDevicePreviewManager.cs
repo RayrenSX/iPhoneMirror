@@ -167,7 +167,11 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                 viewModel.AddUiLog(LocalizationService.Format(
                     "StopFailedFormat", error.Message));
             }
-            catch { }
+            catch (Exception uiError)
+            {
+                DiagnosticLogger.Exception("window", "preview_dispose_ui_failed",
+                    uiError, ("device", AppLog.Device(udid)));
+            }
         }
     }
 

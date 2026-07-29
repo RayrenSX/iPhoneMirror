@@ -96,6 +96,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
         }
         catch (Exception error)
         {
+            DiagnosticLogger.Exception("media_output", "capability_probe_failed", error,
+                ("file", Path.GetFileName(path)));
             return new(false, false, false, false, false, false, false,
                 string.Empty, path, error.Message);
         }
@@ -170,8 +172,10 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 StatusChanged?.Invoke(request.Kind == MediaOutputKind.Recording
                     ? "Recording" : "Live", false);
             }
-            catch
+            catch (Exception error)
             {
+                DiagnosticLogger.Exception("media_output", "start_failed", error,
+                    ("kind", request.Kind));
                 if (process is not null) await DisposeFailedStartAsync(process);
                 audioPipe?.Dispose();
                 if (recordingStagingPath is not null)
@@ -229,8 +233,18 @@ internal sealed class MediaOutputService : IAsyncDisposable
         finally
         {
             pumpCancellation.Cancel();
-            try { process.StandardInput.Close(); } catch { }
-            try { audioPipe?.Dispose(); } catch { }
+            try { process.StandardInput.Close(); }
+            catch (Exception error)
+            {
+                DiagnosticLogger.ExceptionOnce("media-stdin-close", "media_output",
+                    "stdin_close_failed", error);
+            }
+            try { audioPipe?.Dispose(); }
+            catch (Exception error)
+            {
+                DiagnosticLogger.ExceptionOnce("media-audio-pipe-dispose", "media_output",
+                    "audio_pipe_dispose_failed", error);
+            }
             try
             {
                 await Task.WhenAll(videoTask ?? Task.CompletedTask,
@@ -296,6 +310,9 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 }
             }
             finally { _lifecycleGate.Release(); }
+            if (failure is not null)
+                DiagnosticLogger.Exception("media_output", "session_failed", failure,
+                    ("kind", request.Kind), ("handle", AppLog.Handle(sessionHandle)));
             StatusChanged?.Invoke(failure?.Message ?? "Stopped", failure is not null);
         }
     }
@@ -652,7 +669,12 @@ internal sealed class MediaOutputService : IAsyncDisposable
     {
         try
         {
-            try { process.StandardInput.Close(); } catch { }
+            try { process.StandardInput.Close(); }
+            catch (Exception error)
+            {
+                DiagnosticLogger.ExceptionOnce("media-failed-stdin-close", "media_output",
+                    "failed_start_stdin_close_failed", error);
+            }
             await KillProcessAsync(process);
         }
         finally { process.Dispose(); }
@@ -668,9 +690,10 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 new CancellationTokenSource(TimeSpan.FromSeconds(2));
             await process.WaitForExitAsync(timeout.Token);
         }
-        catch
+        catch (Exception error)
         {
             // Cleanup must not replace the original media-output failure.
+            DiagnosticLogger.Exception("media_output", "process_kill_failed", error);
         }
     }
 
@@ -684,9 +707,11 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 return true;
             }
         }
-        catch
+        catch (Exception error)
         {
             // The caller already retains any shutdown or pump failure.
+            DiagnosticLogger.ExceptionOnce("media-exit-code", "media_output",
+                "exit_code_read_failed", error);
         }
         exitCode = 0;
         return false;
@@ -695,8 +720,12 @@ internal sealed class MediaOutputService : IAsyncDisposable
     private static void TryDeleteFile(string path)
     {
         try { File.Delete(path); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (Exception error) when (error is IOException or
+                                      UnauthorizedAccessException)
+        {
+            DiagnosticLogger.Exception("media_output", "temporary_file_delete_failed",
+                error, ("file", Path.GetFileName(path)));
+        }
     }
 
     private static string? FindFfmpeg()
@@ -721,7 +750,12 @@ internal sealed class MediaOutputService : IAsyncDisposable
             process?.WaitForExit(2000);
             return !string.IsNullOrWhiteSpace(line) && File.Exists(line) ? line : null;
         }
-        catch { return null; }
+        catch (Exception error)
+        {
+            DiagnosticLogger.ExceptionOnce("ffmpeg-discovery", "media_output",
+                "ffmpeg_discovery_failed", error);
+            return null;
+        }
     }
 
     private static async Task<string> RunProbeAsync(string path,

@@ -136,7 +136,12 @@ internal static class ThemeService
                 "AppsUseLightTheme", 0);
             return value is not int integer || integer == 0;
         }
-        catch { return true; }
+        catch (Exception error)
+        {
+            DiagnosticLogger.ExceptionOnce("theme-registry", "theme",
+                "system_theme_read_failed", error);
+            return true;
+        }
     }
 
     [DllImport("dwmapi.dll")]

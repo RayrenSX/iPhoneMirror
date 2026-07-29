@@ -279,6 +279,8 @@ public partial class MediaOutputSettingsWindow : Window
             }
             catch (Exception error)
             {
+                DiagnosticLogger.Exception("recording", "save_failed", error,
+                    ("file", Path.GetFileName(dialog.FileName)));
                 FeedbackText.Text = LocalizationService.Format(
                     "RecordingSaveFailedFormat", error.Message);
             }
@@ -289,7 +291,11 @@ public partial class MediaOutputSettingsWindow : Window
     private async Task RunAsync(Func<Task> action)
     {
         try { await action(); }
-        catch (Exception error) { FeedbackText.Text = error.Message; }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("media_output", "settings_action_failed", error);
+            FeedbackText.Text = error.Message;
+        }
     }
 
     private bool TryReadOutputSettings(TextBox widthBox, TextBox heightBox,

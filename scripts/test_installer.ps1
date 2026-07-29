@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.4.1',
+    [string]$Version = '1.4.2',
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$PreviousVersion = '1.4.0'
+    [string]$PreviousVersion = '1.4.1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,6 +111,17 @@ try {
         throw 'Previous test version did not install the application.'
     }
     Install-TestVersion $currentSetup 'upgrade-current'
+
+    foreach ($relative in @(
+        'libusb0.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
+        'Wireless\msvcp140.dll', 'Wireless\vcruntime140.dll',
+        'Wireless\vcruntime140_1.dll'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $InstallDirectory $relative) `
+                -PathType Leaf)) {
+            throw "Upgrade did not install required native runtime: $relative"
+        }
+    }
 
     $uninstallEntry = Get-ItemProperty -LiteralPath $UninstallRegistryPath
     if ($uninstallEntry.DisplayVersion.Trim() -ne $Version) {

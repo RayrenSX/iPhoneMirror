@@ -10,12 +10,24 @@ internal static class AppIdentity
     internal static void Initialize()
     {
         try { SetErrorMode(GetErrorMode() | SemFailCriticalErrors); }
-        catch (DllNotFoundException) { }
-        catch (EntryPointNotFoundException) { }
+        catch (Exception error) when (error is DllNotFoundException or
+                                      EntryPointNotFoundException)
+        {
+            DiagnosticLogger.Exception("identity", "set_error_mode_failed", error);
+        }
 
-        try { SetCurrentProcessExplicitAppUserModelID(AppUserModelId); }
-        catch (DllNotFoundException) { }
-        catch (EntryPointNotFoundException) { }
+        try
+        {
+            var result = SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+            if (result != 0)
+                DiagnosticLogger.Error("identity", "app_user_model_id_failed",
+                    ("hresult", $"0x{result:X8}"));
+        }
+        catch (Exception error) when (error is DllNotFoundException or
+                                      EntryPointNotFoundException)
+        {
+            DiagnosticLogger.Exception("identity", "app_user_model_id_exception", error);
+        }
     }
 
     [DllImport("kernel32.dll")]

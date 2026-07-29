@@ -129,6 +129,8 @@
     <system:String x:Key="CaptureStopped">投屏已停止</system:String>
     <system:String x:Key="CaptureError">投屏出现错误</system:String>
     <system:String x:Key="CaptureErrorFormat">投屏错误：{0}</system:String>
+    <system:String x:Key="CaptureNoPingTitle">iPhone 投屏连接超时</system:String>
+    <system:String x:Key="CaptureNoPingRecovery">iPhone 已连接，但长时间没有响应投屏握手。&#x0A;&#x0A;请重启 iPhone，然后使用 Apple 原装或 MFi 认证数据线重新连接后重试。&#x0A;&#x0A;重试时请保持 iPhone 解锁。</system:String>
     <system:String x:Key="StartRequested">已请求开始投屏</system:String>
     <system:String x:Key="StartFailedFormat">开始投屏失败：{0}</system:String>
     <system:String x:Key="StopSessionReleased">投屏已停止，会话资源已释放</system:String>
@@ -391,6 +393,14 @@
     <system:String x:Key="LicenseInformation">许可证信息</system:String>
     <system:String x:Key="UpdateSettingsTitle">更新设置</system:String>
     <system:String x:Key="UpdateSettingsDescription">控制后台检查、自动下载、发布通道和应用主题。</system:String>
+    <system:String x:Key="DiagnosticsTitle">诊断</system:String>
+    <system:String x:Key="DiagnosticsDescription">应用错误、投屏核心和更新流程会写入本地日志，便于排查其他电脑上的问题。</system:String>
+    <system:String x:Key="DiagnosticsLocation">日志位置</system:String>
+    <system:String x:Key="DiagnosticsRetentionSummary">日志自动限制为单文件 8–16 MB，并清理超过 14 天或总量超过 64 MB 的旧文件。</system:String>
+    <system:String x:Key="OpenLogs">打开日志目录</system:String>
+    <system:String x:Key="CleanLogs">清理日志和更新缓存</system:String>
+    <system:String x:Key="DiagnosticsCleanedFormat">清理完成：删除 {0} 个文件，释放 {1}；{2} 个正在使用或无权限的文件已跳过。</system:String>
+    <system:String x:Key="DiagnosticsCleanupFailedFormat">清理失败：{0}</system:String>
     <system:String x:Key="CheckOnStartup">启动时检查更新</system:String>
     <system:String x:Key="AutoDownloadUpdates">发现更新后自动开始下载</system:String>
     <system:String x:Key="NotifyStableReleases">提醒正式版更新</system:String>

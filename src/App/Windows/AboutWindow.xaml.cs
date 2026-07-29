@@ -19,6 +19,7 @@ public partial class AboutWindow : Window, INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public string VersionText => VersionManager.DisplayVersion;
+    public string DiagnosticPath => DiagnosticLogger.DirectoryPath;
     public IReadOnlyList<ThemeChoice> ThemeChoices { get; }
     public string UpdateStatus
     {
@@ -59,6 +60,7 @@ public partial class AboutWindow : Window, INotifyPropertyChanged
     {
         _app = app;
         _updateStatus = LocalizationService.Get("UpdateStatusReady");
+        _diagnosticStatus = LocalizationService.Get("DiagnosticsRetentionSummary");
         ThemeChoices =
         [
             new(AppTheme.System, LocalizationService.Get("ThemeSystem")),
@@ -88,10 +90,12 @@ public partial class AboutWindow : Window, INotifyPropertyChanged
         }
         catch (OperationCanceledException)
         {
+            DiagnosticLogger.Info("updater", "manual_check_cancelled");
             UpdateStatus = LocalizationService.Get("UpdateCheckCancelled");
         }
         catch (Exception error)
         {
+            DiagnosticLogger.Exception("updater", "manual_check_failed", error);
             UpdateStatus = string.Format(LocalizationService.Get("UpdateCheckFailedFormat"),
                 FriendlyError(error));
         }
@@ -109,8 +113,52 @@ public partial class AboutWindow : Window, INotifyPropertyChanged
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
         catch (Exception error)
         {
+            DiagnosticLogger.Exception("shell", "open_target_failed", error,
+                ("target", Path.GetFileName(target)));
             AppPromptWindow.Inform(LocalizationService.Get("OpenLinkFailedTitle"), error.Message);
         }
+    }
+
+    private void OnOpenLogsClick(object sender, RoutedEventArgs e) =>
+        Open(DiagnosticLogger.DirectoryPath);
+
+    private void OnCleanLogsClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var logs = DiagnosticLogger.Cleanup(includeActiveLogs: true);
+            var updates = GitHubReleaseClient.CleanupOldDownloads(
+                includeCompleted: true);
+            var deletedFiles = logs.DeletedFiles + updates.DeletedFiles;
+            var deletedBytes = logs.DeletedBytes + updates.DeletedBytes;
+            var skipped = logs.SkippedFiles + updates.SkippedFiles;
+            DiagnosticStatus = string.Format(LocalizationService.Get(
+                "DiagnosticsCleanedFormat"), deletedFiles,
+                FormatBytes(deletedBytes), skipped);
+            DiagnosticLogger.Info("logging", "manual_cleanup_complete",
+                ("deleted_files", deletedFiles), ("deleted_bytes", deletedBytes),
+                ("skipped_files", skipped));
+        }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("logging", "manual_cleanup_failed", error);
+            DiagnosticStatus = string.Format(LocalizationService.Get(
+                "DiagnosticsCleanupFailedFormat"), AppLog.Error(error));
+        }
+    }
+
+    private string _diagnosticStatus = string.Empty;
+    public string DiagnosticStatus
+    {
+        get => _diagnosticStatus;
+        private set { _diagnosticStatus = value; OnPropertyChanged(); }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024 * 1024) return $"{bytes / 1024d / 1024d:F1} MB";
+        if (bytes >= 1024) return $"{bytes / 1024d:F0} KB";
+        return $"{bytes} B";
     }
 
     private void OnGitHubClick(object sender, RoutedEventArgs e) =>

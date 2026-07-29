@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.4.1',
+    [string]$Version = '1.4.2',
     [switch]$SkipAppBuild,
     [string]$SourceDirectory,
     [string]$OutputDirectory
@@ -35,7 +35,10 @@ try {
         throw "Installer version $Version does not match application version $actualVersion."
     }
     foreach ($required in @('CHANGELOG.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
-            'tools\updater\Apply-ZipUpdate.ps1')) {
+            'tools\updater\Apply-ZipUpdate.ps1', 'libusb0.dll', 'msvcp140.dll',
+            'vcruntime140.dll', 'vcruntime140_1.dll',
+            'Wireless\msvcp140.dll', 'Wireless\vcruntime140.dll',
+            'Wireless\vcruntime140_1.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory $required) -PathType Leaf)) {
             throw "Installer payload is missing: $required"
         }

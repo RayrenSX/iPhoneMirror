@@ -146,7 +146,11 @@ internal sealed class WirelessReceiverService
                 if (!process.WaitForExit(5000))
                 {
                     try { process.Kill(entireProcessTree: true); }
-                    catch { }
+                    catch (Exception error)
+                    {
+                        DiagnosticLogger.ExceptionOnce("wireless-probe-kill",
+                            "wireless", "runtime_probe_kill_failed", error);
+                    }
                     return new(WirelessRuntimeProbeStatus.TimedOut, -1);
                 }
                 var result = WirelessRuntimeProbeResult.FromExitCode(process.ExitCode);
@@ -155,15 +159,23 @@ internal sealed class WirelessReceiverService
             }
             catch (Win32Exception error) when (IsCodeIntegrityError(error.NativeErrorCode))
             {
+                DiagnosticLogger.ExceptionOnce("wireless-code-integrity", "wireless",
+                    "runtime_probe_code_integrity_blocked", error,
+                    ("native_error", error.NativeErrorCode));
                 return new(WirelessRuntimeProbeStatus.CodeIntegrityBlocked,
                     error.NativeErrorCode);
             }
             catch (Win32Exception error)
             {
+                DiagnosticLogger.ExceptionOnce("wireless-load", "wireless",
+                    "runtime_probe_load_failed", error,
+                    ("native_error", error.NativeErrorCode));
                 return new(WirelessRuntimeProbeStatus.LoadFailed, error.NativeErrorCode);
             }
-            catch
+            catch (Exception error)
             {
+                DiagnosticLogger.ExceptionOnce("wireless-probe", "wireless",
+                    "runtime_probe_failed", error);
                 return new(WirelessRuntimeProbeStatus.LoadFailed, -1);
             }
         }

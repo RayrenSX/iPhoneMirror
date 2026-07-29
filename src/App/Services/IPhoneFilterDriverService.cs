@@ -90,6 +90,8 @@ internal sealed class IPhoneFilterDriverService
         }
         catch (Exception error)
         {
+            DiagnosticLogger.Exception("driver", "filter_inspection_failed", error,
+                ("device", AppLog.Device(udid)));
             return new(IPhoneFilterDriverState.Error, ReadInstalledVersion(), error.Message);
         }
     }
@@ -127,8 +129,10 @@ internal sealed class IPhoneFilterDriverService
                 "drivers", "libusb0.sys");
             return File.Exists(path) ? FileVersionInfo.GetVersionInfo(path).FileVersion : null;
         }
-        catch
+        catch (Exception error)
         {
+            DiagnosticLogger.ExceptionOnce("driver-version", "driver",
+                "filter_version_read_failed", error);
             return null;
         }
     }

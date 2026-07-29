@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Interop;
 
@@ -430,8 +431,10 @@ internal sealed class NativeCore : IDisposable
                     : im_force_preview_refresh()) == 0;
             }
         }
-        catch (EntryPointNotFoundException)
+        catch (EntryPointNotFoundException error)
         {
+            DiagnosticLogger.ExceptionOnce("native-force-refresh", "native",
+                "force_refresh_entrypoint_missing", error);
             return false;
         }
     }
@@ -446,10 +449,12 @@ internal sealed class NativeCore : IDisposable
                 Math.Clamp((float)normalizedRadius, 0.0f, 0.5f),
                 Math.Clamp((float)curveExponent, 1.5f, 8.0f)) == 0;
         }
-        catch (EntryPointNotFoundException)
+        catch (EntryPointNotFoundException error)
         {
             // A mismatched older native DLL should keep rendering with its
             // historical iPhone curve instead of crashing the GUI.
+            DiagnosticLogger.ExceptionOnce("native-corner-profile", "native",
+                "corner_profile_entrypoint_missing", error);
             return false;
         }
     }
@@ -593,8 +598,10 @@ internal sealed class NativeCore : IDisposable
         {
             return im_log_message(message) == 0;
         }
-        catch (EntryPointNotFoundException)
+        catch (EntryPointNotFoundException error)
         {
+            DiagnosticLogger.ExceptionOnce("native-log-entrypoint", "native",
+                "log_entrypoint_missing", error);
             return false;
         }
     }
@@ -733,6 +740,8 @@ internal sealed class NativeCore : IDisposable
         catch (Exception error) when (error is EntryPointNotFoundException or
                                       DllNotFoundException)
         {
+            DiagnosticLogger.ExceptionOnce("native-video-output-status", "native",
+                "video_output_status_unavailable", error);
             return false;
         }
     }
@@ -759,6 +768,8 @@ internal sealed class NativeCore : IDisposable
         }
         catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
         {
+            DiagnosticLogger.ExceptionOnce("native-pipeline-preferences", "native",
+                "pipeline_preferences_unavailable", error);
             return (false, error.Message);
         }
     }
@@ -783,6 +794,8 @@ internal sealed class NativeCore : IDisposable
         catch (Exception error) when (error is EntryPointNotFoundException or
                                       DllNotFoundException)
         {
+            DiagnosticLogger.ExceptionOnce("native-image-adjustments", "native",
+                "image_adjustments_unavailable", error);
             return (false, error.Message);
         }
     }
@@ -814,8 +827,10 @@ internal sealed class NativeCore : IDisposable
                 ? (true, LocalizationService.Get(enabled ? "AudioPlaybackEnabled" : "AudioPlaybackMuted"))
                 : (false, GetLastError(LocalizationService.Get("AudioStateUpdateFailed")));
         }
-        catch (EntryPointNotFoundException)
+        catch (EntryPointNotFoundException error)
         {
+            DiagnosticLogger.ExceptionOnce("native-audio-toggle", "native",
+                "audio_toggle_entrypoint_missing", error);
             return (false, LocalizationService.Get("AudioToggleUnsupported"));
         }
     }
@@ -830,8 +845,10 @@ internal sealed class NativeCore : IDisposable
                 ? (true, LocalizationService.Format("AudioVolumeFormat", normalized * 100))
                 : (false, GetLastError(LocalizationService.Get("AudioVolumeUpdateFailed")));
         }
-        catch (EntryPointNotFoundException)
+        catch (EntryPointNotFoundException error)
         {
+            DiagnosticLogger.ExceptionOnce("native-audio-volume", "native",
+                "audio_volume_entrypoint_missing", error);
             return (false, LocalizationService.Get("AudioVolumeUnsupported"));
         }
     }
@@ -845,8 +862,10 @@ internal sealed class NativeCore : IDisposable
                 ? (true, LocalizationService.Get("VideoPreferencesApplied"))
                 : (false, GetLastError(LocalizationService.Get("VideoPreferencesUpdateFailed")));
         }
-        catch (EntryPointNotFoundException)
+        catch (EntryPointNotFoundException error)
         {
+            DiagnosticLogger.ExceptionOnce("native-video-preferences", "native",
+                "video_preferences_entrypoint_missing", error);
             return (false, LocalizationService.Get("VideoPreferencesUnsupported"));
         }
     }

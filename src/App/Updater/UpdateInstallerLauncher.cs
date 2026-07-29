@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Updater;
 
@@ -7,6 +8,9 @@ internal static class UpdateInstallerLauncher
 {
     internal static void Launch(DownloadedUpdate update)
     {
+        DiagnosticLogger.Info("updater", "installer_launch_begin",
+            ("release", update.Release.TagName), ("asset", update.Asset.Name),
+            ("sha256_verified", update.HashVerified));
         if (update.Asset.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
             var process = Process.Start(new ProcessStartInfo
@@ -19,6 +23,8 @@ internal static class UpdateInstallerLauncher
             });
             if (process is null)
                 throw new InvalidOperationException("The update installer could not be started.");
+            DiagnosticLogger.Info("updater", "installer_launched",
+                ("format", "exe"), ("pid", process.Id));
             return;
         }
 
@@ -47,10 +53,16 @@ internal static class UpdateInstallerLauncher
             start.ArgumentList.Add(argument);
         if (Process.Start(start) is null)
             throw new InvalidOperationException("The ZIP update helper could not be started.");
+        DiagnosticLogger.Info("updater", "installer_launched", ("format", "zip"));
     }
 
-    internal static string BuildInstallerArguments() =>
-        "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RESTARTAPP=1";
+    internal static string BuildInstallerArguments()
+    {
+        var logPath = Path.Combine(DiagnosticLogger.DirectoryPath,
+            $"installer-update-{DateTime.UtcNow:yyyyMMdd-HHmmss}.log");
+        return "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS " +
+            $"/RESTARTAPP=1 /LOG=\"{logPath}\"";
+    }
 
     internal static IReadOnlyList<string> BuildZipArguments(string script,
         string zipPath, string installDirectory, string restartExecutable, int processId) =>

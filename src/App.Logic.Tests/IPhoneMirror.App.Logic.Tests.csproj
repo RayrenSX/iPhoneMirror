@@ -20,6 +20,9 @@
     <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
     <Compile Include="..\App\Services\NativeLogTailReader.cs" Link="NativeLogTailReader.cs" />
     <Compile Include="..\App\Services\AppLog.cs" Link="AppLog.cs" />
+    <Compile Include="..\App\Services\DiagnosticLogger.cs" Link="DiagnosticLogger.cs" />
+    <Compile Include="..\App\Services\StartupDiagnostics.cs" Link="StartupDiagnostics.cs" />
+    <Compile Include="..\App\Services\CaptureErrorGuidance.cs" Link="CaptureErrorGuidance.cs" />
     <Compile Include="..\App\Services\MediaSourceClassifier.cs" Link="MediaSourceClassifier.cs" />
     <Compile Include="..\App\Services\MediaCastEventGate.cs" Link="MediaCastEventGate.cs" />
     <Compile Include="..\App\Services\MediaRecoveryBackoff.cs" Link="MediaRecoveryBackoff.cs" />

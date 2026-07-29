@@ -9,7 +9,8 @@ $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 if ([string]::IsNullOrWhiteSpace($Exe)) {
     $Exe = Join-Path $Root 'outputs\iPhoneMirror\iPhoneMirror.exe'
 }
-$Log = Join-Path $env:TEMP 'iPhoneMirror-capture.log'
+$Log = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) `
+    'iPhoneMirror\Logs\capture.log'
 $logOffset = if (Test-Path -LiteralPath $Log) { (Get-Item $Log).Length } else { 0 }
 
 Add-Type -AssemblyName UIAutomationClient
