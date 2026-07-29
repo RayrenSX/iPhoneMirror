@@ -9,6 +9,9 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 - Install Apple Devices non-interactively from its pinned Microsoft Store
   product ID through `winget` when Apple USB support is completely absent.
+- Add an explicit release-build option for embedding an authorized, Apple-signed
+  `AppleMobileDeviceSupport64.msi`; the driver manager installs this offline
+  payload before trying any network source.
 - Audit the Apple USB driver package separately from Apple Mobile Device
   Service, recognizing modern `appleusb.inf` and legacy `usbaapl64.inf` /
   `usbaapl.inf` packages before reporting the wired environment as ready.

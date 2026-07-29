@@ -23,10 +23,24 @@ The virtual camera is a registered user-mode Media Foundation component, not a
 kernel driver. Wireless AirPlay uses bundled user-mode libraries and Windows
 network APIs; it does not require Bonjour or an additional network driver.
 
-Apple packages are intentionally absent from iPhoneMirror Setup and ZIP assets
+Apple packages are absent from normal public iPhoneMirror Setup and ZIP assets
 because Apple has not granted this project redistribution rights. A clean
 machine still receives the required Apple driver automatically from Microsoft
 Store, with an Apple-signed official iTunes download as the compatibility
 fallback. The distributable installation therefore contains all project-owned
 or redistributable driver payloads and acquires the only proprietary dependency
 from its vendor-controlled channel.
+
+An organization that holds Apple redistribution rights can produce a fully
+offline Setup by supplying its authorized MSI explicitly:
+
+```powershell
+./scripts/package_release.ps1 -Version 1.4.2 -GenerateSbom `
+  -AppleSupportPackagePath C:\Authorized\AppleMobileDeviceSupport64.msi `
+  -ConfirmAppleRedistributionRights
+```
+
+The build rejects non-MSI files, reparse points, packages larger than 512 MB,
+untrusted signatures, and signer subjects other than Apple Inc. It verifies the
+copied SHA256 and validates the signature again before packaging. The MSI is
+never downloaded by the build and is ignored by Git if placed in the workspace.

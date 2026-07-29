@@ -3,10 +3,15 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
     [string]$Version = '1.4.2',
     [switch]$SkipBuild,
-    [switch]$GenerateSbom
+    [switch]$GenerateSbom,
+    [string]$AppleSupportPackagePath,
+    [switch]$ConfirmAppleRedistributionRights
 )
 
 $ErrorActionPreference = 'Stop'
+if ($SkipBuild -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
+    throw '-AppleSupportPackagePath cannot be used with -SkipBuild.'
+}
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
 $ReleaseRoot = Join-Path $Root 'outputs\releases'
@@ -140,7 +145,8 @@ function Assert-PublishedOutput {
     $fullPublishRoot = (Resolve-Path -LiteralPath $PublishRoot).Path.TrimEnd('\')
     $actualArtifacts = @(Get-ChildItem -LiteralPath $PublishRoot -Recurse -File |
         ForEach-Object { $_.FullName.Substring($fullPublishRoot.Length + 1) })
-    $unexpected = @($actualArtifacts | Where-Object { $_ -notin $RequiredArtifacts })
+    $allowedArtifacts = @($RequiredArtifacts) + @('AppleMobileDeviceSupport64.msi')
+    $unexpected = @($actualArtifacts | Where-Object { $_ -notin $allowedArtifacts })
     if ($unexpected.Count -ne 0) {
         throw "Unexpected files in published output: $($unexpected -join ', ')"
     }
@@ -148,6 +154,15 @@ function Assert-PublishedOutput {
     Assert-ProductVersion (Join-Path $PublishRoot 'iPhoneMirror.exe') $Version
     Assert-ProductVersion (Join-Path $PublishRoot 'iPhoneMirror.Driver.exe') $Version
     Assert-ProductVersion (Join-Path $PublishRoot 'iPhoneMirror.Core.dll') $Version
+
+    $appleSupportPackage = Join-Path $PublishRoot 'AppleMobileDeviceSupport64.msi'
+    if (Test-Path -LiteralPath $appleSupportPackage -PathType Leaf) {
+        if (-not $ConfirmAppleRedistributionRights) {
+            throw 'Published output contains Apple software without redistribution confirmation.'
+        }
+        . (Join-Path $Root 'scripts\AppleSupportPackage.ps1')
+        [void](Assert-TrustedAppleSupportPackage $appleSupportPackage)
+    }
 
     $wirelessManifest = Join-Path $PublishRoot 'Wireless\licenses\SHA256SUMS.txt'
     $entries = foreach ($line in Get-Content -LiteralPath $wirelessManifest) {
@@ -312,7 +327,13 @@ try {
     }
 
     if (-not $SkipBuild) {
-        & (Join-Path $Root 'build.ps1') -Configuration Release
+        $buildArguments = @{ Configuration = 'Release' }
+        if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
+            $buildArguments.AppleSupportPackagePath = $AppleSupportPackagePath
+            $buildArguments.ConfirmAppleRedistributionRights =
+                $ConfirmAppleRedistributionRights
+        }
+        & (Join-Path $Root 'build.ps1') @buildArguments
         if ($LASTEXITCODE -ne 0) { throw "Release build failed: $LASTEXITCODE" }
     }
 

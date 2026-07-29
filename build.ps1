@@ -3,10 +3,15 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [switch]$SkipTests,
-    [switch]$NoPublish
+    [switch]$NoPublish,
+    [string]$AppleSupportPackagePath,
+    [switch]$ConfirmAppleRedistributionRights
 )
 
 $ErrorActionPreference = 'Stop'
+if ($NoPublish -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
+    throw '-AppleSupportPackagePath cannot be used with -NoPublish.'
+}
 # .NET Framework MSBuild rejects environment blocks containing both Path and PATH.
 $ProcessEnvironment = [Environment]::GetEnvironmentVariables()
 $PathEntries = @($ProcessEnvironment.GetEnumerator() |
@@ -33,6 +38,7 @@ $ExpectedWirelessManifestPaths = @(
 $PrepareMediaOutputRuntime = Join-Path $Root 'scripts\prepare_ffmpeg.ps1'
 $PrepareVcRuntime = Join-Path $Root 'scripts\prepare_vc_runtime.ps1'
 $PrepareLibUsb0Runtime = Join-Path $Root 'scripts\prepare_libusb0_runtime.ps1'
+$AppleSupportPackageTools = Join-Path $Root 'scripts\AppleSupportPackage.ps1'
 $MediaOutputManifestPath = Join-Path $Root 'scripts\ffmpeg-runtime-manifest.psd1'
 if (-not (Test-Path -LiteralPath $MediaOutputManifestPath -PathType Leaf)) {
     throw "Media-output FFmpeg manifest is missing: $MediaOutputManifestPath"
@@ -178,6 +184,10 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "VC runtime version parser tests failed: $LASTEXITCODE"
         }
+        & (Join-Path $Root 'scripts\test_apple_support_package.ps1') | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Apple support package validation tests failed: $LASTEXITCODE"
+        }
     }
 
     if (Test-Path 'src/App/iPhoneMirror.App.csproj') {
@@ -251,6 +261,15 @@ try {
             -p:NuGetAudit=false `
             --output outputs/iPhoneMirror
         if ($LASTEXITCODE -ne 0) { throw "WPF publish failed: $LASTEXITCODE" }
+
+        if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
+            if (-not $ConfirmAppleRedistributionRights) {
+                throw 'Embedding Apple software requires -ConfirmAppleRedistributionRights.'
+            }
+            . $AppleSupportPackageTools
+            Copy-TrustedAppleSupportPackage $AppleSupportPackagePath $PublishRoot |
+                Out-Host
+        }
 
         foreach ($forbidden in @(
             (Join-Path $PublishRoot 'UsbDkHelper.dll'),
@@ -386,6 +405,10 @@ try {
             'CHANGELOG.md',
             'DRIVER_DEPENDENCIES.md'
         )
+        if (Test-Path -LiteralPath (Join-Path $MainPublishRoot `
+                'AppleMobileDeviceSupport64.msi') -PathType Leaf) {
+            $allowedTopLevelFiles += 'AppleMobileDeviceSupport64.msi'
+        }
         $unexpectedFiles = @(Get-ChildItem -LiteralPath $MainPublishRoot -File | Where-Object {
             $_.Name -notin $allowedTopLevelFiles
         })

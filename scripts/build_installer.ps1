@@ -44,6 +44,11 @@ try {
             throw "Installer payload is missing: $required"
         }
     }
+    $appleSupportPackage = Join-Path $SourceDirectory 'AppleMobileDeviceSupport64.msi'
+    if (Test-Path -LiteralPath $appleSupportPackage -PathType Leaf) {
+        . (Join-Path $Root 'scripts\AppleSupportPackage.ps1')
+        [void](Assert-TrustedAppleSupportPackage $appleSupportPackage)
+    }
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     $compiler = & (Join-Path $Root 'scripts\prepare_inno_setup.ps1') |
         Select-Object -Last 1
