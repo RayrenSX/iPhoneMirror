@@ -6,7 +6,7 @@ using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class StartupErrorWindow : Window
+public partial class StartupErrorWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly string _logPath;
 

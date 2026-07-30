@@ -1,16 +1,19 @@
-<Window x:Class="IPhoneMirror.App.Windows.CaptureRecoveryWindow"
+<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.CaptureRecoveryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Width="620" Height="500" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" WindowStyle="None"
-        AllowsTransparency="True" Background="Transparent"
+        ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Acrylic" WindowCornerPreference="Round"
+        Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False">
-    <Border Background="{DynamicResource AppBackgroundBrush}" BorderBrush="#5A5A5A"
-            BorderThickness="1" CornerRadius="8">
-        <Grid Margin="28">
+    <Border Style="{StaticResource ModernDialogSurface}" Margin="10">
+        <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="14"/>
+                <RowDefinition Height="16"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="18"/>
                 <RowDefinition Height="*"/>
@@ -18,11 +21,15 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <Grid MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+            <Grid Style="{StaticResource SubWindowHeader}"
+                  MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
                 <TextBlock Text="{DynamicResource CaptureNoPingTitle}"
-                           FontSize="23" FontWeight="SemiBold"/>
-                <Button Content="X" HorizontalAlignment="Right" Width="32" Height="32"
-                        MinHeight="32" Padding="0" FontSize="14" Click="OnCloseClick"/>
+                           Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
+                <Button Style="{StaticResource SubWindowCloseButton}"
+                        ToolTip="{DynamicResource Close}"
+                        Click="OnCloseClick">
+                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+                </Button>
             </Grid>
 
             <TextBlock Grid.Row="2" Text="{DynamicResource CaptureNoPingSummary}"
@@ -30,8 +37,9 @@
                        FontSize="14" LineHeight="22" TextWrapping="Wrap"/>
 
             <StackPanel Grid.Row="4">
-                <Border Background="#33291A" BorderBrush="#9A7333"
-                        BorderThickness="1" CornerRadius="7" Padding="18,16">
+                <Border Background="{DynamicResource WarningSurfaceBrush}"
+                        BorderBrush="{DynamicResource WarningBrush}"
+                        BorderThickness="1" CornerRadius="16" Padding="18,16">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="48"/>
@@ -40,7 +48,7 @@
                         <Border Width="34" Height="34" CornerRadius="17"
                                 Background="{DynamicResource WarningBrush}"
                                 VerticalAlignment="Center">
-                            <TextBlock Text="1" Foreground="#201800" FontSize="18"
+                            <TextBlock Text="1" Foreground="{DynamicResource OnAccentBrush}" FontSize="18"
                                        FontWeight="Bold" HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Border>
@@ -52,8 +60,9 @@
                     </Grid>
                 </Border>
 
-                <Border Background="#33291A" BorderBrush="#9A7333"
-                        BorderThickness="1" CornerRadius="7" Padding="18,16"
+                <Border Background="{DynamicResource WarningSurfaceBrush}"
+                        BorderBrush="{DynamicResource WarningBrush}"
+                        BorderThickness="1" CornerRadius="16" Padding="18,16"
                         Margin="0,12,0,0">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -63,7 +72,7 @@
                         <Border Width="34" Height="34" CornerRadius="17"
                                 Background="{DynamicResource WarningBrush}"
                                 VerticalAlignment="Center">
-                            <TextBlock Text="2" Foreground="#201800" FontSize="18"
+                            <TextBlock Text="2" Foreground="{DynamicResource OnAccentBrush}" FontSize="18"
                                        FontWeight="Bold" HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Border>
@@ -75,9 +84,9 @@
                     </Grid>
                 </Border>
 
-                <Border Background="{DynamicResource PanelBrush}"
+                <Border Background="{DynamicResource ControlFillBrush}"
                         BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1" CornerRadius="6" Padding="14,11"
+                        BorderThickness="1" CornerRadius="12" Padding="14,11"
                         Margin="0,12,0,0">
                     <TextBlock Text="{DynamicResource CaptureNoPingUnlockHint}"
                                FontSize="13" FontWeight="SemiBold"
@@ -90,4 +99,4 @@
                     HorizontalAlignment="Right" Click="OnCloseClick"/>
         </Grid>
     </Border>
-</Window>
+</ui:FluentWindow>

@@ -23,6 +23,11 @@
     <system:String x:Key="DeviceCaptureErrorTitleFormat">Mirroring error — {0}</system:String>
     <system:String x:Key="IndependentWindowPin">Always on top</system:String>
     <system:String x:Key="IndependentWindowUnpin">Disable always on top</system:String>
+    <system:String x:Key="IndependentWindowEnterFullScreen">Enter full screen</system:String>
+    <system:String x:Key="IndependentWindowExitFullScreen">Exit full screen</system:String>
+    <system:String x:Key="IndependentWindowWindowMenu">Window</system:String>
+    <system:String x:Key="IndependentWindowDisplayMenu">Image</system:String>
+    <system:String x:Key="IndependentWindowAudioMenu">Audio</system:String>
     <system:String x:Key="IndependentWindowFix">Lock window</system:String>
     <system:String x:Key="IndependentWindowUnfix">Unlock window</system:String>
     <system:String x:Key="IndependentWindowRemoveCorners">Remove rounded corners</system:String>
@@ -135,6 +140,7 @@
     <system:String x:Key="CaptureNoPingRestartAction">Restart the iPhone or iPad</system:String>
     <system:String x:Key="CaptureNoPingCableAction">Replace the cable with an Apple original or MFi-certified cable</system:String>
     <system:String x:Key="CaptureNoPingUnlockHint">Keep the device unlocked when reconnecting and starting mirroring again.</system:String>
+    <system:String x:Key="CaptureUsbConfigurationRecovery">iPhone or iPad USB mirroring configuration could not be activated.&#x0A;&#x0A;Try these steps in order:&#x0A;1. Unplug the cable, wait a few seconds, and plug it back in&#x0A;2. Restart the iPhone or iPad, then reconnect it&#x0A;3. Replace the cable with an Apple original or MFi-certified cable&#x0A;&#x0A;Keep the device unlocked when reconnecting and starting mirroring again.</system:String>
     <system:String x:Key="StartRequested">Mirroring start requested</system:String>
     <system:String x:Key="StartFailedFormat">Could not start mirroring: {0}</system:String>
     <system:String x:Key="StopSessionReleased">Mirroring stopped and session resources were released</system:String>
@@ -437,4 +443,23 @@
     <system:String x:Key="UpdateDownloadCancelled">The update download was cancelled. You can retry later.</system:String>
     <system:String x:Key="UpdateDownloadFailedFormat">Update failed: {0}</system:String>
     <system:String x:Key="RetryUpdate">Download again</system:String>
+    <system:String x:Key="NavMirroring">Mirroring</system:String>
+    <system:String x:Key="ProjectionSettingsDescription">Open common mirroring actions when needed. Image, window, and capture tools become available after mirroring starts.</system:String>
+    <system:String x:Key="NavDevices">Devices</system:String>
+    <system:String x:Key="NavOutput">Output</system:String>
+    <system:String x:Key="NavSettings">Settings</system:String>
+    <system:String x:Key="NavDriver">Drivers</system:String>
+    <system:String x:Key="NavAbout">About</system:String>
+    <system:String x:Key="NavMirroringDescription">Mirroring controls</system:String>
+    <system:String x:Key="NavDevicesDescription">Connected devices</system:String>
+    <system:String x:Key="NavSettingsDescription">Projection settings</system:String>
+    <system:String x:Key="NavOutputDescription">Output settings</system:String>
+    <system:String x:Key="NavDriverDescription">Driver manager</system:String>
+    <system:String x:Key="NavAboutDescription">About and updates</system:String>
+    <system:String x:Key="NavExpandDescription">Expand navigation</system:String>
+    <system:String x:Key="NavCollapseDescription">Collapse navigation</system:String>
+    <system:String x:Key="NavExpandToolTip">Expand left navigation</system:String>
+    <system:String x:Key="AppPreferencesTitle">App settings</system:String>
+    <system:String x:Key="Minimize">Minimize</system:String>
+    <system:String x:Key="Maximize">Maximize</system:String>
 </ResourceDictionary>

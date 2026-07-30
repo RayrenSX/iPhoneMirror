@@ -53,6 +53,10 @@ public partial class App : Application
         base.OnStartup(e);
         DriverLocalization.Initialize(e.Args);
         Resources.MergedDictionaries.Insert(0, DriverLocalization.CreateDictionary());
+        DriverThemeService.Initialize(e.Args);
+        EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
+            new RoutedEventHandler((sender, _) =>
+                DriverThemeService.Attach((Window)sender)));
         DriverLogger.WriteEvent("lifecycle", "ui_session_start",
             ("kind", "interactive"),
             ("culture", DriverLocalization.Culture.Name));
@@ -63,6 +67,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        DriverThemeService.Shutdown();
         try
         {
             DriverLogger.WriteEvent("lifecycle", "session_end",

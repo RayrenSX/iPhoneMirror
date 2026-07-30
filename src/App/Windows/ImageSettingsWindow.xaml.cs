@@ -9,7 +9,7 @@ namespace IPhoneMirror.App.Windows;
 internal readonly record struct ImageAdjustmentValues(
     double Brightness, double Contrast, double Saturation, double Gamma);
 
-public partial class ImageSettingsWindow : Window
+public partial class ImageSettingsWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly ImageAdjustmentValues _originalValues;
     private readonly Func<ImageAdjustmentValues, (bool Success, string Message)> _preview;

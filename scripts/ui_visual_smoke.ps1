@@ -27,6 +27,10 @@ public static class WindowCaptureNative {
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
 }
 '@
 
@@ -44,6 +48,23 @@ function Find-ById(
         Start-Sleep -Milliseconds 150
     } while ([DateTime]::UtcNow -lt $deadline)
     throw "Automation element not found: $Id"
+}
+
+function Click-Element([System.Windows.Automation.AutomationElement]$Element) {
+    $bounds = $Element.Current.BoundingRectangle
+    if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) {
+        throw "Automation element has no clickable bounds: $($Element.Current.AutomationId)"
+    }
+
+    $x = [int][Math]::Round($bounds.Left + ($bounds.Width / 2))
+    $y = [int][Math]::Round($bounds.Top + ($bounds.Height / 2))
+    if (-not [WindowCaptureNative]::SetCursorPos($x, $y)) {
+        throw "SetCursorPos failed for automation element: $($Element.Current.AutomationId)"
+    }
+
+    Start-Sleep -Milliseconds 100
+    [WindowCaptureNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [WindowCaptureNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
 }
 
 function Save-WindowCapture([IntPtr]$Handle, [string]$Path) {
@@ -83,25 +104,40 @@ try {
     if ($process.HasExited -or $process.MainWindowHandle -eq 0) {
         throw 'Main GUI window did not become ready'
     }
+    $expectedProcessPath = (Resolve-Path -LiteralPath $Exe).Path
+    $actualProcessPath = (Get-Process -Id $process.Id).Path
+    if (-not [string]::Equals($expectedProcessPath, $actualProcessPath,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unexpected GUI process path: $actualProcessPath"
+    }
 
     [void][WindowCaptureNative]::SetForegroundWindow($process.MainWindowHandle)
     Start-Sleep -Seconds 4
     $window = [System.Windows.Automation.AutomationElement]::FromHandle(
         $process.MainWindowHandle)
 
-    $language = Find-ById $window 'LanguageComboBox'
     $captureAction = Find-ById $window 'CaptureActionButton'
-    $languageBounds = $language.Current.BoundingRectangle
+    $deviceToggle = Find-ById $window 'DevicePanelToggle'
+    $settingsToggle = Find-ById $window 'SettingsPanelToggle'
     $actionBounds = $captureAction.Current.BoundingRectangle
-    if ([Math]::Abs($languageBounds.Top - $actionBounds.Top) -gt 1.5 -or
-        [Math]::Abs($languageBounds.Height - $actionBounds.Height) -gt 1.5) {
-        throw "Header controls are not aligned: language=$languageBounds action=$actionBounds"
-    }
 
     $mainPath = Join-Path $OutputDirectory 'ui-polish-main.png'
     Save-WindowCapture $process.MainWindowHandle $mainPath
 
-    $combo = Find-ById $window 'ResolutionComboBox'
+    Click-Element $settingsToggle
+    Start-Sleep -Milliseconds 500
+    $language = Find-ById $window 'LanguageComboBox'
+    $settingsPath = Join-Path $OutputDirectory 'ui-polish-settings.png'
+    Save-WindowCapture $process.MainWindowHandle $settingsPath
+
+    try {
+        $combo = Find-ById $window 'ResolutionComboBox' 2
+    }
+    catch {
+        # Source mode intentionally hides the wired render-limit selector.
+        # Exercise the always-available wireless resolution selector instead.
+        $combo = Find-ById $window 'WirelessResolutionComboBox'
+    }
     $expand = $combo.GetCurrentPattern(
         [System.Windows.Automation.ExpandCollapsePattern]::Pattern)
     $expand.Expand()
@@ -110,12 +146,32 @@ try {
     Save-WindowCapture $process.MainWindowHandle $dropdownPath
     $expand.Collapse()
 
+    $aboutButton = Find-ById $window 'AboutButton'
+    Click-Element $aboutButton
+    $aboutWindow = Find-ById `
+        ([System.Windows.Automation.AutomationElement]::RootElement) 'AboutWindow'
+    if ($aboutWindow.Current.ProcessId -ne $process.Id) {
+        throw "About window belongs to an unexpected process: $($aboutWindow.Current.ProcessId)"
+    }
+    Start-Sleep -Milliseconds 700
+    $aboutHandle = [IntPtr]$aboutWindow.Current.NativeWindowHandle
+    $aboutPath = Join-Path $OutputDirectory 'ui-polish-about.png'
+    Save-WindowCapture $aboutHandle $aboutPath
+    $aboutPattern = $aboutWindow.GetCurrentPattern(
+        [System.Windows.Automation.WindowPattern]::Pattern)
+    $aboutPattern.Close()
+
     [pscustomobject]@{
         Main = $mainPath
+        Settings = $settingsPath
         DropDown = $dropdownPath
+        About = $aboutPath
+        ProcessPath = $actualProcessPath
         ResolutionName = $combo.Current.Name
         HeaderControlHeight = $actionBounds.Height
-        HeaderAlignmentDelta = [Math]::Abs($languageBounds.Top - $actionBounds.Top)
+        DevicePanelToggle = $deviceToggle.Current.Name
+        SettingsPanelToggle = $settingsToggle.Current.Name
+        LanguageName = $language.Current.Name
         ProcessAlive = -not $process.HasExited
     }
 }

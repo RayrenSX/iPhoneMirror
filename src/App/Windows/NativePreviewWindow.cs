@@ -86,12 +86,18 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly Action<nint> _detachPreview;
     private readonly Func<nint, bool> _refreshPreview;
     private readonly ContextMenu _contextMenu;
+    private readonly MenuItem _fullScreenItem;
+    private readonly MenuItem _windowMenuItem;
+    private readonly MenuItem _displayMenuItem;
     private readonly MenuItem _topMostItem;
     private readonly MenuItem _fixedItem;
     private readonly MenuItem? _cornerItem;
     private readonly MenuItem _muteMenuItem;
     private readonly MenuItem _muteThisItem;
     private readonly MenuItem _muteOthersItem;
+    private readonly MenuItem _rotateLeftItem;
+    private readonly MenuItem _rotateRightItem;
+    private readonly MenuItem _closeItem;
     private readonly MenuItem? _imageSettingsItem;
     private readonly MenuItem? _projectionSettingsItem;
     private readonly Func<bool>? _isAudioEnabled;
@@ -158,11 +164,17 @@ internal sealed class NativePreviewWindow : IDisposable
             Placement = PlacementMode.MousePoint,
         };
         var itemStyle = (Style)Application.Current.FindResource("DeviceMenuItemStyle");
+        var submenuStyle = (Style)Application.Current.FindResource("DeviceSubmenuItemStyle");
+        _fullScreenItem = new MenuItem { Style = itemStyle };
+        _fullScreenItem.Click += (_, _) => ToggleFullScreen();
+        _windowMenuItem = new MenuItem { Style = submenuStyle };
         _topMostItem = new MenuItem { Style = itemStyle };
         _topMostItem.Click += (_, _) => ToggleTopMost();
         _fixedItem = new MenuItem { Style = itemStyle };
         _fixedItem.Click += (_, _) => ToggleFixedWindow();
-        var submenuStyle = (Style)Application.Current.FindResource("DeviceSubmenuItemStyle");
+        _windowMenuItem.Items.Add(_topMostItem);
+        _windowMenuItem.Items.Add(_fixedItem);
+        _displayMenuItem = new MenuItem { Style = submenuStyle };
         _muteMenuItem = new MenuItem { Style = submenuStyle };
         _muteThisItem = new MenuItem { Style = itemStyle };
         _muteThisItem.Click += (_, _) => ToggleWindowAudio();
@@ -170,46 +182,41 @@ internal sealed class NativePreviewWindow : IDisposable
         _muteOthersItem.Click += (_, _) => MuteOtherWindows();
         _muteMenuItem.Items.Add(_muteThisItem);
         _muteMenuItem.Items.Add(_muteOthersItem);
-        var rotateLeftItem = new MenuItem
-        {
-            Header = LocalizationService.Get("IndependentWindowRotateLeft"), Style = itemStyle,
-        };
-        rotateLeftItem.Click += (_, _) => Rotate(-1);
-        var rotateRightItem = new MenuItem
-        {
-            Header = LocalizationService.Get("IndependentWindowRotateRight"), Style = itemStyle,
-        };
-        rotateRightItem.Click += (_, _) => Rotate(1);
-        var closeItem = new MenuItem
-        {
-            Header = LocalizationService.Get("IndependentWindowClose"),
-            Style = itemStyle,
-        };
-        closeItem.Click += (_, _) => QueueClose();
-        _contextMenu.Items.Add(_topMostItem);
-        _contextMenu.Items.Add(_fixedItem);
+        _rotateLeftItem = new MenuItem { Style = itemStyle };
+        _rotateLeftItem.Click += (_, _) => Rotate(-1);
+        _rotateRightItem = new MenuItem { Style = itemStyle };
+        _rotateRightItem.Click += (_, _) => Rotate(1);
+        _closeItem = new MenuItem { Style = itemStyle };
+        _closeItem.Click += (_, _) => QueueClose();
         if (managedContent is null)
         {
             _cornerItem = new MenuItem { Style = itemStyle };
             _cornerItem.Click += (_, _) => ToggleCorners();
-            _contextMenu.Items.Add(_cornerItem);
             if (_showImageSettings is not null)
             {
                 _imageSettingsItem = new MenuItem { Style = itemStyle };
                 _imageSettingsItem.Click += (_, _) => ShowImageSettings();
-                _contextMenu.Items.Add(_imageSettingsItem);
+                _displayMenuItem.Items.Add(_imageSettingsItem);
             }
+            _displayMenuItem.Items.Add(_cornerItem);
             if (_showProjectionSettings is not null)
             {
                 _projectionSettingsItem = new MenuItem { Style = itemStyle };
                 _projectionSettingsItem.Click += (_, _) => ShowProjectionSettings();
-                _contextMenu.Items.Add(_projectionSettingsItem);
             }
         }
-        _contextMenu.Items.Add(rotateLeftItem);
-        _contextMenu.Items.Add(rotateRightItem);
+        _displayMenuItem.Items.Add(_rotateLeftItem);
+        _displayMenuItem.Items.Add(_rotateRightItem);
+        _contextMenu.Items.Add(_fullScreenItem);
+        _contextMenu.Items.Add(_windowMenuItem);
+        _contextMenu.Items.Add(_displayMenuItem);
         if (_setAudioEnabled is not null) _contextMenu.Items.Add(_muteMenuItem);
-        _contextMenu.Items.Add(closeItem);
+        if (_projectionSettingsItem is not null) _contextMenu.Items.Add(_projectionSettingsItem);
+        _contextMenu.Items.Add(new Separator
+        {
+            Style = (Style)Application.Current.FindResource("DeviceMenuSeparatorStyle"),
+        });
+        _contextMenu.Items.Add(_closeItem);
         UpdateContextMenuLabels();
         var windowTitle = string.IsNullOrWhiteSpace(title) ? StableTitle : title;
         var parameters = new HwndSourceParameters(windowTitle)
@@ -596,10 +603,16 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private void UpdateContextMenuLabels()
     {
+        _fullScreenItem.Header = LocalizationService.Get(
+            _isFullScreen ? "IndependentWindowExitFullScreen" :
+                "IndependentWindowEnterFullScreen");
+        _windowMenuItem.Header = LocalizationService.Get("IndependentWindowWindowMenu");
+        _displayMenuItem.Header = LocalizationService.Get("IndependentWindowDisplayMenu");
         _topMostItem.Header = LocalizationService.Get(
             _isTopMost ? "IndependentWindowUnpin" : "IndependentWindowPin");
         _fixedItem.Header = LocalizationService.Get(
             _isFixed ? "IndependentWindowUnfix" : "IndependentWindowFix");
+        _fixedItem.IsEnabled = !_isFullScreen;
         if (_cornerItem is not null)
             _cornerItem.Header = LocalizationService.Get(
                 _cornersEnabled ? "IndependentWindowRemoveCorners" :
@@ -610,7 +623,9 @@ internal sealed class NativePreviewWindow : IDisposable
         if (_projectionSettingsItem is not null)
             _projectionSettingsItem.Header = LocalizationService.Get(
                 "IndependentWindowProjectionSettings");
-        _muteMenuItem.Header = LocalizationService.Get("IndependentWindowMute");
+        _rotateLeftItem.Header = LocalizationService.Get("IndependentWindowRotateLeft");
+        _rotateRightItem.Header = LocalizationService.Get("IndependentWindowRotateRight");
+        _muteMenuItem.Header = LocalizationService.Get("IndependentWindowAudioMenu");
         _muteThisItem.Header = LocalizationService.Get(
             _isAudioEnabled?.Invoke() == false
                 ? "IndependentWindowUnmuteThis"
@@ -620,6 +635,7 @@ internal sealed class NativePreviewWindow : IDisposable
             _connectedDeviceCount?.Invoke() ?? 1)
             ? Visibility.Visible
             : Visibility.Collapsed;
+        _closeItem.Header = LocalizationService.Get("IndependentWindowClose");
     }
 
     private void ToggleWindowAudio()

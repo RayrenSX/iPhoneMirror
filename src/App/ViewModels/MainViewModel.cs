@@ -2124,11 +2124,18 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (status.State is not CaptureState.Idle || SelectedDevice is null)
             CaptureStatus = GetCaptureStatusText(status, IsWirelessSelected);
         if (status.State == CaptureState.Error &&
-            CaptureErrorGuidance.IsNoPingTimeout(status.Message) &&
+            CaptureErrorGuidance.HasRecoveryGuidance(status.Message) &&
             CurrentDeviceSession is { ErrorShown: false } failedSession)
         {
             failedSession.ErrorShown = true;
-            CaptureRecoveryWindow.ShowRecovery();
+            if (CaptureErrorGuidance.IsNoPingTimeout(status.Message))
+                CaptureRecoveryWindow.ShowRecovery();
+            else
+                AppPromptWindow.Inform(
+                    LocalizationService.Format("DeviceCaptureErrorTitleFormat",
+                        SelectedDevice?.DisplayName ??
+                        LocalizationService.Get("CaptureError")),
+                    CaptureErrorGuidance.UserMessage(status.Message));
         }
         Resolution = status.Width > 0 && status.Height > 0 ? $"{status.Width}×{status.Height}" : "—";
         if (status.Width > 0 && status.Height > 0 &&
@@ -2458,7 +2465,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         CaptureState.Streaming => LocalizationService.Get(wireless ? "WirelessStreaming" : "CaptureStreaming"),
         CaptureState.Stopping => LocalizationService.Get(wireless ? "WirelessStopping" : "CaptureStopping"),
         CaptureState.Stopped => LocalizationService.Get(wireless ? "WirelessStopped" : "CaptureStopped"),
-        CaptureState.Error when CaptureErrorGuidance.IsNoPingTimeout(status.Message) =>
+        CaptureState.Error when CaptureErrorGuidance.HasRecoveryGuidance(status.Message) =>
             CaptureErrorGuidance.UserMessage(status.Message),
         _ => LocalizationService.Get("CaptureError"),
     };

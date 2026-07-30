@@ -146,4 +146,8 @@
 日志：{0}</system:String>
     <system:String x:Key="AppleServiceNotReady">Apple USB 支持不完整：服务或 Apple USB 驱动包尚未就绪。请连接并解锁 iPhone 后重新检测。
 日志：{0}</system:String>
+    <system:String x:Key="Appearance">外观</system:String>
+    <system:String x:Key="ThemeSystem">跟随系统</system:String>
+    <system:String x:Key="ThemeLight">浅色</system:String>
+    <system:String x:Key="ThemeDark">深色</system:String>
 </ResourceDictionary>

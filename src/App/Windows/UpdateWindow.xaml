@@ -1,35 +1,49 @@
-<Window x:Class="IPhoneMirror.App.Windows.UpdateWindow"
+<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.UpdateWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource UpdateWindowTitle}" Width="760" Height="700"
         MinWidth="660" MinHeight="580" WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip" ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Mica" WindowCornerPreference="Round"
+        Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False"
         AutomationProperties.AutomationId="UpdateWindow" Opacity="0">
-    <Window.RenderTransform>
+    <ui:FluentWindow.RenderTransform>
         <TranslateTransform x:Name="EntranceTransform" Y="16"/>
-    </Window.RenderTransform>
-    <Grid Margin="28">
+    </ui:FluentWindow.RenderTransform>
+    <Grid Style="{StaticResource SubWindowPageRoot}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="18"/>
+            <RowDefinition Height="16"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="18"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="18"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <Grid>
+        <Grid Style="{StaticResource SubWindowHeader}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="{DynamicResource UpdateWindowTitle}" FontSize="25"
-                           FontWeight="SemiBold"/>
+                <TextBlock Text="{DynamicResource UpdateWindowTitle}"
+                           Style="{StaticResource SubWindowTitle}"/>
                 <TextBlock Text="{DynamicResource UpdateWindowSubtitle}"
-                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,0"/>
+                           Style="{StaticResource SubWindowSubtitle}"/>
             </StackPanel>
-            <Border HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Background="{DynamicResource AccentBrush}" CornerRadius="6" Padding="12,7">
+            <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Background="{DynamicResource AccentBrush}" CornerRadius="12" Padding="12,7">
                 <TextBlock Text="{Binding LatestVersion}" Foreground="{DynamicResource OnAccentBrush}"
                            FontWeight="SemiBold"/>
             </Border>
+            <Button Grid.Column="3" Style="{StaticResource SubWindowCloseButton}"
+                    Click="OnLaterClick">
+                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+            </Button>
         </Grid>
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
@@ -58,9 +72,7 @@
                            Margin="0,4,0,0"/>
             </StackPanel>
         </Grid>
-        <Border Grid.Row="4" Background="{DynamicResource PanelBrush}"
-                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                CornerRadius="8" Padding="18">
+        <Border Grid.Row="4" Style="{StaticResource SettingsSection}" Padding="18">
             <FlowDocumentScrollViewer x:Name="ReleaseNotesViewer"
                                       VerticalScrollBarVisibility="Auto"
                                       Background="Transparent" BorderThickness="0"
@@ -90,4 +102,4 @@
             </StackPanel>
         </Grid>
     </Grid>
-</Window>
+</ui:FluentWindow>

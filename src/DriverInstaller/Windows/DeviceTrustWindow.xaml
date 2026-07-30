@@ -1,13 +1,13 @@
 <Window x:Class="IPhoneMirror.DriverInstaller.Windows.DeviceTrustWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         Title="{DynamicResource DeviceTrustTitle}" Width="580" Height="470"
         ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        Foreground="{StaticResource TextBrush}" ShowInTaskbar="False">
-    <Border Background="{StaticResource AppBackground}" BorderBrush="#555555"
-            BorderThickness="1" CornerRadius="8">
-        <Grid Margin="26">
+        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False">
+    <Border Style="{StaticResource ModernDialogSurface}" Margin="10">
+        <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="16"/>
@@ -18,22 +18,25 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <Grid MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+            <Grid Style="{StaticResource SubWindowHeader}"
+                  MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
                 <TextBlock Text="{DynamicResource DeviceTrustTitle}"
-                           FontSize="22" FontWeight="SemiBold"/>
-                <Button Content="X" HorizontalAlignment="Right" Width="32" Height="32"
-                        MinHeight="32" Padding="0" FontSize="14" FontWeight="Normal"
-                        Click="OnNotHandledClick"/>
+                           Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
+                <Button Style="{StaticResource SubWindowCloseButton}"
+                        ToolTip="{DynamicResource Close}" Click="OnNotHandledClick">
+                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+                </Button>
             </Grid>
 
-            <Border Grid.Row="2" Background="#2C2515" BorderBrush="#8A6D2F"
-                    BorderThickness="1" CornerRadius="6" Padding="16,14">
+            <Border Grid.Row="2" Background="{DynamicResource WarningSurfaceBrush}"
+                    BorderBrush="{DynamicResource WarningBrush}"
+                    BorderThickness="1" CornerRadius="16" Padding="16,14">
                 <StackPanel>
                     <TextBlock Text="{DynamicResource DeviceTrustAction}"
-                               Foreground="{StaticResource WarningBrush}"
+                               Foreground="{DynamicResource WarningBrush}"
                                FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
                     <TextBlock Text="{DynamicResource DeviceTrustExplanation}"
-                               Foreground="{StaticResource TextBrush}"
+                               Foreground="{DynamicResource TextBrush}"
                                FontSize="13" LineHeight="20" TextWrapping="Wrap"
                                Margin="0,8,0,0"/>
                 </StackPanel>

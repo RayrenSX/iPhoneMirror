@@ -3,7 +3,7 @@ using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class ProjectionSettingsWindow : Window
+public partial class ProjectionSettingsWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly Func<Task> _refresh;
     private readonly Func<Task> _fullScreen;
@@ -39,6 +39,8 @@ public partial class ProjectionSettingsWindow : Window
 
     private void OnMediaOutputClick(object sender, RoutedEventArgs e) =>
         _mediaOutput();
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     private static async Task RunAsync(Func<Task> action)
     {

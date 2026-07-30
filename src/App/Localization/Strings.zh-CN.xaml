@@ -23,6 +23,11 @@
     <system:String x:Key="DeviceCaptureErrorTitleFormat">{0} 投屏错误</system:String>
     <system:String x:Key="IndependentWindowPin">置顶</system:String>
     <system:String x:Key="IndependentWindowUnpin">取消置顶</system:String>
+    <system:String x:Key="IndependentWindowEnterFullScreen">进入全屏</system:String>
+    <system:String x:Key="IndependentWindowExitFullScreen">退出全屏</system:String>
+    <system:String x:Key="IndependentWindowWindowMenu">窗口</system:String>
+    <system:String x:Key="IndependentWindowDisplayMenu">画面</system:String>
+    <system:String x:Key="IndependentWindowAudioMenu">声音</system:String>
     <system:String x:Key="IndependentWindowFix">固定窗口</system:String>
     <system:String x:Key="IndependentWindowUnfix">取消固定</system:String>
     <system:String x:Key="IndependentWindowRemoveCorners">去除圆角</system:String>
@@ -135,6 +140,7 @@
     <system:String x:Key="CaptureNoPingRestartAction">重启 iPhone 或 iPad</system:String>
     <system:String x:Key="CaptureNoPingCableAction">更换 Apple 原装或 MFi 认证数据线</system:String>
     <system:String x:Key="CaptureNoPingUnlockHint">重新连接并开始投屏时，请保持设备处于解锁状态。</system:String>
+    <system:String x:Key="CaptureUsbConfigurationRecovery">未能切换 iPhone 或 iPad 的 USB 投屏配置。&#x0A;&#x0A;请依次尝试：&#x0A;1. 拔下数据线，等待几秒后重新插入&#x0A;2. 重启 iPhone 或 iPad 后再连接&#x0A;3. 更换 Apple 原装或 MFi 认证数据线&#x0A;&#x0A;重新连接并开始投屏时，请保持设备处于解锁状态。</system:String>
     <system:String x:Key="StartRequested">已请求开始投屏</system:String>
     <system:String x:Key="StartFailedFormat">开始投屏失败：{0}</system:String>
     <system:String x:Key="StopSessionReleased">投屏已停止，会话资源已释放</system:String>
@@ -437,4 +443,23 @@
     <system:String x:Key="UpdateDownloadCancelled">更新下载已取消，可稍后重新尝试。</system:String>
     <system:String x:Key="UpdateDownloadFailedFormat">更新失败：{0}</system:String>
     <system:String x:Key="RetryUpdate">重新下载</system:String>
+    <system:String x:Key="NavMirroring">投屏</system:String>
+    <system:String x:Key="ProjectionSettingsDescription">按需展开常用投屏操作；开始投屏后可使用画面、窗口和截图功能。</system:String>
+    <system:String x:Key="NavDevices">设备</system:String>
+    <system:String x:Key="NavOutput">输出</system:String>
+    <system:String x:Key="NavSettings">设置</system:String>
+    <system:String x:Key="NavDriver">驱动</system:String>
+    <system:String x:Key="NavAbout">关于</system:String>
+    <system:String x:Key="NavMirroringDescription">投屏控制</system:String>
+    <system:String x:Key="NavDevicesDescription">连接设备</system:String>
+    <system:String x:Key="NavSettingsDescription">投屏设置</system:String>
+    <system:String x:Key="NavOutputDescription">输出设置</system:String>
+    <system:String x:Key="NavDriverDescription">驱动管理</system:String>
+    <system:String x:Key="NavAboutDescription">关于与更新</system:String>
+    <system:String x:Key="NavExpandDescription">展开导航</system:String>
+    <system:String x:Key="NavCollapseDescription">收起导航</system:String>
+    <system:String x:Key="NavExpandToolTip">展开左侧导航</system:String>
+    <system:String x:Key="AppPreferencesTitle">应用设置</system:String>
+    <system:String x:Key="Minimize">最小化</system:String>
+    <system:String x:Key="Maximize">最大化</system:String>
 </ResourceDictionary>

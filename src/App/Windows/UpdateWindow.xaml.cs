@@ -10,7 +10,7 @@ using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class UpdateWindow : Window, INotifyPropertyChanged
+public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
 {
     private readonly ReleaseInfo _release;
     private readonly GitHubReleaseClient _client;

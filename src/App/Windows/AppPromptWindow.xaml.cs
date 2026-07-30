@@ -4,7 +4,7 @@ using IPhoneMirror.App.Localization;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class AppPromptWindow : Window
+public partial class AppPromptWindow : Wpf.Ui.Controls.FluentWindow
 {
     public string PromptTitle { get; }
     public string PromptBody { get; }

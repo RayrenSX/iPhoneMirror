@@ -3,7 +3,7 @@ using IPhoneMirror.App.Localization;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class AdvancedSettingsWindow : Window
+public partial class AdvancedSettingsWindow : Wpf.Ui.Controls.FluentWindow
 {
     public uint RequestedWidth { get; private set; }
     public uint RequestedHeight { get; private set; }
@@ -35,4 +35,6 @@ public partial class AdvancedSettingsWindow : Window
         DisableAdvancedModeRequested = true;
         DialogResult = false;
     }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 }

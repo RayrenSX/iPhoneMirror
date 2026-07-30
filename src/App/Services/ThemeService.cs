@@ -1,116 +1,130 @@
-using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
-using System.Windows.Media;
+using System.Windows.Media.Animation;
 using IPhoneMirror.App.Updater;
 using Microsoft.Win32;
+using Wpf.Ui.Appearance;
 
 namespace IPhoneMirror.App.Services;
 
 internal static class ThemeService
 {
-    private static readonly ConditionalWeakTable<Window, object> AttachedWindows = new();
-    private static readonly IReadOnlyDictionary<string, string> DarkColors =
-        new Dictionary<string, string>
-        {
-            ["BackgroundBrush"] = "#202020",
-            ["AppBackgroundBrush"] = "#CC202020",
-            ["PanelBrush"] = "#D9262626",
-            ["PanelAltBrush"] = "#E62D2D2D",
-            ["PanelRaisedBrush"] = "#E62A2A2A",
-            ["BorderBrush"] = "#4B4B4B",
-            ["BorderSoftBrush"] = "#3A3A3A",
-            ["TextBrush"] = "#F7F7F7",
-            ["MutedTextBrush"] = "#B8B8B8",
-            ["AccentBrush"] = "#60CDFF",
-            ["AccentHoverBrush"] = "#99EBFF",
-            ["OnAccentBrush"] = "#002C3D",
-            ["SuccessBrush"] = "#7BD88F",
-            ["WarningBrush"] = "#F4C95D",
-            ["StatusAppliedBrush"] = "#7BD88F",
-            ["StatusPendingBrush"] = "#F4C95D",
-            ["StatusFailedBrush"] = "#FF7B72",
-            ["ComboBackgroundBrush"] = "#D9252525",
-            ["ComboHoverBrush"] = "#353535",
-            ["ComboOpenBrush"] = "#3A3A3A",
-            ["ComboPopupBrush"] = "#2B2B2B",
-            ["ComboItemHoverBrush"] = "#3A3A3A",
-            ["ComboItemSelectedBrush"] = "#454545",
-            ["ComboItemSelectedHoverBrush"] = "#505050",
-            ["ComboBorderHoverBrush"] = "#727272",
-            ["ScrollTrackBrush"] = "#292929",
-            ["ScrollThumbBrush"] = "#666666",
-            ["ScrollThumbHoverBrush"] = "#898989",
-        };
+    private const string LightThemePath = "Themes/LightTheme.xaml";
+    private const string DarkThemePath = "Themes/DarkTheme.xaml";
+    private sealed class WindowBackdropState
+    {
+        internal bool EdgeToEdge { get; set; }
+    }
 
-    private static readonly IReadOnlyDictionary<string, string> LightColors =
-        new Dictionary<string, string>
-        {
-            ["BackgroundBrush"] = "#F3F3F3",
-            ["AppBackgroundBrush"] = "#E6F3F3F3",
-            ["PanelBrush"] = "#EFFFFFFF",
-            ["PanelAltBrush"] = "#F7FFFFFF",
-            ["PanelRaisedBrush"] = "#FFFFFFFF",
-            ["BorderBrush"] = "#D0D0D0",
-            ["BorderSoftBrush"] = "#DDDDDD",
-            ["TextBrush"] = "#1B1B1B",
-            ["MutedTextBrush"] = "#5E5E5E",
-            ["AccentBrush"] = "#0067C0",
-            ["AccentHoverBrush"] = "#005A9E",
-            ["OnAccentBrush"] = "#FFFFFF",
-            ["SuccessBrush"] = "#0F7B3E",
-            ["WarningBrush"] = "#9A6700",
-            ["StatusAppliedBrush"] = "#0F7B3E",
-            ["StatusPendingBrush"] = "#9A6700",
-            ["StatusFailedBrush"] = "#C42B1C",
-            ["ComboBackgroundBrush"] = "#FFFFFFFF",
-            ["ComboHoverBrush"] = "#F0F0F0",
-            ["ComboOpenBrush"] = "#EAEAEA",
-            ["ComboPopupBrush"] = "#FFFFFFFF",
-            ["ComboItemHoverBrush"] = "#F0F0F0",
-            ["ComboItemSelectedBrush"] = "#E5F1FB",
-            ["ComboItemSelectedHoverBrush"] = "#D8EAF8",
-            ["ComboBorderHoverBrush"] = "#8A8A8A",
-            ["ScrollTrackBrush"] = "#E8E8E8",
-            ["ScrollThumbBrush"] = "#8A8A8A",
-            ["ScrollThumbHoverBrush"] = "#666666",
-        };
+    private static readonly ConditionalWeakTable<Window, WindowBackdropState> AttachedWindows = new();
+    private static bool _systemEventsAttached;
 
     internal static bool IsDark { get; private set; } = true;
+    internal static AppTheme Preference { get; private set; } = AppTheme.System;
 
     internal static void Apply(AppTheme theme)
     {
+        Preference = theme;
         IsDark = theme switch
         {
             AppTheme.Dark => true,
             AppTheme.Light => false,
             _ => IsSystemDark(),
         };
+        EnsureSystemEvents();
+
         var application = Application.Current;
         if (application is null) return;
-        foreach (var pair in IsDark ? DarkColors : LightColors)
-        {
-            var color = (Color)ColorConverter.ConvertFromString(pair.Value);
-            if (application.Resources[pair.Key] is SolidColorBrush brush &&
-                !brush.IsFrozen)
-                brush.Color = color;
-            else
-                application.Resources[pair.Key] = new SolidColorBrush(color);
-        }
+        SwapThemeDictionary(application.Resources, IsDark ? DarkThemePath : LightThemePath);
+        ApplicationThemeManager.Apply(
+            IsDark ? ApplicationTheme.Dark : ApplicationTheme.Light,
+            Wpf.Ui.Controls.WindowBackdropType.Mica, updateAccent: false);
         foreach (Window window in application.Windows)
+        {
             ApplyBackdrop(window);
+            AnimateThemeTransition(window);
+        }
     }
 
     internal static void Attach(Window window)
     {
         if (AttachedWindows.TryGetValue(window, out _)) return;
-        AttachedWindows.Add(window, new object());
+        AttachedWindows.Add(window, new WindowBackdropState());
         if (!window.AllowsTransparency)
             window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
         window.SourceInitialized += (_, _) => ApplyBackdrop(window);
+        window.StateChanged += (_, _) => ApplyBackdrop(window);
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero)
             ApplyBackdrop(window);
+    }
+
+    internal static void SetEdgeToEdge(Window window, bool enabled)
+    {
+        Attach(window);
+        if (!AttachedWindows.TryGetValue(window, out var state)) return;
+        state.EdgeToEdge = enabled;
+        ApplyBackdrop(window);
+    }
+
+    internal static void Shutdown()
+    {
+        if (!_systemEventsAttached) return;
+        SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
+        _systemEventsAttached = false;
+    }
+
+    private static void SwapThemeDictionary(ResourceDictionary resources, string path)
+    {
+        var existing = resources.MergedDictionaries.FirstOrDefault(dictionary =>
+            IsThemeDictionary(dictionary.Source));
+        if (existing?.Source?.OriginalString.EndsWith(path,
+                StringComparison.OrdinalIgnoreCase) == true)
+            return;
+
+        var replacement = new ResourceDictionary
+        {
+            Source = new Uri(path, UriKind.Relative),
+        };
+        if (existing is null)
+            resources.MergedDictionaries.Insert(0, replacement);
+        else
+        {
+            var index = resources.MergedDictionaries.IndexOf(existing);
+            resources.MergedDictionaries[index] = replacement;
+        }
+    }
+
+    private static bool IsThemeDictionary(Uri? source)
+    {
+        var value = source?.OriginalString;
+        return value?.EndsWith(LightThemePath, StringComparison.OrdinalIgnoreCase) == true ||
+               value?.EndsWith(DarkThemePath, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static void AnimateThemeTransition(Window window)
+    {
+        if (!window.IsLoaded) return;
+        window.BeginAnimation(UIElement.OpacityProperty,
+            new DoubleAnimation(0.88, 1, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            });
+    }
+
+    private static void EnsureSystemEvents()
+    {
+        if (_systemEventsAttached) return;
+        SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
+        _systemEventsAttached = true;
+    }
+
+    private static void OnSystemPreferenceChanged(object sender,
+        UserPreferenceChangedEventArgs args)
+    {
+        if (Preference != AppTheme.System || Application.Current is null) return;
+        _ = Application.Current.Dispatcher.BeginInvoke(() => Apply(AppTheme.System));
     }
 
     private static void ApplyBackdrop(Window window)
@@ -119,12 +133,22 @@ internal static class ThemeService
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
         var handle = new WindowInteropHelper(window).Handle;
         if (handle == IntPtr.Zero) return;
+        _ = AttachedWindows.TryGetValue(window, out var state);
+        var edgeToEdge = state?.EdgeToEdge == true;
+        var flushToDisplayEdge = edgeToEdge || window.WindowState == WindowState.Maximized;
         var dark = IsDark ? 1 : 0;
-        var corner = 2;
-        var backdrop = 2;
-        _ = DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
-        _ = DwmSetWindowAttribute(handle, 33, ref corner, sizeof(int));
-        _ = DwmSetWindowAttribute(handle, 38, ref backdrop, sizeof(int));
+        var corner = flushToDisplayEdge ? DwmDoNotRound : DwmRound;
+        var acrylic = window is Wpf.Ui.Controls.FluentWindow fluentWindow &&
+                      fluentWindow.WindowBackdropType ==
+                          Wpf.Ui.Controls.WindowBackdropType.Acrylic;
+        var backdrop = edgeToEdge
+            ? DwmBackdropNone
+            : acrylic ? DwmBackdropAcrylic : DwmBackdropMica;
+        var border = flushToDisplayEdge ? DwmColorNone : DwmColorDefault;
+        _ = DwmSetWindowAttribute(handle, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
+        _ = DwmSetWindowAttribute(handle, DwmWindowCornerPreference, ref corner, sizeof(int));
+        _ = DwmSetWindowAttribute(handle, DwmSystemBackdropType, ref backdrop, sizeof(int));
+        _ = DwmSetWindowAttributeColor(handle, DwmBorderColor, ref border, sizeof(uint));
     }
 
     private static bool IsSystemDark()
@@ -147,4 +171,20 @@ internal static class ThemeService
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr window, int attribute,
         ref int value, int valueSize);
+
+    [DllImport("dwmapi.dll", EntryPoint = "DwmSetWindowAttribute")]
+    private static extern int DwmSetWindowAttributeColor(IntPtr window, int attribute,
+        ref uint value, int valueSize);
+
+    private const int DwmUseImmersiveDarkMode = 20;
+    private const int DwmWindowCornerPreference = 33;
+    private const int DwmBorderColor = 34;
+    private const int DwmSystemBackdropType = 38;
+    private const int DwmDoNotRound = 1;
+    private const int DwmRound = 2;
+    private const int DwmBackdropNone = 1;
+    private const int DwmBackdropMica = 2;
+    private const int DwmBackdropAcrylic = 3;
+    private const uint DwmColorNone = 0xFFFFFFFE;
+    private const uint DwmColorDefault = 0xFFFFFFFF;
 }

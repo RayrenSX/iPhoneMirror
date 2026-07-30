@@ -3,7 +3,7 @@ using System.Windows.Input;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class CaptureRecoveryWindow : Window
+public partial class CaptureRecoveryWindow : Wpf.Ui.Controls.FluentWindow
 {
     private CaptureRecoveryWindow() => InitializeComponent();
 

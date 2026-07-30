@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror.Driver</AssemblyName>
     <RootNamespace>IPhoneMirror.DriverInstaller</RootNamespace>
-    <Version>1.4.4</Version>
-    <AssemblyVersion>1.4.4.0</AssemblyVersion>
-    <FileVersion>1.4.4.0</FileVersion>
+    <Version>1.5.0</Version>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
+    <FileVersion>1.5.0.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror Driver Manager</Product>
     <Description>Standalone Apple USB and per-device capture driver manager for iPhoneMirror.</Description>
@@ -28,6 +28,25 @@
     <DebugType>embedded</DebugType>
     <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\SharedUI\Animations\PageTransition.cs"
+             Link="Animations\PageTransition.cs" />
+    <Compile Include="..\SharedUI\Controls\ModernButton.cs"
+             Link="Controls\ModernButton.cs" />
+    <Compile Include="..\SharedUI\Controls\ModernCard.cs"
+             Link="Controls\ModernCard.cs" />
+    <Compile Include="..\SharedUI\Controls\ModernDialog.cs"
+             Link="Controls\ModernDialog.cs" />
+    <Page Include="..\SharedUI\Themes\LightTheme.xaml"
+          Link="Themes\LightTheme.xaml" />
+    <Page Include="..\SharedUI\Themes\DarkTheme.xaml"
+          Link="Themes\DarkTheme.xaml" />
+    <Page Include="..\SharedUI\Animations\ModernAnimations.xaml"
+          Link="Animations\ModernAnimations.xaml" />
+    <Page Include="..\SharedUI\Controls\ModernControls.xaml"
+          Link="Controls\ModernControls.xaml" />
+  </ItemGroup>
 
   <ItemGroup>
     <Resource Include="..\App\Assets\iPhoneMirror.ico">

@@ -11,6 +11,7 @@ namespace IPhoneMirror.DriverInstaller;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
+    public sealed record ThemeChoice(DriverThemeMode Value, string Label);
     private readonly DeviceCatalog _catalog = new();
     private readonly DriverOperationClient _operations = new();
     private readonly AppleSupportInstaller _appleInstaller;
@@ -23,6 +24,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _operationStatus = L("SimpleNoDevice");
 
     public ObservableCollection<AppleDeviceRecord> Devices { get; } = [];
+    public IReadOnlyList<ThemeChoice> ThemeChoices { get; }
+    public DriverThemeMode SelectedTheme
+    {
+        get => DriverThemeService.Preference;
+        set
+        {
+            if (value == DriverThemeService.Preference) return;
+            DriverThemeService.Apply(value);
+            OnPropertyChanged();
+        }
+    }
     public IEnumerable<AppleDeviceRecord> ConnectedDevices =>
         Devices.Where(device => device.IsPresent);
     public AppleDeviceRecord? SelectedDevice
@@ -87,14 +99,40 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public MainWindow()
     {
+        ThemeChoices =
+        [
+            new(DriverThemeMode.System, L("ThemeSystem")),
+            new(DriverThemeMode.Light, L("ThemeLight")),
+            new(DriverThemeMode.Dark, L("ThemeDark")),
+        ];
         InitializeComponent();
         DataContext = this;
         _appleInstaller = new AppleSupportInstaller(_catalog);
+        StateChanged += OnWindowStateChanged;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e) => await RefreshAsync();
 
+    private void OnWindowStateChanged(object? sender, EventArgs e)
+    {
+        var flushToDisplayEdge = WindowState == WindowState.Maximized;
+        DriverWindowChrome.ResizeBorderThickness = flushToDisplayEdge
+            ? new Thickness(0) : new Thickness(7);
+        DriverWindowChrome.CornerRadius = flushToDisplayEdge
+            ? new CornerRadius(0) : new CornerRadius(20);
+    }
+
     private async void OnRefreshClick(object sender, RoutedEventArgs e) => await RefreshAsync();
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState.Minimized;
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+
+    private void OnCloseWindowClick(object sender, RoutedEventArgs e) => Close();
 
     private void OnAdvancedClick(object sender, RoutedEventArgs e) => IsAdvancedMode = !IsAdvancedMode;
 

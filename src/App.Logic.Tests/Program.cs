@@ -76,6 +76,17 @@ foreach (var localizationPath in Directory.GetFiles(
     Equal(true,
         noPingRecovery.Contains("MFi", StringComparison.OrdinalIgnoreCase),
         $"no-PING recovery recommends an original or MFi cable in {Path.GetFileName(localizationPath)}");
+    var usbRecovery = localization.Descendants()
+        .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
+            "CaptureUsbConfigurationRecovery", StringComparison.Ordinal)).Value;
+    Equal(true,
+        usbRecovery.Contains("restart", StringComparison.OrdinalIgnoreCase) ||
+        usbRecovery.Contains("重启", StringComparison.Ordinal),
+        $"USB recovery asks the user to restart in {Path.GetFileName(localizationPath)}");
+    Equal(true,
+        usbRecovery.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
+        usbRecovery.Contains("数据线", StringComparison.Ordinal),
+        $"USB recovery asks the user to replace/reconnect a cable in {Path.GetFileName(localizationPath)}");
 }
 
 var captureRecoveryWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -102,13 +113,210 @@ foreach (var actionKey in new[]
 var mainWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "MainWindow.xaml"));
 var mainWindow = XDocument.Load(mainWindowPath);
-var previewAndObsCard = mainWindow.Descendants()
+var previewQuickActions = mainWindow.Descendants()
     .SingleOrDefault(element =>
         string.Equals((string?)element.Attribute(xaml + "Name"),
-            "PreviewAndObsCard", StringComparison.Ordinal));
+            "PreviewQuickActions", StringComparison.Ordinal));
 Equal("{Binding PreviewAndObsVisibility}",
-    (string?)previewAndObsCard?.Attribute("Visibility"),
-    "preview and OBS card follows the active projection session");
+    (string?)previewQuickActions?.Attribute("Visibility"),
+    "preview quick actions follow the active projection session");
+foreach (var automationId in new[]
+         {
+             "QuickImageSettingsButton", "QuickPreviewWindowButton",
+             "QuickScreenshotButton", "QuickRefreshPreviewButton",
+             "QuickFullScreenButton",
+         })
+{
+    Equal(true, mainWindow.Descendants().Any(element =>
+            string.Equals((string?)element.Attribute("AutomationProperties.AutomationId"),
+                automationId, StringComparison.Ordinal)),
+        $"preview quick actions contain {automationId}");
+}
+
+var sourceDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+    "..", "..", "..", ".."));
+var sharedUiDirectory = Path.Combine(sourceDirectory, "SharedUI");
+var lightThemePath = Path.Combine(sharedUiDirectory, "Themes", "LightTheme.xaml");
+var darkThemePath = Path.Combine(sharedUiDirectory, "Themes", "DarkTheme.xaml");
+static string[] ResourceKeys(string path, XNamespace xamlNamespace) =>
+    XDocument.Load(path).Descendants()
+        .Select(element => (string?)element.Attribute(xamlNamespace + "Key"))
+        .Where(key => !string.IsNullOrWhiteSpace(key))
+        .Select(key => key!)
+        .OrderBy(key => key, StringComparer.Ordinal)
+        .ToArray();
+
+var lightThemeKeys = ResourceKeys(lightThemePath, xaml);
+var darkThemeKeys = ResourceKeys(darkThemePath, xaml);
+Sequence(lightThemeKeys, darkThemeKeys,
+    "light and dark themes expose the same semantic resources");
+foreach (var requiredThemeKey in new[]
+         {
+             "AppBackgroundBrush", "SidebarBrush", "CardBrush", "CardHoverBrush",
+             "ControlFillBrush", "ControlHoverBrush", "AccentBrush", "OnAccentBrush",
+             "IconButtonHoverBrush", "IconButtonPressedBrush",
+             "SuccessBrush", "WarningBrush", "ErrorBrush", "WarningSurfaceBrush",
+              "ErrorSurfaceBrush", "PreviewChromeBrush", "PreviewPanelAltBrush",
+              "PreviewBorderBrush", "PreviewTextBrush", "PreviewMutedTextBrush",
+             "CaptureStartBrush", "CaptureStopBrush", "CaptureActionTextBrush",
+             "PrimaryActionBrush", "PrimaryActionHoverBrush",
+             "PrimaryActionPressedBrush", "PrimaryActionTextBrush",
+             "PrimaryActionFocusBrush", "PrimaryActionDisabledBrush",
+             "PrimaryActionDisabledTextBrush",
+         })
+{
+    Equal(true, lightThemeKeys.Contains(requiredThemeKey, StringComparer.Ordinal),
+        $"theme contains {requiredThemeKey}");
+}
+
+var modernControlsPath = Path.Combine(sharedUiDirectory, "Controls",
+    "ModernControls.xaml");
+var modernControlsText = File.ReadAllText(modernControlsPath);
+foreach (var reusableControl in new[]
+         {
+             "ModernDialogSurface", "SettingsSection", "IconButton",
+             "TitleBarButton", "SubWindowCloseButton", "CornerRadius=\"8\"",
+             "SubWindowPageRoot", "SubWindowHeader", "SubWindowTitle",
+             "SubWindowSubtitle", "SubWindowTabControl", "SubWindowTabItem",
+             "IconButtonHoverBrush",
+             "ui:ModernButton", "ui:ModernCard", "ui:ModernDialog",
+         })
+{
+    Equal(true, modernControlsText.Contains(reusableControl, StringComparison.Ordinal),
+        $"shared UI contains {reusableControl}");
+}
+
+var themedWindowDirectories = new[]
+{
+    Path.Combine(sourceDirectory, "App", "Windows"),
+    Path.Combine(sourceDirectory, "DriverInstaller", "Windows"),
+};
+foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
+             Directory.GetFiles(directory, "*.xaml")))
+{
+    var windowText = File.ReadAllText(windowPath);
+    var windowName = Path.GetFileName(windowPath);
+    Equal(false, System.Text.RegularExpressions.Regex.IsMatch(windowText,
+            @"#[0-9A-Fa-f]{6,8}"),
+        $"{windowName} does not hard-code theme colors");
+    Equal(true, windowText.Contains("{DynamicResource", StringComparison.Ordinal),
+        $"{windowName} uses dynamic theme resources");
+    Equal(true,
+        windowText.Contains("AppBackgroundBrush", StringComparison.Ordinal) ||
+        windowText.Contains("ModernDialogSurface", StringComparison.Ordinal),
+        $"{windowName} uses a shared themed window surface");
+    Equal(true,
+        windowText.Contains("WindowStyle=\"None\"", StringComparison.Ordinal) ||
+        windowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal),
+        $"{windowName} uses custom or Fluent window chrome");
+    Equal(true, windowText.Contains("SubWindowCloseButton", StringComparison.Ordinal),
+        $"{windowName} provides the shared custom close button");
+    Equal(true, windowText.Contains("SubWindowTitle", StringComparison.Ordinal),
+        $"{windowName} uses the shared child-window title hierarchy");
+    Equal(true,
+        windowText.Contains("ModernDialogSurface", StringComparison.Ordinal) ||
+        windowText.Contains("SubWindowPageRoot", StringComparison.Ordinal),
+        $"{windowName} uses shared child-window spacing");
+    Equal(true,
+        windowText.Contains("ModernDialogSurface", StringComparison.Ordinal) ||
+        windowText.Contains("WindowChrome.WindowChrome", StringComparison.Ordinal) ||
+        windowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal),
+        $"{windowName} uses a draggable custom window surface");
+    Equal(true,
+        windowText.Contains("PageTransition.IsEnabled", StringComparison.Ordinal) ||
+        windowText.Contains("EntranceTransform", StringComparison.Ordinal),
+        $"{windowName} has a restrained entrance transition");
+}
+
+var mainWindowText = File.ReadAllText(mainWindowPath);
+foreach (var navigationKey in new[]
+         {
+             "NavMirroring", "NavDevices", "NavOutput", "NavSettings",
+             "NavDriver", "NavAbout",
+         })
+{
+    Equal(true,
+        mainWindowText.Contains($"{{DynamicResource {navigationKey}}}",
+            StringComparison.Ordinal),
+        $"main navigation contains {navigationKey}");
+}
+Equal(true, mainWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal) &&
+            mainWindowText.Contains("WindowBackdropType=\"Mica\"",
+                StringComparison.Ordinal),
+    "main window uses FluentWindow with a Mica backdrop");
+Equal(true, mainWindowText.Contains("<ui:NavigationView", StringComparison.Ordinal) &&
+            mainWindowText.Contains("CompactPaneLength=\"48\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("OpenPaneLength=\"232\"",
+                StringComparison.Ordinal),
+    "main navigation uses the animated compact NavigationView pane");
+Equal(false, mainWindowText.Contains("NavigationColumn", StringComparison.Ordinal) ||
+             mainWindowText.Contains("NavigationLabel", StringComparison.Ordinal),
+    "main navigation no longer mixes column-width and label visibility animations");
+Equal(true, mainWindowText.Contains("x:Name=\"MirroringPanelToggle\"",
+        StringComparison.Ordinal),
+    "mirroring navigation can expand its common actions");
+Equal(true, mainWindowText.Contains("x:Name=\"ThemeComboBox\"",
+        StringComparison.Ordinal),
+    "main settings place theme selection beside language");
+Equal(false, mainWindowText.Contains("x:Name=\"LogExpander\"",
+        StringComparison.Ordinal),
+    "live logs are no longer rendered in the main preview workspace");
+
+var mainWindowCodePath = Path.Combine(sourceDirectory, "App", "MainWindow.xaml.cs");
+var mainWindowCode = File.ReadAllText(mainWindowCodePath);
+Equal(true, mainWindowCode.Contains("AnimateWorkspaceSurface", StringComparison.Ordinal) &&
+            mainWindowCode.Contains("BeginAnimation(WidthProperty", StringComparison.Ordinal),
+    "workspace panels animate layout width so preview resizing stays continuous");
+Equal(true, mainWindowText.Contains(
+        "Background=\"{DynamicResource PreviewChromeBrush}\"", StringComparison.Ordinal),
+    "main preview surface follows the active light/dark theme");
+Equal(false, mainWindowText.Contains("Background=\"#050505\"",
+        StringComparison.Ordinal),
+    "main preview does not hard-code a dark background");
+
+var aboutWindowPath = Path.Combine(sourceDirectory, "App", "Windows", "AboutWindow.xaml");
+var aboutWindowText = File.ReadAllText(aboutWindowPath);
+Equal(true, aboutWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal) &&
+            aboutWindowText.Contains("WindowBackdropType=\"Mica\"",
+                StringComparison.Ordinal),
+    "about window uses FluentWindow with Mica");
+Equal(true, aboutWindowText.Contains("{DynamicResource CheckForUpdates}",
+                StringComparison.Ordinal) &&
+            aboutWindowText.Contains("Style=\"{StaticResource PrimaryButton}\"",
+                StringComparison.Ordinal),
+    "check for updates uses the audited primary action style");
+Equal(false, aboutWindowText.Contains("SettingsSection", StringComparison.Ordinal),
+    "about content uses lightweight unframed sections instead of a large nested card");
+Equal(true, aboutWindowText.Contains("DiagnosticPath, Mode=OneWay",
+        StringComparison.Ordinal),
+    "about diagnostics never binds a read-only path two-way");
+Equal(true, aboutWindowText.Contains("x:Name=\"LiveLogTextBox\"",
+        StringComparison.Ordinal),
+    "about diagnostics owns the live log view");
+Equal(true, aboutWindowText.Contains("SubWindowTabControl", StringComparison.Ordinal),
+    "about navigation uses the shared child-window tab language");
+var mediaOutputWindowText = File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+    "MediaOutputSettingsWindow.xaml"));
+Equal(true, mediaOutputWindowText.Contains("SubWindowTabControl", StringComparison.Ordinal),
+    "media output uses the shared child-window tab language");
+var usbInfoWindowText = File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+    "UsbProjectionModeInfoWindow.xaml"));
+Equal(true, usbInfoWindowText.Contains("Height=\"620\"", StringComparison.Ordinal) &&
+            usbInfoWindowText.Contains("ScrollViewer Grid.Row=\"2\"", StringComparison.Ordinal),
+    "USB mode guidance is tall enough and scrolls long localized content");
+Equal(true, modernControlsText.Contains("FocusVisualStyle", StringComparison.Ordinal),
+    "shared icon controls replace the default rectangular focus adorner");
+var driverMainWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "DriverInstaller", "MainWindow.xaml"));
+Equal(true, driverMainWindowText.Contains("x:Name=\"DriverWindowChrome\"",
+        StringComparison.Ordinal),
+    "driver manager names its shared window chrome for maximize frame policy");
+var driverThemeServiceText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "DriverInstaller", "Services", "DriverThemeService.cs"));
+Equal(true, driverThemeServiceText.Contains("DwmBorderColor", StringComparison.Ordinal) &&
+            driverThemeServiceText.Contains("DwmColorDefault", StringComparison.Ordinal),
+    "driver manager applies the same DWM border color policy as the main window");
 
 Equal(true, SemanticVersion.Parse("v1.2.0") > SemanticVersion.Parse("v1.1.9"),
     "semantic version compares numeric minor and patch components");
@@ -137,6 +345,12 @@ Equal(true, CaptureErrorGuidance.IsNoPingTimeout(
 Equal(false, CaptureErrorGuidance.IsNoPingTimeout(
         "QuickTime endpoint opened; waiting PING"),
     "capture guidance does not treat an in-progress handshake as a timeout");
+Equal(true, CaptureErrorGuidance.IsUsbConfigurationFailure(
+        "open QuickTime USB interface: libusb0-dll:err [set_configuration] could not set config 5: win error: ����"),
+    "capture guidance recognizes the libusb0 configuration failure despite localized text");
+Equal(false, CaptureErrorGuidance.IsUsbConfigurationFailure(
+        "QuickTime endpoint opened but iPhone sent no PING; keep the device unlocked"),
+    "capture guidance does not confuse a no-PING timeout with a USB configuration failure");
 
 const string releaseFixture = """
 [

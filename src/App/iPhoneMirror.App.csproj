@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.4.4</Version>
-    <AssemblyVersion>1.4.4.0</AssemblyVersion>
-    <FileVersion>1.4.4.0</FileVersion>
+    <Version>1.5.0</Version>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
+    <FileVersion>1.5.0.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>
@@ -35,10 +35,31 @@
 
   <ItemGroup>
     <PackageReference Include="Markdig" Version="1.3.2" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\SharedUI\Animations\PageTransition.cs"
+             Link="Animations\PageTransition.cs" />
+    <Compile Include="..\SharedUI\Controls\ModernButton.cs"
+             Link="Controls\ModernButton.cs" />
+    <Compile Include="..\SharedUI\Controls\ModernCard.cs"
+             Link="Controls\ModernCard.cs" />
+    <Compile Include="..\SharedUI\Controls\ModernDialog.cs"
+             Link="Controls\ModernDialog.cs" />
+    <Page Include="..\SharedUI\Themes\LightTheme.xaml"
+          Link="Themes\LightTheme.xaml" />
+    <Page Include="..\SharedUI\Themes\DarkTheme.xaml"
+          Link="Themes\DarkTheme.xaml" />
+    <Page Include="..\SharedUI\Animations\ModernAnimations.xaml"
+          Link="Animations\ModernAnimations.xaml" />
+    <Page Include="..\SharedUI\Controls\ModernControls.xaml"
+          Link="Controls\ModernControls.xaml" />
   </ItemGroup>
 
   <ItemGroup>
     <Resource Include="Assets\iPhoneMirror.ico" />
+    <Resource Include="Assets\iPhoneMirror.png" />
     <Content Include="native\iPhoneMirror.Core.dll" Condition="Exists('native\iPhoneMirror.Core.dll')">
       <Link>iPhoneMirror.Core.dll</Link>
       <TargetPath>iPhoneMirror.Core.dll</TargetPath>

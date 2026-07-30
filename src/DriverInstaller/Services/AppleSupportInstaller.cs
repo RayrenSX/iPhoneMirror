@@ -80,6 +80,14 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 ("sha256", DriverLogger.HashTag(packageHash)));
             var result = await RunMsiAsync(offlineMsi, packageHash, packageLog, operationId);
             installerExitCode = result.ExitCode;
+            if (IsUserCancellation(result.ExitCode))
+            {
+                DriverLogger.WriteWarning("apple-support", "offline_install_cancelled",
+                    ("operation", operationId),
+                    ("elapsed_ms", timer.ElapsedMilliseconds));
+                return new AppleSupportInstallResult(false, false,
+                    DriverLocalization.Get("UacCancelled"));
+            }
             if (!IsInstallerSuccess(result.ExitCode))
             {
                 DriverLogger.WriteError("apple-support", "offline_install_failed",
@@ -112,8 +120,12 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             if (wingetResult is not null && wingetResult.ExitCode == 0)
             {
                 ReportProgress(progress, "AppleSupportVerifying");
-                var storeReady = await WaitAndRecoverAppleSupportAsync(
+                var storeRecovery = await WaitAndRecoverAppleSupportAsync(
                     TimeSpan.FromSeconds(20), operationId);
+                if (storeRecovery.StartOutcome == ServiceStartOutcome.Cancelled)
+                    return new AppleSupportInstallResult(false, false,
+                        DriverLocalization.Get("UacCancelled"));
+                var storeReady = storeRecovery.Status;
                 if (storeReady.Ready)
                 {
                     DriverLogger.WriteEvent("apple-support", "store_install_completed",
@@ -174,6 +186,15 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             var result = await ExtractAndInstallMobileDeviceSupportAsync(setup,
                 packageHash, packageLog, operationId, progress);
             installerExitCode = result.ExitCode;
+            if (IsUserCancellation(result.ExitCode))
+            {
+                DriverLogger.WriteWarning("apple-support",
+                    "mobile_device_support_install_cancelled",
+                    ("operation", operationId),
+                    ("elapsed_ms", timer.ElapsedMilliseconds));
+                return new AppleSupportInstallResult(false, false,
+                    DriverLocalization.Get("UacCancelled"));
+            }
             if (!IsInstallerSuccess(result.ExitCode))
             {
                 DriverLogger.WriteError("apple-support", "mobile_device_support_install_failed",
@@ -187,8 +208,12 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         }
 
         ReportProgress(progress, "AppleSupportVerifying");
-        var ready = await WaitAndRecoverAppleSupportAsync(TimeSpan.FromSeconds(90),
+        var recovery = await WaitAndRecoverAppleSupportAsync(TimeSpan.FromSeconds(90),
             operationId);
+        if (recovery.StartOutcome == ServiceStartOutcome.Cancelled)
+            return new AppleSupportInstallResult(false, false,
+                DriverLocalization.Get("UacCancelled"));
+        var ready = recovery.Status;
         if (ready.Ready)
         {
             DriverLogger.WriteEvent("apple-support", "install_completed",
@@ -290,19 +315,21 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
     private static void ReportProgress(IProgress<string>? progress, string resourceKey) =>
         progress?.Report(DriverLocalization.Get(resourceKey));
 
-    private async Task<AppleSupportStatus> WaitAndRecoverAppleSupportAsync(
+    private async Task<(AppleSupportStatus Status, ServiceStartOutcome? StartOutcome)>
+        WaitAndRecoverAppleSupportAsync(
         TimeSpan timeout, string operationId)
     {
         var status = await WaitForAppleSupportAsync(timeout, operationId,
             returnWhenServiceCanBeRecovered: true);
         if (status.Ready || !status.ServiceInstalled || status.ServiceRunning ||
             status.ServiceName is null)
-            return status;
+            return (status, null);
 
-        if (await StartServiceElevatedAsync(status.ServiceName, operationId) !=
-            ServiceStartOutcome.Started)
-            return status;
-        return await WaitForAppleSupportAsync(TimeSpan.FromSeconds(30), operationId);
+        var startOutcome = await StartServiceElevatedAsync(status.ServiceName, operationId);
+        if (startOutcome != ServiceStartOutcome.Started)
+            return (status, startOutcome);
+        status = await WaitForAppleSupportAsync(TimeSpan.FromSeconds(30), operationId);
+        return (status, startOutcome);
     }
 
     private static async Task<ProcessResult?> TryInstallAppleDevicesWithWingetAsync(
@@ -590,6 +617,8 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
 
     internal static bool IsRestartRequired(int exitCode) => exitCode is 1641 or 3010;
 
+    internal static bool IsUserCancellation(int exitCode) => exitCode == 1223;
+
     private async Task<ServiceStartOutcome> StartServiceElevatedAsync(string serviceName,
         string operationId)
     {
@@ -613,7 +642,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 ("exit_code", result.ExitCode), ("success", success),
                 ("elapsed_ms", timer.ElapsedMilliseconds));
             return success ? ServiceStartOutcome.Started :
-                result.ExitCode == 1223 ? ServiceStartOutcome.Cancelled :
+                IsUserCancellation(result.ExitCode) ? ServiceStartOutcome.Cancelled :
                 ServiceStartOutcome.Failed;
         }
         catch (Exception error)

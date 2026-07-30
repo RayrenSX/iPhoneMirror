@@ -4,7 +4,9 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -21,21 +23,35 @@ namespace IPhoneMirror.App;
 
 // Build marker: GUI hosts the native D3D11 swapchain; decoded presentation
 // frames no longer pass through WPF WriteableBitmap or CompositionTarget.
-public partial class MainWindow : Window
+public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
+    private enum WorkspacePanel
+    {
+        None,
+        Mirroring,
+        Devices,
+        Settings,
+    }
+
     public string VersionText => $"iPhoneMirror {VersionManager.DisplayVersion}";
 
     private readonly MainViewModel _viewModel;
     private readonly DispatcherTimer _refreshTimer;
-    private readonly DispatcherTimer _logTimer;
     private readonly DispatcherTimer _mediaCastTimer;
     private readonly DispatcherTimer _mediaPlaybackTimer;
     private readonly MultiDevicePreviewManager _secondaryMirrors;
     private readonly SemaphoreSlim _screenshotGate = new(1, 1);
     private readonly MediaCastEventGate _mediaCastEvents = new();
     private bool _isFullScreen;
+    private bool _isWindowMaximized;
+    private bool _handlingNativeMaximize;
+    private bool _restoreWasWindowMaximized;
+    private Rect _windowMaximizeRestoreBounds;
     private WindowStyle _restoreWindowStyle;
     private WindowState _restoreWindowState;
+    private ResizeMode _restoreResizeMode;
+    private bool _restoreTopmost;
+    private Rect _restoreBounds;
     private bool _shutdownStarted;
     private bool _allowClose;
     private int _versionClickCount;
@@ -62,15 +78,22 @@ public partial class MainWindow : Window
     private MediaOutputSettingsWindow? _mediaOutputSettingsWindow;
     private string? _projectionSettingsUdid;
     private ulong _projectionSettingsSessionHandle;
-    private string? _mediaOutputSettingsUdid;
-    private ulong _mediaOutputSettingsSessionHandle;
     private string? _lastPlaybackReportError;
+    private WorkspacePanel _workspacePanel = WorkspacePanel.Devices;
+    private bool _isSynchronizingWorkspacePanelControls;
+    private bool _workspaceControlsReady;
+    private bool _themeControlReady;
+    private int _workspaceTransitionRevision;
 
     private static readonly TimeSpan DeviceDragHoldDuration = TimeSpan.FromMilliseconds(350);
-
+    private static readonly TimeSpan WorkspaceTransitionDuration = TimeSpan.FromMilliseconds(280);
     public MainWindow()
     {
         InitializeComponent();
+        if (Application.Current is App app)
+            ThemeComboBox.SelectedValue = app.UpdateSettings.Theme.ToString();
+        _themeControlReady = true;
+        _workspaceControlsReady = true;
         _viewModel = new MainViewModel();
         _secondaryMirrors = new MultiDevicePreviewManager(_viewModel);
         DataContext = _viewModel;
@@ -84,12 +107,11 @@ public partial class MainWindow : Window
         _viewModel.MediaOutputSettingsRequested += OnMediaOutputSettingsRequested;
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _refreshTimer.Tick += (_, _) => _ = _viewModel.RefreshAsync();
-        _logTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _logTimer.Tick += (_, _) => _ = _viewModel.RefreshLogsAsync();
         _mediaCastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _mediaCastTimer.Tick += (_, _) => _viewModel.RefreshMediaCast();
         _mediaPlaybackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _mediaPlaybackTimer.Tick += (_, _) => ReportMediaCastPlayback();
+        StateChanged += OnWindowStateChanged;
         Loaded += OnLoaded;
         Closing += OnClosing;
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_created",
@@ -104,17 +126,311 @@ public partial class MainWindow : Window
         // frozen or prevent the user from seeing the current status.
         _refreshTimer.Start();
         _mediaCastTimer.Start();
+        ApplyWorkspacePanelState();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_loaded",
             ("width", ActualWidth.ToString("F0")),
             ("height", ActualHeight.ToString("F0"))));
         _ = _viewModel.RefreshAsync();
     }
 
+    private void OnWindowStateChanged(object? sender, EventArgs e)
+    {
+        if (!_handlingNativeMaximize && !_isFullScreen &&
+            WindowState == WindowState.Maximized)
+        {
+            _handlingNativeMaximize = true;
+            try
+            {
+                var restoreBounds = _isWindowMaximized
+                    ? _windowMaximizeRestoreBounds
+                    : RestoreBounds;
+                WindowState = WindowState.Normal;
+                if (_isWindowMaximized)
+                    RestoreWindowFromMaximized();
+                else
+                    MaximizeWindow(restoreBounds);
+            }
+            finally
+            {
+                _handlingNativeMaximize = false;
+            }
+            return;
+        }
+        ApplyWindowFramePolicy();
+    }
+
+    private void ApplyWindowFramePolicy()
+    {
+        var flushToDisplayEdge = _isFullScreen || _isWindowMaximized;
+        WindowCornerPreference = flushToDisplayEdge
+            ? Wpf.Ui.Controls.WindowCornerPreference.DoNotRound
+            : Wpf.Ui.Controls.WindowCornerPreference.Round;
+        WindowBackdropType = flushToDisplayEdge
+            ? Wpf.Ui.Controls.WindowBackdropType.None
+            : Wpf.Ui.Controls.WindowBackdropType.Mica;
+        ThemeService.SetEdgeToEdge(this, flushToDisplayEdge);
+    }
+
     private void OnAboutClick(object sender, RoutedEventArgs e)
     {
         if (Application.Current is App app)
-            app.ShowAboutWindow(this);
+            app.ShowAboutWindow(this, _viewModel);
     }
+
+    private void OnNavigateMirroringClick(object sender, RoutedEventArgs e)
+    {
+        if (!_workspaceControlsReady || _isSynchronizingWorkspacePanelControls) return;
+        SetWorkspacePanel(_workspacePanel == WorkspacePanel.Mirroring
+            ? WorkspacePanel.None
+            : WorkspacePanel.Mirroring);
+    }
+
+    private void OnNavigateDevicesClick(object sender, RoutedEventArgs e)
+    {
+        if (!_workspaceControlsReady || _isSynchronizingWorkspacePanelControls) return;
+        SetWorkspacePanel(_workspacePanel == WorkspacePanel.Devices
+            ? WorkspacePanel.None
+            : WorkspacePanel.Devices);
+    }
+
+    private void OnNavigateOutputClick(object sender, RoutedEventArgs e)
+        => OnMediaOutputSettingsRequested();
+
+    private void OnNavigateSettingsClick(object sender, RoutedEventArgs e)
+    {
+        if (!_workspaceControlsReady || _isSynchronizingWorkspacePanelControls) return;
+        SetWorkspacePanel(_workspacePanel == WorkspacePanel.Settings
+            ? WorkspacePanel.None
+            : WorkspacePanel.Settings);
+    }
+
+    private void OnNavigateDriverClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.OpenDriverManagerCommand.CanExecute(null))
+            _viewModel.OpenDriverManagerCommand.Execute(null);
+    }
+
+    private void OnNavigateAboutClick(object sender, RoutedEventArgs e) =>
+        OnAboutClick(sender, e);
+
+    private void OnCloseDevicePanelClick(object sender, RoutedEventArgs e) =>
+        SetWorkspacePanel(WorkspacePanel.None);
+
+    private void OnCloseMirroringPanelClick(object sender, RoutedEventArgs e) =>
+        SetWorkspacePanel(WorkspacePanel.None);
+
+    private void OnCloseSettingsPanelClick(object sender, RoutedEventArgs e) =>
+        SetWorkspacePanel(WorkspacePanel.None);
+
+    private void SetWorkspacePanel(WorkspacePanel panel)
+    {
+        if (_workspacePanel == panel) return;
+        _workspacePanel = panel;
+        ApplyWorkspacePanelState(animate: IsLoaded && !_isFullScreen);
+        _viewModel.AddDiagnosticLog(AppLog.Event("workspace_panel_changed",
+            ("panel", panel.ToString().ToLowerInvariant())));
+    }
+
+    private void ApplyWorkspacePanelState(bool animate = false)
+    {
+        var showMirroring = _workspacePanel == WorkspacePanel.Mirroring;
+        var showDevices = _workspacePanel == WorkspacePanel.Devices;
+        var showSettings = _workspacePanel == WorkspacePanel.Settings;
+        var showLeftPanel = showMirroring || showDevices;
+        DeviceColumn.Width = GridLength.Auto;
+        ControlColumn.Width = GridLength.Auto;
+        LeftGapColumn.Width = showLeftPanel ? new GridLength(18) : new GridLength(0);
+        RightGapColumn.Width = showSettings ? new GridLength(18) : new GridLength(0);
+        _isSynchronizingWorkspacePanelControls = true;
+        try
+        {
+            MirroringPanelToggle.IsActive = showMirroring;
+            DevicePanelToggle.IsActive = showDevices;
+            SettingsPanelToggle.IsActive = showSettings;
+        }
+        finally
+        {
+            _isSynchronizingWorkspacePanelControls = false;
+        }
+
+        if (!animate)
+        {
+            ++_workspaceTransitionRevision;
+            SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, 300);
+            SetWorkspacePageImmediate(DevicePanel, showDevices);
+            SetWorkspacePageImmediate(MirroringPanel, showMirroring);
+            SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, 336);
+            return;
+        }
+
+        var revision = ++_workspaceTransitionRevision;
+        AnimateWorkspaceSurface(LeftPanelHost, showLeftPanel, 300, fromLeft: true, revision);
+        AnimateWorkspacePage(DevicePanel, showDevices, fromLeft: true, revision);
+        AnimateWorkspacePage(MirroringPanel, showMirroring, fromLeft: true, revision);
+        AnimateWorkspaceSurface(ControlPanel, showSettings, 336, fromLeft: false, revision);
+    }
+
+    private static void SetWorkspacePageImmediate(FrameworkElement element, bool visible)
+    {
+        element.BeginAnimation(OpacityProperty, null);
+        if (element.RenderTransform is TranslateTransform transform)
+            transform.BeginAnimation(TranslateTransform.XProperty, null);
+        element.Opacity = visible ? 1 : 0;
+        element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static void SetWorkspaceSurfaceImmediate(FrameworkElement element,
+        bool visible, double width)
+    {
+        element.BeginAnimation(WidthProperty, null);
+        element.BeginAnimation(OpacityProperty, null);
+        element.Opacity = 1;
+        if (element.RenderTransform is TranslateTransform transform)
+        {
+            transform.BeginAnimation(TranslateTransform.XProperty, null);
+            transform.X = 0;
+        }
+        element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        element.Width = visible ? width : 0;
+    }
+
+    private void AnimateWorkspaceSurface(FrameworkElement element, bool visible,
+        double width, bool fromLeft, int revision)
+    {
+        var currentWidth = element.Visibility == Visibility.Visible
+            ? Math.Max(0, element.ActualWidth)
+            : 0;
+        element.BeginAnimation(WidthProperty, null);
+        element.Width = currentWidth;
+        if (visible)
+        {
+            element.Visibility = Visibility.Visible;
+            if (ReferenceEquals(element, LeftPanelHost)) element.Opacity = 1;
+        }
+
+        var widthAnimation = CreateWorkspaceAnimation(currentWidth, visible ? width : 0);
+        widthAnimation.Completed += (_, _) =>
+        {
+            if (revision != _workspaceTransitionRevision) return;
+            element.BeginAnimation(WidthProperty, null);
+            element.Width = visible ? width : 0;
+            if (!visible) element.Visibility = Visibility.Collapsed;
+        };
+        element.BeginAnimation(WidthProperty, widthAnimation);
+
+        if (!ReferenceEquals(element, LeftPanelHost))
+            AnimateWorkspacePage(element, visible, fromLeft, revision);
+    }
+
+    private void AnimateWorkspacePage(FrameworkElement element, bool visible,
+        bool fromLeft, int revision)
+    {
+        if (!visible && element.Visibility != Visibility.Visible) return;
+        element.BeginAnimation(OpacityProperty, null);
+        var transform = element.RenderTransform as TranslateTransform ?? new TranslateTransform();
+        element.RenderTransform = transform;
+        transform.BeginAnimation(TranslateTransform.XProperty, null);
+        if (visible) element.Visibility = Visibility.Visible;
+
+        var direction = fromLeft ? -1d : 1d;
+        var opacity = CreateWorkspaceAnimation(visible ? 0.35 : element.Opacity,
+            visible ? 1 : 0);
+        var translation = CreateWorkspaceAnimation(visible ? direction * 18 : 0,
+            visible ? 0 : direction * 14);
+        opacity.Completed += (_, _) =>
+        {
+            if (revision != _workspaceTransitionRevision) return;
+            element.BeginAnimation(OpacityProperty, null);
+            transform.BeginAnimation(TranslateTransform.XProperty, null);
+            element.Opacity = visible ? 1 : 0;
+            transform.X = 0;
+            if (!visible) element.Visibility = Visibility.Collapsed;
+        };
+        element.BeginAnimation(OpacityProperty, opacity);
+        transform.BeginAnimation(TranslateTransform.XProperty, translation);
+    }
+
+    private static DoubleAnimation CreateWorkspaceAnimation(double from, double to) =>
+        new(from, to, WorkspaceTransitionDuration)
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
+            FillBehavior = FillBehavior.Stop,
+        };
+
+    private void OnThemeSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_themeControlReady || sender is not ComboBox { SelectedValue: string value } ||
+            !Enum.TryParse<AppTheme>(value, ignoreCase: true, out var theme) ||
+            Application.Current is not App app || app.UpdateSettings.Theme == theme)
+            return;
+        app.UpdateSettings.Theme = theme;
+        ThemeService.Apply(theme);
+        app.SaveUpdateSettings();
+    }
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState.Minimized;
+
+    private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        if (e.ClickCount == 2)
+        {
+            OnMaximizeClick(sender, e);
+            return;
+        }
+
+        DragMove();
+    }
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e)
+    {
+        if (_isWindowMaximized)
+            RestoreWindowFromMaximized();
+        else
+            MaximizeWindow();
+    }
+
+    private void MaximizeWindow(Rect? restoreBounds = null)
+    {
+        if (_isFullScreen) return;
+        if (!_isWindowMaximized)
+        {
+            _windowMaximizeRestoreBounds = restoreBounds ?? new Rect(
+                Left, Top, ActualWidth, ActualHeight);
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
+        var monitorInfo = new MonitorInfo
+        {
+            Size = (uint)Marshal.SizeOf<MonitorInfo>(),
+        };
+        if (monitor == 0 || !GetMonitorInfoW(monitor, ref monitorInfo)) return;
+
+        WindowState = WindowState.Normal;
+        _isWindowMaximized = true;
+        ApplyWindowFramePolicy();
+        _ = SetWindowPos(handle, 0,
+            monitorInfo.Monitor.Left, monitorInfo.Monitor.Top,
+            monitorInfo.Monitor.Right - monitorInfo.Monitor.Left,
+            monitorInfo.Monitor.Bottom - monitorInfo.Monitor.Top,
+            SwpNoZOrder | SwpFrameChanged | SwpShowWindow);
+    }
+
+    private void RestoreWindowFromMaximized()
+    {
+        if (!_isWindowMaximized) return;
+        _isWindowMaximized = false;
+        WindowState = WindowState.Normal;
+        ApplyWindowFramePolicy();
+        Left = _windowMaximizeRestoreBounds.Left;
+        Top = _windowMaximizeRestoreBounds.Top;
+        Width = _windowMaximizeRestoreBounds.Width;
+        Height = _windowMaximizeRestoreBounds.Height;
+    }
+
+    private void OnCloseWindowClick(object sender, RoutedEventArgs e) => Close();
 
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
@@ -137,7 +453,6 @@ public partial class MainWindow : Window
         _viewModel.ProjectionSettingsRequested -= OnProjectionSettingsRequested;
         _viewModel.MediaOutputSettingsRequested -= OnMediaOutputSettingsRequested;
         _refreshTimer.Stop();
-        _logTimer.Stop();
         _mediaCastTimer.Stop();
         try
         {
@@ -1263,35 +1578,22 @@ public partial class MainWindow : Window
 
     private void OnMediaOutputSettingsRequested(string? udid, ulong sessionHandle)
     {
-        if (string.IsNullOrWhiteSpace(udid) ||
-            !DeviceViewModel.UdidEquals(_viewModel.SelectedDevice?.Udid, udid) ||
-            _viewModel.CurrentSessionHandle != sessionHandle)
-            return;
         if (_mediaOutputSettingsWindow is not null)
         {
-            if (DeviceViewModel.UdidEquals(_mediaOutputSettingsUdid, udid) &&
-                _mediaOutputSettingsSessionHandle == sessionHandle)
-            {
-                _mediaOutputSettingsWindow.Activate();
-                _mediaOutputSettingsWindow.Focus();
-                return;
-            }
-            _mediaOutputSettingsWindow.Close();
+            _mediaOutputSettingsWindow.Activate();
+            _mediaOutputSettingsWindow.Focus();
+            return;
         }
         var window = new MediaOutputSettingsWindow(_viewModel)
         {
             Owner = this,
         };
         _mediaOutputSettingsWindow = window;
-        _mediaOutputSettingsUdid = udid;
-        _mediaOutputSettingsSessionHandle = sessionHandle;
         window.Closed += (_, _) =>
         {
             if (ReferenceEquals(_mediaOutputSettingsWindow, window))
             {
                 _mediaOutputSettingsWindow = null;
-                _mediaOutputSettingsUdid = null;
-                _mediaOutputSettingsSessionHandle = 0;
             }
         };
         _viewModel.AddDiagnosticLog(AppLog.Event("media_output_window_opened",
@@ -1318,17 +1620,6 @@ public partial class MainWindow : Window
                 ("old_handle", AppLog.Handle(_projectionSettingsSessionHandle)),
                 ("new_handle", AppLog.Handle(sessionHandle))));
             _projectionSettingsWindow.Close();
-        }
-        if (_mediaOutputSettingsWindow is not null &&
-            DeviceViewModel.UdidEquals(_mediaOutputSettingsUdid, udid) &&
-            _mediaOutputSettingsSessionHandle != sessionHandle)
-        {
-            _viewModel.AddDiagnosticLog(AppLog.Event(
-                "media_output_settings_session_invalidated",
-                ("device", AppLog.Device(udid)),
-                ("old_handle", AppLog.Handle(_mediaOutputSettingsSessionHandle)),
-                ("new_handle", AppLog.Handle(sessionHandle))));
-            _mediaOutputSettingsWindow.Close();
         }
     }
 
@@ -1357,10 +1648,6 @@ public partial class MainWindow : Window
                     !DeviceViewModel.UdidEquals(_projectionSettingsUdid,
                         _viewModel.SelectedDevice?.Udid))
                     _projectionSettingsWindow.Close();
-                if (_mediaOutputSettingsWindow is not null &&
-                    !DeviceViewModel.UdidEquals(_mediaOutputSettingsUdid,
-                        _viewModel.SelectedDevice?.Udid))
-                    _mediaOutputSettingsWindow.Close();
             }
             else if (e.PropertyName == nameof(MainViewModel.CurrentSessionHandle))
             {
@@ -1368,9 +1655,6 @@ public partial class MainWindow : Window
                 if (_projectionSettingsWindow is not null &&
                     _projectionSettingsSessionHandle != currentHandle)
                     _projectionSettingsWindow.Close();
-                if (_mediaOutputSettingsWindow is not null &&
-                    _mediaOutputSettingsSessionHandle != currentHandle)
-                    _mediaOutputSettingsWindow.Close();
             }
             _secondaryMirrors.UpdateDevice(
                 _viewModel.SelectedDevice,
@@ -1436,40 +1720,65 @@ public partial class MainWindow : Window
     {
         if (_isFullScreen)
         {
+            WindowState = WindowState.Normal;
             WindowStyle = _restoreWindowStyle;
-            WindowState = _restoreWindowState == WindowState.Minimized ? WindowState.Normal : _restoreWindowState;
-            RootLayout.Margin = new Thickness(24);
+            ResizeMode = _restoreResizeMode;
+            Topmost = _restoreTopmost;
+            Left = _restoreBounds.Left;
+            Top = _restoreBounds.Top;
+            Width = _restoreBounds.Width;
+            Height = _restoreBounds.Height;
+            SetNavigationPaneVisible(true);
+            RootNavigation.IsPaneOpen = false;
+            RootLayout.Margin = new Thickness(12, 18, 18, 18);
             HeaderGapRow.Height = new GridLength(18);
             EnvironmentGapRow.Height = new GridLength(14);
             StatsGapRow.Height = new GridLength(14);
-            LogGapRow.Height = new GridLength(10);
             PreviewPanel.BorderThickness = new Thickness(1);
-            PreviewPanel.CornerRadius = new CornerRadius(8);
+            PreviewPanel.CornerRadius = new CornerRadius(16);
             HeaderPanel.Visibility = Visibility.Visible;
-            DevicePanel.Visibility = Visibility.Visible;
-            ControlPanel.Visibility = Visibility.Visible;
             EnvironmentPanel.Visibility = Visibility.Visible;
             StatsPanel.Visibility = Visibility.Visible;
-            LogExpander.Visibility = Visibility.Visible;
             FooterPanel.Visibility = Visibility.Visible;
-            DeviceColumn.Width = new GridLength(300);
-            LeftGapColumn.Width = new GridLength(18);
-            RightGapColumn.Width = new GridLength(18);
-            ControlColumn.Width = new GridLength(336);
+            ApplyWorkspacePanelState();
             _isFullScreen = false;
+            WindowState = _restoreWindowState == WindowState.Minimized
+                ? WindowState.Normal
+                : _restoreWindowState;
+            if (_restoreWasWindowMaximized)
+                MaximizeWindow(_windowMaximizeRestoreBounds);
+            else
+                ApplyWindowFramePolicy();
         }
         else
         {
             _restoreWindowStyle = WindowStyle;
             _restoreWindowState = WindowState;
+            _restoreResizeMode = ResizeMode;
+            _restoreTopmost = Topmost;
+            _restoreWasWindowMaximized = _isWindowMaximized;
+            _restoreBounds = _isWindowMaximized
+                ? _windowMaximizeRestoreBounds
+                : WindowState == WindowState.Normal
+                ? new Rect(Left, Top, ActualWidth, ActualHeight)
+                : RestoreBounds;
+            var handle = new WindowInteropHelper(this).Handle;
+            var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
+            var monitorInfo = new MonitorInfo
+            {
+                Size = (uint)Marshal.SizeOf<MonitorInfo>(),
+            };
+            if (monitor == 0 || !GetMonitorInfoW(monitor, ref monitorInfo))
+                throw new InvalidOperationException("Unable to resolve the current display bounds.");
+            RootNavigation.IsPaneOpen = false;
+            SetNavigationPaneVisible(false);
             HeaderPanel.Visibility = Visibility.Collapsed;
             DevicePanel.Visibility = Visibility.Collapsed;
             ControlPanel.Visibility = Visibility.Collapsed;
             EnvironmentPanel.Visibility = Visibility.Collapsed;
             StatsPanel.Visibility = Visibility.Collapsed;
-            LogExpander.IsExpanded = false;
-            LogExpander.Visibility = Visibility.Collapsed;
             FooterPanel.Visibility = Visibility.Collapsed;
+            MirroringPanel.Visibility = Visibility.Collapsed;
             DeviceColumn.Width = new GridLength(0);
             LeftGapColumn.Width = new GridLength(0);
             RightGapColumn.Width = new GridLength(0);
@@ -1478,17 +1787,31 @@ public partial class MainWindow : Window
             HeaderGapRow.Height = new GridLength(0);
             EnvironmentGapRow.Height = new GridLength(0);
             StatsGapRow.Height = new GridLength(0);
-            LogGapRow.Height = new GridLength(0);
             PreviewPanel.BorderThickness = new Thickness(0);
             PreviewPanel.CornerRadius = new CornerRadius(0);
             WindowState = WindowState.Normal;
             WindowStyle = WindowStyle.None;
-            WindowState = WindowState.Maximized;
+            ResizeMode = ResizeMode.NoResize;
+            Topmost = true;
             _isFullScreen = true;
+            ApplyWindowFramePolicy();
+            _ = SetWindowPos(handle, HwndTopMost,
+                monitorInfo.Monitor.Left, monitorInfo.Monitor.Top,
+                monitorInfo.Monitor.Right - monitorInfo.Monitor.Left,
+                monitorInfo.Monitor.Bottom - monitorInfo.Monitor.Top,
+                SwpFrameChanged | SwpShowWindow);
         }
         if (!_viewModel.IsMediaCastSelected) MainPreviewHost.Activate();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_fullscreen_state",
             ("enabled", _isFullScreen)));
+    }
+
+    private void SetNavigationPaneVisible(bool visible)
+    {
+        RootNavigation.IsPaneVisible = visible;
+        RootNavigation.ApplyTemplate();
+        if (RootNavigation.Template.FindName("PaneGrid", RootNavigation) is FrameworkElement pane)
+            pane.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ShowMediaCastPreviewWindow()
@@ -1598,19 +1921,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnLogExpanded(object sender, RoutedEventArgs e)
-    {
-        _logTimer.Start();
-        _ = _viewModel.RefreshLogsAsync();
-    }
-
-    private void OnLogCollapsed(object sender, RoutedEventArgs e) => _logTimer.Stop();
-
-    private void OnLogTextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (LogExpander.IsExpanded) LogTextBox.ScrollToEnd();
-    }
-
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
@@ -1620,10 +1930,47 @@ public partial class MainWindow : Window
         else if (e.Key == Key.F5) _ = _viewModel.RefreshAsync(forceDeviceEnumeration: true);
         else if (ctrl && e.Key == Key.R) RefreshPreview();
         else if (ctrl && shift && e.Key == Key.P) OnPreviewWindowClick(this, new RoutedEventArgs());
-        else if (ctrl && e.Key == Key.L) LogExpander.IsExpanded = !LogExpander.IsExpanded;
+        else if (ctrl && e.Key == Key.L && Application.Current is App app)
+            app.ShowAboutWindow(this, _viewModel, showDiagnostics: true);
         else if (ctrl && e.Key == Key.M) _viewModel.PlayAudio = !_viewModel.PlayAudio;
         else if (ctrl && e.Key == Key.S) _ = CaptureScreenshotAsync();
         else return;
         e.Handled = true;
     }
+
+    private const uint MonitorDefaultToNearest = 2;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpFrameChanged = 0x0020;
+    private const uint SwpShowWindow = 0x0040;
+    private static readonly nint HwndTopMost = new(-1);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        internal int Left;
+        internal int Top;
+        internal int Right;
+        internal int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        internal uint Size;
+        internal NativeRect Monitor;
+        internal NativeRect WorkArea;
+        internal uint Flags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromWindow(nint window, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfoW(nint monitor, ref MonitorInfo monitorInfo);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint window, nint insertAfter,
+        int x, int y, int width, int height, uint flags);
 }

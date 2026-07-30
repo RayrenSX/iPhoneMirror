@@ -2,6 +2,7 @@ using System.Windows;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
+using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
 
 namespace IPhoneMirror.App;
@@ -82,17 +83,28 @@ public partial class App : Application
             ? release : null;
     }
 
-    internal void ShowAboutWindow(Window owner)
+    internal void ShowAboutWindow(Window owner, MainViewModel mainViewModel,
+        bool showDiagnostics = false)
     {
         if (_aboutWindow is not null)
         {
+            if (showDiagnostics) _aboutWindow.ShowDiagnostics();
             _aboutWindow.Activate();
             return;
         }
-        var window = new AboutWindow(this) { Owner = owner };
-        _aboutWindow = window;
-        window.Closed += (_, _) => _aboutWindow = null;
-        window.Show();
+        try
+        {
+            var window = new AboutWindow(this, mainViewModel) { Owner = owner };
+            _aboutWindow = window;
+            window.Closed += (_, _) => _aboutWindow = null;
+            if (showDiagnostics) window.ShowDiagnostics();
+            window.Show();
+        }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("ui", "about_window_open_failed", error);
+            AppPromptWindow.Inform(LocalizationService.Get("AboutTitle"), error.Message);
+        }
     }
 
     internal void ShowUpdateWindow(ReleaseInfo release, Window owner,
@@ -124,6 +136,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         SaveUpdateSettings();
+        ThemeService.Shutdown();
         try { _releaseClient.Dispose(); }
         catch (Exception error)
         {

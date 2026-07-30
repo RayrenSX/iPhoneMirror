@@ -3,7 +3,7 @@ using IPhoneMirror.App.ViewModels;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class UsbProjectionModeInfoWindow : Window
+public partial class UsbProjectionModeInfoWindow : Wpf.Ui.Controls.FluentWindow
 {
     internal UsbProjectionModeInfoWindow(UsbProjectionModeOption option)
     {
@@ -13,4 +13,6 @@ public partial class UsbProjectionModeInfoWindow : Window
         DisadvantageText.Text = option.Disadvantage;
         NoticeText.Text = option.Notice;
     }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 }

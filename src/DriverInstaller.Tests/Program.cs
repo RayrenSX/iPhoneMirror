@@ -426,12 +426,17 @@ Run("winget Apple Devices command is pinned to Microsoft Store", () =>
     True(arguments.Contains("--disable-interactivity"));
 });
 
-Run("Apple installer restart exit codes are recognized", () =>
+Run("Apple installer terminal exit codes are recognized", () =>
 {
     False(AppleSupportInstaller.IsRestartRequired(0));
     True(AppleSupportInstaller.IsRestartRequired(1641));
     True(AppleSupportInstaller.IsRestartRequired(3010));
     False(AppleSupportInstaller.IsRestartRequired(1223));
+
+    False(AppleSupportInstaller.IsUserCancellation(0));
+    False(AppleSupportInstaller.IsUserCancellation(1641));
+    False(AppleSupportInstaller.IsUserCancellation(3010));
+    True(AppleSupportInstaller.IsUserCancellation(1223));
 });
 
 if (failures.Count != 0)

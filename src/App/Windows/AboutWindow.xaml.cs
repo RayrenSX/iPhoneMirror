@@ -4,22 +4,29 @@ using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
+using IPhoneMirror.App.ViewModels;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class AboutWindow : Window, INotifyPropertyChanged
+public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
 {
     public sealed record ThemeChoice(AppTheme Value, string Label);
 
     private readonly App _app;
+    private readonly MainViewModel _mainViewModel;
+    private readonly DispatcherTimer _logTimer;
     private string _updateStatus;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public string VersionText => VersionManager.DisplayVersion;
     public string DiagnosticPath => DiagnosticLogger.DirectoryPath;
+    public object MainViewModel => _mainViewModel;
     public IReadOnlyList<ThemeChoice> ThemeChoices { get; }
     public string UpdateStatus
     {
@@ -56,9 +63,12 @@ public partial class AboutWindow : Window, INotifyPropertyChanged
         }
     }
 
-    internal AboutWindow(App app)
+    internal AboutWindow(App app, MainViewModel mainViewModel)
     {
         _app = app;
+        _mainViewModel = mainViewModel;
+        _logTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _logTimer.Tick += OnLogTimerTick;
         _updateStatus = LocalizationService.Get("UpdateStatusReady");
         _diagnosticStatus = LocalizationService.Get("DiagnosticsRetentionSummary");
         ThemeChoices =
@@ -70,8 +80,46 @@ public partial class AboutWindow : Window, INotifyPropertyChanged
         DataContext = this;
         InitializeComponent();
         ThemeService.Attach(this);
-        Closing += (_, _) => _app.SaveUpdateSettings();
+        Loaded += OnLoaded;
+        Closing += OnClosing;
     }
+
+    private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        _logTimer.Start();
+        await _mainViewModel.RefreshLogsAsync();
+    }
+
+    private void OnLogTimerTick(object? sender, EventArgs e) =>
+        _ = _mainViewModel.RefreshLogsAsync();
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        _logTimer.Stop();
+        _logTimer.Tick -= OnLogTimerTick;
+        Loaded -= OnLoaded;
+        Closing -= OnClosing;
+        _app.SaveUpdateSettings();
+    }
+
+    private void OnLiveLogTextChanged(object sender, TextChangedEventArgs e) =>
+        LiveLogTextBox.ScrollToEnd();
+
+    private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        if (e.ClickCount == 2)
+        {
+            WindowState = WindowState == WindowState.Maximized
+                ? WindowState.Normal
+                : WindowState.Maximized;
+            return;
+        }
+
+        DragMove();
+    }
+
+    internal void ShowDiagnostics() => AboutTabs.SelectedIndex = 2;
 
     private async void OnCheckUpdatesClick(object sender, RoutedEventArgs e)
     {

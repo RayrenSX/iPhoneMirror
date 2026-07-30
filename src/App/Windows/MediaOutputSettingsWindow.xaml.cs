@@ -9,7 +9,7 @@ using Microsoft.Win32;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class MediaOutputSettingsWindow : Window
+public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly MainViewModel _viewModel;
     private bool _savePromptOpen;
@@ -228,6 +228,8 @@ public partial class MediaOutputSettingsWindow : Window
         await RunAsync(() => _viewModel.StopMediaOutputAsync());
         await PromptToSaveRecordingAsync();
     }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     private async Task PromptToSaveRecordingAsync()
     {

@@ -5,6 +5,44 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-30
+
+### Added
+
+- Add a compact navigation rail and animated workspace panels for mirroring,
+  device selection, output controls and settings, with preview actions kept
+  close to the active video surface.
+- Add shared light/dark theme dictionaries, reusable modern window controls and
+  consistent custom title bars across the main app and driver manager.
+- Recognize libusb0 `set_configuration` failures and show localized recovery
+  guidance to reconnect the cable, restart the iPhone/iPad and try another
+  Apple original or MFi-certified cable.
+
+### Changed
+
+- Redesign About, update settings and diagnostics as lightweight, unframed tab
+  pages with consistent spacing, typography and a resizable live-log area.
+- Restrict ordinary controls and selection states to a black, gray and white
+  palette. The top-right start/stop mirroring action and semantic warnings keep
+  color where it communicates state or required attention.
+- Make the idle preview surface theme-aware: light mode now uses a light canvas
+  with dark high-contrast text and device glyphs, while dark mode retains its
+  dark preview treatment.
+- Replace system title bars on child windows with the shared close-button and
+  rounded-hover treatment, and enlarge the three wired-mode guidance pages so
+  localized instructions remain visible and scrollable.
+- Reorganize independent preview context menus into window, display and audio
+  groups and keep labels synchronized after language or state changes.
+
+### Fixed
+
+- Apply the same DWM border color, rounded-corner and maximize frame policy to
+  the driver manager as the main application.
+- Stop UAC cancellation during Apple support MSI installation or service
+  recovery from falling through to a misleading generic installation failure.
+- Remove the hard-coded black main-preview background that made the light theme
+  inconsistent and reduced placeholder contrast.
+
 ## [1.4.4] - 2026-07-29
 
 ### Added
@@ -612,7 +650,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.4...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.4...v1.5.0
 [1.4.4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.1...v1.4.2

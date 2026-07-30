@@ -1,12 +1,16 @@
-<Window x:Class="IPhoneMirror.App.Windows.MediaOutputSettingsWindow"
+<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.MediaOutputSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource MediaOutputTitle}"
         Width="560" Height="660" MinWidth="500" MinHeight="560"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Mica" WindowCornerPreference="Round"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}">
-    <Window.Resources>
+    <ui:FluentWindow.Resources>
         <Style x:Key="DetailLabel" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="FontSize" Value="11"/>
@@ -20,107 +24,39 @@
             <Setter Property="Padding" Value="10,7"/>
         </Style>
         <Style x:Key="SectionCard" TargetType="Border">
-            <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="CornerRadius" Value="16"/>
             <Setter Property="Padding" Value="16"/>
             <Setter Property="Margin" Value="0,12,0,0"/>
         </Style>
-        <Style x:Key="OutputTabItemStyle" TargetType="TabItem">
-            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
-            <Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Margin" Value="0"/>
-            <Setter Property="Padding" Value="14,8"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TabItem">
-                        <Border x:Name="TabRoot"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <TextBlock Text="{TemplateBinding Header}"
-                                       Foreground="{TemplateBinding Foreground}"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True"/>
-                                    <Condition Property="IsSelected" Value="False"/>
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="TabRoot" Property="Background" Value="#252525"/>
-                                <Setter TargetName="TabRoot" Property="BorderBrush" Value="#5A5A5A"/>
-                            </MultiTrigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}"/>
-                                <Setter TargetName="TabRoot" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                                <Setter TargetName="TabRoot" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="TabRoot" Property="Opacity" Value="0.42"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="OutputTabControlStyle" TargetType="TabControl">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="ItemContainerStyle" Value="{StaticResource OutputTabItemStyle}"/>
-            <Setter Property="ItemsPanel">
-                <Setter.Value>
-                    <ItemsPanelTemplate>
-                        <UniformGrid Rows="1"/>
-                    </ItemsPanelTemplate>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TabControl">
-                        <Grid KeyboardNavigation.TabNavigation="Local">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
-                            </Grid.RowDefinitions>
-                            <ItemsPresenter x:Name="HeaderPanel"
-                                            KeyboardNavigation.TabIndex="1"
-                                            Panel.ZIndex="1"/>
-                            <ContentPresenter x:Name="PART_SelectedContentHost"
-                                              Grid.Row="1"
-                                              ContentSource="SelectedContent"
-                                              SnapsToDevicePixels="True"/>
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Window.Resources>
+    </ui:FluentWindow.Resources>
 
-    <Grid Margin="24,20">
+    <Grid Style="{StaticResource SubWindowPageRoot}"
+          animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
+            <RowDefinition Height="16"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <StackPanel>
-            <TextBlock Text="{DynamicResource MediaOutputTitle}" FontSize="21" FontWeight="SemiBold"/>
-            <TextBlock Text="{Binding SelectedName}" FontSize="13" Margin="0,5,0,0"/>
-            <TextBlock Text="{Binding MediaOutputCapabilitiesText}" FontSize="10"
-                       Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
-        </StackPanel>
+        <Grid Style="{StaticResource SubWindowHeader}">
+            <StackPanel Margin="0,0,48,0">
+                <TextBlock Text="{DynamicResource MediaOutputTitle}"
+                           Style="{StaticResource SubWindowTitle}"/>
+                <TextBlock Text="{Binding SelectedName}"
+                           Style="{StaticResource SubWindowSubtitle}"/>
+                <TextBlock Text="{Binding MediaOutputCapabilitiesText}" FontSize="10"
+                           Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+            </StackPanel>
+            <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
+                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+            </Button>
+        </Grid>
 
-        <TabControl Grid.Row="2" Style="{StaticResource OutputTabControlStyle}">
+        <TabControl Grid.Row="2" Style="{StaticResource SubWindowTabControl}">
             <TabItem Header="{DynamicResource RecordTab}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Border Style="{StaticResource SectionCard}">
@@ -296,4 +232,4 @@
                     IsEnabled="{Binding CanStopMediaOutput}" MinWidth="110"/>
         </Grid>
     </Grid>
-</Window>
+</ui:FluentWindow>

@@ -38,6 +38,8 @@ internal sealed class DriverManagerLauncher
             };
             start.ArgumentList.Add("--language");
             start.ArgumentList.Add(LocalizationService.EffectiveCulture.Name);
+            start.ArgumentList.Add("--theme");
+            start.ArgumentList.Add(ThemeService.Preference.ToString());
             using var process = Process.Start(start);
             return process is null
                 ? new(false, executablePath, "Windows did not start the driver manager process.")

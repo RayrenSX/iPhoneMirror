@@ -8,6 +8,9 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="..\App\Services\StableDeviceSelection.cs" Link="StableDeviceSelection.cs" />
     <Compile Include="..\App\Services\CaptureShutdownCoordinator.cs" Link="CaptureShutdownCoordinator.cs" />
@@ -16,6 +19,7 @@
     <Compile Include="..\App\Services\DeviceCornerProfileResolver.cs" Link="DeviceCornerProfileResolver.cs" />
     <Compile Include="..\App\Services\IndependentWindowAudioPolicy.cs" Link="IndependentWindowAudioPolicy.cs" />
     <Compile Include="..\App\Services\DriverManagerLauncher.cs" Link="DriverManagerLauncher.cs" />
+    <Compile Include="..\App\Services\ThemeService.cs" Link="ThemeService.cs" />
     <Compile Include="..\App\Localization\LocalizationService.cs" Link="LocalizationService.cs" />
     <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
     <Compile Include="..\App\Services\NativeLogTailReader.cs" Link="NativeLogTailReader.cs" />

@@ -1,0 +1,9 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <Duration x:Key="FastAnimationDuration">0:0:0.16</Duration>
+    <Duration x:Key="NormalAnimationDuration">0:0:0.26</Duration>
+    <CubicEase x:Key="ModernEase" EasingMode="EaseOut"/>
+    <sys:Double x:Key="PressedScale">0.96</sys:Double>
+    <sys:Double x:Key="CardHoverOffset">-3</sys:Double>
+</ResourceDictionary>

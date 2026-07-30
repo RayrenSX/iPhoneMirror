@@ -1,12 +1,17 @@
-<Window x:Class="IPhoneMirror.App.Windows.ProjectionSettingsWindow"
+<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.ProjectionSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="{DynamicResource ProjectionSettingsTitle}"
         Width="500" Height="760" MinWidth="460" MinHeight="620"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Mica" WindowCornerPreference="Round"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}">
-    <Window.Resources>
+    <ui:FluentWindow.Resources>
         <Style x:Key="DetailLabel" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="FontSize" Value="11"/>
@@ -31,32 +36,42 @@
             <Setter Property="MinHeight" Value="36"/>
             <Setter Property="Padding" Value="8,7"/>
         </Style>
-    </Window.Resources>
+    </ui:FluentWindow.Resources>
 
-    <Grid Margin="24,20">
+    <Grid Style="{StaticResource SubWindowPageRoot}"
+          animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="14"/>
+            <RowDefinition Height="16"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <Grid>
+        <Grid Style="{StaticResource SubWindowHeader}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="{DynamicResource ProjectionSettingsTitle}"
-                           FontSize="21" FontWeight="SemiBold"/>
-                <TextBlock Text="{Binding SelectedName}" FontSize="13" Margin="0,5,0,0"/>
+                           Style="{StaticResource SubWindowTitle}"/>
+                <TextBlock Text="{Binding SelectedName}"
+                           Style="{StaticResource SubWindowSubtitle}"/>
                 <TextBlock Text="{Binding SelectedConnection}" FontSize="10"
                            Foreground="{DynamicResource MutedTextBrush}"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button Content="{DynamicResource StartMirroring}" Command="{Binding StartCommand}"
-                        Style="{StaticResource ToolButton}" MinWidth="72" Margin="0,0,8,0"/>
+                        Style="{StaticResource ToolButton}" MinWidth="72" Margin="0,0,8,0"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
                 <Button Content="{DynamicResource StopMirroring}" Command="{Binding StopCommand}"
-                        Style="{StaticResource ToolButton}" MinWidth="72"/>
+                        Style="{StaticResource ToolButton}" MinWidth="72"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
             </StackPanel>
+            <Button Grid.Column="3" Style="{StaticResource SubWindowCloseButton}"
+                    Click="OnCloseClick">
+                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+            </Button>
         </Grid>
 
         <Border Grid.Row="2" Style="{StaticResource CardBorder}" Padding="18,4,10,18">
@@ -188,4 +203,4 @@
             </ScrollViewer>
         </Border>
     </Grid>
-</Window>
+</ui:FluentWindow>

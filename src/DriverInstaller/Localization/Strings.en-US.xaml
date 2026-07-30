@@ -146,4 +146,8 @@ Log: {2}</system:String>
 Log: {0}</system:String>
     <system:String x:Key="AppleServiceNotReady">Apple USB support is incomplete: the service or Apple USB driver package is not ready. Connect and unlock the iPhone, then check again.
 Log: {0}</system:String>
+    <system:String x:Key="Appearance">Appearance</system:String>
+    <system:String x:Key="ThemeSystem">Use system setting</system:String>
+    <system:String x:Key="ThemeLight">Light</system:String>
+    <system:String x:Key="ThemeDark">Dark</system:String>
 </ResourceDictionary>
