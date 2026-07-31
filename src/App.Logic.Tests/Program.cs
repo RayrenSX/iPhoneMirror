@@ -277,6 +277,21 @@ foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
         $"{windowName} has a restrained entrance transition");
 }
 
+var resizableWindowPaths = themedWindowDirectories
+    .SelectMany(directory => Directory.GetFiles(directory, "*.xaml"))
+    .Concat(new[]
+    {
+        mainWindowPath,
+        Path.Combine(sourceDirectory, "DriverInstaller", "MainWindow.xaml"),
+    });
+foreach (var windowPath in resizableWindowPaths)
+{
+    Equal(false,
+        File.ReadAllText(windowPath).Contains(
+            "ResizeMode=\"CanResizeWithGrip\"", StringComparison.Ordinal),
+        $"{Path.GetFileName(windowPath)} hides the bottom-right resize grip");
+}
+
 var appWindowDirectory = Path.Combine(sourceDirectory, "App", "Windows");
 foreach (var windowPath in Directory.GetFiles(appWindowDirectory, "*.xaml"))
 {
@@ -432,11 +447,19 @@ var driverMainWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
 Equal(true, driverMainWindowText.Contains("x:Name=\"DriverWindowChrome\"",
         StringComparison.Ordinal),
     "driver manager names its shared window chrome for maximize frame policy");
+Equal(true, driverMainWindowText.Contains(
+        "Background=\"{DynamicResource WindowBackgroundBrush}\"",
+        StringComparison.Ordinal),
+    "driver manager uses an opaque themed background in light mode");
 var driverThemeServiceText = File.ReadAllText(Path.Combine(sourceDirectory,
     "DriverInstaller", "Services", "DriverThemeService.cs"));
 Equal(true, driverThemeServiceText.Contains("DwmBorderColor", StringComparison.Ordinal) &&
             driverThemeServiceText.Contains("DwmColorDefault", StringComparison.Ordinal),
     "driver manager applies the same DWM border color policy as the main window");
+Equal(true, driverThemeServiceText.Contains(
+        "Window.BackgroundProperty, \"WindowBackgroundBrush\"",
+        StringComparison.Ordinal),
+    "driver child windows keep an opaque background when the theme changes");
 
 Equal(true, SemanticVersion.Parse("v1.2.0") > SemanticVersion.Parse("v1.1.9"),
     "semantic version compares numeric minor and patch components");

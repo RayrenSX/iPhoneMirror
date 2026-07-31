@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.5.3',
+    [string]$Version = '1.5.4',
     [switch]$SkipBuild,
     [switch]$GenerateSbom,
     [string]$AppleSupportPackagePath,

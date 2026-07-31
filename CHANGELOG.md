@@ -5,6 +5,22 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.4] - 2026-07-31
+
+### Changed
+
+- Remove the WPF resize-grip glyph from every resizable application and driver
+  manager window while keeping border and corner resizing available.
+- Use an opaque themed window background for the driver manager so light mode
+  no longer composites a gray translucent shell behind the white workspace.
+
+### Fixed
+
+- Prevent the bottom-right resize handle from appearing in the main window,
+  child settings windows, update/error windows and driver manager windows.
+- Keep the driver manager background consistent after switching between light,
+  dark and system theme modes.
+
 ## [1.5.3] - 2026-07-31
 
 ### Added
@@ -737,7 +753,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.3...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.4...HEAD
+[1.5.4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.3...v1.5.4
 [1.5.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.0...v1.5.1

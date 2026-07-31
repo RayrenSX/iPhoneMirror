@@ -12,7 +12,7 @@
         Icon="pack://application:,,,/Assets/iPhoneMirror.ico"
         Width="1540" Height="900" MinWidth="1280" MinHeight="700"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="CanResizeWithGrip"
+        ResizeMode="CanResize"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica"
         WindowCornerPreference="Round"

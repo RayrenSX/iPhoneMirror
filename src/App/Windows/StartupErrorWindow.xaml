@@ -4,7 +4,7 @@
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="iPhoneMirror" Width="680" Height="440"
-        MinWidth="620" MinHeight="400" ResizeMode="CanResizeWithGrip"
+        MinWidth="620" MinHeight="400" ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica" WindowCornerPreference="Round"

@@ -5,7 +5,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource MediaOutputTitle}"
         Width="560" Height="660" MinWidth="500" MinHeight="560"
-        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica" WindowCornerPreference="Round"
         Background="{DynamicResource AppBackgroundBrush}"

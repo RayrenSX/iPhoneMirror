@@ -7,8 +7,8 @@
         Icon="pack://application:,,,/Assets/iPhoneMirror.ico"
         Width="1180" Height="760" MinWidth="980" MinHeight="640"
         WindowStartupLocation="CenterScreen"
-        WindowStyle="None" ResizeMode="CanResizeWithGrip"
-        Background="{DynamicResource AppBackgroundBrush}"
+        WindowStyle="None" ResizeMode="CanResize"
+        Background="{DynamicResource WindowBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}"
         Loaded="OnLoaded">
     <shell:WindowChrome.WindowChrome>

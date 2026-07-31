@@ -6,7 +6,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="{DynamicResource ProjectionSettingsTitle}"
         Width="500" Height="760" MinWidth="460" MinHeight="620"
-        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica" WindowCornerPreference="Round"
         Background="{DynamicResource AppBackgroundBrush}"

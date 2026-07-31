@@ -106,7 +106,7 @@ internal static class DriverThemeService
         if (AttachedWindows.TryGetValue(window, out _)) return;
         AttachedWindows.Add(window, new WindowBackdropState());
         if (!window.AllowsTransparency)
-            window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
+            window.SetResourceReference(Window.BackgroundProperty, "WindowBackgroundBrush");
         window.SourceInitialized += (_, _) => ApplyBackdrop(window);
         window.StateChanged += (_, _) => ApplyBackdrop(window);
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero)
