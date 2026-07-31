@@ -173,6 +173,7 @@ try {
 
         foreach ($Project in @(
             'src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj',
+            'src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj',
             'src/DriverInstaller.Tests/iPhoneMirror.DriverInstaller.Tests.csproj'
         )) {
             dotnet restore $Project -p:NuGetAudit=false

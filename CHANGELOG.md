@@ -5,6 +5,31 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-07-31
+
+### Added
+
+- Add an STA/WPF runtime test that loads application resources and constructs
+  the compiled update window from a release fixture, covering failures that
+  XAML compilation and source-text checks cannot detect.
+- Add a static guard that rejects direct `RenderTransform` values and property
+  elements on every application and driver-manager child window.
+
+### Changed
+
+- Reuse the shared inner-content page transition for the update window instead
+  of maintaining a separate window-level entrance animation.
+- Run the application runtime test as part of the standard `build.ps1` test
+  sequence and therefore on the Windows GitHub Actions build.
+
+### Fixed
+
+- Fix manual and automatic update checks fetching a release successfully but
+  then reporting `RenderTransform` failure when WPF tried to construct the
+  update window. WPF does not allow a render transform directly on `Window`.
+- Make the update progress value binding explicitly one-way so XAML loading
+  does not try to write through the view model's read-only public property.
+
 ## [1.5.1] - 2026-07-31
 
 ### Added
@@ -683,7 +708,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.4...v1.5.0
 [1.4.4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.3...v1.4.4

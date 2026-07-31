@@ -3,7 +3,6 @@ using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Windows;
-using System.Windows.Media.Animation;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
@@ -49,19 +48,9 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
         ReleaseNotesViewer.Document = MarkdownFlowDocumentRenderer.Render(release.Body);
         Loaded += (_, _) =>
         {
-            BeginEntranceAnimation();
             if (autoDownload) _ = DownloadAndInstallAsync();
         };
         Closing += OnClosing;
-    }
-
-    private void BeginEntranceAnimation()
-    {
-        BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1,
-            TimeSpan.FromMilliseconds(220)) { EasingFunction = new CubicEase() });
-        EntranceTransform.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty,
-            new DoubleAnimation(16, 0, TimeSpan.FromMilliseconds(260))
-            { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
     }
 
     private async void OnUpdateClick(object sender, RoutedEventArgs e) =>

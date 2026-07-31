@@ -225,8 +225,17 @@ var themedWindowDirectories = new[]
 foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
              Directory.GetFiles(directory, "*.xaml")))
 {
+    var windowDocument = XDocument.Load(windowPath);
+    var windowRoot = windowDocument.Root ?? throw new InvalidOperationException(
+        $"{Path.GetFileName(windowPath)} does not have a root element");
     var windowText = File.ReadAllText(windowPath);
     var windowName = Path.GetFileName(windowPath);
+    Equal(false,
+        windowRoot.Attribute("RenderTransform") is not null ||
+        windowRoot.Elements().Any(element =>
+            element.Name.LocalName.EndsWith(".RenderTransform",
+                StringComparison.Ordinal)),
+        $"{windowName} does not set a transform directly on a WPF Window");
     Equal(false, System.Text.RegularExpressions.Regex.IsMatch(windowText,
             @"#[0-9A-Fa-f]{6,8}"),
         $"{windowName} does not hard-code theme colors");
@@ -370,6 +379,14 @@ var mediaOutputWindowText = File.ReadAllText(Path.Combine(sourceDirectory, "App"
     "MediaOutputSettingsWindow.xaml"));
 Equal(true, mediaOutputWindowText.Contains("SubWindowTabControl", StringComparison.Ordinal),
     "media output uses the shared child-window tab language");
+var updateWindowText = File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+    "UpdateWindow.xaml"));
+Equal(true, updateWindowText.Contains("PageTransition.IsEnabled=\"True\"",
+        StringComparison.Ordinal),
+    "update window animates an inner layout element instead of the Window");
+Equal(true, updateWindowText.Contains(
+        "Value=\"{Binding ProgressValue, Mode=OneWay}\"", StringComparison.Ordinal),
+    "update progress does not write back to a read-only view-model property");
 var usbInfoWindowText = File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
     "UsbProjectionModeInfoWindow.xaml"));
 Equal(true, usbInfoWindowText.Contains("Height=\"620\"", StringComparison.Ordinal) &&

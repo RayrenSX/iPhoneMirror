@@ -9,11 +9,9 @@
         WindowBackdropType="Mica" WindowCornerPreference="Round"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False"
-        AutomationProperties.AutomationId="UpdateWindow" Opacity="0">
-    <ui:FluentWindow.RenderTransform>
-        <TranslateTransform x:Name="EntranceTransform" Y="16"/>
-    </ui:FluentWindow.RenderTransform>
-    <Grid Style="{StaticResource SubWindowPageRoot}">
+        AutomationProperties.AutomationId="UpdateWindow">
+    <Grid Style="{StaticResource SubWindowPageRoot}"
+          animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
@@ -86,7 +84,8 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <StackPanel Visibility="{Binding ProgressVisibility}">
-                <ProgressBar Height="7" Minimum="0" Maximum="100" Value="{Binding ProgressValue}"
+                <ProgressBar Height="7" Minimum="0" Maximum="100"
+                             Value="{Binding ProgressValue, Mode=OneWay}"
                              IsIndeterminate="{Binding IsIndeterminate}"/>
                 <Grid Margin="0,8,0,0">
                     <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap"/>
