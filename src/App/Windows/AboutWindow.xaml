@@ -104,6 +104,9 @@
                                       IsChecked="{Binding CheckOnStartup}" Margin="0,0,0,14"/>
                             <CheckBox Content="{DynamicResource AutoDownloadUpdates}"
                                       IsChecked="{Binding AutoDownload}" Margin="0,0,0,14"/>
+                            <CheckBox Content="{DynamicResource AllowUpdateMirrorFallback}"
+                                      IsChecked="{Binding AllowMirrorFallback}" Margin="0,0,0,14"
+                                      ToolTip="{DynamicResource AllowUpdateMirrorFallbackDescription}"/>
                             <CheckBox Content="{DynamicResource NotifyStableReleases}"
                                       IsChecked="{Binding NotifyStableReleases}" Margin="0,0,0,14"/>
                             <CheckBox Content="{DynamicResource NotifyPrereleaseReleases}"

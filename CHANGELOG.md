@@ -5,6 +5,45 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.5] - 2026-07-31
+
+### Added
+
+- Add a shared segmented HTTP downloader that uses concurrent byte-range
+  requests when the server supports them and safely falls back to one stream.
+- Add an optional GitHub asset mirror fallback for update downloads in network
+  environments where direct GitHub release assets are slow or unavailable.
+- Add Apple Software Update Catalog discovery for the latest official x64
+  Apple Mobile Device Support standalone MSI.
+
+### Changed
+
+- Download the roughly 38.4 MB Apple Mobile Device Support MSI directly from
+  Apple's CDN instead of downloading the roughly 208 MB iTunes installer first.
+- Use up to eight parallel segments for Apple driver packages and segmented
+  downloads for application updates, including redirected CDN URL reuse.
+- Keep the full official iTunes package as a compatibility fallback when the
+  standalone catalog route is unavailable or fails validation.
+- Fit application windows to the active monitor work area after startup and DPI
+  changes so large Windows display scaling cannot place controls off-screen.
+
+### Fixed
+
+- Prevent the application and driver manager from exceeding the usable desktop
+  area on high-DPI or mixed-DPI Windows configurations.
+- Improve update and Apple driver download reliability on slow or restricted
+  networks, including servers that inconsistently implement HTTP Range.
+
+### Security
+
+- Accept update metadata only from the official GitHub API or
+  `raw.githubusercontent.com`; third-party mirrors can only provide asset bytes
+  after an official SHA-256 digest has been obtained.
+- Require exact package sizes, trusted Apple download hosts and a valid Apple
+  Authenticode signer before installing Apple Mobile Device Support.
+- Require SHA-256 verification before launching any downloaded application
+  update installer.
+
 ## [1.5.4] - 2026-07-31
 
 ### Changed
@@ -753,7 +792,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.4...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.5...HEAD
+[1.5.5]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.4...v1.5.5
 [1.5.4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.3...v1.5.4
 [1.5.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.1...v1.5.2

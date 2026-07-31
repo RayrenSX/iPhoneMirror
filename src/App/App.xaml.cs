@@ -33,6 +33,7 @@ public partial class App : Application
             GitHubReleaseClient.CleanupInterruptedDownloads();
             EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
                 new RoutedEventHandler((sender, _) => ThemeService.Attach((Window)sender)));
+            WindowWorkAreaController.EnableForApplication();
             base.OnStartup(e);
             MainWindow = new MainWindow();
             MainWindow.ContentRendered += OnMainWindowContentRendered;
@@ -115,7 +116,8 @@ public partial class App : Application
             _updateWindow.Activate();
             return;
         }
-        var window = new UpdateWindow(release, _releaseClient, autoDownload)
+        var window = new UpdateWindow(release, _releaseClient, autoDownload,
+            UpdateSettings.AllowMirrorFallback)
         {
             Owner = owner,
         };

@@ -1,8 +1,10 @@
 using System.IO;
+using System.Net.Http;
 using System.Xml.Linq;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Updater;
+using IPhoneMirror.Shared.Networking;
 
 var diagnosticTestRoot = Path.Combine(Path.GetTempPath(),
     $"iPhoneMirror-test-logs-{Guid.NewGuid():N}");
@@ -49,6 +51,13 @@ static async Task ThrowsAsync<TException>(Func<Task> action, string name)
     }
     throw new InvalidOperationException($"{name}: expected {typeof(TException).Name}");
 }
+
+static HttpResponseMessage HttpResponse(HttpRequestMessage request,
+    HttpContent content) => new(System.Net.HttpStatusCode.OK)
+{
+    RequestMessage = request,
+    Content = content,
+};
 
 var localizationDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "Localization"));
@@ -122,6 +131,50 @@ foreach (var actionKey in new[]
 var mainWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "MainWindow.xaml"));
 var mainWindow = XDocument.Load(mainWindowPath);
+var defaultWindowLayout = WindowWorkAreaController.CalculateLayout(
+    currentLeft: 0, currentTop: 0, currentWidth: 1540, currentHeight: 900,
+    workLeft: 0, workTop: 0, workWidth: 2560, workHeight: 1400,
+    dpi: 96, designMinWidth: 1280, designMinHeight: 700, center: true);
+Equal(510, defaultWindowLayout.Left,
+    "main window centers inside a large 100 percent work area");
+Equal(250, defaultWindowLayout.Top,
+    "main window centers vertically inside a large work area");
+Equal(1540, defaultWindowLayout.Width,
+    "main window keeps its design width when it fits");
+Equal(900, defaultWindowLayout.Height,
+    "main window keeps its design height when it fits");
+Equal(1280d, defaultWindowLayout.MinWidth,
+    "main window keeps its design minimum width when it fits");
+Equal(700d, defaultWindowLayout.MinHeight,
+    "main window keeps its design minimum height when it fits");
+
+var highDpiWindowLayout = WindowWorkAreaController.CalculateLayout(
+    currentLeft: -580, currentTop: -380, currentWidth: 3080, currentHeight: 1800,
+    workLeft: 0, workTop: 0, workWidth: 1920, workHeight: 1040,
+    dpi: 192, designMinWidth: 1280, designMinHeight: 700, center: true);
+Equal(0, highDpiWindowLayout.Left,
+    "oversized high-DPI window starts inside the work area");
+Equal(0, highDpiWindowLayout.Top,
+    "oversized high-DPI window stays below the work-area top");
+Equal(1920, highDpiWindowLayout.Width,
+    "oversized high-DPI window is clamped to the work-area width");
+Equal(1040, highDpiWindowLayout.Height,
+    "oversized high-DPI window is clamped to the work-area height");
+Equal(960d, highDpiWindowLayout.MinWidth,
+    "minimum width is lowered when 200 percent scaling leaves fewer DIPs");
+Equal(520d, highDpiWindowLayout.MinHeight,
+    "minimum height is lowered when 200 percent scaling leaves fewer DIPs");
+
+var secondaryMonitorLayout = WindowWorkAreaController.CalculateLayout(
+    currentLeft: -2200, currentTop: 200, currentWidth: 1200, currentHeight: 800,
+    workLeft: -2560, workTop: 0, workWidth: 2560, workHeight: 1400,
+    dpi: 144, designMinWidth: 1280, designMinHeight: 700, center: false);
+Equal(-2200, secondaryMonitorLayout.Left,
+    "negative-coordinate monitor preserves an already valid horizontal position");
+Equal(200, secondaryMonitorLayout.Top,
+    "an already valid window is not needlessly repositioned after a DPI change");
+Equal(1200, secondaryMonitorLayout.Width,
+    "an already smaller window is never enlarged by work-area fitting");
 var previewQuickActions = mainWindow.Descendants()
     .SingleOrDefault(element =>
         string.Equals((string?)element.Attribute(xaml + "Name"),
@@ -144,6 +197,16 @@ foreach (var automationId in new[]
 
 var sourceDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", ".."));
+var releaseManifestPath = Path.Combine(sourceDirectory, "..", "updates", "releases.json");
+var repositoryRelease = ReleaseParser.ParseLatest(
+    File.ReadAllText(releaseManifestPath), includeStable: true, includePrerelease: true);
+var appProject = XDocument.Load(Path.Combine(sourceDirectory, "App",
+    "iPhoneMirror.App.csproj"));
+var appVersion = appProject.Descendants("Version").Single().Value.Trim();
+Equal($"v{appVersion}", repositoryRelease?.TagName,
+    "repository update manifest matches the application version");
+Equal(true, repositoryRelease?.PreferredAsset?.Sha256 is not null,
+    "repository update manifest pins the preferred asset SHA256 digest");
 var sharedUiDirectory = Path.Combine(sourceDirectory, "SharedUI");
 var lightThemePath = Path.Combine(sharedUiDirectory, "Themes", "LightTheme.xaml");
 var darkThemePath = Path.Combine(sharedUiDirectory, "Themes", "DarkTheme.xaml");
@@ -505,7 +568,8 @@ const string releaseFixture = """
     "draft": false,
     "prerelease": true,
     "assets": [
-      { "name": "iPhoneMirror-Setup-v1.4.0-beta.1-x64.exe", "size": 30,
+      { "name": "setup.exe", "size": 30,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.4.0-beta.1/setup.exe" }
     ]
   },
@@ -517,9 +581,10 @@ const string releaseFixture = """
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "iPhoneMirror-v1.3.1-win-x64.zip", "size": 20,
+      { "name": "app.zip", "size": 20,
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.1/app.zip" },
-      { "name": "iPhoneMirror-Setup-v1.3.1-x64.exe", "size": 10,
+      { "name": "setup.exe", "size": 10,
+        "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.1/setup.exe" },
       { "name": "SHA256SUMS.txt", "size": 5,
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.1/SHA256SUMS.txt" }
@@ -531,8 +596,11 @@ var stableRelease = ReleaseParser.ParseLatest(releaseFixture,
     includeStable: true, includePrerelease: false);
 Equal("v1.3.1", stableRelease?.TagName,
     "stable update channel ignores prereleases");
-Equal("iPhoneMirror-Setup-v1.3.1-x64.exe", stableRelease?.PreferredAsset?.Name,
+Equal("setup.exe", stableRelease?.PreferredAsset?.Name,
     "release parser prefers x64 Setup EXE over ZIP");
+Equal("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    stableRelease?.PreferredAsset?.Sha256,
+    "release parser preserves GitHub's SHA256 asset digest");
 var betaRelease = ReleaseParser.ParseLatest(releaseFixture,
     includeStable: true, includePrerelease: true);
 Equal("v1.4.0-beta.1", betaRelease?.TagName,
@@ -550,16 +618,241 @@ const string nonInstallerExeFixture = """
     "prerelease": false,
     "assets": [
       { "name": "iPhoneMirror.Driver.exe", "size": 10,
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.2/driver.exe" },
-      { "name": "iPhoneMirror-v1.3.2-win-x64.zip", "size": 20,
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.2/iPhoneMirror.Driver.exe" },
+      { "name": "app.zip", "size": 20,
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.2/app.zip" }
     ]
   }
 ]
 """;
-Equal("iPhoneMirror-v1.3.2-win-x64.zip",
+Equal("app.zip",
     ReleaseParser.ParseLatest(nonInstallerExeFixture, true, false)?.PreferredAsset?.Name,
     "release parser never launches a non-installer EXE as an update");
+
+const string mismatchedAssetNameFixture = """
+[
+  {
+    "tag_name": "v1.3.3",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "safe-setup.exe", "size": 10,
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.3/different.exe" },
+      { "name": "foreign.zip", "size": 10,
+        "browser_download_url": "https://github.com/another/repository/releases/download/v1.3.3/foreign.zip" }
+    ]
+  }
+]
+""";
+Equal<ReleaseAsset?>(null,
+    ReleaseParser.ParseLatest(mismatchedAssetNameFixture, true, false)?.PreferredAsset,
+    "release parser rejects mismatched paths and foreign GitHub repositories");
+var mirroredAsset = new ReleaseAsset("setup.exe",
+    new Uri("https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.3.3/setup.exe"),
+    10, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+var mirrorCandidates = GitHubReleaseClient.BuildDownloadCandidates(
+    mirroredAsset, allowMirrorFallback: true);
+Equal(4, mirrorCandidates.Count,
+    "verified update assets include GitHub and three mirror candidates");
+Equal("github.com", mirrorCandidates[0].Host,
+    "official GitHub download remains the first candidate");
+Equal(true, mirrorCandidates.Skip(1).All(candidate =>
+        candidate.AbsoluteUri.EndsWith(mirroredAsset.DownloadUri.AbsoluteUri,
+            StringComparison.Ordinal)),
+    "mirror candidates proxy the exact trusted GitHub asset URL");
+Equal(1, GitHubReleaseClient.BuildDownloadCandidates(
+        mirroredAsset with { Sha256 = null }, allowMirrorFallback: true).Count,
+    "unverified assets never use third-party download mirrors");
+Equal(1, GitHubReleaseClient.BuildDownloadCandidates(
+        mirroredAsset, allowMirrorFallback: false).Count,
+    "disabled mirror fallback keeps the official download only");
+
+var segmentedDownloadRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-segmented-download-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(segmentedDownloadRoot);
+    var segmentedPayload = Enumerable.Range(0, 256 * 1024)
+        .Select(index => (byte)(index * 31 % 251)).ToArray();
+    var activeRangeRequests = 0;
+    var maximumActiveRangeRequests = 0;
+    var rangeRequestCount = 0;
+    using var segmentedHttpClient = new HttpClient(new StubHttpMessageHandler(
+        async (request, cancellationToken) =>
+        {
+            var range = request.Headers.Range?.Ranges.SingleOrDefault() ??
+                throw new InvalidOperationException("Range request was expected.");
+            var start = range.From ?? 0;
+            var end = range.To ?? segmentedPayload.LongLength - 1;
+            Interlocked.Increment(ref rangeRequestCount);
+            var active = Interlocked.Increment(ref activeRangeRequests);
+            while (true)
+            {
+                var observed = Volatile.Read(ref maximumActiveRangeRequests);
+                if (active <= observed || Interlocked.CompareExchange(
+                        ref maximumActiveRangeRequests, active, observed) == observed)
+                    break;
+            }
+            try
+            {
+                await Task.Delay(25, cancellationToken);
+                var content = new ByteArrayContent(segmentedPayload[
+                    checked((int)start)..checked((int)end + 1)]);
+                content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(
+                    start, end, segmentedPayload.LongLength);
+                return new HttpResponseMessage(System.Net.HttpStatusCode.PartialContent)
+                {
+                    RequestMessage = request,
+                    Content = content,
+                };
+            }
+            finally
+            {
+                Interlocked.Decrement(ref activeRangeRequests);
+            }
+        }));
+    var segmentedPath = Path.Combine(segmentedDownloadRoot, "segmented.bin");
+    var segmentedResult = await SegmentedHttpDownloader.DownloadAsync(
+        segmentedHttpClient, new Uri("https://downloads.example.test/package.bin"),
+        segmentedPath, new SegmentedDownloadOptions(
+            MaximumBytes: segmentedPayload.LongLength,
+            ExpectedBytes: segmentedPayload.LongLength,
+            MaximumConcurrency: 4,
+            MinimumSegmentBytes: 32 * 1024,
+            BufferSize: 4096),
+        finalUri => finalUri.Host.Equals("downloads.example.test",
+            StringComparison.OrdinalIgnoreCase));
+    Equal(4, segmentedResult.SegmentCount,
+        "range-capable downloads use the configured parallel segment count");
+    Equal(true, maximumActiveRangeRequests >= 2,
+        "segmented downloader overlaps multiple HTTP range requests");
+    Equal(5, rangeRequestCount,
+        "segmented downloader sends one probe and four data ranges");
+    Equal(true, File.ReadAllBytes(segmentedPath).SequenceEqual(segmentedPayload),
+        "parallel random-access writes preserve the exact payload");
+
+    var redirectedRequestHosts = new List<string>();
+    using var redirectedHttpClient = new HttpClient(new StubHttpMessageHandler(
+        (request, _) =>
+        {
+            redirectedRequestHosts.Add(request.RequestUri?.Host ?? string.Empty);
+            var range = request.Headers.Range?.Ranges.SingleOrDefault() ??
+                throw new InvalidOperationException("Range request was expected.");
+            var start = range.From ?? 0;
+            var end = range.To ?? segmentedPayload.LongLength - 1;
+            var content = new ByteArrayContent(segmentedPayload[
+                checked((int)start)..checked((int)end + 1)]);
+            content.Headers.ContentRange =
+                new System.Net.Http.Headers.ContentRangeHeaderValue(
+                    start, end, segmentedPayload.LongLength);
+            var responseRequest = request;
+            if (redirectedRequestHosts.Count == 1)
+            {
+                responseRequest = new HttpRequestMessage(request.Method,
+                    "https://cdn.example.test/package.bin");
+            }
+            return Task.FromResult(new HttpResponseMessage(
+                System.Net.HttpStatusCode.PartialContent)
+            {
+                RequestMessage = responseRequest,
+                Content = content,
+            });
+        }));
+    var redirectedPath = Path.Combine(segmentedDownloadRoot, "redirected.bin");
+    var redirectedResult = await SegmentedHttpDownloader.DownloadAsync(
+        redirectedHttpClient,
+        new Uri("https://origin.example.test/package.bin"), redirectedPath,
+        new SegmentedDownloadOptions(segmentedPayload.LongLength,
+            segmentedPayload.LongLength, MaximumConcurrency: 4,
+            MinimumSegmentBytes: 32 * 1024),
+        finalUri => finalUri.Host.EndsWith(".example.test",
+            StringComparison.OrdinalIgnoreCase));
+    Equal(4, redirectedResult.SegmentCount,
+        "redirected range downloads remain parallel");
+    Equal("origin.example.test", redirectedRequestHosts[0],
+        "range probe starts at the configured origin");
+    Equal(true, redirectedRequestHosts.Skip(1).All(host =>
+            host.Equals("cdn.example.test", StringComparison.OrdinalIgnoreCase)),
+        "data ranges reuse the trusted final CDN URL from the probe");
+    Equal(true, File.ReadAllBytes(redirectedPath).SequenceEqual(segmentedPayload),
+        "redirected parallel download preserves the exact payload");
+
+    var singleRequestCount = 0;
+    using var singleHttpClient = new HttpClient(new StubHttpMessageHandler(
+        (request, _) =>
+        {
+            Interlocked.Increment(ref singleRequestCount);
+            return Task.FromResult(HttpResponse(request,
+                new ByteArrayContent(segmentedPayload)));
+        }));
+    var singlePath = Path.Combine(segmentedDownloadRoot, "single.bin");
+    var singleResult = await SegmentedHttpDownloader.DownloadAsync(singleHttpClient,
+        new Uri("https://downloads.example.test/package.bin"), singlePath,
+        new SegmentedDownloadOptions(segmentedPayload.LongLength,
+            segmentedPayload.LongLength, MaximumConcurrency: 4,
+            MinimumSegmentBytes: 32 * 1024),
+        finalUri => finalUri.Host.Equals("downloads.example.test",
+            StringComparison.OrdinalIgnoreCase));
+    Equal(1, singleResult.SegmentCount,
+        "servers that ignore Range automatically use a single stream");
+    Equal(1, singleRequestCount,
+        "the full probe response is reused for single-stream fallback");
+    Equal(true, File.ReadAllBytes(singlePath).SequenceEqual(segmentedPayload),
+        "single-stream fallback preserves the exact payload");
+
+    var inconsistentRangeRequests = 0;
+    var fullFallbackRequests = 0;
+    using var inconsistentHttpClient = new HttpClient(new StubHttpMessageHandler(
+        (request, _) =>
+        {
+            if (request.Headers.Range is not null)
+            {
+                var requestNumber = Interlocked.Increment(
+                    ref inconsistentRangeRequests);
+                if (requestNumber == 1)
+                {
+                    var content = new ByteArrayContent(segmentedPayload[..1]);
+                    content.Headers.ContentRange =
+                        new System.Net.Http.Headers.ContentRangeHeaderValue(
+                            0, 0, segmentedPayload.LongLength);
+                    return Task.FromResult(new HttpResponseMessage(
+                        System.Net.HttpStatusCode.PartialContent)
+                    {
+                        RequestMessage = request,
+                        Content = content,
+                    });
+                }
+            }
+            else
+            {
+                Interlocked.Increment(ref fullFallbackRequests);
+            }
+            return Task.FromResult(HttpResponse(request,
+                new ByteArrayContent(segmentedPayload)));
+        }));
+    var inconsistentPath = Path.Combine(segmentedDownloadRoot, "inconsistent.bin");
+    var inconsistentResult = await SegmentedHttpDownloader.DownloadAsync(
+        inconsistentHttpClient,
+        new Uri("https://downloads.example.test/package.bin"), inconsistentPath,
+        new SegmentedDownloadOptions(segmentedPayload.LongLength,
+            segmentedPayload.LongLength, MaximumConcurrency: 4,
+            MinimumSegmentBytes: 32 * 1024),
+        finalUri => finalUri.Host.Equals("downloads.example.test",
+            StringComparison.OrdinalIgnoreCase));
+    Equal(1, inconsistentResult.SegmentCount,
+        "a server that stops honoring Range falls back to one full stream");
+    Equal(true, inconsistentRangeRequests >= 2,
+        "range inconsistency is detected after the successful probe");
+    Equal(1, fullFallbackRequests,
+        "range inconsistency triggers exactly one full fallback request");
+    Equal(true, File.ReadAllBytes(inconsistentPath).SequenceEqual(segmentedPayload),
+        "range inconsistency fallback preserves the exact payload");
+}
+finally
+{
+    if (Directory.Exists(segmentedDownloadRoot))
+        Directory.Delete(segmentedDownloadRoot, recursive: true);
+}
 
 var updateSettingsRoot = Path.Combine(Path.GetTempPath(),
     $"iphone-mirror-update-settings-{Guid.NewGuid():N}");
@@ -571,6 +864,7 @@ try
     {
         CheckOnStartup = false,
         AutoDownload = true,
+        AllowMirrorFallback = false,
         NotifyStableReleases = true,
         NotifyPrereleaseReleases = true,
         Theme = AppTheme.Light,
@@ -581,6 +875,8 @@ try
         "update settings preserve startup check preference");
     Equal(true, loadedSettings.AutoDownload,
         "update settings preserve auto-download preference");
+    Equal(false, loadedSettings.AllowMirrorFallback,
+        "update settings preserve mirror fallback preference");
     Equal(AppTheme.Light, loadedSettings.Theme,
         "update settings preserve theme preference");
 }
@@ -588,6 +884,95 @@ finally
 {
     if (Directory.Exists(updateSettingsRoot))
         Directory.Delete(updateSettingsRoot, recursive: true);
+}
+
+var updateNetworkRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-update-network-{Guid.NewGuid():N}");
+try
+{
+    var releaseRequests = new List<string>();
+    using var releaseHttpClient = new HttpClient(new StubHttpMessageHandler(
+        (request, _) =>
+        {
+            var host = request.RequestUri?.Host ?? string.Empty;
+            releaseRequests.Add(host);
+            if (host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase))
+                return Task.FromException<HttpResponseMessage>(
+                    new HttpRequestException("simulated GitHub API outage"));
+            if (host.Equals("raw.githubusercontent.com",
+                    StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(HttpResponse(request,
+                    new StringContent(releaseFixture,
+                        System.Text.Encoding.UTF8, "application/json")));
+            return Task.FromException<HttpResponseMessage>(
+                new HttpRequestException($"unexpected endpoint {host}"));
+        }));
+    using var releaseClient = new GitHubReleaseClient(releaseHttpClient,
+        Path.Combine(updateNetworkRoot, "release-check"));
+    var fallbackRelease = await releaseClient.GetLatestAsync(new UpdateSettings
+    {
+        AllowMirrorFallback = true,
+        NotifyStableReleases = true,
+        NotifyPrereleaseReleases = false,
+    });
+    Equal("v1.3.1", fallbackRelease?.TagName,
+        "release check falls back to official GitHub Raw metadata when the API fails");
+    Sequence(["api.github.com", "raw.githubusercontent.com"], releaseRequests,
+        "release check uses only official GitHub metadata endpoints");
+
+    await ThrowsAsync<HttpRequestException>(async () =>
+        await releaseClient.GetLatestAsync(new UpdateSettings
+        {
+            AllowMirrorFallback = false,
+            NotifyStableReleases = true,
+        }), "disabled release mirror fallback does not contact alternate endpoints");
+    Equal(1, releaseRequests.Count(host => host.Equals("raw.githubusercontent.com",
+            StringComparison.OrdinalIgnoreCase)),
+        "disabled metadata fallback leaves GitHub Raw untouched");
+
+    var payload = System.Text.Encoding.UTF8.GetBytes("verified mirror payload");
+    var payloadHash = Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(payload)).ToLowerInvariant();
+    var downloadAsset = new ReleaseAsset(
+        "iPhoneMirror-Setup-v9.9.9-x64.exe",
+        new Uri("https://github.com/RayrenSX/iPhoneMirror/releases/download/v9.9.9/iPhoneMirror-Setup-v9.9.9-x64.exe"),
+        payload.LongLength, payloadHash);
+    var downloadRelease = new ReleaseInfo("v9.9.9", "Mirror test", string.Empty,
+        DateTimeOffset.UtcNow, SemanticVersion.Parse("v9.9.9"), false,
+        downloadAsset, null, null);
+    var downloadRequests = new List<string>();
+    using var downloadHttpClient = new HttpClient(new StubHttpMessageHandler(
+        (request, _) =>
+        {
+            var host = request.RequestUri?.Host ?? string.Empty;
+            downloadRequests.Add(host);
+            if (host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+                return Task.FromException<HttpResponseMessage>(
+                    new HttpRequestException("simulated GitHub asset outage"));
+            if (host.Equals("gh-proxy.org", StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(HttpResponse(request,
+                    new ByteArrayContent(payload)));
+            return Task.FromException<HttpResponseMessage>(
+                new HttpRequestException($"unexpected endpoint {host}"));
+        }));
+    using var downloadClient = new GitHubReleaseClient(downloadHttpClient,
+        Path.Combine(updateNetworkRoot, "downloads"));
+    var downloaded = await downloadClient.DownloadAsync(downloadRelease,
+        cancellationToken: default, allowMirrorFallback: true);
+    Equal(true, downloaded.HashVerified,
+        "mirror download is accepted only after SHA256 verification");
+    Equal(true, File.ReadAllBytes(downloaded.Path).SequenceEqual(payload),
+        "mirror download preserves the verified payload exactly");
+    Sequence(["github.com", "gh-proxy.org"], downloadRequests,
+        "asset download tries GitHub before the first verified mirror");
+    Throws<InvalidDataException>(() => UpdateInstallerLauncher.Launch(
+            downloaded with { HashVerified = false }),
+        "installer launcher refuses an update without verified integrity");
+}
+finally
+{
+    if (Directory.Exists(updateNetworkRoot))
+        Directory.Delete(updateNetworkRoot, recursive: true);
 }
 Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
         .Contains("/RESTARTAPP=1", StringComparison.Ordinal),
@@ -1438,3 +1823,12 @@ Sequence(["stop", "dispose"], failureOrder, "core is disposed after stop failure
 Console.WriteLine("App logic tests passed.");
 if (Directory.Exists(diagnosticTestRoot))
     Directory.Delete(diagnosticTestRoot, recursive: true);
+
+internal sealed class StubHttpMessageHandler(
+    Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
+    : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken) =>
+        handler(request, cancellationToken);
+}

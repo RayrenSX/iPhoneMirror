@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\DriverInstaller\GlobalUsings.cs" Link="GlobalUsings.cs" />
+    <Compile Include="..\Shared\Networking\SegmentedHttpDownloader.cs" Link="Networking\SegmentedHttpDownloader.cs" />
     <Compile Include="..\DriverInstaller\Models\DriverModels.cs" Link="DriverModels.cs" />
     <Compile Include="..\DriverInstaller\Services\DriverConstants.cs" Link="DriverConstants.cs" />
     <Compile Include="..\DriverInstaller\Services\DriverPayload.cs" Link="DriverPayload.cs" />
@@ -18,6 +19,7 @@
     <Compile Include="..\DriverInstaller\Services\DeviceCatalog.cs" Link="DeviceCatalog.cs" />
     <Compile Include="..\DriverInstaller\Services\AppleDeviceMetadataReader.cs" Link="AppleDeviceMetadataReader.cs" />
     <Compile Include="..\DriverInstaller\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />
+    <Compile Include="..\DriverInstaller\Services\AppleSoftwareUpdateCatalog.cs" Link="AppleSoftwareUpdateCatalog.cs" />
     <Compile Include="..\DriverInstaller\Services\AppleSupportInstaller.cs" Link="AppleSupportInstaller.cs" />
     <Compile Include="..\DriverInstaller\Services\ElevatedDriverHost.cs" Link="ElevatedDriverHost.cs" />
     <EmbeddedResource Include="..\DriverInstaller\Assets\libusb-win32-1.2.6.0\amd64\install-filter.exe"

@@ -15,6 +15,7 @@ internal sealed class UpdateSettings
 {
     public bool CheckOnStartup { get; set; } = true;
     public bool AutoDownload { get; set; }
+    public bool AllowMirrorFallback { get; set; } = true;
     public bool NotifyStableReleases { get; set; } = true;
     public bool NotifyPrereleaseReleases { get; set; }
     public AppTheme Theme { get; set; } = AppTheme.System;
@@ -23,6 +24,7 @@ internal sealed class UpdateSettings
     {
         CheckOnStartup = CheckOnStartup,
         AutoDownload = AutoDownload,
+        AllowMirrorFallback = AllowMirrorFallback,
         NotifyStableReleases = NotifyStableReleases,
         NotifyPrereleaseReleases = NotifyPrereleaseReleases,
         Theme = Theme,

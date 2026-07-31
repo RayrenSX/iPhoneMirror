@@ -44,7 +44,7 @@ internal static class Program
               "assets": [{
                 "name": "iPhoneMirror-Setup-v99.0.0-x64.exe",
                 "size": 1,
-                "browser_download_url": "https://example.invalid/setup.exe"
+                "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v99.0.0/iPhoneMirror-Setup-v99.0.0-x64.exe"
               }]
             }]
             """;
@@ -63,7 +63,7 @@ internal static class Program
                 "IPhoneMirror.App.Windows.UpdateWindow", throwOnError: true)!;
             var window = Activator.CreateInstance(windowType,
                 BindingFlags.Instance | BindingFlags.NonPublic,
-                binder: null, args: [release, client, false], culture: null) as Window ??
+                binder: null, args: [release, client, false, true], culture: null) as Window ??
                 throw new InvalidOperationException("Update window was not constructed.");
             window.Close();
         }

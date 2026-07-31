@@ -357,6 +357,54 @@ Run("Apple support requires both service and USB driver", () =>
         DeviceCatalog.ResolveAppleSupportDiagnosticKey(false, false, true));
 });
 
+Run("Apple software update catalog selects the newest standalone support MSI", () =>
+{
+    const string catalog = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0"><dict><key>Products</key><dict>
+          <key>older</key><dict>
+            <key>Packages</key><array><dict>
+              <key>Size</key><integer>39915520</integer>
+              <key>URL</key><string>http://swcdn.apple.com/old/AppleMobileDeviceSupport64.msi</string>
+            </dict></array>
+            <key>PostDate</key><date>2021-06-30T17:39:06Z</date>
+          </dict>
+          <key>047-76422</key><dict>
+            <key>Packages</key><array>
+              <dict><key>Size</key><integer>175001600</integer><key>URL</key><string>http://swcdn.apple.com/current/iTunes64.msi</string></dict>
+              <dict><key>Size</key><integer>40308736</integer><key>URL</key><string>http://swcdn.apple.com/current/AppleMobileDeviceSupport64.msi</string></dict>
+            </array>
+            <key>PostDate</key><date>2026-03-04T18:01:11Z</date>
+          </dict>
+        </dict></dict></plist>
+        """;
+    var package = AppleSoftwareUpdateCatalog
+        .ParseLatestMobileDeviceSupport64(catalog);
+    Equal("047-76422", package.ProductId);
+    Equal(40308736L, package.Size);
+    Equal("https", package.DownloadUri.Scheme);
+    Equal("swcdn.apple.com", package.DownloadUri.Host);
+    Equal(new DateTimeOffset(2026, 3, 4, 18, 1, 11, TimeSpan.Zero),
+        package.PostDate);
+});
+
+Run("Apple software update catalog rejects an untrusted package host", () =>
+{
+    const string catalog = """
+        <plist version="1.0"><dict><key>Products</key><dict>
+          <key>malicious</key><dict>
+            <key>Packages</key><array><dict>
+              <key>Size</key><integer>40308736</integer>
+              <key>URL</key><string>https://example.test/AppleMobileDeviceSupport64.msi</string>
+            </dict></array>
+            <key>PostDate</key><date>2026-03-04T18:01:11Z</date>
+          </dict>
+        </dict></dict></plist>
+        """;
+    Throws<InvalidDataException>(() => AppleSoftwareUpdateCatalog
+        .ParseLatestMobileDeviceSupport64(catalog));
+});
+
 Run("Apple support install path distinguishes a missing service from a missing INF", () =>
 {
     True(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
@@ -365,7 +413,7 @@ Run("Apple support install path distinguishes a missing service from a missing I
     True(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
         new AppleSupportStatus(true, true, "Apple Mobile Device Service",
             false, null, string.Empty)));
-    False(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
+    True(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
         new AppleSupportStatus(false, false, null,
             true, "appleusb.inf", string.Empty)));
     False(AppleSupportInstaller.ShouldInstallAppleDevicesFromStore(
@@ -424,6 +472,9 @@ Run("winget Apple Devices command is pinned to Microsoft Store", () =>
     True(arguments.Contains("--accept-source-agreements"));
     True(arguments.Contains("--accept-package-agreements"));
     True(arguments.Contains("--disable-interactivity"));
+    False(arguments.Contains("--force"));
+    True(AppleSupportInstaller.BuildWingetInstallArguments(force: true)
+        .Contains("--force"));
 });
 
 Run("Apple installer terminal exit codes are recognized", () =>

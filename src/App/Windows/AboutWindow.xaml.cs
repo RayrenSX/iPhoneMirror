@@ -43,6 +43,11 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
         get => _app.UpdateSettings.AutoDownload;
         set => _app.UpdateSettings.AutoDownload = value;
     }
+    public bool AllowMirrorFallback
+    {
+        get => _app.UpdateSettings.AllowMirrorFallback;
+        set => _app.UpdateSettings.AllowMirrorFallback = value;
+    }
     public bool NotifyStableReleases
     {
         get => _app.UpdateSettings.NotifyStableReleases;

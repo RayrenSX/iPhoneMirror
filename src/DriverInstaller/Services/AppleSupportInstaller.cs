@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Text;
 using IPhoneMirror.DriverInstaller.Models;
+using IPhoneMirror.Shared.Networking;
 
 namespace IPhoneMirror.DriverInstaller.Services;
 
@@ -19,10 +21,10 @@ internal enum ServiceStartOutcome
 
 /// <summary>
 /// Installs Apple USB support without requiring the user to open Apple Devices.
-/// An offline AppleMobileDeviceSupport MSI is preferred. Apple Devices is
-/// installed from Microsoft Store only when the Apple USB INF is missing; the
-/// official Apple package supplies the missing service MSI. No Apple package
-/// is bundled.
+/// An offline AppleMobileDeviceSupport MSI is preferred, followed by the
+/// standalone MSI published in Apple's Windows software-update catalog. The
+/// full official iTunes package is retained only as a final fallback. No Apple
+/// package is bundled.
 /// </summary>
 internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
 {
@@ -69,16 +71,33 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         DriverPayload.CreateSafeDirectory(DriverConstants.PackagesRoot);
         var packageLog = Path.Combine(DriverConstants.PackagesRoot, "apple-support-install.log");
         int? installerExitCode = null;
-        var offlineMsi = FindOfflineMsi();
-        if (offlineMsi is not null)
+        var supportMsi = FindOfflineMsi();
+        if (supportMsi is null)
+        {
+            try
+            {
+                ReportProgress(progress, "AppleSupportDownloadingCompatibility");
+                supportMsi = await DownloadOfficialMobileDeviceSupportAsync(
+                    operationId, progress);
+            }
+            catch (Exception error)
+            {
+                DriverLogger.WriteException("apple-support",
+                    "standalone_package_acquisition_failed", error,
+                    ("operation", operationId),
+                    ("elapsed_ms", timer.ElapsedMilliseconds));
+            }
+        }
+
+        if (supportMsi is not null)
         {
             ReportProgress(progress, "AppleSupportInstallingCompatibility");
-            var packageHash = DriverPayload.ComputeHash(offlineMsi);
-            DriverLogger.WriteEvent("apple-support", "offline_package_selected",
-                ("operation", operationId), ("package", DriverLogger.DescribePath(offlineMsi)),
+            var packageHash = DriverPayload.ComputeHash(supportMsi);
+            DriverLogger.WriteEvent("apple-support", "support_msi_selected",
+                ("operation", operationId), ("package", DriverLogger.DescribePath(supportMsi)),
                 ("signature", "trusted"),
                 ("sha256", DriverLogger.HashTag(packageHash)));
-            var result = await RunMsiAsync(offlineMsi, packageHash, packageLog, operationId);
+            var result = await RunMsiAsync(supportMsi, packageHash, packageLog, operationId);
             installerExitCode = result.ExitCode;
             if (IsUserCancellation(result.ExitCode))
             {
@@ -101,49 +120,6 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         }
         else
         {
-            ProcessResult? wingetResult = null;
-            if (ShouldInstallAppleDevicesFromStore(current))
-            {
-                ReportProgress(progress, "AppleSupportInstallingStore");
-                wingetResult = await TryInstallAppleDevicesWithWingetAsync(operationId);
-            }
-            else
-            {
-                DriverLogger.WriteEvent("apple-support", "store_install_skipped",
-                    ("operation", operationId),
-                    ("reason", "usb_driver_present_service_not_ready"),
-                    ("service_installed", current.ServiceInstalled),
-                    ("service_running", current.ServiceRunning),
-                    ("usb_driver_inf", current.UsbDriverInf));
-            }
-
-            if (wingetResult is not null && wingetResult.ExitCode == 0)
-            {
-                ReportProgress(progress, "AppleSupportVerifying");
-                var storeRecovery = await WaitAndRecoverAppleSupportAsync(
-                    TimeSpan.FromSeconds(20), operationId);
-                if (storeRecovery.StartOutcome == ServiceStartOutcome.Cancelled)
-                    return new AppleSupportInstallResult(false, false,
-                        DriverLocalization.Get("UacCancelled"));
-                var storeReady = storeRecovery.Status;
-                if (storeReady.Ready)
-                {
-                    DriverLogger.WriteEvent("apple-support", "store_install_completed",
-                        ("operation", operationId), ("success", true),
-                        ("usb_driver_inf", storeReady.UsbDriverInf),
-                        ("elapsed_ms", timer.ElapsedMilliseconds));
-                    return new AppleSupportInstallResult(true, false,
-                        storeReady.Diagnostic);
-                }
-                DriverLogger.WriteWarning("apple-support", "store_install_not_ready",
-                    ("operation", operationId),
-                    ("service_installed", storeReady.ServiceInstalled),
-                    ("service_running", storeReady.ServiceRunning),
-                    ("usb_driver_installed", storeReady.UsbDriverInstalled),
-                    ("usb_driver_inf", storeReady.UsbDriverInf));
-                current = storeReady;
-            }
-
             var setup = FindLocalItunesSetup();
             try
             {
@@ -152,23 +128,15 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                     : "AppleSupportInstallingCompatibility");
                 DriverLogger.WriteEvent("apple-support", "itunes_fallback_selected",
                     ("operation", operationId), ("local_package", setup is not null),
-                    ("winget_attempted", wingetResult is not null),
-                    ("winget_exit_code", wingetResult?.ExitCode));
+                    ("reason", "standalone_msi_unavailable"));
                 setup ??= await DownloadOfficialItunesAsync(operationId, progress);
             }
             catch (Exception error)
             {
                 DriverLogger.WriteException("apple-support", "package_acquisition_failed", error,
                     ("operation", operationId), ("elapsed_ms", timer.ElapsedMilliseconds));
-                var storeCanSupplyMissingDriver =
-                    ShouldInstallAppleDevicesFromStore(current);
-                if (storeCanSupplyMissingDriver) OpenMicrosoftStore();
-                var messageKey = storeCanSupplyMissingDriver
-                    ? "AppleDownloadUnavailable"
-                    : "AppleCompatibilityDownloadUnavailable";
-                return new AppleSupportInstallResult(false,
-                    storeCanSupplyMissingDriver,
-                    DriverLocalization.Get(messageKey) + "\n" +
+                return new AppleSupportInstallResult(false, false,
+                    DriverLocalization.Get("AppleCompatibilityDownloadUnavailable") + "\n" +
                     DriverLogger.Sanitize(error.Message));
             }
 
@@ -297,16 +265,21 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         return File.Exists(alias) ? alias : null;
     }
 
-    internal static string[] BuildWingetInstallArguments() =>
-    [
+    internal static string[] BuildWingetInstallArguments(bool force = false)
+    {
+        var arguments = new List<string>
+        {
         "install", "--id", DriverConstants.AppleStoreProductId, "--exact",
         "--source", DriverConstants.AppleStoreSource,
         "--accept-source-agreements", "--accept-package-agreements",
         "--silent", "--disable-interactivity",
-    ];
+        };
+        if (force) arguments.Add("--force");
+        return arguments.ToArray();
+    }
 
     internal static bool ShouldInstallAppleDevicesFromStore(AppleSupportStatus status) =>
-        !status.UsbDriverInstalled;
+        !status.UsbDriverInstalled || !status.ServiceInstalled;
 
     internal static bool ShouldRecoverExistingService(AppleSupportStatus status) =>
         status.UsbDriverInstalled && status.ServiceInstalled &&
@@ -333,7 +306,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
     }
 
     private static async Task<ProcessResult?> TryInstallAppleDevicesWithWingetAsync(
-        string operationId)
+        string operationId, bool force)
     {
         var winget = FindWinget();
         if (winget is null)
@@ -347,11 +320,12 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         DriverLogger.WriteEvent("apple-support", "winget_install_start",
             ("operation", operationId),
             ("product", DriverConstants.AppleStoreProductId),
-            ("source", DriverConstants.AppleStoreSource));
+            ("source", DriverConstants.AppleStoreSource),
+            ("force", force));
         try
         {
             var result = await RunCapturedProcessAsync(winget,
-                BuildWingetInstallArguments(), TimeSpan.FromMinutes(20));
+                BuildWingetInstallArguments(force), TimeSpan.FromMinutes(20));
             var fields = new (string Key, object? Value)[]
             {
                 ("operation", operationId), ("exit_code", result.ExitCode),
@@ -434,6 +408,121 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             DriverPayload.IsTrustedAppleSignature(path));
     }
 
+    private static async Task<string> DownloadOfficialMobileDeviceSupportAsync(
+        string operationId, IProgress<string>? progress)
+    {
+        var destination = Path.Combine(DriverConstants.PackagesRoot,
+            DriverConstants.AppleSupportMsiFileName);
+        if (IsTrustedAppleMsi(destination))
+        {
+            DriverLogger.WriteEvent("apple-support", "standalone_download_cache_used",
+                ("operation", operationId),
+                ("package", DriverLogger.DescribePath(destination)),
+                ("signature", "trusted"),
+                ("sha256", DriverPayload.ComputeHashTag(destination)));
+            return destination;
+        }
+        if (File.Exists(destination)) File.Delete(destination);
+
+        var timer = Stopwatch.StartNew();
+        try
+        {
+            var catalogContent = await DownloadAppleUpdateCatalogAsync();
+            var package = AppleSoftwareUpdateCatalog
+                .ParseLatestMobileDeviceSupport64(catalogContent);
+            DriverLogger.WriteEvent("apple-support", "standalone_package_selected",
+                ("operation", operationId), ("product", package.ProductId),
+                ("post_date", package.PostDate), ("bytes", package.Size),
+                ("origin", DriverLogger.DescribeUri(package.DownloadUri.ToString())));
+
+            var lastReportedPercent = -1;
+            long lastReportedBytes = 0;
+            long lastLoggedMilliseconds = -5000;
+            var downloadProgress = new Progress<SegmentedDownloadProgress>(value =>
+            {
+                ReportDownloadProgress(progress, value.BytesReceived,
+                    value.TotalBytes, value.BytesPerSecond, value.SegmentCount,
+                    ref lastReportedPercent, ref lastReportedBytes);
+                var elapsedMilliseconds = timer.ElapsedMilliseconds;
+                if (elapsedMilliseconds - lastLoggedMilliseconds < 5000 &&
+                    value.BytesReceived != value.TotalBytes) return;
+                lastLoggedMilliseconds = elapsedMilliseconds;
+                DriverLogger.WriteEvent("apple-support",
+                    "standalone_download_progress",
+                    ("operation", operationId), ("bytes", value.BytesReceived),
+                    ("total_bytes", value.TotalBytes),
+                    ("bytes_per_second", Math.Round(value.BytesPerSecond)),
+                    ("segments", value.SegmentCount),
+                    ("elapsed_ms", elapsedMilliseconds));
+            });
+            var result = await SegmentedHttpDownloader.DownloadAsync(Http,
+                package.DownloadUri, destination,
+                new SegmentedDownloadOptions(
+                    AppleSoftwareUpdateCatalog.MaximumPackageBytes,
+                    ExpectedBytes: package.Size,
+                    MaximumConcurrency: 8,
+                    MinimumSegmentBytes: 1024L * 1024),
+                IsTrustedAppleDownloadUri, downloadProgress);
+            DriverLogger.WriteEvent("apple-support", "standalone_download_complete",
+                ("operation", operationId), ("bytes", result.BytesReceived),
+                ("segments", result.SegmentCount),
+                ("elapsed_ms", timer.ElapsedMilliseconds));
+
+            if (!IsTrustedAppleMsi(destination))
+                throw new InvalidOperationException(
+                    "The downloaded Apple support package signature is invalid.");
+            DriverLogger.WriteEvent("apple-support",
+                "standalone_download_security_verified",
+                ("operation", operationId),
+                ("package", DriverLogger.DescribePath(destination)),
+                ("signature", "trusted"),
+                ("sha256", DriverPayload.ComputeHashTag(destination)),
+                ("elapsed_ms", timer.ElapsedMilliseconds));
+            return destination;
+        }
+        catch
+        {
+            try { File.Delete(destination); } catch { }
+            throw;
+        }
+    }
+
+    private static async Task<string> DownloadAppleUpdateCatalogAsync()
+    {
+        using var response = await Http.GetAsync(
+            AppleSoftwareUpdateCatalog.CatalogUrl,
+            HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+        var finalUri = response.RequestMessage?.RequestUri ??
+            throw new InvalidDataException(
+                "The Apple update catalog response has no final URL.");
+        if (finalUri.Scheme != Uri.UriSchemeHttps ||
+            !finalUri.Host.Equals("swscan.apple.com",
+                StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(
+                "The Apple update catalog redirected to an untrusted host.");
+        if (response.Content.Headers.ContentLength is { } contentLength &&
+            contentLength > AppleSoftwareUpdateCatalog.MaximumCatalogBytes)
+            throw new InvalidDataException(
+                "The Apple update catalog is unexpectedly large.");
+
+        await using var input = await response.Content.ReadAsStreamAsync();
+        using var output = new MemoryStream();
+        var buffer = new byte[64 * 1024];
+        while (true)
+        {
+            var count = await input.ReadAsync(buffer);
+            if (count == 0) break;
+            if (output.Length + count >
+                AppleSoftwareUpdateCatalog.MaximumCatalogBytes)
+                throw new InvalidDataException(
+                    "The Apple update catalog exceeded its size limit.");
+            output.Write(buffer, 0, count);
+        }
+        return Encoding.UTF8.GetString(output.GetBuffer(), 0,
+            checked((int)output.Length));
+    }
+
     private static async Task<string> DownloadOfficialItunesAsync(string operationId,
         IProgress<string>? progress)
     {
@@ -451,48 +540,39 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             ("origin", DriverLogger.DescribeUri(DriverConstants.OfficialItunesDownloadUrl)));
 
         var timer = Stopwatch.StartNew();
-        using var response = await Http.GetAsync(DriverConstants.OfficialItunesDownloadUrl,
-            HttpCompletionOption.ResponseHeadersRead);
-        DriverLogger.WriteEvent("apple-support", "download_headers",
-            ("operation", operationId), ("status", (int)response.StatusCode),
-            ("content_length", response.Content.Headers.ContentLength),
-            ("final_origin", DriverLogger.DescribeUri(response.RequestMessage?.RequestUri?.ToString())));
-        response.EnsureSuccessStatusCode();
-        if (response.RequestMessage?.RequestUri is not { } finalUri ||
-            finalUri.Scheme != Uri.UriSchemeHttps ||
-            !finalUri.Host.EndsWith(".apple.com", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Apple download redirected to an untrusted host.");
-        if (response.Content.Headers.ContentLength is > 512L * 1024 * 1024)
-            throw new InvalidOperationException("The Apple installer is unexpectedly large.");
 
         try
         {
-            await using var source = await response.Content.ReadAsStreamAsync();
-            await using (var target = new FileStream(destination, FileMode.CreateNew,
-                             FileAccess.Write, FileShare.None, 64 * 1024,
-                             FileOptions.WriteThrough))
+            var lastReportedPercent = -1;
+            long lastReportedBytes = 0;
+            long lastLoggedMilliseconds = -5000;
+            var downloadProgress = new Progress<SegmentedDownloadProgress>(value =>
             {
-                var buffer = new byte[64 * 1024];
-                long total = 0;
-                var lastReportedPercent = -1;
-                long lastReportedBytes = 0;
-                int read;
-                while ((read = await source.ReadAsync(buffer)) != 0)
-                {
-                    total += read;
-                    if (total > 512L * 1024 * 1024)
-                        throw new InvalidOperationException(
-                            "The Apple installer exceeded the size limit.");
-                    await target.WriteAsync(buffer.AsMemory(0, read));
-                    ReportDownloadProgress(progress, total,
-                        response.Content.Headers.ContentLength,
-                        ref lastReportedPercent, ref lastReportedBytes);
-                }
-                await target.FlushAsync();
-                DriverLogger.WriteEvent("apple-support", "download_body_complete",
-                    ("operation", operationId), ("bytes", total),
-                    ("elapsed_ms", timer.ElapsedMilliseconds));
-            }
+                ReportDownloadProgress(progress, value.BytesReceived,
+                    value.TotalBytes, value.BytesPerSecond, value.SegmentCount,
+                    ref lastReportedPercent, ref lastReportedBytes);
+                var elapsedMilliseconds = timer.ElapsedMilliseconds;
+                if (elapsedMilliseconds - lastLoggedMilliseconds < 5000 &&
+                    value.BytesReceived != value.TotalBytes) return;
+                lastLoggedMilliseconds = elapsedMilliseconds;
+                DriverLogger.WriteEvent("apple-support", "download_progress",
+                    ("operation", operationId),
+                    ("bytes", value.BytesReceived),
+                    ("total_bytes", value.TotalBytes),
+                    ("bytes_per_second", Math.Round(value.BytesPerSecond)),
+                    ("segments", value.SegmentCount),
+                    ("elapsed_ms", elapsedMilliseconds));
+            });
+            var result = await SegmentedHttpDownloader.DownloadAsync(Http,
+                new Uri(DriverConstants.OfficialItunesDownloadUrl), destination,
+                new SegmentedDownloadOptions(512L * 1024 * 1024,
+                    MaximumConcurrency: 12,
+                    MinimumSegmentBytes: 2L * 1024 * 1024),
+                IsTrustedAppleDownloadUri, downloadProgress);
+            DriverLogger.WriteEvent("apple-support", "download_body_complete",
+                ("operation", operationId), ("bytes", result.BytesReceived),
+                ("segments", result.SegmentCount),
+                ("elapsed_ms", timer.ElapsedMilliseconds));
 
             // WinVerifyTrust must be able to reopen the completed file. The
             // download stream uses FileShare.None, so dispose it first.
@@ -517,9 +597,14 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
     private static bool IsTrustedAppleMsi(string path) =>
         File.Exists(path) && DriverPayload.IsTrustedAppleSignature(path);
 
+    private static bool IsTrustedAppleDownloadUri(Uri uri) =>
+        uri.Scheme == Uri.UriSchemeHttps &&
+        (uri.Host.Equals("apple.com", StringComparison.OrdinalIgnoreCase) ||
+         uri.Host.EndsWith(".apple.com", StringComparison.OrdinalIgnoreCase));
+
     private static void ReportDownloadProgress(IProgress<string>? progress,
-        long downloadedBytes, long? totalBytes, ref int lastReportedPercent,
-        ref long lastReportedBytes)
+        long downloadedBytes, long? totalBytes, double bytesPerSecond,
+        int segmentCount, ref int lastReportedPercent, ref long lastReportedBytes)
     {
         if (progress is null) return;
         const double bytesPerMegabyte = 1024d * 1024d;
@@ -529,16 +614,20 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 0, 100);
             if (percent == lastReportedPercent) return;
             lastReportedPercent = percent;
-            progress.Report(DriverLocalization.Format("AppleSupportDownloadProgress",
+            progress.Report(DriverLocalization.Format(
+                "AppleSupportDownloadProgressParallel",
                 percent, downloadedBytes / bytesPerMegabyte,
-                totalBytes.Value / bytesPerMegabyte));
+                totalBytes.Value / bytesPerMegabyte,
+                bytesPerSecond / bytesPerMegabyte, segmentCount));
             return;
         }
 
         if (downloadedBytes - lastReportedBytes < 1024 * 1024) return;
         lastReportedBytes = downloadedBytes;
-        progress.Report(DriverLocalization.Format("AppleSupportDownloadProgressUnknown",
-            downloadedBytes / bytesPerMegabyte));
+        progress.Report(DriverLocalization.Format(
+            "AppleSupportDownloadProgressUnknownParallel",
+            downloadedBytes / bytesPerMegabyte,
+            bytesPerSecond / bytesPerMegabyte, segmentCount));
     }
 
     private static async Task<ProcessResult> ExtractAndInstallMobileDeviceSupportAsync(

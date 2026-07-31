@@ -13,6 +13,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
 {
     private readonly ReleaseInfo _release;
     private readonly GitHubReleaseClient _client;
+    private readonly bool _allowMirrorFallback;
     private readonly CancellationTokenSource _cancellation = new();
     private bool _downloading;
     private bool _installationStarted;
@@ -36,10 +37,11 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
     public string UpdateButtonText { get => _updateButtonText; private set { _updateButtonText = value; OnPropertyChanged(); } }
 
     internal UpdateWindow(ReleaseInfo release, GitHubReleaseClient client,
-        bool autoDownload)
+        bool autoDownload, bool allowMirrorFallback = true)
     {
         _release = release;
         _client = client;
+        _allowMirrorFallback = allowMirrorFallback;
         _statusText = string.Empty;
         _updateButtonText = LocalizationService.Get("UpdateNow");
         DataContext = this;
@@ -76,7 +78,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
         try
         {
             var downloaded = await _client.DownloadAsync(_release, progress,
-                _cancellation.Token);
+                _cancellation.Token, _allowMirrorFallback);
             StatusText = downloaded.HashVerified
                 ? LocalizationService.Get("UpdateVerified")
                 : LocalizationService.Get("UpdateDownloadedNoChecksum");

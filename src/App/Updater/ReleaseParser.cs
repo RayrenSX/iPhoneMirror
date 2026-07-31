@@ -3,7 +3,11 @@ using System.Text.Json;
 
 namespace IPhoneMirror.App.Updater;
 
-internal sealed record ReleaseAsset(string Name, Uri DownloadUri, long Size);
+internal sealed record ReleaseAsset(
+    string Name,
+    Uri DownloadUri,
+    long Size,
+    string? Sha256 = null);
 
 internal sealed record ReleaseInfo(
     string TagName,
@@ -96,14 +100,36 @@ internal static class ReleaseParser
             if (string.IsNullOrWhiteSpace(name) ||
                 Path.GetFileName(name) != name ||
                 !Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
-                uri.Scheme != Uri.UriSchemeHttps ||
-                !uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+                !IsTrustedGitHubAssetUri(uri) ||
+                !Path.GetFileName(uri.LocalPath).Equals(name,
+                    StringComparison.Ordinal))
                 continue;
             var size = element.TryGetProperty("size", out var sizeElement) &&
                 sizeElement.TryGetInt64(out var parsedSize) ? parsedSize : 0;
-            assets.Add(new ReleaseAsset(name, uri, Math.Max(0, size)));
+            var digest = NormalizeSha256(GetOptionalString(element, "digest"));
+            assets.Add(new ReleaseAsset(name, uri, Math.Max(0, size), digest));
         }
         return assets;
+    }
+
+    internal static bool IsTrustedGitHubAssetUri(Uri uri) =>
+        uri.IsAbsoluteUri &&
+        uri.Scheme == Uri.UriSchemeHttps &&
+        uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) &&
+        uri.AbsolutePath.StartsWith(
+            "/RayrenSX/iPhoneMirror/releases/download/",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static string? NormalizeSha256(string? digest)
+    {
+        const string prefix = "sha256:";
+        if (digest is null || !digest.StartsWith(prefix,
+                StringComparison.OrdinalIgnoreCase))
+            return null;
+        var hash = digest[prefix.Length..];
+        return hash.Length == 64 && hash.All(Uri.IsHexDigit)
+            ? hash.ToLowerInvariant()
+            : null;
     }
 
     private static int InstallerScore(ReleaseAsset asset)

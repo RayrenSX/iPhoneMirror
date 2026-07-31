@@ -8,6 +8,9 @@ internal static class UpdateInstallerLauncher
 {
     internal static void Launch(DownloadedUpdate update)
     {
+        if (!update.HashVerified)
+            throw new InvalidDataException(
+                "The update package was not verified and will not be executed.");
         DiagnosticLogger.Info("updater", "installer_launch_begin",
             ("release", update.Release.TagName), ("asset", update.Asset.Name),
             ("sha256_verified", update.HashVerified));
