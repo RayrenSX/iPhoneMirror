@@ -5,6 +5,39 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-07-31
+
+### Added
+
+- Add a reusable child-window drag behavior to the main application so the
+  title regions in advanced, image, projection, media-output, update, startup
+  error and USB-mode windows can move the window consistently. Resizable
+  windows also support title-region double-click maximize and restore.
+- Add shared pressed-state scrollbar resources for both light and dark themes.
+
+### Changed
+
+- Refine the main navigation as a compact overlay rail with a 48-pixel icon
+  column, restrained active indicator, consistent icon sizing and a narrower
+  208-pixel expanded pane that no longer repeats the product title.
+- Move the complete vertical and horizontal scrollbar templates into SharedUI
+  so the main application and driver manager use the same thin rounded track,
+  hover expansion, dragging feedback and page-direction commands.
+- Rebalance dark-mode Mica surfaces, cards, dialogs, controls and combo boxes
+  around neutral translucent grays for clearer layering without heavy blocks.
+- Use the lightweight control-fill surface for ordinary workspace actions and
+  refresh controls, keeping semantic action colors reserved for start, stop,
+  warning and error states.
+
+### Fixed
+
+- Keep compact navigation labels collapsed without mixing pane-width and label
+  animations, preventing layout shifts while the overlay pane opens or closes.
+- Preserve correct horizontal scrollbar direction, thumb sizing and pressed
+  feedback when the shared template is used outside the main application.
+- Make custom child-window title regions draggable instead of limiting window
+  movement to a small or inconsistent hit target.
+
 ## [1.5.0] - 2026-07-30
 
 ### Added
@@ -650,7 +683,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.4...v1.5.0
 [1.4.4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.2...v1.4.3

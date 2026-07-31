@@ -25,7 +25,8 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Style="{StaticResource SubWindowHeader}">
+        <Grid Style="{StaticResource SubWindowHeader}"
+              animations:WindowDragBehavior.IsEnabled="True">
             <TextBlock x:Name="HeadingText" Style="{StaticResource SubWindowTitle}"
                        Margin="0,0,48,0"/>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">

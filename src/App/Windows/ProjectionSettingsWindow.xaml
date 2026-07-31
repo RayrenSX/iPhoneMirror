@@ -45,7 +45,8 @@
             <RowDefinition Height="16"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <Grid Style="{StaticResource SubWindowHeader}">
+        <Grid Style="{StaticResource SubWindowHeader}"
+              animations:WindowDragBehavior.IsEnabled="True">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>

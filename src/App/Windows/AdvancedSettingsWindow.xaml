@@ -9,7 +9,8 @@
         Foreground="{DynamicResource TextBrush}">
  <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="*"/><RowDefinition Height="16"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-  <Grid Style="{StaticResource SubWindowHeader}">
+  <Grid Style="{StaticResource SubWindowHeader}"
+        animations:WindowDragBehavior.IsEnabled="True">
    <StackPanel Margin="0,0,48,0"><TextBlock Text="{DynamicResource AdvancedSettingsTitle}" Style="{StaticResource SubWindowTitle}"/><TextBlock Text="{DynamicResource AdvancedSettingsIntro}" Style="{StaticResource SubWindowSubtitle}"/></StackPanel>
    <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
     <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>

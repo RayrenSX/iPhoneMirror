@@ -105,5 +105,6 @@
     <SolidColorBrush x:Key="ScrollTrackHoverBrush" Color="#14000000"/>
     <SolidColorBrush x:Key="ScrollThumbBrush" Color="#52000000"/>
     <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#73000000"/>
+    <SolidColorBrush x:Key="ScrollThumbPressedBrush" Color="#A6000000"/>
     <Color x:Key="CardShadowColor">#FF000000</Color>
 </ResourceDictionary>

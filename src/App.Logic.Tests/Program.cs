@@ -163,6 +163,8 @@ foreach (var requiredThemeKey in new[]
              "PrimaryActionPressedBrush", "PrimaryActionTextBrush",
              "PrimaryActionFocusBrush", "PrimaryActionDisabledBrush",
              "PrimaryActionDisabledTextBrush",
+             "ScrollTrackBrush", "ScrollTrackHoverBrush", "ScrollThumbBrush",
+             "ScrollThumbHoverBrush", "ScrollThumbPressedBrush",
          })
 {
     Equal(true, lightThemeKeys.Contains(requiredThemeKey, StringComparer.Ordinal),
@@ -179,11 +181,40 @@ foreach (var reusableControl in new[]
              "SubWindowPageRoot", "SubWindowHeader", "SubWindowTitle",
              "SubWindowSubtitle", "SubWindowTabControl", "SubWindowTabItem",
              "IconButtonHoverBrush",
+             "ModernVerticalScrollThumbStyle", "ModernHorizontalScrollThumbStyle",
              "ui:ModernButton", "ui:ModernCard", "ui:ModernDialog",
          })
 {
     Equal(true, modernControlsText.Contains(reusableControl, StringComparison.Ordinal),
         $"shared UI contains {reusableControl}");
+}
+Equal(true,
+    modernControlsText.Contains("<Style TargetType=\"{x:Type ScrollBar}\">",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains("<Setter Property=\"Width\" Value=\"8\"/>",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains("<Setter Property=\"Height\" Value=\"8\"/>",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains("CornerRadius=\"2.5\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("MinHeight=\"24\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("MinWidth=\"24\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("QuadraticEase", StringComparison.Ordinal) &&
+    modernControlsText.Contains("PageLeftCommand", StringComparison.Ordinal) &&
+    modernControlsText.Contains("PageRightCommand", StringComparison.Ordinal),
+    "shared scrollbars are thin, rounded, animated, and support both orientations");
+foreach (var appXamlPath in new[]
+         {
+             Path.Combine(sourceDirectory, "App", "App.xaml"),
+             Path.Combine(sourceDirectory, "DriverInstaller", "App.xaml"),
+         })
+{
+    var appXamlText = File.ReadAllText(appXamlPath);
+    Equal(true, appXamlText.Contains("Controls/ModernControls.xaml",
+            StringComparison.Ordinal),
+        $"{Path.GetFileName(Path.GetDirectoryName(appXamlPath))} loads shared controls");
+    Equal(false, appXamlText.Contains("TargetType=\"{x:Type ScrollBar}\"",
+            StringComparison.Ordinal),
+        $"{Path.GetFileName(Path.GetDirectoryName(appXamlPath))} does not override shared scrollbars");
 }
 
 var themedWindowDirectories = new[]
@@ -228,6 +259,25 @@ foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
         $"{windowName} has a restrained entrance transition");
 }
 
+var appWindowDirectory = Path.Combine(sourceDirectory, "App", "Windows");
+foreach (var windowPath in Directory.GetFiles(appWindowDirectory, "*.xaml"))
+{
+    var windowText = File.ReadAllText(windowPath);
+    if (!windowText.Contains("SubWindowHeader", StringComparison.Ordinal)) continue;
+    Equal(true,
+        windowText.Contains("WindowDragBehavior.IsEnabled=\"True\"",
+            StringComparison.Ordinal) ||
+        windowText.Contains("MouseLeftButtonDown=", StringComparison.Ordinal),
+        $"{Path.GetFileName(windowPath)} exposes a draggable title region");
+}
+var windowDragBehaviorText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Animations", "WindowDragBehavior.cs"));
+Equal(true,
+    windowDragBehaviorText.Contains("window.DragMove()", StringComparison.Ordinal) &&
+    windowDragBehaviorText.Contains("ResizeMode.CanResizeWithGrip",
+        StringComparison.Ordinal),
+    "shared child-window drag behavior supports moving and title double-click");
+
 var mainWindowText = File.ReadAllText(mainWindowPath);
 foreach (var navigationKey in new[]
          {
@@ -245,11 +295,26 @@ Equal(true, mainWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordin
                 StringComparison.Ordinal),
     "main window uses FluentWindow with a Mica backdrop");
 Equal(true, mainWindowText.Contains("<ui:NavigationView", StringComparison.Ordinal) &&
+            mainWindowText.Contains("PaneDisplayMode=\"LeftMinimal\"",
+                StringComparison.Ordinal) &&
             mainWindowText.Contains("CompactPaneLength=\"48\"",
                 StringComparison.Ordinal) &&
-            mainWindowText.Contains("OpenPaneLength=\"232\"",
+            mainWindowText.Contains("OpenPaneLength=\"208\"",
                 StringComparison.Ordinal),
-    "main navigation uses the animated compact NavigationView pane");
+    "main navigation uses the standard compact overlay pane");
+Equal(false, mainWindowText.Contains("PaneTitle=", StringComparison.Ordinal),
+    "compact navigation does not repeat the product title inside the pane");
+Equal(true, mainWindowText.Contains("x:Key=\"ShellNavigationItem\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("FontWeight\" Value=\"Medium\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("x:Name=\"ActiveIndicator\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("<Condition Property=\"IsPaneOpen\" Value=\"True\"/>",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("<ColumnDefinition Width=\"48\"/>",
+        StringComparison.Ordinal),
+    "navigation items use a light compact selection indicator and restrained labels");
 Equal(false, mainWindowText.Contains("NavigationColumn", StringComparison.Ordinal) ||
              mainWindowText.Contains("NavigationLabel", StringComparison.Ordinal),
     "main navigation no longer mixes column-width and label visibility animations");
@@ -274,9 +339,14 @@ Equal(true, mainWindowText.Contains(
 Equal(false, mainWindowText.Contains("Background=\"#050505\"",
         StringComparison.Ordinal),
     "main preview does not hard-code a dark background");
-
 var aboutWindowPath = Path.Combine(sourceDirectory, "App", "Windows", "AboutWindow.xaml");
 var aboutWindowText = File.ReadAllText(aboutWindowPath);
+Equal(true,
+    mainWindowText.Contains("Background=\"{DynamicResource AppBackgroundBrush}\"",
+        StringComparison.Ordinal) &&
+    aboutWindowText.Contains("Background=\"{DynamicResource AppBackgroundBrush}\"",
+        StringComparison.Ordinal),
+    "main and about windows share the same themed Mica background surface");
 Equal(true, aboutWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal) &&
             aboutWindowText.Contains("WindowBackdropType=\"Mica\"",
                 StringComparison.Ordinal),

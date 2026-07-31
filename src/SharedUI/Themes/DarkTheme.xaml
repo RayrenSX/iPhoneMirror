@@ -1,11 +1,11 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Color x:Key="ThemeBackgroundColor">#FF18181A</Color>
-    <Color x:Key="ThemeSurfaceColor">#B3212125</Color>
-    <Color x:Key="ThemeRaisedColor">#E629292D</Color>
-    <Color x:Key="ThemeSidebarColor">#B31B1B1F</Color>
-    <Color x:Key="ThemeBorderColor">#2EFFFFFF</Color>
-    <Color x:Key="ThemeSoftBorderColor">#1AFFFFFF</Color>
+    <Color x:Key="ThemeBackgroundColor">#FF1F1F1F</Color>
+    <Color x:Key="ThemeSurfaceColor">#B3242424</Color>
+    <Color x:Key="ThemeRaisedColor">#D1292929</Color>
+    <Color x:Key="ThemeSidebarColor">#C41F1F1F</Color>
+    <Color x:Key="ThemeBorderColor">#24FFFFFF</Color>
+    <Color x:Key="ThemeSoftBorderColor">#14FFFFFF</Color>
     <Color x:Key="ThemeTextColor">#FFF5F5F7</Color>
     <Color x:Key="ThemeMutedTextColor">#FFB7B7BC</Color>
     <Color x:Key="ThemeAccentColor">#FFF0F0F2</Color>
@@ -13,8 +13,8 @@
     <Color x:Key="ThemeOnAccentColor">#FF171719</Color>
 
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource ThemeBackgroundColor}"/>
-    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#A6121214"/>
-    <SolidColorBrush x:Key="AppBackground" Color="#FF18181A"/>
+    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#E61F1F1F"/>
+    <SolidColorBrush x:Key="AppBackground" Color="#FF1F1F1F"/>
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource ThemeBackgroundColor}"/>
     <SolidColorBrush x:Key="SidebarBrush" Color="{StaticResource ThemeSidebarColor}"/>
     <SolidColorBrush x:Key="PanelBrush" Color="{StaticResource ThemeSurfaceColor}"/>
@@ -22,14 +22,14 @@
     <SolidColorBrush x:Key="PanelAltBrush" Color="{StaticResource ThemeRaisedColor}"/>
     <SolidColorBrush x:Key="PanelRaisedBrush" Color="{StaticResource ThemeRaisedColor}"/>
     <SolidColorBrush x:Key="RaisedBackground" Color="{StaticResource ThemeRaisedColor}"/>
-    <SolidColorBrush x:Key="CardBrush" Color="#DE27272B"/>
-    <SolidColorBrush x:Key="CardHoverBrush" Color="#F02D2D32"/>
+    <SolidColorBrush x:Key="CardBrush" Color="#A6292929"/>
+    <SolidColorBrush x:Key="CardHoverBrush" Color="#C42E2E2E"/>
     <SolidColorBrush x:Key="WorkspaceCardBrush" Color="#00FFFFFF"/>
     <SolidColorBrush x:Key="WorkspaceCardHoverBrush" Color="#14FFFFFF"/>
     <SolidColorBrush x:Key="WorkspaceItemBrush" Color="#00FFFFFF"/>
     <SolidColorBrush x:Key="WorkspaceItemSelectedBrush" Color="#28479EF5"/>
     <SolidColorBrush x:Key="WorkspaceItemSelectedBorderBrush" Color="#FF69B1F8"/>
-    <SolidColorBrush x:Key="DialogSurfaceBrush" Color="#F22B2B30"/>
+    <SolidColorBrush x:Key="DialogSurfaceBrush" Color="#F2242424"/>
     <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource ThemeBorderColor}"/>
     <SolidColorBrush x:Key="BorderSoftBrush" Color="{StaticResource ThemeSoftBorderColor}"/>
     <SolidColorBrush x:Key="TextBrush" Color="{StaticResource ThemeTextColor}"/>
@@ -49,9 +49,9 @@
     <SolidColorBrush x:Key="PrimaryActionFocusBrush" Color="#FF0F1419"/>
     <SolidColorBrush x:Key="PrimaryActionDisabledBrush" Color="#FF3A3A3D"/>
     <SolidColorBrush x:Key="PrimaryActionDisabledTextBrush" Color="#FFB8B8BD"/>
-    <SolidColorBrush x:Key="ControlFillBrush" Color="#B3323235"/>
-    <SolidColorBrush x:Key="ControlHoverBrush" Color="#FF3B3B3F"/>
-    <SolidColorBrush x:Key="ControlPressedBrush" Color="#FF45454A"/>
+    <SolidColorBrush x:Key="ControlFillBrush" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="ControlHoverBrush" Color="#20FFFFFF"/>
+    <SolidColorBrush x:Key="ControlPressedBrush" Color="#2AFFFFFF"/>
     <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#1FFFFFFF"/>
     <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#33FFFFFF"/>
     <SolidColorBrush x:Key="SelectionBrush" Color="#24FFFFFF"/>
@@ -93,11 +93,11 @@
     <SolidColorBrush x:Key="CaptureStopBorderBrush" Color="#FFFF979C"/>
     <SolidColorBrush x:Key="CaptureActionTextBrush" Color="#FFFFFFFF"/>
 
-    <SolidColorBrush x:Key="ComboBackgroundBrush" Color="#E62A2A2D"/>
-    <SolidColorBrush x:Key="ComboHoverBrush" Color="#FF36363A"/>
-    <SolidColorBrush x:Key="ComboOpenBrush" Color="#FF3D3D41"/>
-    <SolidColorBrush x:Key="ComboPopupBrush" Color="#FF29292C"/>
-    <SolidColorBrush x:Key="ComboItemHoverBrush" Color="#FF38383C"/>
+    <SolidColorBrush x:Key="ComboBackgroundBrush" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="ComboHoverBrush" Color="#20FFFFFF"/>
+    <SolidColorBrush x:Key="ComboOpenBrush" Color="#2AFFFFFF"/>
+    <SolidColorBrush x:Key="ComboPopupBrush" Color="#F2292929"/>
+    <SolidColorBrush x:Key="ComboItemHoverBrush" Color="#20FFFFFF"/>
     <SolidColorBrush x:Key="ComboItemSelectedBrush" Color="#28FFFFFF"/>
     <SolidColorBrush x:Key="ComboItemSelectedHoverBrush" Color="#38FFFFFF"/>
     <SolidColorBrush x:Key="ComboBorderHoverBrush" Color="#52FFFFFF"/>
@@ -105,5 +105,6 @@
     <SolidColorBrush x:Key="ScrollTrackHoverBrush" Color="#1AFFFFFF"/>
     <SolidColorBrush x:Key="ScrollThumbBrush" Color="#52FFFFFF"/>
     <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#73FFFFFF"/>
+    <SolidColorBrush x:Key="ScrollThumbPressedBrush" Color="#A6FFFFFF"/>
     <Color x:Key="CardShadowColor">#FF000000</Color>
 </ResourceDictionary>

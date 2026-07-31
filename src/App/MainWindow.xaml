@@ -84,7 +84,7 @@
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
         <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource ControlFillBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="MinHeight" Value="36"/>
@@ -125,6 +125,107 @@
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ShellNavigationItem"
+               TargetType="{x:Type ui:NavigationViewItem}"
+               BasedOn="{StaticResource {x:Type ui:NavigationViewItem}}">
+            <Setter Property="MinHeight" Value="44"/>
+            <Setter Property="Margin" Value="0,2"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ui:NavigationViewItem}">
+                        <Grid x:Name="NavigationItemRoot"
+                              Height="{TemplateBinding MinHeight}"
+                              Background="Transparent"
+                              SnapsToDevicePixels="True">
+                            <Border x:Name="InteractionBackground"
+                                    Margin="4,0"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="1"
+                                    CornerRadius="7"/>
+                            <Border x:Name="ActiveIndicator"
+                                    Width="3" Height="18"
+                                    Margin="4,0,0,0"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource AccentBrush}"
+                                    CornerRadius="2"
+                                    Opacity="0"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="48"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="NavigationIcon"
+                                                  Content="{TemplateBinding Icon}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"/>
+                                <ContentPresenter x:Name="PaneItemText"
+                                                  Grid.Column="1"
+                                                  Margin="8,0,12,0"
+                                                  HorizontalAlignment="Left"
+                                                  VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True"
+                                                  ContentSource="Content"/>
+                            </Grid>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="InteractionBackground"
+                                        Property="Background"
+                                        Value="{DynamicResource ControlHoverBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="InteractionBackground"
+                                        Property="Background"
+                                        Value="{DynamicResource ControlPressedBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsActive" Value="True">
+                                <Setter TargetName="ActiveIndicator" Property="Opacity" Value="1"/>
+                                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsActive" Value="True"/>
+                                    <Condition Property="IsPaneOpen" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionBackground"
+                                        Property="Background"
+                                        Value="{DynamicResource ControlFillBrush}"/>
+                            </MultiTrigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsActive" Value="True"/>
+                                    <Condition Property="IsPaneOpen" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionBackground"
+                                        Property="Background"
+                                        Value="Transparent"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsPaneOpen" Value="False">
+                                <Setter TargetName="PaneItemText" Property="Visibility" Value="Collapsed"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="InteractionBackground"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="NavigationItemRoot" Property="Opacity" Value="0.4"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -273,8 +374,7 @@
 
     <Grid x:Name="AppShell">
         <ui:NavigationView x:Name="RootNavigation"
-                           PaneDisplayMode="Left"
-                           PaneTitle="iPhoneMirror"
+                           PaneDisplayMode="LeftMinimal"
                            IsPaneOpen="False"
                            IsPaneVisible="True"
                            IsPaneToggleVisible="True"
@@ -282,66 +382,72 @@
                            IsTopSeparatorVisible="False"
                            IsFooterSeparatorVisible="True"
                            CompactPaneLength="48"
-                           OpenPaneLength="232"
+                           OpenPaneLength="208"
                            FrameMargin="0"
                            Padding="0"
                            Background="Transparent"
                            AutomationProperties.AutomationId="RootNavigation">
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem x:Name="MirroringPanelToggle"
+                                       Style="{StaticResource ShellNavigationItem}"
                                        Content="{DynamicResource NavMirroring}"
                                        Click="OnNavigateMirroringClick"
                                        ToolTip="{DynamicResource NavMirroringDescription}"
                                        AutomationProperties.AutomationId="MirroringNavButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;"/>
+                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" FontSize="18"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem x:Name="DevicePanelToggle"
+                                       Style="{StaticResource ShellNavigationItem}"
                                        Content="{DynamicResource NavDevices}"
                                        Click="OnNavigateDevicesClick"
                                        ToolTip="{DynamicResource NavDevicesDescription}"
                                        AutomationProperties.AutomationId="DevicePanelToggle">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8B7;"/>
+                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8EA;" FontSize="18"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem x:Name="SettingsPanelToggle"
+                                       Style="{StaticResource ShellNavigationItem}"
                                        Content="{DynamicResource NavSettings}"
                                        Click="OnNavigateSettingsClick"
                                        ToolTip="{DynamicResource NavSettingsDescription}"
                                        AutomationProperties.AutomationId="SettingsPanelToggle">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE713;"/>
+                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE713;" FontSize="18"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItemSeparator/>
-                <ui:NavigationViewItem Content="{DynamicResource NavOutput}"
+                <ui:NavigationViewItem Style="{StaticResource ShellNavigationItem}"
+                                       Content="{DynamicResource NavOutput}"
                                        Click="OnNavigateOutputClick"
                                        ToolTip="{DynamicResource NavOutputDescription}"
                                        AutomationProperties.AutomationId="OutputNavButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8B9;"/>
+                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE714;" FontSize="18"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem x:Name="DriverManagerButton"
+                                       Style="{StaticResource ShellNavigationItem}"
                                        Content="{DynamicResource NavDriver}"
                                        Click="OnNavigateDriverClick"
                                        ToolTip="{DynamicResource NavDriverDescription}"
                                        AutomationProperties.AutomationId="DriverManagerButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE950;"/>
+                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE90F;" FontSize="18"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.MenuItems>
             <ui:NavigationView.FooterMenuItems>
                 <ui:NavigationViewItem x:Name="AboutButton"
+                                       Style="{StaticResource ShellNavigationItem}"
                                        Content="{DynamicResource NavAbout}"
                                        Click="OnNavigateAboutClick"
                                        ToolTip="{DynamicResource NavAboutDescription}"
                                        AutomationProperties.AutomationId="AboutButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE946;"/>
+                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE946;" FontSize="18"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.FooterMenuItems>
@@ -562,7 +668,7 @@
                     <StackPanel Grid.Row="5">
                         <Button x:Name="RefreshDevicesButton"
                                 Content="{DynamicResource RefreshDevices}" Command="{Binding RefreshCommand}"
-                                Background="{DynamicResource PanelAltBrush}"/>
+                                Background="{DynamicResource ControlFillBrush}"/>
                         <TextBlock Text="{DynamicResource KeepUnlocked}" Foreground="{DynamicResource MutedTextBrush}"
                                    FontSize="11" TextAlignment="Center" Margin="0,9,0,0"/>
                     </StackPanel>

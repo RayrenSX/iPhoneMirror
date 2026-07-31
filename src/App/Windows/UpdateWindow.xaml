@@ -1,6 +1,7 @@
 <ui:FluentWindow x:Class="IPhoneMirror.App.Windows.UpdateWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource UpdateWindowTitle}" Width="760" Height="700"
         MinWidth="660" MinHeight="580" WindowStartupLocation="CenterOwner"
@@ -22,7 +23,8 @@
             <RowDefinition Height="18"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <Grid Style="{StaticResource SubWindowHeader}">
+        <Grid Style="{StaticResource SubWindowHeader}"
+              animations:WindowDragBehavior.IsEnabled="True">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>

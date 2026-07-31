@@ -42,7 +42,8 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Style="{StaticResource SubWindowHeader}">
+        <Grid Style="{StaticResource SubWindowHeader}"
+              animations:WindowDragBehavior.IsEnabled="True">
             <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="{DynamicResource MediaOutputTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
