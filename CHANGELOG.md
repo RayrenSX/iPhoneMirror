@@ -5,6 +5,33 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-07-31
+
+### Added
+
+- Allow the right-side projection settings panel to remain open alongside
+  either the mirroring actions or source-selection panel.
+- Add language-specific navigation font resources and regression checks for
+  the Chinese and English navigation templates.
+
+### Changed
+
+- Keep the left-side Mirroring and Sources pages mutually exclusive while
+  giving projection settings an independent toggle and close action.
+- Rename the Chinese navigation label from "设备" to "投屏来源" and the
+  English label from "Devices" to "Sources".
+- Render navigation labels with explicit text, normal inactive weight and
+  semibold active weight using Microsoft YaHei UI for Chinese and Segoe UI for
+  English.
+- Animate only the workspace side whose state changed, while settling the
+  unchanged side immediately to prevent competing transition revisions.
+
+### Fixed
+
+- Cancel pending workspace width, opacity and translation animations when
+  entering full screen so an old completion callback cannot restore hidden
+  panels during full-screen preview.
+
 ## [1.5.2] - 2026-07-31
 
 ### Added
@@ -710,7 +737,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.2...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.3...HEAD
+[1.5.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.4.4...v1.5.0

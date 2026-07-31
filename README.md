@@ -300,7 +300,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.5.2 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.5.3 -GenerateSbom
 ```
 
 Inno Setup 6.7.3 及其简体中文翻译会按固定 SHA256 下载到 `work/tools`，无需全局安装。

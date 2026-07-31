@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.5.2</Version>
-    <AssemblyVersion>1.5.2.0</AssemblyVersion>
-    <FileVersion>1.5.2.0</FileVersion>
+    <Version>1.5.3</Version>
+    <AssemblyVersion>1.5.3.0</AssemblyVersion>
+    <FileVersion>1.5.3.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>

@@ -138,7 +138,8 @@
             <Setter Property="Margin" Value="0,2"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontFamily" Value="{DynamicResource NavigationTextFontFamily}"/>
+            <Setter Property="FontWeight" Value="Normal"/>
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -173,13 +174,18 @@
                                                   Content="{TemplateBinding Icon}"
                                                   HorizontalAlignment="Center"
                                                   VerticalAlignment="Center"/>
-                                <ContentPresenter x:Name="PaneItemText"
-                                                  Grid.Column="1"
-                                                  Margin="8,0,12,0"
-                                                  HorizontalAlignment="Left"
-                                                  VerticalAlignment="Center"
-                                                  RecognizesAccessKey="True"
-                                                  ContentSource="Content"/>
+                                <TextBlock x:Name="PaneItemText"
+                                           Grid.Column="1"
+                                           Margin="8,0,12,0"
+                                           HorizontalAlignment="Left"
+                                           VerticalAlignment="Center"
+                                           FontFamily="{TemplateBinding FontFamily}"
+                                           FontSize="{TemplateBinding FontSize}"
+                                           FontWeight="{TemplateBinding FontWeight}"
+                                           Foreground="{TemplateBinding Foreground}"
+                                           Text="{TemplateBinding Content}"
+                                           TextOptions.TextFormattingMode="Display"
+                                           TextTrimming="CharacterEllipsis"/>
                             </Grid>
                         </Grid>
                         <ControlTemplate.Triggers>
@@ -196,6 +202,7 @@
                             </Trigger>
                             <Trigger Property="IsActive" Value="True">
                                 <Setter TargetName="ActiveIndicator" Property="Opacity" Value="1"/>
+                                <Setter TargetName="PaneItemText" Property="FontWeight" Value="SemiBold"/>
                                 <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
                             </Trigger>
                             <MultiTrigger>

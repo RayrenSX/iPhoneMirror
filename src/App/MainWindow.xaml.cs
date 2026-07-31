@@ -25,12 +25,11 @@ namespace IPhoneMirror.App;
 // frames no longer pass through WPF WriteableBitmap or CompositionTarget.
 public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
-    private enum WorkspacePanel
+    private enum LeftWorkspacePanel
     {
         None,
         Mirroring,
         Devices,
-        Settings,
     }
 
     public string VersionText => $"iPhoneMirror {VersionManager.DisplayVersion}";
@@ -79,7 +78,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private string? _projectionSettingsUdid;
     private ulong _projectionSettingsSessionHandle;
     private string? _lastPlaybackReportError;
-    private WorkspacePanel _workspacePanel = WorkspacePanel.Devices;
+    private LeftWorkspacePanel _leftWorkspacePanel = LeftWorkspacePanel.Devices;
+    private bool _isSettingsPanelVisible;
     private bool _isSynchronizingWorkspacePanelControls;
     private bool _workspaceControlsReady;
     private bool _themeControlReady;
@@ -180,17 +180,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void OnNavigateMirroringClick(object sender, RoutedEventArgs e)
     {
         if (!_workspaceControlsReady || _isSynchronizingWorkspacePanelControls) return;
-        SetWorkspacePanel(_workspacePanel == WorkspacePanel.Mirroring
-            ? WorkspacePanel.None
-            : WorkspacePanel.Mirroring);
+        SetLeftWorkspacePanel(_leftWorkspacePanel == LeftWorkspacePanel.Mirroring
+            ? LeftWorkspacePanel.None
+            : LeftWorkspacePanel.Mirroring);
     }
 
     private void OnNavigateDevicesClick(object sender, RoutedEventArgs e)
     {
         if (!_workspaceControlsReady || _isSynchronizingWorkspacePanelControls) return;
-        SetWorkspacePanel(_workspacePanel == WorkspacePanel.Devices
-            ? WorkspacePanel.None
-            : WorkspacePanel.Devices);
+        SetLeftWorkspacePanel(_leftWorkspacePanel == LeftWorkspacePanel.Devices
+            ? LeftWorkspacePanel.None
+            : LeftWorkspacePanel.Devices);
     }
 
     private void OnNavigateOutputClick(object sender, RoutedEventArgs e)
@@ -199,9 +199,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void OnNavigateSettingsClick(object sender, RoutedEventArgs e)
     {
         if (!_workspaceControlsReady || _isSynchronizingWorkspacePanelControls) return;
-        SetWorkspacePanel(_workspacePanel == WorkspacePanel.Settings
-            ? WorkspacePanel.None
-            : WorkspacePanel.Settings);
+        SetSettingsPanelVisible(!_isSettingsPanelVisible);
     }
 
     private void OnNavigateDriverClick(object sender, RoutedEventArgs e)
@@ -214,28 +212,40 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         OnAboutClick(sender, e);
 
     private void OnCloseDevicePanelClick(object sender, RoutedEventArgs e) =>
-        SetWorkspacePanel(WorkspacePanel.None);
+        SetLeftWorkspacePanel(LeftWorkspacePanel.None);
 
     private void OnCloseMirroringPanelClick(object sender, RoutedEventArgs e) =>
-        SetWorkspacePanel(WorkspacePanel.None);
+        SetLeftWorkspacePanel(LeftWorkspacePanel.None);
 
     private void OnCloseSettingsPanelClick(object sender, RoutedEventArgs e) =>
-        SetWorkspacePanel(WorkspacePanel.None);
+        SetSettingsPanelVisible(false);
 
-    private void SetWorkspacePanel(WorkspacePanel panel)
+    private void SetLeftWorkspacePanel(LeftWorkspacePanel panel)
     {
-        if (_workspacePanel == panel) return;
-        _workspacePanel = panel;
-        ApplyWorkspacePanelState(animate: IsLoaded && !_isFullScreen);
-        _viewModel.AddDiagnosticLog(AppLog.Event("workspace_panel_changed",
+        if (_leftWorkspacePanel == panel) return;
+        _leftWorkspacePanel = panel;
+        ApplyWorkspacePanelState(animate: IsLoaded && !_isFullScreen,
+            animateSettings: false);
+        _viewModel.AddDiagnosticLog(AppLog.Event("workspace_left_panel_changed",
             ("panel", panel.ToString().ToLowerInvariant())));
     }
 
-    private void ApplyWorkspacePanelState(bool animate = false)
+    private void SetSettingsPanelVisible(bool visible)
     {
-        var showMirroring = _workspacePanel == WorkspacePanel.Mirroring;
-        var showDevices = _workspacePanel == WorkspacePanel.Devices;
-        var showSettings = _workspacePanel == WorkspacePanel.Settings;
+        if (_isSettingsPanelVisible == visible) return;
+        _isSettingsPanelVisible = visible;
+        ApplyWorkspacePanelState(animate: IsLoaded && !_isFullScreen,
+            animateLeft: false);
+        _viewModel.AddDiagnosticLog(AppLog.Event("workspace_settings_panel_changed",
+            ("visible", visible)));
+    }
+
+    private void ApplyWorkspacePanelState(bool animate = false,
+        bool animateLeft = true, bool animateSettings = true)
+    {
+        var showMirroring = _leftWorkspacePanel == LeftWorkspacePanel.Mirroring;
+        var showDevices = _leftWorkspacePanel == LeftWorkspacePanel.Devices;
+        var showSettings = _isSettingsPanelVisible;
         var showLeftPanel = showMirroring || showDevices;
         DeviceColumn.Width = GridLength.Auto;
         ControlColumn.Width = GridLength.Auto;
@@ -264,10 +274,25 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
 
         var revision = ++_workspaceTransitionRevision;
-        AnimateWorkspaceSurface(LeftPanelHost, showLeftPanel, 300, fromLeft: true, revision);
-        AnimateWorkspacePage(DevicePanel, showDevices, fromLeft: true, revision);
-        AnimateWorkspacePage(MirroringPanel, showMirroring, fromLeft: true, revision);
-        AnimateWorkspaceSurface(ControlPanel, showSettings, 336, fromLeft: false, revision);
+        if (animateLeft)
+        {
+            AnimateWorkspaceSurface(LeftPanelHost, showLeftPanel, 300,
+                fromLeft: true, revision);
+            AnimateWorkspacePage(DevicePanel, showDevices, fromLeft: true, revision);
+            AnimateWorkspacePage(MirroringPanel, showMirroring, fromLeft: true, revision);
+        }
+        else
+        {
+            SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, 300);
+            SetWorkspacePageImmediate(DevicePanel, showDevices);
+            SetWorkspacePageImmediate(MirroringPanel, showMirroring);
+        }
+
+        if (animateSettings)
+            AnimateWorkspaceSurface(ControlPanel, showSettings, 336,
+                fromLeft: false, revision);
+        else
+            SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, 336);
     }
 
     private static void SetWorkspacePageImmediate(FrameworkElement element, bool visible)
@@ -1772,13 +1797,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 throw new InvalidOperationException("Unable to resolve the current display bounds.");
             RootNavigation.IsPaneOpen = false;
             SetNavigationPaneVisible(false);
+            ++_workspaceTransitionRevision;
+            SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: 300);
+            SetWorkspacePageImmediate(DevicePanel, visible: false);
+            SetWorkspacePageImmediate(MirroringPanel, visible: false);
+            SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: 336);
             HeaderPanel.Visibility = Visibility.Collapsed;
-            DevicePanel.Visibility = Visibility.Collapsed;
-            ControlPanel.Visibility = Visibility.Collapsed;
             EnvironmentPanel.Visibility = Visibility.Collapsed;
             StatsPanel.Visibility = Visibility.Collapsed;
             FooterPanel.Visibility = Visibility.Collapsed;
-            MirroringPanel.Visibility = Visibility.Collapsed;
             DeviceColumn.Width = new GridLength(0);
             LeftGapColumn.Width = new GridLength(0);
             RightGapColumn.Width = new GridLength(0);

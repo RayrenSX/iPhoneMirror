@@ -66,6 +66,15 @@ foreach (var localizationPath in Directory.GetFiles(
         .ToArray();
     Equal(0, duplicateKeys.Length,
         $"localization resource keys are unique in {Path.GetFileName(localizationPath)}");
+    var navigationFont = localization.Descendants()
+        .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
+            "NavigationTextFontFamily", StringComparison.Ordinal)).Value.Trim();
+    var expectedNavigationFont = Path.GetFileName(localizationPath)
+        .Contains("zh-CN", StringComparison.OrdinalIgnoreCase)
+        ? "Microsoft YaHei UI"
+        : "Segoe UI";
+    Equal(expectedNavigationFont, navigationFont,
+        $"navigation font matches the interface language in {Path.GetFileName(localizationPath)}");
     var noPingRecovery = localization.Descendants()
         .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
             "CaptureNoPingRecovery", StringComparison.Ordinal)).Value;
@@ -315,7 +324,13 @@ Equal(false, mainWindowText.Contains("PaneTitle=", StringComparison.Ordinal),
     "compact navigation does not repeat the product title inside the pane");
 Equal(true, mainWindowText.Contains("x:Key=\"ShellNavigationItem\"",
         StringComparison.Ordinal) &&
-    mainWindowText.Contains("FontWeight\" Value=\"Medium\"",
+    mainWindowText.Contains(
+        "Value=\"{DynamicResource NavigationTextFontFamily}\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("FontWeight\" Value=\"Normal\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("x:Name=\"PaneItemText\"", StringComparison.Ordinal) &&
+    mainWindowText.Contains("TextOptions.TextFormattingMode=\"Display\"",
         StringComparison.Ordinal) &&
     mainWindowText.Contains("x:Name=\"ActiveIndicator\"",
         StringComparison.Ordinal) &&
@@ -339,9 +354,27 @@ Equal(false, mainWindowText.Contains("x:Name=\"LogExpander\"",
 
 var mainWindowCodePath = Path.Combine(sourceDirectory, "App", "MainWindow.xaml.cs");
 var mainWindowCode = File.ReadAllText(mainWindowCodePath);
+Equal(true,
+    mainWindowCode.Contains("private enum LeftWorkspacePanel", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("private bool _isSettingsPanelVisible;",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("SetSettingsPanelVisible(!_isSettingsPanelVisible)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("var showSettings = _isSettingsPanelVisible;",
+        StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("WorkspacePanel.Settings", StringComparison.Ordinal),
+    "left workspace pages stay exclusive while settings toggles independently");
 Equal(true, mainWindowCode.Contains("AnimateWorkspaceSurface", StringComparison.Ordinal) &&
             mainWindowCode.Contains("BeginAnimation(WidthProperty", StringComparison.Ordinal),
     "workspace panels animate layout width so preview resizing stays continuous");
+Equal(true,
+    mainWindowCode.Contains(
+        "SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: 300)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains(
+        "SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: 336)",
+        StringComparison.Ordinal),
+    "entering full screen cancels pending workspace panel animations");
 Equal(true, mainWindowText.Contains(
         "Background=\"{DynamicResource PreviewChromeBrush}\"", StringComparison.Ordinal),
     "main preview surface follows the active light/dark theme");

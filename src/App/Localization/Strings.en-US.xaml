@@ -1,6 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:system="clr-namespace:System;assembly=mscorlib">
+    <FontFamily x:Key="NavigationTextFontFamily">Segoe UI</FontFamily>
     <system:String x:Key="WindowTitle">iPhoneMirror — USB iPhone/iPad Mirroring</system:String>
     <system:String x:Key="AppSubtitle">Wired iPhone/iPad screen capture for Windows</system:String>
     <system:String x:Key="LanguageSystem">System default</system:String>
@@ -445,13 +446,13 @@
     <system:String x:Key="RetryUpdate">Download again</system:String>
     <system:String x:Key="NavMirroring">Mirroring</system:String>
     <system:String x:Key="ProjectionSettingsDescription">Open common mirroring actions when needed. Image, window, and capture tools become available after mirroring starts.</system:String>
-    <system:String x:Key="NavDevices">Devices</system:String>
+    <system:String x:Key="NavDevices">Sources</system:String>
     <system:String x:Key="NavOutput">Output</system:String>
     <system:String x:Key="NavSettings">Settings</system:String>
     <system:String x:Key="NavDriver">Drivers</system:String>
     <system:String x:Key="NavAbout">About</system:String>
     <system:String x:Key="NavMirroringDescription">Mirroring controls</system:String>
-    <system:String x:Key="NavDevicesDescription">Connected devices</system:String>
+    <system:String x:Key="NavDevicesDescription">Choose a mirroring source</system:String>
     <system:String x:Key="NavSettingsDescription">Projection settings</system:String>
     <system:String x:Key="NavOutputDescription">Output settings</system:String>
     <system:String x:Key="NavDriverDescription">Driver manager</system:String>
