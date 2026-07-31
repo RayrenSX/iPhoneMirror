@@ -29,6 +29,8 @@ All notable changes to iPhoneMirror are documented here. The project follows
   update window. WPF does not allow a render transform directly on `Window`.
 - Make the update progress value binding explicitly one-way so XAML loading
   does not try to write through the view model's read-only public property.
+- Recompute the embedded SPDX manifest's SHA-256 sidecar after enriching the
+  generated SBOM, so portable release archives contain a valid manifest hash.
 
 ## [1.5.1] - 2026-07-31
 

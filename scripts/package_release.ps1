@@ -104,6 +104,18 @@ function Assert-ProductVersion([string]$Path, [string]$ExpectedVersion) {
     }
 }
 
+function Write-Sha256Sidecar([string]$Path) {
+    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumPath = "$Path.sha256"
+    [IO.File]::WriteAllText($checksumPath, $hash, [Text.UTF8Encoding]::new($false))
+
+    $writtenHash = [IO.File]::ReadAllText($checksumPath).Trim()
+    if (-not [string]::Equals($writtenHash, $hash,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Failed to write SHA256 sidecar: $checksumPath"
+    }
+}
+
 function Assert-SafeWorkspaceDirectory([string]$Path) {
     $workspace = [IO.Path]::GetFullPath($Root).TrimEnd('\')
     $fullPath = [IO.Path]::GetFullPath($Path)
@@ -488,6 +500,7 @@ try {
 
         [IO.File]::WriteAllText($GeneratedSbom.FullName,
             ($Sbom | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+        Write-Sha256Sidecar $GeneratedSbom.FullName
         Copy-Item -LiteralPath $GeneratedSbom.FullName -Destination $StagedSbomAsset -Force
     }
 
