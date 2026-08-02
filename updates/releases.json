@@ -3,38 +3,38 @@
     "tag_name": "v1.5.6",
     "name": "iPhoneMirror v1.5.6",
     "body": "v1.5.6 优化高 DPI 窗口尺寸、驱动管理器窗口适配和多投屏来源导航。",
-    "published_at": "2026-08-02T00:00:00Z",
+    "published_at": "2026-08-02T17:28:18Z",
     "draft": false,
     "prerelease": false,
     "assets": [
       {
         "name": "iPhoneMirror-Setup-v1.5.6-x64.exe",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 167279484,
+        "digest": "sha256:cb3998f7765e4e5df9c3a00cd5cd5142cf33009c9158ca043db76dda34df29dd",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/iPhoneMirror-Setup-v1.5.6-x64.exe"
       },
       {
         "name": "iPhoneMirror-v1.5.6-win-x64.zip",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 187985415,
+        "digest": "sha256:f732f0ad09ade9c2199900cb4362d51ce62548810116a34bbd25bff37bd44906",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/iPhoneMirror-v1.5.6-win-x64.zip"
       },
       {
         "name": "iPhoneMirror-v1.5.6-win-x64-latest.zip",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 187985415,
+        "digest": "sha256:f732f0ad09ade9c2199900cb4362d51ce62548810116a34bbd25bff37bd44906",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/iPhoneMirror-v1.5.6-win-x64-latest.zip"
       },
       {
         "name": "iPhoneMirror-v1.5.6-win-x64-sbom.spdx.json",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 67531,
+        "digest": "sha256:4bec08a316bb7cdd560a487d381460d608a822e246aebae4f52b5d787a5cfe89",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/iPhoneMirror-v1.5.6-win-x64-sbom.spdx.json"
       },
       {
         "name": "SHA256SUMS.txt",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 412,
+        "digest": "sha256:c00adee3410e5c3ee1b45975e9ed8ed0632bb246058a4e559f7bb5c493422423",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/SHA256SUMS.txt"
       }
     ]
