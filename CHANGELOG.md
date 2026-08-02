@@ -5,6 +5,32 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.6] - 2026-08-02
+
+### Added
+
+- Automatically open the Sources workspace when a second mirroring source is
+  added, while preserving the user's panel choice during refreshes and removals.
+- Reuse the window work-area controller in the standalone driver manager so its
+  windows receive the same high-DPI and mixed-monitor fitting behavior as the
+  main application.
+
+### Changed
+
+- Limit oversized windows to 80 percent of the active monitor work area when
+  Windows display scaling is above 100 percent, leaving room to reach window
+  borders and surrounding desktop controls.
+- Move shared window fitting behavior into `SharedUI` so the application and
+  driver manager cannot drift into separate implementations.
+- Upgrade the Windows build workflow from `actions/setup-dotnet@v5` to v6.
+
+### Fixed
+
+- Prevent very large high-DPI windows from consuming the entire usable desktop
+  even after their minimum WPF dimensions have been reduced to fit.
+- Avoid reporting a Sources-panel auto-open diagnostic event when that panel was
+  already visible.
+
 ## [1.5.5] - 2026-07-31
 
 ### Added
@@ -792,7 +818,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.5...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.6...HEAD
+[1.5.6]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.5...v1.5.6
 [1.5.5]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.4...v1.5.5
 [1.5.4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.3...v1.5.4
 [1.5.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.2...v1.5.3

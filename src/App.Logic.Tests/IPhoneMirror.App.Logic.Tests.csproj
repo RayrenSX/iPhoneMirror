@@ -21,7 +21,7 @@
     <Compile Include="..\App\Services\IndependentWindowAudioPolicy.cs" Link="IndependentWindowAudioPolicy.cs" />
     <Compile Include="..\App\Services\DriverManagerLauncher.cs" Link="DriverManagerLauncher.cs" />
     <Compile Include="..\App\Services\ThemeService.cs" Link="ThemeService.cs" />
-    <Compile Include="..\App\Services\WindowWorkAreaController.cs" Link="WindowWorkAreaController.cs" />
+    <Compile Include="..\SharedUI\Services\WindowWorkAreaController.cs" Link="WindowWorkAreaController.cs" />
     <Compile Include="..\App\Localization\LocalizationService.cs" Link="LocalizationService.cs" />
     <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
     <Compile Include="..\App\Services\NativeLogTailReader.cs" Link="NativeLogTailReader.cs" />

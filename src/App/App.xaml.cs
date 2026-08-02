@@ -4,6 +4,7 @@ using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
+using IPhoneMirror.SharedUI.Services;
 
 namespace IPhoneMirror.App;
 

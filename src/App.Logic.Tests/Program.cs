@@ -5,6 +5,7 @@ using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Updater;
 using IPhoneMirror.Shared.Networking;
+using IPhoneMirror.SharedUI.Services;
 
 var diagnosticTestRoot = Path.Combine(Path.GetTempPath(),
     $"iPhoneMirror-test-logs-{Guid.NewGuid():N}");
@@ -152,18 +153,18 @@ var highDpiWindowLayout = WindowWorkAreaController.CalculateLayout(
     currentLeft: -580, currentTop: -380, currentWidth: 3080, currentHeight: 1800,
     workLeft: 0, workTop: 0, workWidth: 1920, workHeight: 1040,
     dpi: 192, designMinWidth: 1280, designMinHeight: 700, center: true);
-Equal(0, highDpiWindowLayout.Left,
-    "oversized high-DPI window starts inside the work area");
-Equal(0, highDpiWindowLayout.Top,
-    "oversized high-DPI window stays below the work-area top");
-Equal(1920, highDpiWindowLayout.Width,
-    "oversized high-DPI window is clamped to the work-area width");
-Equal(1040, highDpiWindowLayout.Height,
-    "oversized high-DPI window is clamped to the work-area height");
-Equal(960d, highDpiWindowLayout.MinWidth,
-    "minimum width is lowered when 200 percent scaling leaves fewer DIPs");
-Equal(520d, highDpiWindowLayout.MinHeight,
-    "minimum height is lowered when 200 percent scaling leaves fewer DIPs");
+Equal(192, highDpiWindowLayout.Left,
+    "80 percent high-DPI window is centered horizontally");
+Equal(104, highDpiWindowLayout.Top,
+    "80 percent high-DPI window is centered vertically");
+Equal(1536, highDpiWindowLayout.Width,
+    "high-DPI window width is capped at 80 percent of the work area");
+Equal(832, highDpiWindowLayout.Height,
+    "high-DPI window height is capped at 80 percent of the work area");
+Equal(768d, highDpiWindowLayout.MinWidth,
+    "minimum width cannot force a 200 percent window above the 80 percent cap");
+Equal(416d, highDpiWindowLayout.MinHeight,
+    "minimum height cannot force a 200 percent window above the 80 percent cap");
 
 var secondaryMonitorLayout = WindowWorkAreaController.CalculateLayout(
     currentLeft: -2200, currentTop: 200, currentWidth: 1200, currentHeight: 800,
@@ -175,6 +176,10 @@ Equal(200, secondaryMonitorLayout.Top,
     "an already valid window is not needlessly repositioned after a DPI change");
 Equal(1200, secondaryMonitorLayout.Width,
     "an already smaller window is never enlarged by work-area fitting");
+Equal(800d, secondaryMonitorLayout.MinWidth,
+    "high-DPI minimum width follows an already smaller window");
+Equal(533.3333333333334d, secondaryMonitorLayout.MinHeight,
+    "high-DPI minimum height follows an already smaller window");
 var previewQuickActions = mainWindow.Descendants()
     .SingleOrDefault(element =>
         string.Equals((string?)element.Attribute(xaml + "Name"),
@@ -442,6 +447,13 @@ Equal(true,
         StringComparison.Ordinal) &&
     !mainWindowCode.Contains("WorkspacePanel.Settings", StringComparison.Ordinal),
     "left workspace pages stay exclusive while settings toggles independently");
+Equal(true,
+    mainWindowCode.Contains(
+        "_leftWorkspacePanel == LeftWorkspacePanel.Devices)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("workspace_left_panel_auto_opened",
+        StringComparison.Ordinal),
+    "source auto-open telemetry is emitted only when the panel actually changes");
 Equal(true, mainWindowCode.Contains("AnimateWorkspaceSurface", StringComparison.Ordinal) &&
             mainWindowCode.Contains("BeginAnimation(WidthProperty", StringComparison.Ordinal),
     "workspace panels animate layout width so preview resizing stays continuous");

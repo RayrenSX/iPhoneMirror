@@ -4,7 +4,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
 
-namespace IPhoneMirror.App.Services;
+namespace IPhoneMirror.SharedUI.Services;
 
 internal readonly record struct WindowWorkAreaLayout(
     int Left,
@@ -16,6 +16,7 @@ internal readonly record struct WindowWorkAreaLayout(
 
 internal static class WindowWorkAreaController
 {
+    private const double HighDpiWorkAreaRatio = 0.80;
     private const uint MonitorDefaultToNearest = 2;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
@@ -93,8 +94,14 @@ internal static class WindowWorkAreaController
         if (workHeight <= 0) throw new ArgumentOutOfRangeException(nameof(workHeight));
         if (dpi == 0) throw new ArgumentOutOfRangeException(nameof(dpi));
 
-        var width = Math.Min(Math.Max(1, currentWidth), workWidth);
-        var height = Math.Min(Math.Max(1, currentHeight), workHeight);
+        var maximumWidth = dpi > 96
+            ? Math.Max(1, (int)Math.Round(workWidth * HighDpiWorkAreaRatio))
+            : workWidth;
+        var maximumHeight = dpi > 96
+            ? Math.Max(1, (int)Math.Round(workHeight * HighDpiWorkAreaRatio))
+            : workHeight;
+        var width = Math.Min(Math.Max(1, currentWidth), maximumWidth);
+        var height = Math.Min(Math.Max(1, currentHeight), maximumHeight);
         var maxLeft = workLeft + workWidth - width;
         var maxTop = workTop + workHeight - height;
         var left = center
@@ -107,8 +114,8 @@ internal static class WindowWorkAreaController
 
         return new WindowWorkAreaLayout(
             left, top, width, height,
-            Math.Min(Math.Max(0, designMinWidth), workWidth / scale),
-            Math.Min(Math.Max(0, designMinHeight), workHeight / scale));
+            Math.Min(Math.Max(0, designMinWidth), width / scale),
+            Math.Min(Math.Max(0, designMinHeight), height / scale));
     }
 
     [StructLayout(LayoutKind.Sequential)]
