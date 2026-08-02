@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Collections.Specialized;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -98,6 +99,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _secondaryMirrors = new MultiDevicePreviewManager(_viewModel);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.Devices.CollectionChanged += OnDevicesCollectionChanged;
         _viewModel.DeviceVideoSizeChanged += OnDeviceVideoSizeChanged;
         _viewModel.DeviceSessionHandleChanged += OnDeviceSessionHandleChanged;
         _viewModel.MediaCastCommandReceived += OnMediaCastCommandReceived;
@@ -470,6 +472,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_shutdown_begin"));
         _shutdownStarted = true;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _viewModel.Devices.CollectionChanged -= OnDevicesCollectionChanged;
         _viewModel.DeviceVideoSizeChanged -= OnDeviceVideoSizeChanged;
         _viewModel.DeviceSessionHandleChanged -= OnDeviceSessionHandleChanged;
         _viewModel.MediaCastCommandReceived -= OnMediaCastCommandReceived;
@@ -1691,6 +1694,21 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         else if (e.PropertyName == nameof(MainViewModel.IsCapturing))
             QueueMainPreviewHostSync();
+    }
+
+    private void OnDevicesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        // A source panel is useful once there is a choice. Open it exactly
+        // when a new source is added; refreshes and removals must not override
+        // the user's current panel choice.
+        if (e.Action != NotifyCollectionChangedAction.Add ||
+            e.NewItems is null || e.NewItems.Count == 0 || _viewModel.Devices.Count <= 1 ||
+            _leftWorkspacePanel == LeftWorkspacePanel.Devices)
+            return;
+
+        SetLeftWorkspacePanel(LeftWorkspacePanel.Devices);
+        _viewModel.AddDiagnosticLog(AppLog.Event("workspace_left_panel_auto_opened",
+            ("reason", "device_added"), ("device_count", _viewModel.Devices.Count)));
     }
 
     private void QueueMainPreviewHostSync() =>

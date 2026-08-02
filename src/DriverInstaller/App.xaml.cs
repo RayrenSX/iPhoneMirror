@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows;
 using IPhoneMirror.DriverInstaller.Models;
 using IPhoneMirror.DriverInstaller.Services;
+using IPhoneMirror.SharedUI.Services;
 
 namespace IPhoneMirror.DriverInstaller;
 
@@ -57,6 +58,7 @@ public partial class App : Application
         EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
             new RoutedEventHandler((sender, _) =>
                 DriverThemeService.Attach((Window)sender)));
+        WindowWorkAreaController.EnableForApplication();
         DriverLogger.WriteEvent("lifecycle", "ui_session_start",
             ("kind", "interactive"),
             ("culture", DriverLocalization.Culture.Name));

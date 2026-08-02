@@ -1,41 +1,41 @@
 [
   {
-    "tag_name": "v1.5.5",
-    "name": "iPhoneMirror v1.5.5",
-    "body": "v1.5.5 优化高 DPI 窗口适配、GitHub 更新镜像与多线程下载，并改用 Apple 官方独立驱动 MSI 下载路径。",
-    "published_at": "2026-07-31T16:07:03Z",
+    "tag_name": "v1.5.6",
+    "name": "iPhoneMirror v1.5.6",
+    "body": "v1.5.6 优化高 DPI 窗口尺寸、驱动管理器窗口适配和多投屏来源导航。",
+    "published_at": "2026-08-02T17:28:18Z",
     "draft": false,
     "prerelease": false,
     "assets": [
       {
-        "name": "iPhoneMirror-Setup-v1.5.5-x64.exe",
-        "size": 167277634,
-        "digest": "sha256:9a0fe6b5f673c96a54c5d4596aea10b8cd34f0c084595347b0333ea0da17cb8b",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.5/iPhoneMirror-Setup-v1.5.5-x64.exe"
+        "name": "iPhoneMirror-Setup-v1.5.6-x64.exe",
+        "size": 167279484,
+        "digest": "sha256:cb3998f7765e4e5df9c3a00cd5cd5142cf33009c9158ca043db76dda34df29dd",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/iPhoneMirror-Setup-v1.5.6-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.5.5-win-x64.zip",
-        "size": 187980382,
-        "digest": "sha256:b353abd032f053484abd7603571edf5a9f2cf331d33508efb6047608284f876b",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.5/iPhoneMirror-v1.5.5-win-x64.zip"
+        "name": "iPhoneMirror-v1.5.6-win-x64.zip",
+        "size": 187985415,
+        "digest": "sha256:f732f0ad09ade9c2199900cb4362d51ce62548810116a34bbd25bff37bd44906",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/iPhoneMirror-v1.5.6-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.5.5-win-x64-latest.zip",
-        "size": 187980382,
-        "digest": "sha256:b353abd032f053484abd7603571edf5a9f2cf331d33508efb6047608284f876b",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.5/iPhoneMirror-v1.5.5-win-x64-latest.zip"
+        "name": "iPhoneMirror-v1.5.6-win-x64-latest.zip",
+        "size": 187985415,
+        "digest": "sha256:f732f0ad09ade9c2199900cb4362d51ce62548810116a34bbd25bff37bd44906",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/iPhoneMirror-v1.5.6-win-x64-latest.zip"
       },
       {
-        "name": "iPhoneMirror-v1.5.5-win-x64-sbom.spdx.json",
+        "name": "iPhoneMirror-v1.5.6-win-x64-sbom.spdx.json",
         "size": 67531,
-        "digest": "sha256:a34fd68a34d1cf8c58537e00c5054250171464826310258fc46630ea2b69433d",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.5/iPhoneMirror-v1.5.5-win-x64-sbom.spdx.json"
+        "digest": "sha256:4bec08a316bb7cdd560a487d381460d608a822e246aebae4f52b5d787a5cfe89",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/iPhoneMirror-v1.5.6-win-x64-sbom.spdx.json"
       },
       {
         "name": "SHA256SUMS.txt",
         "size": 412,
-        "digest": "sha256:6c270a6da8d7220893d3828e84c0dd037a4958d702bf3c486892b425703017fe",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.5/SHA256SUMS.txt"
+        "digest": "sha256:c00adee3410e5c3ee1b45975e9ed8ed0632bb246058a4e559f7bb5c493422423",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.6/SHA256SUMS.txt"
       }
     ]
   }
