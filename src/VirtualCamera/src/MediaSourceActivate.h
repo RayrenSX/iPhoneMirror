@@ -21,21 +21,21 @@ public:
     IFACEMETHODIMP ShutdownObject() override;
     IFACEMETHODIMP DetachObject() override;
 
-    IFACEMETHODIMP GetItem(REFGUID key, PROPVARIANT* value) override;
+    IFACEMETHODIMP GetItem(REFGUID key, PROPVARIANT* result) override;
     IFACEMETHODIMP GetItemType(REFGUID key, MF_ATTRIBUTE_TYPE* type) override;
-    IFACEMETHODIMP CompareItem(REFGUID key, REFPROPVARIANT value,
+    IFACEMETHODIMP CompareItem(REFGUID key, REFPROPVARIANT item,
                               BOOL* result) override;
     IFACEMETHODIMP Compare(IMFAttributes* theirs,
                           MF_ATTRIBUTES_MATCH_TYPE match_type,
                           BOOL* result) override;
-    IFACEMETHODIMP GetUINT32(REFGUID key, UINT32* value) override;
-    IFACEMETHODIMP GetUINT64(REFGUID key, UINT64* value) override;
-    IFACEMETHODIMP GetDouble(REFGUID key, double* value) override;
-    IFACEMETHODIMP GetGUID(REFGUID key, GUID* value) override;
+    IFACEMETHODIMP GetUINT32(REFGUID key, UINT32* result) override;
+    IFACEMETHODIMP GetUINT64(REFGUID key, UINT64* result) override;
+    IFACEMETHODIMP GetDouble(REFGUID key, double* result) override;
+    IFACEMETHODIMP GetGUID(REFGUID key, GUID* result) override;
     IFACEMETHODIMP GetStringLength(REFGUID key, UINT32* length) override;
-    IFACEMETHODIMP GetString(REFGUID key, LPWSTR value, UINT32 value_size,
+    IFACEMETHODIMP GetString(REFGUID key, LPWSTR buffer, UINT32 buffer_size,
                             UINT32* length) override;
-    IFACEMETHODIMP GetAllocatedString(REFGUID key, LPWSTR* value,
+    IFACEMETHODIMP GetAllocatedString(REFGUID key, LPWSTR* result,
                                      UINT32* length) override;
     IFACEMETHODIMP GetBlobSize(REFGUID key, UINT32* size) override;
     IFACEMETHODIMP GetBlob(REFGUID key, UINT8* buffer, UINT32 buffer_size,
@@ -43,14 +43,14 @@ public:
     IFACEMETHODIMP GetAllocatedBlob(REFGUID key, UINT8** buffer,
                                    UINT32* size) override;
     IFACEMETHODIMP GetUnknown(REFGUID key, REFIID riid, void** object) override;
-    IFACEMETHODIMP SetItem(REFGUID key, REFPROPVARIANT value) override;
+    IFACEMETHODIMP SetItem(REFGUID key, REFPROPVARIANT item) override;
     IFACEMETHODIMP DeleteItem(REFGUID key) override;
     IFACEMETHODIMP DeleteAllItems() override;
-    IFACEMETHODIMP SetUINT32(REFGUID key, UINT32 value) override;
-    IFACEMETHODIMP SetUINT64(REFGUID key, UINT64 value) override;
-    IFACEMETHODIMP SetDouble(REFGUID key, double value) override;
-    IFACEMETHODIMP SetGUID(REFGUID key, REFGUID value) override;
-    IFACEMETHODIMP SetString(REFGUID key, LPCWSTR value) override;
+    IFACEMETHODIMP SetUINT32(REFGUID key, UINT32 item) override;
+    IFACEMETHODIMP SetUINT64(REFGUID key, UINT64 item) override;
+    IFACEMETHODIMP SetDouble(REFGUID key, double item) override;
+    IFACEMETHODIMP SetGUID(REFGUID key, REFGUID item) override;
+    IFACEMETHODIMP SetString(REFGUID key, LPCWSTR item) override;
     IFACEMETHODIMP SetBlob(REFGUID key, const UINT8* buffer,
                           UINT32 buffer_size) override;
     IFACEMETHODIMP SetUnknown(REFGUID key, IUnknown* object) override;
@@ -58,7 +58,7 @@ public:
     IFACEMETHODIMP UnlockStore() override;
     IFACEMETHODIMP GetCount(UINT32* count) override;
     IFACEMETHODIMP GetItemByIndex(UINT32 index, GUID* key,
-                                 PROPVARIANT* value) override;
+                                 PROPVARIANT* result) override;
     IFACEMETHODIMP CopyAllItems(IMFAttributes* destination) override;
 
 private:

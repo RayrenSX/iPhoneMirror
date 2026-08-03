@@ -354,12 +354,13 @@ HRESULT MediaStream::GetEvent(DWORD flags, IMFMediaEvent** event) {
 }
 
 HRESULT MediaStream::QueueEvent(MediaEventType type, REFGUID extended_type,
-                                HRESULT status, const PROPVARIANT* value) {
+                                HRESULT status,
+                                const PROPVARIANT* event_value) {
     ComPtr<IMFMediaEventQueue> queue;
     HRESULT hr = copy_event_queue(mutex_, event_queue_, queue);
     return FAILED(hr) ? hr
                       : queue->QueueEventParamVar(type, extended_type, status,
-                                                 value);
+                                                 event_value);
 }
 
 HRESULT MediaStream::GetMediaSource(IMFMediaSource** source) {
@@ -727,12 +728,13 @@ HRESULT MediaSource::GetEvent(DWORD flags, IMFMediaEvent** event) {
 }
 
 HRESULT MediaSource::QueueEvent(MediaEventType type, REFGUID extended_type,
-                                HRESULT status, const PROPVARIANT* value) {
+                                HRESULT status,
+                                const PROPVARIANT* event_value) {
     ComPtr<IMFMediaEventQueue> queue;
     HRESULT hr = copy_event_queue(mutex_, event_queue_, queue);
     return FAILED(hr) ? hr
                       : queue->QueueEventParamVar(type, extended_type, status,
-                                                 value);
+                                                 event_value);
 }
 
 HRESULT MediaSource::GetCharacteristics(DWORD* characteristics) {

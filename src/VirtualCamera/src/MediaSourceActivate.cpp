@@ -34,17 +34,17 @@ HRESULT MediaSourceActivate::DetachObject() {
     return S_OK;
 }
 
-HRESULT MediaSourceActivate::GetItem(REFGUID key, PROPVARIANT* value) {
-    return attributes_->GetItem(key, value);
+HRESULT MediaSourceActivate::GetItem(REFGUID key, PROPVARIANT* result) {
+    return attributes_->GetItem(key, result);
 }
 
 HRESULT MediaSourceActivate::GetItemType(REFGUID key, MF_ATTRIBUTE_TYPE* type) {
     return attributes_->GetItemType(key, type);
 }
 
-HRESULT MediaSourceActivate::CompareItem(REFGUID key, REFPROPVARIANT value,
+HRESULT MediaSourceActivate::CompareItem(REFGUID key, REFPROPVARIANT item,
                                          BOOL* result) {
-    return attributes_->CompareItem(key, value, result);
+    return attributes_->CompareItem(key, item, result);
 }
 
 HRESULT MediaSourceActivate::Compare(IMFAttributes* theirs,
@@ -53,34 +53,34 @@ HRESULT MediaSourceActivate::Compare(IMFAttributes* theirs,
     return attributes_->Compare(theirs, match_type, result);
 }
 
-HRESULT MediaSourceActivate::GetUINT32(REFGUID key, UINT32* value) {
-    return attributes_->GetUINT32(key, value);
+HRESULT MediaSourceActivate::GetUINT32(REFGUID key, UINT32* result) {
+    return attributes_->GetUINT32(key, result);
 }
 
-HRESULT MediaSourceActivate::GetUINT64(REFGUID key, UINT64* value) {
-    return attributes_->GetUINT64(key, value);
+HRESULT MediaSourceActivate::GetUINT64(REFGUID key, UINT64* result) {
+    return attributes_->GetUINT64(key, result);
 }
 
-HRESULT MediaSourceActivate::GetDouble(REFGUID key, double* value) {
-    return attributes_->GetDouble(key, value);
+HRESULT MediaSourceActivate::GetDouble(REFGUID key, double* result) {
+    return attributes_->GetDouble(key, result);
 }
 
-HRESULT MediaSourceActivate::GetGUID(REFGUID key, GUID* value) {
-    return attributes_->GetGUID(key, value);
+HRESULT MediaSourceActivate::GetGUID(REFGUID key, GUID* result) {
+    return attributes_->GetGUID(key, result);
 }
 
 HRESULT MediaSourceActivate::GetStringLength(REFGUID key, UINT32* length) {
     return attributes_->GetStringLength(key, length);
 }
 
-HRESULT MediaSourceActivate::GetString(REFGUID key, LPWSTR value,
-                                       UINT32 value_size, UINT32* length) {
-    return attributes_->GetString(key, value, value_size, length);
+HRESULT MediaSourceActivate::GetString(REFGUID key, LPWSTR buffer,
+                                       UINT32 buffer_size, UINT32* length) {
+    return attributes_->GetString(key, buffer, buffer_size, length);
 }
 
-HRESULT MediaSourceActivate::GetAllocatedString(REFGUID key, LPWSTR* value,
+HRESULT MediaSourceActivate::GetAllocatedString(REFGUID key, LPWSTR* result,
                                                 UINT32* length) {
-    return attributes_->GetAllocatedString(key, value, length);
+    return attributes_->GetAllocatedString(key, result, length);
 }
 
 HRESULT MediaSourceActivate::GetBlobSize(REFGUID key, UINT32* size) {
@@ -102,8 +102,8 @@ HRESULT MediaSourceActivate::GetUnknown(REFGUID key, REFIID riid,
     return attributes_->GetUnknown(key, riid, object);
 }
 
-HRESULT MediaSourceActivate::SetItem(REFGUID key, REFPROPVARIANT value) {
-    return attributes_->SetItem(key, value);
+HRESULT MediaSourceActivate::SetItem(REFGUID key, REFPROPVARIANT item) {
+    return attributes_->SetItem(key, item);
 }
 
 HRESULT MediaSourceActivate::DeleteItem(REFGUID key) {
@@ -114,24 +114,24 @@ HRESULT MediaSourceActivate::DeleteAllItems() {
     return attributes_->DeleteAllItems();
 }
 
-HRESULT MediaSourceActivate::SetUINT32(REFGUID key, UINT32 value) {
-    return attributes_->SetUINT32(key, value);
+HRESULT MediaSourceActivate::SetUINT32(REFGUID key, UINT32 item) {
+    return attributes_->SetUINT32(key, item);
 }
 
-HRESULT MediaSourceActivate::SetUINT64(REFGUID key, UINT64 value) {
-    return attributes_->SetUINT64(key, value);
+HRESULT MediaSourceActivate::SetUINT64(REFGUID key, UINT64 item) {
+    return attributes_->SetUINT64(key, item);
 }
 
-HRESULT MediaSourceActivate::SetDouble(REFGUID key, double value) {
-    return attributes_->SetDouble(key, value);
+HRESULT MediaSourceActivate::SetDouble(REFGUID key, double item) {
+    return attributes_->SetDouble(key, item);
 }
 
-HRESULT MediaSourceActivate::SetGUID(REFGUID key, REFGUID value) {
-    return attributes_->SetGUID(key, value);
+HRESULT MediaSourceActivate::SetGUID(REFGUID key, REFGUID item) {
+    return attributes_->SetGUID(key, item);
 }
 
-HRESULT MediaSourceActivate::SetString(REFGUID key, LPCWSTR value) {
-    return attributes_->SetString(key, value);
+HRESULT MediaSourceActivate::SetString(REFGUID key, LPCWSTR item) {
+    return attributes_->SetString(key, item);
 }
 
 HRESULT MediaSourceActivate::SetBlob(REFGUID key, const UINT8* buffer,
@@ -152,8 +152,8 @@ HRESULT MediaSourceActivate::GetCount(UINT32* count) {
 }
 
 HRESULT MediaSourceActivate::GetItemByIndex(UINT32 index, GUID* key,
-                                            PROPVARIANT* value) {
-    return attributes_->GetItemByIndex(index, key, value);
+                                            PROPVARIANT* result) {
+    return attributes_->GetItemByIndex(index, key, result);
 }
 
 HRESULT MediaSourceActivate::CopyAllItems(IMFAttributes* destination) {
