@@ -3,7 +3,7 @@
     "tag_name": "v1.5.8",
     "name": "iPhoneMirror v1.5.8",
     "body": "v1.5.8 加入单实例启动保护，优化现代滚动条与浅色主题可读性，并修复媒体输出启动期间的进程退出竞态。",
-    "published_at": "2026-08-03T13:36:00Z",
+    "published_at": "2026-08-03T13:48:54Z",
     "draft": false,
     "prerelease": false,
     "assets": [
