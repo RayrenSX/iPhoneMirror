@@ -1,4 +1,5 @@
 name: Windows build
+run-name: Windows build
 
 on:
   push:
