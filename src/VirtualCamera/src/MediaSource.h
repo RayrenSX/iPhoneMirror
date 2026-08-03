@@ -44,7 +44,7 @@ public:
     IFACEMETHODIMP GetEvent(DWORD flags, IMFMediaEvent** event) override;
     IFACEMETHODIMP QueueEvent(MediaEventType type, REFGUID extended_type,
                              HRESULT status,
-                             const PROPVARIANT* value) override;
+                             const PROPVARIANT* event_value) override;
 
     IFACEMETHODIMP GetMediaSource(IMFMediaSource** source) override;
     IFACEMETHODIMP GetStreamDescriptor(IMFStreamDescriptor** descriptor) override;
@@ -106,7 +106,7 @@ public:
     IFACEMETHODIMP GetEvent(DWORD flags, IMFMediaEvent** event) override;
     IFACEMETHODIMP QueueEvent(MediaEventType type, REFGUID extended_type,
                              HRESULT status,
-                             const PROPVARIANT* value) override;
+                             const PROPVARIANT* event_value) override;
 
     IFACEMETHODIMP GetCharacteristics(DWORD* characteristics) override;
     IFACEMETHODIMP CreatePresentationDescriptor(
