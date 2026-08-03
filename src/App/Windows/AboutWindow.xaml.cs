@@ -16,8 +16,6 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
 {
-    public sealed record ThemeChoice(AppTheme Value, string Label);
-
     private readonly App _app;
     private readonly MainViewModel _mainViewModel;
     private readonly DispatcherTimer _logTimer;
@@ -27,7 +25,6 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
     public string VersionText => VersionManager.DisplayVersion;
     public string DiagnosticPath => DiagnosticLogger.DirectoryPath;
     public object MainViewModel => _mainViewModel;
-    public IReadOnlyList<ThemeChoice> ThemeChoices { get; }
     public string UpdateStatus
     {
         get => _updateStatus;
@@ -58,16 +55,6 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
         get => _app.UpdateSettings.NotifyPrereleaseReleases;
         set => _app.UpdateSettings.NotifyPrereleaseReleases = value;
     }
-    public AppTheme SelectedTheme
-    {
-        get => _app.UpdateSettings.Theme;
-        set
-        {
-            _app.UpdateSettings.Theme = value;
-            ThemeService.Apply(value);
-        }
-    }
-
     internal AboutWindow(App app, MainViewModel mainViewModel)
     {
         _app = app;
@@ -76,12 +63,6 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
         _logTimer.Tick += OnLogTimerTick;
         _updateStatus = LocalizationService.Get("UpdateStatusReady");
         _diagnosticStatus = LocalizationService.Get("DiagnosticsRetentionSummary");
-        ThemeChoices =
-        [
-            new(AppTheme.System, LocalizationService.Get("ThemeSystem")),
-            new(AppTheme.Dark, LocalizationService.Get("ThemeDark")),
-            new(AppTheme.Light, LocalizationService.Get("ThemeLight")),
-        ];
         DataContext = this;
         InitializeComponent();
         ThemeService.Attach(this);

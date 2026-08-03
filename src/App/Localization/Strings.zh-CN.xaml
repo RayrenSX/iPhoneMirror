@@ -395,7 +395,7 @@
     <system:String x:Key="UnknownError">未知错误</system:String>
     <system:String x:Key="AboutTitle">关于</system:String>
     <system:String x:Key="AboutToolTip">关于和更新设置</system:String>
-    <system:String x:Key="AboutSubtitle">应用信息、更新和外观</system:String>
+    <system:String x:Key="AboutSubtitle">应用信息、更新和诊断</system:String>
     <system:String x:Key="AboutDescription">低延迟 iPhone 屏幕投射、录制、直播与虚拟摄像头。</system:String>
     <system:String x:Key="UpdateStatusTitle">更新状态</system:String>
     <system:String x:Key="UpdateStatusReady">可随时检查 GitHub Release 更新。</system:String>
@@ -403,7 +403,7 @@
     <system:String x:Key="Changelog">更新日志</system:String>
     <system:String x:Key="LicenseInformation">许可证信息</system:String>
     <system:String x:Key="UpdateSettingsTitle">更新设置</system:String>
-    <system:String x:Key="UpdateSettingsDescription">控制后台检查、自动下载、镜像回退、发布通道和应用主题。</system:String>
+    <system:String x:Key="UpdateSettingsDescription">控制后台检查、自动下载、镜像回退和发布通道。</system:String>
     <system:String x:Key="DiagnosticsTitle">诊断</system:String>
     <system:String x:Key="DiagnosticsDescription">应用错误、投屏核心和更新流程会写入本地日志，便于排查其他电脑上的问题。</system:String>
     <system:String x:Key="DiagnosticsLocation">日志位置</system:String>

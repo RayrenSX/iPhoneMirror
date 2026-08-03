@@ -395,7 +395,7 @@
     <system:String x:Key="UnknownError">Unknown error</system:String>
     <system:String x:Key="AboutTitle">About</system:String>
     <system:String x:Key="AboutToolTip">About and update settings</system:String>
-    <system:String x:Key="AboutSubtitle">App information, updates, and appearance</system:String>
+    <system:String x:Key="AboutSubtitle">App information, updates, and diagnostics</system:String>
     <system:String x:Key="AboutDescription">Low-latency iPhone mirroring, recording, streaming, and virtual camera output.</system:String>
     <system:String x:Key="UpdateStatusTitle">Update status</system:String>
     <system:String x:Key="UpdateStatusReady">Check GitHub Releases for updates at any time.</system:String>
@@ -403,7 +403,7 @@
     <system:String x:Key="Changelog">Changelog</system:String>
     <system:String x:Key="LicenseInformation">License information</system:String>
     <system:String x:Key="UpdateSettingsTitle">Update settings</system:String>
-    <system:String x:Key="UpdateSettingsDescription">Control background checks, automatic downloads, mirror fallback, release channels, and the app theme.</system:String>
+    <system:String x:Key="UpdateSettingsDescription">Control background checks, automatic downloads, mirror fallback, and release channels.</system:String>
     <system:String x:Key="DiagnosticsTitle">Diagnostics</system:String>
     <system:String x:Key="DiagnosticsDescription">Application errors, capture-core events, and update workflows are written to local logs for troubleshooting failures on other PCs.</system:String>
     <system:String x:Key="DiagnosticsLocation">Log location</system:String>

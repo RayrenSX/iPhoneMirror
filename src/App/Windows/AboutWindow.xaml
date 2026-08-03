@@ -111,15 +111,6 @@
                                       IsChecked="{Binding NotifyStableReleases}" Margin="0,0,0,14"/>
                             <CheckBox Content="{DynamicResource NotifyPrereleaseReleases}"
                                       IsChecked="{Binding NotifyPrereleaseReleases}"/>
-                            <Border Height="1" Background="{DynamicResource BorderSoftBrush}"
-                                    Margin="0,20"/>
-                            <TextBlock Text="{DynamicResource ThemeTitle}"
-                                       Style="{StaticResource SubWindowSectionTitle}"/>
-                            <ComboBox ItemsSource="{Binding ThemeChoices}"
-                                      DisplayMemberPath="Label" SelectedValuePath="Value"
-                                      SelectedValue="{Binding SelectedTheme}"
-                                      Width="230" HorizontalAlignment="Left"
-                                      Margin="0,10,0,0"/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

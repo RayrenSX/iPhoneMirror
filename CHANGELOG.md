@@ -5,6 +5,22 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.7] - 2026-08-03
+
+### Changed
+
+- Keep app theme selection in the main App preferences only, removing the
+  duplicate control from the About window.
+- Rename virtual-camera COM implementation parameters that shadow inherited
+  interface names, keeping warning-clean Release builds without behavior changes.
+
+### Fixed
+
+- Refresh every open child window with its own backdrop type after switching
+  between light and dark themes, preventing mixed or incorrectly tinted colors.
+- Resolve theme dictionaries through the application assembly so theme changes
+  remain reliable when the UI is hosted by runtime tests or another executable.
+
 ## [1.5.6] - 2026-08-02
 
 ### Added
@@ -818,7 +834,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.6...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.7...HEAD
+[1.5.7]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.6...v1.5.7
 [1.5.6]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.5...v1.5.6
 [1.5.5]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.4...v1.5.5
 [1.5.4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.3...v1.5.4

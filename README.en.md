@@ -45,8 +45,9 @@ By default the app checks GitHub Releases after startup. When an update is
 available, it shows the version, publication date, and Markdown release notes;
 **Update now** downloads, verifies, and launches the in-place upgrade, then
 restarts the app. The About page also provides manual checks, stable/Beta
-channel controls, automatic downloads, and theme settings. Network failures and
-timeouts never block normal startup.
+channel controls, and automatic downloads. App themes are configured under App
+preferences in the main window. Network failures and timeouts never block normal
+startup.
 
 The [complete user guide (Chinese)](docs/USER_GUIDE.md) covers every main interface and workflow.
 
@@ -306,7 +307,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.5.6 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.5.7 -GenerateSbom
 ```
 
 The script downloads hash-pinned Inno Setup 6.7.3 and its Simplified Chinese

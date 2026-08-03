@@ -98,7 +98,8 @@ iPhoneMirror 当前不提供手机触控或远程控制，也没有内建视频�
 
 程序默认在启动后后台检查 GitHub Release。发现更新时会显示版本、发布日期和 Markdown
 更新说明；点击“立即更新”即可下载、校验并启动覆盖安装，完成后自动重新打开程序。
-“关于”页面可手动检查更新，并可分别控制启动检查、自动下载、正式版/Beta 提醒和主题。
+“关于”页面可手动检查更新，并可分别控制启动检查、自动下载和正式版/Beta 提醒；
+应用主题在主界面的“应用偏好”中设置。
 网络不可用或检查超时不会影响正常启动。
 
 完整操作说明见 [使用教程](docs/USER_GUIDE.md)。
@@ -300,7 +301,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.5.6 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.5.7 -GenerateSbom
 ```
 
 Inno Setup 6.7.3 及其简体中文翻译会按固定 SHA256 下载到 `work/tools`，无需全局安装。
