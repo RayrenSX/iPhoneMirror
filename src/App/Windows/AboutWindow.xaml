@@ -11,6 +11,14 @@
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}"
         AutomationProperties.AutomationId="AboutWindow">
+    <ui:FluentWindow.Resources>
+        <Style x:Key="AboutCheckUpdatesButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="Foreground"
+                    Value="{DynamicResource AboutCheckUpdatesTextBrush}"/>
+        </Style>
+    </ui:FluentWindow.Resources>
     <Grid Style="{StaticResource SubWindowPageRoot}"
           animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
@@ -75,7 +83,7 @@
                             <WrapPanel>
                                 <Button Content="{DynamicResource CheckForUpdates}"
                                         Click="OnCheckUpdatesClick"
-                                        Style="{StaticResource PrimaryButton}"
+                                        Style="{StaticResource AboutCheckUpdatesButtonStyle}"
                                         MinWidth="138" Margin="0,0,8,8"/>
                                 <Button Content="GitHub" Click="OnGitHubClick"
                                         MinWidth="96" Margin="0,0,8,8"/>

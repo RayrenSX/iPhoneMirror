@@ -41,53 +41,19 @@
 
     <Style x:Key="ModernVerticalScrollThumbStyle" TargetType="{x:Type Thumb}">
         <Setter Property="Background" Value="{DynamicResource ScrollThumbBrush}"/>
+        <Setter Property="Width" Value="2"/>
+        <Setter Property="MinHeight" Value="28"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="Opacity" Value="0.56"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Thumb}">
-                    <Grid Background="Transparent">
-                        <Border x:Name="ThumbRoot"
-                                Width="3"
-                                MinHeight="24"
-                                HorizontalAlignment="Center"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="2.5"
-                                Opacity="0.78"/>
-                    </Grid>
+                    <Border Background="{TemplateBinding Background}"
+                            CornerRadius="2"
+                            SnapsToDevicePixels="True"/>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter Property="Background" Value="{DynamicResource ScrollThumbHoverBrush}"/>
-                            <Trigger.EnterActions>
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="ThumbRoot"
-                                                         Storyboard.TargetProperty="Width"
-                                                         To="5" Duration="0:0:0.12">
-                                            <DoubleAnimation.EasingFunction>
-                                                <QuadraticEase EasingMode="EaseOut"/>
-                                            </DoubleAnimation.EasingFunction>
-                                        </DoubleAnimation>
-                                        <DoubleAnimation Storyboard.TargetName="ThumbRoot"
-                                                         Storyboard.TargetProperty="Opacity"
-                                                         To="1" Duration="0:0:0.1"/>
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </Trigger.EnterActions>
-                            <Trigger.ExitActions>
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="ThumbRoot"
-                                                         Storyboard.TargetProperty="Width"
-                                                         To="3" Duration="0:0:0.16">
-                                            <DoubleAnimation.EasingFunction>
-                                                <QuadraticEase EasingMode="EaseOut"/>
-                                            </DoubleAnimation.EasingFunction>
-                                        </DoubleAnimation>
-                                        <DoubleAnimation Storyboard.TargetName="ThumbRoot"
-                                                         Storyboard.TargetProperty="Opacity"
-                                                         To="0.78" Duration="0:0:0.14"/>
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsDragging" Value="True">
                             <Setter Property="Background" Value="{DynamicResource ScrollThumbPressedBrush}"/>
@@ -100,53 +66,19 @@
 
     <Style x:Key="ModernHorizontalScrollThumbStyle" TargetType="{x:Type Thumb}">
         <Setter Property="Background" Value="{DynamicResource ScrollThumbBrush}"/>
+        <Setter Property="Height" Value="2"/>
+        <Setter Property="MinWidth" Value="28"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Opacity" Value="0.56"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Thumb}">
-                    <Grid Background="Transparent">
-                        <Border x:Name="ThumbRoot"
-                                Height="3"
-                                MinWidth="24"
-                                VerticalAlignment="Center"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="2.5"
-                                Opacity="0.78"/>
-                    </Grid>
+                    <Border Background="{TemplateBinding Background}"
+                            CornerRadius="2"
+                            SnapsToDevicePixels="True"/>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter Property="Background" Value="{DynamicResource ScrollThumbHoverBrush}"/>
-                            <Trigger.EnterActions>
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="ThumbRoot"
-                                                         Storyboard.TargetProperty="Height"
-                                                         To="5" Duration="0:0:0.12">
-                                            <DoubleAnimation.EasingFunction>
-                                                <QuadraticEase EasingMode="EaseOut"/>
-                                            </DoubleAnimation.EasingFunction>
-                                        </DoubleAnimation>
-                                        <DoubleAnimation Storyboard.TargetName="ThumbRoot"
-                                                         Storyboard.TargetProperty="Opacity"
-                                                         To="1" Duration="0:0:0.1"/>
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </Trigger.EnterActions>
-                            <Trigger.ExitActions>
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="ThumbRoot"
-                                                         Storyboard.TargetProperty="Height"
-                                                         To="3" Duration="0:0:0.16">
-                                            <DoubleAnimation.EasingFunction>
-                                                <QuadraticEase EasingMode="EaseOut"/>
-                                            </DoubleAnimation.EasingFunction>
-                                        </DoubleAnimation>
-                                        <DoubleAnimation Storyboard.TargetName="ThumbRoot"
-                                                         Storyboard.TargetProperty="Opacity"
-                                                         To="0.78" Duration="0:0:0.14"/>
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsDragging" Value="True">
                             <Setter Property="Background" Value="{DynamicResource ScrollThumbPressedBrush}"/>
@@ -159,18 +91,22 @@
 
     <Style TargetType="{x:Type ScrollBar}">
         <Setter Property="Background" Value="{DynamicResource ScrollTrackBrush}"/>
-        <Setter Property="Width" Value="8"/>
+        <Setter Property="Width" Value="6"/>
         <Setter Property="Height" Value="Auto"/>
-        <Setter Property="Margin" Value="2,0,0,0"/>
+        <Setter Property="Margin" Value="0"/>
         <Setter Property="Focusable" Value="False"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="UseLayoutRounding" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ScrollBar}">
-                    <Border Background="{TemplateBinding Background}"
-                            CornerRadius="4"
-                            SnapsToDevicePixels="True">
+                    <Grid Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                        <Border x:Name="TrackSurface"
+                                Width="4"
+                                HorizontalAlignment="Center"
+                                Background="{DynamicResource ScrollTrackHoverBrush}"
+                                CornerRadius="2"
+                                Opacity="0"/>
                         <Track x:Name="PART_Track"
                                Focusable="False"
                                Orientation="{TemplateBinding Orientation}"
@@ -187,7 +123,6 @@
                             </Track.DecreaseRepeatButton>
                             <Track.Thumb>
                                 <Thumb x:Name="ScrollThumb"
-                                       MinHeight="24"
                                        Style="{StaticResource ModernVerticalScrollThumbStyle}"/>
                             </Track.Thumb>
                             <Track.IncreaseRepeatButton>
@@ -197,22 +132,113 @@
                                               Style="{StaticResource InvisibleScrollRepeatButtonStyle}"/>
                             </Track.IncreaseRepeatButton>
                         </Track>
-                    </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="Orientation" Value="Horizontal">
                             <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+                            <Setter TargetName="TrackSurface" Property="Width" Value="Auto"/>
+                            <Setter TargetName="TrackSurface" Property="Height" Value="4"/>
+                            <Setter TargetName="TrackSurface" Property="HorizontalAlignment" Value="Stretch"/>
+                            <Setter TargetName="TrackSurface" Property="VerticalAlignment" Value="Center"/>
                             <Setter TargetName="DecreaseButton" Property="Command" Value="{x:Static ScrollBar.PageLeftCommand}"/>
                             <Setter TargetName="IncreaseButton" Property="Command" Value="{x:Static ScrollBar.PageRightCommand}"/>
-                            <Setter TargetName="ScrollThumb" Property="MinHeight" Value="0"/>
-                            <Setter TargetName="ScrollThumb" Property="MinWidth" Value="24"/>
                             <Setter TargetName="ScrollThumb" Property="Style"
                                     Value="{StaticResource ModernHorizontalScrollThumbStyle}"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Background" Value="{DynamicResource ScrollTrackHoverBrush}"/>
+                            <Setter TargetName="ScrollThumb" Property="Background"
+                                    Value="{DynamicResource ScrollThumbHoverBrush}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="TrackSurface"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.62" Duration="0:0:0.12"/>
+                                        <DoubleAnimation Storyboard.TargetName="ScrollThumb"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.96" Duration="0:0:0.1"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="TrackSurface"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.2"/>
+                                        <DoubleAnimation Storyboard.TargetName="ScrollThumb"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.56" Duration="0:0:0.18"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Orientation" Value="Vertical"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <MultiTrigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ScrollThumb"
+                                                         Storyboard.TargetProperty="Width"
+                                                         To="4" Duration="0:0:0.12">
+                                            <DoubleAnimation.EasingFunction>
+                                                <QuadraticEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiTrigger.EnterActions>
+                            <MultiTrigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ScrollThumb"
+                                                         Storyboard.TargetProperty="Width"
+                                                         To="2" Duration="0:0:0.18">
+                                            <DoubleAnimation.EasingFunction>
+                                                <QuadraticEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiTrigger.ExitActions>
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Orientation" Value="Horizontal"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <MultiTrigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ScrollThumb"
+                                                         Storyboard.TargetProperty="Height"
+                                                         To="4" Duration="0:0:0.12">
+                                            <DoubleAnimation.EasingFunction>
+                                                <QuadraticEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiTrigger.EnterActions>
+                            <MultiTrigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ScrollThumb"
+                                                         Storyboard.TargetProperty="Height"
+                                                         To="2" Duration="0:0:0.18">
+                                            <DoubleAnimation.EasingFunction>
+                                                <QuadraticEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiTrigger.ExitActions>
+                        </MultiTrigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.35"/>
+                            <Setter Property="Opacity" Value="0.28"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -221,8 +247,7 @@
         <Style.Triggers>
             <Trigger Property="Orientation" Value="Horizontal">
                 <Setter Property="Width" Value="Auto"/>
-                <Setter Property="Height" Value="8"/>
-                <Setter Property="Margin" Value="0,2,0,0"/>
+                <Setter Property="Height" Value="6"/>
             </Trigger>
         </Style.Triggers>
     </Style>

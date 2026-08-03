@@ -238,6 +238,7 @@ foreach (var requiredThemeKey in new[]
              "CaptureStartBrush", "CaptureStopBrush", "CaptureActionTextBrush",
              "PrimaryActionBrush", "PrimaryActionHoverBrush",
              "PrimaryActionPressedBrush", "PrimaryActionTextBrush",
+             "AboutCheckUpdatesTextBrush",
              "PrimaryActionFocusBrush", "PrimaryActionDisabledBrush",
              "PrimaryActionDisabledTextBrush",
              "ScrollTrackBrush", "ScrollTrackHoverBrush", "ScrollThumbBrush",
@@ -268,13 +269,18 @@ foreach (var reusableControl in new[]
 Equal(true,
     modernControlsText.Contains("<Style TargetType=\"{x:Type ScrollBar}\">",
         StringComparison.Ordinal) &&
-    modernControlsText.Contains("<Setter Property=\"Width\" Value=\"8\"/>",
+    modernControlsText.Contains("<Setter Property=\"Width\" Value=\"6\"/>",
         StringComparison.Ordinal) &&
-    modernControlsText.Contains("<Setter Property=\"Height\" Value=\"8\"/>",
+    modernControlsText.Contains("<Setter Property=\"Height\" Value=\"6\"/>",
         StringComparison.Ordinal) &&
-    modernControlsText.Contains("CornerRadius=\"2.5\"", StringComparison.Ordinal) &&
-    modernControlsText.Contains("MinHeight=\"24\"", StringComparison.Ordinal) &&
-    modernControlsText.Contains("MinWidth=\"24\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("CornerRadius=\"2\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("MinHeight\" Value=\"28\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("MinWidth\" Value=\"28\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("Storyboard.TargetProperty=\"Width\"",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains("Storyboard.TargetProperty=\"Height\"",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains("To=\"4\"", StringComparison.Ordinal) &&
     modernControlsText.Contains("QuadraticEase", StringComparison.Ordinal) &&
     modernControlsText.Contains("PageLeftCommand", StringComparison.Ordinal) &&
     modernControlsText.Contains("PageRightCommand", StringComparison.Ordinal),
@@ -496,9 +502,31 @@ Equal(true, aboutWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordi
     "about window uses FluentWindow with Mica");
 Equal(true, aboutWindowText.Contains("{DynamicResource CheckForUpdates}",
                 StringComparison.Ordinal) &&
-            aboutWindowText.Contains("Style=\"{StaticResource PrimaryButton}\"",
+            aboutWindowText.Contains(
+                "Style=\"{StaticResource AboutCheckUpdatesButtonStyle}\"",
+                StringComparison.Ordinal) &&
+            aboutWindowText.Contains(
+                "Value=\"{DynamicResource AboutCheckUpdatesTextBrush}\"",
                 StringComparison.Ordinal),
-    "check for updates uses the audited primary action style");
+    "check for updates keeps an explicit theme-aware foreground");
+Equal(true,
+    mainWindowText.Contains("<TranslateTransform X=\"6\"/>",
+        StringComparison.Ordinal),
+    "settings scrollbar keeps the reviewed right-side offset");
+var conflictWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "InstanceConflictWindow.xaml"));
+Equal(true,
+    conflictWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal) &&
+    conflictWindowText.Contains("WindowBackdropType=\"Acrylic\"",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("CloseOtherInstancesButton",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("CloseCurrentInstanceButton",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("Style=\"{StaticResource PrimaryButton}\"",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("IsDefault=\"True\"", StringComparison.Ordinal),
+    "instance conflict uses a Fluent Acrylic decision dialog");
 Equal(false, aboutWindowText.Contains("SettingsSection", StringComparison.Ordinal),
     "about content uses lightweight unframed sections instead of a large nested card");
 Equal(true, aboutWindowText.Contains("DiagnosticPath, Mode=OneWay",

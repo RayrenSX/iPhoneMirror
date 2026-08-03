@@ -1048,11 +1048,21 @@
 
             <Border x:Name="ControlPanel" Grid.Column="4" Width="0"
                     Style="{StaticResource WorkspaceCardBorder}"
-                    Padding="16,16,7,16" Visibility="Collapsed">
+                    Padding="16,16,1,16" Visibility="Collapsed">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto"
                               PanningMode="VerticalOnly">
-                    <StackPanel Margin="0,0,7,0">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar"
+                               BasedOn="{StaticResource {x:Type ScrollBar}}">
+                            <Setter Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform X="6"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ScrollViewer.Resources>
+                    <StackPanel Margin="0,0,10,0">
                         <Grid>
                             <TextBlock Text="{DynamicResource ControlTitle}" FontSize="16" FontWeight="SemiBold"
                                        VerticalAlignment="Center"/>
