@@ -1,5 +1,8 @@
-name: Windows build
-run-name: Windows build
+name: iPhoneMirror CI
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+      && format('Pull request #{0} | {1} -> {2}', github.event.pull_request.number, github.head_ref, github.base_ref)
+      || format('{0} | {1}', github.event_name, github.ref_name) }}
 
 on:
   push:
@@ -16,6 +19,7 @@ concurrency:
 
 jobs:
   build-test:
+    name: Build, test and package
     runs-on: windows-2025-vs2026
     timeout-minutes: 30
 
