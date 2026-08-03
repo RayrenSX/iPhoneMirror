@@ -1,8 +1,8 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.5.8"
+  #define MyAppVersion "1.5.9"
 #endif
 #ifndef MyNumericVersion
-  #define MyNumericVersion "1.5.8.0"
+  #define MyNumericVersion "1.5.9.0"
 #endif
 #ifndef MySourceDir
   #define MySourceDir "..\outputs\iPhoneMirror"

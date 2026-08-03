@@ -319,7 +319,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.5.8 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.5.9 -GenerateSbom
 ```
 
 The script downloads hash-pinned Inno Setup 6.7.3 and its Simplified Chinese

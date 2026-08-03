@@ -5,6 +5,28 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.9] - 2026-08-03
+
+### Changed
+
+- Centralize every application and driver-manager scrollbar on a named modern
+  style, while keeping a shared right-edge variant for dense content panels.
+- Keep blue action buttons legible in light mode by explicitly carrying the
+  theme-aware action foreground through the rendered button label.
+- Give GitHub Actions runs a stable workflow display name instead of inheriting
+  commit or pull-request titles.
+
+### Fixed
+
+- Replace the update window release-notes viewer's legacy WPF scrollbar with
+  the same thin, rounded and animated scrollbar used by the main settings view.
+- Prevent the global `TextBlock` style from overriding white text inside
+  `PrimaryButton` controls in light mode, including the immediate-update action.
+- Keep the shared scrollbar geometry consistent at a 6 px layout slot, 2 px
+  resting thumb, 4 px hover thumb and 6 px right-edge offset where requested.
+- Add runtime visual-tree checks for the real update button label and the
+  internally generated release-notes scrollbar to prevent style regressions.
+
 ## [1.5.8] - 2026-08-03
 
 ### Added
@@ -860,7 +882,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.8...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.9...HEAD
+[1.5.9]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.8...v1.5.9
 [1.5.8]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.7...v1.5.8
 [1.5.7]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.6...v1.5.7
 [1.5.6]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.5...v1.5.6
