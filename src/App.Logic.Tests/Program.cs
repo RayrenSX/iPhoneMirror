@@ -236,6 +236,23 @@ var lightThemeKeys = ResourceKeys(lightThemePath, xaml);
 var darkThemeKeys = ResourceKeys(darkThemePath, xaml);
 Sequence(lightThemeKeys, darkThemeKeys,
     "light and dark themes expose the same semantic resources");
+static string ResourceColor(string path, XNamespace xamlNamespace, string key) =>
+    (string?)XDocument.Load(path).Descendants()
+        .Single(element =>
+            string.Equals((string?)element.Attribute(xamlNamespace + "Key"), key,
+                StringComparison.Ordinal))
+        .Attribute("Color") ??
+    throw new InvalidOperationException($"Theme resource {key} does not define a color.");
+
+foreach (var blueActionTextBrush in new[]
+         {
+             "PrimaryActionTextBrush", "AboutCheckUpdatesTextBrush",
+             "CaptureActionTextBrush",
+         })
+{
+    Equal("#FFFFFFFF", ResourceColor(lightThemePath, xaml, blueActionTextBrush),
+        $"light theme keeps {blueActionTextBrush} white on blue actions");
+}
 foreach (var requiredThemeKey in new[]
          {
              "AppBackgroundBrush", "SidebarBrush", "CardBrush", "CardHoverBrush",
@@ -269,6 +286,7 @@ foreach (var reusableControl in new[]
              "SubWindowSubtitle", "SubWindowTabControl", "SubWindowTabItem",
              "IconButtonHoverBrush",
              "ModernVerticalScrollThumbStyle", "ModernHorizontalScrollThumbStyle",
+             "ModernScrollBarStyle", "ContentEdgeScrollBarStyle",
              "ui:ModernButton", "ui:ModernCard", "ui:ModernDialog",
          })
 {
@@ -276,7 +294,11 @@ foreach (var reusableControl in new[]
         $"shared UI contains {reusableControl}");
 }
 Equal(true,
-    modernControlsText.Contains("<Style TargetType=\"{x:Type ScrollBar}\">",
+    modernControlsText.Contains(
+        "<Style x:Key=\"ModernScrollBarStyle\" TargetType=\"{x:Type ScrollBar}\">",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains(
+        "BasedOn=\"{StaticResource ModernScrollBarStyle}\"/>",
         StringComparison.Ordinal) &&
     modernControlsText.Contains("<Setter Property=\"Width\" Value=\"6\"/>",
         StringComparison.Ordinal) &&
@@ -519,9 +541,19 @@ Equal(true, aboutWindowText.Contains("{DynamicResource CheckForUpdates}",
                 StringComparison.Ordinal),
     "check for updates keeps an explicit theme-aware foreground");
 Equal(true,
-    mainWindowText.Contains("<TranslateTransform X=\"6\"/>",
+    mainWindowText.Contains(
+        "BasedOn=\"{StaticResource ContentEdgeScrollBarStyle}\"",
         StringComparison.Ordinal),
-    "settings scrollbar keeps the reviewed right-side offset");
+    "settings scrollbar uses the shared right-edge style");
+var updateWindowScrollText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "UpdateWindow.xaml"));
+Equal(true,
+    updateWindowScrollText.Contains("x:Name=\"ReleaseNotesViewer\"",
+        StringComparison.Ordinal) &&
+    updateWindowScrollText.Contains(
+        "BasedOn=\"{StaticResource ContentEdgeScrollBarStyle}\"",
+        StringComparison.Ordinal),
+    "update release notes use the same modern right-edge scrollbar style");
 var conflictWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "InstanceConflictWindow.xaml"));
 Equal(true,

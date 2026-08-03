@@ -89,7 +89,7 @@
         </Setter>
     </Style>
 
-    <Style TargetType="{x:Type ScrollBar}">
+    <Style x:Key="ModernScrollBarStyle" TargetType="{x:Type ScrollBar}">
         <Setter Property="Background" Value="{DynamicResource ScrollTrackBrush}"/>
         <Setter Property="Width" Value="6"/>
         <Setter Property="Height" Value="Auto"/>
@@ -250,6 +250,19 @@
                 <Setter Property="Height" Value="6"/>
             </Trigger>
         </Style.Triggers>
+    </Style>
+
+    <Style TargetType="{x:Type ScrollBar}"
+           BasedOn="{StaticResource ModernScrollBarStyle}"/>
+
+    <Style x:Key="ContentEdgeScrollBarStyle"
+           TargetType="{x:Type ScrollBar}"
+           BasedOn="{StaticResource ModernScrollBarStyle}">
+        <Setter Property="RenderTransform">
+            <Setter.Value>
+                <TranslateTransform X="6"/>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style x:Key="SettingsSection" TargetType="Border">

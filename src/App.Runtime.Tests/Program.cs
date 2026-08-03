@@ -4,6 +4,11 @@ using System.Windows.Media;
 using IPhoneMirror.App;
 using IPhoneMirror.App.Updater;
 using Wpf.Ui.Controls;
+using WpfButton = System.Windows.Controls.Button;
+using WpfFlowDocumentScrollViewer = System.Windows.Controls.FlowDocumentScrollViewer;
+using WpfScrollBar = System.Windows.Controls.Primitives.ScrollBar;
+using WpfThumb = System.Windows.Controls.Primitives.Thumb;
+using WpfTextBlock = System.Windows.Controls.TextBlock;
 
 namespace IPhoneMirror.App.Runtime.Tests;
 
@@ -83,15 +88,24 @@ internal static class Program
             window.Show();
             try
             {
+                var updateButton = window.FindName("UpdateActionButton") as WpfButton ??
+                    throw new InvalidOperationException("Update action button was not found.");
+                var releaseNotesViewer =
+                    window.FindName("ReleaseNotesViewer") as WpfFlowDocumentScrollViewer ??
+                    throw new InvalidOperationException("Release notes viewer was not found.");
+                window.UpdateLayout();
                 ApplyTheme(assembly, AppTheme.Light);
                 AssertThemeBrush(window, "TextBrush", Color.FromRgb(0x1D, 0x1D, 0x1F));
                 AssertThemeBrush(window, "AboutCheckUpdatesTextBrush", Colors.White);
+                AssertPrimaryButtonText(updateButton, Colors.White);
+                AssertModernScrollBar(releaseNotesViewer);
                 AssertBackdropBackground(window);
 
                 ApplyTheme(assembly, AppTheme.Dark);
                 AssertThemeBrush(window, "TextBrush", Color.FromRgb(0xF5, 0xF5, 0xF7));
                 AssertThemeBrush(window, "AboutCheckUpdatesTextBrush",
                     Color.FromRgb(0x0F, 0x14, 0x19));
+                AssertPrimaryButtonText(updateButton, Color.FromRgb(0x0F, 0x14, 0x19));
                 AssertBackdropBackground(window);
             }
             finally
@@ -124,6 +138,43 @@ internal static class Program
             brush.Color != expectedColor)
             throw new InvalidOperationException(
                 $"Child window did not refresh {resourceKey} for the active theme.");
+    }
+
+    private static void AssertPrimaryButtonText(WpfButton button, Color expectedColor)
+    {
+        button.ApplyTemplate();
+        if (button.Template.FindName("PrimaryLabel", button) is not WpfTextBlock label ||
+            label.Foreground is not SolidColorBrush brush || brush.Color != expectedColor)
+            throw new InvalidOperationException(
+                $"Primary button text did not use the expected theme color {expectedColor}.");
+    }
+
+    private static void AssertModernScrollBar(DependencyObject root)
+    {
+        var scrollBar = FindVisualDescendant<WpfScrollBar>(root,
+            candidate => candidate.Orientation == System.Windows.Controls.Orientation.Vertical) ??
+            throw new InvalidOperationException(
+                "Release notes did not create a vertical scrollbar.");
+        scrollBar.ApplyTemplate();
+        if (scrollBar.Width != 6 ||
+            scrollBar.RenderTransform is not TranslateTransform { X: 6 } ||
+            scrollBar.Template.FindName("ScrollThumb", scrollBar) is not WpfThumb thumb ||
+            thumb.Width != 2)
+            throw new InvalidOperationException(
+                "Release notes did not use the shared modern scrollbar template.");
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject root, Func<T, bool> match)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is T candidate && match(candidate)) return candidate;
+            var descendant = FindVisualDescendant(child, match);
+            if (descendant is not null) return descendant;
+        }
+        return null;
     }
 
     private static void AssertBackdropBackground(Window window)

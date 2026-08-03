@@ -1054,13 +1054,7 @@
                               PanningMode="VerticalOnly">
                     <ScrollViewer.Resources>
                         <Style TargetType="ScrollBar"
-                               BasedOn="{StaticResource {x:Type ScrollBar}}">
-                            <Setter Property="RenderTransform">
-                                <Setter.Value>
-                                    <TranslateTransform X="6"/>
-                                </Setter.Value>
-                            </Setter>
-                        </Style>
+                               BasedOn="{StaticResource ContentEdgeScrollBarStyle}"/>
                     </ScrollViewer.Resources>
                     <StackPanel Margin="0,0,10,0">
                         <Grid>

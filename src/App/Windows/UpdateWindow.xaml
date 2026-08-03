@@ -74,9 +74,14 @@
         </Grid>
         <Border Grid.Row="4" Style="{StaticResource SettingsSection}" Padding="18">
             <FlowDocumentScrollViewer x:Name="ReleaseNotesViewer"
-                                      VerticalScrollBarVisibility="Auto"
-                                      Background="Transparent" BorderThickness="0"
-                                      IsToolBarVisible="False"/>
+                                       VerticalScrollBarVisibility="Auto"
+                                       Background="Transparent" BorderThickness="0"
+                                       IsToolBarVisible="False">
+                <FlowDocumentScrollViewer.Resources>
+                    <Style TargetType="ScrollBar"
+                           BasedOn="{StaticResource ContentEdgeScrollBarStyle}"/>
+                </FlowDocumentScrollViewer.Resources>
+            </FlowDocumentScrollViewer>
         </Border>
         <Grid Grid.Row="6">
             <Grid.RowDefinitions>
@@ -97,8 +102,10 @@
                         Margin="0,16,0,0">
                 <Button Content="{DynamicResource RemindLater}" Click="OnLaterClick"
                         MinWidth="112" Margin="0,0,8,0"/>
-                <Button Content="{Binding UpdateButtonText}" Click="OnUpdateClick"
+                <Button x:Name="UpdateActionButton"
+                        Content="{Binding UpdateButtonText}" Click="OnUpdateClick"
                         IsEnabled="{Binding CanUpdate}" Style="{StaticResource PrimaryButton}"
+                        Foreground="{DynamicResource PrimaryActionTextBrush}"
                         MinWidth="132"/>
             </StackPanel>
         </Grid>
