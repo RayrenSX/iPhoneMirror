@@ -23,6 +23,18 @@
 > signed, so Windows may show SmartScreen or unknown-publisher warnings. Apple
 > Screen Capture is a private protocol and can change in future iOS versions.
 
+> [!NOTE]
+> **Windows ARM64 is not supported.** The complete USB mirroring path depends on
+> x64-only `libusb-win32 1.2.6.0` binaries, including the `libusb0.dll` runtime
+> and `libusb0.sys` kernel filter driver. The bundled AirPlayServer/FFmpeg
+> receiver runtime is also available only as x64 binaries. Windows 11 ARM64 can
+> emulate many x64 user-mode applications, but it cannot load an x64 kernel
+> driver as an ARM64 driver. Shipping a wireless-only ARM64 edition would omit
+> the USB and driver-management capabilities promised by this project, so
+> official builds remain Windows x64 and x64 emulation on ARM64 is not treated
+> as a supported configuration. ARM64 will be reconsidered only when the USB
+> driver, wireless runtime, and their full verification chain are ARM64-ready.
+
 ## Download
 
 Download `iPhoneMirror-Setup-v*-x64.exe` from
