@@ -5,6 +5,8 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.8] - 2026-08-03
+
 ### Added
 
 - Detect an already-running iPhoneMirror instance and present a localized
@@ -858,7 +860,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.7...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.8...HEAD
+[1.5.8]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.7...v1.5.8
 [1.5.7]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.6...v1.5.7
 [1.5.6]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.5...v1.5.6
 [1.5.5]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.4...v1.5.5
