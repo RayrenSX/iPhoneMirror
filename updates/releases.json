@@ -3,38 +3,38 @@
     "tag_name": "v1.5.7",
     "name": "iPhoneMirror v1.5.7",
     "body": "v1.5.7 修复已打开子窗口的浅色/深色主题同步，将主题选择统一到主界面的应用偏好，并清理虚拟摄像头编译警告。",
-    "published_at": "2026-08-03T00:00:00Z",
+    "published_at": "2026-08-03T03:08:17Z",
     "draft": false,
     "prerelease": false,
     "assets": [
       {
         "name": "iPhoneMirror-Setup-v1.5.7-x64.exe",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 167278261,
+        "digest": "sha256:28a30d8e3629bc6d45197544cb6379c174cd2a76fbc76716ea4c79175af0362f",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.7/iPhoneMirror-Setup-v1.5.7-x64.exe"
       },
       {
         "name": "iPhoneMirror-v1.5.7-win-x64.zip",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 187984857,
+        "digest": "sha256:539f61741bce4d9a09d098a7d78fc5de3807eb1f1eda0a74cb9ca80738e66b29",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.7/iPhoneMirror-v1.5.7-win-x64.zip"
       },
       {
         "name": "iPhoneMirror-v1.5.7-win-x64-latest.zip",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 187984857,
+        "digest": "sha256:539f61741bce4d9a09d098a7d78fc5de3807eb1f1eda0a74cb9ca80738e66b29",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.7/iPhoneMirror-v1.5.7-win-x64-latest.zip"
       },
       {
         "name": "iPhoneMirror-v1.5.7-win-x64-sbom.spdx.json",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 67531,
+        "digest": "sha256:30ffa059ddb836ba57f8c435c742cf179c1322424e9d3f6f41fb3620fe7cc283",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.7/iPhoneMirror-v1.5.7-win-x64-sbom.spdx.json"
       },
       {
         "name": "SHA256SUMS.txt",
-        "size": 0,
-        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 412,
+        "digest": "sha256:24a938c6595f2cc25aed9a0eb7df98590c193fa10c974b570b5ab3d3aa4ac90e",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.7/SHA256SUMS.txt"
       }
     ]
