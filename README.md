@@ -82,8 +82,6 @@ iPhoneMirror 不给所有设备套用同一个通用圆角。程序会根据 App
 
 ![双设备独立窗口与设备圆角](docs/images/user-guide/双设备独立窗口，圆弧.png)
 
-![输出设置](docs/images/user-guide/output-recording1.png)
-
 ### 与常见投屏方案的区别
 
 | 对比维度 | iPhoneMirror | 常见通用方案 |
