@@ -465,6 +465,15 @@ Equal(true,
         "SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: 336)",
         StringComparison.Ordinal),
     "entering full screen cancels pending workspace panel animations");
+var themeServiceText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "ThemeService.cs"));
+Equal(true,
+    themeServiceText.Contains("WindowBackdropType.None,", StringComparison.Ordinal) &&
+    themeServiceText.Contains("WindowBackgroundManager.UpdateBackground(window",
+        StringComparison.Ordinal) &&
+    themeServiceText.Contains("fluentWindow.WindowBackdropType",
+        StringComparison.Ordinal),
+    "theme changes refresh every open window with its own backdrop type");
 Equal(true, mainWindowText.Contains(
         "Background=\"{DynamicResource PreviewChromeBrush}\"", StringComparison.Ordinal),
     "main preview surface follows the active light/dark theme");
@@ -473,6 +482,8 @@ Equal(false, mainWindowText.Contains("Background=\"#050505\"",
     "main preview does not hard-code a dark background");
 var aboutWindowPath = Path.Combine(sourceDirectory, "App", "Windows", "AboutWindow.xaml");
 var aboutWindowText = File.ReadAllText(aboutWindowPath);
+var aboutWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "AboutWindow.xaml.cs"));
 Equal(true,
     mainWindowText.Contains("Background=\"{DynamicResource AppBackgroundBrush}\"",
         StringComparison.Ordinal) &&
@@ -498,6 +509,12 @@ Equal(true, aboutWindowText.Contains("x:Name=\"LiveLogTextBox\"",
     "about diagnostics owns the live log view");
 Equal(true, aboutWindowText.Contains("SubWindowTabControl", StringComparison.Ordinal),
     "about navigation uses the shared child-window tab language");
+Equal(false,
+    aboutWindowText.Contains("{Binding ThemeChoices}", StringComparison.Ordinal) ||
+    aboutWindowText.Contains("{Binding SelectedTheme}", StringComparison.Ordinal) ||
+    aboutWindowCode.Contains("ThemeChoice", StringComparison.Ordinal) ||
+    aboutWindowCode.Contains("SelectedTheme", StringComparison.Ordinal),
+    "theme selection lives in main settings instead of the about window");
 var mediaOutputWindowText = File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
     "MediaOutputSettingsWindow.xaml"));
 Equal(true, mediaOutputWindowText.Contains("SubWindowTabControl", StringComparison.Ordinal),

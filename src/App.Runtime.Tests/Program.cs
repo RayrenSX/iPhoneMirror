@@ -1,6 +1,9 @@
 using System.Reflection;
 using System.Windows;
+using System.Windows.Media;
 using IPhoneMirror.App;
+using IPhoneMirror.App.Updater;
+using Wpf.Ui.Controls;
 
 namespace IPhoneMirror.App.Runtime.Tests;
 
@@ -11,7 +14,7 @@ internal static class Program
     {
         try
         {
-            ConstructUpdateWindow();
+            TestUpdateWindowThemeSwitch();
             Console.WriteLine("App runtime tests passed.");
             return 0;
         }
@@ -22,7 +25,7 @@ internal static class Program
         }
     }
 
-    private static void ConstructUpdateWindow()
+    private static void TestUpdateWindowThemeSwitch()
     {
         var application = new App();
         application.InitializeComponent();
@@ -57,6 +60,16 @@ internal static class Program
             BindingFlags.Instance | BindingFlags.NonPublic,
             binder: null, args: [null, null], culture: null) ??
             throw new InvalidOperationException("Update client was not constructed.");
+        var owner = new FluentWindow
+        {
+            Width = 320,
+            Height = 240,
+            ShowInTaskbar = false,
+            ExtendsContentIntoTitleBar = true,
+            WindowBackdropType = WindowBackdropType.Mica,
+        };
+        application.MainWindow = owner;
+        owner.Show();
         try
         {
             var windowType = assembly.GetType(
@@ -65,12 +78,60 @@ internal static class Program
                 BindingFlags.Instance | BindingFlags.NonPublic,
                 binder: null, args: [release, client, false, true], culture: null) as Window ??
                 throw new InvalidOperationException("Update window was not constructed.");
-            window.Close();
+            window.Owner = owner;
+            ((FluentWindow)window).WindowBackdropType = WindowBackdropType.Acrylic;
+            window.Show();
+            try
+            {
+                ApplyTheme(assembly, AppTheme.Light);
+                AssertThemeBrush(window, "TextBrush", Color.FromRgb(0x1D, 0x1D, 0x1F));
+                AssertBackdropBackground(window);
+
+                ApplyTheme(assembly, AppTheme.Dark);
+                AssertThemeBrush(window, "TextBrush", Color.FromRgb(0xF5, 0xF5, 0xF7));
+                AssertBackdropBackground(window);
+            }
+            finally
+            {
+                window.Close();
+            }
         }
         finally
         {
             ((IDisposable)client).Dispose();
+            owner.Close();
             application.Shutdown();
         }
+    }
+
+    private static void ApplyTheme(Assembly assembly, AppTheme theme)
+    {
+        var themeService = assembly.GetType(
+            "IPhoneMirror.App.Services.ThemeService", throwOnError: true)!;
+        var apply = themeService.GetMethod("Apply",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new MissingMethodException(themeService.FullName, "Apply");
+        apply.Invoke(null, [theme]);
+    }
+
+    private static void AssertThemeBrush(Window window, string resourceKey,
+        Color expectedColor)
+    {
+        if (window.TryFindResource(resourceKey) is not SolidColorBrush brush ||
+            brush.Color != expectedColor)
+            throw new InvalidOperationException(
+                $"Child window did not refresh {resourceKey} for the active theme.");
+    }
+
+    private static void AssertBackdropBackground(Window window)
+    {
+        if (window is not FluentWindow fluentWindow ||
+            fluentWindow.WindowBackdropType == WindowBackdropType.None ||
+            !WindowBackdrop.IsSupported(fluentWindow.WindowBackdropType))
+            return;
+        if (window.Background is not SolidColorBrush brush ||
+            brush.Color != Colors.Transparent)
+            throw new InvalidOperationException(
+                "Child window backdrop kept a stale themed background after switching themes.");
     }
 }

@@ -38,12 +38,13 @@ internal static class ThemeService
         var application = Application.Current;
         if (application is null) return;
         SwapThemeDictionary(application.Resources, IsDark ? DarkThemePath : LightThemePath);
+        var applicationTheme = CurrentApplicationTheme;
         ApplicationThemeManager.Apply(
-            IsDark ? ApplicationTheme.Dark : ApplicationTheme.Light,
-            Wpf.Ui.Controls.WindowBackdropType.Mica, updateAccent: false);
+            applicationTheme, Wpf.Ui.Controls.WindowBackdropType.None,
+            updateAccent: false);
         foreach (Window window in application.Windows)
         {
-            ApplyBackdrop(window);
+            RefreshWindowTheme(window, applicationTheme);
             AnimateThemeTransition(window);
         }
     }
@@ -54,10 +55,11 @@ internal static class ThemeService
         AttachedWindows.Add(window, new WindowBackdropState());
         if (!window.AllowsTransparency)
             window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
-        window.SourceInitialized += (_, _) => ApplyBackdrop(window);
+        window.SourceInitialized += (_, _) =>
+            RefreshWindowTheme(window, CurrentApplicationTheme);
         window.StateChanged += (_, _) => ApplyBackdrop(window);
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero)
-            ApplyBackdrop(window);
+            RefreshWindowTheme(window, CurrentApplicationTheme);
     }
 
     internal static void SetEdgeToEdge(Window window, bool enabled)
@@ -65,7 +67,7 @@ internal static class ThemeService
         Attach(window);
         if (!AttachedWindows.TryGetValue(window, out var state)) return;
         state.EdgeToEdge = enabled;
-        ApplyBackdrop(window);
+        RefreshWindowTheme(window, CurrentApplicationTheme);
     }
 
     internal static void Shutdown()
@@ -85,7 +87,9 @@ internal static class ThemeService
 
         var replacement = new ResourceDictionary
         {
-            Source = new Uri(path, UriKind.Relative),
+            Source = new Uri(
+                $"/{typeof(ThemeService).Assembly.GetName().Name};component/{path}",
+                UriKind.Relative),
         };
         if (existing is null)
             resources.MergedDictionaries.Insert(0, replacement);
@@ -111,6 +115,22 @@ internal static class ThemeService
             {
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
             });
+    }
+
+    private static ApplicationTheme CurrentApplicationTheme =>
+        IsDark ? ApplicationTheme.Dark : ApplicationTheme.Light;
+
+    private static void RefreshWindowTheme(Window window,
+        ApplicationTheme applicationTheme)
+    {
+        if (!window.AllowsTransparency)
+        {
+            var backdrop = window is Wpf.Ui.Controls.FluentWindow fluentWindow
+                ? fluentWindow.WindowBackdropType
+                : Wpf.Ui.Controls.WindowBackdropType.None;
+            WindowBackgroundManager.UpdateBackground(window, applicationTheme, backdrop);
+        }
+        ApplyBackdrop(window);
     }
 
     private static void EnsureSystemEvents()
