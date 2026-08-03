@@ -46,6 +46,7 @@
     <SolidColorBrush x:Key="PrimaryActionHoverBorderBrush" Color="#FF052D4F"/>
     <SolidColorBrush x:Key="PrimaryActionPressedBorderBrush" Color="#FF031D32"/>
     <SolidColorBrush x:Key="PrimaryActionTextBrush" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="AboutCheckUpdatesTextBrush" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="PrimaryActionFocusBrush" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="PrimaryActionDisabledBrush" Color="#FFE5E5E8"/>
     <SolidColorBrush x:Key="PrimaryActionDisabledTextBrush" Color="#FF59595D"/>
@@ -101,10 +102,10 @@
     <SolidColorBrush x:Key="ComboItemSelectedBrush" Color="#16000000"/>
     <SolidColorBrush x:Key="ComboItemSelectedHoverBrush" Color="#22000000"/>
     <SolidColorBrush x:Key="ComboBorderHoverBrush" Color="#52000000"/>
-    <SolidColorBrush x:Key="ScrollTrackBrush" Color="#0D000000"/>
-    <SolidColorBrush x:Key="ScrollTrackHoverBrush" Color="#14000000"/>
-    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#52000000"/>
-    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#73000000"/>
+    <SolidColorBrush x:Key="ScrollTrackBrush" Color="#00000000"/>
+    <SolidColorBrush x:Key="ScrollTrackHoverBrush" Color="#1A000000"/>
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#66000000"/>
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#85000000"/>
     <SolidColorBrush x:Key="ScrollThumbPressedBrush" Color="#A6000000"/>
     <Color x:Key="CardShadowColor">#FF000000</Color>
 </ResourceDictionary>

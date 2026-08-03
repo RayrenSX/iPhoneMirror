@@ -463,6 +463,13 @@
     <system:String x:Key="NavCollapseDescription">Collapse navigation</system:String>
     <system:String x:Key="NavExpandToolTip">Expand left navigation</system:String>
     <system:String x:Key="AppPreferencesTitle">App settings</system:String>
+    <system:String x:Key="InstanceConflictTitle">iPhoneMirror is already running</system:String>
+    <system:String x:Key="InstanceConflictBody">Another iPhoneMirror instance is currently running. Choose which window to keep.</system:String>
+    <system:String x:Key="InstanceConflictHint">Closing the other window continues this launch. Closing this window leaves the active mirroring session untouched.</system:String>
+    <system:String x:Key="CloseOtherInstances">Close other window</system:String>
+    <system:String x:Key="CloseCurrentInstance">Close this window</system:String>
+    <system:String x:Key="ClosingOtherInstances">Safely closing the other iPhoneMirror window…</system:String>
+    <system:String x:Key="CloseOtherInstancesFailedFormat">{0} iPhoneMirror instance could not be closed. Close it from the taskbar or Task Manager, then try again.</system:String>
     <system:String x:Key="Minimize">Minimize</system:String>
     <system:String x:Key="Maximize">Maximize</system:String>
 </ResourceDictionary>

@@ -14,6 +14,8 @@ public partial class App : Application
     private readonly GitHubReleaseClient _releaseClient = new();
     private AboutWindow? _aboutWindow;
     private UpdateWindow? _updateWindow;
+    private SingleInstanceCoordinator? _singleInstanceCoordinator;
+    private int _remoteShutdownRequested;
 
     internal UpdateSettings UpdateSettings { get; private set; } = new();
 
@@ -28,14 +30,34 @@ public partial class App : Application
                 ("arguments", e.Args.Length));
             LocalizationService.Initialize();
             AppIdentity.Initialize();
-            StartupDiagnostics.ValidateRequiredRuntime();
             UpdateSettings = _settingsStore.Load();
             ThemeService.Apply(UpdateSettings.Theme);
-            GitHubReleaseClient.CleanupInterruptedDownloads();
             EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
                 new RoutedEventHandler((sender, _) => ThemeService.Attach((Window)sender)));
             WindowWorkAreaController.EnableForApplication();
             base.OnStartup(e);
+
+            _singleInstanceCoordinator = new SingleInstanceCoordinator();
+            if (!_singleInstanceCoordinator.OwnsPrimaryInstance ||
+                _singleInstanceCoordinator.HasPreExistingInstance())
+            {
+                DiagnosticLogger.Info("lifecycle", "instance_conflict_detected",
+                    ("owns_primary", _singleInstanceCoordinator.OwnsPrimaryInstance));
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                var conflictWindow = new InstanceConflictWindow(_singleInstanceCoordinator);
+                conflictWindow.ShowDialog();
+                if (!conflictWindow.ContinueWithCurrentInstance ||
+                    !_singleInstanceCoordinator.OwnsPrimaryInstance)
+                {
+                    Shutdown(0);
+                    return;
+                }
+            }
+
+            _singleInstanceCoordinator.StartShutdownListener(OnRemoteShutdownRequested);
+            ShutdownMode = ShutdownMode.OnLastWindowClose;
+            StartupDiagnostics.ValidateRequiredRuntime();
+            GitHubReleaseClient.CleanupInterruptedDownloads();
             MainWindow = new MainWindow();
             MainWindow.ContentRendered += OnMainWindowContentRendered;
             MainWindow.Show();
@@ -53,6 +75,17 @@ public partial class App : Application
             }
             Shutdown(-1);
         }
+    }
+
+    private void OnRemoteShutdownRequested()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (Interlocked.Exchange(ref _remoteShutdownRequested, 1) != 0) return;
+            DiagnosticLogger.Info("lifecycle", "remote_shutdown_requested");
+            if (MainWindow is { } window) window.Close();
+            else Shutdown(0);
+        });
     }
 
     private async void OnMainWindowContentRendered(object? sender, EventArgs e)
@@ -145,6 +178,8 @@ public partial class App : Application
         {
             DiagnosticLogger.Exception("updater", "client_dispose_failed", error);
         }
+        _singleInstanceCoordinator?.Dispose();
+        _singleInstanceCoordinator = null;
         DiagnosticLogger.Shutdown(e.ApplicationExitCode);
         base.OnExit(e);
     }

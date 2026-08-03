@@ -5,6 +5,30 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Detect an already-running iPhoneMirror instance and present a localized
+  Fluent Acrylic choice to close the other instance or leave the active
+  mirroring session untouched.
+
+### Changed
+
+- Replace the shared default scrollbars with a slimmer, theme-aware treatment
+  that expands smoothly on hover without covering settings content.
+- Keep the settings scrollbar aligned close to the right edge while preserving
+  visible spacing from the rounded workspace border.
+- Keep the About page update action legible with an explicit white foreground
+  in light mode.
+
+### Fixed
+
+- Avoid showing duplicate conflict dialogs when two launches race at nearly the
+  same time by distinguishing an older running process from a newer contender.
+- Dispose filtered process handles and conservatively report inaccessible
+  processes during the graceful-close and bounded forced-close workflow.
+- Detect an FFmpeg process that exits while the projection audio pipe is still
+  connecting, reporting the real startup failure instead of a later timeout.
+
 ## [1.5.7] - 2026-08-03
 
 ### Changed

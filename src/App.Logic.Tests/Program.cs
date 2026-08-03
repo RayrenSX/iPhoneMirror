@@ -7,6 +7,15 @@ using IPhoneMirror.App.Updater;
 using IPhoneMirror.Shared.Networking;
 using IPhoneMirror.SharedUI.Services;
 
+const string delayedExitEnvironment =
+    "IPHONE_MIRROR_TEST_DELAYED_PROCESS_EXIT_MS";
+if (int.TryParse(Environment.GetEnvironmentVariable(delayedExitEnvironment),
+        out var delayedExitMilliseconds) && delayedExitMilliseconds > 0)
+{
+    await Task.Delay(delayedExitMilliseconds);
+    return;
+}
+
 var diagnosticTestRoot = Path.Combine(Path.GetTempPath(),
     $"iPhoneMirror-test-logs-{Guid.NewGuid():N}");
 Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY",
@@ -238,6 +247,7 @@ foreach (var requiredThemeKey in new[]
              "CaptureStartBrush", "CaptureStopBrush", "CaptureActionTextBrush",
              "PrimaryActionBrush", "PrimaryActionHoverBrush",
              "PrimaryActionPressedBrush", "PrimaryActionTextBrush",
+             "AboutCheckUpdatesTextBrush",
              "PrimaryActionFocusBrush", "PrimaryActionDisabledBrush",
              "PrimaryActionDisabledTextBrush",
              "ScrollTrackBrush", "ScrollTrackHoverBrush", "ScrollThumbBrush",
@@ -268,13 +278,18 @@ foreach (var reusableControl in new[]
 Equal(true,
     modernControlsText.Contains("<Style TargetType=\"{x:Type ScrollBar}\">",
         StringComparison.Ordinal) &&
-    modernControlsText.Contains("<Setter Property=\"Width\" Value=\"8\"/>",
+    modernControlsText.Contains("<Setter Property=\"Width\" Value=\"6\"/>",
         StringComparison.Ordinal) &&
-    modernControlsText.Contains("<Setter Property=\"Height\" Value=\"8\"/>",
+    modernControlsText.Contains("<Setter Property=\"Height\" Value=\"6\"/>",
         StringComparison.Ordinal) &&
-    modernControlsText.Contains("CornerRadius=\"2.5\"", StringComparison.Ordinal) &&
-    modernControlsText.Contains("MinHeight=\"24\"", StringComparison.Ordinal) &&
-    modernControlsText.Contains("MinWidth=\"24\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("CornerRadius=\"2\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("MinHeight\" Value=\"28\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("MinWidth\" Value=\"28\"", StringComparison.Ordinal) &&
+    modernControlsText.Contains("Storyboard.TargetProperty=\"Width\"",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains("Storyboard.TargetProperty=\"Height\"",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains("To=\"4\"", StringComparison.Ordinal) &&
     modernControlsText.Contains("QuadraticEase", StringComparison.Ordinal) &&
     modernControlsText.Contains("PageLeftCommand", StringComparison.Ordinal) &&
     modernControlsText.Contains("PageRightCommand", StringComparison.Ordinal),
@@ -496,9 +511,31 @@ Equal(true, aboutWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordi
     "about window uses FluentWindow with Mica");
 Equal(true, aboutWindowText.Contains("{DynamicResource CheckForUpdates}",
                 StringComparison.Ordinal) &&
-            aboutWindowText.Contains("Style=\"{StaticResource PrimaryButton}\"",
+            aboutWindowText.Contains(
+                "Style=\"{StaticResource AboutCheckUpdatesButtonStyle}\"",
+                StringComparison.Ordinal) &&
+            aboutWindowText.Contains(
+                "Value=\"{DynamicResource AboutCheckUpdatesTextBrush}\"",
                 StringComparison.Ordinal),
-    "check for updates uses the audited primary action style");
+    "check for updates keeps an explicit theme-aware foreground");
+Equal(true,
+    mainWindowText.Contains("<TranslateTransform X=\"6\"/>",
+        StringComparison.Ordinal),
+    "settings scrollbar keeps the reviewed right-side offset");
+var conflictWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "InstanceConflictWindow.xaml"));
+Equal(true,
+    conflictWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal) &&
+    conflictWindowText.Contains("WindowBackdropType=\"Acrylic\"",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("CloseOtherInstancesButton",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("CloseCurrentInstanceButton",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("Style=\"{StaticResource PrimaryButton}\"",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("IsDefault=\"True\"", StringComparison.Ordinal),
+    "instance conflict uses a Fluent Acrylic decision dialog");
 Equal(false, aboutWindowText.Contains("SettingsSection", StringComparison.Ordinal),
     "about content uses lightweight unframed sections instead of a large nested card");
 Equal(true, aboutWindowText.Contains("DiagnosticPath, Mode=OneWay",
@@ -1326,17 +1363,32 @@ await using (var immediateExitOutput = new MediaOutputService((_, _, _) => null,
             1, 48000, 2, 16, new byte[4])
         : null))
 {
-    var immediateExitCapabilities = ffmpegCapabilities with
+    var previousDelayedExit = Environment.GetEnvironmentVariable(
+        delayedExitEnvironment, EnvironmentVariableTarget.Process);
+    try
     {
-        FfmpegPath = Path.Combine(Environment.SystemDirectory, "whoami.exe"),
-    };
-    await ThrowsAsync<InvalidOperationException>(() => immediateExitOutput.StartAsync(
-            1, processTestRequest, immediateExitCapabilities),
-        "an output process that exits during startup is rejected");
+        Environment.SetEnvironmentVariable(delayedExitEnvironment, "750",
+            EnvironmentVariableTarget.Process);
+        var delayedExitCapabilities = ffmpegCapabilities with
+        {
+            FfmpegPath = Environment.ProcessPath ??
+                throw new InvalidOperationException(
+                    "The test process executable path is unavailable."),
+        };
+        await ThrowsAsync<InvalidOperationException>(() =>
+                immediateExitOutput.StartAsync(1, processTestRequest,
+                    delayedExitCapabilities),
+            "an output process that exits during the audio handshake is rejected");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable(delayedExitEnvironment,
+            previousDelayedExit, EnvironmentVariableTarget.Process);
+    }
     Equal(false, immediateExitOutput.IsRunning,
-        "immediate process exit does not publish a running output");
+        "startup process exit does not publish a running output");
     Equal(0UL, immediateExitOutput.SessionHandle,
-        "immediate process exit does not retain the session handle");
+        "startup process exit does not retain the session handle");
 }
 
 await using (var failedStartOutput = new MediaOutputService((_, _, _) => null,

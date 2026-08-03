@@ -85,10 +85,13 @@ internal static class Program
             {
                 ApplyTheme(assembly, AppTheme.Light);
                 AssertThemeBrush(window, "TextBrush", Color.FromRgb(0x1D, 0x1D, 0x1F));
+                AssertThemeBrush(window, "AboutCheckUpdatesTextBrush", Colors.White);
                 AssertBackdropBackground(window);
 
                 ApplyTheme(assembly, AppTheme.Dark);
                 AssertThemeBrush(window, "TextBrush", Color.FromRgb(0xF5, 0xF5, 0xF7));
+                AssertThemeBrush(window, "AboutCheckUpdatesTextBrush",
+                    Color.FromRgb(0x0F, 0x14, 0x19));
                 AssertBackdropBackground(window);
             }
             finally
