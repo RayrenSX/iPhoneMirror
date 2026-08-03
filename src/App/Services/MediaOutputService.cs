@@ -150,6 +150,14 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 await ObserveStartupAsync(process, cancellationToken);
                 if (pipeConnection is not null)
                 {
+                    var processExit = process.WaitForExitAsync(cancellationToken);
+                    var completed = await Task.WhenAny(pipeConnection, processExit);
+                    if (completed == processExit)
+                    {
+                        await processExit;
+                        await ThrowStartupExitAsync(process, cancellationToken);
+                    }
+
                     try { await pipeConnection; }
                     catch (OperationCanceledException)
                         when (!cancellationToken.IsCancellationRequested)
@@ -657,6 +665,13 @@ internal sealed class MediaOutputService : IAsyncDisposable
             if (!process.HasExited) return;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+        await ThrowStartupExitAsync(process, cancellationToken);
+    }
+
+    private async Task ThrowStartupExitAsync(Process process,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         process.WaitForExit();
         await Task.Yield();

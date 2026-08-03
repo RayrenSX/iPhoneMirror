@@ -7,6 +7,15 @@ using IPhoneMirror.App.Updater;
 using IPhoneMirror.Shared.Networking;
 using IPhoneMirror.SharedUI.Services;
 
+const string delayedExitEnvironment =
+    "IPHONE_MIRROR_TEST_DELAYED_PROCESS_EXIT_MS";
+if (int.TryParse(Environment.GetEnvironmentVariable(delayedExitEnvironment),
+        out var delayedExitMilliseconds) && delayedExitMilliseconds > 0)
+{
+    await Task.Delay(delayedExitMilliseconds);
+    return;
+}
+
 var diagnosticTestRoot = Path.Combine(Path.GetTempPath(),
     $"iPhoneMirror-test-logs-{Guid.NewGuid():N}");
 Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY",
@@ -1354,17 +1363,32 @@ await using (var immediateExitOutput = new MediaOutputService((_, _, _) => null,
             1, 48000, 2, 16, new byte[4])
         : null))
 {
-    var immediateExitCapabilities = ffmpegCapabilities with
+    var previousDelayedExit = Environment.GetEnvironmentVariable(
+        delayedExitEnvironment, EnvironmentVariableTarget.Process);
+    try
     {
-        FfmpegPath = Path.Combine(Environment.SystemDirectory, "whoami.exe"),
-    };
-    await ThrowsAsync<InvalidOperationException>(() => immediateExitOutput.StartAsync(
-            1, processTestRequest, immediateExitCapabilities),
-        "an output process that exits during startup is rejected");
+        Environment.SetEnvironmentVariable(delayedExitEnvironment, "750",
+            EnvironmentVariableTarget.Process);
+        var delayedExitCapabilities = ffmpegCapabilities with
+        {
+            FfmpegPath = Environment.ProcessPath ??
+                throw new InvalidOperationException(
+                    "The test process executable path is unavailable."),
+        };
+        await ThrowsAsync<InvalidOperationException>(() =>
+                immediateExitOutput.StartAsync(1, processTestRequest,
+                    delayedExitCapabilities),
+            "an output process that exits during the audio handshake is rejected");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable(delayedExitEnvironment,
+            previousDelayedExit, EnvironmentVariableTarget.Process);
+    }
     Equal(false, immediateExitOutput.IsRunning,
-        "immediate process exit does not publish a running output");
+        "startup process exit does not publish a running output");
     Equal(0UL, immediateExitOutput.SessionHandle,
-        "immediate process exit does not retain the session handle");
+        "startup process exit does not retain the session handle");
 }
 
 await using (var failedStartOutput = new MediaOutputService((_, _, _) => null,

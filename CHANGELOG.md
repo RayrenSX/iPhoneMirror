@@ -26,6 +26,8 @@ All notable changes to iPhoneMirror are documented here. The project follows
   same time by distinguishing an older running process from a newer contender.
 - Dispose filtered process handles and conservatively report inaccessible
   processes during the graceful-close and bounded forced-close workflow.
+- Detect an FFmpeg process that exits while the projection audio pipe is still
+  connecting, reporting the real startup failure instead of a later timeout.
 
 ## [1.5.7] - 2026-08-03
 
