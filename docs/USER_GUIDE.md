@@ -1,6 +1,6 @@
 # iPhoneMirror 完整使用教程
 
-本文按 iPhoneMirror v1.5.10 更新，覆盖驱动安装、USB 有线投屏、AirPlay 无线屏幕镜像、
+本文按 iPhoneMirror v1.5.11 更新，覆盖驱动安装、USB 有线投屏、AirPlay 无线屏幕镜像、
 视频应用投屏、多设备、独立窗口、音频、截图、录制与推流、虚拟摄像头、实时日志和高级 USB 设置。
 
 本文截图均使用无损 PNG 保存，保留捕获时的原始像素尺寸，并且不在 Markdown 中设置缩放尺寸。

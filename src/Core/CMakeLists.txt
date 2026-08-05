@@ -143,6 +143,15 @@ if(IPHONEMIRROR_BUILD_TESTS)
         /W4 /permissive- /utf-8 /EHsc)
     add_test(NAME OutputModeStateTests COMMAND iPhoneMirror.OutputModeState.Tests)
 
+    add_executable(iPhoneMirror.UsbConfigurationRestorePolicy.Tests
+        tests/UsbConfigurationRestorePolicyTests.cpp)
+    target_include_directories(iPhoneMirror.UsbConfigurationRestorePolicy.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(iPhoneMirror.UsbConfigurationRestorePolicy.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    add_test(NAME UsbConfigurationRestorePolicyTests
+        COMMAND iPhoneMirror.UsbConfigurationRestorePolicy.Tests)
+
     add_executable(iPhoneMirror.LibUsb0Probe
         tools/LibUsb0Probe.cpp
         src/Transport/LibUsb0Transport.cpp

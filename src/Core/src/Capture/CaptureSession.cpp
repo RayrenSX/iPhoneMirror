@@ -1,4 +1,5 @@
 #include "Capture/CaptureSession.h"
+#include "Capture/UsbConfigurationRestorePolicy.h"
 
 #include "Transport/UsbMuxClient.h"
 
@@ -201,7 +202,6 @@ public:
     virtual void write(std::span<const std::uint8_t> source, unsigned timeout_ms) = 0;
     virtual void clear_halt() = 0;
     virtual void recover_handshake() = 0;
-    virtual void disable_quicktime_configuration() = 0;
     virtual void close() noexcept = 0;
 };
 
@@ -209,14 +209,7 @@ template <typename Connection>
 class CaptureConnectionAdapter final : public CaptureConnection {
 public:
     explicit CaptureConnectionAdapter(Connection connection) : connection_(std::move(connection)) {}
-    ~CaptureConnectionAdapter() override {
-        // The capture worker owns the protocol shutdown sequence.  It sends
-        // HPA0/HPD0, drains RELS, and disables configuration exactly once in
-        // shutdown_usb().  Repeating the 0x52/0 request from this destructor
-        // races device re-enumeration and differs from the working Aisi
-        // client, which performs a single disable step.
-        connection_.close();
-    }
+    ~CaptureConnectionAdapter() override { connection_.close(); }
     std::size_t read(std::span<std::uint8_t> destination, unsigned timeout_ms) override {
         return connection_.read(destination, timeout_ms);
     }
@@ -225,41 +218,85 @@ public:
     }
     void clear_halt() override { connection_.clear_halt(); }
     void recover_handshake() override { connection_.recover_handshake(); }
-    void disable_quicktime_configuration() override { connection_.disable_quicktime_configuration(); }
     void close() noexcept override { connection_.close(); }
 private:
     Connection connection_;
 };
 
-bool restore_libusb0_configuration(
-    const transport::AppleUsbIdentity& identity) noexcept {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    do {
-        try {
-            (void)transport::LibUsb0Connection::disable_quicktime_configuration(identity);
-            return true;
-        } catch (...) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+struct UsbConfigurationRestoreResult {
+    bool normal_observed{};
+    bool disable_requested{};
+};
+
+template <typename Observe, typename Disable>
+UsbConfigurationRestoreResult restore_usb_configuration(
+    std::string_view backend, Observe&& observe,
+    Disable&& disable) noexcept {
+    detail::UsbConfigurationRestorePolicy policy;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto observation = detail::UsbConfigurationObservation::Missing;
+        try { observation = observe(); } catch (...) {}
+
+        const auto action = policy.observe(observation);
+        if (action == detail::UsbConfigurationRestoreAction::Complete) {
+            logging::write(std::format(
+                "usb_configuration_restore backend={} result=normal disable_requested={}",
+                backend, policy.disable_requested()));
+            return {
+                .normal_observed = true,
+                .disable_requested = policy.disable_requested(),
+            };
         }
-    } while (std::chrono::steady_clock::now() < deadline);
-    return false;
+        if (action == detail::UsbConfigurationRestoreAction::DisableQuickTime) {
+            // 0x52 disconnects the device and can surface as I/O/NO_DEVICE even
+            // when iOS accepted it. Mark it attempted before entering the
+            // transport so no error path can send the request a second time.
+            logging::write(std::format(
+                "usb_configuration_restore backend={} action=disable_requested", backend));
+            deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            try { disable(); } catch (...) {}
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    logging::write(std::format(
+        "usb_configuration_restore backend={} result=timeout disable_requested={}",
+        backend, policy.disable_requested()));
+    return {
+        .normal_observed = false,
+        .disable_requested = policy.disable_requested(),
+    };
 }
 
-bool restore_qt_configuration(bool use_usbdk,
+UsbConfigurationRestoreResult restore_libusb0_configuration(
     const transport::AppleUsbIdentity& identity) noexcept {
-    const auto deadline = std::chrono::steady_clock::now() +
-        std::chrono::seconds(5);
-    do {
-        try {
-            transport::QtUsbContext context(use_usbdk);
-            (void)transport::QtUsbConnection::disable_quicktime_configuration(
-                context, identity);
-            return true;
-        } catch (...) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        }
-    } while (std::chrono::steady_clock::now() < deadline);
-    return false;
+    return restore_usb_configuration("libusb0", [&] {
+        const auto device = transport::find_libusb0_device(identity);
+        if (!device) return detail::UsbConfigurationObservation::Missing;
+        return device->quicktime_configuration
+            ? detail::UsbConfigurationObservation::QuickTime
+            : detail::UsbConfigurationObservation::Normal;
+    }, [&] {
+        (void)transport::LibUsb0Connection::disable_quicktime_configuration(identity);
+    });
+}
+
+UsbConfigurationRestoreResult restore_qt_configuration(bool use_usbdk,
+    const transport::AppleUsbIdentity& identity) noexcept {
+    const auto backend = use_usbdk ? std::string_view("usbdk") :
+        std::string_view("libusb1");
+    return restore_usb_configuration(backend, [&] {
+        transport::QtUsbContext context(use_usbdk);
+        const auto device = find_device(context, identity);
+        if (!device) return detail::UsbConfigurationObservation::Missing;
+        return device->quicktime_configuration
+            ? detail::UsbConfigurationObservation::QuickTime
+            : detail::UsbConfigurationObservation::Normal;
+    }, [&] {
+        transport::QtUsbContext context(use_usbdk);
+        (void)transport::QtUsbConnection::disable_quicktime_configuration(
+            context, identity);
+    });
 }
 
 std::uint8_t luma_as_8bit(const media::DecodedFrame& frame,
@@ -496,8 +533,7 @@ CaptureSession::~CaptureSession() { stop(); }
 
 void CaptureSession::start(bool use_usbdk) {
     if (worker_.joinable()) throw std::runtime_error("capture session is already running");
-    usb_transition_gate.acquire();
-    usb_transition_gate_held_.store(true, std::memory_order_release);
+    acquire_usb_transition_gate();
     try {
         preflight_device_.reset();
         // Synchronous preflight keeps the GUI from reporting a false successful start.
@@ -570,6 +606,12 @@ void CaptureSession::start(bool use_usbdk) {
         release_usb_transition_gate();
         throw;
     }
+}
+
+void CaptureSession::acquire_usb_transition_gate() noexcept {
+    if (usb_transition_gate_held_.load(std::memory_order_acquire)) return;
+    usb_transition_gate.acquire();
+    usb_transition_gate_held_.store(true, std::memory_order_release);
 }
 
 void CaptureSession::release_usb_transition_gate() noexcept {
@@ -834,13 +876,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 }
             }
         } catch (...) {}
-        bool configuration_restored{};
-        try {
-            usb->disable_quicktime_configuration();
-            configuration_restored = true;
-        } catch (...) {}
+        // Close the claimed streaming handle while the device is still in a
+        // stable configuration. The deferred restore then uses an independent,
+        // unclaimed control handle for the single disconnecting 0x52 request.
         usb->close();
-        if (configuration_restored) configuration_restore.disarm();
+        // Let libusb-win32 finish its internal interface release and CloseHandle
+        // before opening a new control handle on the same physical device.
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
     };
 
     try {
@@ -942,7 +984,11 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         device_fp, first_error.what()));
                     set_state(State::ActivatingUsb,
                         L"正在恢复 Apple 设备的 QuickTime USB 配置");
-                    if (restore_libusb0_configuration(identity))
+                    const auto recovery = restore_libusb0_configuration(identity);
+                    // A transport error after 0x52 still consumes this
+                    // activation's one request. A pure Missing timeout does
+                    // not, so keep deferred cleanup available for a late node.
+                    if (recovery.normal_observed || recovery.disable_requested)
                         configuration_restore.disarm();
 
                     std::optional<transport::AppleUsbDevice> normal_device;
@@ -1830,6 +1876,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             }
         }
 
+        // Serialize the whole release/close/restore transition against other
+        // sessions starting or stopping. Streaming bulk calls remain protected
+        // by the backend's own API lock.
+        acquire_usb_transition_gate();
         video_worker.request_stop();
         video_queue_cv.notify_all();
         video_worker.join();
@@ -1838,16 +1888,19 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         configuration_restore.run_now();
         active_backend_release.run_now();
         transition_release.run_now();
+        release_usb_transition_gate();
         logging::write("capture_run stop path");
         set_state(State::Stopped, L"投屏已停止");
     } catch (const std::exception& error) {
         // Stop requests intentionally interrupt USB I/O while iOS restores
         // its normal configuration. This is a normal terminal condition.
+        acquire_usb_transition_gate();
         stop_audio_renderer();
         shutdown_usb();
         configuration_restore.run_now();
         active_backend_release.run_now();
         transition_release.run_now();
+        release_usb_transition_gate();
         logging::write(std::format("capture_run exception stop_requested={} error={}",
             stop_token.stop_requested(), error.what()));
         if (stop_token.stop_requested() && !video_worker_failure.failed()) {

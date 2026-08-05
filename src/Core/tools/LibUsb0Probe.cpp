@@ -36,7 +36,6 @@ int main(int argc, char** argv) {
                     static_cast<int>(ping.size()), 3000);
                 std::cout << "raw_config=" << config << " claim=" << claim << " write=" << write
                           << " error=" << usb_strerror() << '\n';
-                usb_release_interface(handle, 2);
                 usb_close(handle);
                 return write < 0 ? 3 : 0;
             }
@@ -62,8 +61,11 @@ int main(int argc, char** argv) {
                 std::cout << std::dec;
             }
             std::cout << '\n';
-            try { connection.disable_quicktime_configuration(); } catch (...) {}
             connection.close();
+            try {
+                (void)iPhoneMirror::transport::LibUsb0Connection::
+                    disable_quicktime_configuration(argv[2]);
+            } catch (...) {}
             return 0;
         } catch (const std::exception& error) {
             std::cerr << "quicktime_error=" << error.what() << '\n';
@@ -114,29 +116,6 @@ int main(int argc, char** argv) {
                 std::cout << "  disable_quicktime=" << result;
                 if (result < 0) std::cout << " error=" << usb_strerror();
                 std::cout << '\n';
-                int mux_configuration{};
-                for (int c = 0; c < device->descriptor.bNumConfigurations; ++c) {
-                    const auto& config = device->config[c];
-                    bool has_mux{};
-                    bool has_quicktime{};
-                    for (int i = 0; i < config.bNumInterfaces; ++i) {
-                        const auto& group = config.interface[i];
-                        for (int a = 0; a < group.num_altsetting; ++a) {
-                            has_mux = has_mux || group.altsetting[a].bInterfaceSubClass == 0xfe;
-                            const auto subclass = group.altsetting[a].bInterfaceSubClass;
-                            has_quicktime = has_quicktime || subclass == 0x2a || subclass == 0xfd;
-                        }
-                    }
-                    if (has_mux && !has_quicktime) {
-                        mux_configuration = (std::max)(mux_configuration,
-                            static_cast<int>(config.bConfigurationValue));
-                    }
-                }
-                if (disable && result >= 0 && mux_configuration > 0) {
-                    const int restore = usb_set_configuration(handle, mux_configuration);
-                    std::cout << "  restore_mux_configuration=" << mux_configuration
-                              << " result=" << restore << '\n';
-                }
             }
             int qt_configuration = -1;
             int qt_interface = -1;
@@ -212,7 +191,6 @@ int main(int argc, char** argv) {
                         std::cout << '\n';
                     }
                 }
-                usb_release_interface(handle, qt_interface);
             }
             if (handle) usb_close(handle);
         }

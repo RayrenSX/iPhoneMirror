@@ -2,6 +2,7 @@
 
 #include "Media/CoreMedia.h"
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -21,8 +22,24 @@ struct WasapiBufferLayout {
     std::size_t capacity_bytes{};
 };
 
+struct WasapiQueueThresholds {
+    std::size_t startup_frames{};
+    std::size_t high_water_frames{};
+};
+
+struct WasapiEnqueuePlan {
+    std::size_t drop_existing_frames{};
+    std::size_t final_frames{};
+};
+
 [[nodiscard]] std::optional<WasapiBufferLayout> checked_wasapi_buffer_layout(
     const coremedia::AudioStreamBasicDescription& format) noexcept;
+[[nodiscard]] WasapiQueueThresholds wasapi_queue_thresholds(
+    std::size_t maximum_packet_frames, std::size_t capacity_frames,
+    std::size_t endpoint_buffer_frames = 0) noexcept;
+[[nodiscard]] WasapiEnqueuePlan plan_wasapi_enqueue(
+    std::size_t queued_frames, std::size_t incoming_frames,
+    std::size_t capacity_frames, WasapiQueueThresholds thresholds) noexcept;
 
 } // namespace detail
 
@@ -60,6 +77,12 @@ private:
     std::size_t read_frame_{};
     std::size_t write_frame_{};
     std::size_t queued_frames_{};
+    std::size_t maximum_packet_frames_{};
+    std::array<std::size_t, 16> recent_packet_frames_{};
+    std::size_t packet_history_index_{};
+    std::size_t endpoint_buffer_frames_{};
+    std::size_t startup_frames_{};
+    std::size_t high_water_frames_{};
 
     void* stop_event_{};
     void* data_event_{};
@@ -70,6 +93,7 @@ private:
     std::atomic_uint64_t rendered_frames_{};
     std::atomic_uint64_t dropped_frames_{};
     std::atomic_uint64_t underruns_{};
+    std::atomic_uint64_t queue_catchups_{};
     std::atomic_bool playback_enabled_{true};
     // Linear gain encoded as 0..10000 to keep the real-time sample loop free
     // from floating point atomics and platform-specific lock fallbacks.

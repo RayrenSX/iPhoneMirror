@@ -459,16 +459,6 @@ void QtUsbConnection::recover_handshake() {
     if (result < 0) throw UsbError("recover QuickTime handshake", result);
 }
 
-void QtUsbConnection::disable_quicktime_configuration() {
-    if (!handle_) return;
-    const int result = libusb_control_transfer(handle_,
-        static_cast<std::uint8_t>(LIBUSB_ENDPOINT_OUT) |
-            static_cast<std::uint8_t>(LIBUSB_REQUEST_TYPE_VENDOR) |
-            static_cast<std::uint8_t>(LIBUSB_RECIPIENT_DEVICE),
-        0x52, 0, 0, nullptr, 0, 1000);
-    if (result < 0) throw UsbError("disable QuickTime USB configuration", result);
-}
-
 void QtUsbConnection::close() noexcept {
     auto* handle = std::exchange(handle_, nullptr);
     const auto claimed = std::exchange(claimed_, false);

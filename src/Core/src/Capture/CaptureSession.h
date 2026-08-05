@@ -161,6 +161,7 @@ private:
     std::uint64_t audio_output_sequence_{};
 
     void run(std::stop_token stop_token) noexcept;
+    void acquire_usb_transition_gate() noexcept;
     void release_usb_transition_gate() noexcept;
     void set_state(State state, std::wstring message);
     void stop_audio_renderer() noexcept;

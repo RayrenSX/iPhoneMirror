@@ -26,12 +26,11 @@ constexpr std::uint32_t PcmIsFloat = 1U << 0U;
 constexpr std::uint32_t PcmIsBigEndian = 1U << 1U;
 constexpr std::uint32_t PcmIsSignedInteger = 1U << 2U;
 constexpr std::uint32_t PcmIsNonInterleaved = 1U << 5U;
-// Three Apple packets provide a stable ~42 ms reserve after priming the 22 ms
-// endpoint buffer. One and two packets both produced occasional short reads on
-// the real default endpoint; this still stays within Apple's 73 ms buffer-ahead
-// interval advertised by the capture protocol.
-constexpr std::size_t StartupFrames = 3072;
-constexpr std::size_t HighWaterFrames = 4096;
+// Older devices normally submit 1024-frame PCM packets. Newer devices can use
+// 2048 or 4096 frames, so these are lower bounds rather than fixed packet-count
+// assumptions. Runtime thresholds expand around the largest observed packet.
+constexpr std::size_t BaseStartupFrames = 3072;
+constexpr std::size_t BaseHighWaterFrames = 4096;
 
 HANDLE as_handle(void* value) noexcept { return static_cast<HANDLE>(value); }
 
@@ -85,6 +84,53 @@ std::optional<WasapiBufferLayout> checked_wasapi_buffer_layout(
     };
 }
 
+WasapiQueueThresholds wasapi_queue_thresholds(
+    std::size_t maximum_packet_frames, std::size_t capacity_frames,
+    std::size_t endpoint_buffer_frames) noexcept {
+    if (capacity_frames == 0) return {};
+    const auto packet = std::min(maximum_packet_frames, capacity_frames);
+    const auto endpoint = std::min(endpoint_buffer_frames, capacity_frames);
+    const auto capped_add = [capacity_frames](std::size_t left,
+                                std::size_t right) noexcept {
+        if (left >= capacity_frames || right >= capacity_frames - left)
+            return capacity_frames;
+        return left + right;
+    };
+
+    auto startup = std::min(BaseStartupFrames, capacity_frames);
+    startup = std::max(startup, packet);
+    if (endpoint != 0) startup = std::max(startup, capped_add(packet, endpoint));
+
+    auto high_water = std::min(BaseHighWaterFrames, capacity_frames);
+    high_water = std::max(high_water, capped_add(startup, packet));
+    return {
+        .startup_frames = startup,
+        .high_water_frames = std::max(startup, high_water),
+    };
+}
+
+WasapiEnqueuePlan plan_wasapi_enqueue(
+    std::size_t queued_frames, std::size_t incoming_frames,
+    std::size_t capacity_frames, WasapiQueueThresholds thresholds) noexcept {
+    if (capacity_frames == 0) return {};
+    auto queued = std::min(queued_frames, capacity_frames);
+    const auto incoming = std::min(incoming_frames, capacity_frames);
+    const auto startup = std::min(thresholds.startup_frames, capacity_frames);
+    const auto high_water = std::max({startup, incoming,
+        std::min(thresholds.high_water_frames, capacity_frames)});
+    std::size_t dropped{};
+
+    const auto permitted_existing = high_water - incoming;
+    if (queued > permitted_existing) {
+        dropped = queued - permitted_existing;
+        queued = permitted_existing;
+    }
+    return {
+        .drop_existing_frames = dropped,
+        .final_frames = queued + incoming,
+    };
+}
+
 } // namespace detail
 
 WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& format,
@@ -100,6 +146,9 @@ WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& for
     block_align_ = layout->block_align;
     capacity_frames_ = layout->capacity_frames;
     ring_.resize(layout->capacity_bytes);
+    const auto thresholds = detail::wasapi_queue_thresholds(0, capacity_frames_);
+    startup_frames_ = thresholds.startup_frames;
+    high_water_frames_ = thresholds.high_water_frames;
 
     playback_enabled_.store(playback_enabled, std::memory_order_relaxed);
     const auto initial_volume = std::isfinite(volume) ? std::clamp(volume, 0.0F, 1.0F) : 1.0F;
@@ -163,25 +212,26 @@ void WasapiRenderer::enqueue(std::span<const std::uint8_t> pcm) {
 
     std::size_t dropped{};
     std::size_t depth{};
+    std::size_t startup{};
+    std::size_t high_water{};
+    std::size_t maximum_packet{};
     {
         std::scoped_lock lock(queue_mutex_);
-        // Never let endpoint or scheduling stalls turn into audible A/V delay.
-        // When more than three Apple packets are pending, retain the newest
-        // packet(s) and discard already-stale PCM.
-        if (queued_frames_ + frames > HighWaterFrames) {
-            const auto desired_total = std::max<std::size_t>(StartupFrames, frames);
-            const auto desired_existing = desired_total > frames ? desired_total - frames : 0;
-            if (queued_frames_ > desired_existing) {
-                dropped = queued_frames_ - desired_existing;
-                read_frame_ = (read_frame_ + dropped) % capacity_frames_;
-                queued_frames_ -= dropped;
-            }
-        }
-        if (queued_frames_ + frames > capacity_frames_) {
-            const auto overflow = queued_frames_ + frames - capacity_frames_;
-            read_frame_ = (read_frame_ + overflow) % capacity_frames_;
-            queued_frames_ -= overflow;
-            dropped += overflow;
+        recent_packet_frames_[packet_history_index_] = frames;
+        packet_history_index_ =
+            (packet_history_index_ + 1) % recent_packet_frames_.size();
+        maximum_packet_frames_ = *std::max_element(
+            recent_packet_frames_.begin(), recent_packet_frames_.end());
+        const auto thresholds = detail::wasapi_queue_thresholds(
+            maximum_packet_frames_, capacity_frames_, endpoint_buffer_frames_);
+        startup_frames_ = thresholds.startup_frames;
+        high_water_frames_ = thresholds.high_water_frames;
+        const auto plan = detail::plan_wasapi_enqueue(
+            queued_frames_, frames, capacity_frames_, thresholds);
+        dropped = plan.drop_existing_frames;
+        if (dropped != 0) {
+            read_frame_ = (read_frame_ + dropped) % capacity_frames_;
+            queued_frames_ -= dropped;
         }
 
         const auto first = std::min(frames, capacity_frames_ - write_frame_);
@@ -194,11 +244,18 @@ void WasapiRenderer::enqueue(std::span<const std::uint8_t> pcm) {
         write_frame_ = (write_frame_ + frames) % capacity_frames_;
         queued_frames_ += frames;
         depth = queued_frames_;
+        startup = startup_frames_;
+        high_water = high_water_frames_;
+        maximum_packet = maximum_packet_frames_;
     }
     if (dropped != 0) {
         const auto total = dropped_frames_.fetch_add(dropped, std::memory_order_relaxed) + dropped;
-        logging::write(std::format("wasapi queue_catchup dropped={} dropped_total={} depth={}",
-            dropped, total, depth));
+        const auto event = queue_catchups_.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (event <= 3 || event % 100 == 0) {
+            logging::write(std::format(
+                "wasapi queue_catchup n={} dropped={} dropped_total={} depth={} startup={} high_water={} packet_max={}",
+                event, dropped, total, depth, startup, high_water, maximum_packet));
+        }
     }
     SetEvent(as_handle(data_event_));
 }
@@ -352,6 +409,14 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
     check(client->SetEventHandle(as_handle(render_event_)), "set WASAPI render event");
     UINT32 buffer_frames{};
     check(client->GetBufferSize(&buffer_frames), "get WASAPI buffer size");
+    {
+        std::scoped_lock lock(queue_mutex_);
+        endpoint_buffer_frames_ = buffer_frames;
+        const auto thresholds = detail::wasapi_queue_thresholds(
+            maximum_packet_frames_, capacity_frames_, endpoint_buffer_frames_);
+        startup_frames_ = thresholds.startup_frames;
+        high_water_frames_ = thresholds.high_water_frames;
+    }
     ComPtr<IAudioRenderClient> render;
     check(client->GetService(IID_PPV_ARGS(&render)), "get IAudioRenderClient");
     logging::write(std::format(
@@ -390,10 +455,14 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
     };
 
     try {
-        const auto prebuffer = std::min<std::size_t>(StartupFrames,
-            std::max<UINT32>(1, buffer_frames));
         const HANDLE startup_events[] = {as_handle(stop_event_), as_handle(data_event_)};
-        while (!token.stop_requested() && queued_frames() < prebuffer) {
+        while (!token.stop_requested()) {
+            bool ready{};
+            {
+                std::scoped_lock lock(queue_mutex_);
+                ready = queued_frames_ >= startup_frames_;
+            }
+            if (ready) break;
             if (WaitForMultipleObjects(2, startup_events, FALSE, 500) == WAIT_OBJECT_0) {
                 stop_client();
                 return;
@@ -405,12 +474,18 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
         }
         std::size_t startup_dropped{};
         std::size_t startup_depth{};
+        std::size_t startup_target{};
+        std::size_t startup_high_water{};
+        std::size_t startup_packet_max{};
         {
             std::scoped_lock lock(queue_mutex_);
-            if (queued_frames_ > StartupFrames) {
-                startup_dropped = queued_frames_ - StartupFrames;
+            startup_target = startup_frames_;
+            startup_high_water = high_water_frames_;
+            startup_packet_max = maximum_packet_frames_;
+            if (queued_frames_ > startup_target) {
+                startup_dropped = queued_frames_ - startup_target;
                 read_frame_ = (read_frame_ + startup_dropped) % capacity_frames_;
-                queued_frames_ = StartupFrames;
+                queued_frames_ = startup_target;
             }
             startup_depth = queued_frames_;
         }
@@ -418,14 +493,16 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
             const auto total = dropped_frames_.fetch_add(
                 startup_dropped, std::memory_order_relaxed) + startup_dropped;
             logging::write(std::format(
-                "wasapi startup_catchup dropped={} dropped_total={} depth={}",
-                startup_dropped, total, startup_depth));
+                "wasapi startup_catchup dropped={} dropped_total={} depth={} target={}",
+                startup_dropped, total, startup_depth, startup_target));
         }
         write_available(false);
         check(client->Start(), "start WASAPI client");
         started = true;
         active_.store(true, std::memory_order_relaxed);
-        logging::write(std::format("wasapi playback_started queue_frames={}", queued_frames()));
+        logging::write(std::format(
+            "wasapi playback_started queue_frames={} startup_frames={} high_water_frames={} packet_max={}",
+            queued_frames(), startup_target, startup_high_water, startup_packet_max));
 
         const HANDLE render_events[] = {as_handle(stop_event_), as_handle(render_event_)};
         while (!token.stop_requested()) {

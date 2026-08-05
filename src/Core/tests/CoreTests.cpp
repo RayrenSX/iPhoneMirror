@@ -1016,6 +1016,64 @@ void test_capture_media_safety_helpers() {
         audio_layout->capacity_frames == 8192 &&
         audio_layout->capacity_bytes == 32768,
         "WASAPI validates PCM before computing its bounded ring layout");
+    const auto audio_capacity = audio_layout ? audio_layout->capacity_frames : 0;
+
+    const auto queue_1024 = iPhoneMirror::audio::detail::wasapi_queue_thresholds(
+        1024, audio_capacity, 1056);
+    const auto queue_2048 = iPhoneMirror::audio::detail::wasapi_queue_thresholds(
+        2048, audio_capacity, 1056);
+    const auto queue_4096 = iPhoneMirror::audio::detail::wasapi_queue_thresholds(
+        4096, audio_capacity, 1056);
+    check(queue_1024.startup_frames == 3072 &&
+        queue_1024.high_water_frames == 4096 &&
+        queue_2048.startup_frames == 3104 &&
+        queue_2048.high_water_frames == 5152 &&
+        queue_4096.startup_frames == 5152 &&
+        queue_4096.high_water_frames == 8192,
+        "WASAPI jitter thresholds adapt to the observed PCM packet and endpoint sizes");
+
+    const auto queue_4096_before_endpoint =
+        iPhoneMirror::audio::detail::wasapi_queue_thresholds(
+            4096, audio_capacity);
+    const auto first_large_packet =
+        iPhoneMirror::audio::detail::plan_wasapi_enqueue(
+            0, 4096, audio_capacity,
+            queue_4096_before_endpoint);
+    const auto second_large_packet =
+        iPhoneMirror::audio::detail::plan_wasapi_enqueue(
+            4096, 4096, audio_capacity,
+            queue_4096_before_endpoint);
+    check(first_large_packet.drop_existing_frames == 0 &&
+        first_large_packet.final_frames == 4096 &&
+        second_large_packet.drop_existing_frames == 0 &&
+        second_large_packet.final_frames == 8192,
+        "WASAPI keeps two 4096-frame packets instead of discarding the jitter reserve");
+
+    const auto large_packet_catchup =
+        iPhoneMirror::audio::detail::plan_wasapi_enqueue(
+            4097, 4096, audio_capacity, queue_4096);
+    const auto medium_packet_at_limit =
+        iPhoneMirror::audio::detail::plan_wasapi_enqueue(
+            queue_2048.startup_frames, 2048,
+            audio_capacity, queue_2048);
+    const auto large_packet_burst =
+        iPhoneMirror::audio::detail::plan_wasapi_enqueue(
+            4512, 4096, audio_capacity, queue_4096);
+    check(large_packet_catchup.drop_existing_frames == 1 &&
+        large_packet_catchup.final_frames == queue_4096.high_water_frames &&
+        large_packet_burst.drop_existing_frames == 416 &&
+        large_packet_burst.final_frames == queue_4096.high_water_frames &&
+        medium_packet_at_limit.drop_existing_frames == 0 &&
+        medium_packet_at_limit.final_frames == queue_2048.high_water_frames,
+        "WASAPI drops only the excess above the adaptive high-water mark");
+
+    const auto saturated_queue =
+        iPhoneMirror::audio::detail::wasapi_queue_thresholds(
+            audio_capacity * 2, audio_capacity, audio_capacity);
+    check(saturated_queue.startup_frames == audio_capacity &&
+        saturated_queue.high_water_frames == audio_capacity,
+        "WASAPI queue threshold arithmetic saturates at ring capacity");
+
     audio_format.sample_rate = std::numeric_limits<double>::infinity();
     check(!iPhoneMirror::audio::detail::checked_wasapi_buffer_layout(audio_format),
         "WASAPI rejects non-finite rates before allocation");

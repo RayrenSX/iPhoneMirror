@@ -5,6 +5,48 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.11] - 2026-08-05
+
+### Added
+
+- Add a repository maintenance utility that lists currently connected Apple
+  mobile devices, previews the exact PnP nodes and third-party Driver Store
+  packages associated with one selected device, and requires an
+  administrator-confirmed serial-tail challenge before removal.
+- Add a deterministic USB configuration restoration policy test covering
+  missing devices, normal configuration, repeated QuickTime observations and
+  transport failures after the disconnect request.
+
+### Changed
+
+- Adapt WASAPI startup and high-water thresholds to the recent PCM packet size
+  and the actual endpoint buffer, preserving suitable jitter reserve for 1024,
+  2048 and 4096-frame Apple audio packets.
+- Close claimed streaming handles before restoring the normal Apple USB
+  configuration, then observe re-enumeration through a separate control handle.
+  Start and stop transitions are serialized without blocking independent
+  devices' steady-state bulk media transfers.
+- Let `usb_close` own legacy libusb-win32 interface cleanup instead of issuing
+  an explicit release immediately before close during PnP teardown.
+
+### Fixed
+
+- Prevent intermittent wired-audio gaps caused by treating a 4096-frame packet
+  as the entire queue high-water mark and discarding the jitter reserve that
+  should bridge USB or scheduler delays.
+- Prevent multi-device wired sessions from starving one another by keeping
+  independent libusb0 bulk reads and writes concurrent while discovery,
+  configuration and close operations remain exclusive.
+- Avoid reading libusb-win32's process-global, non-thread-safe error string from
+  concurrent bulk paths; timeout and failure handling now use stable numeric
+  transfer results.
+- Send the QuickTime configuration disable request at most once per restore
+  attempt, including when the expected device disconnect surfaces as an I/O
+  error, and wait for the normal configuration instead of forcing USBMux on the
+  disconnecting handle.
+- Reduce real-time logging pressure by throttling repeated WASAPI catch-up
+  records while retaining initial and periodic diagnostics.
+
 ## [1.5.10] - 2026-08-05
 
 ### Changed
@@ -918,7 +960,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.10...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.11...HEAD
+[1.5.11]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.10...v1.5.11
 [1.5.10]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.9...v1.5.10
 [1.5.9]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.8...v1.5.9
 [1.5.8]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.7...v1.5.8

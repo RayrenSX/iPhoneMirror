@@ -1,41 +1,41 @@
 [
   {
-    "tag_name": "v1.5.10",
-    "name": "iPhoneMirror v1.5.10",
-    "body": "v1.5.10 降低自动 USB 探测触发复合过滤器竞态的风险，完善 QuickTime 配置恢复与同设备启动协调，并修复多网卡 AirPlay DNS-SD 生命周期。",
-    "published_at": "2026-08-05T02:41:08Z",
+    "tag_name": "v1.5.11",
+    "name": "iPhoneMirror v1.5.11",
+    "body": "v1.5.11 修复有线投屏间歇性断音和多设备 USB 媒体饥饿，并完善 QuickTime USB 配置退出、重枚举与关闭恢复流程。",
+    "published_at": "2026-08-05T00:00:00Z",
     "draft": false,
     "prerelease": false,
     "assets": [
       {
-        "name": "iPhoneMirror-Setup-v1.5.10-x64.exe",
-        "size": 167327792,
-        "digest": "sha256:9ea17f9410709a769de5e1a5269e69c4c36579c3be01d2de204c92c36687916f",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.10/iPhoneMirror-Setup-v1.5.10-x64.exe"
+        "name": "iPhoneMirror-Setup-v1.5.11-x64.exe",
+        "size": 167328873,
+        "digest": "sha256:b5dc32d02d95b2781b2e4da4abb82b4ecac82f90131aa12cd64cdb2026459ebb",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-Setup-v1.5.11-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.5.10-win-x64.zip",
-        "size": 188021905,
-        "digest": "sha256:e7c9e810cea4bdfdca97e05ba05dc4e0c7458109513c533e26af7dd77457a82f",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.10/iPhoneMirror-v1.5.10-win-x64.zip"
+        "name": "iPhoneMirror-v1.5.11-win-x64.zip",
+        "size": 188024206,
+        "digest": "sha256:27935d2abfda464c497d0ce5c4ec3547a7f737b7f14fd88a9e05269c601ea6b4",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.5.10-win-x64-latest.zip",
-        "size": 188021905,
-        "digest": "sha256:e7c9e810cea4bdfdca97e05ba05dc4e0c7458109513c533e26af7dd77457a82f",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.10/iPhoneMirror-v1.5.10-win-x64-latest.zip"
+        "name": "iPhoneMirror-v1.5.11-win-x64-latest.zip",
+        "size": 188024206,
+        "digest": "sha256:27935d2abfda464c497d0ce5c4ec3547a7f737b7f14fd88a9e05269c601ea6b4",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64-latest.zip"
       },
       {
-        "name": "iPhoneMirror-v1.5.10-win-x64-sbom.spdx.json",
+        "name": "iPhoneMirror-v1.5.11-win-x64-sbom.spdx.json",
         "size": 67535,
-        "digest": "sha256:0a81cc4b869512593d1d0fbc6c62fae781668892b85559cabf0a00fb209a0545",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.10/iPhoneMirror-v1.5.10-win-x64-sbom.spdx.json"
+        "digest": "sha256:983311941c885dba7d47f1c8e62a7178cbcab10787c7a7d059ff7a28452fce19",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64-sbom.spdx.json"
       },
       {
         "name": "SHA256SUMS.txt",
         "size": 416,
-        "digest": "sha256:86c5ffa99e53848afaadf2b2f985d1afbbb3ba7482aea98e66990255e20e19a0",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.10/SHA256SUMS.txt"
+        "digest": "sha256:43f7fc5e1dee475031345a804c00688fe230c465ae6082f9914267c9c326ccc8",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/SHA256SUMS.txt"
       }
     ]
   }

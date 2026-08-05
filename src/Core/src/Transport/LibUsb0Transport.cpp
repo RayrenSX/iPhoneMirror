@@ -20,9 +20,11 @@ namespace {
 constexpr std::uint16_t AppleVendorId = 0x05ac;
 constexpr std::uint8_t QuickTimeSubclass = 0x2a;
 constexpr std::uint8_t QuickTimePlaceholderSubclass = 0xfd;
-// libusb-win32 keeps a process-global bus/device list. Exclusive operations
-// refresh that list or change configuration; bulk transfers use shared access
-// so independent capture sessions can continue concurrently.
+constexpr int LibUsb0TransferTimedOut = -116;
+// libusb-win32 keeps a process-global bus/device list. Configuration, discovery
+// and close operations take exclusive access so they cannot overlap any in-
+// flight transfer. Bulk I/O uses shared access because independent, already-
+// opened devices must keep draining concurrently to avoid media starvation.
 std::shared_mutex api_mutex;
 std::once_flag usb_init_once;
 
@@ -551,12 +553,7 @@ bool LibUsb0Connection::disable_quicktime_configuration(
     usb_dev_handle* handle{};
     if (!find_device(identity, &handle) || !handle)
         throw std::runtime_error("libusb0 cannot find the selected Apple device");
-    struct usb_device* device = usb_device(handle);
-    const int mux_configuration = device ? mux_configuration_for(*device) : 0;
     const int result = usb_control_msg(handle, 0x40, 0x52, 0, 0, nullptr, 0, 1000);
-    if (result >= 0 && mux_configuration > 0) {
-        (void)usb_set_configuration(handle, mux_configuration);
-    }
     usb_close(handle);
     if (result < 0) throw_last_error("disable QuickTime USB configuration");
     return true;
@@ -656,11 +653,10 @@ std::size_t LibUsb0Connection::read(std::span<std::uint8_t> destination, unsigne
         reinterpret_cast<char*>(destination.data()),
         static_cast<int>(std::min<std::size_t>(destination.size(), INT_MAX)),
         static_cast<int>(timeout_ms));
-    if (count < 0) {
-        const std::string error = usb_strerror();
-        if (error.find("timeout") != std::string::npos || error.find("Timeout") != std::string::npos) return 0;
-        throw_last_error("QuickTime bulk read");
-    }
+    if (count == LibUsb0TransferTimedOut) return 0;
+    if (count < 0)
+        throw std::runtime_error(std::format(
+            "QuickTime bulk read: libusb0 error {}", count));
     return static_cast<std::size_t>(count);
 }
 
@@ -675,7 +671,9 @@ void LibUsb0Connection::write(std::span<const std::uint8_t> source, unsigned tim
             reinterpret_cast<char*>(const_cast<std::uint8_t*>(source.data() + offset)),
             static_cast<int>(std::min<std::size_t>(source.size() - offset, INT_MAX)),
             static_cast<int>(timeout_ms));
-        if (count <= 0) throw_last_error("QuickTime bulk write");
+        if (count <= 0)
+            throw std::runtime_error(std::format(
+                "QuickTime bulk write: libusb0 error {}", count));
         offset += static_cast<std::size_t>(count);
     }
 }
@@ -695,19 +693,6 @@ void LibUsb0Connection::recover_handshake() {
     }
 }
 
-void LibUsb0Connection::disable_quicktime_configuration() {
-    std::unique_lock lock(api_mutex);
-    if (!handle_) return;
-    struct usb_device* device = usb_device(handle_);
-    const int mux_configuration = device ? mux_configuration_for(*device) : 0;
-    if (usb_control_msg(handle_, 0x40, 0x52, 0, 0, nullptr, 0, 1000) < 0) {
-        throw_last_error("disable QuickTime USB configuration");
-    }
-    if (mux_configuration > 0 && usb_set_configuration(handle_, mux_configuration) < 0) {
-        throw_last_error("restore USBMux configuration");
-    }
-}
-
 void LibUsb0Connection::close() noexcept {
     try {
         std::unique_lock lock(api_mutex);
@@ -721,11 +706,11 @@ void LibUsb0Connection::close() noexcept {
 
 void LibUsb0Connection::close_unlocked() noexcept {
     auto* handle = std::exchange(handle_, nullptr);
-    const auto claimed = std::exchange(claimed_, false);
-    if (handle) {
-        if (claimed) usb_release_interface(handle, endpoints_.interface_number);
-        usb_close(handle);
-    }
+    claimed_ = false;
+    // usb_close performs the interface release. Calling usb_release_interface
+    // first can make libusb-win32 issue a second release when the first one
+    // fails during PnP teardown.
+    if (handle) usb_close(handle);
     if (active_identity_retained_) {
         release_active_apple_usb_identity(active_topology_, active_serial_);
         active_identity_retained_ = false;

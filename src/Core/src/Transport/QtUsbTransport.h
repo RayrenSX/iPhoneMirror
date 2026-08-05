@@ -156,7 +156,6 @@ public:
     void write(std::span<const std::uint8_t> source, unsigned timeout_ms);
     void clear_halt();
     void recover_handshake();
-    void disable_quicktime_configuration();
     void close() noexcept;
     [[nodiscard]] bool valid() const noexcept { return handle_ != nullptr; }
 
