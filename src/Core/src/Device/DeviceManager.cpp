@@ -140,22 +140,25 @@ EnvironmentRecord DeviceManager::environment() const {
     result.physical_device_count = static_cast<std::uint32_t>(discover_physical_apple_usb_devices().size());
     const auto usb_runtime = transport::probe_usb_runtime();
     result.libusb_runtime = usb_runtime.runtime_available;
+    result.usbdk_backend_known = usb_runtime.usbdk_backend_probed;
     result.usbdk_backend = usb_runtime.usbdk_backend_available;
+    result.libusb_apple_devices_known = usb_runtime.apple_device_count_probed;
     result.libusb_apple_devices = usb_runtime.apple_device_count;
     result.libusb_version = widen(usb_runtime.version);
-    result.libusb0_available = transport::libusb0_available();
-    // Do not call the legacy global enumeration API from the GUI refresh thread
-    // while a capture handle may be active. The regular descriptor probe is
-    // sufficient for environment status; CaptureSession performs the real open.
-    if (result.libusb0_available) result.libusb0_apple_devices = usb_runtime.apple_device_count;
+    result.libusb0_available = transport::libusb0_installed();
+    // The automatic probe never touches libusb0, so its device count remains
+    // deliberately unknown until the explicit capture preflight. Do not copy
+    // the libusb-1 count into the legacy backend fields.
 
-    if (result.standard_mux && result.libusb0_apple_devices > 0) {
+    if (result.standard_mux && result.libusb0_apple_devices_known &&
+        result.libusb0_apple_devices > 0) {
         result.diagnostic = L"Apple 配对通道与 libusb0 直接采集后端已就绪。";
     } else if (!result.service_installed && !result.capture_mux) {
         result.diagnostic = L"未检测到 Apple Mobile Device Support。请安装 Apple Devices 或 iTunes 驱动；有线采集还需要兼容的 USB 过滤驱动。";
     } else if (!result.service_running && !result.capture_mux) {
         result.diagnostic = L"Apple Devices 已安装，但后台 USB 服务尚未运行。连接并解锁 iPhone 后应自动启动；若未启动请打开 Apple Devices 修复。";
-    } else if (result.standard_mux && result.libusb_apple_devices > 0) {
+    } else if (result.standard_mux && result.libusb_apple_devices_known &&
+        result.libusb_apple_devices > 0) {
         result.diagnostic = L"Apple 配对通道和 libusb 设备枚举可用；开始投屏时将验证隐藏配置访问权限。";
     } else if (result.standard_mux) {
         result.diagnostic = L"Apple 配对通道可用；连接 iPhone 后将检测直接 QuickTime USB 后端。";
@@ -166,12 +169,18 @@ EnvironmentRecord DeviceManager::environment() const {
     }
     if (result.libusb_runtime) {
         result.diagnostic += L" libusb " + result.libusb_version + L" 已加载";
-        result.diagnostic += result.usbdk_backend ? L"，UsbDk 后端可用。" : L"，UsbDk 后端未安装。";
+        if (result.usbdk_backend_known) {
+            result.diagnostic += result.usbdk_backend
+                ? L"，UsbDk 后端可用。"
+                : L"，UsbDk 后端不可用。";
+        } else {
+            result.diagnostic += L"，UsbDk 后端尚未探测（开始投屏时才会访问 USB 后端）。";
+        }
     } else {
         result.diagnostic += L" libusb 用户态运行库不可用。";
     }
     if (result.libusb0_available) {
-        result.diagnostic += L" libusb0 过滤后端可用。";
+        result.diagnostic += L" libusb0 运行库文件存在；设备枚举将在开始投屏时进行。";
     }
     return result;
 }

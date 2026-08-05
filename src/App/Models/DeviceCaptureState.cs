@@ -18,6 +18,7 @@ internal sealed class DeviceCaptureState
 {
     internal required string Udid { get; init; }
     internal ulong Handle { get; set; }
+    internal bool IsStarting { get; set; }
     internal bool IsStopping { get; set; }
     internal uint RenderWidth { get; set; }
     internal uint RenderHeight { get; set; }

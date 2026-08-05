@@ -5,6 +5,7 @@
 #include "Protocol/Plist.h"
 #include "Protocol/QuickTimePacket.h"
 #include "Protocol/QuickTimeSession.h"
+#include "Transport/AppleUsbIdentityCache.h"
 #include "Transport/LibUsb0Readiness.h"
 #include "Transport/QtUsbTransport.h"
 #include "Capture/CaptureSession.h"
@@ -12,6 +13,8 @@
 #include "Logging.h"
 #include "IpcProtocol.h"
 #include "iPhoneMirror/CoreApi.h"
+
+#include <Windows.h>
 
 #include <algorithm>
 #include <atomic>
@@ -441,9 +444,60 @@ void test_usb_projection_modes() {
 }
 
 void test_libusb_runtime() {
+    class CountingProbeSource final : public iPhoneMirror::transport::UsbRuntimeProbeSource {
+    public:
+        void read_user_mode_metadata(
+            iPhoneMirror::transport::UsbRuntimeProbe& probe) override {
+            ++metadata_calls;
+            probe.runtime_available = true;
+            probe.usbdk_helper_installed = true;
+            probe.version = "test";
+        }
+
+        void probe_usb_backends(
+            iPhoneMirror::transport::UsbRuntimeProbe& probe) override {
+            ++backend_calls;
+            probe.usbdk_backend_probed = true;
+            probe.usbdk_backend_available = true;
+            probe.apple_device_count_probed = true;
+            probe.apple_device_count = 1;
+        }
+
+        int metadata_calls{};
+        int backend_calls{};
+    };
+
+    const bool legacy_runtime_was_loaded =
+        GetModuleHandleW(L"libusb0.dll") != nullptr;
+    CountingProbeSource source;
+    const auto automatic = iPhoneMirror::transport::probe_usb_runtime(source);
+    check(source.metadata_calls == 1,
+        "automatic runtime probe reads user-mode metadata once");
+    check(source.backend_calls == 0,
+        "automatic runtime probe does not enter USB backends");
+    check(!automatic.usbdk_backend_probed &&
+        !automatic.apple_device_count_probed,
+        "automatic runtime probe reports backend state as unknown");
+
+    const auto explicit_probe =
+        iPhoneMirror::transport::probe_usb_runtime(source, true);
+    check(source.metadata_calls == 2 && source.backend_calls == 1,
+        "explicit runtime probe enters USB backends exactly once");
+    check(explicit_probe.usbdk_backend_probed &&
+        explicit_probe.usbdk_backend_available &&
+        explicit_probe.apple_device_count_probed &&
+        explicit_probe.apple_device_count == 1,
+        "explicit runtime probe returns backend results");
+
     const auto probe = iPhoneMirror::transport::probe_usb_runtime();
     check(probe.runtime_available, "libusb runtime loads");
     check(probe.version.starts_with("1.0.29"), "libusb runtime version is 1.0.29");
+    check(!probe.usbdk_backend_probed && !probe.apple_device_count_probed,
+        "system runtime metadata leaves USB backend state unknown");
+    if (!legacy_runtime_was_loaded) {
+        check(GetModuleHandleW(L"libusb0.dll") == nullptr,
+            "automatic runtime metadata does not load the legacy USB runtime");
+    }
 }
 
 void test_apple_usb_serial_matching() {
@@ -470,6 +524,35 @@ void test_apple_usb_serial_matching() {
     check(!apple_usb_serial_equal({}, {}) &&
         !apple_usb_serial_equal("   ", "\t"),
         "empty normalized USB serials never identify a device");
+}
+
+void test_active_apple_usb_identity_cache() {
+    using namespace iPhoneMirror::transport;
+    const AppleUsbIdentity identity{
+        .serial = "00008101-00044D600A22001E",
+        .topology_id = "test-active-usb:3:2",
+    };
+    check(cached_active_apple_usb_serial(identity.topology_id).empty(),
+        "active USB identity cache started with a stale entry");
+    check(retain_active_apple_usb_identity(identity),
+        "active USB identity cache rejected the first owner");
+    check(apple_usb_serial_equal(
+            cached_active_apple_usb_serial(identity.topology_id), identity.serial),
+        "active USB identity cache did not return the retained serial");
+    check(retain_active_apple_usb_identity(identity),
+        "active USB identity cache rejected a matching second owner");
+
+    auto conflicting = identity;
+    conflicting.serial = "00008101-0000000000000000";
+    check(!retain_active_apple_usb_identity(conflicting),
+        "active USB identity cache accepted a conflicting serial");
+
+    release_active_apple_usb_identity(identity.topology_id, identity.serial);
+    check(!cached_active_apple_usb_serial(identity.topology_id).empty(),
+        "active USB identity cache dropped a shared owner too early");
+    release_active_apple_usb_identity(identity.topology_id, identity.serial);
+    check(cached_active_apple_usb_serial(identity.topology_id).empty(),
+        "active USB identity cache retained a released owner");
 }
 
 void test_apple_usb_reenumeration_selection() {
@@ -1061,7 +1144,7 @@ void test_wireless_i420_conversion() {
         header, std::span(i420).first(11), nv12, stride),
         "wireless conversion rejects truncated planes");
     check(sizeof(iPhoneMirror::wireless::MessageHeader) == 392 &&
-        iPhoneMirror::ApiVersion == 16 &&
+        iPhoneMirror::ApiVersion == 17 &&
         header.magic == iPhoneMirror::wireless::IpcMagic &&
         header.version == iPhoneMirror::wireless::IpcVersion &&
         iPhoneMirror::wireless::IpcVersion == 6,
@@ -1245,7 +1328,23 @@ void test_logging_shutdown_boundary() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--usb-runtime-probe-only") {
+        try {
+            test_libusb_runtime();
+            test_active_apple_usb_identity_cache();
+        } catch (const std::exception& error) {
+            std::cerr << "UNEXPECTED: " << error.what() << '\n';
+            return 2;
+        }
+        if (failures != 0) {
+            std::cerr << failures << " test(s) failed\n";
+            return 1;
+        }
+        std::cout << "USB runtime probe policy tests passed\n";
+        return 0;
+    }
+
     {
         const iPhoneMirror::quicktime::SessionOptions native_options;
         check(native_options.requested_width == 1206 && native_options.requested_height == 2622,
@@ -1263,6 +1362,7 @@ int main() {
         test_session_protocol();
         test_usb_projection_modes();
         test_apple_usb_serial_matching();
+        test_active_apple_usb_identity_cache();
         test_apple_usb_reenumeration_selection();
         test_libusb_runtime();
         test_media_foundation_decoder();

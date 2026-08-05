@@ -45,7 +45,7 @@ An organization that holds Apple redistribution rights can produce a fully
 offline Setup by supplying its authorized MSI explicitly:
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.5.9 -GenerateSbom `
+./scripts/package_release.ps1 -Version 1.5.10 -GenerateSbom `
   -AppleSupportPackagePath C:\Authorized\AppleMobileDeviceSupport64.msi `
   -ConfirmAppleRedistributionRights
 ```

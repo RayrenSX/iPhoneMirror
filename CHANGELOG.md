@@ -5,6 +5,42 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.5.10] - 2026-08-05
+
+### Changed
+
+- Keep startup, periodic refreshes and device selection out of third-party USB
+  kernel filters. Exact backend access now starts only after an explicit wired
+  mirroring request, while all existing USB backends and fallback paths remain
+  available.
+- Serialize wired preflight, QuickTime configuration activation,
+  re-enumeration, interface claim and handshake until the first media sample.
+  New sessions prefer the backend already used by an active session, reducing
+  cross-backend descriptor access without preventing multi-device capture.
+- Target USB discovery by physical topology, Product ID and serial, stopping as
+  soon as the requested device is found instead of opening every Apple device
+  to build a complete candidate list.
+- Report automatically polled USB backend values as unknown until an explicit
+  wired start performs the authoritative probe, rather than presenting an
+  unprobed zero value as a confirmed backend failure.
+
+### Fixed
+
+- Restore the normal Apple USB configuration on cancellation, open/claim or
+  handshake failure, capture errors and normal shutdown after QuickTime
+  configuration activation. Successful normal shutdown disarms the fallback
+  restoration so the device is not reconfigured twice.
+- Prevent the main window and an independent device window from creating two
+  native sessions or running duplicate wired preflight for the same device
+  during a concurrent start.
+- Avoid loading the legacy USB runtime merely to show automatic environment
+  status; runtime availability is now determined by file metadata until the
+  user starts wired mirroring.
+- Publish AirPlay DNS-SD records on a selected physical interface and keep the
+  logical registration alive across the upstream per-adapter references, so
+  multi-homed PCs do not expose duplicate receivers or drop the service when
+  one adapter reference is released.
+
 ## [1.5.9] - 2026-08-03
 
 ### Changed
@@ -882,7 +918,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.9...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.10...HEAD
+[1.5.10]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.9...v1.5.10
 [1.5.9]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.8...v1.5.9
 [1.5.8]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.7...v1.5.8
 [1.5.7]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.6...v1.5.7

@@ -211,6 +211,24 @@ foreach (var automationId in new[]
 
 var sourceDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", ".."));
+var mainViewModelSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "ViewModels", "MainViewModel.cs"));
+Equal(false, mainViewModelSource.Contains(".IsLibUsb0DeviceAvailable(",
+        StringComparison.Ordinal),
+    "automatic UI refresh never enters the exact legacy USB probe");
+var captureStartIndex = mainViewModelSource.IndexOf(
+    "private async Task StartAsync()", StringComparison.Ordinal);
+var captureReuseIndex = captureStartIndex >= 0
+    ? mainViewModelSource.IndexOf(
+        "capture_start_reused", captureStartIndex, StringComparison.Ordinal)
+    : -1;
+var capturePreflightIndex = captureStartIndex >= 0
+    ? mainViewModelSource.IndexOf(
+        "EnsureSourceReadyAsync(device)", captureStartIndex, StringComparison.Ordinal)
+    : -1;
+Equal(true, captureStartIndex >= 0 && captureReuseIndex > captureStartIndex &&
+            capturePreflightIndex > captureReuseIndex,
+    "main start reuses a session created by an independent window before USB preflight");
 var releaseManifestPath = Path.Combine(sourceDirectory, "..", "updates", "releases.json");
 var repositoryRelease = ReleaseParser.ParseLatest(
     File.ReadAllText(releaseManifestPath), includeStable: true, includePrerelease: true);

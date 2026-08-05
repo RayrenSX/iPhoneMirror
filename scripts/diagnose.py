@@ -51,6 +51,8 @@ class EnvironmentInfo(ctypes.Structure):
         ("usbdk_backend", ctypes.c_int32),
         ("libusb_apple_devices", ctypes.c_uint32),
         ("libusb_version", ctypes.c_wchar * 32),
+        ("usbdk_backend_known", ctypes.c_int32),
+        ("libusb_apple_devices_known", ctypes.c_int32),
     ]
 
 
@@ -226,7 +228,10 @@ def main() -> None:
                 "libusb_runtime": bool(environment.libusb_runtime),
                 "libusb_version": environment.libusb_version,
                 "usbdk_backend": bool(environment.usbdk_backend),
+                "usbdk_backend_known": bool(environment.usbdk_backend_known),
                 "libusb_apple_devices": environment.libusb_apple_devices,
+                "libusb_apple_devices_known": bool(
+                    environment.libusb_apple_devices_known),
                 "diagnostic": environment.diagnostic,
             },
             "devices": [

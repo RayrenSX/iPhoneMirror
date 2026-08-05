@@ -1,8 +1,8 @@
-name: iPhoneMirror CI
+name: Windows x64 build validation
 run-name: >-
   ${{ github.event_name == 'pull_request'
-      && format('Pull request #{0} | {1} -> {2}', github.event.pull_request.number, github.head_ref, github.base_ref)
-      || format('{0} | {1}', github.event_name, github.ref_name) }}
+      && format('Windows x64: verify localization, build, test and publish | PR #{0} | {1} -> {2}', github.event.pull_request.number, github.head_ref, github.base_ref)
+      || format('Windows x64: verify localization, build, test and publish | {0} | {1}', github.event_name, github.ref_name) }}
 
 on:
   push:
@@ -19,23 +19,23 @@ concurrency:
 
 jobs:
   build-test:
-    name: Build, test and package
+    name: Verify localization, build, test and publish
     runs-on: windows-2025-vs2026
     timeout-minutes: 30
 
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v7
 
-      - name: Set up .NET 10
+      - name: Set up .NET 10 SDK
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
-      - name: Verify localization resources
+      - name: Verify Simplified Chinese and English resources
         shell: pwsh
         run: ./scripts/verify_localization.ps1
 
-      - name: Build, test and publish
+      - name: Build Release, run tests, and publish Windows x64 output
         shell: pwsh
         run: ./build.ps1 -Configuration Release

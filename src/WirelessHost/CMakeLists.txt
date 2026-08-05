@@ -1,9 +1,10 @@
 add_library(iPhoneMirror.DnsSdShim SHARED DnsSdShim.cpp DnsSdShim.def)
 target_compile_definitions(iPhoneMirror.DnsSdShim PRIVATE
-    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+    WINVER=0x0A00 _WIN32_WINNT=0x0A00)
 target_compile_options(iPhoneMirror.DnsSdShim PRIVATE
     /W4 /permissive- /utf-8 /EHsc)
-target_link_libraries(iPhoneMirror.DnsSdShim PRIVATE dnsapi ws2_32)
+target_link_libraries(iPhoneMirror.DnsSdShim PRIVATE dnsapi iphlpapi ws2_32)
 set_target_properties(iPhoneMirror.DnsSdShim PROPERTIES
     PREFIX ""
     OUTPUT_NAME "dnssd")
@@ -51,6 +52,15 @@ install(TARGETS iPhoneMirror.WirelessHost iPhoneMirror.DnsSdShim
     RUNTIME DESTINATION Wireless)
 
 if(IPHONEMIRROR_BUILD_TESTS)
+    add_executable(iPhoneMirror.DnsSdRegistrationPolicy.Tests
+        tests/DnsSdRegistrationPolicyTests.cpp)
+    target_include_directories(iPhoneMirror.DnsSdRegistrationPolicy.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(iPhoneMirror.DnsSdRegistrationPolicy.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    add_test(NAME DnsSdRegistrationPolicyTests
+        COMMAND iPhoneMirror.DnsSdRegistrationPolicy.Tests)
+
     add_library(iPhoneMirror.WirelessHost.Stub SHARED
         tests/WirelessHostStub.cpp
         tests/WirelessHostStub.def)

@@ -17,7 +17,7 @@
 
 namespace iPhoneMirror {
 
-constexpr std::uint32_t ApiVersion = 16;
+constexpr std::uint32_t ApiVersion = 17;
 using SessionHandle = std::uint64_t;
 constexpr std::size_t MaxUdid = 128;
 constexpr std::size_t MaxName = 128;
@@ -79,6 +79,11 @@ struct EnvironmentInfo {
     std::int32_t usbdk_backend_available;
     std::uint32_t libusb_apple_devices;
     wchar_t libusb_version[32];
+    // Availability/count values are conservative false/zero when the matching
+    // known flag is zero. Automatic environment polling deliberately leaves
+    // USB kernel backends unprobed.
+    std::int32_t usbdk_backend_known;
+    std::int32_t libusb_apple_devices_known;
 };
 
 enum class CaptureState : std::int32_t {

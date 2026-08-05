@@ -30,9 +30,12 @@ struct EnvironmentRecord {
     bool capture_mux{};
     std::uint32_t physical_device_count{};
     bool libusb_runtime{};
+    bool usbdk_backend_known{};
     bool usbdk_backend{};
+    bool libusb_apple_devices_known{};
     std::uint32_t libusb_apple_devices{};
     bool libusb0_available{};
+    bool libusb0_apple_devices_known{};
     std::uint32_t libusb0_apple_devices{};
     std::wstring libusb_version;
     std::wstring diagnostic;

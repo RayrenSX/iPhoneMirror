@@ -99,6 +99,8 @@ internal struct NativeEnvironmentInfo
     public int UsbDkBackendAvailable;
     public uint LibUsbAppleDevices;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string LibUsbVersion;
+    public int UsbDkBackendKnown;
+    public int LibUsbAppleDevicesKnown;
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -483,8 +485,10 @@ internal sealed class NativeCore : IDisposable
 
     /// <summary>
     /// Checks whether libusb0 can enumerate and open this exact iPhone serial.
-    /// The native probe only opens the descriptor long enough to read its
-    /// serial; it never changes the active USB configuration or driver state.
+    /// Call only after an explicit wired-capture action: even this read-only
+    /// enumeration enters the legacy kernel filter and can bugcheck an
+    /// incompatible driver stack. It never changes the active USB
+    /// configuration or driver state.
     /// </summary>
     public bool IsLibUsb0DeviceAvailable(string udid)
     {
@@ -655,7 +659,7 @@ internal sealed class NativeCore : IDisposable
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 16,
+            ApiVersion = 17,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,
@@ -681,7 +685,7 @@ internal sealed class NativeCore : IDisposable
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 16,
+            ApiVersion = 17,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,

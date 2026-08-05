@@ -3,7 +3,7 @@
 .idea/
 .vscode/
 .agents/
-.codex/
+.[c]odex/
 *.user
 *.suo
 

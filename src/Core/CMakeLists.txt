@@ -91,6 +91,8 @@ if(IPHONEMIRROR_BUILD_TESTS)
         src/Media/CoreMedia.cpp
         src/Media/MediaFoundationDecoder.cpp
         src/Audio/WasapiRenderer.cpp
+        src/Transport/Socket.cpp
+        src/Transport/UsbMuxClient.cpp
         src/Transport/QtUsbTransport.cpp
         src/Transport/LibUsb0Transport.cpp
         src/Capture/CaptureSession.cpp
@@ -115,6 +117,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib"
         mfplat mf mfuuid wmcodecdspuuid d3d11 dxgi
         ole32 advapi32 avrt winhttp
+        ws2_32
         bcrypt
         delayimp
     )

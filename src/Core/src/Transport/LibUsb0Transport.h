@@ -13,6 +13,10 @@ struct usb_dev_handle;
 
 namespace iPhoneMirror::transport {
 
+// Pure file-system check for automatic environment polling. It must not load
+// the legacy user-mode DLL or enter its kernel filter.
+[[nodiscard]] bool libusb0_installed() noexcept;
+// Loadability check used only after an explicit wired-capture action.
 [[nodiscard]] bool libusb0_available() noexcept;
 [[nodiscard]] std::vector<AppleUsbDevice> enumerate_libusb0();
 [[nodiscard]] std::optional<AppleUsbDevice> find_libusb0_device(
@@ -44,9 +48,15 @@ public:
     void close() noexcept;
 
 private:
+    void remember_active_identity(const AppleUsbIdentity& identity) noexcept;
+    void close_unlocked() noexcept;
+
     usb_dev_handle* handle_{};
     UsbEndpointSet endpoints_{};
     bool claimed_{};
+    bool active_identity_retained_{};
+    std::string active_topology_;
+    std::string active_serial_;
 };
 
 } // namespace iPhoneMirror::transport

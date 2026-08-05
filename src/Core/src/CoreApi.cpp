@@ -848,6 +848,9 @@ std::int32_t IM_CALL im_get_environment(iPhoneMirror::EnvironmentInfo* environme
         environment->usbdk_backend_available = info.usbdk_backend;
         environment->libusb_apple_devices = info.libusb_apple_devices;
         copy_text(environment->libusb_version, info.libusb_version);
+        environment->usbdk_backend_known = info.usbdk_backend_known;
+        environment->libusb_apple_devices_known =
+            info.libusb_apple_devices_known;
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
     } catch (...) {

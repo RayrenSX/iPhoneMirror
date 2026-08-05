@@ -76,12 +76,33 @@ struct AppleUsbSelection {
 [[nodiscard]] std::string describe_apple_usb_candidates(
     std::span<const AppleUsbDevice> devices, const AppleUsbIdentity& identity);
 
+// A live capture handle already proves the device identity for its physical
+// port. Cache that proof inside each backend's topology namespace. Capture
+// startup prefers the backend already used by live sessions and never assumes
+// that unrelated backend-specific topology strings are interchangeable.
+[[nodiscard]] std::string cached_active_apple_usb_serial(
+    std::string_view topology) noexcept;
+[[nodiscard]] bool retain_active_apple_usb_identity(
+    const AppleUsbIdentity& identity) noexcept;
+void release_active_apple_usb_identity(
+    std::string_view topology, std::string_view serial) noexcept;
+
 struct UsbRuntimeProbe {
     bool runtime_available{};
+    bool usbdk_helper_installed{};
+    bool usbdk_backend_probed{};
     bool usbdk_backend_available{};
     std::string version;
+    bool apple_device_count_probed{};
     std::uint32_t apple_device_count{};
     std::string error;
+};
+
+class UsbRuntimeProbeSource {
+public:
+    virtual ~UsbRuntimeProbeSource() = default;
+    virtual void read_user_mode_metadata(UsbRuntimeProbe& probe) = 0;
+    virtual void probe_usb_backends(UsbRuntimeProbe& probe) = 0;
 };
 
 class UsbError final : public std::runtime_error {
@@ -100,6 +121,9 @@ public:
     QtUsbContext& operator=(const QtUsbContext&) = delete;
 
     [[nodiscard]] std::vector<AppleUsbDevice> enumerate() const;
+    [[nodiscard]] std::optional<AppleUsbDevice> find_apple_device(
+        const AppleUsbIdentity& identity,
+        bool require_quicktime = false) const;
     [[nodiscard]] libusb_context* native() const noexcept { return context_; }
     [[nodiscard]] bool using_usbdk() const noexcept { return using_usbdk_; }
 
@@ -137,11 +161,18 @@ public:
     [[nodiscard]] bool valid() const noexcept { return handle_ != nullptr; }
 
 private:
+    void remember_active_identity(const AppleUsbIdentity& identity) noexcept;
+
     libusb_device_handle* handle_{};
     UsbEndpointSet endpoints_{};
     bool claimed_{};
+    bool active_identity_retained_{};
+    std::string active_topology_;
+    std::string active_serial_;
 };
 
 [[nodiscard]] UsbRuntimeProbe probe_usb_runtime() noexcept;
+[[nodiscard]] UsbRuntimeProbe probe_usb_runtime(
+    UsbRuntimeProbeSource& source, bool probe_backends = false) noexcept;
 
 } // namespace iPhoneMirror::transport

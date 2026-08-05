@@ -1,5 +1,7 @@
 #include "Capture/CaptureSession.h"
 
+#include "Transport/UsbMuxClient.h"
+
 #include "Media/MediaFoundationDecoder.h"
 #include "Audio/WasapiRenderer.h"
 #include "Logging.h"
@@ -10,14 +12,17 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <deque>
 #include <exception>
 #include <format>
+#include <functional>
 #include <limits>
 #include <memory>
+#include <semaphore>
 #include <thread>
 #include <optional>
 #include <utility>
@@ -25,6 +30,68 @@
 
 namespace iPhoneMirror::capture {
 namespace {
+
+std::binary_semaphore usb_transition_gate{1};
+std::mutex active_usb_backend_mutex;
+std::array<std::uint32_t, 3> active_usb_backend_counts{};
+
+std::optional<std::size_t> preferred_active_usb_backend() noexcept {
+    try {
+        std::scoped_lock lock(active_usb_backend_mutex);
+        std::optional<std::size_t> selected;
+        for (std::size_t index{}; index < active_usb_backend_counts.size(); ++index) {
+            if (active_usb_backend_counts[index] == 0) continue;
+            if (!selected || active_usb_backend_counts[index] >
+                    active_usb_backend_counts[*selected]) selected = index;
+        }
+        return selected;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+void retain_active_usb_backend(std::size_t backend) noexcept {
+    if (backend >= active_usb_backend_counts.size()) return;
+    try {
+        std::scoped_lock lock(active_usb_backend_mutex);
+        ++active_usb_backend_counts[backend];
+    } catch (...) {}
+}
+
+void release_active_usb_backend(std::size_t backend) noexcept {
+    if (backend >= active_usb_backend_counts.size()) return;
+    try {
+        std::scoped_lock lock(active_usb_backend_mutex);
+        if (active_usb_backend_counts[backend] != 0)
+            --active_usb_backend_counts[backend];
+    } catch (...) {}
+}
+
+class DeferredCleanup final {
+public:
+    DeferredCleanup() = default;
+    explicit DeferredCleanup(std::function<void()> cleanup)
+        : cleanup_(std::move(cleanup)) {}
+    ~DeferredCleanup() { run_now(); }
+    DeferredCleanup(const DeferredCleanup&) = delete;
+    DeferredCleanup& operator=(const DeferredCleanup&) = delete;
+
+    void arm(std::function<void()> cleanup) {
+        cleanup_ = std::move(cleanup);
+    }
+
+    void disarm() noexcept { cleanup_ = {}; }
+
+    void run_now() noexcept {
+        auto cleanup = std::move(cleanup_);
+        cleanup_ = {};
+        if (!cleanup) return;
+        try { cleanup(); } catch (...) {}
+    }
+
+private:
+    std::function<void()> cleanup_;
+};
 
 struct NativeDisplaySize { std::uint32_t width; std::uint32_t height; };
 
@@ -96,18 +163,35 @@ std::wstring widen(std::string_view utf8) {
 }
 
 std::optional<transport::AppleUsbDevice> find_device(
-    transport::QtUsbContext& context, const transport::AppleUsbIdentity& identity,
+    const transport::QtUsbContext& context,
+    const transport::AppleUsbIdentity& identity,
     bool require_quicktime = false) {
-    auto devices = context.enumerate();
-    const auto selection = transport::select_apple_usb_device(devices, identity,
-        require_quicktime);
-    if (!selection.index) return std::nullopt;
-    return std::move(devices[*selection.index]);
+    return context.find_apple_device(identity, require_quicktime);
 }
 
-std::optional<transport::AppleUsbDevice> find_device(
-    transport::QtUsbContext& context, const std::string& serial) {
-    return find_device(context, transport::AppleUsbIdentity{.serial = serial});
+std::uint16_t mux_product_id_for(std::string_view serial) noexcept {
+    if (serial.empty()) return 0;
+    for (const auto port : {std::uint16_t{27015}, std::uint16_t{37015}}) {
+        if (!transport::Socket::probe_loopback(port)) continue;
+        try {
+            transport::UsbMuxClient mux(port);
+            for (const auto& device : mux.list_devices()) {
+                if (!transport::apple_usb_serial_equal(device.serial, serial) ||
+                    device.product_id == 0 || device.product_id > 0xffffU)
+                    continue;
+                return static_cast<std::uint16_t>(device.product_id);
+            }
+        } catch (...) {
+        }
+    }
+    return 0;
+}
+
+transport::AppleUsbIdentity requested_usb_identity(std::string_view serial) {
+    transport::AppleUsbIdentity identity;
+    identity.serial = serial;
+    identity.original_product_id = mux_product_id_for(serial);
+    return identity;
 }
 
 class CaptureConnection {
@@ -147,20 +231,21 @@ private:
     Connection connection_;
 };
 
-void restore_libusb0_configuration(
+bool restore_libusb0_configuration(
     const transport::AppleUsbIdentity& identity) noexcept {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     do {
         try {
             (void)transport::LibUsb0Connection::disable_quicktime_configuration(identity);
-            return;
+            return true;
         } catch (...) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     } while (std::chrono::steady_clock::now() < deadline);
+    return false;
 }
 
-void restore_qt_configuration(bool use_usbdk,
+bool restore_qt_configuration(bool use_usbdk,
     const transport::AppleUsbIdentity& identity) noexcept {
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::seconds(5);
@@ -169,11 +254,12 @@ void restore_qt_configuration(bool use_usbdk,
             transport::QtUsbContext context(use_usbdk);
             (void)transport::QtUsbConnection::disable_quicktime_configuration(
                 context, identity);
-            return;
+            return true;
         } catch (...) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     } while (std::chrono::steady_clock::now() < deadline);
+    return false;
 }
 
 std::uint8_t luma_as_8bit(const media::DecodedFrame& frame,
@@ -410,40 +496,85 @@ CaptureSession::~CaptureSession() { stop(); }
 
 void CaptureSession::start(bool use_usbdk) {
     if (worker_.joinable()) throw std::runtime_error("capture session is already running");
-    // Synchronous preflight keeps the GUI from reporting a false successful start.
-    std::string failure = "libusb cannot see the selected iPhone; USB backend/driver is not ready";
-    bool ready{};
-    if (transport::libusb0_available()) {
-        try {
-            const auto device = transport::find_libusb0_device(serial_);
-            if (device && device->can_open) {
-                usb_backend_ = UsbBackend::LibUsb0;
-                ready = true;
-            }
-        } catch (const std::exception& error) {
-            failure = error.what();
-        }
-    }
-    for (const bool candidate : {use_usbdk, !use_usbdk}) {
-        if (ready) break;
-        try {
-            transport::QtUsbContext context(candidate);
-            const auto device = find_device(context, serial_);
-            if (!device) continue;
-            if (!device->can_open) {
-                failure = "libusb sees the iPhone but cannot open it; check the USB filter backend";
+    usb_transition_gate.acquire();
+    usb_transition_gate_held_.store(true, std::memory_order_release);
+    try {
+        preflight_device_.reset();
+        // Synchronous preflight keeps the GUI from reporting a false successful start.
+        std::string failure =
+            "libusb cannot see the selected iPhone; USB backend/driver is not ready";
+        bool ready{};
+        std::unique_ptr<transport::AppleUsbDevice> selected_device;
+        const auto requested_identity = requested_usb_identity(serial_);
+
+        std::vector<UsbBackend> backend_order;
+        const auto append_backend = [&](UsbBackend backend) {
+            if (std::find(backend_order.begin(), backend_order.end(), backend) ==
+                backend_order.end()) backend_order.push_back(backend);
+        };
+        // Continue on the backend already used by a live session whenever it
+        // can see the target. That keeps active-device topology keys in the
+        // same namespace and avoids a cross-backend descriptor reopen.
+        if (const auto active = preferred_active_usb_backend())
+            append_backend(static_cast<UsbBackend>(*active));
+        append_backend(UsbBackend::LibUsb0);
+        append_backend(use_usbdk ? UsbBackend::UsbDk : UsbBackend::LibUsb1);
+        append_backend(use_usbdk ? UsbBackend::LibUsb1 : UsbBackend::UsbDk);
+
+        for (const auto backend : backend_order) {
+            if (backend == UsbBackend::LibUsb0) {
+                if (!transport::libusb0_available()) continue;
+                try {
+                    const auto device =
+                        transport::find_libusb0_device(requested_identity);
+                    if (!device) continue;
+                    if (!device->can_open) {
+                        failure = "libusb0 sees the iPhone but cannot open it";
+                        continue;
+                    }
+                    usb_backend_ = backend;
+                    selected_device =
+                        std::make_unique<transport::AppleUsbDevice>(*device);
+                    ready = true;
+                    break;
+                } catch (const std::exception& error) {
+                    failure = error.what();
+                }
                 continue;
             }
-            usb_backend_ = candidate ? UsbBackend::UsbDk : UsbBackend::LibUsb1;
-            ready = true;
-            break;
-        } catch (const std::exception& error) {
-            failure = error.what();
+
+            const bool candidate_uses_usbdk = backend == UsbBackend::UsbDk;
+            try {
+                transport::QtUsbContext context(candidate_uses_usbdk);
+                const auto device = find_device(context, requested_identity);
+                if (!device) continue;
+                if (!device->can_open) {
+                    failure = "libusb sees the iPhone but cannot open it; check the USB filter backend";
+                    continue;
+                }
+                usb_backend_ = backend;
+                selected_device =
+                    std::make_unique<transport::AppleUsbDevice>(*device);
+                ready = true;
+                break;
+            } catch (const std::exception& error) {
+                failure = error.what();
+            }
         }
+
+        if (!ready) throw std::runtime_error(failure);
+        preflight_device_ = std::move(selected_device);
+        set_state(State::ActivatingUsb, L"正在激活 QuickTime USB 配置");
+        worker_ = std::jthread([this](std::stop_token token) { run(token); });
+    } catch (...) {
+        release_usb_transition_gate();
+        throw;
     }
-    if (!ready) throw std::runtime_error(failure);
-    set_state(State::ActivatingUsb, L"正在激活 QuickTime USB 配置");
-    worker_ = std::jthread([this](std::stop_token token) { run(token); });
+}
+
+void CaptureSession::release_usb_transition_gate() noexcept {
+    if (usb_transition_gate_held_.exchange(false, std::memory_order_acq_rel))
+        usb_transition_gate.release();
 }
 
 void CaptureSession::stop() noexcept {
@@ -465,6 +596,7 @@ void CaptureSession::stop() noexcept {
         render_queue_bytes_ = 0;
         latest_frame_.reset();
     }
+    release_usb_transition_gate();
 }
 
 void CaptureSession::set_audio_enabled(bool enabled) noexcept {
@@ -622,6 +754,15 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         audio_volume_.load(std::memory_order_relaxed),
         media::decoder_preference_name(decoder_switch_.requested().preference),
         static_cast<unsigned>(preferences_.color_output_preference)));
+    DeferredCleanup transition_release(
+        [this] { release_usb_transition_gate(); });
+    DeferredCleanup configuration_restore;
+    DeferredCleanup active_backend_release;
+    auto preflight_device = std::move(preflight_device_);
+    // Keep the transport context alive until after the connection has been
+    // closed on every exception path. Destruction is reverse declaration
+    // order, so the handle must be declared after its owning context.
+    std::unique_ptr<transport::QtUsbContext> qt_context;
     std::unique_ptr<CaptureConnection> usb;
     quicktime::StreamDecoder decoder;
     const auto display_configuration = make_usb_display_configuration(
@@ -693,15 +834,21 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 }
             }
         } catch (...) {}
-        try { usb->disable_quicktime_configuration(); } catch (...) {}
+        bool configuration_restored{};
+        try {
+            usb->disable_quicktime_configuration();
+            configuration_restored = true;
+        } catch (...) {}
         usb->close();
+        if (configuration_restored) configuration_restore.disarm();
     };
 
     try {
-        std::unique_ptr<transport::QtUsbContext> qt_context;
         bool quicktime_open_recovered{};
         if (usb_backend_ == UsbBackend::LibUsb0) {
-            auto device = transport::find_libusb0_device(serial_);
+            std::optional<transport::AppleUsbDevice> device;
+            if (preflight_device) device = std::move(*preflight_device);
+            else device = transport::find_libusb0_device(serial_);
             if (!device)
                 throw std::runtime_error("Apple device disconnected before capture started");
             auto identity = transport::make_apple_usb_identity(*device);
@@ -711,9 +858,17 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 device->highest_configuration_value,
                 identity.expected_quicktime_configuration,
                 !identity.topology_id.empty()));
+            if (device->quicktime_configuration) {
+                configuration_restore.arm([identity] {
+                    (void)restore_libusb0_configuration(identity);
+                });
+            }
             if (!device->quicktime_configuration) {
                 const bool activation_acknowledged =
                     transport::LibUsb0Connection::enable_quicktime_configuration(identity);
+                configuration_restore.arm([identity] {
+                    (void)restore_libusb0_configuration(identity);
+                });
                 logging::write(std::format(
                     "usb_activation requested device_fp={} acknowledged={} expected_qt_config={}",
                     device_fp, activation_acknowledged,
@@ -726,21 +881,22 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 std::string last_usb_open_error;
                 do {
                     if (stop_token.stop_requested()) {
-                        restore_libusb0_configuration(identity);
                         set_state(State::Stopped, L"投屏已取消");
                         return;
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                    const auto candidates = transport::enumerate_libusb0();
-                    const auto diagnostic = transport::describe_apple_usb_candidates(
-                        candidates, identity);
+                    device = transport::find_libusb0_device(identity, true);
+                    const auto diagnostic = device
+                        ? std::format("target_ready=true config={} interface={}",
+                            device->quicktime_endpoints.configuration,
+                            device->quicktime_endpoints.interface_number)
+                        : std::string("target_ready=false");
                     if (diagnostic != last_usb_diagnostic) {
                         logging::write(std::format(
                             "usb_reenumeration device_fp={} backend=libusb0 {}",
                             device_fp, diagnostic));
                         last_usb_diagnostic = diagnostic;
                     }
-                    device = transport::find_libusb0_device(identity, true);
                     if (device && device->quicktime_configuration) break;
                     if (std::chrono::steady_clock::now() - activation_started >=
                         std::chrono::milliseconds(1500)) {
@@ -786,7 +942,8 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         device_fp, first_error.what()));
                     set_state(State::ActivatingUsb,
                         L"正在恢复 Apple 设备的 QuickTime USB 配置");
-                    restore_libusb0_configuration(identity);
+                    if (restore_libusb0_configuration(identity))
+                        configuration_restore.disarm();
 
                     std::optional<transport::AppleUsbDevice> normal_device;
                     const auto restore_deadline = std::chrono::steady_clock::now() +
@@ -810,11 +967,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
 
                     identity = transport::make_apple_usb_identity(*normal_device);
                     (void)transport::LibUsb0Connection::enable_quicktime_configuration(identity);
+                    configuration_restore.arm([identity] {
+                        (void)restore_libusb0_configuration(identity);
+                    });
                     const auto retry_deadline = std::chrono::steady_clock::now() +
                         std::chrono::seconds(20);
                     do {
                         if (stop_token.stop_requested()) {
-                            restore_libusb0_configuration(identity);
                             set_state(State::Stopped, L"投屏已取消");
                             return;
                         }
@@ -840,14 +999,25 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         } else {
             const bool use_usbdk = usb_backend_ == UsbBackend::UsbDk;
             qt_context = std::make_unique<transport::QtUsbContext>(use_usbdk);
-            auto device = find_device(*qt_context, serial_);
+            std::optional<transport::AppleUsbDevice> device;
+            if (preflight_device) device = std::move(*preflight_device);
+            else device = find_device(*qt_context,
+                requested_usb_identity(serial_));
             if (!device)
                 throw std::runtime_error("Apple device disconnected before capture started");
             const auto identity = transport::make_apple_usb_identity(*device);
+            if (device->quicktime_configuration) {
+                configuration_restore.arm([use_usbdk, identity] {
+                    (void)restore_qt_configuration(use_usbdk, identity);
+                });
+            }
             if (!device->quicktime_configuration) {
                 const bool activation_acknowledged =
                     transport::QtUsbConnection::enable_quicktime_configuration(
                         *qt_context, identity);
+                configuration_restore.arm([use_usbdk, identity] {
+                    (void)restore_qt_configuration(use_usbdk, identity);
+                });
                 logging::write(std::format(
                     "usb_activation requested device_fp={} acknowledged={} expected_qt_config={}",
                     device_fp, activation_acknowledged,
@@ -862,16 +1032,18 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 do {
                     if (stop_token.stop_requested()) {
                         qt_context.reset();
-                        restore_qt_configuration(use_usbdk, identity);
                         set_state(State::Stopped, L"投屏已取消");
                         return;
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(250));
                     try {
                         qt_context = std::make_unique<transport::QtUsbContext>(use_usbdk);
-                        const auto candidates = qt_context->enumerate();
-                        const auto diagnostic = transport::describe_apple_usb_candidates(
-                            candidates, identity);
+                        device = qt_context->find_apple_device(identity, true);
+                        const auto diagnostic = device
+                            ? std::format("target_ready=true config={} interface={}",
+                                device->quicktime_endpoints.configuration,
+                                device->quicktime_endpoints.interface_number)
+                            : std::string("target_ready=false");
                         if (diagnostic != last_usb_diagnostic) {
                             logging::write(std::format(
                                 "usb_reenumeration device_fp={} backend={} {}",
@@ -879,18 +1051,17 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                 diagnostic));
                             last_usb_diagnostic = diagnostic;
                         }
-                        device = find_device(*qt_context, identity, true);
                         if (device && device->quicktime_configuration) break;
                         if (std::chrono::steady_clock::now() - activation_started >=
                             std::chrono::milliseconds(1500)) {
                             auto connection = transport::QtUsbConnection::open_quicktime(
                                 *qt_context, identity, true);
-                            usb = std::make_unique<CaptureConnectionAdapter<transport::QtUsbConnection>>(
-                                std::move(connection));
                             logging::write(std::format(
                                 "usb_reenumeration ready device_fp={} backend={} fallback=conventional expected_qt_config={}",
                                 device_fp, use_usbdk ? "usbdk" : "libusb1",
                                 identity.expected_quicktime_configuration));
+                            usb = std::make_unique<CaptureConnectionAdapter<transport::QtUsbConnection>>(
+                                std::move(connection));
                             break;
                         }
                     } catch (const std::exception& error) {
@@ -927,6 +1098,11 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         if (usb_backend_ != UsbBackend::LibUsb0) {
             try { usb->clear_halt(); } catch (...) {}
         }
+        const auto active_backend = static_cast<std::size_t>(usb_backend_);
+        retain_active_usb_backend(active_backend);
+        active_backend_release.arm([active_backend] {
+            release_active_usb_backend(active_backend);
+        });
         set_state(State::Handshaking, L"已连接 QuickTime 端点，等待 PING");
         struct PendingVideoSample {
             coremedia::SampleBuffer sample;
@@ -1569,6 +1745,11 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 }
 
                 if (event.video_sample || event.audio_sample) {
+                    // Keep all wired preflight, activation, re-enumeration,
+                    // claim and handshake work serialized. A second wired
+                    // session may begin only after this one proves a stable
+                    // media stream, or after an error path releases the gate.
+                    transition_release.run_now();
                     std::scoped_lock lock(mutex_);
                     snapshot_.state = State::Streaming;
                     snapshot_.message = L"投屏中";
@@ -1654,6 +1835,9 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         video_worker.join();
         stop_audio_renderer();
         shutdown_usb();
+        configuration_restore.run_now();
+        active_backend_release.run_now();
+        transition_release.run_now();
         logging::write("capture_run stop path");
         set_state(State::Stopped, L"投屏已停止");
     } catch (const std::exception& error) {
@@ -1661,6 +1845,9 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         // its normal configuration. This is a normal terminal condition.
         stop_audio_renderer();
         shutdown_usb();
+        configuration_restore.run_now();
+        active_backend_release.run_now();
+        transition_release.run_now();
         logging::write(std::format("capture_run exception stop_requested={} error={}",
             stop_token.stop_requested(), error.what()));
         if (stop_token.stop_requested() && !video_worker_failure.failed()) {

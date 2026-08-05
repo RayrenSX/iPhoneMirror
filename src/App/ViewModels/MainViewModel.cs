@@ -156,10 +156,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private double _mediaCastPlaybackVolume = 100;
     private readonly HashSet<string> _knownWirelessDeviceIds =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, (DateTimeOffset CheckedAt, bool Available)>
-        _libUsbProbeCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _libUsbProbesInFlight =
-        new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _visibleLogLines = new();
     private readonly Stopwatch _lifetime = Stopwatch.StartNew();
     private long _refreshSequence;
@@ -172,9 +168,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private string? _lastVideoOutputSignature;
     private CaptureState? _lastLoggedCaptureState;
     private ulong _lastLoggedCaptureHandle;
-    private long _driverProbeRevision;
-
-    private static readonly TimeSpan LibUsbProbeCacheLifetime = TimeSpan.FromSeconds(10);
 
     public ObservableCollection<DeviceViewModel> Devices { get; } = [];
     public IReadOnlyList<ResolutionPreset> ResolutionPresets { get; } =
@@ -1075,7 +1068,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (ReferenceEquals(_selectedDevice, value)) return;
         var previous = _selectedDevice;
         _selectedDevice = value;
-        Interlocked.Increment(ref _driverProbeRevision);
         OnPropertyChanged(nameof(SelectedDevice));
         if (value?.IsMediaCast == true)
         {
@@ -1256,6 +1248,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             ("usb_mode", requestedState.UsbProjectionMode)));
         IsBusy = true;
         var gateHeld = false;
+        var startMarked = false;
         try
         {
             if (requestedDevice is null) return;
@@ -1266,8 +1259,26 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (_disposed) return;
             var device = SelectedDevice;
             if (device is null || !DeviceViewModel.UdidEquals(device.Udid, requestedDevice.Udid)) return;
-            // Exact libusb0 verification reaches the native core. Keep it
-            // serialized with polling, teardown, and session creation.
+            if (requestedState.Handle != 0)
+            {
+                AddDiagnosticLog(AppLog.Event("capture_start_reused",
+                    ("device", AppLog.Device(device.Udid)),
+                    ("handle", AppLog.Handle(requestedState.Handle)),
+                    ("elapsed_ms", operation.ElapsedMilliseconds)));
+                IsCapturing = true;
+                _activeCaptureUdid = device.Udid;
+                NotifyCaptureSessionChanged();
+                NativeCore.SelectPreviewSession(requestedState.Handle);
+                OnPropertyChanged(nameof(CurrentSessionHandle));
+                CaptureStatus = LocalizationService.Get("StartRequested");
+                return;
+            }
+            if (requestedState.IsStarting || requestedState.IsStopping) return;
+            requestedState.IsStarting = true;
+            startMarked = true;
+            // Keep readiness checks, teardown and native session creation on
+            // one per-process path so independent windows cannot race the
+            // selected device into a duplicate wired start.
             var preflight = await EnsureSourceReadyAsync(device);
             AddDiagnosticLog(AppLog.Event("capture_start_preflight",
                 ("device", AppLog.Device(device.Udid)),
@@ -1334,6 +1345,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         finally
         {
+            if (startMarked) requestedState.IsStarting = false;
             IsBusy = false;
             if (gateHeld) _coreGate.Release();
         }
@@ -2009,7 +2021,18 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             };
             _sessions.Set(state);
             var startSettings = CaptureSessionStartSettings(state);
-            var result = await Task.Run(() => CreateSession(device, startSettings));
+            if (state.IsStarting || state.IsStopping)
+                return (false, 0, false, LocalizationService.Get("StatusWaiting"));
+            state.IsStarting = true;
+            (bool Success, ulong Handle, string Message) result;
+            try
+            {
+                result = await Task.Run(() => CreateSession(device, startSettings));
+            }
+            finally
+            {
+                state.IsStarting = false;
+            }
             _sessions.SetHandle(state, result.Success ? result.Handle : 0);
             if (result.Success) state.MarkVideoSettingsApplied(
                 startSettings.RenderWidth, startSettings.RenderHeight,
@@ -2249,7 +2272,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             EnvironmentStatus = LocalizationService.Get("EnvironmentReadyCapture");
             DriverState = LocalizationService.Get("DriverCaptureReady");
         }
-        else if (environment.UsbDkBackendAvailable != 0)
+        else if (environment.UsbDkBackendKnown != 0 &&
+                 environment.UsbDkBackendAvailable != 0)
         {
             EnvironmentStatus = LocalizationService.Get("EnvironmentReadyUsbDk");
             DriverState = LocalizationService.Format("DriverLibUsbReadyFormat", environment.LibUsbVersion);
@@ -2269,7 +2293,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void UpdateSelectedDriverStatus()
     {
-        var revision = Interlocked.Increment(ref _driverProbeRevision);
         if (IsWirelessSelected)
         {
             RefreshWirelessStatus();
@@ -2277,82 +2300,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         if (SelectedDevice is not { IsMediaCast: false } selected) return;
 
-        var status = _filterDriver.Inspect(selected.Udid);
-        if (status.State == IPhoneFilterDriverState.Provisional &&
-            _libUsbProbeCache.TryGetValue(selected.Udid, out var cached) &&
-            DateTimeOffset.UtcNow - cached.CheckedAt <= LibUsbProbeCacheLifetime)
-            status = _filterDriver.Inspect(selected.Udid, cached.Available);
-        _filterDriverStatus = status;
+        // Status refreshes run automatically at startup and every two seconds.
+        // Keep them strictly in registry/SCM/SetupAPI territory: even a
+        // read-only libusb0 enumeration enters the third-party kernel filter
+        // and can bugcheck a machine with an incompatible driver stack. The
+        // exact serial probe remains part of the explicit Start action below.
+        _filterDriverStatus = _filterDriver.Inspect(selected.Udid);
         if (_lastEnvironment is { } environment)
             UpdateEnvironmentStatus(environment);
         else
             ApplySelectedDriverState();
-
-        if (status.State == IPhoneFilterDriverState.Provisional &&
-            _libUsbProbesInFlight.Add(selected.Udid))
-            _ = VerifySelectedDriverStatusAsync(selected.Udid, revision);
-    }
-
-    private async Task VerifySelectedDriverStatusAsync(string udid, long revision)
-    {
-        var gateHeld = false;
-        try
-        {
-            await _coreGate.WaitAsync(_shutdownCancellation.Token);
-            gateHeld = true;
-            if (_disposed) return;
-            var available = await Task.Run(() => _core.IsLibUsb0DeviceAvailable(udid));
-            _libUsbProbeCache[udid] = (DateTimeOffset.UtcNow, available);
-            if (_disposed || revision != Interlocked.Read(ref _driverProbeRevision) ||
-                !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid)) return;
-
-            _filterDriverStatus = _filterDriver.Inspect(udid, available);
-            if (_lastEnvironment is { } environment)
-                UpdateEnvironmentStatus(environment);
-            else
-                ApplySelectedDriverState();
-            AddDiagnosticLog(AppLog.Event("driver_exact_probe_complete",
-                ("device", AppLog.Device(udid)), ("available", available)));
-        }
-        catch (OperationCanceledException) when (_shutdownCancellation.IsCancellationRequested)
-        {
-        }
-        catch (Exception error)
-        {
-            AddDiagnosticLog(AppLog.Event("driver_exact_probe_failed",
-                ("device", AppLog.Device(udid)), ("error", AppLog.Error(error))));
-        }
-        finally
-        {
-            if (gateHeld) _coreGate.Release();
-            _libUsbProbesInFlight.Remove(udid);
-        }
-    }
-
-    private IPhoneFilterDriverStatus InspectDriverStatus(DeviceViewModel device,
-        bool requireExactBackend = false)
-    {
-        var status = _filterDriver.Inspect(device.Udid);
-        if (status.State == IPhoneFilterDriverState.Provisional)
-        {
-            try
-            {
-                status = _filterDriver.Inspect(device.Udid,
-                    _core.IsLibUsb0DeviceAvailable(device.Udid));
-            }
-            catch (Exception error)
-            {
-                DiagnosticLogger.Exception("driver", "exact_backend_probe_failed", error,
-                    ("device", AppLog.Device(device.Udid)),
-                    ("required", requireExactBackend));
-                if (requireExactBackend)
-                    return new(IPhoneFilterDriverState.Error, status.InstalledVersion,
-                        $"Exact libusb0 device verification failed: {error.Message}");
-                // Keep the conservative Provisional state. Native capture
-                // repeats the same exact-serial preflight before activation.
-            }
-        }
-        return status;
     }
 
     private void ApplySelectedDriverState()
@@ -2399,15 +2356,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
 
         // Wireless devices return above and never enter the USB driver path.
-        // A real start click requires an exact serial-level libusb0 result;
-        // the provisional background status is not sufficient here.
-        // libusb0's legacy serial enumeration is process-global. When another
-        // phone already has an active capture handle, rely on the per-device
-        // registry state here and let native session creation perform its own
-        // authoritative open without disturbing the live session.
-        var driverStatus = await Task.Run(() => _sessions.AnySession
-            ? _filterDriver.Inspect(device.Udid)
-            : InspectDriverStatus(device, requireExactBackend: true));
+        // Keep the UI preflight in registry/SCM territory. The native capture
+        // start performs the one authoritative exact-device open after this
+        // check; doing it here as well would enumerate the legacy filter twice
+        // and could touch an already-streaming device in a multi-device setup.
+        var driverStatus = await Task.Run(() => _filterDriver.Inspect(device.Udid));
         if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
         {
             _filterDriverStatus = driverStatus;
@@ -2415,8 +2368,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         if (driverStatus.CanStartCapture)
         {
-            if (driverStatus.State == IPhoneFilterDriverState.Provisional)
-                AddUiLog("driver preflight is provisional; native libusb0 serial enumeration is authoritative");
             return (true, string.Empty);
         }
         var failure = LocalizationService.Get(driverStatus.State switch

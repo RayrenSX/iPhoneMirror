@@ -19,6 +19,10 @@ namespace iPhoneMirror::audio {
 class WasapiRenderer;
 }
 
+namespace iPhoneMirror::transport {
+struct AppleUsbDevice;
+}
+
 namespace iPhoneMirror::capture {
 
 namespace detail {
@@ -137,6 +141,14 @@ private:
     std::uint64_t selected_render_frames_{};
     std::jthread worker_;
     UsbBackend usb_backend_{UsbBackend::LibUsb1};
+    // The explicit start preflight already opened and identified this device.
+    // Reuse that descriptor in the worker so startup does not immediately
+    // enumerate and open every Apple device a second time.
+    std::unique_ptr<transport::AppleUsbDevice> preflight_device_;
+    // A process-wide binary semaphore is acquired by start() and released by
+    // the worker after the first media sample or on every failure path. The
+    // flag makes the cross-thread release idempotent.
+    std::atomic_bool usb_transition_gate_held_{};
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
     std::atomic<float> audio_volume_{1.0F};
@@ -149,6 +161,7 @@ private:
     std::uint64_t audio_output_sequence_{};
 
     void run(std::stop_token stop_token) noexcept;
+    void release_usb_transition_gate() noexcept;
     void set_state(State state, std::wstring message);
     void stop_audio_renderer() noexcept;
 };

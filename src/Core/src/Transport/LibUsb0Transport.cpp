@@ -1,4 +1,5 @@
 #include "Transport/LibUsb0Transport.h"
+#include "Transport/AppleUsbIdentityCache.h"
 
 #include <lusb0_usb.h>
 
@@ -8,8 +9,10 @@
 #include <chrono>
 #include <format>
 #include <mutex>
+#include <shared_mutex>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 
 namespace iPhoneMirror::transport {
 namespace {
@@ -17,7 +20,15 @@ namespace {
 constexpr std::uint16_t AppleVendorId = 0x05ac;
 constexpr std::uint8_t QuickTimeSubclass = 0x2a;
 constexpr std::uint8_t QuickTimePlaceholderSubclass = 0xfd;
-std::mutex api_mutex;
+// libusb-win32 keeps a process-global bus/device list. Exclusive operations
+// refresh that list or change configuration; bulk transfers use shared access
+// so independent capture sessions can continue concurrently.
+std::shared_mutex api_mutex;
+std::once_flag usb_init_once;
+
+void ensure_usb_initialized() {
+    std::call_once(usb_init_once, [] { usb_init(); });
+}
 
 std::string normalize(std::string_view source) {
     std::string value(source);
@@ -93,7 +104,7 @@ std::string topology_for(const struct usb_device& device) {
         device.bus->location, device.filename);
 }
 
-void populate_descriptor_summary(const struct usb_device& raw,
+void populate_basic_summary(const struct usb_device& raw,
     AppleUsbDevice& info) noexcept {
     info.configuration_count = raw.descriptor.bNumConfigurations;
     for (int index = 0; index < raw.descriptor.bNumConfigurations; ++index) {
@@ -102,6 +113,11 @@ void populate_descriptor_summary(const struct usb_device& raw,
             raw.config[index].bConfigurationValue);
     }
     try { info.topology_id = topology_for(raw); } catch (...) {}
+}
+
+void populate_descriptor_summary(const struct usb_device& raw,
+    AppleUsbDevice& info) noexcept {
+    populate_basic_summary(raw, info);
 }
 
 int mux_configuration_for(const struct usb_device& device) {
@@ -132,49 +148,99 @@ int mux_configuration_for(const struct usb_device& device) {
     return selected;
 }
 
+void throw_last_error(const char* operation) {
+    throw std::runtime_error(std::string(operation) + ": " + usb_strerror());
+}
+
+void refresh_usb_devices() {
+    ensure_usb_initialized();
+    if (usb_find_busses() < 0) throw_last_error("usb_find_busses");
+    if (usb_find_devices() < 0) throw_last_error("usb_find_devices");
+}
+
 struct usb_device* find_device(const AppleUsbIdentity& identity,
-    usb_dev_handle** opened = nullptr, bool require_quicktime = false) {
-    usb_init();
-    usb_find_busses();
-    usb_find_devices();
+    usb_dev_handle** opened = nullptr, bool require_quicktime = false,
+    AppleUsbDevice* selected_info = nullptr) {
+    refresh_usb_devices();
     std::vector<AppleUsbDevice> candidates;
     std::vector<struct usb_device*> raw_candidates;
     for (struct usb_bus* bus = usb_get_busses(); bus; bus = bus->next) {
         for (struct usb_device* device = bus->devices; device; device = device->next) {
             if (device->descriptor.idVendor != AppleVendorId) continue;
+            std::string topology;
+            try { topology = topology_for(*device); } catch (...) {}
+            if (!identity.topology_id.empty() &&
+                topology != identity.topology_id) continue;
             AppleUsbDevice candidate;
             candidate.vendor_id = device->descriptor.idVendor;
             candidate.product_id = device->descriptor.idProduct;
             candidate.bus = bus
                 ? static_cast<std::uint8_t>(bus->location & 0xffU) : 0;
             candidate.address = device->devnum;
-            populate_descriptor_summary(*device, candidate);
-            candidate.quicktime_endpoints = endpoints_for(*device,
-                QuickTimeSubclass);
-            candidate.quicktime_configuration =
-                candidate.quicktime_endpoints.configuration != 0;
-            usb_dev_handle* handle = usb_open(device);
-            if (handle) {
-                candidate.can_open = true;
-                char value[256]{};
-                const int length = usb_get_string_simple(handle,
-                    device->descriptor.iSerialNumber, value, sizeof(value));
-                if (length > 0) candidate.serial.assign(value,
-                    static_cast<std::size_t>(length));
-                usb_close(handle);
-            }
+            populate_basic_summary(*device, candidate);
+            if (!topology.empty()) candidate.topology_id = std::move(topology);
+            candidate.serial = cached_active_apple_usb_serial(candidate.topology_id);
+            candidate.can_open = !candidate.serial.empty();
             candidates.push_back(std::move(candidate));
             raw_candidates.push_back(device);
         }
     }
-    const auto selection = select_apple_usb_device(candidates, identity,
-        require_quicktime);
-    if (!selection.index) return nullptr;
-    auto* selected = raw_candidates[*selection.index];
-    if (opened) {
-        *opened = usb_open(selected);
-        if (!*opened) return nullptr;
+    auto selection = select_apple_usb_device(candidates, identity, false);
+    usb_dev_handle* matched_handle{};
+    if (!selection.index) {
+        std::vector<std::size_t> probe_order(candidates.size());
+        for (std::size_t index{}; index < candidates.size(); ++index)
+            probe_order[index] = index;
+        std::stable_sort(probe_order.begin(), probe_order.end(),
+            [&](std::size_t left, std::size_t right) {
+                const bool left_pid = identity.original_product_id != 0 &&
+                    candidates[left].product_id == identity.original_product_id;
+                const bool right_pid = identity.original_product_id != 0 &&
+                    candidates[right].product_id == identity.original_product_id;
+                return left_pid && !right_pid;
+            });
+        for (const auto index : probe_order) {
+            auto& candidate = candidates[index];
+            if (!candidate.serial.empty()) continue;
+            auto* device = raw_candidates[index];
+            if (device->descriptor.iSerialNumber == 0) continue;
+            auto* handle = usb_open(device);
+            if (!handle) continue;
+            candidate.can_open = true;
+            char value[256]{};
+            const int length = usb_get_string_simple(handle,
+                device->descriptor.iSerialNumber, value, sizeof(value));
+            if (length > 0) candidate.serial.assign(value,
+                static_cast<std::size_t>(length));
+            if (apple_usb_serial_equal(candidate.serial, identity.serial)) {
+                selection.index = index;
+                selection.match_kind = AppleUsbMatchKind::Serial;
+                matched_handle = handle;
+                break;
+            }
+            usb_close(handle);
+        }
     }
+    if (!selection.index) return nullptr;
+    const auto selected_index = *selection.index;
+    auto* selected = raw_candidates[selected_index];
+    auto& info = candidates[selected_index];
+    populate_descriptor_summary(*selected, info);
+    info.quicktime_endpoints = endpoints_for(*selected, QuickTimeSubclass);
+    info.quicktime_configuration =
+        info.quicktime_endpoints.configuration != 0;
+    if (require_quicktime && !info.quicktime_configuration) {
+        if (matched_handle) usb_close(matched_handle);
+        return nullptr;
+    }
+    if (opened) {
+        *opened = matched_handle ? matched_handle : usb_open(selected);
+        matched_handle = nullptr;
+        if (!*opened) return nullptr;
+    } else if (matched_handle) {
+        usb_close(matched_handle);
+    }
+    if (selected_info) *selected_info = info;
     return selected;
 }
 
@@ -182,10 +248,6 @@ struct usb_device* find_device(const std::string& serial,
     usb_dev_handle** opened = nullptr, bool require_quicktime = false) {
     return find_device(AppleUsbIdentity{.serial = serial}, opened,
         require_quicktime);
-}
-
-void throw_last_error(const char* operation) {
-    throw std::runtime_error(std::string(operation) + ": " + usb_strerror());
 }
 
 } // namespace
@@ -326,6 +388,21 @@ std::string describe_apple_usb_candidates(
     return description;
 }
 
+bool libusb0_installed() noexcept {
+    try {
+        wchar_t system_directory[MAX_PATH]{};
+        const auto length = GetSystemDirectoryW(system_directory, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH) return false;
+        std::wstring path(system_directory, length);
+        path += L"\\libusb0.dll";
+        const auto attributes = GetFileAttributesW(path.c_str());
+        return attributes != INVALID_FILE_ATTRIBUTES &&
+            (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    } catch (...) {
+        return false;
+    }
+}
+
 bool libusb0_available() noexcept {
     HMODULE module = LoadLibraryExW(L"libusb0.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!module) return false;
@@ -348,10 +425,8 @@ bool apple_usb_serial_equal(std::string_view left, std::string_view right) noexc
 }
 
 std::vector<AppleUsbDevice> enumerate_libusb0() {
-    std::scoped_lock lock(api_mutex);
-    usb_init();
-    usb_find_busses();
-    usb_find_devices();
+    std::unique_lock lock(api_mutex);
+    refresh_usb_devices();
     std::vector<AppleUsbDevice> result;
     for (struct usb_bus* bus = usb_get_busses(); bus; bus = bus->next) {
         for (struct usb_device* device = bus->devices; device; device = device->next) {
@@ -363,13 +438,17 @@ std::vector<AppleUsbDevice> enumerate_libusb0() {
                 ? static_cast<std::uint8_t>(device->bus->location & 0xffU) : 0;
             info.address = device->devnum;
             populate_descriptor_summary(*device, info);
-            if (usb_dev_handle* handle = usb_open(device)) {
-                info.can_open = true;
-                char serial[256]{};
-                if (usb_get_string_simple(handle, device->descriptor.iSerialNumber, serial, sizeof(serial)) > 0) {
-                    info.serial = serial;
+            info.serial = cached_active_apple_usb_serial(info.topology_id);
+            info.can_open = !info.serial.empty();
+            if (info.serial.empty()) {
+                if (usb_dev_handle* handle = usb_open(device)) {
+                    info.can_open = true;
+                    char serial[256]{};
+                    if (usb_get_string_simple(handle, device->descriptor.iSerialNumber, serial, sizeof(serial)) > 0) {
+                        info.serial = serial;
+                    }
+                    usb_close(handle);
                 }
-                usb_close(handle);
             }
             info.quicktime_endpoints = endpoints_for(*device, QuickTimeSubclass);
             info.quicktime_configuration = info.quicktime_endpoints.configuration != 0;
@@ -380,22 +459,18 @@ std::vector<AppleUsbDevice> enumerate_libusb0() {
 }
 
 std::optional<AppleUsbDevice> find_libusb0_device(std::string_view serial) {
-    if (serial.empty() || !libusb0_available()) return std::nullopt;
-    for (auto& device : enumerate_libusb0()) {
-        if (apple_usb_serial_equal(device.serial, serial)) return device;
-    }
-    return std::nullopt;
+    return find_libusb0_device(AppleUsbIdentity{.serial = std::string(serial)});
 }
 
 std::optional<AppleUsbDevice> find_libusb0_device(
     const AppleUsbIdentity& identity, bool require_quicktime) {
     if ((identity.serial.empty() && identity.topology_id.empty()) ||
         !libusb0_available()) return std::nullopt;
-    auto devices = enumerate_libusb0();
-    const auto selection = select_apple_usb_device(devices, identity,
-        require_quicktime);
-    if (!selection.index) return std::nullopt;
-    return std::move(devices[*selection.index]);
+    std::unique_lock lock(api_mutex);
+    AppleUsbDevice info;
+    if (!find_device(identity, nullptr, require_quicktime, &info))
+        return std::nullopt;
+    return info;
 }
 
 bool is_libusb0_device_available(std::string_view serial) {
@@ -405,9 +480,15 @@ bool is_libusb0_device_available(std::string_view serial) {
 
 LibUsb0Connection::~LibUsb0Connection() { close(); }
 LibUsb0Connection::LibUsb0Connection(LibUsb0Connection&& other) noexcept
-    : handle_(other.handle_), endpoints_(other.endpoints_), claimed_(other.claimed_) {
+    : handle_(other.handle_), endpoints_(other.endpoints_), claimed_(other.claimed_),
+      active_identity_retained_(other.active_identity_retained_),
+      active_topology_(std::move(other.active_topology_)),
+      active_serial_(std::move(other.active_serial_)) {
     other.handle_ = nullptr;
     other.claimed_ = false;
+    other.active_identity_retained_ = false;
+    other.active_topology_.clear();
+    other.active_serial_.clear();
 }
 LibUsb0Connection& LibUsb0Connection::operator=(LibUsb0Connection&& other) noexcept {
     if (this != &other) {
@@ -415,10 +496,30 @@ LibUsb0Connection& LibUsb0Connection::operator=(LibUsb0Connection&& other) noexc
         handle_ = other.handle_;
         endpoints_ = other.endpoints_;
         claimed_ = other.claimed_;
+        active_identity_retained_ = other.active_identity_retained_;
+        active_topology_ = std::move(other.active_topology_);
+        active_serial_ = std::move(other.active_serial_);
         other.handle_ = nullptr;
         other.claimed_ = false;
+        other.active_identity_retained_ = false;
+        other.active_topology_.clear();
+        other.active_serial_.clear();
     }
     return *this;
+}
+
+void LibUsb0Connection::remember_active_identity(
+    const AppleUsbIdentity& identity) noexcept {
+    if (identity.topology_id.empty() || identity.serial.empty()) return;
+    try {
+        active_topology_ = identity.topology_id;
+        active_serial_ = identity.serial;
+        active_identity_retained_ = retain_active_apple_usb_identity(identity);
+    } catch (...) {
+        active_identity_retained_ = false;
+        active_topology_.clear();
+        active_serial_.clear();
+    }
 }
 
 bool LibUsb0Connection::enable_quicktime_configuration(const std::string& serial) {
@@ -427,7 +528,7 @@ bool LibUsb0Connection::enable_quicktime_configuration(const std::string& serial
 
 bool LibUsb0Connection::enable_quicktime_configuration(
     const AppleUsbIdentity& identity) {
-    std::scoped_lock lock(api_mutex);
+    std::unique_lock lock(api_mutex);
     usb_dev_handle* handle{};
     if (!find_device(identity, &handle) || !handle)
         throw std::runtime_error("libusb0 cannot find the selected Apple device");
@@ -446,7 +547,7 @@ bool LibUsb0Connection::disable_quicktime_configuration(const std::string& seria
 
 bool LibUsb0Connection::disable_quicktime_configuration(
     const AppleUsbIdentity& identity) {
-    std::scoped_lock lock(api_mutex);
+    std::unique_lock lock(api_mutex);
     usb_dev_handle* handle{};
     if (!find_device(identity, &handle) || !handle)
         throw std::runtime_error("libusb0 cannot find the selected Apple device");
@@ -467,7 +568,7 @@ LibUsb0Connection LibUsb0Connection::open_quicktime(const std::string& serial) {
 
 LibUsb0Connection LibUsb0Connection::open_quicktime(
     const AppleUsbIdentity& identity, bool allow_conventional_fallback) {
-    std::scoped_lock lock(api_mutex);
+    std::unique_lock lock(api_mutex);
     LibUsb0Connection connection;
     std::string last_error = "unknown libusb0 error";
     // Windows may report BUSY for the first handle immediately after iOS
@@ -475,8 +576,14 @@ LibUsb0Connection LibUsb0Connection::open_quicktime(
     // few times; this is the same settle window used by Apple's capture
     // utility and does not touch the installed filter driver.
     for (int attempt = 0; attempt < 3; ++attempt) {
-        if (attempt != 0) std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        struct usb_device* device = find_device(identity, &connection.handle_);
+        if (attempt != 0) {
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            lock.lock();
+        }
+        AppleUsbDevice selected_info;
+        struct usb_device* device = find_device(identity, &connection.handle_,
+            false, &selected_info);
         if (!device || !connection.handle_) {
             last_error = "libusb0 cannot find the selected Apple device";
             continue;
@@ -488,7 +595,7 @@ LibUsb0Connection LibUsb0Connection::open_quicktime(
             }
             if (!connection.endpoints_.configuration) {
                 last_error = "Apple device has no QuickTime 0x2A interface";
-                connection.close();
+                connection.close_unlocked();
                 continue;
             }
         }
@@ -503,18 +610,23 @@ LibUsb0Connection LibUsb0Connection::open_quicktime(
                 if (connection.endpoints_.alternate_setting == 0 ||
                     usb_set_altinterface(connection.handle_,
                         connection.endpoints_.alternate_setting) >= 0) {
+                    auto active_identity = make_apple_usb_identity(selected_info);
+                    if (active_identity.serial.empty())
+                        active_identity.serial = identity.serial;
+                    connection.remember_active_identity(active_identity);
+                    lock.unlock();
                     return connection;
                 }
                 last_error = usb_strerror();
-                connection.close();
+                connection.close_unlocked();
                 continue;
             }
-            connection.close();
+            connection.close_unlocked();
             continue;
         }
         if (usb_claim_interface(connection.handle_, connection.endpoints_.interface_number) < 0) {
             last_error = usb_strerror();
-            connection.close();
+            connection.close_unlocked();
             continue;
         }
         connection.claimed_ = true;
@@ -522,16 +634,25 @@ LibUsb0Connection LibUsb0Connection::open_quicktime(
             usb_set_altinterface(connection.handle_,
                 connection.endpoints_.alternate_setting) < 0) {
             last_error = usb_strerror();
-            connection.close();
+            connection.close_unlocked();
             continue;
         }
+        auto active_identity = make_apple_usb_identity(selected_info);
+        if (active_identity.serial.empty()) active_identity.serial = identity.serial;
+        connection.remember_active_identity(active_identity);
+        lock.unlock();
         return connection;
     }
+    lock.unlock();
     throw std::runtime_error("open QuickTime USB interface: " + last_error);
 }
 
 std::size_t LibUsb0Connection::read(std::span<std::uint8_t> destination, unsigned timeout_ms) {
-    const int count = usb_bulk_read(handle_, endpoints_.bulk_in,
+    std::shared_lock lock(api_mutex);
+    auto* handle = handle_;
+    if (!handle || destination.empty())
+        throw std::invalid_argument("invalid QuickTime USB read");
+    const int count = usb_bulk_read(handle, endpoints_.bulk_in,
         reinterpret_cast<char*>(destination.data()),
         static_cast<int>(std::min<std::size_t>(destination.size(), INT_MAX)),
         static_cast<int>(timeout_ms));
@@ -544,9 +665,13 @@ std::size_t LibUsb0Connection::read(std::span<std::uint8_t> destination, unsigne
 }
 
 void LibUsb0Connection::write(std::span<const std::uint8_t> source, unsigned timeout_ms) {
+    std::shared_lock lock(api_mutex);
+    auto* handle = handle_;
+    if (!handle || source.empty())
+        throw std::invalid_argument("invalid QuickTime USB write");
     std::size_t offset{};
     while (offset < source.size()) {
-        const int count = usb_bulk_write(handle_, endpoints_.bulk_out,
+        const int count = usb_bulk_write(handle, endpoints_.bulk_out,
             reinterpret_cast<char*>(const_cast<std::uint8_t*>(source.data() + offset)),
             static_cast<int>(std::min<std::size_t>(source.size() - offset, INT_MAX)),
             static_cast<int>(timeout_ms));
@@ -556,17 +681,22 @@ void LibUsb0Connection::write(std::span<const std::uint8_t> source, unsigned tim
 }
 
 void LibUsb0Connection::clear_halt() {
+    std::unique_lock lock(api_mutex);
+    if (!handle_) return;
     if (usb_clear_halt(handle_, endpoints_.bulk_in) < 0) throw_last_error("clear QuickTime IN halt");
     if (usb_clear_halt(handle_, endpoints_.bulk_out) < 0) throw_last_error("clear QuickTime OUT halt");
 }
 
 void LibUsb0Connection::recover_handshake() {
+    std::unique_lock lock(api_mutex);
+    if (!handle_) return;
     if (usb_control_msg(handle_, 0x40, 0x40, 0x6400, 0x6400, nullptr, 0, 1000) < 0) {
         throw_last_error("recover QuickTime handshake");
     }
 }
 
 void LibUsb0Connection::disable_quicktime_configuration() {
+    std::unique_lock lock(api_mutex);
     if (!handle_) return;
     struct usb_device* device = usb_device(handle_);
     const int mux_configuration = device ? mux_configuration_for(*device) : 0;
@@ -579,11 +709,29 @@ void LibUsb0Connection::disable_quicktime_configuration() {
 }
 
 void LibUsb0Connection::close() noexcept {
-    if (!handle_) return;
-    if (claimed_) usb_release_interface(handle_, endpoints_.interface_number);
-    usb_close(handle_);
-    handle_ = nullptr;
-    claimed_ = false;
+    try {
+        std::unique_lock lock(api_mutex);
+        close_unlocked();
+    } catch (...) {
+        // A failed lock must not turn cleanup into process termination. Leave
+        // the handle for the owning process to reclaim rather than racing the
+        // legacy library from an unprotected thread.
+    }
+}
+
+void LibUsb0Connection::close_unlocked() noexcept {
+    auto* handle = std::exchange(handle_, nullptr);
+    const auto claimed = std::exchange(claimed_, false);
+    if (handle) {
+        if (claimed) usb_release_interface(handle, endpoints_.interface_number);
+        usb_close(handle);
+    }
+    if (active_identity_retained_) {
+        release_active_apple_usb_identity(active_topology_, active_serial_);
+        active_identity_retained_ = false;
+    }
+    active_topology_.clear();
+    active_serial_.clear();
 }
 
 } // namespace iPhoneMirror::transport
