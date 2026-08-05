@@ -3,7 +3,7 @@
     "tag_name": "v1.5.10",
     "name": "iPhoneMirror v1.5.10",
     "body": "v1.5.10 降低自动 USB 探测触发复合过滤器竞态的风险，完善 QuickTime 配置恢复与同设备启动协调，并修复多网卡 AirPlay DNS-SD 生命周期。",
-    "published_at": "2026-08-05T00:00:00Z",
+    "published_at": "2026-08-05T02:41:08Z",
     "draft": false,
     "prerelease": false,
     "assets": [
