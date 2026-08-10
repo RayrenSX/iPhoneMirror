@@ -316,11 +316,32 @@ outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
 outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 ```
 
+`outputs/iPhoneMirror` is the portable build with .NET/WPF dependencies bundled
+inside its executables. The installer uses `outputs/iPhoneMirror.Installer`,
+where the app and driver manager share external runtime DLLs to reduce download
+size.
+
+The default build bundles the FFmpeg 8 media-output runtime so recording and
+RTMP/SRT/WHIP streaming work out of the box. Build the compact edition only
+when minimum size is required and a system FFmpeg dependency is acceptable:
+
+```powershell
+.\build.ps1 -Configuration Release -OmitMediaOutputRuntime
+```
+
+Pass `-OmitMediaOutputRuntime` to the release packaging script as well when
+publishing the compact edition.
+
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.5.11 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.6.0 -GenerateSbom
 ```
+
+Pass `-UpdateReleaseManifest` when producing the assets that will be uploaded.
+The release script then synchronizes sizes and SHA256 digests for the matching
+entry in `updates/releases.json`, keeping the fallback update endpoint valid.
+Ordinary local package builds do not modify the published release manifest.
 
 The script downloads hash-pinned Inno Setup 6.7.3 and its Simplified Chinese
 translation into `work/tools`; no global Inno Setup installation is required.

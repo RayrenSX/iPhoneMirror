@@ -1,11 +1,11 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.5.11"
+  #define MyAppVersion "1.6.0"
 #endif
 #ifndef MyNumericVersion
-  #define MyNumericVersion "1.5.11.0"
+  #define MyNumericVersion "1.6.0.0"
 #endif
 #ifndef MySourceDir
-  #define MySourceDir "..\outputs\iPhoneMirror"
+  #define MySourceDir "..\outputs\iPhoneMirror.Installer"
 #endif
 #ifndef MyOutputDir
   #define MyOutputDir "..\outputs\releases"
@@ -72,7 +72,7 @@ WizardSizePercent=110
 Compression={#MyCompression}
 SolidCompression={#MySolidCompression}
 CloseApplications=yes
-CloseApplicationsFilter=iPhoneMirror.exe
+CloseApplicationsFilter=iPhoneMirror.exe,iPhoneMirror.Driver.exe
 RestartApplications=no
 SetupLogging=yes
 UsePreviousAppDir=yes
@@ -91,7 +91,15 @@ english.DeleteUserDataPrompt=Also delete iPhoneMirror settings and downloaded up
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Remove media-output files from older releases before copying the current
+; payload. If the current build includes FFmpeg, [Files] restores these files.
+[InstallDelete]
+Type: files; Name: "{app}\tools\ffmpeg\ffmpeg.exe"
+Type: files; Name: "{app}\tools\ffmpeg\LICENSE.txt"
+Type: files; Name: "{app}\tools\ffmpeg\README.txt"
+Type: files; Name: "{app}\tools\ffmpeg\SOURCE.txt"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\iPhoneMirror.exe"; WorkingDir: "{app}"; IconFilename: "{app}\iPhoneMirror.exe"; AppUserModelID: "{#MyAppUserModelId}"
@@ -145,7 +153,12 @@ var
   ResultCode: Integer;
 begin
   if (CurStep = ssDone) and
-     (ExpandConstant('{param:RESTARTAPP|0}') = '1') then
+     (ExpandConstant('{param:STARTAPP|0}') = '1') then
+  begin
+    { Give Restart Manager time to release handles from both application EXEs
+      before the updated shared runtime is loaded by a new process. }
+    Sleep(1000);
     Exec(ExpandConstant('{app}\iPhoneMirror.exe'), '', ExpandConstant('{app}'),
       SW_SHOWNORMAL, ewNoWait, ResultCode);
+  end;
 end;

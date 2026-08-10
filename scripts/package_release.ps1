@@ -1,20 +1,29 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.5.11',
+    [string]$Version = '1.6.0',
     [switch]$SkipBuild,
     [switch]$GenerateSbom,
+    [switch]$UpdateReleaseManifest,
+    [switch]$IncludeMediaOutputRuntime,
+    [switch]$OmitMediaOutputRuntime,
     [string]$AppleSupportPackagePath,
     [switch]$ConfirmAppleRedistributionRights
 )
 
 $ErrorActionPreference = 'Stop'
+if ($IncludeMediaOutputRuntime -and $OmitMediaOutputRuntime) {
+    throw '-IncludeMediaOutputRuntime and -OmitMediaOutputRuntime cannot be used together.'
+}
+$UseMediaOutputRuntime = -not $OmitMediaOutputRuntime
 if ($SkipBuild -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
     throw '-AppleSupportPackagePath cannot be used with -SkipBuild.'
 }
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
+$InstallerPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Installer'
 $ReleaseRoot = Join-Path $Root 'outputs\releases'
+$ReleaseManifestPath = Join-Path $Root 'updates\releases.json'
 $StagingBase = Join-Path $Root 'outputs\release-staging'
 $StagingRoot = Join-Path $StagingBase ([Guid]::NewGuid().ToString('N'))
 $PackageName = "iPhoneMirror-v$Version-win-x64"
@@ -44,10 +53,6 @@ $RequiredArtifacts = @(
     'iPhoneMirror.Core.dll',
     'iPhoneMirror.VirtualCamera.dll',
     'iPhoneMirror.VirtualCamera.Admin.exe',
-    'tools\ffmpeg\ffmpeg.exe',
-    'tools\ffmpeg\LICENSE.txt',
-    'tools\ffmpeg\README.txt',
-    'tools\ffmpeg\SOURCE.txt',
     'iPhoneMirror.Driver.exe',
     'libusb-1.0.dll',
     'libusb0.dll',
@@ -116,6 +121,112 @@ function Write-Sha256Sidecar([string]$Path) {
     }
 }
 
+function Format-JsonRecord([string]$Json) {
+    $depth = 1
+    @($Json -split "`r?`n" | ForEach-Object {
+        $line = $_.Trim()
+        if ($line.StartsWith('}') -or $line.StartsWith(']')) { --$depth }
+        $formatted = ('  ' * $depth) + $line
+        if ($line.EndsWith('{') -or $line.EndsWith('[')) { ++$depth }
+        $formatted
+    }) -join "`n"
+}
+
+function Update-ReleaseManifestAssets([string]$Path, [string]$ReleaseVersion,
+    [object[]]$Assets) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Fallback release manifest is missing: $Path"
+    }
+    $json = [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8)
+    $parsed = $json | ConvertFrom-Json
+    $releases = if ($parsed -is [array]) {
+        @($parsed)
+    }
+    elseif ($parsed.PSObject.Properties.Name -contains 'value') {
+        @($parsed.value)
+    }
+    else {
+        @($parsed)
+    }
+    $tag = "v$ReleaseVersion"
+    $matches = @($releases | Where-Object {
+        [string]::Equals([string]$_.tag_name, $tag,
+            [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($matches.Count -ne 1) {
+        throw "Fallback release manifest must contain exactly one $tag entry."
+    }
+
+    $manifestAssets = @($Assets | ForEach-Object {
+        $assetPath = [IO.Path]::GetFullPath([string]$_.Final)
+        if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+            throw "Published release asset is missing: $assetPath"
+        }
+        $item = Get-Item -LiteralPath $assetPath
+        $name = [IO.Path]::GetFileName($assetPath)
+        $hash = ((Get-FileHash -LiteralPath $assetPath `
+            -Algorithm SHA256).Hash).ToLowerInvariant()
+        [PSCustomObject][ordered]@{
+            name = $name
+            size = $item.Length
+            digest = "sha256:$hash"
+            browser_download_url =
+                "https://github.com/RayrenSX/iPhoneMirror/releases/download/$tag/$name"
+        }
+    })
+    $duplicateNames = @($manifestAssets | Group-Object name |
+        Where-Object Count -ne 1)
+    if ($duplicateNames.Count -ne 0) {
+        throw "Published release asset names are not unique: $($duplicateNames.Name -join ', ')"
+    }
+    $matches[0].assets = $manifestAssets
+
+    # Windows PowerShell 5.1 can serialize a one-item Object[] as a
+    # value/Count wrapper. Serialize each record and assemble the root array
+    # explicitly so ReleaseParser always receives a JSON array.
+    $serializedEntries = @($releases | ForEach-Object {
+        $entry = ConvertTo-Json -InputObject $_ -Depth 100
+        Format-JsonRecord $entry
+    })
+    $serialized = "[`n" + ($serializedEntries -join ",`n") + "`n]"
+    if (-not $serialized.TrimStart().StartsWith('[')) {
+        throw 'Fallback release manifest root must be a JSON array.'
+    }
+    $roundTrip = $serialized | ConvertFrom-Json
+    $roundTripMatches = @($roundTrip | Where-Object {
+        [string]::Equals([string]$_.tag_name, $tag,
+            [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($roundTripMatches.Count -ne 1 -or
+        @($roundTripMatches[0].assets).Count -ne $manifestAssets.Count) {
+        throw 'Fallback release manifest failed round-trip validation.'
+    }
+    foreach ($expectedAsset in $manifestAssets) {
+        $actualAssets = @($roundTripMatches[0].assets | Where-Object {
+            [string]::Equals([string]$_.name, [string]$expectedAsset.name,
+                [StringComparison]::Ordinal)
+        })
+        if ($actualAssets.Count -ne 1 -or
+            [long]$actualAssets[0].size -ne [long]$expectedAsset.size -or
+            -not [string]::Equals([string]$actualAssets[0].digest,
+                [string]$expectedAsset.digest,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Fallback release manifest failed validation for $($expectedAsset.name)."
+        }
+    }
+    $temporaryPath = "$Path.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText($temporaryPath, $serialized + "`n",
+            [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+    }
+}
+
 function Assert-SafeWorkspaceDirectory([string]$Path) {
     $workspace = [IO.Path]::GetFullPath($Root).TrimEnd('\')
     $fullPath = [IO.Path]::GetFullPath($Path)
@@ -157,7 +268,16 @@ function Assert-PublishedOutput {
     $fullPublishRoot = (Resolve-Path -LiteralPath $PublishRoot).Path.TrimEnd('\')
     $actualArtifacts = @(Get-ChildItem -LiteralPath $PublishRoot -Recurse -File |
         ForEach-Object { $_.FullName.Substring($fullPublishRoot.Length + 1) })
-    $allowedArtifacts = @($RequiredArtifacts) + @('AppleMobileDeviceSupport64.msi')
+    $optionalArtifacts = @('AppleMobileDeviceSupport64.msi')
+    if ($UseMediaOutputRuntime) {
+        $optionalArtifacts += @(
+            'tools\ffmpeg\ffmpeg.exe',
+            'tools\ffmpeg\LICENSE.txt',
+            'tools\ffmpeg\README.txt',
+            'tools\ffmpeg\SOURCE.txt'
+        )
+    }
+    $allowedArtifacts = @($RequiredArtifacts) + $optionalArtifacts
     $unexpected = @($actualArtifacts | Where-Object { $_ -notin $allowedArtifacts })
     if ($unexpected.Count -ne 0) {
         throw "Unexpected files in published output: $($unexpected -join ', ')"
@@ -225,20 +345,25 @@ function Assert-PublishedOutput {
         throw 'Published libusb0 runtime Authenticode signature is not valid.'
     }
 
-    foreach ($entry in $MediaOutputRuntimeHashes.GetEnumerator()) {
-        $name = [string]$entry.Key
-        $published = Join-Path (Join-Path $PublishRoot 'tools\ffmpeg') $name
-        $actual = (Get-FileHash -LiteralPath $published -Algorithm SHA256).Hash
-        if ($actual -ne [string]$entry.Value) {
-            throw "Published media-output runtime hash mismatch for ${name}: expected $($entry.Value), got $actual"
+    if ($UseMediaOutputRuntime) {
+        foreach ($entry in $MediaOutputRuntimeHashes.GetEnumerator()) {
+            $name = [string]$entry.Key
+            $published = Join-Path (Join-Path $PublishRoot 'tools\ffmpeg') $name
+            if (-not (Test-Path -LiteralPath $published -PathType Leaf)) {
+                throw "Published media-output runtime is missing: $name"
+            }
+            $actual = (Get-FileHash -LiteralPath $published -Algorithm SHA256).Hash
+            if ($actual -ne [string]$entry.Value) {
+                throw "Published media-output runtime hash mismatch for ${name}: expected $($entry.Value), got $actual"
+            }
         }
-    }
-    $sourceRecord = Get-Content -LiteralPath `
-        (Join-Path $PublishRoot 'tools\ffmpeg\SOURCE.txt') -Raw
-    if ($sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.Version) -or
-        $sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.ArchiveSha256) -or
-        $sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.DownloadUrl)) {
-        throw 'Published media-output FFmpeg source record does not match the pinned manifest.'
+        $sourceRecord = Get-Content -LiteralPath `
+            (Join-Path $PublishRoot 'tools\ffmpeg\SOURCE.txt') -Raw
+        if ($sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.Version) -or
+            $sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.ArchiveSha256) -or
+            $sourceRecord -notmatch [regex]::Escape([string]$MediaOutputManifest.DownloadUrl)) {
+            throw 'Published media-output FFmpeg source record does not match the pinned manifest.'
+        }
     }
 }
 
@@ -340,6 +465,9 @@ try {
 
     if (-not $SkipBuild) {
         $buildArguments = @{ Configuration = 'Release' }
+        if ($OmitMediaOutputRuntime) {
+            $buildArguments.OmitMediaOutputRuntime = $true
+        }
         if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
             $buildArguments.AppleSupportPackagePath = $AppleSupportPackagePath
             $buildArguments.ConfirmAppleRedistributionRights =
@@ -350,10 +478,51 @@ try {
     }
 
     Assert-PublishedOutput
+    if (-not (Test-Path -LiteralPath $InstallerPublishRoot -PathType Container)) {
+        throw "Shared-runtime installer output is missing: $InstallerPublishRoot"
+    }
+    $installerRequiredArtifacts = @(
+        'iPhoneMirror.exe', 'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
+        'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.exe',
+        'iPhoneMirror.Driver.dll', 'iPhoneMirror.Driver.deps.json',
+        'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
+        'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
+        'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll'
+    )
+    if ($UseMediaOutputRuntime) {
+        $installerRequiredArtifacts += @(
+            'tools\ffmpeg\ffmpeg.exe', 'tools\ffmpeg\LICENSE.txt',
+            'tools\ffmpeg\README.txt', 'tools\ffmpeg\SOURCE.txt'
+        )
+    }
+    foreach ($required in $installerRequiredArtifacts) {
+        if (-not (Test-Path -LiteralPath `
+                (Join-Path $InstallerPublishRoot $required) -PathType Leaf)) {
+            throw "Shared-runtime installer artifact is missing: $required"
+        }
+    }
+    $versionedDac = @(Get-ChildItem -LiteralPath $InstallerPublishRoot `
+        -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
+    if ($versionedDac.Count -ne 1) {
+        throw 'Shared-runtime installer must contain exactly one versioned .NET DAC.'
+    }
+    if (-not $UseMediaOutputRuntime) {
+        $installerFfmpegRoot = Join-Path $InstallerPublishRoot 'tools\ffmpeg'
+        $staleInstallerFfmpeg = if (Test-Path -LiteralPath $installerFfmpegRoot `
+                -PathType Container) {
+            @(Get-ChildItem -LiteralPath $installerFfmpegRoot -Recurse -File)
+        }
+        else { @() }
+        if ($staleInstallerFfmpeg.Count -ne 0) {
+            throw 'Shared-runtime installer output still contains FFmpeg files. ' +
+                'Rebuild with -OmitMediaOutputRuntime before packaging.'
+        }
+    }
     Assert-SafeWorkspaceDirectory $StagingRoot
     New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null
     & (Join-Path $Root 'scripts\build_installer.ps1') -Version $Version `
-        -SkipAppBuild -SourceDirectory $PublishRoot -OutputDirectory $StagingRoot
+        -SkipAppBuild -SourceDirectory $InstallerPublishRoot `
+        -OutputDirectory $StagingRoot
     if ($LASTEXITCODE -ne 0 -or
         -not (Test-Path -LiteralPath $StagedInstaller -PathType Leaf)) {
         throw "Windows installer build failed: $LASTEXITCODE"
@@ -409,7 +578,7 @@ try {
         $VcRuntimeVersion = (Get-Item -LiteralPath `
             (Join-Path $PublishRoot 'vcruntime140.dll')).VersionInfo.ProductVersion
 
-        $NativePackages = @(
+        $NativePackages = [Collections.Generic.List[object]]@(
             [PSCustomObject][ordered]@{
                 name = 'libusb'
                 SPDXID = 'SPDXRef-Package-libusb-1.0.29'
@@ -465,17 +634,6 @@ try {
                 supplier = 'Organization: FFmpeg project'
             },
             [PSCustomObject][ordered]@{
-                name = 'FFmpeg media-output runtime'
-                SPDXID = 'SPDXRef-Package-FFmpeg-8.1.2-Gyan'
-                downloadLocation = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip'
-                filesAnalyzed = $false
-                licenseConcluded = 'GPL-3.0-only'
-                licenseDeclared = 'GPL-3.0-only'
-                copyrightText = 'NOASSERTION'
-                versionInfo = '8.1.2'
-                supplier = 'Organization: gyan.dev'
-            },
-            [PSCustomObject][ordered]@{
                 name = 'Microsoft Visual C++ x64 runtime'
                 SPDXID = 'SPDXRef-Package-Microsoft-Visual-Cpp-Runtime'
                 downloadLocation = 'https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist'
@@ -487,6 +645,19 @@ try {
                 supplier = 'Organization: Microsoft Corporation'
             }
         )
+        if ($UseMediaOutputRuntime) {
+            $NativePackages.Add([PSCustomObject][ordered]@{
+                name = 'FFmpeg media-output runtime'
+                SPDXID = 'SPDXRef-Package-FFmpeg-8.1.2-Gyan'
+                downloadLocation = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip'
+                filesAnalyzed = $false
+                licenseConcluded = 'GPL-3.0-only'
+                licenseDeclared = 'GPL-3.0-only'
+                copyrightText = 'NOASSERTION'
+                versionInfo = '8.1.2'
+                supplier = 'Organization: gyan.dev'
+            })
+        }
         foreach ($NativePackage in $NativePackages) {
             if (-not ($Sbom.packages | Where-Object { $_.SPDXID -eq $NativePackage.SPDXID })) {
                 $Sbom.packages += $NativePackage
@@ -537,6 +708,9 @@ try {
     $publishAssets += [PSCustomObject]@{ Staged = $StagedChecksum; Final = $ChecksumPath }
     $removePaths = if ($GenerateSbom) { @() } else { @($SbomAsset) }
     Publish-StagedAssets $publishAssets $removePaths
+    if ($UpdateReleaseManifest) {
+        Update-ReleaseManifestAssets $ReleaseManifestPath $Version $publishAssets
+    }
 
     if (Test-Path -LiteralPath $LegacyArchive) {
         Remove-Item -LiteralPath $LegacyArchive -Force
@@ -546,6 +720,9 @@ try {
     Write-Host "Windows setup:  $InstallerPath" -ForegroundColor Green
     Write-Host "Latest alias:    $LatestArchivePath" -ForegroundColor Green
     Write-Host "Checksums:      $ChecksumPath" -ForegroundColor Green
+    if ($UpdateReleaseManifest) {
+        Write-Host "Release data:  $ReleaseManifestPath" -ForegroundColor Green
+    }
     if ($GenerateSbom) {
         Write-Host "SBOM:           $SbomAsset" -ForegroundColor Green
     }

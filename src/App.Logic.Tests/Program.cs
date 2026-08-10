@@ -229,6 +229,36 @@ var capturePreflightIndex = captureStartIndex >= 0
 Equal(true, captureStartIndex >= 0 && captureReuseIndex > captureStartIndex &&
             capturePreflightIndex > captureReuseIndex,
     "main start reuses a session created by an independent window before USB preflight");
+var repositoryRoot = Path.GetFullPath(Path.Combine(sourceDirectory, ".."));
+var installerScript = File.ReadAllText(Path.Combine(repositoryRoot,
+    "installer", "iPhoneMirror.iss"));
+Equal(true, installerScript.Contains(
+        "CloseApplicationsFilter=iPhoneMirror.exe,iPhoneMirror.Driver.exe",
+        StringComparison.Ordinal),
+    "installer closes the main app and shared-runtime driver manager");
+Equal(false, installerScript.Contains("restartreplace",
+        StringComparison.OrdinalIgnoreCase),
+    "installer never defers shared runtime replacement until reboot");
+Equal(true, installerScript.Contains("[InstallDelete]", StringComparison.Ordinal) &&
+            installerScript.Contains(
+                "{app}\\tools\\ffmpeg\\ffmpeg.exe", StringComparison.Ordinal),
+    "installer removes legacy media-output FFmpeg files before upgrade");
+Equal(true, installerScript.Contains("{param:STARTAPP|0}", StringComparison.Ordinal) &&
+            installerScript.Contains("Sleep(1000)", StringComparison.Ordinal),
+    "installer restarts only after a post-install handle-release delay");
+var buildInstallerScript = File.ReadAllText(Path.Combine(repositoryRoot,
+    "scripts", "build_installer.ps1"));
+Equal(true, buildInstallerScript.Contains(
+        "outputs\\iPhoneMirror.Installer", StringComparison.Ordinal),
+    "standalone installer build defaults to the shared-runtime payload");
+Equal(true, buildInstallerScript.Contains(
+        "iPhoneMirror.Driver.exe", StringComparison.Ordinal),
+    "standalone installer build requires the driver manager executable");
+var zipUpdateScript = File.ReadAllText(Path.Combine(sourceDirectory, "App",
+    "tools", "updater", "Apply-ZipUpdate.ps1"));
+Equal(true, zipUpdateScript.Contains("[string]$WaitPids", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("iPhoneMirror.Driver.exe", StringComparison.Ordinal),
+    "portable updates wait for the independent driver manager before copying");
 var releaseManifestPath = Path.Combine(sourceDirectory, "..", "updates", "releases.json");
 var repositoryRelease = ReleaseParser.ParseLatest(
     File.ReadAllText(releaseManifestPath), includeStable: true, includePrerelease: true);
@@ -714,6 +744,10 @@ Equal("v1.3.1", stableRelease?.TagName,
     "stable update channel ignores prereleases");
 Equal("setup.exe", stableRelease?.PreferredAsset?.Name,
     "release parser prefers x64 Setup EXE over ZIP");
+Equal("app.zip", stableRelease?.SelectAsset(preferInstaller: false)?.Name,
+    "portable deployment selects the ZIP asset");
+Equal("setup.exe", stableRelease?.SelectAsset(preferInstaller: true)?.Name,
+    "installed deployment selects the Setup asset");
 Equal("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     stableRelease?.PreferredAsset?.Sha256,
     "release parser preserves GitHub's SHA256 asset digest");
@@ -782,6 +816,50 @@ Equal(1, GitHubReleaseClient.BuildDownloadCandidates(
 Equal(1, GitHubReleaseClient.BuildDownloadCandidates(
         mirroredAsset, allowMirrorFallback: false).Count,
     "disabled mirror fallback keeps the official download only");
+
+var deploymentLayoutRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-layout-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(deploymentLayoutRoot);
+    Equal(false, DeploymentLayout.UsesSharedRuntime(deploymentLayoutRoot),
+        "portable layout has no external managed runtime markers");
+    foreach (var marker in new[]
+             {
+                 "iPhoneMirror.dll", "iPhoneMirror.deps.json",
+                 "iPhoneMirror.runtimeconfig.json",
+             })
+        File.WriteAllText(Path.Combine(deploymentLayoutRoot, marker), string.Empty);
+    Equal(true, DeploymentLayout.UsesSharedRuntime(deploymentLayoutRoot),
+        "installed layout is recognized by all external runtime markers");
+    foreach (var marker in new[]
+             {
+                 "iPhoneMirror.dll", "iPhoneMirror.deps.json",
+                 "iPhoneMirror.runtimeconfig.json",
+             })
+        File.Delete(Path.Combine(deploymentLayoutRoot, marker));
+    var legacyInstalledExecutable = Path.Combine(deploymentLayoutRoot,
+        "iPhoneMirror.exe");
+    File.WriteAllBytes(legacyInstalledExecutable, []);
+    Equal(true, DeploymentLayout.UsesSharedRuntime(deploymentLayoutRoot,
+            registeredExecutablePath: legacyInstalledExecutable),
+        "legacy single-file Setup layout is recognized by its App Paths registration");
+    Equal(false, DeploymentLayout.UsesSharedRuntime(deploymentLayoutRoot,
+            registeredExecutablePath: Path.Combine(deploymentLayoutRoot, "other.exe")),
+        "portable layout is not promoted by an unrelated installation registration");
+    var spacedRoot = Path.Combine(deploymentLayoutRoot, "Program Files", "iPhoneMirror");
+    Directory.CreateDirectory(spacedRoot);
+    var spacedExecutable = Path.Combine(spacedRoot, "iPhoneMirror.exe");
+    File.WriteAllBytes(spacedExecutable, []);
+    Equal(true, DeploymentLayout.IsRegisteredInstall(spacedExecutable,
+            registeredExecutablePath: spacedExecutable),
+        "installation registration comparison preserves paths containing spaces");
+}
+finally
+{
+    if (Directory.Exists(deploymentLayoutRoot))
+        Directory.Delete(deploymentLayoutRoot, recursive: true);
+}
 
 var segmentedDownloadRoot = Path.Combine(Path.GetTempPath(),
     $"iphone-mirror-segmented-download-{Guid.NewGuid():N}");
@@ -963,6 +1041,21 @@ try
         "range inconsistency triggers exactly one full fallback request");
     Equal(true, File.ReadAllBytes(inconsistentPath).SequenceEqual(segmentedPayload),
         "range inconsistency fallback preserves the exact payload");
+
+    var failedPath = Path.Combine(segmentedDownloadRoot, "failed.bin");
+    using var failedHttpClient = new HttpClient(new StubHttpMessageHandler(
+        (request, _) => Task.FromResult(HttpResponse(request,
+            new UnknownLengthContent(segmentedPayload[..1024])))));
+    await ThrowsAsync<EndOfStreamException>(() =>
+        SegmentedHttpDownloader.DownloadAsync(failedHttpClient,
+            new Uri("https://downloads.example.test/package.bin"), failedPath,
+            new SegmentedDownloadOptions(segmentedPayload.LongLength,
+                segmentedPayload.LongLength),
+            finalUri => finalUri.Host.Equals("downloads.example.test",
+                StringComparison.OrdinalIgnoreCase)),
+        "incomplete download throws when the response ends early");
+    Equal(false, File.Exists(failedPath),
+        "failed downloads remove their incomplete destination file");
 }
 finally
 {
@@ -983,6 +1076,7 @@ try
         AllowMirrorFallback = false,
         NotifyStableReleases = true,
         NotifyPrereleaseReleases = true,
+        Language = "zh-CN",
         Theme = AppTheme.Light,
     };
     settingsStore.Save(savedSettings);
@@ -995,6 +1089,16 @@ try
         "update settings preserve mirror fallback preference");
     Equal(AppTheme.Light, loadedSettings.Theme,
         "update settings preserve theme preference");
+    Equal("zh-CN", loadedSettings.Language,
+        "update settings preserve language preference");
+    settingsStore.Update(settings => settings.Language = "en-US");
+    var languageUpdatedSettings = settingsStore.Load();
+    Equal(true, languageUpdatedSettings.AutoDownload,
+        "language updates preserve unrelated update preferences");
+    Equal(AppTheme.Light, languageUpdatedSettings.Theme,
+        "language updates preserve the selected theme");
+    Equal("en-US", languageUpdatedSettings.Language,
+        "language updates persist the selected language");
 }
 finally
 {
@@ -1074,7 +1178,8 @@ try
     using var downloadClient = new GitHubReleaseClient(downloadHttpClient,
         Path.Combine(updateNetworkRoot, "downloads"));
     var downloaded = await downloadClient.DownloadAsync(downloadRelease,
-        cancellationToken: default, allowMirrorFallback: true);
+        cancellationToken: default, allowMirrorFallback: true,
+        preferInstaller: true);
     Equal(true, downloaded.HashVerified,
         "mirror download is accepted only after SHA256 verification");
     Equal(true, File.ReadAllBytes(downloaded.Path).SequenceEqual(payload),
@@ -1091,11 +1196,32 @@ finally
         Directory.Delete(updateNetworkRoot, recursive: true);
 }
 Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
+        .Contains("/STARTAPP=1", StringComparison.Ordinal),
+    "one-click installer update requests a delayed application restart");
+Equal(false, UpdateInstallerLauncher.BuildInstallerArguments()
         .Contains("/RESTARTAPP=1", StringComparison.Ordinal),
-    "one-click installer update requests application restart");
+    "one-click installer update does not use Inno's immediate restart parameter");
 Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
         .Contains("/LOG=", StringComparison.Ordinal),
     "one-click installer update persists an installer log");
+UpdateInstallerLauncher.ValidateAssetForDeployment("setup.exe",
+    sharedRuntime: true);
+UpdateInstallerLauncher.ValidateAssetForDeployment("portable.zip",
+    sharedRuntime: false);
+Throws<InvalidOperationException>(() =>
+        UpdateInstallerLauncher.ValidateAssetForDeployment("portable.zip",
+            sharedRuntime: true),
+    "installed deployment refuses a ZIP overlay update");
+Throws<InvalidOperationException>(() =>
+        UpdateInstallerLauncher.ValidateAssetForDeployment("setup.exe",
+            sharedRuntime: false),
+    "portable deployment refuses migration to Setup during automatic update");
+var zipWaitArguments = UpdateInstallerLauncher.BuildZipArguments(
+    "Apply-ZipUpdate.ps1", "update.zip", "C:\\install",
+    "C:\\install\\iPhoneMirror.exe", [17, 29, 17]);
+Equal(true, zipWaitArguments.Contains("-WaitPids", StringComparer.Ordinal) &&
+            zipWaitArguments.Contains("17;29", StringComparer.Ordinal),
+    "portable update helper receives both main and driver process IDs");
 
 // usbmux may reverse its enumeration order on every poll. Existing cards must
 // never move, while a newly connected phone is appended exactly once.
@@ -1261,6 +1387,44 @@ Equal(false, noEncoder.Supports(MediaOutputKind.Rtmp),
     "RTMP is gated when no compatible encoder exists");
 Equal(false, noEncoder.Supports((MediaOutputKind)999),
     "unknown output kinds are never reported as supported");
+
+var videoOnlyCapabilities = MediaOutputService.CreateCapabilities("ffmpeg.exe",
+    " V..... libx264 ", "rtmp srt", "flv mpegts whip");
+Equal(true, videoOnlyCapabilities.Supports(MediaOutputKind.Recording),
+    "video-only recording does not require an AAC encoder");
+Equal(true, videoOnlyCapabilities.Supports(MediaOutputKind.Rtmp),
+    "video-only RTMP does not require an AAC encoder");
+Equal(true, videoOnlyCapabilities.Supports(MediaOutputKind.Whip),
+    "video-only WHIP does not require an Opus encoder");
+Equal(true, MediaOutputService.CapabilityScore(ffmpegCapabilities) >
+            MediaOutputService.CapabilityScore(videoOnlyCapabilities),
+    "FFmpeg discovery prefers the candidate with the most complete output support");
+var protocolOnlyCapabilities = MediaOutputService.CreateCapabilities("protocol-only.exe",
+    " A..... aac\n A..... libopus ", "rtmp srt", "flv mpegts whip");
+Equal(videoOnlyCapabilities,
+    MediaOutputService.SelectBestCapabilities([
+        protocolOnlyCapabilities, videoOnlyCapabilities]),
+    "FFmpeg discovery never prefers a candidate without H.264");
+
+var ffmpegLocationRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-ffmpeg-locations-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(ffmpegLocationRoot);
+    var firstFfmpeg = Path.Combine(ffmpegLocationRoot, "first-ffmpeg.exe");
+    var secondFfmpeg = Path.Combine(ffmpegLocationRoot, "second-ffmpeg.exe");
+    File.WriteAllBytes(firstFfmpeg, [1]);
+    File.WriteAllBytes(secondFfmpeg, [2]);
+    Sequence([firstFfmpeg, secondFfmpeg],
+        MediaOutputService.ParseFfmpegLocations(
+            $"{firstFfmpeg}\r\n{secondFfmpeg}\r\n{firstFfmpeg}\r\n"),
+        "FFmpeg discovery keeps every unique where.exe result");
+}
+finally
+{
+    if (Directory.Exists(ffmpegLocationRoot))
+        Directory.Delete(ffmpegLocationRoot, recursive: true);
+}
 
 var recordingArguments = MediaOutputService.BuildArguments(
     new MediaOutputRequest(MediaOutputKind.Recording, "capture.mp4", 1280, 720, 30, 6000),
@@ -1962,4 +2126,16 @@ internal sealed class StubHttpMessageHandler(
     protected override Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken) =>
         handler(request, cancellationToken);
+}
+
+internal sealed class UnknownLengthContent(byte[] content) : HttpContent
+{
+    protected override Task SerializeToStreamAsync(Stream stream,
+        System.Net.TransportContext? context) => stream.WriteAsync(content).AsTask();
+
+    protected override bool TryComputeLength(out long length)
+    {
+        length = 0;
+        return false;
+    }
 }

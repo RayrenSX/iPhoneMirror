@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.5.11',
+    [string]$Version = '1.6.0',
     [switch]$SkipAppBuild,
     [string]$SourceDirectory,
     [string]$OutputDirectory
@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $SourceDirectory = if ($SourceDirectory) {
     [IO.Path]::GetFullPath($SourceDirectory)
-} else { Join-Path $Root 'outputs\iPhoneMirror' }
+} else { Join-Path $Root 'outputs\iPhoneMirror.Installer' }
 $OutputDirectory = if ($OutputDirectory) {
     [IO.Path]::GetFullPath($OutputDirectory)
 } else { Join-Path $Root 'outputs\releases' }
@@ -34,15 +34,35 @@ try {
     if ($actualVersion -ne $Version) {
         throw "Installer version $Version does not match application version $actualVersion."
     }
+    $driverExecutable = Join-Path $SourceDirectory 'iPhoneMirror.Driver.exe'
+    if (-not (Test-Path -LiteralPath $driverExecutable -PathType Leaf)) {
+        throw "Published driver manager is missing: $driverExecutable"
+    }
+    $driverProductVersion = (Get-Item -LiteralPath $driverExecutable).VersionInfo.ProductVersion
+    $actualDriverVersion = ($driverProductVersion -split '\+', 2)[0].Trim()
+    if ($actualDriverVersion -ne $Version) {
+        throw "Installer version $Version does not match driver version $actualDriverVersion."
+    }
     foreach ($required in @('CHANGELOG.md', 'DRIVER_DEPENDENCIES.md', 'LICENSE',
             'THIRD_PARTY_NOTICES.md',
             'tools\updater\Apply-ZipUpdate.ps1', 'libusb0.dll', 'msvcp140.dll',
             'vcruntime140.dll', 'vcruntime140_1.dll',
+            'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
+            'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.dll',
+            'iPhoneMirror.Driver.exe', 'iPhoneMirror.Driver.deps.json',
+            'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
+            'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
+            'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
             'Wireless\msvcp140.dll', 'Wireless\vcruntime140.dll',
             'Wireless\vcruntime140_1.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory $required) -PathType Leaf)) {
             throw "Installer payload is missing: $required"
         }
+    }
+    $versionedDac = @(Get-ChildItem -LiteralPath $SourceDirectory `
+        -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
+    if ($versionedDac.Count -ne 1) {
+        throw 'Installer payload must contain exactly one versioned .NET DAC.'
     }
     $appleSupportPackage = Join-Path $SourceDirectory 'AppleMobileDeviceSupport64.msi'
     if (Test-Path -LiteralPath $appleSupportPackage -PathType Leaf) {

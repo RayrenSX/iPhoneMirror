@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.IO;
-using System.Text.Json;
 using System.Windows;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Localization;
 
@@ -95,8 +95,7 @@ internal static class LocalizationService
         try
         {
             if (!File.Exists(SettingsPath)) return SystemLanguage;
-            var settings = JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(SettingsPath));
-            return settings?.Language ?? SystemLanguage;
+            return new UpdateSettingsStore(SettingsPath).Load().Language;
         }
         catch (Exception error)
         {
@@ -109,10 +108,8 @@ internal static class LocalizationService
     {
         try
         {
-            var directory = Path.GetDirectoryName(SettingsPath);
-            if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(
-                new UserSettings(language), new JsonSerializerOptions { WriteIndented = true }));
+            new UpdateSettingsStore(SettingsPath).Update(settings =>
+                settings.Language = language);
         }
         catch (Exception error)
         {
@@ -120,6 +117,4 @@ internal static class LocalizationService
             DiagnosticLogger.Exception("localization", "language_save_failed", error);
         }
     }
-
-    private sealed record UserSettings(string Language);
 }

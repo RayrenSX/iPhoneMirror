@@ -35,15 +35,17 @@ internal sealed record MediaOutputCapabilities(
     string FfmpegPath,
     string Detail)
 {
-    internal bool CanRecord => FfmpegAvailable && HasH264Encoder && HasAacEncoder;
+    // Audio is optional: the capture pipeline can explicitly pass -an when
+    // no PCM packet is available. Keep video-only output available with a
+    // minimal FFmpeg build that has H.264 but no AAC/Opus encoder.
+    internal bool CanRecord => FfmpegAvailable && HasH264Encoder;
 
     internal bool Supports(MediaOutputKind kind) => kind switch
     {
         MediaOutputKind.Recording => CanRecord,
         MediaOutputKind.Rtmp => CanRecord && HasRtmp,
         MediaOutputKind.Srt => CanRecord && HasSrt,
-        MediaOutputKind.Whip => FfmpegAvailable && HasH264Encoder &&
-            HasOpusEncoder && HasWhip,
+        MediaOutputKind.Whip => FfmpegAvailable && HasH264Encoder && HasWhip,
         _ => false,
     };
 }
@@ -81,26 +83,83 @@ internal sealed class MediaOutputService : IAsyncDisposable
     internal static async Task<MediaOutputCapabilities> ProbeAsync(
         CancellationToken cancellationToken = default)
     {
-        var path = FindFfmpeg();
-        if (path is null)
-            return new(false, false, false, false, false, false, false, string.Empty,
-                string.Empty,
-                "FFmpeg was not found. Install FFmpeg 8 or place it in the application directory.");
+        var candidates = await FindFfmpegCandidatesAsync(cancellationToken);
+        if (candidates.Count == 0)
+            return MissingFfmpegCapabilities();
 
-        try
+        Exception? lastError = null;
+        MediaOutputCapabilities? best = null;
+        foreach (var path in candidates)
         {
-            var encoders = await RunProbeAsync(path, ["-hide_banner", "-encoders"], cancellationToken);
-            var protocols = await RunProbeAsync(path, ["-hide_banner", "-protocols"], cancellationToken);
-            var muxers = await RunProbeAsync(path, ["-hide_banner", "-muxers"], cancellationToken);
-            return CreateCapabilities(path, encoders, protocols, muxers);
+            try
+            {
+                var encoders = await RunProbeAsync(path,
+                    ["-hide_banner", "-encoders"], cancellationToken);
+                var protocols = await RunProbeAsync(path,
+                    ["-hide_banner", "-protocols"], cancellationToken);
+                var muxers = await RunProbeAsync(path,
+                    ["-hide_banner", "-muxers"], cancellationToken);
+                var capabilities = CreateCapabilities(path, encoders, protocols,
+                    muxers);
+                best = SelectBestCapabilities([best, capabilities]);
+                if (capabilities.HasH264Encoder && CapabilityScore(capabilities) == 34)
+                    break;
+            }
+            catch (OperationCanceledException) when (
+                cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception error)
+            {
+                lastError = error;
+                DiagnosticLogger.Exception("media_output", "capability_probe_failed",
+                    error, ("file", Path.GetFileName(path)));
+            }
         }
-        catch (Exception error)
+
+        if (best is not null) return best;
+
+        return new(false, false, false, false, false, false, false, string.Empty,
+            candidates[0], lastError?.Message ?? "FFmpeg capability probing failed.");
+    }
+
+    private static MediaOutputCapabilities MissingFfmpegCapabilities() =>
+        new(false, false, false, false, false, false, false, string.Empty,
+            string.Empty,
+            "FFmpeg was not found. Install FFmpeg 8 or place it in the application directory.");
+
+    internal static int CapabilityScore(MediaOutputCapabilities capabilities) =>
+        (capabilities.HasH264Encoder ? 16 : 0) +
+        (capabilities.HasAacEncoder ? 8 : 0) +
+        (capabilities.HasOpusEncoder ? 4 : 0) +
+        (capabilities.HasRtmp ? 2 : 0) +
+        (capabilities.HasSrt ? 2 : 0) +
+        (capabilities.HasWhip ? 2 : 0);
+
+    internal static MediaOutputCapabilities? SelectBestCapabilities(
+        IEnumerable<MediaOutputCapabilities?> candidates)
+    {
+        MediaOutputCapabilities? best = null;
+        foreach (var candidate in candidates)
         {
-            DiagnosticLogger.Exception("media_output", "capability_probe_failed", error,
-                ("file", Path.GetFileName(path)));
-            return new(false, false, false, false, false, false, false,
-                string.Empty, path, error.Message);
+            if (candidate is null) continue;
+            if (best is null || IsBetterCandidate(candidate, best))
+                best = candidate;
         }
+        return best;
+    }
+
+    private static bool IsBetterCandidate(MediaOutputCapabilities candidate,
+        MediaOutputCapabilities current)
+    {
+        // H.264 is the hard requirement for every output mode. A build with
+        // many protocols but no H.264 must never displace a usable encoder.
+        if (candidate.HasH264Encoder != current.HasH264Encoder)
+            return candidate.HasH264Encoder;
+        if (candidate.FfmpegAvailable != current.FfmpegAvailable)
+            return candidate.FfmpegAvailable;
+        return CapabilityScore(candidate) > CapabilityScore(current);
     }
 
     internal async Task StartAsync(ulong sessionHandle, MediaOutputRequest request,
@@ -123,8 +182,13 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 TryDeleteFile(recordingStagingPath);
                 processRequest = request with { Destination = recordingStagingPath };
             }
-            var audioPipeName = firstAudio is null ? null :
-                $"iphoneMirror-audio-{Environment.ProcessId}-{Guid.NewGuid():N}";
+            var includeAudio = firstAudio is not null &&
+                (request.Kind == MediaOutputKind.Whip
+                    ? capabilities.HasOpusEncoder
+                    : capabilities.HasAacEncoder);
+            var audioPipeName = includeAudio
+                ? $"iphoneMirror-audio-{Environment.ProcessId}-{Guid.NewGuid():N}"
+                : null;
             NamedPipeServerStream? audioPipe = audioPipeName is null ? null : new(
                 audioPipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous, 64 * 1024, 64 * 1024);
@@ -133,7 +197,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
                     audioPipeName is null ? null : $@"\\.\pipe\{audioPipeName}",
                     firstAudio?.SampleRate ?? 48000,
                     firstAudio?.Channels ?? 2,
-                    includeAudio: firstAudio is not null));
+                    includeAudio: includeAudio));
             process.ErrorDataReceived += (_, args) =>
             {
                 if (!string.IsNullOrWhiteSpace(args.Data)) _lastError = args.Data;
@@ -743,33 +807,89 @@ internal sealed class MediaOutputService : IAsyncDisposable
         }
     }
 
-    private static string? FindFfmpeg()
+    internal static IReadOnlyList<string> ParseFfmpegLocations(string output)
     {
-        var candidates = new[]
+        var paths = new List<string>();
+        foreach (var line in output.Split(['\r', '\n'],
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!File.Exists(line) || paths.Contains(line,
+                    StringComparer.OrdinalIgnoreCase)) continue;
+            paths.Add(line);
+        }
+        return paths;
+    }
+
+    private static async Task<IReadOnlyList<string>> FindFfmpegCandidatesAsync(
+        CancellationToken cancellationToken)
+    {
+        var candidates = new List<string>
         {
             Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe"),
             Path.Combine(AppContext.BaseDirectory, "tools", "ffmpeg", "ffmpeg.exe"),
         };
-        var bundled = candidates.FirstOrDefault(File.Exists);
-        if (bundled is not null) return bundled;
+        candidates = candidates.Where(File.Exists).ToList();
+        Process? process = null;
         try
         {
             var start = new ProcessStartInfo
             {
-                FileName = "where.exe", Arguments = "ffmpeg.exe",
+                FileName = "where.exe",
                 UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
             };
-            using var process = Process.Start(start);
-            var line = process?.StandardOutput.ReadLine();
-            process?.WaitForExit(2000);
-            return !string.IsNullOrWhiteSpace(line) && File.Exists(line) ? line : null;
+            start.ArgumentList.Add("ffmpeg.exe");
+            process = Process.Start(start);
+            if (process is null) return candidates;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            var output = await outputTask + await errorTask;
+            foreach (var path in ParseFfmpegLocations(output))
+            {
+                if (!candidates.Contains(path, StringComparer.OrdinalIgnoreCase))
+                    candidates.Add(path);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            TryKillProcess(process);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcess(process);
+            DiagnosticLogger.Info("media_output", "ffmpeg_discovery_timeout");
         }
         catch (Exception error)
         {
+            TryKillProcess(process);
             DiagnosticLogger.ExceptionOnce("ffmpeg-discovery", "media_output",
                 "ffmpeg_discovery_failed", error);
-            return null;
+        }
+        finally
+        {
+            process?.Dispose();
+        }
+        return candidates;
+    }
+
+    private static void TryKillProcess(Process? process)
+    {
+        if (process is null) return;
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch (Exception error) when (error is InvalidOperationException or
+                                      System.ComponentModel.Win32Exception or
+                                      NotSupportedException)
+        {
+            DiagnosticLogger.ExceptionOnce("ffmpeg-discovery-kill", "media_output",
+                "ffmpeg_discovery_kill_failed", error);
         }
     }
 

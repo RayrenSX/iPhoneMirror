@@ -1,5 +1,45 @@
 [
   {
+    "tag_name": "v1.6.0",
+    "name": "iPhoneMirror v1.6.0",
+    "body": "v1.6.0 将安装版改为主程序与驱动管理器共享外置 .NET DLL，便携版继续内置运行时和 FFmpeg，并修复安装与便携更新、旧 FFmpeg 清理、外部 FFmpeg 发现及发布校验问题。",
+    "published_at": "2026-08-10T00:00:00Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.6.0-x64.exe",
+        "size": 91617302,
+        "digest": "sha256:f49966784a932f40a53a335a619abcc3367b8bf69e2f08a4c0310c8cb81dabd4",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-Setup-v1.6.0-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.0-win-x64.zip",
+        "size": 188032255,
+        "digest": "sha256:ec02a61b9bfb5e496d318bf69fab3f7ddb277da780fd7f1ff90dedd7a32c61be",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.0-win-x64-latest.zip",
+        "size": 188032255,
+        "digest": "sha256:ec02a61b9bfb5e496d318bf69fab3f7ddb277da780fd7f1ff90dedd7a32c61be",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64-latest.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.0-win-x64-sbom.spdx.json",
+        "size": 66086,
+        "digest": "sha256:c7e84dc097622188d195407adb2b850b4d4100d4b7ec7b2dfac6ec433302eee6",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 412,
+        "digest": "sha256:469c8b7e43874c36b7b078edeb2d55fbd9ddda2b88f5a355084e75bc7d406aa6",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.5.11",
     "name": "iPhoneMirror v1.5.11",
     "body": "v1.5.11 修复有线投屏间歇性断音和多设备 USB 媒体饥饿，并完善 QuickTime USB 配置退出、重枚举与关闭恢复流程。",

@@ -19,6 +19,7 @@ internal sealed class UpdateSettings
     public bool NotifyStableReleases { get; set; } = true;
     public bool NotifyPrereleaseReleases { get; set; }
     public AppTheme Theme { get; set; } = AppTheme.System;
+    public string Language { get; set; } = "system";
 
     internal UpdateSettings Clone() => new()
     {
@@ -28,6 +29,7 @@ internal sealed class UpdateSettings
         NotifyStableReleases = NotifyStableReleases,
         NotifyPrereleaseReleases = NotifyPrereleaseReleases,
         Theme = Theme,
+        Language = Language,
     };
 }
 
@@ -88,5 +90,13 @@ internal sealed class UpdateSettingsStore
                     error, ("file", Path.GetFileName(temporary)));
             }
         }
+    }
+
+    internal void Update(Action<UpdateSettings> update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        var settings = Load();
+        update(settings);
+        Save(settings);
     }
 }

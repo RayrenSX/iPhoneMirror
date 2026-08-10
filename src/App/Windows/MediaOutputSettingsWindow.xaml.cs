@@ -31,7 +31,9 @@ public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
         RecordFpsBox.Text = StreamFpsBox.Text = "30";
         RecordBitrateBox.Text = StreamBitrateBox.Text = "6000";
         VirtualCameraFpsBox.SelectedIndex = 0;
-        await RunAsync(() => _viewModel.EnsureMediaOutputCapabilitiesAsync());
+        // Re-probe on each opening so a user can install FFmpeg or update PATH
+        // without restarting the entire application.
+        await RunAsync(() => _viewModel.EnsureMediaOutputCapabilitiesAsync(force: true));
         SelectFirstSupportedProtocol();
         UpdateStartButtons();
         if (!_viewModel.IsMediaOutputRunning &&

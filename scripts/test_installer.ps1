@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.5.11',
+    [string]$Version = '1.6.0',
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$PreviousVersion = '1.4.1'
 )
@@ -12,7 +12,7 @@ $WorkRoot = Join-Path $Root ('work\installer-test-' + [Guid]::NewGuid().ToString
 $InstallDirectory = Join-Path $WorkRoot 'installed'
 $OutputDirectory = Join-Path $WorkRoot 'setups'
 $UserDataDirectory = Join-Path $WorkRoot 'user-data'
-$SourceDirectory = Join-Path $Root 'outputs\iPhoneMirror'
+$SourceDirectory = Join-Path $Root 'outputs\iPhoneMirror.Installer'
 $Suffix = [Guid]::NewGuid().ToString('N').Substring(0, 8)
 $AppName = "iPhoneMirror Installer Test $Suffix"
 $AppId = "RayrenSX.iPhoneMirror.InstallerTest.$Suffix"
@@ -67,6 +67,7 @@ function Build-TestInstaller([string]$BuildVersion) {
 function Install-TestVersion([string]$SetupPath, [string]$Description) {
     Invoke-Checked $SetupPath @(
         '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER',
+        '/CLOSEAPPLICATIONS',
         "/DIR=$InstallDirectory", "/LOG=$(Join-Path $WorkRoot "$Description.log")"
     ) $Description
 }
@@ -94,10 +95,33 @@ function Uninstall-TestVersion([string]$UserDataArgument, [string]$Description) 
 }
 
 Assert-SafeTestPath $WorkRoot
+$DriverProcess = $null
 try {
     $publishedExecutable = Join-Path $SourceDirectory 'iPhoneMirror.exe'
     if (-not (Test-Path -LiteralPath $publishedExecutable -PathType Leaf)) {
         throw "Published application is missing: $SourceDirectory"
+    }
+    $sourceRequiredArtifacts = @(
+        'iPhoneMirror.dll', 'iPhoneMirror.Driver.exe',
+        'iPhoneMirror.Driver.dll', 'hostfxr.dll',
+        'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
+        'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll'
+    )
+    $publishedFfmpeg = 'tools\ffmpeg\ffmpeg.exe'
+    if (Test-Path -LiteralPath (Join-Path $SourceDirectory $publishedFfmpeg) `
+            -PathType Leaf) {
+        $sourceRequiredArtifacts += $publishedFfmpeg
+    }
+    foreach ($required in $sourceRequiredArtifacts) {
+        if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory $required) `
+                -PathType Leaf)) {
+            throw "Shared installer runtime is missing: $required"
+        }
+    }
+    $sourceVersionedDac = @(Get-ChildItem -LiteralPath $SourceDirectory `
+        -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
+    if ($sourceVersionedDac.Count -ne 1) {
+        throw 'Shared installer runtime must contain exactly one versioned .NET DAC.'
     }
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     $Compiler = & (Join-Path $Root 'scripts\prepare_inno_setup.ps1') |
@@ -110,17 +134,41 @@ try {
     if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) {
         throw 'Previous test version did not install the application.'
     }
+    $installedDriver = Join-Path $InstallDirectory 'iPhoneMirror.Driver.exe'
+    $DriverProcess = Start-Process -FilePath $installedDriver `
+        -WorkingDirectory $InstallDirectory -PassThru
+    Start-Sleep -Seconds 2
+    if ($DriverProcess.HasExited) {
+        throw 'Installed driver manager exited before the upgrade test.'
+    }
     Install-TestVersion $currentSetup 'upgrade-current'
+    $DriverProcess.Refresh()
+    if (-not $DriverProcess.HasExited) {
+        throw 'Upgrade did not close the running driver manager.'
+    }
 
-    foreach ($relative in @(
+    $installedRequiredArtifacts = @(
         'libusb0.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
+        'iPhoneMirror.dll', 'iPhoneMirror.Driver.exe',
+        'iPhoneMirror.Driver.dll', 'hostfxr.dll',
+        'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
+        'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
         'Wireless\msvcp140.dll', 'Wireless\vcruntime140.dll',
         'Wireless\vcruntime140_1.dll'
-    )) {
+    )
+    if ($publishedFfmpeg -in $sourceRequiredArtifacts) {
+        $installedRequiredArtifacts += $publishedFfmpeg
+    }
+    foreach ($relative in $installedRequiredArtifacts) {
         if (-not (Test-Path -LiteralPath (Join-Path $InstallDirectory $relative) `
                 -PathType Leaf)) {
             throw "Upgrade did not install required native runtime: $relative"
         }
+    }
+    $installedVersionedDac = @(Get-ChildItem -LiteralPath $InstallDirectory `
+        -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
+    if ($installedVersionedDac.Count -ne 1) {
+        throw 'Upgrade did not install exactly one versioned .NET DAC.'
     }
 
     $uninstallEntry = Get-ItemProperty -LiteralPath $UninstallRegistryPath
@@ -164,6 +212,9 @@ try {
     Write-Host 'Installer upgrade and uninstall tests passed.' -ForegroundColor Green
 }
 finally {
+    if ($null -ne $DriverProcess -and -not $DriverProcess.HasExited) {
+        Stop-Process -Id $DriverProcess.Id -Force -ErrorAction SilentlyContinue
+    }
     if (Test-Path -LiteralPath $StartMenuDirectory) {
         Remove-Item -LiteralPath $StartMenuDirectory -Recurse -Force
     }

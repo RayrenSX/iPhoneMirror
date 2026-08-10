@@ -83,8 +83,9 @@ pipe. The application and native capture core do not link to the receiver DLL.
 
 ## FFmpeg 8.1.2 media-output runtime
 
-The application-side recording and live-video output uses an FFmpeg essentials
-build staged at `tools/ffmpeg/` in the release package. It is prepared by
+The default release uses an FFmpeg essentials build staged at `tools/ffmpeg/`.
+An explicitly requested compact edition may omit this runtime and use a
+user-installed FFmpeg from `PATH`. The bundled runtime is prepared by
 `scripts/prepare_ffmpeg.ps1`, which verifies the published archive SHA-256
 before copying `ffmpeg.exe`, the license, build README and source record into
 the application output. This runtime is independent of the older FFmpeg DLLs

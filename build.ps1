@@ -4,11 +4,17 @@ param(
     [string]$Configuration = 'Release',
     [switch]$SkipTests,
     [switch]$NoPublish,
+    [switch]$IncludeMediaOutputRuntime,
+    [switch]$OmitMediaOutputRuntime,
     [string]$AppleSupportPackagePath,
     [switch]$ConfirmAppleRedistributionRights
 )
 
 $ErrorActionPreference = 'Stop'
+if ($IncludeMediaOutputRuntime -and $OmitMediaOutputRuntime) {
+    throw '-IncludeMediaOutputRuntime and -OmitMediaOutputRuntime cannot be used together.'
+}
+$UseMediaOutputRuntime = -not $OmitMediaOutputRuntime
 if ($NoPublish -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
     throw '-AppleSupportPackagePath cannot be used with -NoPublish.'
 }
@@ -209,12 +215,14 @@ try {
         Assert-SafeWorkspaceDirectory $AppFfmpeg
         New-Item -ItemType Directory -Force -Path $AppNative | Out-Null
         New-Item -ItemType Directory -Force -Path $AppWireless | Out-Null
-        if (-not (Test-Path -LiteralPath $PrepareMediaOutputRuntime -PathType Leaf)) {
-            throw "Media-output FFmpeg preparation script is missing: $PrepareMediaOutputRuntime"
+        if ($UseMediaOutputRuntime) {
+            if (-not (Test-Path -LiteralPath $PrepareMediaOutputRuntime -PathType Leaf)) {
+                throw "Media-output FFmpeg preparation script is missing: $PrepareMediaOutputRuntime"
+            }
+            & $PrepareMediaOutputRuntime -Destination $AppFfmpeg
+            Assert-ExpectedRuntimeDirectory $AppFfmpeg $MediaOutputRuntimeFiles `
+                'Media-output FFmpeg runtime' $MediaOutputRuntimeHashes
         }
-        & $PrepareMediaOutputRuntime -Destination $AppFfmpeg
-        Assert-ExpectedRuntimeDirectory $AppFfmpeg $MediaOutputRuntimeFiles `
-            'Media-output FFmpeg runtime' $MediaOutputRuntimeHashes
         Copy-Item $NativeDll (Join-Path $AppNative 'iPhoneMirror.Core.dll') -Force
         Copy-Item $VirtualCameraDll `
             (Join-Path $AppNative 'iPhoneMirror.VirtualCamera.dll') -Force
@@ -259,6 +267,7 @@ try {
             --configuration $Configuration `
             --runtime win-x64 `
             --self-contained true `
+            -p:IncludeBundledFfmpeg=$($UseMediaOutputRuntime.ToString().ToLowerInvariant()) `
             -p:NuGetAudit=false `
             --output outputs/iPhoneMirror
         if ($LASTEXITCODE -ne 0) { throw "WPF publish failed: $LASTEXITCODE" }
@@ -295,10 +304,6 @@ try {
             'iPhoneMirror.Core.dll',
             'iPhoneMirror.VirtualCamera.dll',
             'iPhoneMirror.VirtualCamera.Admin.exe',
-            'tools\ffmpeg\ffmpeg.exe',
-            'tools\ffmpeg\LICENSE.txt',
-            'tools\ffmpeg\README.txt',
-            'tools\ffmpeg\SOURCE.txt',
             'libusb-1.0.dll',
             'libusb0.dll',
             'msvcp140.dll',
@@ -333,9 +338,11 @@ try {
                 throw "Published artifact is missing: $relative"
             }
         }
-        Assert-ExpectedRuntimeDirectory (Join-Path $PublishRoot 'tools\ffmpeg') `
-            $MediaOutputRuntimeFiles 'Published media-output FFmpeg runtime' `
-            $MediaOutputRuntimeHashes
+        if ($UseMediaOutputRuntime) {
+            Assert-ExpectedRuntimeDirectory (Join-Path $PublishRoot 'tools\ffmpeg') `
+                $MediaOutputRuntimeFiles 'Published media-output FFmpeg runtime' `
+                $MediaOutputRuntimeHashes
+        }
         foreach ($entry in $WirelessHashes) {
             $published = Join-Path (Join-Path $PublishRoot 'Wireless') `
                 ([IO.Path]::GetFileName($entry.Path))
@@ -419,6 +426,67 @@ try {
             $unexpected = @($unexpectedFiles.Name) + @($unexpectedDirectories.Name)
             throw "Unexpected files in compact application output: $($unexpected -join ', ')"
         }
+
+        # The installer uses framework files shared by both WPF entry points.
+        # The portable ZIP keeps the two compressed single-file executables.
+        $InstallerPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Installer'
+        Assert-SafeWorkspaceDirectory $InstallerPublishRoot
+        if (Test-Path -LiteralPath $InstallerPublishRoot) {
+            Assert-NoReparseChildren $InstallerPublishRoot
+            Remove-Item -LiteralPath $InstallerPublishRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $InstallerPublishRoot | Out-Null
+        dotnet publish src/App/iPhoneMirror.App.csproj `
+            --configuration $Configuration `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:IncludeBundledFfmpeg=$($UseMediaOutputRuntime.ToString().ToLowerInvariant()) `
+            -p:NuGetAudit=false `
+            --output $InstallerPublishRoot
+        if ($LASTEXITCODE -ne 0) {
+            throw "Shared-runtime app publish failed: $LASTEXITCODE"
+        }
+        dotnet publish src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj `
+            --configuration $Configuration `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:NuGetAudit=false `
+            --output $InstallerPublishRoot
+        if ($LASTEXITCODE -ne 0) {
+            throw "Shared-runtime driver publish failed: $LASTEXITCODE"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
+            . $AppleSupportPackageTools
+            Copy-TrustedAppleSupportPackage $AppleSupportPackagePath `
+                $InstallerPublishRoot | Out-Host
+        }
+        $installerRequiredArtifacts = @(
+            'iPhoneMirror.exe', 'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
+            'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.exe',
+            'iPhoneMirror.Driver.dll', 'iPhoneMirror.Driver.deps.json',
+            'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
+            'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
+            'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll'
+        )
+        if ($UseMediaOutputRuntime) {
+            $installerRequiredArtifacts += @(
+                'tools\ffmpeg\ffmpeg.exe', 'tools\ffmpeg\LICENSE.txt',
+                'tools\ffmpeg\README.txt', 'tools\ffmpeg\SOURCE.txt'
+            )
+        }
+        foreach ($required in $installerRequiredArtifacts) {
+            if (-not (Test-Path -LiteralPath `
+                    (Join-Path $InstallerPublishRoot $required) -PathType Leaf)) {
+                throw "Shared-runtime installer artifact is missing: $required"
+            }
+        }
+        $versionedDac = @(Get-ChildItem -LiteralPath $InstallerPublishRoot `
+            -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
+        if ($versionedDac.Count -ne 1) {
+            throw 'Shared-runtime installer must contain exactly one versioned .NET DAC.'
+        }
     }
 
     if ($NoPublish) {
@@ -426,6 +494,8 @@ try {
     }
     else {
         Write-Host "Build complete: $Root\outputs\iPhoneMirror" -ForegroundColor Green
+        Write-Host "Installer payload: $Root\outputs\iPhoneMirror.Installer" `
+            -ForegroundColor Green
         Write-Host "Driver tool: $Root\outputs\iPhoneMirror\iPhoneMirror.Driver.exe" `
             -ForegroundColor Green
     }

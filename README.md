@@ -313,11 +313,28 @@ outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
 outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 ```
 
+`outputs/iPhoneMirror` 是内置 .NET/WPF 依赖的单文件便携版。安装器使用
+`outputs/iPhoneMirror.Installer`，主程序和驱动管理器共享外置运行时 DLL，
+从而减少安装包下载体积。
+
+默认构建内置 FFmpeg 8 媒体输出运行时，录制及 RTMP/SRT/WHIP 推流可以
+开箱即用。仅在明确需要最小体积、并接受依赖系统 FFmpeg 时生成精简版：
+
+```powershell
+.\build.ps1 -Configuration Release -OmitMediaOutputRuntime
+```
+
+发布精简版资产时，同样向发布脚本传入 `-OmitMediaOutputRuntime`。
+
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.5.11 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.6.0 -GenerateSbom
 ```
+
+正式生成待上传资产时传入 `-UpdateReleaseManifest`，发布脚本会同步
+`updates/releases.json` 中对应版本的文件大小和 SHA256，确保 GitHub API
+不可用时备用更新源仍能完成校验。普通本地打包默认不修改在线发布清单。
 
 Inno Setup 6.7.3 及其简体中文翻译会按固定 SHA256 下载到 `work/tools`，无需全局安装。
 

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -101,8 +102,7 @@ internal static class SegmentedHttpDownloader
         SegmentedDownloadOptions options)
     {
         var possibleSegments = (int)Math.Min(int.MaxValue,
-            (totalBytes + options.MinimumSegmentBytes - 1) /
-            options.MinimumSegmentBytes);
+            1 + ((totalBytes - 1) / options.MinimumSegmentBytes));
         return Math.Clamp(possibleSegments, 1, options.MaximumConcurrency);
     }
 
@@ -140,26 +140,43 @@ internal static class SegmentedHttpDownloader
         if (totalBytes is > 0) ValidateTotalBytes(totalBytes.Value, options);
 
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var output = new FileStream(destination, FileMode.CreateNew,
-            FileAccess.Write, FileShare.None, options.BufferSize,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var buffer = new byte[options.BufferSize];
-        var stopwatch = Stopwatch.StartNew();
-        long received = 0;
-        while (true)
+        try
         {
-            var count = await input.ReadAsync(buffer, cancellationToken);
-            if (count == 0) break;
-            received = checked(received + count);
-            if (received > options.MaximumBytes)
-                throw new InvalidDataException("The download exceeded the size limit.");
-            await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
-            Report(progress, received, totalBytes, stopwatch, 1);
+            await using var output = new FileStream(destination, FileMode.CreateNew,
+                FileAccess.Write, FileShare.None, options.BufferSize,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var buffer = ArrayPool<byte>.Shared.Rent(options.BufferSize);
+            try
+            {
+                var stopwatch = Stopwatch.StartNew();
+                long received = 0;
+                while (true)
+                {
+                    var count = await input.ReadAsync(
+                        buffer.AsMemory(0, options.BufferSize), cancellationToken);
+                    if (count == 0) break;
+                    received = checked(received + count);
+                    if (received > options.MaximumBytes)
+                        throw new InvalidDataException(
+                            "The download exceeded the size limit.");
+                    await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                    Report(progress, received, totalBytes, stopwatch, 1);
+                }
+                await output.FlushAsync(cancellationToken);
+                ValidateCompletedBytes(received, totalBytes);
+                Report(progress, received, totalBytes, stopwatch, 1);
+                return new SegmentedDownloadResult(received, 1);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
-        await output.FlushAsync(cancellationToken);
-        ValidateCompletedBytes(received, totalBytes);
-        Report(progress, received, totalBytes, stopwatch, 1);
-        return new SegmentedDownloadResult(received, 1);
+        catch
+        {
+            TryDelete(destination);
+            throw;
+        }
     }
 
     private static async Task<SegmentedDownloadResult> DownloadSegmentsAsync(
@@ -173,65 +190,73 @@ internal static class SegmentedHttpDownloader
         IProgress<SegmentedDownloadProgress>? progress,
         CancellationToken cancellationToken)
     {
-        await using var output = new FileStream(destination, FileMode.CreateNew,
-            FileAccess.Write, FileShare.Read, options.BufferSize,
-            FileOptions.Asynchronous | FileOptions.RandomAccess);
-        output.SetLength(totalBytes);
-        var handle = output.SafeFileHandle;
-        var segmentSize = (totalBytes + segmentCount - 1) / segmentCount;
-        var stopwatch = Stopwatch.StartNew();
-        long received = 0;
-        long lastReportTimestamp = 0;
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken);
-
-        var tasks = Enumerable.Range(0, segmentCount).Select(async index =>
+        try
         {
-            var start = checked(index * segmentSize);
-            var end = Math.Min(totalBytes - 1, start + segmentSize - 1);
-            if (start > end) return;
+            await using var output = new FileStream(destination, FileMode.CreateNew,
+                FileAccess.Write, FileShare.Read, options.BufferSize,
+                FileOptions.Asynchronous | FileOptions.RandomAccess);
+            output.SetLength(totalBytes);
+            var handle = output.SafeFileHandle;
+            var segmentSize = 1 + ((totalBytes - 1) / segmentCount);
+            var stopwatch = Stopwatch.StartNew();
+            long received = 0;
+            long lastReportTimestamp = Stopwatch.GetTimestamp();
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+
+            var tasks = Enumerable.Range(0, segmentCount).Select(async index =>
+            {
+                var start = checked(index * segmentSize);
+                var end = Math.Min(totalBytes - 1, start + segmentSize - 1);
+                if (start > end) return;
+                try
+                {
+                    await DownloadSegmentAsync(client, uri, handle, start, end,
+                        totalBytes, options, isTrustedFinalUri, count =>
+                        {
+                            var aggregate = Interlocked.Add(ref received, count);
+                            var now = Stopwatch.GetTimestamp();
+                            var previous = Volatile.Read(ref lastReportTimestamp);
+                            if (Stopwatch.GetElapsedTime(previous, now) <
+                                TimeSpan.FromMilliseconds(100)) return;
+                            if (Interlocked.CompareExchange(ref lastReportTimestamp,
+                                    now, previous) == previous)
+                                Report(progress, aggregate, totalBytes, stopwatch,
+                                    segmentCount);
+                        }, linked.Token);
+                }
+                catch
+                {
+                    linked.Cancel();
+                    throw;
+                }
+            }).ToArray();
+
             try
             {
-                await DownloadSegmentAsync(client, uri, handle, start, end,
-                    totalBytes, options, isTrustedFinalUri, count =>
-                    {
-                        var aggregate = Interlocked.Add(ref received, count);
-                        var now = Stopwatch.GetTimestamp();
-                        var previous = Volatile.Read(ref lastReportTimestamp);
-                        if (Stopwatch.GetElapsedTime(previous, now) <
-                            TimeSpan.FromMilliseconds(100)) return;
-                        if (Interlocked.CompareExchange(ref lastReportTimestamp,
-                                now, previous) == previous)
-                            Report(progress, aggregate, totalBytes, stopwatch,
-                                segmentCount);
-                    }, linked.Token);
+                await Task.WhenAll(tasks);
             }
             catch
             {
                 linked.Cancel();
+                var rangeFailure = tasks
+                    .Where(task => task.Exception is not null)
+                    .SelectMany(task => task.Exception!.Flatten().InnerExceptions)
+                    .OfType<RangeNotSupportedException>()
+                    .FirstOrDefault();
+                if (rangeFailure is not null) throw rangeFailure;
                 throw;
             }
-        }).ToArray();
-
-        try
-        {
-            await Task.WhenAll(tasks);
+            await output.FlushAsync(cancellationToken);
+            ValidateCompletedBytes(received, totalBytes);
+            Report(progress, received, totalBytes, stopwatch, segmentCount);
+            return new SegmentedDownloadResult(received, segmentCount);
         }
         catch
         {
-            linked.Cancel();
-            var rangeFailure = tasks
-                .Where(task => task.Exception is not null)
-                .SelectMany(task => task.Exception!.Flatten().InnerExceptions)
-                .OfType<RangeNotSupportedException>()
-                .FirstOrDefault();
-            if (rangeFailure is not null) throw rangeFailure;
+            TryDelete(destination);
             throw;
         }
-        await output.FlushAsync(cancellationToken);
-        ValidateCompletedBytes(received, totalBytes);
-        Report(progress, received, totalBytes, stopwatch, segmentCount);
-        return new SegmentedDownloadResult(received, segmentCount);
     }
 
     private static async Task DownloadSegmentAsync(
@@ -265,23 +290,31 @@ internal static class SegmentedHttpDownloader
             throw new InvalidDataException(
                 "A download segment has an unexpected size.");
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var buffer = new byte[options.BufferSize];
-        long segmentBytes = 0;
-        while (true)
+        var buffer = ArrayPool<byte>.Shared.Rent(options.BufferSize);
+        try
         {
-            var count = await input.ReadAsync(buffer, cancellationToken);
-            if (count == 0) break;
-            segmentBytes = checked(segmentBytes + count);
-            if (segmentBytes > expectedSegmentBytes)
-                throw new InvalidDataException(
-                    "A download segment exceeded its requested range.");
-            await RandomAccess.WriteAsync(output, buffer.AsMemory(0, count),
-                start + segmentBytes - count, cancellationToken);
-            reportBytes(count);
+            long segmentBytes = 0;
+            while (true)
+            {
+                var count = await input.ReadAsync(
+                    buffer.AsMemory(0, options.BufferSize), cancellationToken);
+                if (count == 0) break;
+                segmentBytes = checked(segmentBytes + count);
+                if (segmentBytes > expectedSegmentBytes)
+                    throw new InvalidDataException(
+                        "A download segment exceeded its requested range.");
+                await RandomAccess.WriteAsync(output, buffer.AsMemory(0, count),
+                    start + segmentBytes - count, cancellationToken);
+                reportBytes(count);
+            }
+            if (segmentBytes != expectedSegmentBytes)
+                throw new EndOfStreamException(
+                    "A download segment ended before its requested range completed.");
         }
-        if (segmentBytes != expectedSegmentBytes)
-            throw new EndOfStreamException(
-                "A download segment ended before its requested range completed.");
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private static HttpRequestMessage CreateRequest(Uri uri,

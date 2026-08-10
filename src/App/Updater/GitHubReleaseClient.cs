@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.Shared.Networking;
 
@@ -19,6 +20,93 @@ internal sealed record UpdateDownloadProgress(
 
 internal sealed record DownloadedUpdate(
     ReleaseInfo Release, ReleaseAsset Asset, string Path, bool HashVerified);
+
+internal static class DeploymentLayout
+{
+    private const string ExecutableName = "iPhoneMirror.exe";
+    private const string AppPathsSubKeyPrefix =
+        @"Software\Microsoft\Windows\CurrentVersion\App Paths\";
+
+    internal static bool UsesSharedRuntime(string? baseDirectory = null,
+        string? registeredExecutablePath = null)
+    {
+        var root = baseDirectory ?? AppContext.BaseDirectory;
+        if (File.Exists(Path.Combine(root, "iPhoneMirror.dll")) &&
+            File.Exists(Path.Combine(root, "iPhoneMirror.deps.json")) &&
+            File.Exists(Path.Combine(root, "iPhoneMirror.runtimeconfig.json")))
+            return true;
+
+        // Older Setup releases used a single-file executable, so they have no
+        // managed runtime markers. Inno Setup registers the installed EXE in
+        // App Paths; compare that path with the process directory to preserve
+        // Setup updates across the single-file -> shared-runtime migration.
+        var executablePath = Path.Combine(root, ExecutableName);
+        return IsRegisteredInstall(executablePath, registeredExecutablePath);
+    }
+
+    internal static bool IsRegisteredInstall(string executablePath,
+        string? registeredExecutablePath = null)
+    {
+        var expected = NormalizeExecutablePath(executablePath);
+        if (expected is null) return false;
+        if (registeredExecutablePath is not null)
+            return PathsEqual(expected, registeredExecutablePath);
+        var executableName = Path.GetFileName(expected);
+        if (string.IsNullOrWhiteSpace(executableName)) return false;
+        var appPathsSubKey = AppPathsSubKeyPrefix + executableName;
+
+        foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+        {
+            try
+            {
+                using var root = RegistryKey.OpenBaseKey(hive, view);
+                using var key = root.OpenSubKey(appPathsSubKey, writable: false);
+                var registered = key?.GetValue(null) as string;
+                if (registered is not null && PathsEqual(expected, registered))
+                    return true;
+            }
+            catch (Exception error) when (error is IOException or
+                                           UnauthorizedAccessException or
+                                           System.Security.SecurityException)
+            {
+                // Portable copies and restricted environments may not allow
+                // registry reads. The runtime-marker check remains sufficient.
+                DiagnosticLogger.ExceptionOnce("deployment-registry", "updater",
+                    "deployment_registry_probe_failed", error,
+                    ("hive", hive), ("view", view));
+            }
+        }
+        return false;
+    }
+
+    private static bool PathsEqual(string expected, string actual)
+    {
+        var normalized = NormalizeExecutablePath(actual);
+        return normalized is not null &&
+            string.Equals(expected, normalized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeExecutablePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var value = Environment.ExpandEnvironmentVariables(path.Trim());
+        if (value.StartsWith('"'))
+        {
+            var endQuote = value.IndexOf('"', 1);
+            value = endQuote > 1 ? value[1..endQuote] : value[1..];
+        }
+        try
+        {
+            return Path.GetFullPath(value.Trim()).TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+}
 
 internal sealed class GitHubReleaseClient : IDisposable
 {
@@ -129,10 +217,17 @@ internal sealed class GitHubReleaseClient : IDisposable
     internal async Task<DownloadedUpdate> DownloadAsync(ReleaseInfo release,
         IProgress<UpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        bool allowMirrorFallback = true)
+        bool allowMirrorFallback = true,
+        bool? preferInstaller = null)
     {
-        var asset = release.PreferredAsset ?? throw new InvalidOperationException(
-            "This release does not provide a Windows installer or ZIP package.");
+        var useInstaller = preferInstaller ?? DeploymentLayout.UsesSharedRuntime();
+        var asset = release.SelectAsset(useInstaller) ?? throw new InvalidOperationException(
+            useInstaller
+                ? "This release does not provide a Windows installer package."
+                : "This release does not provide a portable ZIP package.");
+        DiagnosticLogger.Info("updater", "asset_selected",
+            ("deployment", useInstaller ? "installer" : "portable"),
+            ("asset", asset.Name));
         var fileName = Path.GetFileName(asset.Name);
         if (!string.Equals(fileName, asset.Name, StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(fileName))

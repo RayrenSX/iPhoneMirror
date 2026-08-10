@@ -21,6 +21,10 @@ internal sealed record ReleaseInfo(
     ReleaseAsset? ChecksumAsset)
 {
     internal ReleaseAsset? PreferredAsset => InstallerAsset ?? ZipAsset;
+
+    internal ReleaseAsset? SelectAsset(bool preferInstaller) => preferInstaller
+        ? InstallerAsset
+        : ZipAsset;
 }
 
 internal static class ReleaseParser

@@ -5,6 +5,32 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-10
+
+### Changed
+
+- Use one shared self-contained .NET/WPF runtime in the Setup payload for the
+  main app and driver manager, while keeping the portable ZIP single-file and
+  self-contained.
+- Keep FFmpeg 8 bundled by default for recording, RTMP, SRT and WHIP output;
+  add an explicit compact build option for systems that provide FFmpeg.
+- Keep the five required .NET diagnostic runtime files in the shared installer
+  payload and validate their presence during packaging and installer tests.
+
+### Fixed
+
+- Close `iPhoneMirror.Driver.exe` during Setup upgrades and portable ZIP
+  updates before replacing shared runtime files.
+- Select Setup updates for installed copies and ZIP updates for portable copies,
+  including legacy single-file installations registered by App Paths.
+- Remove stale FFmpeg files left by older installations or ZIP overlay updates.
+- Retry external FFmpeg discovery, consider every `where.exe` result, and
+  re-probe after a failed lookup without requiring an application restart.
+- Preserve existing update and language settings when either setting changes,
+  and remove incomplete update downloads after failures.
+- Validate release asset sizes and SHA-256 digests before updating the fallback
+  release manifest.
+
 ## [1.5.11] - 2026-08-05
 
 ### Added
@@ -960,7 +986,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.11...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.11...v1.6.0
 [1.5.11]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.10...v1.5.11
 [1.5.10]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.9...v1.5.10
 [1.5.9]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.8...v1.5.9

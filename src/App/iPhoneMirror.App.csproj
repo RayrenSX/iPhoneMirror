@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.5.11</Version>
-    <AssemblyVersion>1.5.11.0</AssemblyVersion>
-    <FileVersion>1.5.11.0</FileVersion>
+    <Version>1.6.0</Version>
+    <AssemblyVersion>1.6.0.0</AssemblyVersion>
+    <FileVersion>1.6.0.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>
@@ -85,7 +85,8 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Content Include="native\tools\ffmpeg\ffmpeg.exe;native\tools\ffmpeg\LICENSE.txt;native\tools\ffmpeg\README.txt;native\tools\ffmpeg\SOURCE.txt" Condition="Exists('native\tools\ffmpeg\ffmpeg.exe')">
+    <Content Include="native\tools\ffmpeg\ffmpeg.exe;native\tools\ffmpeg\LICENSE.txt;native\tools\ffmpeg\README.txt;native\tools\ffmpeg\SOURCE.txt"
+             Condition="'$(IncludeBundledFfmpeg)' != 'false' and Exists('native\tools\ffmpeg\ffmpeg.exe')">
       <Link>tools\ffmpeg\%(Filename)%(Extension)</Link>
       <TargetPath>tools\ffmpeg\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

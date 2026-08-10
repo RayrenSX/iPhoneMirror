@@ -327,6 +327,9 @@ $logPath = Join-Path $operationRoot 'cleanup.log'
 
 $transcriptStarted = $false
 $failures = [Collections.Generic.List[string]]::new()
+$restartRequired = $false
+$restartPendingPackages = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::OrdinalIgnoreCase)
 try {
     Start-Transcript -LiteralPath $logPath -Force | Out-Null
     $transcriptStarted = $true
@@ -334,8 +337,14 @@ try {
     Write-Host '开始移除设备节点...'
     foreach ($deviceId in @($targetDeviceIds | Sort-Object Length -Descending)) {
         $result = Invoke-PnpUtil @('/remove-device', $deviceId, '/subtree', '/force')
-        if ($result.ExitCode -eq 0) {
-            Write-Host "  已移除：$deviceId" -ForegroundColor Green
+        if ($result.ExitCode -in @(0, 3010)) {
+            if ($result.ExitCode -eq 3010) {
+                $restartRequired = $true
+                Write-Host "  已移除（重启后完成）：$deviceId" -ForegroundColor Green
+            }
+            else {
+                Write-Host "  已移除：$deviceId" -ForegroundColor Green
+            }
         }
         else {
             $message = "设备节点移除失败：$deviceId (代码 $($result.ExitCode))"
@@ -349,8 +358,16 @@ try {
     foreach ($package in $packages) {
         $result = Invoke-PnpUtil @('/delete-driver', $package.InfName,
             '/uninstall', '/force')
-        if ($result.ExitCode -eq 0) {
-            Write-Host "  已删除：$($package.InfName)" -ForegroundColor Green
+        if ($result.ExitCode -in @(0, 3010)) {
+            if ($result.ExitCode -eq 3010) {
+                $restartRequired = $true
+                [void]$restartPendingPackages.Add($package.InfName)
+                Write-Host "  已删除（重启后完成）：$($package.InfName)" `
+                    -ForegroundColor Green
+            }
+            else {
+                Write-Host "  已删除：$($package.InfName)" -ForegroundColor Green
+            }
         }
         else {
             $message = "驱动包删除失败：$($package.InfName) (代码 $($result.ExitCode))"
@@ -368,8 +385,15 @@ try {
             Write-Host '手机仍连接，正在清理 Windows 重新枚举出的设备节点...'
             foreach ($deviceId in @($reenumeratedIds | Sort-Object Length -Descending)) {
                 $result = Invoke-PnpUtil @('/remove-device', $deviceId, '/subtree', '/force')
-                if ($result.ExitCode -eq 0) {
-                    Write-Host "  已再次移除：$deviceId" -ForegroundColor Green
+                if ($result.ExitCode -in @(0, 3010)) {
+                    if ($result.ExitCode -eq 3010) {
+                        $restartRequired = $true
+                        Write-Host "  已再次移除（重启后完成）：$deviceId" `
+                            -ForegroundColor Green
+                    }
+                    else {
+                        Write-Host "  已再次移除：$deviceId" -ForegroundColor Green
+                    }
                 }
                 else {
                     Write-Warning "重新枚举节点未能移除：$deviceId (代码 $($result.ExitCode))"
@@ -379,7 +403,8 @@ try {
     }
 
     foreach ($package in $packages) {
-        if (Test-Path -LiteralPath (Join-Path $env:windir "INF\$($package.InfName)")) {
+        if (-not $restartPendingPackages.Contains($package.InfName) -and
+            (Test-Path -LiteralPath (Join-Path $env:windir "INF\$($package.InfName)"))) {
             $failures.Add("驱动包仍存在：$($package.InfName)")
         }
     }
@@ -388,6 +413,10 @@ try {
     if ($failures.Count -eq 0) {
         Write-Host '完成：所选设备使用的第三方驱动包均已清除。' -ForegroundColor Green
         Write-Host '手机保持连接时，Windows 仍可能显示无驱动或未知设备节点，这是正常现象。'
+        if ($restartRequired) {
+            Write-Host 'Windows 报告操作成功，但需要重启才能完成。请现在重启电脑。' `
+                -ForegroundColor Yellow
+        }
         Write-Host "日志：$logPath" -ForegroundColor DarkGray
         exit 0
     }

@@ -315,6 +315,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             if (string.IsNullOrWhiteSpace(value) || !Set(ref _selectedLanguage, value)) return;
             LocalizationService.SetLanguage(value);
+            if (Application.Current is App app)
+                app.UpdateSettings.Language = LocalizationService.SelectedLanguage;
         }
     }
     public string Resolution { get => _resolution; private set => Set(ref _resolution, value); }
@@ -2860,11 +2862,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         window.CloseForSessionInvalidation();
     }
 
-    internal async Task EnsureMediaOutputCapabilitiesAsync()
+    internal async Task EnsureMediaOutputCapabilitiesAsync(bool force = false)
     {
         if (_disposed) return;
         RefreshVirtualCameraCapabilities();
-        if (_mediaOutputCapabilitiesLoaded) return;
+        if (_mediaOutputCapabilitiesLoaded && !force &&
+            _mediaOutputCapabilities.FfmpegAvailable) return;
         MediaOutputCapabilitiesText = LocalizationService.Get("MediaOutputChecking");
         var capabilities = await MediaOutputService.ProbeAsync(_shutdownCancellation.Token);
         _mediaOutputCapabilities = capabilities;
