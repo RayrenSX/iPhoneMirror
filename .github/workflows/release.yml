@@ -550,6 +550,7 @@ jobs:
               $status.creator.login -ne 'github-actions[bot]') {
             throw "Relayed manifest validation status is invalid."
           }
+          "status_id=$($status.id)" >> $env:GITHUB_OUTPUT
 
       - name: Preflight fallback release manifest
         if: steps.manifest.outputs.changed == 'true'
@@ -560,6 +561,7 @@ jobs:
           MANIFEST_BRANCH: ${{ steps.manifest.outputs.branch }}
           MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
           VALIDATION_RUN_URL: ${{ steps.validation.outputs.run_url }}
+          VALIDATION_STATUS_ID: ${{ steps.validation.outputs.status_id }}
         run: |
           git fetch origin `
             "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
@@ -573,13 +575,19 @@ jobs:
             throw "$env:DEFAULT_BRANCH advanced during manifest validation; rerun the release workflow."
           }
 
-          $combinedStatusJson = gh api `
-            "repos/$env:GITHUB_REPOSITORY/commits/$env:MANIFEST_SHA/status"
+          $statusesJson = gh api `
+            "repos/$env:GITHUB_REPOSITORY/commits/$env:MANIFEST_SHA/statuses"
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to inspect the relayed manifest validation status."
           }
-          $matchingStatuses = @(($combinedStatusJson | ConvertFrom-Json).statuses |
+          $statusId = [long]$env:VALIDATION_STATUS_ID
+          if ($statusId -le 0) {
+            throw "The relayed manifest validation status ID is invalid."
+          }
+          $statuses = @($statusesJson | ConvertFrom-Json)
+          $matchingStatuses = @($statuses |
             Where-Object {
+              [long]$_.id -eq $statusId -and
               $_.context -eq 'build-test' -and
               $_.state -eq 'success' -and
               $_.target_url -eq $env:VALIDATION_RUN_URL -and
