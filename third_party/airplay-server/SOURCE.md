@@ -1,6 +1,6 @@
 # AirPlay receiver source and licenses
 
-The files in `bin/x64` are a pinned runtime subset of AirPlayServer v1.1.0,
+The files in `bin/x64` are a pinned runtime subset of AirPlayServer v1.1.2,
 with the wrapper patched for native Windows FFmpeg loading, per-client IPC
 identity, AirPlay SETUP device metadata extraction, and runtime-selectable
 AirPlay display capability responses with a 5120x2880@60 fallback. One combined
@@ -9,12 +9,16 @@ with one stable device ID. This follows UxPlay's receiver model and prevents
 iOS from hiding a route whose service identity, `/info` identity, or pairing
 endpoint disagrees.
 
-The combined receiver advertises the UxPlay-compatible legacy HLS feature mask
-and dispatches by request type. Screen-mirroring stream type 110 continues to
-the decoded-frame IPC path, while `/play`, `/playback-info`, and `/stop` use the
-URL-video IPC path. `/rate` pause/resume and `/scrub` seek requests are forwarded
-as distinct IPC controls without reloading the media URL. Both the AirPlay HTTP
-and RAOP ports handle media controls,
+Mirror mode uses AirPlayServer v1.1.2's upstream mirroring/audio negotiation
+profile (`0x5A7FFEE6,0x0`). Combined/media mode enables UxPlay's AirPlay video
+and HLS bits 0 and 4 (`0x5A7FFEF7,0x0`) because this receiver implements the
+corresponding URL-video handlers. Within either mode, the `_airplay._tcp` and
+`_raop._tcp` DNS-SD records, `/info`, and `/server-info` advertise the same
+profile. Screen-mirroring stream type 110 continues to the decoded-frame IPC
+path, while `/play`, `/playback-info`, and `/stop` use the URL-video IPC path.
+`/rate` pause/resume and `/scrub` seek requests are forwarded as distinct IPC
+controls without reloading the media URL. Both the AirPlay HTTP and RAOP ports
+handle media controls,
 and the two-stage `/fp-setup` exchange remains available before the first video
 URL. The `/info` response, HTTP server-info response, and both DNS-SD records
 use the same receiver name, model, features, and device ID. The SETUP
@@ -31,12 +35,12 @@ process, which loads `airplay2dll.dll`; the GPL-3.0-only application and native
 capture core exchange decoded frames with that process over a named pipe.
 
 - Project: https://github.com/xenos1337/AirPlayServer
-- Version: v1.1.0
-- Commit: `ff149b2e768bf9ae93199de941ab170571a941a4`
+- Version: v1.1.2
+- Commit: `34ba6cfd49b2432cf30e89913d66decb775763e4`
 - Original release artifact SHA-256:
-  `a08140406e5735b19e47c1697e903174863cda396a3dd54571ff68c0e95c04db`
+  `633838f0334ca876ac4a27fbffc7fe359949783fb6f9bdd5f00f25d2f6641d61`
 - Corresponding source:
-  https://github.com/xenos1337/AirPlayServer/archive/refs/tags/v1.1.0.zip
+  https://github.com/xenos1337/AirPlayServer/archive/refs/tags/v1.1.2.zip
 
 The receiver includes or derives from the following components:
 

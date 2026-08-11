@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.0',
+    [string]$Version = '1.6.1',
     [switch]$SkipBuild,
     [switch]$GenerateSbom,
     [switch]$UpdateReleaseManifest,
@@ -29,13 +29,12 @@ $StagingRoot = Join-Path $StagingBase ([Guid]::NewGuid().ToString('N'))
 $PackageName = "iPhoneMirror-v$Version-win-x64"
 $PackageRoot = Join-Path $StagingRoot $PackageName
 $ArchivePath = Join-Path $ReleaseRoot "$PackageName.zip"
-$LatestArchivePath = Join-Path $ReleaseRoot "$PackageName-latest.zip"
+$LegacyLatestArchivePath = Join-Path $ReleaseRoot "$PackageName-latest.zip"
 $SbomAsset = Join-Path $ReleaseRoot "$PackageName-sbom.spdx.json"
 $ChecksumPath = Join-Path $ReleaseRoot 'SHA256SUMS.txt'
 $InstallerName = "iPhoneMirror-Setup-v$Version-x64.exe"
 $InstallerPath = Join-Path $ReleaseRoot $InstallerName
 $StagedArchive = Join-Path $StagingRoot "$PackageName.zip"
-$StagedLatestArchive = Join-Path $StagingRoot "$PackageName-latest.zip"
 $StagedSbomAsset = Join-Path $StagingRoot "$PackageName-sbom.spdx.json"
 $StagedChecksum = Join-Path $StagingRoot 'SHA256SUMS.txt'
 $StagedInstaller = Join-Path $StagingRoot $InstallerName
@@ -153,8 +152,30 @@ function Update-ReleaseManifestAssets([string]$Path, [string]$ReleaseVersion,
         [string]::Equals([string]$_.tag_name, $tag,
             [StringComparison]::OrdinalIgnoreCase)
     })
-    if ($matches.Count -ne 1) {
-        throw "Fallback release manifest must contain exactly one $tag entry."
+    if ($matches.Count -gt 1) {
+        throw "Fallback release manifest contains duplicate $tag entries."
+    }
+    if ($matches.Count -eq 0) {
+        $changelogPath = Join-Path $Root 'CHANGELOG.md'
+        $changelog = [IO.File]::ReadAllText($changelogPath, [Text.Encoding]::UTF8)
+        $escapedVersion = [regex]::Escape($ReleaseVersion)
+        $section = [regex]::Match($changelog,
+            "(?ms)^## \[$escapedVersion\] - [^\r\n]+\r?\n(?<body>.*?)(?=^## \[|\z)")
+        if (-not $section.Success) {
+            throw "CHANGELOG.md has no release section for $ReleaseVersion."
+        }
+        $release = [PSCustomObject][ordered]@{
+            tag_name = $tag
+            name = "iPhoneMirror $tag"
+            body = $section.Groups['body'].Value.Trim()
+            published_at = [DateTimeOffset]::UtcNow.ToString(
+                'yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
+            draft = $false
+            prerelease = $ReleaseVersion.Contains('-')
+            assets = @()
+        }
+        $releases = @($release) + @($releases)
+        $matches = @($release)
     }
 
     $manifestAssets = @($Assets | ForEach-Object {
@@ -608,18 +629,18 @@ try {
             },
             [PSCustomObject][ordered]@{
                 name = 'AirPlayServer wireless receiver'
-                SPDXID = 'SPDXRef-Package-AirPlayServer-1.1.0'
-                downloadLocation = 'https://github.com/xenos1337/AirPlayServer/releases/tag/v1.1.0'
+                SPDXID = 'SPDXRef-Package-AirPlayServer-1.1.2'
+                downloadLocation = 'https://github.com/xenos1337/AirPlayServer/releases/tag/v1.1.2'
                 filesAnalyzed = $false
                 licenseConcluded = 'GPL-3.0-only'
                 licenseDeclared = 'GPL-3.0-only'
                 copyrightText = 'Copyright (c) 2025 xenos1337 and upstream contributors'
-                versionInfo = '1.1.0'
+                versionInfo = '1.1.2'
                 supplier = 'Person: xenos1337'
                 externalRefs = @([PSCustomObject][ordered]@{
                     referenceCategory = 'PACKAGE-MANAGER'
                     referenceType = 'purl'
-                    referenceLocator = 'pkg:github/xenos1337/AirPlayServer@v1.1.0'
+                    referenceLocator = 'pkg:github/xenos1337/AirPlayServer@v1.1.2'
                 })
             },
             [PSCustomObject][ordered]@{
@@ -677,12 +698,10 @@ try {
 
     Compress-Archive -LiteralPath $PackageRoot -DestinationPath $StagedArchive `
         -CompressionLevel Optimal
-    Copy-Item -LiteralPath $StagedArchive -Destination $StagedLatestArchive
 
     $assets = @(
         [PSCustomObject]@{ Path = $StagedInstaller; Name = $InstallerName },
-        [PSCustomObject]@{ Path = $StagedArchive; Name = [IO.Path]::GetFileName($ArchivePath) },
-        [PSCustomObject]@{ Path = $StagedLatestArchive; Name = [IO.Path]::GetFileName($LatestArchivePath) }
+        [PSCustomObject]@{ Path = $StagedArchive; Name = [IO.Path]::GetFileName($ArchivePath) }
     )
     if ($GenerateSbom) {
         $assets += [PSCustomObject]@{
@@ -699,14 +718,14 @@ try {
 
     $publishAssets = @(
         [PSCustomObject]@{ Staged = $StagedInstaller; Final = $InstallerPath },
-        [PSCustomObject]@{ Staged = $StagedArchive; Final = $ArchivePath },
-        [PSCustomObject]@{ Staged = $StagedLatestArchive; Final = $LatestArchivePath }
+        [PSCustomObject]@{ Staged = $StagedArchive; Final = $ArchivePath }
     )
     if ($GenerateSbom) {
         $publishAssets += [PSCustomObject]@{ Staged = $StagedSbomAsset; Final = $SbomAsset }
     }
     $publishAssets += [PSCustomObject]@{ Staged = $StagedChecksum; Final = $ChecksumPath }
-    $removePaths = if ($GenerateSbom) { @() } else { @($SbomAsset) }
+    $removePaths = @($LegacyLatestArchivePath)
+    if (-not $GenerateSbom) { $removePaths += $SbomAsset }
     Publish-StagedAssets $publishAssets $removePaths
     if ($UpdateReleaseManifest) {
         Update-ReleaseManifestAssets $ReleaseManifestPath $Version $publishAssets
@@ -718,7 +737,6 @@ try {
 
     Write-Host "Release package: $ArchivePath" -ForegroundColor Green
     Write-Host "Windows setup:  $InstallerPath" -ForegroundColor Green
-    Write-Host "Latest alias:    $LatestArchivePath" -ForegroundColor Green
     Write-Host "Checksums:      $ChecksumPath" -ForegroundColor Green
     if ($UpdateReleaseManifest) {
         Write-Host "Release data:  $ReleaseManifestPath" -ForegroundColor Green

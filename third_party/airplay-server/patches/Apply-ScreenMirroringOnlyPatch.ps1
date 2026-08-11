@@ -28,7 +28,7 @@ $Encoding = [Text.UTF8Encoding]::new($false)
 $MirrorBuffer = [IO.File]::ReadAllText($MirrorBufferFile, $Encoding)
 $MirrorCommentMarker = 'IPHONE_MIRROR_ASCII_DECRYPT_COMMENT'
 if (-not $MirrorBuffer.Contains($MirrorCommentMarker)) {
-    $Pattern = '(?m)^(\s*mirror_buffer->nextDecryptCount = 16 - restlen;)[^\r\n]*$'
+    $Pattern = '(?m)^(\s*mirror_buffer->nextDecryptCount = 16 - restlen;)[^\r\n]*(?=\r?$)'
     if ([regex]::Matches($MirrorBuffer, $Pattern).Count -ne 1) {
         throw 'AirPlay mirror-buffer comment repair point changed.'
     }
@@ -42,9 +42,15 @@ $Global = [IO.File]::ReadAllText($GlobalFile, $Encoding)
 $Global = $Global.Replace('"AppleTV14,1"', '"AppleTV3,2"')
 $Global = $Global.Replace('"Kodi,1"', '"AppleTV3,2"')
 $Global = $Global.Replace('"845.5.1"', '"220.68"')
+$GlobalNewLine = if ($Global.Contains("`r`n")) { "`r`n" } else { "`n" }
+$Global = $Global.Replace('#define GLOBAL_FEATURES 0x7',
+    '#define GLOBAL_FEATURES_1 0x5A7FFEE6U' + $GlobalNewLine +
+    '#define GLOBAL_FEATURES_2 0x00000000U')
 if (-not $Global.Contains('"AppleTV3,2"') -or
-    -not $Global.Contains('"220.68"')) {
-    throw 'UxPlay-compatible AirPlay model/version metadata was not applied.'
+    -not $Global.Contains('"220.68"') -or
+    -not $Global.Contains('#define GLOBAL_FEATURES_1 0x5A7FFEE6U') -or
+    -not $Global.Contains('#define GLOBAL_FEATURES_2 0x00000000U')) {
+    throw 'UxPlay-compatible AirPlay model/version/features were not applied.'
 }
 [IO.File]::WriteAllText($GlobalFile, $Global, $Encoding)
 
@@ -116,46 +122,40 @@ pairing_init_generate()
 }
 
 $DnsSd = [IO.File]::ReadAllText($DnsSdFile, $Encoding)
-$LegacyFeatures = @(
-    '"0x5A7FFFF7, 0x1E"',
-    '"0x5A7FFFF7,0x1E"',
-    '"0x5A7FFFC0,0x1E"',
-    '"0x484051C0,0x0"',
-    '"0x1A7FFEC0,0x0"'
-)
-$MirroringOnlyFeatures = '"0x5A7FFEC0,0x0"'
-if ([regex]::Matches($DnsSd, [regex]::Escape($MirroringOnlyFeatures)).Count -ne 2) {
-    foreach ($Legacy in $LegacyFeatures) {
-        $DnsSd = $DnsSd.Replace($Legacy, $MirroringOnlyFeatures)
-    }
-    $Matches = [regex]::Matches($DnsSd, [regex]::Escape($MirroringOnlyFeatures)).Count
-    if ($Matches -ne 2) {
-        throw "AirPlay DNS-SD feature declaration changed (expected 2 replacements, found $Matches)."
-    }
-    [IO.File]::WriteAllText($DnsSdFile, $DnsSd, $Encoding)
-    Write-Host 'Disabled AirPlay media/photo/HLS capability advertisement.'
+$FeatureFormatter =
+    'snprintf(features, sizeof(features), "0x%X,0x%X", GLOBAL_FEATURES_1, GLOBAL_FEATURES_2);'
+$RaopFeatureRecord =
+    'TXTRecordSetValue(&txtRecord, "ft", strlen(features), features);'
+$AirPlayFeatureRecord =
+    'TXTRecordSetValue(&txtRecord, "features", strlen(features), features);'
+if ([regex]::Matches($DnsSd, [regex]::Escape($FeatureFormatter)).Count -ne 2 -or
+    [regex]::Matches($DnsSd, [regex]::Escape($RaopFeatureRecord)).Count -ne 1 -or
+    [regex]::Matches($DnsSd, [regex]::Escape($AirPlayFeatureRecord)).Count -ne 1) {
+    throw 'AirPlayServer v1.1.2 DNS-SD feature/ft declarations changed.'
 }
-else {
-    Write-Host 'AirPlay mirroring-only DNS-SD capabilities are already applied.'
-}
+Write-Host 'Verified matching upstream RAOP and AirPlay DNS-SD capabilities.'
 
 $AirPlay = [IO.File]::ReadAllText($AirPlayFile, $Encoding)
 $AirPlay = $AirPlay.Replace(
     '*response = http_response_init("RTSP/1.0", 200, "OK");',
     '*response = http_response_init("HTTP/1.1", 200, "OK");')
 $AirPlay = $AirPlay.Replace('AirTunes/845.5.1', 'AirTunes/220.68')
-$AirPlay = $AirPlay.Replace('<integer>119</integer>', '<integer>1518337783</integer>')
-$AirPlay = $AirPlay.Replace('<integer>64</integer>', '<integer>1518337783</integer>')
-$AirPlay = $AirPlay.Replace('<integer>55</integer>', '<integer>1518337783</integer>')
-$AirPlay = $AirPlay.Replace('<integer>639</integer>', '<integer>1518337783</integer>')
+$AirPlay = $AirPlay.Replace('<integer>119</integer>', '<integer>1518337766</integer>')
+$AirPlay = $AirPlay.Replace('<integer>64</integer>', '<integer>1518337766</integer>')
+$AirPlay = $AirPlay.Replace('<integer>55</integer>', '<integer>1518337766</integer>')
+$AirPlay = $AirPlay.Replace('<integer>639</integer>', '<integer>1518337766</integer>')
+$AirPlay = $AirPlay.Replace('<integer>1518337783</integer>',
+    '<integer>1518337766</integer>')
 $AirPlay = $AirPlay.Replace('<string>Kodi,1</string>',
     '<string>AppleTV3,2</string>')
 $AirPlay = $AirPlay.Replace('<string>AppleTV14,1</string>',
     '<string>AppleTV3,2</string>')
-if (-not $AirPlay.Contains('<integer>1518337783</integer>')) {
-    throw 'AirPlay media-cast server-info capability was not applied.'
+if (-not $AirPlay.Contains('<integer>%u</integer>') -and
+    -not $AirPlay.Contains('<integer>1518337766</integer>')) {
+    throw 'AirPlay server-info capability was not applied.'
 }
-if (-not $AirPlay.Contains('<string>AppleTV3,2</string>')) {
+if (-not $AirPlay.Contains('GLOBAL_MODEL') -and
+    -not $AirPlay.Contains('<string>AppleTV3,2</string>')) {
     throw 'AirPlay media-cast server-info model was not applied.'
 }
 if (-not $AirPlay.Contains(
@@ -184,6 +184,50 @@ $AirPlayHandlers = $AirPlayHandlers.Replace('if (video_get_play_info != NULL) {'
 if ($AirPlayHandlers.Contains('auto video_play =') -or
     $AirPlayHandlers.Contains('auto video_get_play_info =')) {
     throw 'AirPlay media callback pointer fix was not applied.'
+}
+$ServerInfoFeaturesMarker = 'IPHONE_MIRROR_SERVER_INFO_FEATURES'
+if (-not $AirPlayHandlers.Contains($ServerInfoFeaturesMarker)) {
+    $HandlerNewLine = if ($AirPlayHandlers.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $Needle = "`tsprintf(data, SERVER_INFO, deviceid, GLOBAL_FEATURES_1);"
+    $Replacement = @'
+	/* IPHONE_MIRROR_SERVER_INFO_FEATURES */
+	const char *iphone_mirror_mode = getenv("IPHONE_MIRROR_AIRPLAY_MODE");
+	unsigned int iphone_mirror_features = iphone_mirror_mode != NULL &&
+		(!strcmp(iphone_mirror_mode, "media") ||
+		 !strcmp(iphone_mirror_mode, "combined")) ?
+		0x5A7FFEF7U : GLOBAL_FEATURES_1;
+	sprintf(data, SERVER_INFO, deviceid, iphone_mirror_features);
+'@ -replace "`r?`n", $HandlerNewLine
+    if ([regex]::Matches($AirPlayHandlers, [regex]::Escape($Needle)).Count -ne 1) {
+        throw 'AirPlay server-info feature insertion point changed.'
+    }
+    $AirPlayHandlers = $AirPlayHandlers.Replace($Needle,
+        $Replacement.TrimEnd("`r", "`n"))
+}
+if ($AirPlay.Contains('<integer>%u</integer>') -and
+    -not $AirPlayHandlers.Contains($ServerInfoFeaturesMarker)) {
+    throw 'AirPlay server-info does not use the runtime receiver feature mask.'
+}
+$ServerInfoIdentityMarker = 'IPHONE_MIRROR_SERVER_INFO_IDENTITY'
+if (-not $AirPlayHandlers.Contains($ServerInfoIdentityMarker)) {
+    $HandlerNewLine = if ($AirPlayHandlers.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $Needle = "`tsprintf(data, SERVER_INFO, deviceid, iphone_mirror_features);"
+    $Replacement = @'
+	/* IPHONE_MIRROR_SERVER_INFO_IDENTITY */
+	const char *receiver_device_id =
+		getenv("IPHONE_MIRROR_AIRPLAY_DEVICE_ID");
+	const char *server_device_id = receiver_device_id != NULL &&
+		strlen(receiver_device_id) == 17 ? receiver_device_id : deviceid;
+	sprintf(data, SERVER_INFO, server_device_id, iphone_mirror_features);
+'@ -replace "`r?`n", $HandlerNewLine
+    if ([regex]::Matches($AirPlayHandlers, [regex]::Escape($Needle)).Count -ne 1) {
+        throw 'AirPlay server-info identity insertion point changed.'
+    }
+    $AirPlayHandlers = $AirPlayHandlers.Replace($Needle,
+        $Replacement.TrimEnd("`r", "`n"))
+}
+if (-not $AirPlayHandlers.Contains($ServerInfoIdentityMarker)) {
+    throw 'AirPlay server-info does not use the runtime receiver identity.'
 }
 [IO.File]::WriteAllText($AirPlayHandlersFile, $AirPlayHandlers, $Encoding)
 $FairPlayMarker = 'IPHONE_MIRROR_MEDIA_CAST_FAIRPLAY'
@@ -324,7 +368,7 @@ if (-not $AirPlay.Contains($FairPlayRouteMarker)) {
     }
     $AirPlay = $AirPlay.Replace($Needle, $Replacement.TrimEnd("`r", "`n"))
 }
-elseif (-not $AirPlay.Contains('IPHONE_MIRROR_MEDIA_CAST_MODE')) {
+if (-not $AirPlay.Contains('IPHONE_MIRROR_MEDIA_CAST_MODE')) {
     $Needle = "`tlogger_log(conn->airplay->logger, LOGGER_DEBUG, `"[AirPlay] Handling request %s with URL %s`", method, url);"
     $Replacement = $ConditionalBlock + $NewLine + $Needle
     if ([regex]::Matches($AirPlay, [regex]::Escape($Needle)).Count -ne 1) {
@@ -351,6 +395,37 @@ if (-not $AirPlay.Contains(
     }
     $AirPlay = $AirPlay.Replace($Needle,
         $ModeDeclaration.TrimEnd("`r", "`n") + $NewLine + $Needle)
+}
+
+# Older revisions of this patch could leave the mode declaration in place
+# without the non-media request guard. Repair that partial state as well as
+# applying cleanly to an untouched upstream checkout.
+if (-not $AirPlay.Contains('IPHONE_MIRROR_MEDIA_CAST_BLOCKED')) {
+    $Needle = "`tlogger_log(conn->airplay->logger, LOGGER_DEBUG, `"[AirPlay] Handling request %s with URL %s`", method, url);"
+    $BlockedRoutes = @'
+	if (!iphone_mirror_media_cast && url != NULL && (
+		!strcmp(url, "/play") || !strcmp(url, "/playback-info") ||
+		!strncmp(url, "/rate", strlen("/rate")) ||
+		!strncmp(url, "/setProperty", strlen("/setProperty")) ||
+		!strncmp(url, "/photo", strlen("/photo")) ||
+		!strncmp(url, "/slideshow", strlen("/slideshow")) ||
+		!strncmp(url, "/scrub", strlen("/scrub")) ||
+		!strcmp(url, "/stop") || !strcmp(url, "/reverse"))) {
+		logger_log(conn->airplay->logger, LOGGER_INFO,
+			"IPHONE_MIRROR_MEDIA_CAST_BLOCKED method=%s url=%s", method, url);
+		http_response_destroy(*response);
+		*response = http_response_init("HTTP/1.1", 403, "Forbidden");
+		http_response_add_header(*response, "Connection", "close");
+		http_response_set_disconnect(*response, 1);
+		http_response_finish(*response, NULL, 0);
+		return;
+	}
+'@ -replace "`r?`n", $NewLine
+    if ([regex]::Matches($AirPlay, [regex]::Escape($Needle)).Count -ne 1) {
+        throw 'AirPlay media-cast request guard insertion point changed.'
+    }
+    $AirPlay = $AirPlay.Replace($Needle,
+        $BlockedRoutes.TrimEnd("`r", "`n") + $NewLine + $Needle)
 }
 
 $LegacyRateRoute = @'
@@ -425,9 +500,6 @@ $AirPlay = [regex]::Replace($AirPlay,
 $AirPlay = $AirPlay.Replace(
     'else if (iphone_mirror_media_cast && !strncmp(url, "/scrub", 6)) {',
     'else if (!strncmp(url, "/scrub", 6)) {')
-$AirPlay = $AirPlay.Replace(
-    'conn->airplay->callbacks.video_play(conn->airplay->callbacks.cls, url, volume, start_pos);',
-    'conn->airplay->callbacks.video_play(conn->airplay->callbacks.cls, url, volume, start_pos_sec > 0 ? start_pos_sec : start_pos);')
 [IO.File]::WriteAllText($AirPlayFile, $AirPlay, $Encoding)
 
 $RaopHeader = [IO.File]::ReadAllText($RaopHeaderFile, $Encoding)
@@ -452,7 +524,8 @@ if (-not $RaopHeader.Contains($RaopMediaCallbacksMarker)) {
 
 $RaopEncoding = [Text.Encoding]::Unicode
 $Raop = [IO.File]::ReadAllText($RaopFile, $RaopEncoding)
-$Raop = $Raop.Replace('0x1A7FFEC0ULL', '0x5A7FFEC0ULL')
+$Raop = $Raop.Replace('0x1A7FFEC0ULL', '0x5A7FFEE6ULL')
+$Raop = $Raop.Replace('0x5A7FFEC0ULL', '0x5A7FFEE6ULL')
 $Raop = $Raop.Replace('"AppleTV14,1"', '"AppleTV3,2"')
 $Raop = $Raop.Replace('"845.5.1"', '"220.68"')
 $NewLine = if ($Raop.Contains("`r`n")) { "`r`n" } else { "`n" }
@@ -476,15 +549,15 @@ $LegacyInfoBlock = @'
 	/* IPHONE_MIRROR_MIRRORING_ONLY_FEATURES: media bits are intentionally absent. */
 	if (capability_root)
 		plist_dict_set_item(capability_root, "features",
-			plist_new_uint(0x5A7FFEC0ULL));
+			plist_new_uint(0x5A7FFEE6ULL));
 '@ -replace "`r?`n", $NewLine
 $RuntimeInfoBlock = @'
 	/* IPHONE_MIRROR_RUNTIME_FEATURES */
 	const char *iphone_mirror_mode = getenv("IPHONE_MIRROR_AIRPLAY_MODE");
 	unsigned long long iphone_mirror_features = iphone_mirror_mode != NULL &&
 		(!strcmp(iphone_mirror_mode, "media") ||
-		 !strcmp(iphone_mirror_mode, "combined"))
-		? 0x5A7FFEF7ULL : 0x5A7FFEC0ULL;
+		 !strcmp(iphone_mirror_mode, "combined")) ?
+		0x5A7FFEF7ULL : 0x5A7FFEE6ULL;
 	if (capability_root)
 		plist_dict_set_item(capability_root, "features",
 			plist_new_uint(iphone_mirror_features));
@@ -503,9 +576,10 @@ if (-not $Raop.Contains($InfoMarker)) {
     }
     $Raop = $Raop.Replace($Needle, $Replacement.TrimEnd("`r", "`n"))
 }
-if (-not $Raop.Contains('0x5A7FFEF7ULL') -or
-    -not $Raop.Contains('0x5A7FFEC0ULL')) {
-    throw 'AirPlay /info runtime feature declaration was not applied.'
+if (-not $Raop.Contains('0x5A7FFEE6ULL') -or
+    -not $Raop.Contains('0x5A7FFEF7ULL') -or
+    $Raop.Contains('0x5A7FFEC0ULL')) {
+    throw 'AirPlay /info feature declaration was not applied consistently.'
 }
 $InfoIdentityMarker = 'IPHONE_MIRROR_RUNTIME_IDENTITY'
 if (-not $Raop.Contains($InfoIdentityMarker)) {
@@ -916,26 +990,151 @@ if (-not $RaopRouter.Contains('!strcmp(iphone_mirror_mode, "combined")')) {
 }
 [IO.File]::WriteAllText($RaopRouterFile, $RaopRouter, $Encoding)
 
-# Give the media process a stable, locally administered device ID distinct
-# from the mirror process. iOS otherwise merges both _airplay services because
-# the two server instances obtain the same physical adapter MAC address.
+# Make every AirPlay endpoint use the stable, locally administered device ID
+# supplied by WirelessHost. Recomputing it inside the DLL would diverge for
+# non-ASCII computer names and using the adapter MAC would make /server-info
+# disagree with Bonjour and /info.
 $Wrapper = [IO.File]::ReadAllText($WrapperServerFile, $Encoding)
 $WrapperNewLine = if ($Wrapper.Contains("`r`n")) { "`r`n" } else { "`n" }
-$LegacyIdentityCondition =
-    'if \(GetEnvironmentVariableA\("IPHONE_MIRROR_AIRPLAY_MODE",\s*' +
-    'iphone_mirror_mode, sizeof\(iphone_mirror_mode\)\) == 5 &&\s*' +
-    '!strcmp\(iphone_mirror_mode, "media"\)\) \{'
-$CombinedIdentityCondition = @'
-		DWORD iphone_mirror_mode_length = GetEnvironmentVariableA(
-			"IPHONE_MIRROR_AIRPLAY_MODE", iphone_mirror_mode,
-			sizeof(iphone_mirror_mode));
-		if ((iphone_mirror_mode_length == 5 &&
-			 !strcmp(iphone_mirror_mode, "media")) ||
-			(iphone_mirror_mode_length == 8 &&
-			 !strcmp(iphone_mirror_mode, "combined"))) {
+$EnvironmentSyncMarker = 'IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC'
+if (-not $Wrapper.Contains($EnvironmentSyncMarker)) {
+    $Wrapper = $Wrapper.Replace('#include <thread>',
+        '#include <thread>' + $WrapperNewLine + '#include <cstdlib>' +
+        $WrapperNewLine + '#include <string>')
+    $Needle = 'BOOL GetMacAddress(char strMac[6]);'
+    $Replacement = @'
+BOOL GetMacAddress(char strMac[6]);
+
+/* IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC: the host and this DLL use separate CRT
+ * environment caches. Copy host-supplied Win32 values into this DLL's UCRT
+ * before any AirPlayServer getenv() call. */
+static bool
+iphone_mirror_sync_environment_value(const wchar_t* wide_name,
+	const char* narrow_name)
+{
+	SetLastError(ERROR_SUCCESS);
+	DWORD required = GetEnvironmentVariableW(wide_name, NULL, 0);
+	if (required == 0)
+		return GetLastError() == ERROR_ENVVAR_NOT_FOUND;
+
+	std::wstring wide_value(required, L'\0');
+	DWORD length = GetEnvironmentVariableW(
+		wide_name, &wide_value[0], required);
+	if (length == 0 || length >= required) return false;
+	wide_value.resize(length);
+
+	int utf8_length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+		wide_value.data(), (int)wide_value.size(), NULL, 0, NULL, NULL);
+	if (utf8_length <= 0) return false;
+	std::string utf8_value((size_t)utf8_length, '\0');
+	if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+		wide_value.data(), (int)wide_value.size(), &utf8_value[0],
+		utf8_length, NULL, NULL) != utf8_length) return false;
+	if (_putenv_s(narrow_name, utf8_value.c_str()) != 0) return false;
+	/* _putenv_s may rewrite the process value through the active ANSI code
+	 * page. Restore the original wide value for the DNS-SD shim. */
+	return SetEnvironmentVariableW(wide_name, wide_value.c_str()) != FALSE;
+}
+
+static bool
+iphone_mirror_sync_environment()
+{
+	struct environment_entry {
+		const wchar_t* wide_name;
+		const char* narrow_name;
+	};
+	static const environment_entry entries[] = {
+		{ L"IPHONE_MIRROR_AIRPLAY_WIDTH", "IPHONE_MIRROR_AIRPLAY_WIDTH" },
+		{ L"IPHONE_MIRROR_AIRPLAY_HEIGHT", "IPHONE_MIRROR_AIRPLAY_HEIGHT" },
+		{ L"IPHONE_MIRROR_AIRPLAY_FPS", "IPHONE_MIRROR_AIRPLAY_FPS" },
+		{ L"IPHONE_MIRROR_AIRPLAY_MODE", "IPHONE_MIRROR_AIRPLAY_MODE" },
+		{ L"IPHONE_MIRROR_AIRPLAY_NAME", "IPHONE_MIRROR_AIRPLAY_NAME" },
+		{ L"IPHONE_MIRROR_AIRPLAY_DEVICE_ID", "IPHONE_MIRROR_AIRPLAY_DEVICE_ID" },
+		{ L"IPHONE_MIRROR_AIRPLAY_PAIRING_SEED", "IPHONE_MIRROR_AIRPLAY_PAIRING_SEED" },
+	};
+	for (size_t index = 0; index < sizeof(entries) / sizeof(entries[0]); ++index)
+		if (!iphone_mirror_sync_environment_value(
+				entries[index].wide_name, entries[index].narrow_name))
+			return false;
+	return true;
+}
 '@ -replace "`r?`n", $WrapperNewLine
-$Wrapper = [regex]::Replace($Wrapper, $LegacyIdentityCondition,
-    $CombinedIdentityCondition.TrimEnd("`r", "`n"))
+    if ([regex]::Matches($Wrapper, [regex]::Escape($Needle)).Count -ne 1) {
+        throw 'AirPlay wrapper environment-sync insertion point changed.'
+    }
+    $Wrapper = $Wrapper.Replace($Needle,
+        $Replacement.TrimEnd("`r", "`n"))
+}
+# Upgrade source trees patched by an earlier revision that used const data()
+# pointers with this upstream project's pre-C++17 toolchain.
+$Wrapper = $Wrapper.Replace(
+    'wide_name, wide_value.data(), required);',
+    'wide_name, &wide_value[0], required);')
+$Wrapper = $Wrapper.Replace(
+    'wide_value.data(), (int)wide_value.size(), utf8_value.data(),',
+    'wide_value.data(), (int)wide_value.size(), &utf8_value[0],')
+if (-not $Wrapper.Contains('wide_name, &wide_value[0], required);') -or
+    -not $Wrapper.Contains(
+        'wide_value.data(), (int)wide_value.size(), &utf8_value[0],')) {
+    throw 'AirPlay wrapper environment-sync writable buffers were not applied.'
+}
+$EnvironmentSyncCall = @'
+	m_pCallback = callback;
+	if (!iphone_mirror_sync_environment() && m_pCallback != NULL)
+		m_pCallback->log(3, "IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC failed");
+'@ -replace "`r?`n", $WrapperNewLine
+if (-not $Wrapper.Contains('if (!iphone_mirror_sync_environment()')) {
+    $Needle = "`tm_pCallback = callback;"
+    if ([regex]::Matches($Wrapper, [regex]::Escape($Needle)).Count -ne 1) {
+        throw 'AirPlay wrapper environment-sync call point changed.'
+    }
+    $Wrapper = $Wrapper.Replace($Needle,
+        $EnvironmentSyncCall.TrimEnd("`r", "`n"))
+}
+if (-not $Wrapper.Contains($EnvironmentSyncMarker) -or
+    -not $Wrapper.Contains('if (!iphone_mirror_sync_environment()')) {
+    throw 'AirPlay wrapper CRT environment synchronization was not applied.'
+}
+$DeviceIdParserMarker = 'IPHONE_MIRROR_DEVICE_ID_PARSER'
+if (-not $Wrapper.Contains($DeviceIdParserMarker)) {
+    $Needle = 'static bool' + $WrapperNewLine +
+        'iphone_mirror_sync_environment()'
+    $Replacement = @'
+/* IPHONE_MIRROR_DEVICE_ID_PARSER */
+static int
+iphone_mirror_hex_nibble(char value)
+{
+	if (value >= '0' && value <= '9') return value - '0';
+	if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+	if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+	return -1;
+}
+
+static bool
+iphone_mirror_parse_device_id(const char* value, char* bytes, size_t length)
+{
+	if (value == NULL || bytes == NULL || length != 6 || strlen(value) != 17)
+		return false;
+	for (size_t index = 0; index < length; ++index) {
+		size_t offset = index * 3;
+		if (index != 0 && value[offset - 1] != ':') return false;
+		int high = iphone_mirror_hex_nibble(value[offset]);
+		int low = iphone_mirror_hex_nibble(value[offset + 1]);
+		if (high < 0 || low < 0) return false;
+		bytes[index] = (char)((high << 4) | low);
+	}
+	return true;
+}
+
+static bool
+iphone_mirror_sync_environment()
+'@ -replace "`r?`n", $WrapperNewLine
+    if ([regex]::Matches($Wrapper, [regex]::Escape($Needle)).Count -ne 1) {
+        throw 'AirPlay wrapper device-ID parser insertion point changed.'
+    }
+    $Wrapper = $Wrapper.Replace($Needle,
+        $Replacement.TrimEnd("`r", "`n"))
+}
 $RaopWrapperCallbacksMarker = 'IPHONE_MIRROR_RAOP_WRAPPER_CALLBACKS'
 if (-not $Wrapper.Contains($RaopWrapperCallbacksMarker)) {
     $WrapperNewLine = if ($Wrapper.Contains("`r`n")) { "`r`n" } else { "`n" }
@@ -951,74 +1150,70 @@ if (-not $Wrapper.Contains($RaopWrapperCallbacksMarker)) {
     }
     $Wrapper = $Wrapper.Replace($Needle, $Replacement.TrimEnd("`r", "`n"))
 }
-$MediaIdentityMarker = 'IPHONE_MIRROR_MEDIA_CAST_IDENTITY'
-if (-not $Wrapper.Contains($MediaIdentityMarker)) {
-    $WrapperNewLine = if ($Wrapper.Contains("`r`n")) { "`r`n" } else { "`n" }
+$LegacyIdentityPattern =
+    '(?s)\r?\n\t\t/\* IPHONE_MIRROR_MEDIA_CAST_IDENTITY \*/.*?' +
+    '(?=\r?\n\r?\n\t\tm_pAirplay = airplay_init)'
+$LegacyIdentityMatches = [regex]::Matches($Wrapper, $LegacyIdentityPattern).Count
+if ($LegacyIdentityMatches -gt 1) {
+    throw 'AirPlay wrapper contains duplicate legacy identity blocks.'
+}
+if ($LegacyIdentityMatches -eq 1) {
+    $Wrapper = [regex]::Replace($Wrapper, $LegacyIdentityPattern, '')
+}
+$RuntimeDeviceIdMarker = 'IPHONE_MIRROR_RUNTIME_DEVICE_ID'
+if (-not $Wrapper.Contains($RuntimeDeviceIdMarker)) {
     $Needle = "`t`tGetMacAddress(hwaddr);"
     $Replacement = @'
 		GetMacAddress(hwaddr);
-		/* IPHONE_MIRROR_MEDIA_CAST_IDENTITY */
-		char iphone_mirror_mode[16] = {};
-		DWORD iphone_mirror_mode_length = GetEnvironmentVariableA(
-			"IPHONE_MIRROR_AIRPLAY_MODE", iphone_mirror_mode,
-			sizeof(iphone_mirror_mode));
-		if ((iphone_mirror_mode_length == 5 &&
-			 !strcmp(iphone_mirror_mode, "media")) ||
-			(iphone_mirror_mode_length == 8 &&
-			 !strcmp(iphone_mirror_mode, "combined"))) {
-			char computer[MAX_COMPUTERNAME_LENGTH + 1] = "iPhoneMirror";
-			DWORD computer_length = sizeof(computer);
-			if (!GetComputerNameA(computer, &computer_length))
-				computer_length = (DWORD)strlen(computer);
-			unsigned long long hash = 1469598103934665603ULL;
-			for (DWORD index = 0; index < computer_length; ++index) {
-				hash ^= (unsigned char)computer[index];
-				hash *= 1099511628211ULL;
-			}
-			hwaddr[0] = 0x02;
-			for (int index = 1; index < 6; ++index)
-				hwaddr[index] = (char)(hash >> ((index - 1) * 8));
-		}
+		/* IPHONE_MIRROR_RUNTIME_DEVICE_ID */
+		char receiver_device_id[18] = {};
+		DWORD receiver_device_id_length = GetEnvironmentVariableA(
+			"IPHONE_MIRROR_AIRPLAY_DEVICE_ID", receiver_device_id,
+			sizeof(receiver_device_id));
+		if (receiver_device_id_length != 0 &&
+			(receiver_device_id_length != 17 ||
+			 !iphone_mirror_parse_device_id(
+				receiver_device_id, hwaddr, sizeof(hwaddr))) &&
+			m_pCallback != NULL)
+			m_pCallback->log(3, "IPHONE_MIRROR_RUNTIME_DEVICE_ID invalid");
 '@ -replace "`r?`n", $WrapperNewLine
     if ([regex]::Matches($Wrapper, [regex]::Escape($Needle)).Count -ne 1) {
-        throw 'AirPlay media receiver identity insertion point changed.'
+        throw 'AirPlay runtime device-ID insertion point changed.'
     }
-    $Wrapper = $Wrapper.Replace($Needle, $Replacement.TrimEnd("`r", "`n"))
+    $Wrapper = $Wrapper.Replace($Needle,
+        $Replacement.TrimEnd("`r", "`n"))
 }
-$MediaIdentityV2Marker = 'IPHONE_MIRROR_MEDIA_CAST_IDENTITY_V2'
-if (-not $Wrapper.Contains($MediaIdentityV2Marker)) {
-    $WrapperNewLine = if ($Wrapper.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $Needle = @'
-			for (DWORD index = 0; index < computer_length; ++index) {
-				hash ^= (unsigned char)computer[index];
-				hash *= 1099511628211ULL;
-			}
-			hwaddr[0] = 0x02;
+$LegacyRuntimeDeviceId = @'
+		/* IPHONE_MIRROR_RUNTIME_DEVICE_ID */
+		const char* receiver_device_id =
+			getenv("IPHONE_MIRROR_AIRPLAY_DEVICE_ID");
+		if (!iphone_mirror_parse_device_id(
+				receiver_device_id, hwaddr, sizeof(hwaddr)) &&
+			receiver_device_id != NULL && m_pCallback != NULL)
+			m_pCallback->log(3, "IPHONE_MIRROR_RUNTIME_DEVICE_ID invalid");
 '@ -replace "`r?`n", $WrapperNewLine
-    $Replacement = @'
-			for (DWORD index = 0; index < computer_length; ++index) {
-				hash ^= (unsigned char)computer[index];
-				hash *= 1099511628211ULL;
-			}
-			/* IPHONE_MIRROR_MEDIA_CAST_IDENTITY_V2 */
-			const char profile[] = "video-cast-v2";
-			for (size_t index = 0; index + 1 < sizeof(profile); ++index) {
-				hash ^= (unsigned char)profile[index];
-				hash *= 1099511628211ULL;
-			}
-			hwaddr[0] = 0x02;
+$RuntimeDeviceId = @'
+		/* IPHONE_MIRROR_RUNTIME_DEVICE_ID */
+		char receiver_device_id[18] = {};
+		DWORD receiver_device_id_length = GetEnvironmentVariableA(
+			"IPHONE_MIRROR_AIRPLAY_DEVICE_ID", receiver_device_id,
+			sizeof(receiver_device_id));
+		if (receiver_device_id_length != 0 &&
+			(receiver_device_id_length != 17 ||
+			 !iphone_mirror_parse_device_id(
+				receiver_device_id, hwaddr, sizeof(hwaddr))) &&
+			m_pCallback != NULL)
+			m_pCallback->log(3, "IPHONE_MIRROR_RUNTIME_DEVICE_ID invalid");
 '@ -replace "`r?`n", $WrapperNewLine
-    $MatchedNeedle = $Needle
-    $MatchedReplacement = $Replacement
-    if (-not $Wrapper.Contains($MatchedNeedle)) {
-        $MatchedNeedle = $Needle.Replace("`r`n", "`n")
-        $MatchedReplacement = $Replacement.Replace("`r`n", "`n")
-    }
-    if ([regex]::Matches($Wrapper, [regex]::Escape($MatchedNeedle)).Count -ne 1) {
-        throw 'AirPlay media receiver v2 identity insertion point changed.'
-    }
-    $Wrapper = $Wrapper.Replace($MatchedNeedle,
-        $MatchedReplacement.TrimEnd("`r", "`n"))
+$Wrapper = $Wrapper.Replace(
+    $LegacyRuntimeDeviceId.TrimEnd("`r", "`n"),
+    $RuntimeDeviceId.TrimEnd("`r", "`n"))
+if (-not $Wrapper.Contains($DeviceIdParserMarker) -or
+    -not $Wrapper.Contains($RuntimeDeviceIdMarker) -or
+    $Wrapper.Contains('IPHONE_MIRROR_MEDIA_CAST_IDENTITY') -or
+    $Wrapper.Contains('GetComputerNameA(computer') -or
+    $Wrapper.Contains('"video-cast-v2"')) {
+    throw 'AirPlay receiver endpoint identity was not unified.'
 }
 [IO.File]::WriteAllText($WrapperServerFile, $Wrapper, $Encoding)
 Write-Host 'Applied combined AirPlay mirror and URL-video request policy.'

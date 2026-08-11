@@ -28,6 +28,9 @@ $SourceValues = [ordered]@{
     '0x11, 0x05, 0xa0' = '0x11, 0x0b, 0x40' # 1440 -> 2880
     '0x10, 0x1e'       = '0x10, 0x3c'       # 30 -> 60 (shared by maxFPS/refreshRate)
     '0x11, 0x0d, 0x70' = '0x11, 0x14, 0x00' # 3440 -> 5120
+    # Keep the static fallback plist consistent with DNS-SD and dynamic /info.
+    '0x13, 0x00, 0x00, 0x00, 0x1e, 0x5a, 0x7f, 0xff, 0xf7' =
+        '0x13, 0x00, 0x00, 0x00, 0x00, 0x5a, 0x7f, 0xfe, 0xe6'
 }
 
 $AlreadyPatched = $true
@@ -42,6 +45,9 @@ if ($AlreadyPatched) {
 }
 else {
     foreach ($Pair in $SourceValues.GetEnumerator()) {
+        if ($Capability.IndexOf($Pair.Value, [StringComparison]::Ordinal) -ge 0) {
+            continue
+        }
         $Matches = [regex]::Matches($Capability, [regex]::Escape($Pair.Key)).Count
         if ($Matches -ne 1) {
             throw "AirPlayServer display capability no longer matches '$($Pair.Key)' exactly once (found $Matches)."
@@ -53,6 +59,15 @@ else {
     $Text = $Text.Replace(
         '// Binary plist with display capabilities: 1920x1080 @ 30fps (maxFPS=30, refreshRate=30)',
         '// Binary plist with display capabilities: 5120x2880 @ 60fps (maxFPS=60, refreshRate=60)')
+}
+
+$FeatureTarget = '0x13, 0x00, 0x00, 0x00, 0x00, 0x5a, 0x7f, 0xfe, 0xe6'
+$FeatureLegacy = '0x13, 0x00, 0x00, 0x00, 0x1e, 0x5a, 0x7f, 0xff, 0xf7'
+$ArrayStart = $Text.IndexOf('char info[] = {', [StringComparison]::Ordinal)
+$ArrayEnd = $Text.IndexOf("`n`t};", $ArrayStart, [StringComparison]::Ordinal) + 4
+$Capability = $Text.Substring($ArrayStart, $ArrayEnd - $ArrayStart)
+if (-not $Capability.Contains($FeatureTarget) -or $Capability.Contains($FeatureLegacy)) {
+    throw 'AirPlay static capability plist feature mask is not the E6 profile.'
 }
 
 $NewLine = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
@@ -87,14 +102,43 @@ $ResponseEnd = $Text.IndexOf($NextHandler, $ArrayEnd, [StringComparison]::Ordina
 if ($ResponseEnd -lt 0) { throw 'AirPlay info response block terminator is missing.' }
 $ResponseStart = $Text.IndexOf($NewLine + "`tsize_t len = sizeof(info);", $ArrayEnd,
     [StringComparison]::Ordinal)
-if ($ResponseStart -lt 0) {
-    $ResponseStart = $Text.IndexOf($NewLine + "`tplist_t capability_root", $ArrayEnd,
-        [StringComparison]::Ordinal)
+$CapabilityRootStart = $Text.IndexOf(
+    $NewLine + "`tplist_t capability_root", $ArrayEnd,
+    [StringComparison]::Ordinal)
+if ($ResponseStart -lt 0 -or
+    ($CapabilityRootStart -ge 0 -and $CapabilityRootStart -lt $ResponseStart)) {
+    $ResponseStart = $CapabilityRootStart
+}
+$RuntimeFeaturesStart = $Text.IndexOf(
+    $NewLine + "`t/* IPHONE_MIRROR_RUNTIME_FEATURES */", $ArrayEnd,
+    [StringComparison]::Ordinal)
+if ($RuntimeFeaturesStart -ge 0 -and
+    ($ResponseStart -lt 0 -or $RuntimeFeaturesStart -lt $ResponseStart)) {
+    $ResponseStart = $RuntimeFeaturesStart
 }
 if ($ResponseStart -lt 0 -or $ResponseStart -ge $ResponseEnd) {
     throw 'AirPlay info response block is missing.'
 }
 $DynamicResponse = @'
+	/* IPHONE_MIRROR_RUNTIME_FEATURES */
+	const char *iphone_mirror_mode = getenv("IPHONE_MIRROR_AIRPLAY_MODE");
+	int iphone_mirror_media_cast = iphone_mirror_mode != NULL &&
+		(!strcmp(iphone_mirror_mode, "media") ||
+		 !strcmp(iphone_mirror_mode, "combined"));
+	unsigned long long iphone_mirror_features = iphone_mirror_media_cast ?
+		0x5A7FFEF7ULL : 0x5A7FFEE6ULL;
+	if (iphone_mirror_media_cast) {
+		const unsigned char mirror_features[] =
+			{ 0x00, 0x00, 0x00, 0x00, 0x5a, 0x7f, 0xfe, 0xe6 };
+		for (size_t index = 0;
+			index + sizeof(mirror_features) <= sizeof(info); ++index) {
+			if (!memcmp(info + index, mirror_features,
+					sizeof(mirror_features))) {
+				info[index + sizeof(mirror_features) - 1] = 0xf7;
+				break;
+			}
+		}
+	}
 	plist_t capability_root = NULL;
 	plist_from_bin(info, sizeof(info), &capability_root);
 	plist_t displays = capability_root ?
@@ -107,6 +151,9 @@ $DynamicResponse = @'
 		"IPHONE_MIRROR_AIRPLAY_HEIGHT", 2880, 180, 8192);
 	unsigned long fps = iphone_mirror_capability_value(
 		"IPHONE_MIRROR_AIRPLAY_FPS", 60, 15, 120);
+	if (capability_root)
+		plist_dict_set_item(capability_root, "features",
+			plist_new_uint(iphone_mirror_features));
 	if (capability_root && receiver_name && *receiver_name)
 		plist_dict_set_item(capability_root, "name", plist_new_string(receiver_name));
 	if (display) {

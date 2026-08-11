@@ -5,6 +5,24 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-08-11
+
+### Changed
+
+- Upgrade the bundled AirPlay receiver to v1.1.2 and keep its source,
+  licensing, patch and SHA-256 records synchronized.
+- Publish version-tagged Windows releases directly from the GitHub Actions
+  build runner, keeping failed uploads in draft state instead of transferring
+  large packages through an intermediate workflow artifact.
+- Stop producing and uploading the duplicate `-latest.zip` alias; portable
+  updates already prefer the versioned `win-x64.zip` asset.
+
+### Fixed
+
+- Restore wireless iPad screen mirroring by upgrading the AirPlay receiver to
+  v1.1.2 and keeping Bonjour, server-info, and `/info` capability negotiation
+  and receiver identity on the same mode-specific, upstream-compatible profile.
+
 ## [1.6.0] - 2026-08-10
 
 ### Changed
@@ -986,7 +1004,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.11...v1.6.0
 [1.5.11]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.10...v1.5.11
 [1.5.10]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.9...v1.5.10

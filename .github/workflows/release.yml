@@ -1,0 +1,158 @@
+name: Publish Windows Release
+
+run-name: >-
+  Publish Windows x64 release ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish Windows x64 release
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+
+    steps:
+      - name: Resolve release tag
+        id: version
+        shell: pwsh
+        env:
+          PUSH_TAG: ${{ github.ref_name }}
+          MANUAL_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          $tag = if ($env:EVENT_NAME -eq 'workflow_dispatch') { $env:MANUAL_TAG } else { $env:PUSH_TAG }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Release tag must match v<major>.<minor>.<patch>[-suffix]: $tag"
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.version.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Microsoft SBOM Tool
+        shell: pwsh
+        run: |
+          $tool = Get-Command sbom-tool,sbom -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($null -eq $tool) {
+            dotnet tool install --global Microsoft.Sbom.DotNetTool
+            if ($LASTEXITCODE -ne 0) { throw "Failed to install Microsoft SBOM Tool." }
+          }
+
+      - name: Verify localization
+        shell: pwsh
+        run: ./scripts/verify_localization.ps1
+
+      - name: Build and test
+        shell: pwsh
+        run: ./build.ps1 -Configuration Release
+
+      - name: Package release assets
+        shell: pwsh
+        run: >-
+          ./scripts/package_release.ps1
+          -Version '${{ steps.version.outputs.version }}'
+          -SkipBuild
+          -GenerateSbom
+          -UpdateReleaseManifest
+
+      - name: Create draft release when needed
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY `
+              --draft `
+              --generate-notes `
+              --verify-tag `
+              --title "iPhoneMirror $env:RELEASE_TAG"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create draft release $env:RELEASE_TAG" }
+          }
+
+      - name: Upload release assets directly
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $expectedNames = @(
+            "iPhoneMirror-Setup-v$env:RELEASE_VERSION-x64.exe",
+            "iPhoneMirror-v$env:RELEASE_VERSION-win-x64.zip",
+            "iPhoneMirror-v$env:RELEASE_VERSION-win-x64-sbom.spdx.json",
+            "SHA256SUMS.txt"
+          )
+          $assets = @($expectedNames | ForEach-Object {
+            $path = Join-Path outputs/releases $_
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Expected release asset is missing: $_"
+            }
+            Get-Item -LiteralPath $path
+          })
+          $unexpected = @(Get-ChildItem -LiteralPath outputs/releases -File |
+            Where-Object { $_.Name -notin $expectedNames })
+          if ($unexpected.Count -ne 0) {
+            throw "Unexpected release assets: $($unexpected.Name -join ', ')"
+          }
+          $assetPaths = @($assets.FullName)
+          gh release upload $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
+            @assetPaths --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Failed to upload release assets for $env:RELEASE_TAG" }
+
+      - name: Publish fallback release manifest
+        shell: pwsh
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git diff --quiet -- updates/releases.json
+          if ($LASTEXITCODE -eq 0) {
+            throw "Packaging did not update updates/releases.json for $env:RELEASE_TAG."
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- updates/releases.json
+          git commit -m "Update $env:RELEASE_TAG release manifest"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to commit the release manifest." }
+          git push origin "HEAD:refs/heads/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to publish the release manifest to $env:DEFAULT_BRANCH."
+          }
+
+      - name: Publish release after asset upload
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish release $env:RELEASE_TAG" }

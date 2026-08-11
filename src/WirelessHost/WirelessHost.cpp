@@ -896,6 +896,15 @@ std::string utf8(std::wstring_view value) {
     return result;
 }
 
+bool set_airplay_environment(std::wstring_view name,
+    std::wstring_view value) {
+    const std::wstring wide_name(name);
+    const std::wstring wide_value(value);
+    // The receiver DLL synchronizes these Win32 values into its own CRT before
+    // initializing AirPlayServer; the DNS-SD shim reads them directly.
+    return SetEnvironmentVariableW(wide_name.c_str(), wide_value.c_str()) != FALSE;
+}
+
 std::wstring stable_airplay_device_id() {
     wchar_t computer[MAX_COMPUTERNAME_LENGTH + 1]{};
     DWORD length = static_cast<DWORD>(std::size(computer));
@@ -909,7 +918,7 @@ std::wstring stable_airplay_device_id() {
         hash ^= static_cast<std::uint8_t>(computer[index]);
         hash *= 1099511628211ULL;
     }
-    constexpr std::string_view profile = "video-cast-v2";
+    constexpr std::string_view profile = "airplay-compat-v3";
     for (const auto byte : profile) {
         hash ^= static_cast<std::uint8_t>(byte);
         hash *= 1099511628211ULL;
@@ -1151,21 +1160,11 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(pipe);
         return 7;
     }
-    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_WIDTH",
-        std::to_wstring(capability_width).c_str());
-    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_HEIGHT",
-        std::to_wstring(capability_height).c_str());
-    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_FPS",
-        std::to_wstring(capability_fps).c_str());
     const auto effective_mode = receiver_mode == L"media" ? L"media" :
         receiver_mode == L"combined" ? L"combined" : L"mirror";
-    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_MODE", effective_mode);
     const auto effective_receiver_name = receiver_name_wide.empty()
         ? std::wstring(L"iPhoneMirror AirPlay") : receiver_name_wide;
-    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_NAME",
-        effective_receiver_name.c_str());
     const auto device_id = stable_airplay_device_id();
-    SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_DEVICE_ID", device_id.c_str());
     const auto pairing_seed = stable_airplay_pairing_seed(device_id);
     if (pairing_seed.empty()) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
@@ -1175,8 +1174,28 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(pipe);
         return 8;
     }
-    SetEnvironmentVariableW(
-        L"IPHONE_MIRROR_AIRPLAY_PAIRING_SEED", pairing_seed.c_str());
+    const auto capability_width_text = std::to_wstring(capability_width);
+    const auto capability_height_text = std::to_wstring(capability_height);
+    const auto capability_fps_text = std::to_wstring(capability_fps);
+    const auto environment_ready = set_airplay_environment(
+            L"IPHONE_MIRROR_AIRPLAY_WIDTH", capability_width_text) &&
+        set_airplay_environment(
+            L"IPHONE_MIRROR_AIRPLAY_HEIGHT", capability_height_text) &&
+        set_airplay_environment(L"IPHONE_MIRROR_AIRPLAY_FPS", capability_fps_text) &&
+        set_airplay_environment(L"IPHONE_MIRROR_AIRPLAY_MODE", effective_mode) &&
+        set_airplay_environment(
+            L"IPHONE_MIRROR_AIRPLAY_NAME", effective_receiver_name) &&
+        set_airplay_environment(L"IPHONE_MIRROR_AIRPLAY_DEVICE_ID", device_id) &&
+        set_airplay_environment(
+            L"IPHONE_MIRROR_AIRPLAY_PAIRING_SEED", pairing_seed);
+    if (!environment_ready) {
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+            "wireless_host airplay_environment_sync_failed");
+        writer.send_text(iPhoneMirror::wireless::MessageType::Log, writer.summary());
+        writer.shutdown();
+        CloseHandle(pipe);
+        return 10;
+    }
 
     const auto loaded_library = load_airplay_library(library_path);
     const auto library = loaded_library.library;

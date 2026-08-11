@@ -1,6 +1,7 @@
 // DNS-SD compatibility layer for AirPlayServer using the Windows 10+ DNS API.
 
 #include "DnsSdRegistrationPolicy.h"
+#include "DnsSdAdvertisementPolicy.h"
 
 #include <WinSock2.h>
 #include <Windows.h>
@@ -28,20 +29,6 @@
 
 namespace {
 
-// Preserve the authentication/audio transport bits required by screen
-// mirroring, while clearing video, photo, HLS, slideshow, rotation-advertising,
-// playback-queue, and second-word cloud-media capabilities.
-constexpr std::wstring_view MirroringOnlyFeatures = L"0x5A7FFEC0,0x0";
-// Match UxPlay's HLS-enabled legacy feature set. Advertising the newer
-// playback-queue/cloud/TLS bits makes some video apps require AirPlay 2
-// services that this receiver intentionally does not implement, so they hide
-// the route before attempting a connection.
-constexpr std::wstring_view MediaCastFeatures = L"0x5A7FFEF7,0x0";
-constexpr std::wstring_view LegacyAirPlayModel = L"AppleTV3,2";
-constexpr std::wstring_view LegacyAirPlayVersion = L"220.68";
-constexpr std::wstring_view AirPlayPairingIdentity =
-    L"2e388006-13ba-4041-9a67-25dd4a43d536";
-
 std::wstring receiver_mode() {
     wchar_t mode[16]{};
     const auto length = GetEnvironmentVariableW(
@@ -56,14 +43,6 @@ std::wstring environment_value(const wchar_t* name, std::size_t capacity) {
     if (length == 0 || length >= value.size()) return {};
     value.resize(length);
     return value;
-}
-
-bool is_lower_hex(std::wstring_view value, std::size_t length) noexcept {
-    return value.size() == length && std::ranges::all_of(value,
-        [](wchar_t character) {
-            return (character >= L'0' && character <= L'9') ||
-                (character >= L'a' && character <= L'f');
-        });
 }
 
 struct Registration;
@@ -455,7 +434,7 @@ std::array<std::uint8_t, 6> media_device_id() noexcept {
     // Bump the media-route identity when its advertised protocol profile
     // changes. iOS and third-party apps otherwise keep the old audio-only
     // classification cached even after the TXT record is corrected.
-    constexpr std::string_view profile = "video-cast-v2";
+    constexpr std::string_view profile = "airplay-compat-v3";
     for (const auto byte : profile) {
         hash ^= static_cast<std::uint8_t>(byte);
         hash *= 1099511628211ULL;
@@ -1020,41 +999,11 @@ static DNSServiceErrorType dns_service_register_impl(
 
     const auto host = host_name();
     auto properties = parse_txt(txt_length, txt_record);
-    const auto set_property = [&properties](std::wstring_view key,
-                                  std::wstring_view value) {
-        const auto property = std::ranges::find_if(properties,
-            [key](const auto& item) { return item.first == key; });
-        if (property == properties.end()) properties.emplace_back(key, value);
-        else property->second.assign(value);
-    };
-    if (service_type == "_airplay._tcp") {
-        const auto advertised = media_mode ? MediaCastFeatures : MirroringOnlyFeatures;
-        set_property(L"features", advertised);
-        if (media_mode) {
-            const auto public_key = environment_value(
-                L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY", 65);
-            set_property(L"deviceid", media_device_id_text(false));
-            set_property(L"model", LegacyAirPlayModel);
-            set_property(L"srcvers", LegacyAirPlayVersion);
-            set_property(L"pi", AirPlayPairingIdentity);
-            if (is_lower_hex(public_key, 64)) set_property(L"pk", public_key);
-            set_property(L"pw", L"false");
-        }
-    }
-    else if (service_type == "_raop._tcp" && media_mode) {
-        // UxPlay publishes the video/HLS feature mask on both service records.
-        // Without RAOP `ft`, iOS route pickers classify this target as a pure
-        // AirTunes speaker and never open the /play video-control channel.
-        set_property(L"ft", MediaCastFeatures);
-        const auto public_key = environment_value(
-            L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY", 65);
-        set_property(L"am", LegacyAirPlayModel);
-        set_property(L"vs", LegacyAirPlayVersion);
-        if (is_lower_hex(public_key, 64)) set_property(L"pk", public_key);
-        set_property(L"vv", L"2");
-        set_property(L"cn", L"0,1,2,3");
-        set_property(L"rhd", L"5.6.0.0");
-    }
+    const auto public_key = environment_value(
+        L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY", 65);
+    iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
+        service_type, media_mode, media_device_id_text(false), public_key,
+        properties);
     std::vector<PCWSTR> keys;
     std::vector<PCWSTR> values;
     keys.reserve(properties.size());

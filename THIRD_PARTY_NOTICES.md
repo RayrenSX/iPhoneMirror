@@ -64,7 +64,7 @@ directory after validating their Microsoft Authenticode signatures.
 - License terms:
   https://visualstudio.microsoft.com/license-terms/
 
-## AirPlayServer 1.1.0 wireless receiver
+## AirPlayServer 1.1.2 wireless receiver
 
 `third_party/airplay-server/` contains a pinned runtime subset of the
 AirPlayServer x64 release with local compatibility patches. The GPL-licensed
@@ -73,7 +73,7 @@ decoded I420 video and PCM audio to the GPL-3.0-only application over a named
 pipe. The application and native capture core do not link to the receiver DLL.
 
 - Project: https://github.com/xenos1337/AirPlayServer
-- Version/commit: v1.1.0 / `ff149b2e768bf9ae93199de941ab170571a941a4`
+- Version/commit: v1.1.2 / `34ba6cfd49b2432cf30e89913d66decb775763e4`
 - AirPlayServer wrapper: MIT
 - PlayFair implementation and receiver runtime: GPL version 3
 - FFmpeg 4.4.2 runtime: LGPL version 2.1 or later

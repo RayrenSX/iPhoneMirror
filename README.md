@@ -248,7 +248,7 @@ App 发送的播放地址进入主窗口内的专用播放界面，两条播放�
 | .NET 10、WPF、Windows SDK | 主界面、Windows API 和发布运行时 | Microsoft 官方运行时 |
 | libusb 1.0.29 | 可选的 USB 传输兼容层 | LGPL-2.1-or-later，见 `third_party/libusb/` |
 | libusb-win32 1.2.6.0 | 独立驱动管理器的 `libusb0` 过滤驱动 | LGPL-3.0 及上游许可证，见 `src/DriverInstaller/Assets/` |
-| AirPlayServer 1.1.0 | 无线 AirPlay 接收、FairPlay/视频/音频解码 | GPL-3.0、LGPL-2.1-or-later 及上游许可证，见 `third_party/airplay-server/` |
+| AirPlayServer 1.1.2 | 无线 AirPlay 接收、FairPlay/视频/音频解码 | GPL-3.0、LGPL-2.1-or-later 及上游许可证，见 `third_party/airplay-server/` |
 | FFmpeg 4.4.2 runtime | AirPlay 视频/音频解码依赖 | LGPL-2.1-or-later，随 AirPlayServer 发行物提供 |
 | quicktime_video_hack fixtures | QuickTime 协议回归测试向量 | MIT，仅用于 `src/Core/tests/fixtures/` |
 
@@ -329,7 +329,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.6.0 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.6.1 -GenerateSbom
 ```
 
 正式生成待上传资产时传入 `-UpdateReleaseManifest`，发布脚本会同步

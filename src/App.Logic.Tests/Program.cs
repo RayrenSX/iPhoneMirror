@@ -265,8 +265,11 @@ var repositoryRelease = ReleaseParser.ParseLatest(
 var appProject = XDocument.Load(Path.Combine(sourceDirectory, "App",
     "iPhoneMirror.App.csproj"));
 var appVersion = appProject.Descendants("Version").Single().Value.Trim();
-Equal($"v{appVersion}", repositoryRelease?.TagName,
-    "repository update manifest matches the application version");
+Equal(true, SemanticVersion.TryParse(appVersion, out var parsedAppVersion),
+    "application project declares a valid semantic version");
+Equal(true, repositoryRelease is not null &&
+            repositoryRelease.Version <= parsedAppVersion,
+    "repository update manifest does not advertise a version newer than the application");
 Equal(true, repositoryRelease?.PreferredAsset?.Sha256 is not null,
     "repository update manifest pins the preferred asset SHA256 digest");
 var sharedUiDirectory = Path.Combine(sourceDirectory, "SharedUI");

@@ -19,7 +19,7 @@ if ($PathEntries.Count -gt 1) {
 }
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $ReceiverRoot = Join-Path $Root 'third_party\airplay-server'
-$Commit = 'ff149b2e768bf9ae93199de941ab170571a941a4'
+$Commit = '34ba6cfd49b2432cf30e89913d66decb775763e4'
 $Repository = 'https://github.com/xenos1337/AirPlayServer.git'
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
     $SourceRoot = Join-Path $Root 'build\airplay-server-source'
@@ -105,14 +105,16 @@ if (-not (Test-Path -LiteralPath $Binary)) {
 }
 $BinaryHex = [BitConverter]::ToString([IO.File]::ReadAllBytes($Binary)).Replace('-', '')
 $TargetHeightAndRate = '6C73100E110B40103C5F102465306666'
-$TargetWidth = '65393235111400130000001E5A7FFFF710015A41'
+$TargetWidth = '6539323511140013000000005A7FFEE610015A41'
+$MediaFeaturesLittleEndian = 'F7FE7F5A'
 $LegacyHeightAndRate = '6C73100E1105A0101E5F102465306666'
-$LegacyWidth = '65393235110D70130000001E5A7FFFF710015A41'
+$LegacyWidth = '65393235110D7013000000005A7FFEE610015A41'
 if (-not $BinaryHex.Contains($TargetHeightAndRate) -or
     -not $BinaryHex.Contains($TargetWidth) -or
+    -not $BinaryHex.Contains($MediaFeaturesLittleEndian) -or
     $BinaryHex.Contains($LegacyHeightAndRate) -or
     $BinaryHex.Contains($LegacyWidth)) {
-    throw 'Built AirPlay receiver does not contain the expected 5120x2880@60 fallback capability.'
+    throw 'Built AirPlay receiver does not contain the expected display and mode-specific feature capabilities.'
 }
 $BinaryAscii = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Binary))
 foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIGHT',
@@ -123,11 +125,13 @@ foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIG
         'IPHONE_MIRROR_RAOP_MEDIA_CAST_BLOCKED',
         'IPHONE_MIRROR_AIRPLAY_PAIRING_SEED',
         'IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY',
+        'IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC',
+        'IPHONE_MIRROR_RUNTIME_DEVICE_ID',
         'iphonemirror://pause',
         'iphonemirror://resume',
         'iphonemirror://seek',
         '2e388006-13ba-4041-9a67-25dd4a43d536',
-        'AppleTV3,2', '220.68', 'combined', '0x5A7FFEC0,0x0')) {
+        'AppleTV3,2', '220.68', 'combined')) {
     if (-not $BinaryAscii.Contains($Marker)) {
         throw "Built AirPlay receiver is missing runtime capability marker: $Marker"
     }
@@ -135,8 +139,9 @@ foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIG
 if ($BinaryAscii.Contains('0x5A7FFFF7,0x1E') -or
     $BinaryAscii.Contains('0x5A7FFFC0,0x1E') -or
     $BinaryAscii.Contains('0x484051C0,0x0') -or
-    $BinaryAscii.Contains('0x1A7FFEC0,0x0')) {
-    throw 'Built AirPlay receiver still advertises media casting capabilities.'
+    $BinaryAscii.Contains('0x1A7FFEC0,0x0') -or
+    $BinaryAscii.Contains('0x5A7FFEC0,0x0')) {
+    throw 'Built AirPlay receiver contains an inconsistent legacy feature mask.'
 }
 Write-Host 'Verified combined screen-mirroring and URL-video AirPlay mode.' -ForegroundColor Green
 $Hash = (Get-FileHash -LiteralPath $Binary -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -168,6 +173,11 @@ if ($Install) {
     $StagedManifest = "$Manifest.$TransactionId.tmp"
     $BackupBinary = "$TargetBinary.$TransactionId.bak"
     $BackupManifest = "$Manifest.$TransactionId.bak"
+    # File.Replace requires a concrete backup path on the Windows/.NET
+    # runtime used by the build environment. Keep separate rollback copies so
+    # a failure in the second replacement can still restore both targets.
+    $ReplaceBackupBinary = "$TargetBinary.$TransactionId.replace.bak"
+    $ReplaceBackupManifest = "$Manifest.$TransactionId.replace.bak"
     $TargetsMayBeModified = $false
     $InstallComplete = $false
     $RollbackComplete = $false
@@ -179,8 +189,8 @@ if ($Install) {
         Copy-Item -LiteralPath $Manifest -Destination $BackupManifest
 
         $TargetsMayBeModified = $true
-        [IO.File]::Replace($StagedBinary, $TargetBinary, $null)
-        [IO.File]::Replace($StagedManifest, $Manifest, $null)
+        [IO.File]::Replace($StagedBinary, $TargetBinary, $ReplaceBackupBinary)
+        [IO.File]::Replace($StagedManifest, $Manifest, $ReplaceBackupManifest)
         $InstalledHash = (Get-FileHash -LiteralPath $TargetBinary `
             -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($InstalledHash -ne $Hash -or
@@ -221,7 +231,8 @@ if ($Install) {
         throw $installError
     }
     finally {
-        foreach ($temporary in @($StagedBinary, $StagedManifest)) {
+        foreach ($temporary in @($StagedBinary, $StagedManifest,
+                $ReplaceBackupBinary, $ReplaceBackupManifest)) {
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
         }
         if ($InstallComplete -or $RollbackComplete) {

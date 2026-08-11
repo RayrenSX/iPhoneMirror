@@ -43,7 +43,7 @@ std::uint32_t child_u32(const plist::Value& dictionary, std::string_view key) {
 plist::Value UsbMuxClient::base_message(std::string message_type) const {
     return plist::Value::Dict({
         {"BundleID", plist::Value::String("com.iphonemirror.windows")},
-        {"ClientVersionString", plist::Value::String("iPhoneMirror 1.1.0-preview.1")},
+        {"ClientVersionString", plist::Value::String("iPhoneMirror 1.6.1")},
         {"MessageType", plist::Value::String(std::move(message_type))},
         {"ProgName", plist::Value::String("iPhoneMirror")},
         {"kLibUSBMuxVersion", plist::Value::Integer(3)},

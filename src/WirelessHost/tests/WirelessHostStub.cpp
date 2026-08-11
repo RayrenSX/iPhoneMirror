@@ -1,6 +1,9 @@
 #include <Windows.h>
 
+#include <cstdlib>
+#include <cstring>
 #include <limits>
+#include <string>
 
 struct SFgAudioFrame {
     unsigned long long pts;
@@ -37,6 +40,21 @@ public:
 extern "C" void* __cdecl stub_start(const char*, unsigned int, unsigned int,
     IAirServerCallback* callback) {
     if (!callback) return nullptr;
+    const auto environment_value = [](const char* name) {
+        const auto* value = std::getenv(name);
+        return value ? std::string(value) : std::string{};
+    };
+    const auto device_id = environment_value("IPHONE_MIRROR_AIRPLAY_DEVICE_ID");
+    const auto pairing_seed = environment_value("IPHONE_MIRROR_AIRPLAY_PAIRING_SEED");
+    if (environment_value("IPHONE_MIRROR_AIRPLAY_WIDTH") != "1280" ||
+        environment_value("IPHONE_MIRROR_AIRPLAY_HEIGHT") != "720" ||
+        environment_value("IPHONE_MIRROR_AIRPLAY_FPS") != "30" ||
+        environment_value("IPHONE_MIRROR_AIRPLAY_MODE") != "combined" ||
+        environment_value("IPHONE_MIRROR_AIRPLAY_NAME") != "Smoke Test" ||
+        !device_id.starts_with("02:") || pairing_seed.size() != 64) {
+        callback->log(3, "stub AirPlay environment synchronization failed");
+        return nullptr;
+    }
     SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY",
         L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     callback->log(6, "stub protocol log");

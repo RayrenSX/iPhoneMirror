@@ -267,7 +267,7 @@ identifier in parentheses; unknown identifiers are shown unchanged.
 | .NET 10, WPF, Windows SDK | UI, Windows APIs and publishing runtime | Microsoft official runtime |
 | libusb 1.0.29 | Optional USB transport compatibility layer | LGPL-2.1-or-later, `third_party/libusb/` |
 | libusb-win32 1.2.6.0 | `libusb0` filter driver used by the standalone manager | LGPL-3.0 and upstream terms, `src/DriverInstaller/Assets/` |
-| AirPlayServer 1.1.0 | Wireless AirPlay, FairPlay, video and audio decode | GPL-3.0, LGPL-2.1-or-later and upstream terms, `third_party/airplay-server/` |
+| AirPlayServer 1.1.2 | Wireless AirPlay, FairPlay, video and audio decode | GPL-3.0, LGPL-2.1-or-later and upstream terms, `third_party/airplay-server/` |
 | FFmpeg 4.4.2 runtime | AirPlay video/audio decode dependency | LGPL-2.1-or-later, distributed with AirPlayServer |
 | quicktime_video_hack fixtures | QuickTime protocol regression vectors | MIT, test fixtures only |
 
@@ -335,7 +335,7 @@ publishing the compact edition.
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.6.0 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.6.1 -GenerateSbom
 ```
 
 Pass `-UpdateReleaseManifest` when producing the assets that will be uploaded.

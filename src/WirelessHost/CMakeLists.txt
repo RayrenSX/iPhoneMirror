@@ -100,4 +100,20 @@ if(IPHONEMIRROR_BUILD_TESTS)
         $<TARGET_FILE:iPhoneMirror.WirelessHost>
         $<TARGET_FILE:iPhoneMirror.WirelessHost.Stub>)
     set_tests_properties(WirelessHostInvalidImagePreflight PROPERTIES TIMEOUT 10)
+
+    add_executable(iPhoneMirror.WirelessReceiver.ProtocolSmoke
+        tests/WirelessReceiverProtocolSmoke.cpp)
+    target_include_directories(iPhoneMirror.WirelessReceiver.ProtocolSmoke PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(iPhoneMirror.WirelessReceiver.ProtocolSmoke PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.WirelessReceiver.ProtocolSmoke PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.WirelessReceiver.ProtocolSmoke PRIVATE ws2_32)
+    add_dependencies(iPhoneMirror.WirelessReceiver.ProtocolSmoke
+        iPhoneMirror.WirelessHost)
+    add_test(NAME WirelessReceiverProtocolSmoke COMMAND
+        iPhoneMirror.WirelessReceiver.ProtocolSmoke
+        $<TARGET_FILE:iPhoneMirror.WirelessHost>)
+    set_tests_properties(WirelessReceiverProtocolSmoke PROPERTIES TIMEOUT 35)
 endif()

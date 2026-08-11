@@ -1,9 +1,28 @@
 #include "DnsSdRegistrationPolicy.h"
+#include "DnsSdAdvertisementPolicy.h"
 
 #include <array>
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <string_view>
+
+namespace {
+
+std::wstring_view property_value(
+    const iPhoneMirror::wireless::DnsSdProperties& properties,
+    std::wstring_view key) {
+    const auto property = std::ranges::find_if(properties,
+        [key](const auto& item) { return item.first == key; });
+    return property == properties.end() ? std::wstring_view{} : property->second;
+}
+
+bool has_property(const iPhoneMirror::wireless::DnsSdProperties& properties,
+    std::wstring_view key, std::wstring_view expected) {
+    return property_value(properties, key) == expected;
+}
+
+} // namespace
 
 int main() {
     constexpr std::array cases{
@@ -67,6 +86,55 @@ int main() {
     pending.assign_missing_interfaces(19);
     if (pending.owner_interface() != 19) {
         std::cerr << "pending DNS-SD leases did not adopt a recovered interface\n";
+        return 1;
+    }
+
+    constexpr std::wstring_view device_id = L"02:AA:BB:CC:DD:EE";
+    constexpr std::wstring_view public_key =
+        L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    iPhoneMirror::wireless::DnsSdProperties mirror_airplay{
+        {L"features", L"legacy"}, {L"deviceid", L"old"}};
+    iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
+        "_airplay._tcp", false, device_id, public_key, mirror_airplay);
+    if (!has_property(mirror_airplay, L"features",
+            iPhoneMirror::wireless::MirroringFeatures) ||
+        !has_property(mirror_airplay, L"deviceid", device_id)) {
+        std::cerr << "mirror DNS-SD TXT policy did not apply the stable profile\n";
+        return 1;
+    }
+
+    iPhoneMirror::wireless::DnsSdProperties combined_airplay;
+    iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
+        "_airplay._tcp", true, device_id, public_key, combined_airplay);
+    if (!has_property(combined_airplay, L"features",
+            iPhoneMirror::wireless::MediaCastFeatures) ||
+        !has_property(combined_airplay, L"deviceid", device_id) ||
+        !has_property(combined_airplay, L"model",
+            iPhoneMirror::wireless::LegacyAirPlayModel) ||
+        !has_property(combined_airplay, L"srcvers",
+            iPhoneMirror::wireless::LegacyAirPlayVersion) ||
+        !has_property(combined_airplay, L"pi",
+            iPhoneMirror::wireless::AirPlayPairingIdentity) ||
+        !has_property(combined_airplay, L"pk", public_key) ||
+        !has_property(combined_airplay, L"pw", L"false")) {
+        std::cerr << "combined AirPlay DNS-SD TXT policy is incomplete\n";
+        return 1;
+    }
+
+    iPhoneMirror::wireless::DnsSdProperties combined_raop;
+    iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
+        "_raop._tcp", true, device_id, public_key, combined_raop);
+    if (!has_property(combined_raop, L"ft",
+            iPhoneMirror::wireless::MediaCastFeatures) ||
+        !has_property(combined_raop, L"am",
+            iPhoneMirror::wireless::LegacyAirPlayModel) ||
+        !has_property(combined_raop, L"vs",
+            iPhoneMirror::wireless::LegacyAirPlayVersion) ||
+        !has_property(combined_raop, L"pk", public_key) ||
+        !has_property(combined_raop, L"vv", L"2") ||
+        !has_property(combined_raop, L"cn", L"0,1,2,3") ||
+        !has_property(combined_raop, L"rhd", L"5.6.0.0")) {
+        std::cerr << "combined RAOP DNS-SD TXT policy is incomplete\n";
         return 1;
     }
 
