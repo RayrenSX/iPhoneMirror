@@ -15,6 +15,8 @@ on:
         type: string
 
 permissions:
+  actions: write
+  checks: read
   contents: write
 
 concurrency:
@@ -25,7 +27,7 @@ jobs:
   release:
     name: Build and publish Windows x64 release
     runs-on: windows-2025-vs2026
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Resolve release tag
@@ -128,24 +130,207 @@ jobs:
             @assetPaths --clobber
           if ($LASTEXITCODE -ne 0) { throw "Failed to upload release assets for $env:RELEASE_TAG" }
 
-      - name: Publish fallback release manifest
+      - name: Prepare fallback release manifest commit
+        id: manifest
         shell: pwsh
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           git diff --quiet -- updates/releases.json
-          if ($LASTEXITCODE -eq 0) {
+          $packageDiffExit = $LASTEXITCODE
+          if ($packageDiffExit -eq 0) {
             throw "Packaging did not update updates/releases.json for $env:RELEASE_TAG."
           }
+          if ($packageDiffExit -ne 1) {
+            throw "Failed to inspect the generated release manifest."
+          }
+
+          $generatedManifest = Join-Path $env:RUNNER_TEMP `
+            "releases-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.json"
+          Copy-Item -LiteralPath updates/releases.json `
+            -Destination $generatedManifest -Force
+
+          git fetch origin `
+            "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch $env:DEFAULT_BRANCH before publishing the release manifest."
+          }
+          git checkout --force --detach "refs/remotes/origin/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to check out the latest $env:DEFAULT_BRANCH commit."
+          }
+
+          function Read-ReleaseManifest([string]$Path) {
+            $parsed = [IO.File]::ReadAllText(
+              $Path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($parsed -is [array]) { return @($parsed) }
+            if ($parsed.PSObject.Properties.Name -contains 'value') {
+              return @($parsed.value)
+            }
+            return @($parsed)
+          }
+
+          $generatedReleases = @(Read-ReleaseManifest $generatedManifest)
+          $generatedMatches = @($generatedReleases | Where-Object {
+            [string]::Equals([string]$_.tag_name, $env:RELEASE_TAG,
+              [StringComparison]::OrdinalIgnoreCase)
+          })
+          if ($generatedMatches.Count -ne 1) {
+            throw "Generated manifest must contain exactly one $env:RELEASE_TAG entry."
+          }
+
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'updates/releases.json'
+          $currentReleases = @(Read-ReleaseManifest $manifestPath)
+          $currentMatches = @($currentReleases | Where-Object {
+            [string]::Equals([string]$_.tag_name, $env:RELEASE_TAG,
+              [StringComparison]::OrdinalIgnoreCase)
+          })
+          if ($currentMatches.Count -gt 1) {
+            throw "Current manifest contains duplicate $env:RELEASE_TAG entries."
+          }
+          if ($currentMatches.Count -eq 1) {
+            $generatedMatches[0].published_at = $currentMatches[0].published_at
+          }
+
+          $mergedReleases = @($generatedMatches[0]) + @($currentReleases |
+            Where-Object {
+              -not [string]::Equals([string]$_.tag_name, $env:RELEASE_TAG,
+                [StringComparison]::OrdinalIgnoreCase)
+            })
+          $mergedJson = ConvertTo-Json -InputObject $mergedReleases -Depth 100
+          [IO.File]::WriteAllText($manifestPath, $mergedJson + "`n",
+            [Text.UTF8Encoding]::new($false))
+
+          git diff --quiet -- updates/releases.json
+          $mergedDiffExit = $LASTEXITCODE
+          if ($mergedDiffExit -eq 0) {
+            Write-Host "Release manifest already contains $env:RELEASE_TAG."
+            "changed=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          if ($mergedDiffExit -ne 1) {
+            throw "Failed to inspect the merged release manifest."
+          }
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- updates/releases.json
           git commit -m "Update $env:RELEASE_TAG release manifest"
           if ($LASTEXITCODE -ne 0) { throw "Failed to commit the release manifest." }
+
+          $changedPaths = @(git diff-tree --no-commit-id --name-only -r HEAD |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          if ($changedPaths.Count -ne 1 -or
+              $changedPaths[0] -ne 'updates/releases.json') {
+            throw "Release manifest commit contains unexpected paths: $($changedPaths -join ', ')"
+          }
+          $manifestSha = (git rev-parse HEAD).Trim()
+          $parentSha = (git rev-parse HEAD^).Trim()
+          $defaultBranchSha = (git rev-parse `
+            "refs/remotes/origin/$env:DEFAULT_BRANCH").Trim()
+          if ($parentSha -ne $defaultBranchSha) {
+            throw "Release manifest commit is not based on the latest $env:DEFAULT_BRANCH."
+          }
+
+          $safeTag = $env:RELEASE_TAG -replace '[^0-9A-Za-z.-]', '-'
+          $manifestBranch = "automation/release-manifest-$safeTag-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          git push origin "HEAD:refs/heads/$manifestBranch"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to push temporary manifest branch $manifestBranch."
+          }
+          "changed=true" >> $env:GITHUB_OUTPUT
+          "branch=$manifestBranch" >> $env:GITHUB_OUTPUT
+          "sha=$manifestSha" >> $env:GITHUB_OUTPUT
+
+      - name: Validate fallback release manifest commit
+        if: steps.manifest.outputs.changed == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_BRANCH: ${{ steps.manifest.outputs.branch }}
+          MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
+        run: |
+          gh workflow run windows-build.yml --repo $env:GITHUB_REPOSITORY `
+            --ref $env:MANIFEST_BRANCH
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to dispatch manifest validation for $env:MANIFEST_BRANCH."
+          }
+
+          $validationRun = $null
+          for ($attempt = 0; $attempt -lt 60 -and $null -eq $validationRun; ++$attempt) {
+            $runsJson = gh run list --repo $env:GITHUB_REPOSITORY `
+              --workflow windows-build.yml `
+              --branch $env:MANIFEST_BRANCH `
+              --event workflow_dispatch `
+              --limit 10 `
+              --json databaseId,headSha,createdAt
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to query the manifest validation run."
+            }
+            $validationRun = @($runsJson | ConvertFrom-Json |
+              Where-Object { $_.headSha -eq $env:MANIFEST_SHA } |
+              Sort-Object createdAt -Descending |
+              Select-Object -First 1)[0]
+            if ($null -eq $validationRun) { Start-Sleep -Seconds 2 }
+          }
+          if ($null -eq $validationRun) {
+            throw "Timed out waiting for manifest validation to start."
+          }
+
+          gh run watch $validationRun.databaseId --repo $env:GITHUB_REPOSITORY `
+            --exit-status
+          if ($LASTEXITCODE -ne 0) {
+            throw "Manifest validation failed: $($validationRun.databaseId)."
+          }
+
+          $checksJson = gh api `
+            "repos/$env:GITHUB_REPOSITORY/commits/$env:MANIFEST_SHA/check-runs"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to inspect manifest validation checks."
+          }
+          $matchingChecks = @(($checksJson | ConvertFrom-Json).check_runs |
+            Where-Object {
+              $_.name -eq 'build-test' -and
+              $_.app.slug -eq 'github-actions' -and
+              $_.conclusion -eq 'success'
+            })
+          if ($matchingChecks.Count -eq 0) {
+            throw "The manifest commit has no successful GitHub Actions build-test check."
+          }
+
+      - name: Publish fallback release manifest
+        if: steps.manifest.outputs.changed == 'true'
+        shell: pwsh
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch origin `
+            "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to refresh $env:DEFAULT_BRANCH before publishing the manifest."
+          }
+          $parentSha = (git rev-parse HEAD^).Trim()
+          $defaultBranchSha = (git rev-parse `
+            "refs/remotes/origin/$env:DEFAULT_BRANCH").Trim()
+          if ($parentSha -ne $defaultBranchSha) {
+            throw "$env:DEFAULT_BRANCH advanced during manifest validation; rerun the release workflow."
+          }
           git push origin "HEAD:refs/heads/$env:DEFAULT_BRANCH"
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to publish the release manifest to $env:DEFAULT_BRANCH."
+          }
+
+      - name: Delete manifest validation branch
+        if: always() && steps.manifest.outputs.changed == 'true'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          MANIFEST_BRANCH: ${{ steps.manifest.outputs.branch }}
+        run: |
+          git push origin --delete $env:MANIFEST_BRANCH
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Failed to delete temporary branch $env:MANIFEST_BRANCH."
           }
 
       - name: Publish release after asset upload
