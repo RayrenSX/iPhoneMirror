@@ -13,6 +13,10 @@ on:
         description: Existing version tag to build and publish
         required: true
         type: string
+      expected_source_sha:
+        description: Expected tag commit; defaults to the selected workflow ref
+        required: false
+        type: string
 
 permissions:
   actions: write
@@ -51,6 +55,28 @@ jobs:
         with:
           ref: ${{ steps.version.outputs.tag }}
           fetch-depth: 0
+
+      - name: Verify release source commit
+        id: source
+        shell: pwsh
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha || github.sha }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if ($env:EXPECTED_SOURCE_SHA -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "Expected release source must be a full commit SHA."
+          }
+          $releaseSha = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or
+              [string]::IsNullOrWhiteSpace($releaseSha)) {
+            throw "Failed to resolve release tag $env:RELEASE_TAG."
+          }
+          $releaseSha = $releaseSha.Trim()
+          if (-not [string]::Equals($releaseSha, $env:EXPECTED_SOURCE_SHA,
+              [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Release tag $env:RELEASE_TAG resolves to $releaseSha, but the expected source is $env:EXPECTED_SOURCE_SHA."
+          }
+          "sha=$releaseSha" >> $env:GITHUB_OUTPUT
 
       - name: Set up .NET 10 SDK
         uses: actions/setup-dotnet@v6
@@ -551,6 +577,34 @@ jobs:
             throw "Relayed manifest validation status is invalid."
           }
           "status_id=$($status.id)" >> $env:GITHUB_OUTPUT
+
+      - name: Verify release tag before publication
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $tagRefJson = gh api `
+            "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to inspect release tag $env:RELEASE_TAG."
+          }
+          $tagObject = ($tagRefJson | ConvertFrom-Json).object
+          while ($tagObject.type -eq 'tag') {
+            $tagJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/git/tags/$($tagObject.sha)"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to peel release tag $env:RELEASE_TAG."
+            }
+            $tagObject = ($tagJson | ConvertFrom-Json).object
+          }
+          if ($tagObject.type -ne 'commit' -or
+              -not [string]::Equals([string]$tagObject.sha,
+                $env:RELEASE_SOURCE_SHA,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Release tag $env:RELEASE_TAG moved during the release workflow."
+          }
 
       - name: Preflight fallback release manifest
         if: steps.manifest.outputs.changed == 'true'
