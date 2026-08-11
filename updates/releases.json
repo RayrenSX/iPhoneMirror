@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.6.1",
+    "name": "iPhoneMirror v1.6.1",
+    "body": "### Changed\n\n- Upgrade the bundled AirPlay receiver to v1.1.2 and keep its source,\n  licensing, patch and SHA-256 records synchronized.\n- Publish version-tagged Windows releases directly from the GitHub Actions\n  build runner, keeping failed uploads in draft state instead of transferring\n  large packages through an intermediate workflow artifact.\n- Stop producing and uploading the duplicate `-latest.zip` alias; portable\n  updates already prefer the versioned `win-x64.zip` asset.\n\n### Fixed\n\n- Restore wireless iPad screen mirroring by upgrading the AirPlay receiver to\n  v1.1.2 and keeping Bonjour, server-info, and `/info` capability negotiation\n  and receiver identity on the same mode-specific, upstream-compatible profile.",
+    "published_at": "2026-08-11T13:15:04Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.6.1-x64.exe",
+        "size": 91663523,
+        "digest": "sha256:16f641ec18e512654ae964ab3f81e10ae88ef59c82675181d902a964121e0755",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-Setup-v1.6.1-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.1-win-x64.zip",
+        "size": 190379213,
+        "digest": "sha256:bdbb2c35065d7b12830235784342862295ac14a6b9c7f4e4fb1240c06d5c0df7",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-v1.6.1-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.1-win-x64-sbom.spdx.json",
+        "size": 38215,
+        "digest": "sha256:3cb46c22d48f9e627fdd900f5946e3fcafe3ab1f95e0fc29dca2b17efc30f666",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-v1.6.1-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 307,
+        "digest": "sha256:54e57b05d4b0a64cc316a23336a5919ba179fb0c5b40b699b47ffe121986ef0f",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.6.0",
     "name": "iPhoneMirror v1.6.0",
     "body": "v1.6.0 将安装版改为主程序与驱动管理器共享外置 .NET DLL，便携版继续内置运行时和 FFmpeg，并修复安装与便携更新、旧 FFmpeg 清理、外部 FFmpeg 发现及发布校验问题。",
