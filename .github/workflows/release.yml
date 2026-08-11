@@ -632,6 +632,47 @@ jobs:
             }
           })
 
+          function Read-ManifestReleases([string]$Json) {
+            $parsed = $Json | ConvertFrom-Json
+            if ($parsed -is [array]) { return $parsed }
+            if ($parsed.PSObject.Properties.Name -contains 'value') {
+              return $parsed.value
+            }
+            return $parsed
+          }
+
+          function ConvertTo-CanonicalRelease([object]$Release) {
+            $assets = @($Release.assets | Sort-Object { [string]$_.name } |
+              ForEach-Object {
+                [ordered]@{
+                  name = [string]$_.name
+                  size = [long]$_.size
+                  digest = [string]$_.digest
+                  browser_download_url = [string]$_.browser_download_url
+                }
+              })
+            return ([ordered]@{
+              tag_name = [string]$Release.tag_name
+              name = [string]$Release.name
+              body = [string]$Release.body
+              published_at = [string]$Release.published_at
+              draft = [bool]$Release.draft
+              prerelease = [bool]$Release.prerelease
+              assets = $assets
+            } | ConvertTo-Json -Depth 10 -Compress)
+          }
+
+          $localManifest = [IO.File]::ReadAllText(
+            (Join-Path $env:GITHUB_WORKSPACE 'updates/releases.json'),
+            [Text.Encoding]::UTF8)
+          $expectedManifestMatches = @(Read-ManifestReleases $localManifest |
+            Where-Object { $_.tag_name -eq $env:RELEASE_TAG })
+          if ($expectedManifestMatches.Count -ne 1) {
+            throw "Local manifest must contain exactly one $env:RELEASE_TAG entry."
+          }
+          $expectedManifestEntry = ConvertTo-CanonicalRelease `
+            $expectedManifestMatches[0]
+
           function Get-ReleaseState {
             $json = gh release view $env:RELEASE_TAG `
               --repo $env:GITHUB_REPOSITORY --json body,isDraft,assets
@@ -670,6 +711,9 @@ jobs:
           }
 
           function Restore-Draft([string]$Reason) {
+            if ($env:MANIFEST_CHANGED -ne 'true') {
+              throw "$Reason The manifest is already public, so the Release was not returned to draft."
+            }
             gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
               --draft=true
             $redraftExit = $LASTEXITCODE
@@ -691,12 +735,26 @@ jobs:
           function Get-ManifestPublication([string]$RemoteSha) {
             if ([string]::IsNullOrWhiteSpace($RemoteSha)) { return 'unknown' }
             if ($RemoteSha -eq $env:MANIFEST_SHA) { return 'published' }
-            $comparisonJson = gh api `
-              "repos/$env:GITHUB_REPOSITORY/compare/$env:MANIFEST_SHA...$RemoteSha"
+            $contentJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/contents/updates/releases.json?ref=$RemoteSha"
             if ($LASTEXITCODE -ne 0) { return 'unknown' }
-            $status = [string](($comparisonJson | ConvertFrom-Json).status)
-            if ($status -in @('ahead', 'identical')) { return 'published' }
-            return 'not-published'
+            try {
+              $contentResponse = $contentJson | ConvertFrom-Json
+              $bytes = [Convert]::FromBase64String([string]$contentResponse.content)
+              $remoteManifest = [Text.Encoding]::UTF8.GetString($bytes)
+              $matches = @(Read-ManifestReleases $remoteManifest |
+                Where-Object { $_.tag_name -eq $env:RELEASE_TAG })
+              if ($matches.Count -ne 1) { return 'not-published' }
+              $actualEntry = ConvertTo-CanonicalRelease $matches[0]
+              if ([string]::Equals($actualEntry, $expectedManifestEntry,
+                  [StringComparison]::Ordinal)) {
+                return 'published'
+              }
+              return 'not-published'
+            }
+            catch {
+              return 'unknown'
+            }
           }
 
           gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
@@ -710,10 +768,36 @@ jobs:
             Assert-ReleaseContent $release
             $publicUri = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/" +
               [Uri]::EscapeDataString($env:RELEASE_TAG)
-            $publicRelease = Invoke-RestMethod -Uri $publicUri -Headers @{
-              Accept = 'application/vnd.github+json'
-              'X-GitHub-Api-Version' = '2022-11-28'
-              'User-Agent' = 'iPhoneMirror-release-workflow'
+            $publicRelease = $null
+            $publicError = $null
+            for ($attempt = 0; $attempt -lt 6 -and $null -eq $publicRelease; ++$attempt) {
+              try {
+                $candidate = Invoke-RestMethod -Uri $publicUri -Headers @{
+                  Accept = 'application/vnd.github+json'
+                  'X-GitHub-Api-Version' = '2022-11-28'
+                  'User-Agent' = 'iPhoneMirror-release-workflow'
+                }
+                if (-not $candidate.draft -and
+                    @($candidate.assets).Count -eq $expectedNames.Count) {
+                  $publicRelease = $candidate
+                  break
+                }
+                $publicError = 'The public release is incomplete.'
+              }
+              catch {
+                $statusCode = if ($null -ne $_.Exception.Response) {
+                  [int]$_.Exception.Response.StatusCode
+                }
+                else { 0 }
+                $publicError = "Public Release API request failed with HTTP $statusCode."
+              }
+              if ($attempt -lt 5) {
+                $delay = [Math]::Min([Math]::Pow(2, $attempt), 10)
+                Start-Sleep -Seconds $delay
+              }
+            }
+            if ($null -eq $publicRelease) {
+              throw $publicError
             }
             if ($publicRelease.draft -or
                 @($publicRelease.assets).Count -ne $expectedNames.Count) {
@@ -753,17 +837,83 @@ jobs:
         id: reconcile
         if: >-
           always() &&
-          steps.manifest.outputs.changed == 'true' &&
-          steps.validation.outcome == 'success' &&
-          steps.transaction.outcome != 'success'
+          steps.manifest.outcome == 'success' &&
+          steps.transaction.outcome != 'success' &&
+          ((steps.manifest.outputs.changed == 'true' &&
+            steps.validation.outcome == 'success') ||
+           steps.manifest.outputs.changed == 'false')
         continue-on-error: true
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          MANIFEST_CHANGED: ${{ steps.manifest.outputs.changed }}
           MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
         run: |
+          function Read-ManifestReleases([string]$Json) {
+            $parsed = $Json | ConvertFrom-Json
+            if ($parsed -is [array]) { return $parsed }
+            if ($parsed.PSObject.Properties.Name -contains 'value') {
+              return $parsed.value
+            }
+            return $parsed
+          }
+
+          function ConvertTo-CanonicalRelease([object]$Release) {
+            $assets = @($Release.assets | Sort-Object { [string]$_.name } |
+              ForEach-Object {
+                [ordered]@{
+                  name = [string]$_.name
+                  size = [long]$_.size
+                  digest = [string]$_.digest
+                  browser_download_url = [string]$_.browser_download_url
+                }
+              })
+            return ([ordered]@{
+              tag_name = [string]$Release.tag_name
+              name = [string]$Release.name
+              body = [string]$Release.body
+              published_at = [string]$Release.published_at
+              draft = [bool]$Release.draft
+              prerelease = [bool]$Release.prerelease
+              assets = $assets
+            } | ConvertTo-Json -Depth 10 -Compress)
+          }
+
+          $localManifest = [IO.File]::ReadAllText(
+            (Join-Path $env:GITHUB_WORKSPACE 'updates/releases.json'),
+            [Text.Encoding]::UTF8)
+          $expectedMatches = @(Read-ManifestReleases $localManifest |
+            Where-Object { $_.tag_name -eq $env:RELEASE_TAG })
+          if ($expectedMatches.Count -ne 1) {
+            throw "Local manifest must contain exactly one $env:RELEASE_TAG entry."
+          }
+          $expectedEntry = ConvertTo-CanonicalRelease $expectedMatches[0]
+
+          function Get-RemoteManifestState([string]$RemoteSha) {
+            $contentJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/contents/updates/releases.json?ref=$RemoteSha"
+            if ($LASTEXITCODE -ne 0) { return 'unknown' }
+            try {
+              $contentResponse = $contentJson | ConvertFrom-Json
+              $bytes = [Convert]::FromBase64String([string]$contentResponse.content)
+              $remoteManifest = [Text.Encoding]::UTF8.GetString($bytes)
+              $matches = @(Read-ManifestReleases $remoteManifest |
+                Where-Object { $_.tag_name -eq $env:RELEASE_TAG })
+              if ($matches.Count -ne 1) { return 'invalid' }
+              $actualEntry = ConvertTo-CanonicalRelease $matches[0]
+              if ([string]::Equals($actualEntry, $expectedEntry,
+                  [StringComparison]::Ordinal)) {
+                return 'valid'
+              }
+              return 'invalid'
+            }
+            catch {
+              return 'unknown'
+            }
+          }
+
           $releaseJson = gh release view $env:RELEASE_TAG `
             --repo $env:GITHUB_REPOSITORY --json isDraft
           if ($LASTEXITCODE -ne 0) {
@@ -777,16 +927,17 @@ jobs:
             throw "Unable to inspect $env:DEFAULT_BRANCH during reconciliation."
           }
           $remoteSha = [string](($refJson | ConvertFrom-Json).object.sha)
-          $manifestPublished = $remoteSha -eq $env:MANIFEST_SHA
-          if (-not $manifestPublished) {
-            $comparisonJson = gh api `
-              "repos/$env:GITHUB_REPOSITORY/compare/$env:MANIFEST_SHA...$remoteSha"
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Unable to determine manifest publication during reconciliation.'
-            }
-            $comparisonStatus = [string](($comparisonJson | ConvertFrom-Json).status)
-            $manifestPublished = $comparisonStatus -in @('ahead', 'identical')
+          $manifestState = if ($env:MANIFEST_CHANGED -eq 'true' -and
+              $remoteSha -eq $env:MANIFEST_SHA) {
+            'valid'
           }
+          else {
+            Get-RemoteManifestState $remoteSha
+          }
+          if ($manifestState -eq 'unknown') {
+            throw 'Unable to validate the current remote release manifest.'
+          }
+          $manifestPublished = $manifestState -eq 'valid'
 
           if ($manifestPublished -and $release.isDraft) {
             gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
