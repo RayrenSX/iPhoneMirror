@@ -236,15 +236,16 @@ jobs:
 
           $safeTag = $env:RELEASE_TAG -replace '[^0-9A-Za-z.-]', '-'
           $manifestBranch = "automation/release-manifest-$safeTag-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "changed=true" >> $env:GITHUB_OUTPUT
+          "branch=$manifestBranch" >> $env:GITHUB_OUTPUT
+          "sha=$manifestSha" >> $env:GITHUB_OUTPUT
           git push origin "HEAD:refs/heads/$manifestBranch"
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to push temporary manifest branch $manifestBranch."
           }
-          "changed=true" >> $env:GITHUB_OUTPUT
-          "branch=$manifestBranch" >> $env:GITHUB_OUTPUT
-          "sha=$manifestSha" >> $env:GITHUB_OUTPUT
 
       - name: Validate fallback release manifest commit
+        id: validation
         if: steps.manifest.outputs.changed == 'true'
         shell: pwsh
         env:
@@ -278,6 +279,9 @@ jobs:
           if ($null -eq $validationRun) {
             throw "Timed out waiting for manifest validation to start."
           }
+          "run_id=$($validationRun.databaseId)" >> $env:GITHUB_OUTPUT
+          "run_url=$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$($validationRun.databaseId)" >> `
+            $env:GITHUB_OUTPUT
 
           gh run watch $validationRun.databaseId --repo $env:GITHUB_REPOSITORY `
             --exit-status
@@ -309,6 +313,7 @@ jobs:
           MANIFEST_BRANCH: ${{ steps.manifest.outputs.branch }}
           MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          VALIDATION_RUN_URL: ${{ steps.validation.outputs.run_url }}
         run: |
           git fetch origin `
             "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
@@ -326,7 +331,7 @@ jobs:
           Publishes the fallback update manifest for $env:RELEASE_TAG.
 
           The exact manifest commit was validated by the required build-test workflow:
-          $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          $env:VALIDATION_RUN_URL
           "@
           $prOutput = @(gh pr create `
             --repo $env:GITHUB_REPOSITORY `
@@ -339,26 +344,47 @@ jobs:
             throw "Failed to create the release manifest pull request."
           }
           $prUrl = ([string]$prOutput[-1]).Trim()
-          $prJson = gh pr view $prUrl --repo $env:GITHUB_REPOSITORY `
-            --json number,baseRefName,headRefOid,state
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to inspect release manifest pull request $prUrl."
-          }
-          $pr = $prJson | ConvertFrom-Json
-          if ($pr.state -ne 'OPEN' -or
-              $pr.baseRefName -ne $env:DEFAULT_BRANCH -or
-              $pr.headRefOid -ne $env:MANIFEST_SHA) {
-            throw "Release manifest pull request does not match the validated commit."
+          $pr = $null
+          for ($attempt = 0; $attempt -lt 60; ++$attempt) {
+            $prJson = gh pr view $prUrl --repo $env:GITHUB_REPOSITORY `
+              --json number,baseRefName,baseRefOid,headRefOid,state,mergeStateStatus,statusCheckRollup
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to inspect release manifest pull request $prUrl."
+            }
+            $pr = $prJson | ConvertFrom-Json
+            if ($pr.state -ne 'OPEN' -or
+                $pr.baseRefName -ne $env:DEFAULT_BRANCH -or
+                $pr.baseRefOid -ne $defaultBranchSha -or
+                $pr.headRefOid -ne $env:MANIFEST_SHA) {
+              throw "Release manifest pull request no longer matches the validated commits."
+            }
+            $requiredCheck = @($pr.statusCheckRollup | Where-Object {
+              $_.name -eq 'build-test' -and $_.conclusion -eq 'SUCCESS'
+            })
+            if ($requiredCheck.Count -gt 0 -and
+                $pr.mergeStateStatus -eq 'CLEAN') {
+              break
+            }
+            if ($attempt -eq 59) {
+              throw "Release manifest pull request did not become mergeable."
+            }
+            Start-Sleep -Seconds 2
           }
 
-          gh pr merge $pr.number --repo $env:GITHUB_REPOSITORY --squash
+          gh pr merge $pr.number --repo $env:GITHUB_REPOSITORY --squash `
+            --match-head-commit $env:MANIFEST_SHA
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to merge release manifest pull request #$($pr.number)."
           }
           $mergedJson = gh pr view $pr.number --repo $env:GITHUB_REPOSITORY `
-            --json state
-          if ($LASTEXITCODE -ne 0 -or
-              ($mergedJson | ConvertFrom-Json).state -ne 'MERGED') {
+            --json state,mergeCommit
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to inspect merged release manifest pull request #$($pr.number)."
+          }
+          $mergedPr = $mergedJson | ConvertFrom-Json
+          $mergeSha = [string]$mergedPr.mergeCommit.oid
+          if ($mergedPr.state -ne 'MERGED' -or
+              [string]::IsNullOrWhiteSpace($mergeSha)) {
             throw "Release manifest pull request #$($pr.number) was not merged."
           }
 
@@ -367,12 +393,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to verify the published release manifest."
           }
-          $validatedBlob = (git rev-parse `
-            "${env:MANIFEST_SHA}:updates/releases.json").Trim()
-          $publishedBlob = (git rev-parse `
-            "refs/remotes/origin/$env:DEFAULT_BRANCH`:updates/releases.json").Trim()
-          if ($validatedBlob -ne $publishedBlob) {
-            throw "Published release manifest differs from the validated manifest."
+
+          function Resolve-GitObject([string]$Spec) {
+            $object = git rev-parse $Spec
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($object)) {
+              throw "Failed to resolve Git object $Spec."
+            }
+            return ([string]$object).Trim()
+          }
+
+          git merge-base --is-ancestor $mergeSha `
+            "refs/remotes/origin/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Merged release manifest commit is not on $env:DEFAULT_BRANCH."
+          }
+          $validatedTree = Resolve-GitObject "${env:MANIFEST_SHA}^{tree}"
+          $mergedTree = Resolve-GitObject "${mergeSha}^{tree}"
+          if ($validatedTree -ne $mergedTree) {
+            throw "Merged release manifest tree differs from the validated tree."
+          }
+          $validatedBlob = Resolve-GitObject `
+            "${env:MANIFEST_SHA}:updates/releases.json"
+          $mergedBlob = Resolve-GitObject `
+            "${mergeSha}:updates/releases.json"
+          if ($validatedBlob -ne $mergedBlob) {
+            throw "Merged release manifest differs from the validated manifest."
           }
 
       - name: Delete manifest validation branch
