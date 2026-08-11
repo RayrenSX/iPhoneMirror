@@ -18,6 +18,7 @@ permissions:
   actions: write
   checks: read
   contents: write
+  pull-requests: write
 
 concurrency:
   group: windows-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -303,7 +304,11 @@ jobs:
         if: steps.manifest.outputs.changed == 'true'
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          MANIFEST_BRANCH: ${{ steps.manifest.outputs.branch }}
+          MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           git fetch origin `
             "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
@@ -316,9 +321,58 @@ jobs:
           if ($parentSha -ne $defaultBranchSha) {
             throw "$env:DEFAULT_BRANCH advanced during manifest validation; rerun the release workflow."
           }
-          git push origin "HEAD:refs/heads/$env:DEFAULT_BRANCH"
+
+          $prBody = @"
+          Publishes the fallback update manifest for $env:RELEASE_TAG.
+
+          The exact manifest commit was validated by the required build-test workflow:
+          $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          "@
+          $prOutput = @(gh pr create `
+            --repo $env:GITHUB_REPOSITORY `
+            --base $env:DEFAULT_BRANCH `
+            --head $env:MANIFEST_BRANCH `
+            --title "Update $env:RELEASE_TAG release manifest" `
+            --body $prBody)
+          $prExit = $LASTEXITCODE
+          if ($prExit -ne 0 -or $prOutput.Count -eq 0) {
+            throw "Failed to create the release manifest pull request."
+          }
+          $prUrl = ([string]$prOutput[-1]).Trim()
+          $prJson = gh pr view $prUrl --repo $env:GITHUB_REPOSITORY `
+            --json number,baseRefName,headRefOid,state
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to publish the release manifest to $env:DEFAULT_BRANCH."
+            throw "Failed to inspect release manifest pull request $prUrl."
+          }
+          $pr = $prJson | ConvertFrom-Json
+          if ($pr.state -ne 'OPEN' -or
+              $pr.baseRefName -ne $env:DEFAULT_BRANCH -or
+              $pr.headRefOid -ne $env:MANIFEST_SHA) {
+            throw "Release manifest pull request does not match the validated commit."
+          }
+
+          gh pr merge $pr.number --repo $env:GITHUB_REPOSITORY --squash
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to merge release manifest pull request #$($pr.number)."
+          }
+          $mergedJson = gh pr view $pr.number --repo $env:GITHUB_REPOSITORY `
+            --json state
+          if ($LASTEXITCODE -ne 0 -or
+              ($mergedJson | ConvertFrom-Json).state -ne 'MERGED') {
+            throw "Release manifest pull request #$($pr.number) was not merged."
+          }
+
+          git fetch origin `
+            "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to verify the published release manifest."
+          }
+          $validatedBlob = (git rev-parse `
+            "${env:MANIFEST_SHA}:updates/releases.json").Trim()
+          $publishedBlob = (git rev-parse `
+            "refs/remotes/origin/$env:DEFAULT_BRANCH`:updates/releases.json").Trim()
+          if ($validatedBlob -ne $publishedBlob) {
+            throw "Published release manifest differs from the validated manifest."
           }
 
       - name: Delete manifest validation branch
@@ -326,8 +380,35 @@ jobs:
         continue-on-error: true
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           MANIFEST_BRANCH: ${{ steps.manifest.outputs.branch }}
         run: |
+          $prsJson = gh pr list --repo $env:GITHUB_REPOSITORY `
+            --state open --head $env:MANIFEST_BRANCH --limit 1 --json number
+          if ($LASTEXITCODE -eq 0) {
+            $openPr = @($prsJson | ConvertFrom-Json)[0]
+            if ($null -ne $openPr) {
+              gh pr close $openPr.number --repo $env:GITHUB_REPOSITORY `
+                --delete-branch
+              if ($LASTEXITCODE -eq 0) { exit 0 }
+              Write-Warning "Failed to close release manifest pull request #$($openPr.number)."
+            }
+          }
+          else {
+            Write-Warning "Failed to inspect release manifest pull requests."
+          }
+
+          git ls-remote --exit-code --heads origin `
+            "refs/heads/$env:MANIFEST_BRANCH" *> $null
+          $branchExit = $LASTEXITCODE
+          if ($branchExit -eq 2) {
+            Write-Host "Temporary branch $env:MANIFEST_BRANCH is already deleted."
+            exit 0
+          }
+          if ($branchExit -ne 0) {
+            Write-Warning "Failed to inspect temporary branch $env:MANIFEST_BRANCH."
+            exit 0
+          }
           git push origin --delete $env:MANIFEST_BRANCH
           if ($LASTEXITCODE -ne 0) {
             Write-Warning "Failed to delete temporary branch $env:MANIFEST_BRANCH."
