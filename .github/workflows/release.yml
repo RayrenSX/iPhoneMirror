@@ -84,22 +84,176 @@ jobs:
           -GenerateSbom
           -UpdateReleaseManifest
 
+      - name: Prepare release notes
+        id: notes
+        shell: pwsh
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $expectedNames = @(
+            "iPhoneMirror-Setup-v$env:RELEASE_VERSION-x64.exe",
+            "iPhoneMirror-v$env:RELEASE_VERSION-win-x64.zip",
+            "iPhoneMirror-v$env:RELEASE_VERSION-win-x64-sbom.spdx.json",
+            "SHA256SUMS.txt"
+          )
+          $descriptions = @{
+            $expectedNames[0] = 'Windows x64 安装程序，支持覆盖升级与卸载。'
+            $expectedNames[1] = '免安装便携版，完整解压后运行。'
+            $expectedNames[2] = 'SPDX 2.2 软件物料清单。'
+            $expectedNames[3] = '全部公开 Release 资产的 SHA-256 校验清单。'
+          }
+
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'updates/releases.json'
+          $manifestJson = [IO.File]::ReadAllText(
+            $manifestPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+          $manifestReleases = if ($manifestJson -is [array]) {
+            @($manifestJson)
+          }
+          elseif ($manifestJson.PSObject.Properties.Name -contains 'value') {
+            @($manifestJson.value)
+          }
+          else {
+            @($manifestJson)
+          }
+          $manifestMatches = @($manifestReleases | Where-Object {
+            [string]::Equals([string]$_.tag_name, $env:RELEASE_TAG,
+              [StringComparison]::OrdinalIgnoreCase)
+          })
+          if ($manifestMatches.Count -ne 1) {
+            throw "Generated manifest must contain exactly one $env:RELEASE_TAG entry."
+          }
+          $manifestAssets = @($manifestMatches[0].assets)
+          if ($manifestAssets.Count -ne $expectedNames.Count) {
+            throw "Generated manifest must contain exactly $($expectedNames.Count) release assets."
+          }
+
+          $assetRecords = @($expectedNames | ForEach-Object {
+            $name = $_
+            $path = Join-Path $env:GITHUB_WORKSPACE "outputs/releases/$name"
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Expected release asset is missing: $name"
+            }
+            $item = Get-Item -LiteralPath $path
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            $manifestAsset = @($manifestAssets | Where-Object {
+              [string]::Equals([string]$_.name, $name,
+                [StringComparison]::Ordinal)
+            })
+            if ($manifestAsset.Count -ne 1 -or
+                [long]$manifestAsset[0].size -ne $item.Length -or
+                -not [string]::Equals([string]$manifestAsset[0].digest,
+                  "sha256:$hash", [StringComparison]::OrdinalIgnoreCase)) {
+              throw "Generated manifest does not match the local release asset: $name"
+            }
+            [PSCustomObject]@{
+              Name = $name
+              Path = $path
+              Size = [long]$item.Length
+              Hash = $hash
+            }
+          })
+
+          $checksumPath = Join-Path $env:GITHUB_WORKSPACE `
+            'outputs/releases/SHA256SUMS.txt'
+          $checksumEntries = @(Get-Content -LiteralPath $checksumPath -Encoding utf8 |
+            ForEach-Object {
+              if ($_ -notmatch '^([0-9a-fA-F]{64})  (.+)$') {
+                throw "Invalid SHA256SUMS.txt entry: $_"
+              }
+              [PSCustomObject]@{
+                Hash = $Matches[1].ToLowerInvariant()
+                Name = $Matches[2]
+              }
+            })
+          $hashedAssets = @($assetRecords | Where-Object {
+            $_.Name -ne 'SHA256SUMS.txt'
+          })
+          if ($checksumEntries.Count -ne $hashedAssets.Count) {
+            throw 'SHA256SUMS.txt must cover every non-checksum release asset exactly once.'
+          }
+          foreach ($asset in $hashedAssets) {
+            $matches = @($checksumEntries | Where-Object { $_.Name -eq $asset.Name })
+            if ($matches.Count -ne 1 -or $matches[0].Hash -ne $asset.Hash) {
+              throw "SHA256SUMS.txt does not match $($asset.Name)."
+            }
+          }
+
+          git fetch origin `
+            "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch release notes from $env:DEFAULT_BRANCH."
+          }
+          $templateSpec = "$env:WORKFLOW_SHA`:docs/releases/$env:RELEASE_TAG.md"
+          $templateLines = @(git show $templateSpec)
+          if ($LASTEXITCODE -ne 0 -or $templateLines.Count -eq 0) {
+            throw "Release notes template is missing: docs/releases/$env:RELEASE_TAG.md"
+          }
+          $template = ($templateLines -join "`n").Trim()
+          if ([regex]::IsMatch($template,
+              '(?mi)^#{1,6}[ \t]*(?:中文|英文)[ \t]*$')) {
+            throw 'Release notes must not contain standalone Chinese or English labels.'
+          }
+          if ([regex]::IsMatch($template,
+              '(?mi)^##[ \t]+发布资产[ \t]*$|<!-- release-assets:')) {
+            throw 'The release notes template must not contain a generated asset section.'
+          }
+          $firstChinese = [regex]::Match($template, '[\u3400-\u9fff]')
+          $firstEnglishHeading = [regex]::Match($template,
+            '(?m)^### (?:Added|Changed|Fixed|Removed|Security|Notes)$')
+          if (-not $firstChinese.Success -or -not $firstEnglishHeading.Success -or
+              $firstChinese.Index -gt $firstEnglishHeading.Index) {
+            throw 'Release notes must place the Chinese content above the English content.'
+          }
+
+          $assetSection = [Collections.Generic.List[string]]::new()
+          $assetSection.Add('<!-- release-assets:start -->')
+          $assetSection.Add('## 发布资产')
+          $assetSection.Add('')
+          foreach ($asset in $assetRecords) {
+            $assetSection.Add("- ``$($asset.Name)``：$($descriptions[$asset.Name])")
+          }
+          $assetSection.Add('')
+          $assetSection.Add('| 资产 | 大小 | SHA-256 |')
+          $assetSection.Add('| --- | ---: | --- |')
+          foreach ($asset in $assetRecords) {
+            $size = $asset.Size.ToString('N0', [Globalization.CultureInfo]::InvariantCulture)
+            $assetSection.Add("| ``$($asset.Name)`` | $size bytes | ``$($asset.Hash)`` |")
+          }
+          $assetSection.Add('<!-- release-assets:end -->')
+
+          $notesPath = Join-Path $env:RUNNER_TEMP `
+            "release-notes-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.md"
+          $notes = $template + "`n`n" + ($assetSection -join "`n") + "`n"
+          [IO.File]::WriteAllText($notesPath, $notes,
+            [Text.UTF8Encoding]::new($false))
+          "path=$notesPath" >> $env:GITHUB_OUTPUT
+
       - name: Create draft release when needed
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.path }}
         run: |
-          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $env:RELEASE_TAG `
-              --repo $env:GITHUB_REPOSITORY `
-              --draft `
-              --generate-notes `
-              --verify-tag `
-              --title "iPhoneMirror $env:RELEASE_TAG"
-            if ($LASTEXITCODE -ne 0) { throw "Failed to create draft release $env:RELEASE_TAG" }
+          $releaseJson = gh release view $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY --json isDraft 2> $null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $releaseJson | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              throw "Release $env:RELEASE_TAG is already public; refusing to overwrite its assets."
+            }
+            exit 0
           }
+          gh release create $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --draft `
+            --notes-file $env:RELEASE_NOTES `
+            --verify-tag `
+            --title "iPhoneMirror $env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to create draft release $env:RELEASE_TAG" }
 
       - name: Upload release assets directly
         shell: pwsh
@@ -130,6 +284,81 @@ jobs:
           gh release upload $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
             @assetPaths --clobber
           if ($LASTEXITCODE -ne 0) { throw "Failed to upload release assets for $env:RELEASE_TAG" }
+
+      - name: Verify uploaded assets and update release notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.path }}
+        run: |
+          $expectedNames = @(
+            "iPhoneMirror-Setup-v$env:RELEASE_VERSION-x64.exe",
+            "iPhoneMirror-v$env:RELEASE_VERSION-win-x64.zip",
+            "iPhoneMirror-v$env:RELEASE_VERSION-win-x64-sbom.spdx.json",
+            "SHA256SUMS.txt"
+          )
+          $localAssets = @($expectedNames | ForEach-Object {
+            $path = Join-Path $env:GITHUB_WORKSPACE "outputs/releases/$_"
+            $item = Get-Item -LiteralPath $path
+            [PSCustomObject]@{
+              Name = $_
+              Size = [long]$item.Length
+              Digest = 'sha256:' + (Get-FileHash -LiteralPath $path `
+                -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          })
+
+          function Get-ReleaseState {
+            $json = gh release view $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY --json body,isDraft,assets
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to inspect release $env:RELEASE_TAG."
+            }
+            return $json | ConvertFrom-Json
+          }
+
+          function Assert-ReleaseAssets([object]$Release) {
+            if (-not $Release.isDraft) {
+              throw "Release $env:RELEASE_TAG became public before validation completed."
+            }
+            $remoteAssets = @($Release.assets)
+            if ($remoteAssets.Count -ne $localAssets.Count) {
+              throw "Release $env:RELEASE_TAG has an unexpected asset count."
+            }
+            foreach ($local in $localAssets) {
+              $matches = @($remoteAssets | Where-Object {
+                [string]::Equals([string]$_.name, $local.Name,
+                  [StringComparison]::Ordinal)
+              })
+              if ($matches.Count -ne 1 -or
+                  [string]$matches[0].state -ne 'uploaded' -or
+                  [long]$matches[0].size -ne $local.Size -or
+                  -not [string]::Equals([string]$matches[0].digest,
+                    $local.Digest, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Uploaded release asset does not match the build output: $($local.Name)"
+              }
+            }
+          }
+
+          $release = Get-ReleaseState
+          Assert-ReleaseAssets $release
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
+            --notes-file $env:RELEASE_NOTES
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to update release notes for $env:RELEASE_TAG."
+          }
+
+          $updatedRelease = Get-ReleaseState
+          Assert-ReleaseAssets $updatedRelease
+          $expectedBody = [IO.File]::ReadAllText(
+            $env:RELEASE_NOTES, [Text.Encoding]::UTF8) -replace "`r`n", "`n"
+          $actualBody = ([string]$updatedRelease.body) -replace "`r`n", "`n"
+          if (-not [string]::Equals($actualBody.TrimEnd(),
+              $expectedBody.TrimEnd(), [StringComparison]::Ordinal)) {
+            throw "Published release notes do not match the generated notes for $env:RELEASE_TAG."
+          }
 
       - name: Prepare fallback release manifest commit
         id: manifest
@@ -322,12 +551,13 @@ jobs:
             throw "Relayed manifest validation status is invalid."
           }
 
-      - name: Publish fallback release manifest
+      - name: Preflight fallback release manifest
         if: steps.manifest.outputs.changed == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          MANIFEST_BRANCH: ${{ steps.manifest.outputs.branch }}
           MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
           VALIDATION_RUN_URL: ${{ steps.validation.outputs.run_url }}
         run: |
@@ -359,24 +589,239 @@ jobs:
             throw "The manifest commit has no valid relayed build-test status."
           }
 
-          git push origin "HEAD:refs/heads/$env:DEFAULT_BRANCH"
+          $headSha = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $headSha -ne $env:MANIFEST_SHA) {
+            throw 'The checked-out manifest commit does not match the validated SHA.'
+          }
+          $branchJson = gh api `
+            "repos/$env:GITHUB_REPOSITORY/git/ref/heads/$env:MANIFEST_BRANCH"
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to publish the release manifest to $env:DEFAULT_BRANCH."
+            throw "Failed to inspect temporary branch $env:MANIFEST_BRANCH."
+          }
+          $branchSha = [string](($branchJson | ConvertFrom-Json).object.sha)
+          if ($branchSha -ne $env:MANIFEST_SHA) {
+            throw "Temporary branch $env:MANIFEST_BRANCH no longer points to the validated commit."
           }
 
-          git fetch origin `
-            "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
+      - name: Publish release and fallback manifest
+        id: transaction
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.path }}
+          MANIFEST_CHANGED: ${{ steps.manifest.outputs.changed }}
+          MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
+        run: |
+          $expectedNames = @(
+            "iPhoneMirror-Setup-v$env:RELEASE_VERSION-x64.exe",
+            "iPhoneMirror-v$env:RELEASE_VERSION-win-x64.zip",
+            "iPhoneMirror-v$env:RELEASE_VERSION-win-x64-sbom.spdx.json",
+            "SHA256SUMS.txt"
+          )
+          $localAssets = @($expectedNames | ForEach-Object {
+            $path = Join-Path $env:GITHUB_WORKSPACE "outputs/releases/$_"
+            $item = Get-Item -LiteralPath $path
+            [PSCustomObject]@{
+              Name = $_
+              Size = [long]$item.Length
+              Digest = 'sha256:' + (Get-FileHash -LiteralPath $path `
+                -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          })
+
+          function Get-ReleaseState {
+            $json = gh release view $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY --json body,isDraft,assets
+            if ($LASTEXITCODE -ne 0) { return $null }
+            return $json | ConvertFrom-Json
+          }
+
+          function Assert-ReleaseContent([object]$Release) {
+            if ($null -eq $Release -or $Release.isDraft) {
+              throw "Release $env:RELEASE_TAG is not public."
+            }
+            $remoteAssets = @($Release.assets)
+            if ($remoteAssets.Count -ne $localAssets.Count) {
+              throw "Public release $env:RELEASE_TAG has an unexpected asset count."
+            }
+            foreach ($local in $localAssets) {
+              $matches = @($remoteAssets | Where-Object {
+                [string]::Equals([string]$_.name, $local.Name,
+                  [StringComparison]::Ordinal)
+              })
+              if ($matches.Count -ne 1 -or
+                  [string]$matches[0].state -ne 'uploaded' -or
+                  [long]$matches[0].size -ne $local.Size -or
+                  -not [string]::Equals([string]$matches[0].digest,
+                    $local.Digest, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Public release asset does not match the build output: $($local.Name)"
+              }
+            }
+            $expectedBody = [IO.File]::ReadAllText(
+              $env:RELEASE_NOTES, [Text.Encoding]::UTF8) -replace "`r`n", "`n"
+            $actualBody = ([string]$Release.body) -replace "`r`n", "`n"
+            if (-not [string]::Equals($actualBody.TrimEnd(),
+                $expectedBody.TrimEnd(), [StringComparison]::Ordinal)) {
+              throw "Public release notes do not match the generated notes for $env:RELEASE_TAG."
+            }
+          }
+
+          function Restore-Draft([string]$Reason) {
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
+              --draft=true
+            $redraftExit = $LASTEXITCODE
+            $release = Get-ReleaseState
+            if ($redraftExit -eq 0 -and $null -ne $release -and $release.isDraft) {
+              "cleanup_branch=true" >> $env:GITHUB_OUTPUT
+              throw "$Reason Release $env:RELEASE_TAG was returned to draft state."
+            }
+            throw "$Reason Failed to restore draft state; manual recovery is required."
+          }
+
+          function Get-DefaultBranchSha {
+            $refJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/git/ref/heads/$env:DEFAULT_BRANCH"
+            if ($LASTEXITCODE -ne 0) { return $null }
+            return [string](($refJson | ConvertFrom-Json).object.sha)
+          }
+
+          function Get-ManifestPublication([string]$RemoteSha) {
+            if ([string]::IsNullOrWhiteSpace($RemoteSha)) { return 'unknown' }
+            if ($RemoteSha -eq $env:MANIFEST_SHA) { return 'published' }
+            $comparisonJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/compare/$env:MANIFEST_SHA...$RemoteSha"
+            if ($LASTEXITCODE -ne 0) { return 'unknown' }
+            $status = [string](($comparisonJson | ConvertFrom-Json).status)
+            if ($status -in @('ahead', 'identical')) { return 'published' }
+            return 'not-published'
+          }
+
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
+            --draft=false
+          $releaseEditExit = $LASTEXITCODE
+          $release = Get-ReleaseState
+          if ($releaseEditExit -ne 0 -and ($null -eq $release -or $release.isDraft)) {
+            Restore-Draft "Failed to publish release $env:RELEASE_TAG."
+          }
+          try {
+            Assert-ReleaseContent $release
+            $publicUri = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/" +
+              [Uri]::EscapeDataString($env:RELEASE_TAG)
+            $publicRelease = Invoke-RestMethod -Uri $publicUri -Headers @{
+              Accept = 'application/vnd.github+json'
+              'X-GitHub-Api-Version' = '2022-11-28'
+              'User-Agent' = 'iPhoneMirror-release-workflow'
+            }
+            if ($publicRelease.draft -or
+                @($publicRelease.assets).Count -ne $expectedNames.Count) {
+              throw 'The unauthenticated Release API does not expose the complete release.'
+            }
+            foreach ($name in $expectedNames) {
+              if (@($publicRelease.assets | Where-Object { $_.name -eq $name }).Count -ne 1) {
+                throw "The unauthenticated Release API does not expose asset $name."
+              }
+            }
+          }
+          catch {
+            Restore-Draft "Release publication verification failed: $($_.Exception.Message)"
+          }
+
+          if ($env:MANIFEST_CHANGED -ne 'true') {
+            "cleanup_branch=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          git push origin "HEAD:refs/heads/$env:DEFAULT_BRANCH"
+          $pushExit = $LASTEXITCODE
+          $remoteSha = Get-DefaultBranchSha
+          $publication = Get-ManifestPublication $remoteSha
+          if ($publication -eq 'not-published') {
+            Restore-Draft "Failed to publish the release manifest to $env:DEFAULT_BRANCH."
+          }
+          if ($publication -eq 'unknown') {
+            throw "Unable to determine whether the release manifest reached $env:DEFAULT_BRANCH; the public Release was left unchanged."
+          }
+          if ($pushExit -ne 0) {
+            Write-Warning 'git push reported an error, but the validated manifest is present on the default branch.'
+          }
+          "cleanup_branch=true" >> $env:GITHUB_OUTPUT
+
+      - name: Reconcile interrupted release transaction
+        id: reconcile
+        if: >-
+          always() &&
+          steps.manifest.outputs.changed == 'true' &&
+          steps.validation.outcome == 'success' &&
+          steps.transaction.outcome != 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
+        run: |
+          $releaseJson = gh release view $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY --json isDraft
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to verify the published release manifest."
+            throw "Unable to inspect release $env:RELEASE_TAG during reconciliation."
           }
-          $publishedSha = (git rev-parse `
-            "refs/remotes/origin/$env:DEFAULT_BRANCH").Trim()
-          if ($publishedSha -ne $env:MANIFEST_SHA) {
-            throw "Published release manifest SHA does not match the validated commit."
+          $release = $releaseJson | ConvertFrom-Json
+
+          $refJson = gh api `
+            "repos/$env:GITHUB_REPOSITORY/git/ref/heads/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to inspect $env:DEFAULT_BRANCH during reconciliation."
           }
+          $remoteSha = [string](($refJson | ConvertFrom-Json).object.sha)
+          $manifestPublished = $remoteSha -eq $env:MANIFEST_SHA
+          if (-not $manifestPublished) {
+            $comparisonJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/compare/$env:MANIFEST_SHA...$remoteSha"
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Unable to determine manifest publication during reconciliation.'
+            }
+            $comparisonStatus = [string](($comparisonJson | ConvertFrom-Json).status)
+            $manifestPublished = $comparisonStatus -in @('ahead', 'identical')
+          }
+
+          if ($manifestPublished -and $release.isDraft) {
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
+              --draft=false
+            if ($LASTEXITCODE -ne 0) {
+              throw 'The manifest is public, but the Release could not be republished.'
+            }
+            $releaseJson = gh release view $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY --json isDraft
+            if ($LASTEXITCODE -ne 0 -or ($releaseJson | ConvertFrom-Json).isDraft) {
+              throw 'The manifest is public, but the Release remains a draft.'
+            }
+          }
+          elseif (-not $manifestPublished -and -not $release.isDraft) {
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY `
+              --draft=true
+            if ($LASTEXITCODE -ne 0) {
+              throw 'The manifest is not public, but the Release could not be returned to draft.'
+            }
+            $releaseJson = gh release view $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY --json isDraft
+            if ($LASTEXITCODE -ne 0 -or -not ($releaseJson | ConvertFrom-Json).isDraft) {
+              throw 'The manifest is not public, but the Release remains public.'
+            }
+          }
+
+          "cleanup_branch=true" >> $env:GITHUB_OUTPUT
 
       - name: Delete manifest validation branch
-        if: always() && steps.manifest.outputs.changed == 'true'
+        if: >-
+          always() &&
+          steps.manifest.outputs.changed == 'true' &&
+          (steps.validation.outcome != 'success' ||
+           steps.transaction.outputs.cleanup_branch == 'true' ||
+           steps.reconcile.outputs.cleanup_branch == 'true')
         continue-on-error: true
         shell: pwsh
         env:
@@ -397,12 +842,3 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             Write-Warning "Failed to delete temporary branch $env:MANIFEST_BRANCH."
           }
-
-      - name: Publish release after asset upload
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false
-          if ($LASTEXITCODE -ne 0) { throw "Failed to publish release $env:RELEASE_TAG" }
