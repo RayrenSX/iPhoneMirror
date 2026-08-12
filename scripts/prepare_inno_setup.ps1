@@ -111,11 +111,13 @@ function Write-CompatibleTraditionalChineseTranslation(
             '<60A8><5FC5><9808><767B><5165><6210><7CFB><7D71><7BA1><7406><54E1>' =
                 '<60A8><5FC5><9808><4EE5><7CFB><7D71><7BA1><7406><54E1><8EAB><5206><767B><5165>'
             '<5EFA><7ACB><684C><9762><5716><793A>' = '<5EFA><7ACB><684C><9762><6377><5F91>'
-        }
+    }
     foreach ($replacement in $replacements.GetEnumerator()) {
+        $sourceText = ConvertFrom-HexEscapes ([string]$replacement.Key)
+        $destinationText = ConvertFrom-HexEscapes ([string]$replacement.Value)
         $content = $content.Replace(
-            (ConvertFrom-HexEscapes [string]$replacement.Key),
-            (ConvertFrom-HexEscapes [string]$replacement.Value))
+            $sourceText,
+            $destinationText)
     }
 
     [IO.File]::WriteAllText($Destination, $content,
