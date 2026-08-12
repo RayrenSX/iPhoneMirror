@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Compression;
 using System.Net.Http;
 using System.Xml.Linq;
 using IPhoneMirror.App.Localization;
@@ -61,6 +62,34 @@ static async Task ThrowsAsync<TException>(Func<Task> action, string name)
         return;
     }
     throw new InvalidOperationException($"{name}: expected {typeof(TException).Name}");
+}
+
+static async Task<(int ExitCode, string Output)> RunWindowsPowerShellAsync(
+    string script, string zipPath, string installDirectory, string restartExecutable)
+{
+    var start = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "powershell.exe",
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+    };
+    foreach (var argument in new[]
+             {
+                 "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                 "-File", script, "-WaitPids", int.MaxValue.ToString(
+                     System.Globalization.CultureInfo.InvariantCulture),
+                 "-ZipPath", zipPath, "-InstallDirectory", installDirectory,
+                 "-RestartExecutable", restartExecutable,
+             })
+        start.ArgumentList.Add(argument);
+    using var process = System.Diagnostics.Process.Start(start) ??
+        throw new InvalidOperationException("Windows PowerShell test process did not start.");
+    var stdout = process.StandardOutput.ReadToEndAsync();
+    var stderr = process.StandardError.ReadToEndAsync();
+    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+    return (process.ExitCode, await stdout + await stderr);
 }
 
 static HttpResponseMessage HttpResponse(HttpRequestMessage request,
@@ -283,6 +312,13 @@ var zipUpdateScript = File.ReadAllText(Path.Combine(sourceDirectory, "App",
 Equal(true, zipUpdateScript.Contains("[string]$WaitPids", StringComparison.Ordinal) &&
             zipUpdateScript.Contains("iPhoneMirror.Driver.exe", StringComparison.Ordinal),
     "portable updates wait for the independent driver manager before copying");
+Equal(true, zipUpdateScript.Contains("Rollback was incomplete", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("Get-FileHash", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("$changes", StringComparison.Ordinal),
+    "portable updates verify copied files and roll back partial replacements");
+Equal(false, zipUpdateScript.Contains("[IO.Path]::GetRelativePath",
+        StringComparison.Ordinal),
+    "portable update script avoids APIs unavailable in Windows PowerShell 5.1");
 var releaseManifestPath = Path.Combine(sourceDirectory, "..", "updates", "releases.json");
 var repositoryRelease = ReleaseParser.ParseLatest(
     File.ReadAllText(releaseManifestPath), includeStable: true, includePrerelease: true);
@@ -1293,6 +1329,129 @@ finally
 {
     if (Directory.Exists(updateNetworkRoot))
         Directory.Delete(updateNetworkRoot, recursive: true);
+}
+
+var updateCleanupRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-update-cleanup-{Guid.NewGuid():N}");
+var updateCleanupOutside = updateCleanupRoot + "-outside";
+var updateCleanupLink = Path.Combine(updateCleanupRoot, "linked");
+try
+{
+    Directory.CreateDirectory(Path.Combine(updateCleanupRoot, "release"));
+    Directory.CreateDirectory(updateCleanupOutside);
+    var localPartial = Path.Combine(updateCleanupRoot, "release", "local.download");
+    var localCompleted = Path.Combine(updateCleanupRoot, "release", "local.zip");
+    var outsidePartial = Path.Combine(updateCleanupOutside, "outside.download");
+    File.WriteAllText(localPartial, "partial");
+    File.WriteAllText(localCompleted, "complete");
+    File.WriteAllText(outsidePartial, "outside");
+    try
+    {
+        Directory.CreateSymbolicLink(updateCleanupLink, updateCleanupOutside);
+    }
+    catch (Exception error) when (error is UnauthorizedAccessException ||
+                                  (error is IOException &&
+                                   (error.HResult & 0xffff) == 1314))
+    {
+        updateCleanupLink = string.Empty;
+    }
+
+    GitHubReleaseClient.CleanupInterruptedDownloads(updateCleanupRoot);
+    Equal(false, File.Exists(localPartial),
+        "interrupted update cleanup deletes local partial downloads");
+    Equal(true, File.Exists(localCompleted),
+        "interrupted update cleanup preserves completed downloads");
+    Equal(true, File.Exists(outsidePartial),
+        "interrupted update cleanup never follows directory reparse points");
+
+    var cleanup = GitHubReleaseClient.CleanupOldDownloads(updateCleanupRoot,
+        includeCompleted: true);
+    Equal(1, cleanup.DeletedFiles,
+        "manual update cleanup counts only files inside the cache root");
+    Equal(true, File.Exists(outsidePartial),
+        "manual update cleanup never deletes through directory reparse points");
+}
+finally
+{
+    if (!string.IsNullOrEmpty(updateCleanupLink) && Directory.Exists(updateCleanupLink))
+        Directory.Delete(updateCleanupLink);
+    if (Directory.Exists(updateCleanupRoot))
+        Directory.Delete(updateCleanupRoot, recursive: true);
+    if (Directory.Exists(updateCleanupOutside))
+        Directory.Delete(updateCleanupOutside, recursive: true);
+}
+
+var zipUpdateTestRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-zip-update-{Guid.NewGuid():N}");
+var zipUpdatePreviousDelayedExit = Environment.GetEnvironmentVariable(
+    delayedExitEnvironment);
+try
+{
+    var successInstall = Path.Combine(zipUpdateTestRoot, "success-install");
+    var successPayload = Path.Combine(zipUpdateTestRoot, "success-payload");
+    var successZip = Path.Combine(zipUpdateTestRoot, "success.zip");
+    Directory.CreateDirectory(successInstall);
+    Directory.CreateDirectory(successPayload);
+    File.WriteAllText(Path.Combine(successInstall, "iPhoneMirror.exe"), "old-app");
+    File.WriteAllText(Path.Combine(successInstall, "iPhoneMirror.Driver.exe"), "old-driver");
+    File.WriteAllText(Path.Combine(successPayload, "iPhoneMirror.exe"), "new-app");
+    File.WriteAllText(Path.Combine(successPayload, "iPhoneMirror.Driver.exe"), "new-driver");
+    Directory.CreateDirectory(Path.Combine(successPayload, "nested"));
+    File.WriteAllText(Path.Combine(successPayload, "nested", "runtime.dll"), "runtime");
+    ZipFile.CreateFromDirectory(successPayload, successZip,
+        CompressionLevel.NoCompression, includeBaseDirectory: false);
+    Environment.SetEnvironmentVariable(delayedExitEnvironment, "50");
+    var successResult = await RunWindowsPowerShellAsync(script: Path.Combine(
+            sourceDirectory, "App", "tools", "updater", "Apply-ZipUpdate.ps1"),
+        zipPath: successZip, installDirectory: successInstall,
+        restartExecutable: Environment.ProcessPath!);
+    Equal(0, successResult.ExitCode,
+        $"Windows PowerShell portable update succeeds: {successResult.Output}");
+    Equal("new-app", File.ReadAllText(Path.Combine(successInstall, "iPhoneMirror.exe")),
+        "Windows PowerShell portable update replaces the application");
+    Equal("new-driver", File.ReadAllText(Path.Combine(successInstall,
+            "iPhoneMirror.Driver.exe")),
+        "Windows PowerShell portable update replaces the driver manager");
+    Equal("runtime", File.ReadAllText(Path.Combine(successInstall,
+            "nested", "runtime.dll")),
+        "Windows PowerShell portable update copies nested payload files");
+
+    var rollbackInstall = Path.Combine(zipUpdateTestRoot, "rollback-install");
+    var rollbackPayload = Path.Combine(zipUpdateTestRoot, "rollback-payload");
+    var rollbackZip = Path.Combine(zipUpdateTestRoot, "rollback.zip");
+    var obsoleteDirectory = Path.Combine(rollbackInstall, "tools", "ffmpeg");
+    Directory.CreateDirectory(obsoleteDirectory);
+    Directory.CreateDirectory(rollbackPayload);
+    File.WriteAllText(Path.Combine(rollbackInstall, "iPhoneMirror.exe"), "old-app");
+    File.WriteAllText(Path.Combine(rollbackInstall, "iPhoneMirror.Driver.exe"), "old-driver");
+    File.WriteAllText(Path.Combine(rollbackPayload, "iPhoneMirror.exe"), "new-app");
+    File.WriteAllText(Path.Combine(rollbackPayload, "iPhoneMirror.Driver.exe"), "new-driver");
+    var lockedObsolete = Path.Combine(obsoleteDirectory, "ffmpeg.exe");
+    File.WriteAllText(lockedObsolete, "locked-runtime");
+    ZipFile.CreateFromDirectory(rollbackPayload, rollbackZip,
+        CompressionLevel.NoCompression, includeBaseDirectory: false);
+    await using (var lockStream = new FileStream(lockedObsolete, FileMode.Open,
+                     FileAccess.ReadWrite, FileShare.None))
+    {
+        var rollbackResult = await RunWindowsPowerShellAsync(Path.Combine(
+                sourceDirectory, "App", "tools", "updater", "Apply-ZipUpdate.ps1"),
+            rollbackZip, rollbackInstall, Environment.ProcessPath!);
+        Equal(true, rollbackResult.ExitCode != 0,
+            "Windows PowerShell portable update reports an injected copy failure");
+    }
+    Equal("old-app", File.ReadAllText(Path.Combine(rollbackInstall,
+            "iPhoneMirror.exe")),
+        "failed Windows PowerShell update restores the application");
+    Equal("old-driver", File.ReadAllText(Path.Combine(rollbackInstall,
+            "iPhoneMirror.Driver.exe")),
+        "failed Windows PowerShell update restores the driver manager");
+}
+finally
+{
+    Environment.SetEnvironmentVariable(delayedExitEnvironment,
+        zipUpdatePreviousDelayedExit);
+    if (Directory.Exists(zipUpdateTestRoot))
+        Directory.Delete(zipUpdateTestRoot, recursive: true);
 }
 Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
         .Contains("/STARTAPP=1", StringComparison.Ordinal),

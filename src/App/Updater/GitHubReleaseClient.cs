@@ -513,13 +513,12 @@ internal sealed class GitHubReleaseClient : IDisposable
         root ??= Path.Combine(UpdateSettingsStore.UserDataDirectory, "Updates");
         try
         {
-            if (!Directory.Exists(root)) return;
-            foreach (var file in Directory.EnumerateFiles(root, "*.download",
-                         SearchOption.AllDirectories))
+            foreach (var file in EnumerateCacheFiles(root, "*.download"))
                 TryDelete(file);
         }
         catch (Exception error) when (error is IOException or
-                                      UnauthorizedAccessException)
+                                      UnauthorizedAccessException or
+                                      System.Security.SecurityException)
         {
             DiagnosticLogger.Exception("updater", "interrupted_cleanup_failed", error);
         }
@@ -529,11 +528,11 @@ internal sealed class GitHubReleaseClient : IDisposable
         bool includeCompleted = false)
     {
         root ??= Path.Combine(UpdateSettingsStore.UserDataDirectory, "Updates");
-        if (!Directory.Exists(root)) return default;
+        if (!IsSafeCacheRoot(root)) return default;
         var deleted = 0;
         long bytes = 0;
         var skipped = 0;
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        foreach (var file in EnumerateCacheFiles(root, "*"))
         {
             if (!includeCompleted && !file.EndsWith(".download",
                     StringComparison.OrdinalIgnoreCase)) continue;
@@ -555,17 +554,41 @@ internal sealed class GitHubReleaseClient : IDisposable
         try
         {
             foreach (var directory in Directory.EnumerateDirectories(root, "*",
-                         SearchOption.AllDirectories).OrderByDescending(value => value.Length))
+                         SafeCacheEnumerationOptions).OrderByDescending(value => value.Length))
                 if (!Directory.EnumerateFileSystemEntries(directory).Any())
                     Directory.Delete(directory);
         }
         catch (Exception error) when (error is IOException or
-                                      UnauthorizedAccessException)
+                                      UnauthorizedAccessException or
+                                      System.Security.SecurityException)
         {
             ++skipped;
             DiagnosticLogger.Exception("updater", "cache_directory_cleanup_failed", error);
         }
         return new LogCleanupResult(deleted, bytes, skipped);
+    }
+
+    private static readonly EnumerationOptions SafeCacheEnumerationOptions = new()
+    {
+        RecurseSubdirectories = true,
+        IgnoreInaccessible = false,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+        ReturnSpecialDirectories = false,
+    };
+
+    private static IEnumerable<string> EnumerateCacheFiles(string root, string pattern)
+    {
+        if (!IsSafeCacheRoot(root)) return [];
+        return Directory.EnumerateFiles(root, pattern, SafeCacheEnumerationOptions);
+    }
+
+    private static bool IsSafeCacheRoot(string root)
+    {
+        if (!Directory.Exists(root)) return false;
+        var attributes = File.GetAttributes(root);
+        if ((attributes & FileAttributes.ReparsePoint) == 0) return true;
+        DiagnosticLogger.Info("updater", "cache_root_reparse_point_rejected");
+        return false;
     }
 
     private static void TryDelete(string path)
