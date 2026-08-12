@@ -313,9 +313,12 @@ Equal(true, zipUpdateScript.Contains("[string]$WaitPids", StringComparison.Ordin
             zipUpdateScript.Contains("iPhoneMirror.Driver.exe", StringComparison.Ordinal),
     "portable updates wait for the independent driver manager before copying");
 Equal(true, zipUpdateScript.Contains("Rollback was incomplete", StringComparison.Ordinal) &&
-            zipUpdateScript.Contains("Get-FileHash", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("[Security.Cryptography.SHA256]::Create()",
+                StringComparison.Ordinal) &&
             zipUpdateScript.Contains("$changes", StringComparison.Ordinal),
     "portable updates verify copied files and roll back partial replacements");
+Equal(false, zipUpdateScript.Contains("Get-FileHash", StringComparison.Ordinal),
+    "portable update verification does not depend on optional PowerShell cmdlets");
 Equal(false, zipUpdateScript.Contains("[IO.Path]::GetRelativePath",
         StringComparison.Ordinal),
     "portable update script avoids APIs unavailable in Windows PowerShell 5.1");

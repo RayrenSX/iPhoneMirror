@@ -39,6 +39,18 @@ function Get-RelativeUpdatePath([string]$Root, [string]$Path) {
     return $fullPath.Substring($prefix.Length)
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '')
+        }
+        finally { $algorithm.Dispose() }
+    }
+    finally { $stream.Dispose() }
+}
+
 function Assert-NoReparsePath([string]$Root, [string]$Path) {
     $rootPath = Get-NormalizedPath $Root
     $currentPath = Get-NormalizedPath $Path
@@ -196,8 +208,7 @@ try {
                 Final = $destination; Backup = $backup; HadOriginal = $hadOriginal
             })
             Copy-Item -LiteralPath $source.FullName -Destination $destination -Force
-            if ((Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256).Hash -ne
-                (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash) {
+            if ((Get-Sha256 $source.FullName) -ne (Get-Sha256 $destination)) {
                 throw "Update copy verification failed: $relative"
             }
             ++$index
