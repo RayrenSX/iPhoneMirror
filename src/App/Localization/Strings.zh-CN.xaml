@@ -6,6 +6,7 @@
     <system:String x:Key="AppSubtitle">Windows 有线 iPhone/iPad 屏幕采集</system:String>
     <system:String x:Key="LanguageSystem">跟随系统</system:String>
     <system:String x:Key="LanguageChinese">简体中文</system:String>
+    <system:String x:Key="LanguageTraditionalChineseHongKong">繁體中文（香港）</system:String>
     <system:String x:Key="LanguageEnglish">English</system:String>
     <system:String x:Key="LanguageToolTip">界面语言</system:String>
     <system:String x:Key="DriverManagerButton">驱动管理器</system:String>

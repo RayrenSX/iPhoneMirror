@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.1',
+    [string]$Version = '6.0.2-pre',
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$PreviousVersion = '1.4.1'
 )
@@ -64,15 +64,17 @@ function Build-TestInstaller([string]$BuildVersion) {
     return $path
 }
 
-function Install-TestVersion([string]$SetupPath, [string]$Description) {
+function Install-TestVersion([string]$SetupPath, [string]$Description,
+    [string]$Language = 'english') {
     Invoke-Checked $SetupPath @(
         '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER',
-        '/CLOSEAPPLICATIONS',
+        '/CLOSEAPPLICATIONS', "/LANG=$Language",
         "/DIR=$InstallDirectory", "/LOG=$(Join-Path $WorkRoot "$Description.log")"
     ) $Description
 }
 
-function Uninstall-TestVersion([string]$UserDataArgument, [string]$Description) {
+function Uninstall-TestVersion([string]$UserDataArgument, [string]$Description,
+    [string]$Language = 'english') {
     $entry = Get-ItemProperty -LiteralPath $UninstallRegistryPath
     $uninstaller = [regex]::Match([string]$entry.UninstallString,
         '^"(?<path>[^"]+.exe)"').Groups['path'].Value
@@ -81,6 +83,7 @@ function Uninstall-TestVersion([string]$UserDataArgument, [string]$Description) 
     }
     Invoke-Checked $uninstaller @(
         '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', $UserDataArgument,
+        "/LANG=$Language",
         "/LOG=$(Join-Path $WorkRoot "$Description.log")"
     ) $Description
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
@@ -129,7 +132,7 @@ try {
     $previousSetup = Build-TestInstaller $PreviousVersion
     $currentSetup = Build-TestInstaller $Version
 
-    Install-TestVersion $previousSetup 'install-previous'
+    Install-TestVersion $previousSetup 'install-previous' 'chinesetrad'
     $installedExecutable = Join-Path $InstallDirectory 'iPhoneMirror.exe'
     if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) {
         throw 'Previous test version did not install the application.'
@@ -141,7 +144,7 @@ try {
     if ($DriverProcess.HasExited) {
         throw 'Installed driver manager exited before the upgrade test.'
     }
-    Install-TestVersion $currentSetup 'upgrade-current'
+    Install-TestVersion $currentSetup 'upgrade-current' 'chinesetrad'
     $DriverProcess.Refresh()
     if (-not $DriverProcess.HasExited) {
         throw 'Upgrade did not close the running driver manager.'
@@ -191,7 +194,7 @@ try {
     New-Item -ItemType Directory -Force -Path $UserDataDirectory | Out-Null
     $preserveMarker = Join-Path $UserDataDirectory 'preserve-marker.txt'
     Set-Content -LiteralPath $preserveMarker -Value 'preserve' -Encoding utf8
-    Uninstall-TestVersion '/KEEPUSERDATA=1' 'uninstall-preserve'
+    Uninstall-TestVersion '/KEEPUSERDATA=1' 'uninstall-preserve' 'chinesetrad'
     if (-not (Test-Path -LiteralPath $preserveMarker -PathType Leaf)) {
         throw 'Uninstall did not preserve user data when requested.'
     }
@@ -202,10 +205,10 @@ try {
         throw 'Start menu shortcuts remained after uninstall.'
     }
 
-    Install-TestVersion $currentSetup 'reinstall-current'
+    Install-TestVersion $currentSetup 'reinstall-current' 'chinesetrad'
     $deleteMarker = Join-Path $UserDataDirectory 'delete-marker.txt'
     Set-Content -LiteralPath $deleteMarker -Value 'delete' -Encoding utf8
-    Uninstall-TestVersion '/DELETEUSERDATA=1' 'uninstall-delete'
+    Uninstall-TestVersion '/DELETEUSERDATA=1' 'uninstall-delete' 'chinesetrad'
     if (Test-Path -LiteralPath $UserDataDirectory) {
         throw 'Uninstall did not delete isolated user data when requested.'
     }

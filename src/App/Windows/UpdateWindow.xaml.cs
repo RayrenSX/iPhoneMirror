@@ -87,9 +87,10 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
             UpdateInstallerLauncher.Launch(downloaded);
             _installationStarted = true;
             StatusText = LocalizationService.Get("StartingInstaller");
-            await Task.Delay(250);
+            // Keep the current version alive until Setup reaches the file
+            // replacement stage. Inno Setup's Restart Manager closes it then;
+            // if Setup is cancelled or fails earlier, the app remains usable.
             Close();
-            Application.Current.MainWindow?.Close();
         }
         catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
         {

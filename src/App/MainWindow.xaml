@@ -1324,6 +1324,7 @@
                                           ToolTip="{DynamicResource LanguageToolTip}">
                                     <ComboBoxItem Tag="system" Content="{DynamicResource LanguageSystem}"/>
                                     <ComboBoxItem Tag="zh-CN" Content="{DynamicResource LanguageChinese}"/>
+                                    <ComboBoxItem Tag="zh-HK" Content="{DynamicResource LanguageTraditionalChineseHongKong}"/>
                                     <ComboBoxItem Tag="en-US" Content="{DynamicResource LanguageEnglish}"/>
                                 </ComboBox>
                                 <TextBlock Text="{DynamicResource ThemeTitle}"

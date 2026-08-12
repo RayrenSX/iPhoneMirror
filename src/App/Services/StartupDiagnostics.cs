@@ -105,17 +105,29 @@ internal static class StartupDiagnostics
                 $"Required application components are missing: {string.Join(", ", missing)}");
     }
 
-    internal static string UserMessage(Exception error, bool simplifiedChinese)
+    internal static string UserMessage(Exception error, bool simplifiedChinese) =>
+        UserMessage(error, simplifiedChinese ? "zh-CN" : "en-US");
+
+    internal static string UserMessage(Exception error, string language)
     {
+        var hongKong = language.Equals("zh-HK", StringComparison.OrdinalIgnoreCase) ||
+            language.Equals("zh-Hant-HK", StringComparison.OrdinalIgnoreCase) ||
+            language.Equals("zh-MO", StringComparison.OrdinalIgnoreCase);
+        var simplifiedChinese = language.Equals("zh-CN",
+            StringComparison.OrdinalIgnoreCase);
         var nativeLoadFailure = Find(error, static candidate =>
             candidate is DllNotFoundException or BadImageFormatException or
                 FileNotFoundException);
         if (nativeLoadFailure)
         {
+            if (hongKong)
+                return "無法載入應用程式所需的原生元件。請重新安裝最新的完整安裝程式；詳細診斷資料已寫入下方記錄。";
             return simplifiedChinese
                 ? "无法加载程序所需的原生组件。请重新安装最新的完整安装包；详细诊断已写入下方日志。"
                 : "A required native component could not be loaded. Reinstall the latest full Setup package; detailed diagnostics were written to the log below.";
         }
+        if (hongKong)
+            return "iPhoneMirror 啟動時發生錯誤。詳細診斷資料已寫入下方記錄。";
         return simplifiedChinese
             ? "iPhoneMirror 启动时遇到错误。详细诊断已写入下方日志。"
             : "iPhoneMirror encountered an error during startup. Detailed diagnostics were written to the log below.";

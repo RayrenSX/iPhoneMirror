@@ -100,7 +100,7 @@ iPhoneMirror 当前不提供手机触控或远程控制，也没有内建视频�
 ## 下载
 
 前往 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases)，优先下载
-`iPhoneMirror-Setup-v*-x64.exe`。安装向导支持简体中文和 English，可选择安装目录，
+`iPhoneMirror-Setup-v*-x64.exe`。安装向导支持简体中文、繁体中文（香港）和 English，可选择安装目录，
 默认安装到 `C:\Program Files\iPhoneMirror`，并创建开始菜单入口；桌面快捷方式为可选项。
 需要免安装版本时，也可以下载 `iPhoneMirror-v*-win-x64.zip`，完整解压后运行
 `iPhoneMirror.exe`。若 Windows 对 ZIP 版无线 DLL 报“损坏的映像”或错误
@@ -140,7 +140,7 @@ iPhoneMirror 当前不提供手机触控或远程控制，也没有内建视频�
 | 画面 | 原生/1080p/720p/540p 本地渲染上限，24/30/60/120 FPS 上限 |
 | 预览 | 主窗口、无标题独立窗口、全屏、横竖屏、等比例缩放、按型号匹配屏幕圆角 |
 | OBS | 独立窗口可直接使用 Window Capture，无重复的专用窗口入口 |
-| 工具 | 截图、强制刷新、快捷键、实时日志、中英文界面 |
+| 工具 | 截图、强制刷新、快捷键、实时日志、简体中文、繁体中文（香港）和英文界面 |
 | 驱动 | 有线开始投屏前按当前设备严格检查；异常时打开独立驱动管理器 |
 
 分辨率和 FPS 选项只限制本地渲染，不会降低 USB 上传输的原始画面质量。
@@ -329,14 +329,14 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.6.1 -GenerateSbom
+./scripts/package_release.ps1 -Version 6.0.2-pre -GenerateSbom
 ```
 
 正式生成待上传资产时传入 `-UpdateReleaseManifest`，发布脚本会同步
 `updates/releases.json` 中对应版本的文件大小和 SHA256，确保 GitHub API
 不可用时备用更新源仍能完成校验。普通本地打包默认不修改在线发布清单。
 
-Inno Setup 6.7.3 及其简体中文翻译会按固定 SHA256 下载到 `work/tools`，无需全局安装。
+Inno Setup 6.7.3 及其简体中文、繁体中文翻译会按固定 SHA256 下载到 `work/tools`，无需全局安装。
 
 只构建并运行核心测试：
 

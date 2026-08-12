@@ -30,11 +30,31 @@ internal static class Program
         }
     }
 
+    private static void TestHongKongLocalizationSwitch(Application application,
+        Assembly assembly)
+    {
+        var localizationService = assembly.GetType(
+            "IPhoneMirror.App.Localization.LocalizationService", throwOnError: true)!;
+        var applyLanguage = localizationService.GetMethod("ApplyLanguage",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new MissingMethodException(localizationService.FullName, "ApplyLanguage");
+
+        applyLanguage.Invoke(null, ["zh-HK", false, false]);
+        if (application.TryFindResource("StartMirroring") is not string start ||
+            !start.Contains("螢幕鏡像", StringComparison.Ordinal) ||
+            application.TryFindResource("NavigationTextFontFamily") is not FontFamily font ||
+            !font.Source.Equals("Microsoft JhengHei UI", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "Hong Kong localization dictionary did not load at runtime.");
+        applyLanguage.Invoke(null, ["system", false, false]);
+    }
+
     private static void TestUpdateWindowThemeSwitch()
     {
         var application = new App();
         application.InitializeComponent();
         var assembly = typeof(App).Assembly;
+        TestHongKongLocalizationSwitch(application, assembly);
 
         var parserType = assembly.GetType(
             "IPhoneMirror.App.Updater.ReleaseParser", throwOnError: true)!;

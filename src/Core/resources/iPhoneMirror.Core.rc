@@ -15,12 +15,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "RayrenSX\0"
             VALUE "FileDescription", "iPhoneMirror USB Capture Core\0"
-            VALUE "FileVersion", "1.6.1.0\0"
+            VALUE "FileVersion", "6.0.2.0\0"
             VALUE "InternalName", "iPhoneMirror.Core.dll\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 RayrenSX\0"
             VALUE "OriginalFilename", "iPhoneMirror.Core.dll\0"
             VALUE "ProductName", "iPhoneMirror\0"
-            VALUE "ProductVersion", "1.6.1\0"
+            VALUE "ProductVersion", "6.0.2-pre\0"
         END
     END
     BLOCK "VarFileInfo"

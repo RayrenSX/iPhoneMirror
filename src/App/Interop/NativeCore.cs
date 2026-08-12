@@ -958,8 +958,9 @@ internal sealed class NativeCore : IDisposable
         // The native ABI currently exposes human-readable Chinese diagnostics.
         // Keep those details in the native log, but do not leak mixed-language
         // text into the English UI until the ABI provides stable error codes.
-        if (!LocalizationService.EffectiveCulture.Name.StartsWith(
-                "zh", StringComparison.OrdinalIgnoreCase)) return fallback;
+        if (!LocalizationService.EffectiveCulture.Name.Equals(
+                LocalizationService.SimplifiedChinese,
+                StringComparison.OrdinalIgnoreCase)) return fallback;
         var pointer = im_last_error();
         return pointer == 0 ? fallback : Marshal.PtrToStringUni(pointer) ?? fallback;
     }

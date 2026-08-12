@@ -59,7 +59,8 @@ outside this application package.
 - C#: nullable reference types enabled; keep USB/native work off the WPF UI
   thread.
 - Preserve low-latency behavior: do not add unbounded frame or audio queues.
-- Keep Simplified Chinese and English resource keys in sync.
+- Keep Simplified Chinese, Traditional Chinese (Hong Kong), and English
+  resource keys in sync.
 
 By contributing, you agree that your contribution is licensed under the
 project's GNU General Public License v3.0 only. By contributing, you agree that

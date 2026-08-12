@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.1',
+    [string]$Version = '6.0.2-pre',
     [switch]$SkipAppBuild,
     [string]$SourceDirectory,
     [string]$OutputDirectory
@@ -84,8 +84,8 @@ try {
     }
     $setupVersion = (Get-Item -LiteralPath $expectedPath).VersionInfo.ProductVersion
     $actualSetupVersion = ($setupVersion -split '\+', 2)[0].Trim()
-    if ($actualSetupVersion -ne $Version) {
-        throw "Installer product version mismatch: expected $Version, got $setupVersion"
+    if ($actualSetupVersion -ne $numericVersion) {
+        throw "Installer product version mismatch: expected $numericVersion, got $setupVersion"
     }
     Write-Output $expectedPath
 }

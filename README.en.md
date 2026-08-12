@@ -148,7 +148,7 @@ may require updates for future iOS releases.
 | Quality | Native/1080p/720p/540p local limits and 24/30/60/120 FPS limits |
 | Preview | Main, detached, full-screen, rotation, aspect lock and device-aware corners |
 | OBS | Stable-title dedicated window for Window Capture |
-| Tools | Screenshot, force refresh, shortcuts, live logs, Chinese and English UI |
+| Tools | Screenshot, force refresh, shortcuts, live logs, Simplified Chinese, Traditional Chinese (Hong Kong), and English UI |
 | Driver | Strict per-device check before wired capture; opens the standalone driver manager on failure |
 
 Resolution and FPS options cap local presentation only; they do not reduce the
@@ -335,7 +335,7 @@ publishing the compact edition.
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.6.1 -GenerateSbom
+./scripts/package_release.ps1 -Version 6.0.2-pre -GenerateSbom
 ```
 
 Pass `-UpdateReleaseManifest` when producing the assets that will be uploaded.
@@ -343,8 +343,9 @@ The release script then synchronizes sizes and SHA256 digests for the matching
 entry in `updates/releases.json`, keeping the fallback update endpoint valid.
 Ordinary local package builds do not modify the published release manifest.
 
-The script downloads hash-pinned Inno Setup 6.7.3 and its Simplified Chinese
-translation into `work/tools`; no global Inno Setup installation is required.
+The script downloads hash-pinned Inno Setup 6.7.3 and its Simplified and
+Traditional Chinese translations into `work/tools`; no global Inno Setup
+installation is required.
 
 ## Architecture
 

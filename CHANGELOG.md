@@ -5,6 +5,20 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [6.0.2-pre] - 2026-08-12
+
+### Added
+
+- Add fully localized Traditional Chinese (Hong Kong) resources for the main
+  application and driver manager, including automatic `zh-HK` system-language
+  selection, Hong Kong terminology, and the Microsoft JhengHei UI font.
+
+### Fixed
+
+- Keep the running version open until Setup is ready to replace its files, so
+  cancelled or early-failing updates no longer look like the app uninstalled
+  itself.
+
 ## [1.6.1] - 2026-08-11
 
 ### Changed
@@ -1004,7 +1018,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v6.0.2-pre...HEAD
+[6.0.2-pre]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.1...v6.0.2-pre
 [1.6.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.11...v1.6.0
 [1.5.11]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.10...v1.5.11

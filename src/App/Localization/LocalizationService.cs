@@ -10,6 +10,7 @@ internal static class LocalizationService
 {
     internal const string SystemLanguage = "system";
     internal const string SimplifiedChinese = "zh-CN";
+    internal const string TraditionalChineseHongKong = "zh-HK";
     internal const string English = "en-US";
 
     private const string DictionaryPrefix = "Localization/Strings.";
@@ -24,6 +25,9 @@ internal static class LocalizationService
 
     internal static string SelectedLanguage => _selectedLanguage;
     internal static CultureInfo EffectiveCulture => _effectiveCulture;
+    internal static string StartupCultureName => _selectedLanguage == SystemLanguage
+        ? ResolveCultureName(CultureInfo.InstalledUICulture.Name)
+        : ResolveCultureName(_selectedLanguage);
 
     internal static void Initialize()
     {
@@ -45,20 +49,27 @@ internal static class LocalizationService
 
     private static void ApplyLanguage(string language, bool persist, bool notify)
     {
-        if (language is not (SystemLanguage or SimplifiedChinese or English))
+        if (language is not (SystemLanguage or SimplifiedChinese or
+            TraditionalChineseHongKong or English))
             language = SystemLanguage;
 
         var cultureName = language == SystemLanguage
             ? ResolveSystemCulture()
             : language;
         var culture = CultureInfo.GetCultureInfo(cultureName);
+
+        // Record the requested language before loading its resource dictionary so a
+        // startup-failure dialog remains localized even when that load throws.
+        _selectedLanguage = language;
         var application = Application.Current;
         if (application is not null)
         {
             var dictionaries = application.Resources.MergedDictionaries;
             var replacement = new ResourceDictionary
             {
-                Source = new Uri($"{DictionaryPrefix}{cultureName}.xaml", UriKind.Relative),
+                Source = new Uri(
+                    $"/{typeof(LocalizationService).Assembly.GetName().Name};component/" +
+                    $"{DictionaryPrefix}{cultureName}.xaml", UriKind.Relative),
             };
             var existingIndex = -1;
             for (var index = 0; index < dictionaries.Count; ++index)
@@ -74,7 +85,6 @@ internal static class LocalizationService
             else dictionaries.Insert(0, replacement);
         }
 
-        _selectedLanguage = language;
         _effectiveCulture = culture;
         CultureInfo.CurrentCulture = culture;
         CultureInfo.CurrentUICulture = culture;
@@ -86,9 +96,24 @@ internal static class LocalizationService
     }
 
     private static string ResolveSystemCulture() =>
-        CultureInfo.InstalledUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+        ResolveCultureName(CultureInfo.InstalledUICulture.Name);
+
+    internal static string ResolveCultureName(string cultureName)
+    {
+        if (IsHongKongTraditionalChinese(cultureName))
+            return TraditionalChineseHongKong;
+        return cultureName.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
             ? SimplifiedChinese
             : English;
+    }
+
+    private static bool IsHongKongTraditionalChinese(string cultureName) =>
+        cultureName.StartsWith("zh-Hant", StringComparison.OrdinalIgnoreCase) ||
+        cultureName.Equals("zh-CHT", StringComparison.OrdinalIgnoreCase) ||
+        cultureName.Equals(TraditionalChineseHongKong,
+            StringComparison.OrdinalIgnoreCase) ||
+        cultureName.Equals("zh-MO", StringComparison.OrdinalIgnoreCase) ||
+        cultureName.Equals("zh-TW", StringComparison.OrdinalIgnoreCase);
 
     private static string LoadLanguage()
     {

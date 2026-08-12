@@ -7,6 +7,20 @@ using System.Security.Principal;
 
 var failures = new List<string>();
 
+Run("localized culture mapping", () =>
+{
+    Equal(DriverLocalization.TraditionalChineseHongKong,
+        DriverLocalization.ResolveCultureName("zh-HK"));
+    Equal(DriverLocalization.TraditionalChineseHongKong,
+        DriverLocalization.ResolveCultureName("zh-Hant-TW"));
+    Equal(DriverLocalization.TraditionalChineseHongKong,
+        DriverLocalization.ResolveCultureName("zh-CHT"));
+    Equal(DriverLocalization.Chinese,
+        DriverLocalization.ResolveCultureName("zh-SG"));
+    Equal(DriverLocalization.English,
+        DriverLocalization.ResolveCultureName("de-DE"));
+});
+
 Run("serial normalization", () =>
 {
     Equal("0000810100044D600A22001E",

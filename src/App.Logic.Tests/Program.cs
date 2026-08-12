@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net.Http;
 using System.Xml.Linq;
+using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Updater;
@@ -88,10 +89,13 @@ foreach (var localizationPath in Directory.GetFiles(
     var navigationFont = localization.Descendants()
         .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
             "NavigationTextFontFamily", StringComparison.Ordinal)).Value.Trim();
-    var expectedNavigationFont = Path.GetFileName(localizationPath)
-        .Contains("zh-CN", StringComparison.OrdinalIgnoreCase)
+    var localizationFileName = Path.GetFileName(localizationPath);
+    var expectedNavigationFont = localizationFileName.Contains(
+            "zh-CN", StringComparison.OrdinalIgnoreCase)
         ? "Microsoft YaHei UI"
-        : "Segoe UI";
+        : localizationFileName.Contains("zh-HK", StringComparison.OrdinalIgnoreCase)
+            ? "Microsoft JhengHei UI"
+            : "Segoe UI";
     Equal(expectedNavigationFont, navigationFont,
         $"navigation font matches the interface language in {Path.GetFileName(localizationPath)}");
     var noPingRecovery = localization.Descendants()
@@ -99,7 +103,8 @@ foreach (var localizationPath in Directory.GetFiles(
             "CaptureNoPingRecovery", StringComparison.Ordinal)).Value;
     Equal(true,
         noPingRecovery.Contains("Restart", StringComparison.OrdinalIgnoreCase) ||
-        noPingRecovery.Contains("重启", StringComparison.Ordinal),
+        noPingRecovery.Contains("重启", StringComparison.Ordinal) ||
+        noPingRecovery.Contains("重新啟動", StringComparison.Ordinal),
         $"no-PING recovery asks the user to restart in {Path.GetFileName(localizationPath)}");
     Equal(true,
         noPingRecovery.Contains("MFi", StringComparison.OrdinalIgnoreCase),
@@ -109,13 +114,31 @@ foreach (var localizationPath in Directory.GetFiles(
             "CaptureUsbConfigurationRecovery", StringComparison.Ordinal)).Value;
     Equal(true,
         usbRecovery.Contains("restart", StringComparison.OrdinalIgnoreCase) ||
-        usbRecovery.Contains("重启", StringComparison.Ordinal),
+        usbRecovery.Contains("重启", StringComparison.Ordinal) ||
+        usbRecovery.Contains("重新啟動", StringComparison.Ordinal),
         $"USB recovery asks the user to restart in {Path.GetFileName(localizationPath)}");
     Equal(true,
         usbRecovery.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
-        usbRecovery.Contains("数据线", StringComparison.Ordinal),
+        usbRecovery.Contains("数据线", StringComparison.Ordinal) ||
+        usbRecovery.Contains("傳輸線", StringComparison.Ordinal),
         $"USB recovery asks the user to replace/reconnect a cable in {Path.GetFileName(localizationPath)}");
 }
+
+Equal(LocalizationService.TraditionalChineseHongKong,
+    LocalizationService.ResolveCultureName("zh-HK"),
+    "Hong Kong system culture selects the Hong Kong dictionary");
+Equal(LocalizationService.TraditionalChineseHongKong,
+    LocalizationService.ResolveCultureName("zh-Hant-TW"),
+    "other Traditional Chinese cultures prefer the Hong Kong dictionary");
+Equal(LocalizationService.TraditionalChineseHongKong,
+    LocalizationService.ResolveCultureName("zh-CHT"),
+    "legacy Traditional Chinese culture selects the Hong Kong dictionary");
+Equal(LocalizationService.SimplifiedChinese,
+    LocalizationService.ResolveCultureName("zh-SG"),
+    "other Chinese cultures select the Simplified Chinese dictionary");
+Equal(LocalizationService.English,
+    LocalizationService.ResolveCultureName("fr-FR"),
+    "unsupported system cultures use the English dictionary");
 
 var captureRecoveryWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "Windows", "CaptureRecoveryWindow.xaml"));
@@ -236,8 +259,9 @@ Equal(true, installerScript.Contains(
         "CloseApplicationsFilter=iPhoneMirror.exe,iPhoneMirror.Driver.exe",
         StringComparison.Ordinal),
     "installer closes the main app and shared-runtime driver manager");
-Equal(false, installerScript.Contains("restartreplace",
-        StringComparison.OrdinalIgnoreCase),
+Equal(false, installerScript.Split('\n').Any(line =>
+        line.TrimStart().StartsWith("Flags:", StringComparison.OrdinalIgnoreCase) &&
+        line.Contains("restartreplace", StringComparison.OrdinalIgnoreCase)),
     "installer never defers shared runtime replacement until reboot");
 Equal(true, installerScript.Contains("[InstallDelete]", StringComparison.Ordinal) &&
             installerScript.Contains(
@@ -691,6 +715,9 @@ Equal(true, StartupDiagnostics.UserMessage(new DllNotFoundException(), true)
 Equal(true, StartupDiagnostics.UserMessage(new FileNotFoundException(), false)
     .Contains("native component", StringComparison.OrdinalIgnoreCase),
     "startup preflight missing-file failures use native dependency guidance");
+Equal(true, StartupDiagnostics.UserMessage(new DllNotFoundException(), "zh-HK")
+    .Contains("原生元件", StringComparison.Ordinal),
+    "Hong Kong startup diagnostics use localized native dependency guidance");
 Equal(true, CaptureErrorGuidance.IsNoPingTimeout(
         "QuickTime endpoint opened but iPhone sent no PING; keep the device unlocked"),
     "capture guidance recognizes the native no-PING timeout");
@@ -1207,6 +1234,11 @@ Equal(false, UpdateInstallerLauncher.BuildInstallerArguments()
 Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
         .Contains("/LOG=", StringComparison.Ordinal),
     "one-click installer update persists an installer log");
+var updateWindowCode = File.ReadAllText(Path.GetFullPath(Path.Combine(
+    AppContext.BaseDirectory, "..", "..", "..", "..", "App", "Windows",
+    "UpdateWindow.xaml.cs")));
+Equal(false, updateWindowCode.Contains("MainWindow?.Close()", StringComparison.Ordinal),
+    "installer update leaves the current version open until Setup closes it");
 UpdateInstallerLauncher.ValidateAssetForDeployment("setup.exe",
     sharedRuntime: true);
 UpdateInstallerLauncher.ValidateAssetForDeployment("portable.zip",

@@ -5,6 +5,19 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Exe = Join-Path $Root 'outputs\iPhoneMirror\iPhoneMirror.exe'
 $Output = Join-Path $Root 'outputs\diagnostics'
+$HongKongResourcePath = Join-Path $Root `
+    'src\App\Localization\Strings.zh-HK.xaml'
+
+$hongKongResources = [xml](Get-Content -Raw -LiteralPath `
+    $HongKongResourcePath -Encoding utf8)
+$xamlNamespaces = [System.Xml.XmlNamespaceManager]::new(
+    $hongKongResources.NameTable)
+$xamlNamespaces.AddNamespace('x',
+    'http://schemas.microsoft.com/winfx/2006/xaml')
+$expectedHongKongTitle = $hongKongResources.SelectSingleNode(
+    '//*[@x:Key="WindowTitleConnectivity"]', $xamlNamespaces).InnerText
+$expectedHongKongStart = $hongKongResources.SelectSingleNode(
+    '//*[@x:Key="StartMirroring"]', $xamlNamespaces).InnerText
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -21,6 +34,10 @@ public static class LocalizationSmokeNative {
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
 }
 '@
 
@@ -38,6 +55,23 @@ function Find-ById(
         Start-Sleep -Milliseconds 150
     } while ([DateTime]::UtcNow -lt $deadline)
     throw "Automation element not found: $Id"
+}
+
+function Click-Element([System.Windows.Automation.AutomationElement]$Element) {
+    $bounds = $Element.Current.BoundingRectangle
+    if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) {
+        throw "Automation element has no clickable bounds: $($Element.Current.AutomationId)"
+    }
+
+    $x = [int][Math]::Round($bounds.Left + ($bounds.Width / 2))
+    $y = [int][Math]::Round($bounds.Top + ($bounds.Height / 2))
+    if (-not [LocalizationSmokeNative]::SetCursorPos($x, $y)) {
+        throw "SetCursorPos failed for automation element: $($Element.Current.AutomationId)"
+    }
+
+    Start-Sleep -Milliseconds 100
+    [LocalizationSmokeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [LocalizationSmokeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
 }
 
 function Select-Index(
@@ -90,14 +124,23 @@ try {
     Start-Sleep -Seconds 3
     $window = [System.Windows.Automation.AutomationElement]::FromHandle(
         $process.MainWindowHandle)
+    Click-Element (Find-ById $window 'SettingsPanelToggle')
+    Start-Sleep -Milliseconds 500
     $language = Find-ById $window 'LanguageComboBox'
 
-    Select-Index $language 2
+    Select-Index $language 3
     $process.Refresh()
     $englishTitle = $process.MainWindowTitle
     $englishStart = (Find-ById $window 'CaptureActionButton').Current.Name
     $englishImage = Join-Path $Output 'ui-monochrome-en.png'
     Save-Window $process.MainWindowHandle $englishImage
+
+    Select-Index $language 2
+    $process.Refresh()
+    $hongKongTitle = $process.MainWindowTitle
+    $hongKongStart = (Find-ById $window 'CaptureActionButton').Current.Name
+    $hongKongImage = Join-Path $Output 'ui-monochrome-zh-HK.png'
+    Save-Window $process.MainWindowHandle $hongKongImage
 
     Select-Index $language 1
     $process.Refresh()
@@ -115,14 +158,21 @@ try {
     if ($chineseTitle -eq $englishTitle -or $chineseStart -eq $englishStart) {
         throw "Chinese switch failed: title='$chineseTitle', start='$chineseStart'"
     }
+    if ($hongKongTitle -ne $expectedHongKongTitle -or
+        $hongKongStart -ne $expectedHongKongStart) {
+        throw "Hong Kong Chinese switch failed: title='$hongKongTitle', start='$hongKongStart'"
+    }
 
     [pscustomobject]@{
         EnglishTitle = $englishTitle
         EnglishStart = $englishStart
         ChineseTitle = $chineseTitle
         ChineseStart = $chineseStart
+        HongKongTitle = $hongKongTitle
+        HongKongStart = $hongKongStart
         EnglishScreenshot = $englishImage
         ChineseScreenshot = $chineseImage
+        HongKongScreenshot = $hongKongImage
     }
 }
 finally {
