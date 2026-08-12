@@ -114,8 +114,9 @@ public partial class App : Application
             !settings.NotifyPrereleaseReleases)
             settings.NotifyStableReleases = true;
         var release = await _releaseClient.GetLatestAsync(settings, cancellationToken);
-        return release is not null && release.Version > VersionManager.Current
-            ? release : null;
+        if (release is null || release.Version <= VersionManager.Current)
+            return null;
+        return await _releaseClient.EnrichReleaseNotesAsync(release, cancellationToken);
     }
 
     internal void ShowAboutWindow(Window owner, MainViewModel mainViewModel,

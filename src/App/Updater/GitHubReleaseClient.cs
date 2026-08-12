@@ -172,8 +172,6 @@ internal sealed class GitHubReleaseClient : IDisposable
                 var release = ReleaseParser.ParseLatest(json,
                     settings.NotifyStableReleases,
                     settings.NotifyPrereleaseReleases);
-                if (release is not null)
-                    release = await EnrichReleaseNotesAsync(release, cancellationToken);
                 DiagnosticLogger.Info("updater", "release_check_complete",
                     ("release", release?.TagName ?? "none"),
                     ("endpoint", endpoint.Name));
@@ -197,8 +195,8 @@ internal sealed class GitHubReleaseClient : IDisposable
             "All configured update endpoints are unavailable.", lastError);
     }
 
-    private async Task<ReleaseInfo> EnrichReleaseNotesAsync(ReleaseInfo release,
-        CancellationToken cancellationToken)
+    internal async Task<ReleaseInfo> EnrichReleaseNotesAsync(ReleaseInfo release,
+        CancellationToken cancellationToken = default)
     {
         var notesUri = new Uri(
             $"https://raw.githubusercontent.com/RayrenSX/iPhoneMirror/{release.TagName}/docs/releases/{release.TagName}.md");
@@ -207,18 +205,14 @@ internal sealed class GitHubReleaseClient : IDisposable
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
             using var response = await _httpClient.GetAsync(notesUri,
-                HttpCompletionOption.ResponseContentRead, timeout.Token);
+                HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             var finalUri = response.RequestMessage?.RequestUri;
             if (finalUri is null || finalUri.Scheme != Uri.UriSchemeHttps ||
                 !finalUri.Host.Equals(notesUri.Host, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException(
                     "The release notes endpoint redirected to an untrusted host.");
             response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength is > MaximumReleaseNotesCharacters)
-                throw new InvalidDataException("The release notes are unexpectedly large.");
-            var notes = await response.Content.ReadAsStringAsync(timeout.Token);
-            if (notes.Length > MaximumReleaseNotesCharacters)
-                throw new InvalidDataException("The release notes are unexpectedly large.");
+            var notes = await ReadReleaseNotesAsync(response.Content, timeout.Token);
             if (!string.IsNullOrWhiteSpace(notes))
                 return release with { Body = notes.Trim() };
         }
@@ -234,6 +228,27 @@ internal sealed class GitHubReleaseClient : IDisposable
                 ("release", release.TagName));
         }
         return release;
+    }
+
+    private static async Task<string> ReadReleaseNotesAsync(HttpContent content,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true);
+        var notes = new StringBuilder();
+        var buffer = new char[8192];
+        while (true)
+        {
+            var remaining = MaximumReleaseNotesCharacters - notes.Length;
+            var count = await reader.ReadAsync(
+                buffer.AsMemory(0, Math.Min(buffer.Length, remaining + 1)),
+                cancellationToken);
+            if (count == 0) return notes.ToString();
+            if (count > remaining)
+                throw new InvalidDataException("The release notes are unexpectedly large.");
+            notes.Append(buffer, 0, count);
+        }
     }
 
     private async Task<string> ReadReleaseListAsync(Uri endpoint,

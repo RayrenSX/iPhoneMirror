@@ -1174,7 +1174,10 @@ try
     });
     Equal("v1.3.1", fallbackRelease?.TagName,
         "release check falls back to official GitHub Raw metadata when the API fails");
-    Equal(true, fallbackRelease?.Body.Contains("完整中文说明",
+    Sequence(["api.github.com", "raw.githubusercontent.com"], releaseRequests,
+        "release metadata lookup does not fetch full notes before version comparison");
+    fallbackRelease = await releaseClient.EnrichReleaseNotesAsync(fallbackRelease!);
+    Equal(true, fallbackRelease.Body.Contains("完整中文说明",
             StringComparison.Ordinal) == true,
         "fallback metadata is enriched with the complete version release notes");
     Sequence(["api.github.com", "raw.githubusercontent.com", "raw.githubusercontent.com"], releaseRequests,
@@ -1189,6 +1192,19 @@ try
     Equal(2, releaseRequests.Count(host => host.Equals("raw.githubusercontent.com",
             StringComparison.OrdinalIgnoreCase)),
         "disabled metadata fallback does not add another GitHub Raw request");
+
+    var oversizedNotes = new string('x', 1024 * 1024 + 1);
+    using var oversizedNotesHttpClient = new HttpClient(new StubHttpMessageHandler(
+        (request, _) => Task.FromResult(HttpResponse(request,
+            new StringContent(oversizedNotes, System.Text.Encoding.UTF8,
+                "text/markdown")))));
+    using var oversizedNotesClient = new GitHubReleaseClient(oversizedNotesHttpClient,
+        Path.Combine(updateNetworkRoot, "oversized-notes"));
+    var oversizedNotesRelease = fallbackRelease with { Body = "metadata notes" };
+    var limitedNotesRelease = await oversizedNotesClient.EnrichReleaseNotesAsync(
+        oversizedNotesRelease);
+    Equal("metadata notes", limitedNotesRelease.Body,
+        "oversized release notes fall back to the bounded metadata body");
 
     var payload = System.Text.Encoding.UTF8.GetBytes("verified mirror payload");
     var payloadHash = Convert.ToHexString(
