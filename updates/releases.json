@@ -1,39 +1,5 @@
 [
   {
-    "tag_name": "v6.0.2-pre",
-    "name": "iPhoneMirror v6.0.2-pre",
-    "body": "### Added\n\n- Add fully localized Traditional Chinese (Hong Kong) resources for the main\n  application and driver manager, including automatic `zh-HK` system-language\n  selection, Hong Kong terminology, and the Microsoft JhengHei UI font.\n\n### Fixed\n\n- Keep the running version open until Setup is ready to replace its files, so\n  cancelled or early-failing updates no longer look like the app uninstalled\n  itself.",
-    "published_at": "2026-08-12T06:23:36Z",
-    "draft": false,
-    "prerelease": true,
-    "assets": [
-      {
-        "name": "iPhoneMirror-Setup-v6.0.2-pre-x64.exe",
-        "size": 91779097,
-        "digest": "sha256:e90cf1323e1780b6e1019291cffbd69d869316736b52c349c208ee1403780abf",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v6.0.2-pre/iPhoneMirror-Setup-v6.0.2-pre-x64.exe"
-      },
-      {
-        "name": "iPhoneMirror-v6.0.2-pre-win-x64.zip",
-        "size": 190935474,
-        "digest": "sha256:57310aeea124c3d53d54bd5d6acafaef3f63a0826d0e8c9248b825ed05785d60",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v6.0.2-pre/iPhoneMirror-v6.0.2-pre-win-x64.zip"
-      },
-      {
-        "name": "iPhoneMirror-v6.0.2-pre-win-x64-sbom.spdx.json",
-        "size": 38231,
-        "digest": "sha256:7f0f540ec182002396912b74a4a5878f1a8646a95c831732087e12d047e2c3ec",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v6.0.2-pre/iPhoneMirror-v6.0.2-pre-win-x64-sbom.spdx.json"
-      },
-      {
-        "name": "SHA256SUMS.txt",
-        "size": 319,
-        "digest": "sha256:c15355beaae4e8ab4f24ed8732c37c5f65821987804c56c272a73d8464f689ab",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v6.0.2-pre/SHA256SUMS.txt"
-      }
-    ]
-  },
-  {
     "tag_name": "v1.6.1",
     "name": "iPhoneMirror v1.6.1",
     "body": "### Changed\n\n- Upgrade the bundled AirPlay receiver to v1.1.2 and keep its source,\n  licensing, patch and SHA-256 records synchronized.\n- Publish version-tagged Windows releases directly from the GitHub Actions\n  build runner, keeping failed uploads in draft state instead of transferring\n  large packages through an intermediate workflow artifact.\n- Stop producing and uploading the duplicate `-latest.zip` alias; portable\n  updates already prefer the versioned `win-x64.zip` asset.\n\n### Fixed\n\n- Restore wireless iPad screen mirroring by upgrading the AirPlay receiver to\n  v1.1.2 and keeping Bonjour, server-info, and `/info` capability negotiation\n  and receiver identity on the same mode-specific, upstream-compatible profile.",

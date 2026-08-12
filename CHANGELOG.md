@@ -5,7 +5,7 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
-## [6.0.2-pre] - 2026-08-12
+## [1.6.2-pre] - 2026-08-12
 
 ### Added
 
@@ -1018,8 +1018,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v6.0.2-pre...HEAD
-[6.0.2-pre]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.1...v6.0.2-pre
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.2-pre...HEAD
+[1.6.2-pre]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.1...v1.6.2-pre
 [1.6.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.11...v1.6.0
 [1.5.11]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.10...v1.5.11

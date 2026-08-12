@@ -335,7 +335,7 @@ publishing the compact edition.
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 6.0.2-pre -GenerateSbom
+./scripts/package_release.ps1 -Version 1.6.2-pre -GenerateSbom
 ```
 
 Pass `-UpdateReleaseManifest` when producing the assets that will be uploaded.
