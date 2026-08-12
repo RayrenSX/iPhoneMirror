@@ -1419,6 +1419,30 @@ try
             "nested", "runtime.dll")),
         "Windows PowerShell portable update copies nested payload files");
 
+    var ratioInstall = Path.Combine(zipUpdateTestRoot, "ratio-install");
+    var ratioZip = Path.Combine(zipUpdateTestRoot, "ratio.zip");
+    Directory.CreateDirectory(ratioInstall);
+    File.WriteAllText(Path.Combine(ratioInstall, "iPhoneMirror.exe"), "old-app");
+    File.WriteAllText(Path.Combine(ratioInstall, "iPhoneMirror.Driver.exe"), "old-driver");
+    using (var archive = ZipFile.Open(ratioZip, ZipArchiveMode.Create))
+    {
+        foreach (var name in new[] { "iPhoneMirror.exe", "iPhoneMirror.Driver.exe" })
+        {
+            var entry = archive.CreateEntry(name, CompressionLevel.SmallestSize);
+            using var stream = entry.Open();
+            stream.Write(new byte[2 * 1024 * 1024]);
+        }
+    }
+    var ratioResult = await RunWindowsPowerShellAsync(Path.Combine(
+            sourceDirectory, "App", "tools", "updater", "Apply-ZipUpdate.ps1"),
+        ratioZip, ratioInstall, Environment.ProcessPath!);
+    Equal(true, ratioResult.ExitCode != 0 && ratioResult.Output.Contains(
+            "compression-ratio limit", StringComparison.Ordinal),
+        $"Windows PowerShell portable update rejects high-ratio ZIPs: {ratioResult.Output}");
+    Equal("old-app", File.ReadAllText(Path.Combine(ratioInstall,
+            "iPhoneMirror.exe")),
+        "rejected high-ratio ZIP leaves the installed application unchanged");
+
     var rollbackInstall = Path.Combine(zipUpdateTestRoot, "rollback-install");
     var rollbackPayload = Path.Combine(zipUpdateTestRoot, "rollback-payload");
     var rollbackZip = Path.Combine(zipUpdateTestRoot, "rollback.zip");

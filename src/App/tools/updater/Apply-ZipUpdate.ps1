@@ -10,6 +10,12 @@ $ErrorActionPreference = 'Stop'
 $stagingRoot = Join-Path $env:TEMP ('iPhoneMirror\Update-' + [Guid]::NewGuid().ToString('N'))
 $backupRoot = Join-Path $env:TEMP ('iPhoneMirror\Rollback-' + [Guid]::NewGuid().ToString('N'))
 $preserveBackup = $false
+$maximumArchiveBytes = 2L * 1024 * 1024 * 1024
+$maximumEntryCount = 20000
+$maximumEntryBytes = 2L * 1024 * 1024 * 1024
+$maximumExpandedBytes = 4L * 1024 * 1024 * 1024
+$maximumCompressionRatio = 1000L
+$minimumFreeSpaceReserve = 512L * 1024 * 1024
 
 function Get-NormalizedPath([string]$Path) {
     $fullPath = [IO.Path]::GetFullPath($Path)
@@ -71,9 +77,112 @@ function Assert-NoReparsePath([string]$Root, [string]$Path) {
     }
 }
 
+function Assert-SafeZipArchive([string]$Path, [string]$Destination) {
+    $archiveItem = Get-Item -LiteralPath $Path -Force
+    if ($archiveItem.PSIsContainer) { throw 'The update ZIP path is not a file.' }
+    if ($archiveItem.Length -gt $maximumArchiveBytes) {
+        throw "The update ZIP exceeds the $maximumArchiveBytes-byte download limit."
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($archiveItem.FullName)
+    try {
+        if ($archive.Entries.Count -gt $maximumEntryCount) {
+            throw "The update ZIP contains more than $maximumEntryCount entries."
+        }
+        [long]$expandedBytes = 0
+        foreach ($entry in $archive.Entries) {
+            if ($entry.Length -gt $maximumEntryBytes) {
+                throw "The update ZIP entry '$($entry.FullName)' exceeds the per-file limit."
+            }
+            $minimumCompressedBytes = [long][Math]::Ceiling(
+                $entry.Length / [double]$maximumCompressionRatio)
+            if ($entry.Length -gt 0 -and
+                    $entry.CompressedLength -lt $minimumCompressedBytes) {
+                throw "The update ZIP entry '$($entry.FullName)' exceeds the compression-ratio limit."
+            }
+            if ($expandedBytes -gt $maximumExpandedBytes - $entry.Length) {
+                throw "The update ZIP exceeds the $maximumExpandedBytes-byte expanded-size limit."
+            }
+            $expandedBytes += $entry.Length
+        }
+
+        $destinationRoot = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Destination))
+        try {
+            $drive = [IO.DriveInfo]::new($destinationRoot)
+            if ($drive.IsReady -and $expandedBytes -gt
+                    $drive.AvailableFreeSpace - $minimumFreeSpaceReserve) {
+                throw 'The update ZIP cannot be extracted without exhausting temporary storage.'
+            }
+        }
+        catch [ArgumentException], [IO.IOException], [UnauthorizedAccessException] {
+            # Some network-backed temporary directories do not expose drive capacity.
+        }
+    }
+    finally { $archive.Dispose() }
+}
+
+function Expand-SafeZipArchive([string]$Path, [string]$Destination) {
+    $destinationRoot = Get-NormalizedPath $Destination
+    $destinationPrefix = Get-ChildPathPrefix $destinationRoot
+    $archive = [IO.Compression.ZipFile]::OpenRead((Get-NormalizedPath $Path))
+    try {
+        [long]$expandedBytes = 0
+        foreach ($entry in $archive.Entries) {
+            $entryPath = $entry.FullName.Replace(
+                [IO.Path]::AltDirectorySeparatorChar,
+                [IO.Path]::DirectorySeparatorChar)
+            $target = [IO.Path]::GetFullPath((Join-Path $destinationRoot $entryPath))
+            if (-not $target.StartsWith($destinationPrefix,
+                    [StringComparison]::OrdinalIgnoreCase)) {
+                throw "The update ZIP entry escapes the staging directory: $($entry.FullName)"
+            }
+
+            $isDirectory = $entry.FullName.EndsWith('/', [StringComparison]::Ordinal) -or
+                $entry.FullName.EndsWith('\', [StringComparison]::Ordinal)
+            if ($isDirectory) {
+                New-Item -ItemType Directory -Force -Path $target | Out-Null
+                continue
+            }
+            $parent = Split-Path -Parent $target
+            New-Item -ItemType Directory -Force -Path $parent | Out-Null
+            $input = $entry.Open()
+            $output = [IO.File]::Open($target, [IO.FileMode]::Create,
+                [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try {
+                $buffer = [byte[]]::new(1024 * 1024)
+                [long]$entryBytes = 0
+                while (($read = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    if ($entryBytes -gt $maximumEntryBytes - $read -or
+                            $expandedBytes -gt $maximumExpandedBytes - $read) {
+                        throw "The update ZIP exceeds its expanded-size limit while extracting '$($entry.FullName)'."
+                    }
+                    $entryBytes += $read
+                    $expandedBytes += $read
+                    $minimumCompressedBytes = [long][Math]::Ceiling(
+                        $entryBytes / [double]$maximumCompressionRatio)
+                    if ($entry.CompressedLength -lt $minimumCompressedBytes) {
+                        throw "The update ZIP entry '$($entry.FullName)' exceeds the compression-ratio limit while extracting."
+                    }
+                    $output.Write($buffer, 0, $read)
+                }
+                if ($entryBytes -ne $entry.Length) {
+                    throw "The update ZIP entry '$($entry.FullName)' has an inconsistent expanded size."
+                }
+            }
+            finally {
+                $output.Dispose()
+                $input.Dispose()
+            }
+        }
+    }
+    finally { $archive.Dispose() }
+}
+
 try {
     $installRoot = Get-NormalizedPath $InstallDirectory
     $installPrefix = Get-ChildPathPrefix $installRoot
+    Assert-SafeZipArchive $ZipPath $stagingRoot
     $trackedIds = @($WaitPids -split ';' | ForEach-Object {
         [int]::Parse($_, [Globalization.CultureInfo]::InvariantCulture)
     } | Where-Object { $_ -gt 0 } | Select-Object -Unique)
@@ -141,7 +250,7 @@ try {
         }
     }
     New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
-    Expand-Archive -LiteralPath $ZipPath -DestinationPath $stagingRoot -Force
+    Expand-SafeZipArchive $ZipPath $stagingRoot
     $children = @(Get-ChildItem -LiteralPath $stagingRoot -Force)
     $payloadRoot = if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
         $children[0].FullName
