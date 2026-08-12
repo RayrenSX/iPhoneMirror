@@ -73,15 +73,37 @@
             </StackPanel>
         </Grid>
         <Border Grid.Row="4" Style="{StaticResource SettingsSection}" Padding="18">
-            <FlowDocumentScrollViewer x:Name="ReleaseNotesViewer"
-                                       VerticalScrollBarVisibility="Auto"
-                                       Background="Transparent" BorderThickness="0"
-                                       IsToolBarVisible="False">
-                <FlowDocumentScrollViewer.Resources>
-                    <Style TargetType="ScrollBar"
-                           BasedOn="{StaticResource ContentEdgeScrollBarStyle}"/>
-                </FlowDocumentScrollViewer.Resources>
-            </FlowDocumentScrollViewer>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="8"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding ReleaseName}" FontSize="18"
+                               FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <Button Grid.Column="1" Click="OnOpenReleaseClick"
+                            ToolTip="{DynamicResource OpenReleasePage}" Margin="12,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8A7;" Margin="0,0,6,0"/>
+                            <TextBlock Text="{DynamicResource OpenReleasePage}"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+                <FlowDocumentScrollViewer Grid.Row="2" x:Name="ReleaseNotesViewer"
+                                           VerticalScrollBarVisibility="Auto"
+                                           Background="Transparent" BorderThickness="0"
+                                           IsToolBarVisible="False">
+                    <FlowDocumentScrollViewer.Resources>
+                        <Style TargetType="ScrollBar"
+                               BasedOn="{StaticResource ContentEdgeScrollBarStyle}"/>
+                    </FlowDocumentScrollViewer.Resources>
+                </FlowDocumentScrollViewer>
+            </Grid>
         </Border>
         <Grid Grid.Row="6">
             <Grid.RowDefinitions>

@@ -20,6 +20,8 @@ internal sealed record ReleaseInfo(
     ReleaseAsset? ZipAsset,
     ReleaseAsset? ChecksumAsset)
 {
+    internal Uri ReleaseUrl { get; init; } = new($"https://github.com/RayrenSX/iPhoneMirror/releases/tag/{TagName}");
+
     internal ReleaseAsset? PreferredAsset => InstallerAsset ?? ZipAsset;
 
     internal ReleaseAsset? SelectAsset(bool preferInstaller) => preferInstaller
@@ -66,10 +68,14 @@ internal static class ReleaseParser
             var published = DateTimeOffset.TryParse(
                 GetOptionalString(element, "published_at"), out var parsedPublished)
                 ? parsedPublished : DateTimeOffset.MinValue;
-            releases.Add(new ReleaseInfo(tag,
+            var releaseInfo = new ReleaseInfo(tag,
                 GetOptionalString(element, "name") ?? tag,
                 GetOptionalString(element, "body") ?? string.Empty,
-                published, version, prerelease, installer, zip, checksum));
+                published, version, prerelease, installer, zip, checksum);
+            if (Uri.TryCreate(GetOptionalString(element, "html_url"), UriKind.Absolute,
+                    out var releaseUrl) && IsTrustedReleasePageUri(releaseUrl))
+                releaseInfo = releaseInfo with { ReleaseUrl = releaseUrl };
+            releases.Add(releaseInfo);
         }
         return releases.OrderByDescending(release => release.Version).FirstOrDefault();
     }
@@ -122,6 +128,12 @@ internal static class ReleaseParser
         uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) &&
         uri.AbsolutePath.StartsWith(
             "/RayrenSX/iPhoneMirror/releases/download/",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTrustedReleasePageUri(Uri uri) =>
+        uri.IsAbsoluteUri && uri.Scheme == Uri.UriSchemeHttps &&
+        uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) &&
+        uri.AbsolutePath.StartsWith("/RayrenSX/iPhoneMirror/releases/tag/",
             StringComparison.OrdinalIgnoreCase);
 
     private static string? NormalizeSha256(string? digest)

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
@@ -26,6 +27,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
     public event PropertyChangedEventHandler? PropertyChanged;
     public string CurrentVersion => VersionManager.DisplayVersion;
     public string LatestVersion => _release.TagName;
+    public string ReleaseName => _release.Name;
     public string PublishedAt => _release.PublishedAt.LocalDateTime.ToString("yyyy-MM-dd");
     public Visibility ProgressVisibility => _downloading || !string.IsNullOrWhiteSpace(StatusText)
         ? Visibility.Visible : Visibility.Collapsed;
@@ -137,6 +139,23 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
     }
 
     private void OnLaterClick(object sender, RoutedEventArgs e) => Close();
+
+    private void OnOpenReleaseClick(object sender, RoutedEventArgs e)
+    {
+        var target = _release.ReleaseUrl.AbsoluteUri;
+        try
+        {
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("shell", "open_target_failed", error,
+                ("target", target));
+            AppPromptWindow.Inform(LocalizationService.Get("OpenLinkFailedTitle"),
+                error.Message);
+        }
+    }
+
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

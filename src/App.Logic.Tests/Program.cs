@@ -1150,6 +1150,13 @@ try
                 return Task.FromException<HttpResponseMessage>(
                     new HttpRequestException("simulated GitHub API outage"));
             if (host.Equals("raw.githubusercontent.com",
+                    StringComparison.OrdinalIgnoreCase) &&
+                request.RequestUri?.AbsolutePath.Contains("/docs/releases/",
+                    StringComparison.Ordinal) == true)
+                return Task.FromResult(HttpResponse(request,
+                    new StringContent("# Stable release\n\n完整中文说明\n\n### Fixed\n\nFull English notes.",
+                        System.Text.Encoding.UTF8, "text/markdown")));
+            if (host.Equals("raw.githubusercontent.com",
                     StringComparison.OrdinalIgnoreCase))
                 return Task.FromResult(HttpResponse(request,
                     new StringContent(releaseFixture,
@@ -1167,7 +1174,10 @@ try
     });
     Equal("v1.3.1", fallbackRelease?.TagName,
         "release check falls back to official GitHub Raw metadata when the API fails");
-    Sequence(["api.github.com", "raw.githubusercontent.com"], releaseRequests,
+    Equal(true, fallbackRelease?.Body.Contains("完整中文说明",
+            StringComparison.Ordinal) == true,
+        "fallback metadata is enriched with the complete version release notes");
+    Sequence(["api.github.com", "raw.githubusercontent.com", "raw.githubusercontent.com"], releaseRequests,
         "release check uses only official GitHub metadata endpoints");
 
     await ThrowsAsync<HttpRequestException>(async () =>
@@ -1176,9 +1186,9 @@ try
             AllowMirrorFallback = false,
             NotifyStableReleases = true,
         }), "disabled release mirror fallback does not contact alternate endpoints");
-    Equal(1, releaseRequests.Count(host => host.Equals("raw.githubusercontent.com",
+    Equal(2, releaseRequests.Count(host => host.Equals("raw.githubusercontent.com",
             StringComparison.OrdinalIgnoreCase)),
-        "disabled metadata fallback leaves GitHub Raw untouched");
+        "disabled metadata fallback does not add another GitHub Raw request");
 
     var payload = System.Text.Encoding.UTF8.GetBytes("verified mirror payload");
     var payloadHash = Convert.ToHexString(

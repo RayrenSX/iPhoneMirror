@@ -433,6 +433,7 @@
     <system:String x:Key="OpenLinkFailedTitle">無法開啟</system:String>
     <system:String x:Key="UpdateWindowTitle">發現新版本</system:String>
     <system:String x:Key="UpdateWindowSubtitle">查看更新內容並一按完成升級</system:String>
+    <system:String x:Key="OpenReleasePage">查看完整 Release</system:String>
     <system:String x:Key="CurrentVersionLabel">目前版本</system:String>
     <system:String x:Key="LatestVersionLabel">最新版本</system:String>
     <system:String x:Key="PublishedAtLabel">發佈時間</system:String>

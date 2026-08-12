@@ -433,6 +433,7 @@
     <system:String x:Key="OpenLinkFailedTitle">Could not open</system:String>
     <system:String x:Key="UpdateWindowTitle">A new version is available</system:String>
     <system:String x:Key="UpdateWindowSubtitle">Review the changes and upgrade in one step</system:String>
+    <system:String x:Key="OpenReleasePage">View full release</system:String>
     <system:String x:Key="CurrentVersionLabel">Current version</system:String>
     <system:String x:Key="LatestVersionLabel">Latest version</system:String>
     <system:String x:Key="PublishedAtLabel">Published</system:String>
