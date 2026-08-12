@@ -705,6 +705,9 @@ Equal(true, SemanticVersion.Parse("1.3.0") >
 Equal(true, SemanticVersion.Parse("1.3.0-beta.10") >
     SemanticVersion.Parse("1.3.0-beta.2"),
     "numeric prerelease identifiers compare numerically");
+Equal(true, SemanticVersion.Parse("1.3.0-beta.100000000000000000000") >
+    SemanticVersion.Parse("1.3.0-beta.99999999999999999999"),
+    "arbitrarily large numeric prerelease identifiers compare numerically");
 Equal(false, SemanticVersion.TryParse("1.02.0", out _),
     "semantic version rejects leading zeroes");
 Equal(false, SemanticVersion.TryParse("1.2.0-beta.02", out _),
@@ -1206,6 +1209,21 @@ try
     Equal("metadata notes", limitedNotesRelease.Body,
         "oversized release notes fall back to the bounded metadata body");
 
+    var oversizedReleaseList = System.Text.Encoding.UTF8.GetBytes(
+        new string('x', 4 * 1024 * 1024 + 1));
+    using var oversizedReleaseListHttpClient = new HttpClient(
+        new StubHttpMessageHandler((request, _) => Task.FromResult(
+            HttpResponse(request, new UnknownLengthContent(oversizedReleaseList)))));
+    using var oversizedReleaseListClient = new GitHubReleaseClient(
+        oversizedReleaseListHttpClient,
+        Path.Combine(updateNetworkRoot, "oversized-release-list"));
+    await ThrowsAsync<HttpRequestException>(() =>
+        oversizedReleaseListClient.GetLatestAsync(new UpdateSettings
+        {
+            AllowMirrorFallback = false,
+            NotifyStableReleases = true,
+        }), "unknown-length release metadata is rejected at the streaming limit");
+
     var payload = System.Text.Encoding.UTF8.GetBytes("verified mirror payload");
     var payloadHash = Convert.ToHexString(
         System.Security.Cryptography.SHA256.HashData(payload)).ToLowerInvariant();
@@ -1216,6 +1234,31 @@ try
     var downloadRelease = new ReleaseInfo("v9.9.9", "Mirror test", string.Empty,
         DateTimeOffset.UtcNow, SemanticVersion.Parse("v9.9.9"), false,
         downloadAsset, null, null);
+
+    var checksumAsset = new ReleaseAsset("SHA256SUMS.txt",
+        new Uri("https://github.com/RayrenSX/iPhoneMirror/releases/download/v9.9.9/SHA256SUMS.txt"),
+        0);
+    var checksumRelease = downloadRelease with
+    {
+        InstallerAsset = downloadAsset with { Sha256 = null },
+        ChecksumAsset = checksumAsset,
+    };
+    var oversizedChecksum = new byte[1024 * 1024 + 1];
+    using var oversizedChecksumHttpClient = new HttpClient(
+        new StubHttpMessageHandler((request, _) =>
+        {
+            if (request.Headers.Range is not null)
+                return Task.FromResult(HttpResponse(request, new ByteArrayContent(payload)));
+            return Task.FromResult(HttpResponse(request,
+                new UnknownLengthContent(oversizedChecksum)));
+        }));
+    using var oversizedChecksumClient = new GitHubReleaseClient(
+        oversizedChecksumHttpClient,
+        Path.Combine(updateNetworkRoot, "oversized-checksum"));
+    await ThrowsAsync<InvalidDataException>(() => oversizedChecksumClient.DownloadAsync(
+            checksumRelease, allowMirrorFallback: false, preferInstaller: true),
+        "unknown-length checksum manifest is rejected at the streaming limit");
+
     var downloadRequests = new List<string>();
     using var downloadHttpClient = new HttpClient(new StubHttpMessageHandler(
         (request, _) =>
@@ -2075,6 +2118,16 @@ await shutdown.StopAndDisposeOnceAsync(
     () => { shutdownOrder.Add("duplicate-stop"); return Task.CompletedTask; },
     () => { shutdownOrder.Add("duplicate-dispose"); return Task.CompletedTask; });
 Sequence(["stop", "dispose"], shutdownOrder, "window close cleanup is ordered and idempotent");
+
+var currentExecutable = Environment.ProcessPath!;
+Equal(true, SingleInstanceCoordinator.IsSameExecutable(currentExecutable,
+        currentExecutable.ToUpperInvariant()),
+    "single-instance matching treats Windows executable paths case-insensitively");
+Equal(false, SingleInstanceCoordinator.IsSameExecutable(currentExecutable,
+        Path.Combine(Path.GetDirectoryName(currentExecutable)!, "unrelated", "iPhoneMirror.exe")),
+    "single-instance matching rejects same-name executables from another directory");
+Equal(false, SingleInstanceCoordinator.IsSameExecutable(currentExecutable, null),
+    "single-instance matching rejects processes whose executable path cannot be verified");
 
 var deviceA = new DeviceCaptureState { Udid = "phone-a", Handle = 11, FrameRate = 60, Volume = 80 };
 var deviceB = new DeviceCaptureState { Udid = "phone-b", Handle = 22, FrameRate = 30, Volume = 25 };

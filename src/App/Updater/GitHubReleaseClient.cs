@@ -231,25 +231,9 @@ internal sealed class GitHubReleaseClient : IDisposable
     }
 
     private static async Task<string> ReadReleaseNotesAsync(HttpContent content,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream, Encoding.UTF8,
-            detectEncodingFromByteOrderMarks: true);
-        var notes = new StringBuilder();
-        var buffer = new char[8192];
-        while (true)
-        {
-            var remaining = MaximumReleaseNotesCharacters - notes.Length;
-            var count = await reader.ReadAsync(
-                buffer.AsMemory(0, Math.Min(buffer.Length, remaining + 1)),
-                cancellationToken);
-            if (count == 0) return notes.ToString();
-            if (count > remaining)
-                throw new InvalidDataException("The release notes are unexpectedly large.");
-            notes.Append(buffer, 0, count);
-        }
-    }
+        CancellationToken cancellationToken) =>
+        await ReadBoundedTextAsync(content, MaximumReleaseNotesCharacters,
+            "The release notes are unexpectedly large.", cancellationToken);
 
     private async Task<string> ReadReleaseListAsync(Uri endpoint,
         CancellationToken cancellationToken)
@@ -257,18 +241,17 @@ internal sealed class GitHubReleaseClient : IDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(8));
         using var response = await _httpClient.GetAsync(endpoint,
-            HttpCompletionOption.ResponseContentRead, timeout.Token);
+            HttpCompletionOption.ResponseHeadersRead, timeout.Token);
         var finalUri = response.RequestMessage?.RequestUri;
         if (finalUri is null || finalUri.Scheme != Uri.UriSchemeHttps ||
             !finalUri.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The update endpoint redirected to an untrusted host.");
         response.EnsureSuccessStatusCode();
-        if (response.Content.Headers.ContentLength is > 4 * 1024 * 1024)
+        if (response.Content.Headers.ContentLength is > MaximumReleaseListCharacters)
             throw new InvalidDataException("The update release list is unexpectedly large.");
-        var json = await response.Content.ReadAsStringAsync(timeout.Token);
-        if (json.Length > MaximumReleaseListCharacters)
-            throw new InvalidDataException("The update release list is unexpectedly large.");
-        return json;
+        return await ReadBoundedTextAsync(response.Content,
+            MaximumReleaseListCharacters, "The update release list is unexpectedly large.",
+            timeout.Token);
     }
 
     internal async Task<DownloadedUpdate> DownloadAsync(ReleaseInfo release,
@@ -412,16 +395,15 @@ internal sealed class GitHubReleaseClient : IDisposable
                     CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(20));
                 using var response = await _httpClient.GetAsync(uri,
-                    HttpCompletionOption.ResponseContentRead, timeout.Token);
+                    HttpCompletionOption.ResponseHeadersRead, timeout.Token);
                 EnsureTrustedDownloadResponse(uri, response);
                 response.EnsureSuccessStatusCode();
                 if (response.Content.Headers.ContentLength is > MaximumChecksumCharacters)
                     throw new InvalidDataException(
                         "The checksum manifest is unexpectedly large.");
-                var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token);
-                if (bytes.Length > MaximumChecksumCharacters)
-                    throw new InvalidDataException(
-                        "The checksum manifest is unexpectedly large.");
+                var bytes = await ReadBoundedBytesAsync(response.Content,
+                    MaximumChecksumCharacters,
+                    "The checksum manifest is unexpectedly large.", timeout.Token);
                 if (checksumAsset.Size > 0 && bytes.LongLength != checksumAsset.Size)
                     throw new InvalidDataException(
                         "The checksum manifest size does not match the release metadata.");
@@ -451,6 +433,44 @@ internal sealed class GitHubReleaseClient : IDisposable
         if (lastError is InvalidDataException invalidData) throw invalidData;
         throw new HttpRequestException(
             "All checksum download endpoints are unavailable.", lastError);
+    }
+
+    private static async Task<string> ReadBoundedTextAsync(HttpContent content,
+        int maximumCharacters, string errorMessage, CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true);
+        var result = new StringBuilder();
+        var buffer = new char[8192];
+        while (true)
+        {
+            var remaining = maximumCharacters - result.Length;
+            var count = await reader.ReadAsync(
+                buffer.AsMemory(0, Math.Min(buffer.Length, remaining + 1)),
+                cancellationToken);
+            if (count == 0) return result.ToString();
+            if (count > remaining) throw new InvalidDataException(errorMessage);
+            result.Append(buffer, 0, count);
+        }
+    }
+
+    private static async Task<byte[]> ReadBoundedBytesAsync(HttpContent content,
+        int maximumBytes, string errorMessage, CancellationToken cancellationToken)
+    {
+        await using var input = await content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream(Math.Min(maximumBytes, 64 * 1024));
+        var buffer = new byte[8192];
+        while (true)
+        {
+            var remaining = maximumBytes - checked((int)output.Length);
+            var count = await input.ReadAsync(
+                buffer.AsMemory(0, Math.Min(buffer.Length, remaining + 1)),
+                cancellationToken);
+            if (count == 0) return output.ToArray();
+            if (count > remaining) throw new InvalidDataException(errorMessage);
+            output.Write(buffer, 0, count);
+        }
     }
 
     private async Task<HttpResponseMessage> GetResponseHeadersAsync(Uri uri,

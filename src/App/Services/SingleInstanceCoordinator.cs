@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 
 namespace IPhoneMirror.App.Services;
 
@@ -12,6 +13,7 @@ internal sealed class SingleInstanceCoordinator : IDisposable
     private readonly int _currentProcessId;
     private readonly int _currentSessionId;
     private readonly string _currentProcessName;
+    private readonly string? _currentExecutablePath;
     private readonly DateTime _currentStartedAtUtc;
     private RegisteredWaitHandle? _shutdownRegistration;
     private bool _ownsPrimaryInstance;
@@ -23,6 +25,8 @@ internal sealed class SingleInstanceCoordinator : IDisposable
         _currentProcessId = current.Id;
         _currentSessionId = current.SessionId;
         _currentProcessName = current.ProcessName;
+        _currentExecutablePath = TryGetExecutablePath(current) ??
+            NormalizeExecutablePath(Environment.ProcessPath);
         _currentStartedAtUtc = TryGetStartTimeUtc(current) ?? DateTime.UtcNow;
         _mutex = new Mutex(false, MutexName);
         _shutdownEvent = new EventWaitHandle(
@@ -183,7 +187,8 @@ internal sealed class SingleInstanceCoordinator : IDisposable
         foreach (var process in Process.GetProcessesByName(_currentProcessName))
         {
             if (process.Id != _currentProcessId &&
-                TryGetSessionId(process) == _currentSessionId)
+                TryGetSessionId(process) == _currentSessionId &&
+                IsSameExecutable(_currentExecutablePath, TryGetExecutablePath(process)))
             {
                 matches.Add(process);
             }
@@ -193,6 +198,39 @@ internal sealed class SingleInstanceCoordinator : IDisposable
             }
         }
         return matches;
+    }
+
+    internal static bool IsSameExecutable(string? expected, string? candidate)
+    {
+        var normalizedExpected = NormalizeExecutablePath(expected);
+        var normalizedCandidate = NormalizeExecutablePath(candidate);
+        return normalizedExpected is not null && normalizedCandidate is not null &&
+            string.Equals(normalizedExpected, normalizedCandidate,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryGetExecutablePath(Process process)
+    {
+        try { return NormalizeExecutablePath(process.MainModule?.FileName); }
+        catch (InvalidOperationException) { return null; }
+        catch (System.ComponentModel.Win32Exception) { return null; }
+        catch (NotSupportedException) { return null; }
+    }
+
+    private static string? NormalizeExecutablePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try
+        {
+            return Path.GetFullPath(path).TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception error) when (error is ArgumentException or
+                                           NotSupportedException or
+                                           PathTooLongException)
+        {
+            return null;
+        }
     }
 
     private static int TryGetSessionId(Process process)

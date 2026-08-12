@@ -54,16 +54,24 @@ internal readonly record struct SemanticVersion(
         {
             if (index >= left.Length) return -1;
             if (index >= right.Length) return 1;
-            var leftNumeric = int.TryParse(left[index], out var leftNumber);
-            var rightNumeric = int.TryParse(right[index], out var rightNumber);
+            var leftNumeric = left[index].All(char.IsAsciiDigit);
+            var rightNumeric = right[index].All(char.IsAsciiDigit);
             comparison = leftNumeric && rightNumeric
-                ? leftNumber.CompareTo(rightNumber)
+                ? CompareNumericIdentifier(left[index], right[index])
                 : leftNumeric ? -1
                 : rightNumeric ? 1
                 : string.Compare(left[index], right[index], StringComparison.Ordinal);
             if (comparison != 0) return comparison;
         }
         return 0;
+    }
+
+    private static int CompareNumericIdentifier(string left, string right)
+    {
+        var lengthComparison = left.Length.CompareTo(right.Length);
+        return lengthComparison != 0
+            ? lengthComparison
+            : string.Compare(left, right, StringComparison.Ordinal);
     }
 
     public override string ToString() =>
