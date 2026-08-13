@@ -1,6 +1,8 @@
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml.Linq;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
@@ -65,8 +67,10 @@ static async Task ThrowsAsync<TException>(Func<Task> action, string name)
 }
 
 static async Task<(int ExitCode, string Output)> RunWindowsPowerShellAsync(
-    string script, string zipPath, string installDirectory, string restartExecutable)
+    string script, string zipPath, string installDirectory, string restartExecutable,
+    string? expectedSha256 = null)
 {
+    expectedSha256 ??= Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(zipPath)));
     var start = new System.Diagnostics.ProcessStartInfo
     {
         FileName = "powershell.exe",
@@ -78,9 +82,10 @@ static async Task<(int ExitCode, string Output)> RunWindowsPowerShellAsync(
     foreach (var argument in new[]
              {
                  "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                 "-File", script, "-WaitPids", int.MaxValue.ToString(
-                     System.Globalization.CultureInfo.InvariantCulture),
-                 "-ZipPath", zipPath, "-InstallDirectory", installDirectory,
+                  "-File", script, "-WaitPids", int.MaxValue.ToString(
+                      System.Globalization.CultureInfo.InvariantCulture),
+                  "-ZipPath", zipPath, "-ExpectedSha256", expectedSha256,
+                  "-InstallDirectory", installDirectory,
                  "-RestartExecutable", restartExecutable,
              })
         start.ArgumentList.Add(argument);
@@ -1320,6 +1325,9 @@ try
         preferInstaller: true);
     Equal(true, downloaded.HashVerified,
         "mirror download is accepted only after SHA256 verification");
+    Equal(Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant(),
+        downloaded.VerifiedSha256,
+        "download result retains the digest verified from release metadata");
     Equal(true, File.ReadAllBytes(downloaded.Path).SequenceEqual(payload),
         "mirror download preserves the verified payload exactly");
     Sequence(["github.com", "gh-proxy.org"], downloadRequests,
@@ -1419,6 +1427,50 @@ try
             "nested", "runtime.dll")),
         "Windows PowerShell portable update copies nested payload files");
 
+    var tamperedInstall = Path.Combine(zipUpdateTestRoot, "tampered-install");
+    Directory.CreateDirectory(tamperedInstall);
+    File.WriteAllText(Path.Combine(tamperedInstall, "iPhoneMirror.exe"), "old-app");
+    File.WriteAllText(Path.Combine(tamperedInstall, "iPhoneMirror.Driver.exe"), "old-driver");
+    var tamperedResult = await RunWindowsPowerShellAsync(Path.Combine(
+            sourceDirectory, "App", "tools", "updater", "Apply-ZipUpdate.ps1"),
+        successZip, tamperedInstall, Environment.ProcessPath!, new string('0', 64));
+    Equal(true, tamperedResult.ExitCode != 0 && tamperedResult.Output.Contains(
+            "changed after verification", StringComparison.Ordinal),
+        $"portable updater rejects a ZIP whose digest changed: {tamperedResult.Output}");
+    Equal("old-app", File.ReadAllText(Path.Combine(tamperedInstall,
+            "iPhoneMirror.exe")),
+        "rejected tampered ZIP leaves the installed application unchanged");
+
+    var unsafePathInstall = Path.Combine(zipUpdateTestRoot, "unsafe-path-install");
+    var unsafePathZip = Path.Combine(zipUpdateTestRoot, "unsafe-path.zip");
+    Directory.CreateDirectory(unsafePathInstall);
+    File.WriteAllText(Path.Combine(unsafePathInstall, "iPhoneMirror.exe"), "old-app");
+    File.WriteAllText(Path.Combine(unsafePathInstall, "iPhoneMirror.Driver.exe"),
+        "old-driver");
+    using (var archive = ZipFile.Open(unsafePathZip, ZipArchiveMode.Create))
+    {
+        foreach (var name in new[]
+                 {
+                     "iPhoneMirror.exe", "iPhoneMirror.Driver.exe",
+                     "iPhoneMirror.exe:payload",
+                 })
+        {
+            var entry = archive.CreateEntry(name, CompressionLevel.NoCompression);
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("payload");
+        }
+    }
+    var unsafePathResult = await RunWindowsPowerShellAsync(Path.Combine(
+            sourceDirectory, "App", "tools", "updater", "Apply-ZipUpdate.ps1"),
+        unsafePathZip, unsafePathInstall, Environment.ProcessPath!);
+    Equal(true, unsafePathResult.ExitCode != 0 && unsafePathResult.Output.Contains(
+            "unsafe path", StringComparison.Ordinal),
+        $"Windows PowerShell portable update rejects NTFS stream paths: " +
+        unsafePathResult.Output);
+    Equal("old-app", File.ReadAllText(Path.Combine(unsafePathInstall,
+            "iPhoneMirror.exe")),
+        "rejected unsafe ZIP path leaves the installed application unchanged");
+
     var ratioInstall = Path.Combine(zipUpdateTestRoot, "ratio-install");
     var ratioZip = Path.Combine(zipUpdateTestRoot, "ratio.zip");
     Directory.CreateDirectory(ratioInstall);
@@ -1507,11 +1559,107 @@ Throws<InvalidOperationException>(() =>
             sharedRuntime: false),
     "portable deployment refuses migration to Setup during automatic update");
 var zipWaitArguments = UpdateInstallerLauncher.BuildZipArguments(
-    "Apply-ZipUpdate.ps1", "update.zip", "C:\\install",
-    "C:\\install\\iPhoneMirror.exe", [17, 29, 17]);
+    "update.zip", "C:\\install",
+    "C:\\install\\iPhoneMirror.exe", new string('a', 64), [17, 29, 17]);
 Equal(true, zipWaitArguments.Contains("-WaitPids", StringComparer.Ordinal) &&
             zipWaitArguments.Contains("17;29", StringComparer.Ordinal),
     "portable update helper receives both main and driver process IDs");
+Equal(true, zipWaitArguments.Contains("-ExpectedSha256", StringComparer.Ordinal) &&
+            zipWaitArguments.Contains(new string('a', 64), StringComparer.Ordinal),
+    "portable update helper receives the verified package digest");
+
+var bootstrapRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-update-bootstrap-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(bootstrapRoot);
+    var bootstrapScript = Path.Combine(bootstrapRoot, "helper.ps1");
+    var bootstrapOutput = Path.Combine(bootstrapRoot, "output.txt");
+    File.WriteAllText(bootstrapScript,
+        "param([string]$Output,[string]$Value) " +
+        "[IO.File]::WriteAllText($Output,$Value)", new UTF8Encoding(false));
+    var bootstrapDigest = Convert.ToHexString(
+        SHA256.HashData(File.ReadAllBytes(bootstrapScript)));
+    var encodedBootstrap = UpdateInstallerLauncher.BuildVerifiedScriptBootstrap(
+        bootstrapScript, bootstrapDigest,
+        ["-Output", bootstrapOutput, "-Value", "verified"]);
+    var bootstrapStart = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true,
+    };
+    foreach (var argument in new[]
+             {
+                 "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                 "-EncodedCommand", encodedBootstrap,
+             })
+        bootstrapStart.ArgumentList.Add(argument);
+    using (var process = System.Diagnostics.Process.Start(bootstrapStart) ??
+                         throw new InvalidOperationException(
+                             "verified helper bootstrap did not start"))
+    {
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        Equal(0, process.ExitCode,
+            "verified helper bootstrap executes the expected script");
+    }
+    Equal("verified", File.ReadAllText(bootstrapOutput),
+        "verified helper bootstrap preserves structured arguments");
+
+    File.AppendAllText(bootstrapScript, "#tampered");
+    var rejectedBootstrap = UpdateInstallerLauncher.BuildVerifiedScriptBootstrap(
+        bootstrapScript, bootstrapDigest,
+        ["-Output", bootstrapOutput, "-Value", "tampered"]);
+    var rejectedStart = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true,
+    };
+    foreach (var argument in new[]
+             {
+                 "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                 "-EncodedCommand", rejectedBootstrap,
+             })
+        rejectedStart.ArgumentList.Add(argument);
+    using (var process = System.Diagnostics.Process.Start(rejectedStart) ??
+                         throw new InvalidOperationException(
+                             "tampered helper bootstrap did not start"))
+    {
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        Equal(true, process.ExitCode != 0,
+            "verified helper bootstrap rejects a changed script");
+    }
+    Equal("verified", File.ReadAllText(bootstrapOutput),
+        "rejected helper script cannot run after it is changed");
+}
+finally
+{
+    if (Directory.Exists(bootstrapRoot))
+        Directory.Delete(bootstrapRoot, recursive: true);
+}
+
+var packageLockRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-update-lock-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(packageLockRoot);
+    var package = Path.Combine(packageLockRoot, "update.bin");
+    File.WriteAllText(package, "verified update");
+    var digest = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(package)));
+    using (UpdateInstallerLauncher.LockAndValidatePackage(package, digest))
+    {
+        Throws<IOException>(() => File.AppendAllText(package, "tampered"),
+            "verified update lock blocks writes");
+        Throws<IOException>(() => File.Delete(package),
+            "verified update lock blocks replacement");
+    }
+    File.AppendAllText(package, " released");
+    Throws<InvalidDataException>(() =>
+            UpdateInstallerLauncher.LockAndValidatePackage(package, digest).Dispose(),
+        "update launcher rejects a package changed after download verification");
+}
+finally
+{
+    if (Directory.Exists(packageLockRoot))
+        Directory.Delete(packageLockRoot, recursive: true);
+}
 
 // usbmux may reverse its enumeration order on every poll. Existing cards must
 // never move, while a newly connected phone is appended exactly once.

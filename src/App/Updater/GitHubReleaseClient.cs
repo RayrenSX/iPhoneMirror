@@ -19,7 +19,8 @@ internal sealed record UpdateDownloadProgress(
 }
 
 internal sealed record DownloadedUpdate(
-    ReleaseInfo Release, ReleaseAsset Asset, string Path, bool HashVerified);
+    ReleaseInfo Release, ReleaseAsset Asset, string Path, bool HashVerified,
+    string? VerifiedSha256 = null);
 
 internal static class DeploymentLayout
 {
@@ -297,7 +298,7 @@ internal sealed class GitHubReleaseClient : IDisposable
                 timeout.CancelAfter(TimeSpan.FromMinutes(30));
                 var segmentCount = await DownloadFileAsync(asset, downloadUri, partial, progress,
                     timeout.Token);
-                await VerifyAsync(release, asset, partial, allowMirrorFallback,
+                var verifiedSha256 = await VerifyAsync(release, asset, partial, allowMirrorFallback,
                     timeout.Token);
                 File.Move(partial, destination, overwrite: true);
                 DiagnosticLogger.Info("updater", "download_complete",
@@ -305,7 +306,7 @@ internal sealed class GitHubReleaseClient : IDisposable
                     ("sha256_verified", true), ("endpoint", downloadUri.Host),
                     ("segments", segmentCount));
                 return new DownloadedUpdate(release, asset, destination,
-                    HashVerified: true);
+                    HashVerified: true, VerifiedSha256: verifiedSha256);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -360,7 +361,7 @@ internal sealed class GitHubReleaseClient : IDisposable
         return result.SegmentCount;
     }
 
-    private async Task VerifyAsync(ReleaseInfo release, ReleaseAsset asset,
+    private async Task<string> VerifyAsync(ReleaseInfo release, ReleaseAsset asset,
         string path, bool allowMirrorFallback, CancellationToken cancellationToken)
     {
         var expected = asset.Sha256;
@@ -380,6 +381,7 @@ internal sealed class GitHubReleaseClient : IDisposable
             await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
         if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The downloaded update failed SHA256 verification.");
+        return actual;
     }
 
     private async Task<string> ReadChecksumManifestAsync(ReleaseAsset checksumAsset,

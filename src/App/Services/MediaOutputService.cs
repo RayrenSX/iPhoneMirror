@@ -189,21 +189,23 @@ internal sealed class MediaOutputService : IAsyncDisposable
             var audioPipeName = includeAudio
                 ? $"iphoneMirror-audio-{Environment.ProcessId}-{Guid.NewGuid():N}"
                 : null;
-            NamedPipeServerStream? audioPipe = audioPipeName is null ? null : new(
-                audioPipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous, 64 * 1024, 64 * 1024);
-            Process? process = CreateProcess(capabilities.FfmpegPath,
-                BuildArguments(processRequest, capabilities,
-                    audioPipeName is null ? null : $@"\\.\pipe\{audioPipeName}",
-                    firstAudio?.SampleRate ?? 48000,
-                    firstAudio?.Channels ?? 2,
-                    includeAudio: includeAudio));
-            process.ErrorDataReceived += (_, args) =>
-            {
-                if (!string.IsNullOrWhiteSpace(args.Data)) _lastError = args.Data;
-            };
+            NamedPipeServerStream? audioPipe = null;
+            Process? process = null;
             try
             {
+                audioPipe = audioPipeName is null ? null : new NamedPipeServerStream(
+                    audioPipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte,
+                    PipeOptions.Asynchronous, 64 * 1024, 64 * 1024);
+                process = CreateProcess(capabilities.FfmpegPath,
+                    BuildArguments(processRequest, capabilities,
+                        audioPipeName is null ? null : $@"\\.\pipe\{audioPipeName}",
+                        firstAudio?.SampleRate ?? 48000,
+                        firstAudio?.Channels ?? 2,
+                        includeAudio: includeAudio));
+                process.ErrorDataReceived += (_, args) =>
+                {
+                    if (!string.IsNullOrWhiteSpace(args.Data)) _lastError = args.Data;
+                };
                 if (!process.Start())
                     throw new InvalidOperationException("FFmpeg could not be started.");
                 process.BeginErrorReadLine();
@@ -248,11 +250,14 @@ internal sealed class MediaOutputService : IAsyncDisposable
             {
                 DiagnosticLogger.Exception("media_output", "start_failed", error,
                     ("kind", request.Kind));
+                throw;
+            }
+            finally
+            {
                 if (process is not null) await DisposeFailedStartAsync(process);
                 audioPipe?.Dispose();
                 if (recordingStagingPath is not null)
                     TryDeleteFile(recordingStagingPath);
-                throw;
             }
         }
         finally { _lifecycleGate.Release(); }

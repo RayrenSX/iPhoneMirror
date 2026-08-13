@@ -44,4 +44,8 @@
     <Compile Include="..\App\Updater\UpdateInstallerLauncher.cs" Link="Updater\UpdateInstallerLauncher.cs" />
     <Compile Include="MediaOutputTestInterop.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\App\tools\updater\Apply-ZipUpdate.ps1"
+                      LogicalName="IPhoneMirror.App.Updater.Apply-ZipUpdate.ps1" />
+  </ItemGroup>
 </Project>

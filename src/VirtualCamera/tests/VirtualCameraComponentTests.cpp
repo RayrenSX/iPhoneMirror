@@ -43,6 +43,33 @@ std::filesystem::path module_directory() {
     return std::filesystem::path(std::wstring(path.data(), length)).parent_path();
 }
 
+void test_control_argument_validation() {
+    const auto dll_path = module_directory() / L"iPhoneMirror.VirtualCamera.dll";
+    HMODULE module = LoadLibraryW(dll_path.c_str());
+    check(module != nullptr, "load virtual camera DLL for API validation");
+    if (module == nullptr) return;
+
+    using StartEx = std::int32_t (__cdecl*)(
+        const wchar_t*, std::uint32_t, std::uint32_t, std::uint32_t);
+    const auto start_ex = reinterpret_cast<StartEx>(
+        GetProcAddress(module, "im_vcam_start_ex"));
+    check(start_ex != nullptr, "export extended virtual camera start API");
+    if (start_ex != nullptr) {
+        const auto invalid_argument = static_cast<std::int32_t>(E_INVALIDARG);
+        check(start_ex(nullptr, MaximumFrameWidth + 2U, 2160, 30) ==
+                  invalid_argument,
+              "reject output width above the allocation limit");
+        check(start_ex(nullptr, 3840, MaximumFrameHeight + 2U, 30) ==
+                  invalid_argument,
+              "reject output height above the allocation limit");
+        check(start_ex(nullptr, 1279, 720, 30) == invalid_argument,
+              "reject odd output dimensions");
+        check(start_ex(nullptr, 1280, 720, 61) == invalid_argument,
+              "reject frame rates above the supported limit");
+    }
+    FreeLibrary(module);
+}
+
 template <typename Interface>
 ComPtr<Interface> event_unknown(IMFMediaEvent* event) {
     PROPVARIANT value{};
@@ -488,6 +515,7 @@ int wmain() {
     check_hr(CoInitializeEx(nullptr, COINIT_MULTITHREADED), "initialize COM");
     check_hr(MFStartup(MF_VERSION), "initialize Media Foundation");
 
+    test_control_argument_validation();
     FramePublisher publisher;
     test_frame_exchange(publisher);
     if (!publisher.channel_path().empty()) {

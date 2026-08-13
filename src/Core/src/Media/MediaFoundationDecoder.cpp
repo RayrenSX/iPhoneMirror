@@ -1292,8 +1292,12 @@ struct MediaFoundationVideoDecoder::Impl {
         auto input_result = transform->ProcessInput(0, sample.Get(), 0);
         while (input_result == MF_E_NOTACCEPTING) {
             auto pending = receive_output();
-            if (!pending) check(input_result,
-                "decoder ProcessInput (no output while not accepting)");
+            if (!pending) {
+                check(input_result,
+                    "decoder ProcessInput (no output while not accepting)");
+                throw std::runtime_error(
+                    "decoder accepted no input and produced no output");
+            }
             decoded.push_back(std::move(*pending));
             input_result = transform->ProcessInput(0, sample.Get(), 0);
         }

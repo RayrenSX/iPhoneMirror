@@ -43,7 +43,7 @@ Chunk read_chunk(std::span<const std::uint8_t> bytes, std::size_t& offset) {
 }
 
 void parse_avcc(FormatDescription& format) {
-    const auto marker = quicktime::fourcc('d', 'a', 't', 'v');
+    constexpr auto marker = quicktime::fourcc('d', 'a', 't', 'v');
     for (std::size_t index = 0; index + 4 <= format.extensions.size(); ++index) {
         if (u32le(format.extensions.data() + index) != marker) continue;
         const auto config = std::span(format.extensions).subspan(index + 4);
@@ -84,7 +84,7 @@ void parse_avcc(FormatDescription& format) {
 }
 
 void parse_hvcc(FormatDescription& format) {
-    const auto marker = quicktime::fourcc('d', 'a', 't', 'v');
+    constexpr auto marker = quicktime::fourcc('d', 'a', 't', 'v');
     for (std::size_t index = 0; index + 4 <= format.extensions.size(); ++index) {
         if (u32le(format.extensions.data() + index) != marker) continue;
         const auto config = std::span(format.extensions).subspan(index + 4);

@@ -9,11 +9,11 @@
 #include <wrl.h>
 
 #include <algorithm>
-#include <array>
 #include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
@@ -71,16 +71,22 @@ HRESULT query_support(bool& supported) noexcept {
 
 HRESULT query_registration(bool& registered, std::wstring* path = nullptr) {
     registered = false;
-    wchar_t value[32768]{};
-    DWORD bytes = sizeof(value);
+    std::vector<wchar_t> value(32768);
+    DWORD bytes = static_cast<DWORD>(value.size() * sizeof(wchar_t));
     const LSTATUS result = RegGetValueW(
         HKEY_LOCAL_MACHINE, RegistryPath, nullptr,
-        RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, value, &bytes);
+        RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, value.data(), &bytes);
     if (result == ERROR_FILE_NOT_FOUND || result == ERROR_PATH_NOT_FOUND)
         return S_OK;
     if (result != ERROR_SUCCESS) return last_win32_error(result);
-    registered = value[0] != L'\0';
-    if (path != nullptr) path->assign(value);
+    if (bytes < sizeof(wchar_t) || bytes % sizeof(wchar_t) != 0 ||
+        bytes > value.size() * sizeof(wchar_t))
+        return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    const auto characters = bytes / sizeof(wchar_t);
+    const auto length = wcsnlen_s(value.data(), characters);
+    if (length == characters) return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    registered = length != 0;
+    if (path != nullptr) path->assign(value.data(), length);
     return S_OK;
 }
 

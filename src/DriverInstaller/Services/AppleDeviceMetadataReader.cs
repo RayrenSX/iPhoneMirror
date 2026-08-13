@@ -24,7 +24,12 @@ internal static class AppleDeviceMetadataReader
         {
             try
             {
-                using var mux = Connect(port);
+                using var mux = new TcpClient
+                {
+                    ReceiveTimeout = 1500,
+                    SendTimeout = 1500,
+                };
+                Connect(mux, port);
                 var list = SendMuxRequest(mux, "<key>MessageType</key><string>ListDevices</string>");
                 foreach (var entry in GetArrayDictionaries(list, "DeviceList"))
                 {
@@ -34,7 +39,12 @@ internal static class AppleDeviceMetadataReader
                     if (string.IsNullOrWhiteSpace(serial) || deviceId <= 0) continue;
                     try
                     {
-                        using var connection = Connect(port);
+                        using var connection = new TcpClient
+                        {
+                            ReceiveTimeout = 1500,
+                            SendTimeout = 1500,
+                        };
+                        Connect(connection, port);
                         var connectExtra =
                             $"<key>DeviceID</key><integer>{deviceId}</integer>" +
                             $"<key>PortNumber</key><integer>{ToNetworkOrder(62078)}</integer>";
@@ -64,21 +74,12 @@ internal static class AppleDeviceMetadataReader
         return result;
     }
 
-    private static TcpClient Connect(int port)
+    private static void Connect(TcpClient client, int port)
     {
-        var client = new TcpClient { ReceiveTimeout = 1500, SendTimeout = 1500 };
-        try
-        {
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(750));
-            client.ConnectAsync(IPAddress.Loopback, port, cancellation.Token)
-                .GetAwaiter().GetResult();
-            return client;
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
+        using var cancellation = new CancellationTokenSource(
+            TimeSpan.FromMilliseconds(750));
+        client.ConnectAsync(IPAddress.Loopback, port, cancellation.Token).AsTask()
+            .GetAwaiter().GetResult();
     }
 
     private static XDocument SendMuxRequest(TcpClient client, string body)

@@ -2,14 +2,28 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^\d+(;\d+)*$')][string]$WaitPids,
     [Parameter(Mandatory)][string]$ZipPath,
+    [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedSha256,
     [Parameter(Mandatory)][string]$InstallDirectory,
     [Parameter(Mandatory)][string]$RestartExecutable
 )
 
 $ErrorActionPreference = 'Stop'
-$stagingRoot = Join-Path $env:TEMP ('iPhoneMirror\Update-' + [Guid]::NewGuid().ToString('N'))
-$backupRoot = Join-Path $env:TEMP ('iPhoneMirror\Rollback-' + [Guid]::NewGuid().ToString('N'))
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentPrincipal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
+$isElevated = $currentPrincipal.IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+$privilegedTempRoot = if ($isElevated) {
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
+}
+else { $env:TEMP }
+$stagingRoot = Join-Path $privilegedTempRoot (
+    'iPhoneMirror-Update-' + [Guid]::NewGuid().ToString('N'))
+$backupRoot = Join-Path $privilegedTempRoot (
+    'iPhoneMirror-Rollback-' + [Guid]::NewGuid().ToString('N'))
 $preserveBackup = $false
+$zipLock = $null
 $maximumArchiveBytes = 2L * 1024 * 1024 * 1024
 $maximumEntryCount = 20000
 $maximumEntryBytes = 2L * 1024 * 1024 * 1024
@@ -57,6 +71,40 @@ function Get-Sha256([string]$Path) {
     finally { $stream.Dispose() }
 }
 
+function Get-StreamSha256([IO.Stream]$Stream) {
+    $originalPosition = $Stream.Position
+    try {
+        $Stream.Position = 0
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            return [BitConverter]::ToString($algorithm.ComputeHash($Stream)).Replace('-', '')
+        }
+        finally { $algorithm.Dispose() }
+    }
+    finally { $Stream.Position = $originalPosition }
+}
+
+function New-PrivilegedDirectory([string]$Path) {
+    if (-not $isElevated) {
+        New-Item -ItemType Directory -Path $Path | Out-Null
+        return
+    }
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    $rights = [Security.AccessControl.FileSystemRights]::FullControl
+    $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $administrators, $rights, $inheritance, $propagation, $allow))
+    $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $system, $rights, $inheritance, $propagation, $allow))
+    [IO.DirectoryInfo]::new($Path).Create($security)
+}
+
 function Assert-NoReparsePath([string]$Root, [string]$Path) {
     $rootPath = Get-NormalizedPath $Root
     $currentPath = Get-NormalizedPath $Path
@@ -77,21 +125,41 @@ function Assert-NoReparsePath([string]$Root, [string]$Path) {
     }
 }
 
-function Assert-SafeZipArchive([string]$Path, [string]$Destination) {
-    $archiveItem = Get-Item -LiteralPath $Path -Force
-    if ($archiveItem.PSIsContainer) { throw 'The update ZIP path is not a file.' }
-    if ($archiveItem.Length -gt $maximumArchiveBytes) {
+function Get-SafeZipTarget([string]$EntryName, [string]$Destination) {
+    if ([string]::IsNullOrEmpty($EntryName)) {
+        throw 'The update ZIP contains an empty entry name.'
+    }
+    $entryPath = $EntryName.Replace(
+        [IO.Path]::AltDirectorySeparatorChar,
+        [IO.Path]::DirectorySeparatorChar)
+    if ([IO.Path]::IsPathRooted($entryPath) -or $entryPath.Contains(':')) {
+        throw "The update ZIP contains an unsafe path: $EntryName"
+    }
+    $destinationRoot = Get-NormalizedPath $Destination
+    $destinationPrefix = Get-ChildPathPrefix $destinationRoot
+    $target = [IO.Path]::GetFullPath((Join-Path $destinationRoot $entryPath))
+    if (-not $target.StartsWith($destinationPrefix,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The update ZIP entry escapes the staging directory: $EntryName"
+    }
+    return $target
+}
+
+function Assert-SafeZipArchive([IO.Stream]$Stream, [string]$Destination) {
+    if ($Stream.Length -gt $maximumArchiveBytes) {
         throw "The update ZIP exceeds the $maximumArchiveBytes-byte download limit."
     }
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = [IO.Compression.ZipFile]::OpenRead($archiveItem.FullName)
+    $Stream.Position = 0
+    $archive = [IO.Compression.ZipArchive]::new($Stream,
+        [IO.Compression.ZipArchiveMode]::Read, $true)
     try {
         if ($archive.Entries.Count -gt $maximumEntryCount) {
             throw "The update ZIP contains more than $maximumEntryCount entries."
         }
         [long]$expandedBytes = 0
         foreach ($entry in $archive.Entries) {
+            [void](Get-SafeZipTarget $entry.FullName $Destination)
             if ($entry.Length -gt $maximumEntryBytes) {
                 throw "The update ZIP entry '$($entry.FullName)' exceeds the per-file limit."
             }
@@ -122,21 +190,14 @@ function Assert-SafeZipArchive([string]$Path, [string]$Destination) {
     finally { $archive.Dispose() }
 }
 
-function Expand-SafeZipArchive([string]$Path, [string]$Destination) {
-    $destinationRoot = Get-NormalizedPath $Destination
-    $destinationPrefix = Get-ChildPathPrefix $destinationRoot
-    $archive = [IO.Compression.ZipFile]::OpenRead((Get-NormalizedPath $Path))
+function Expand-SafeZipArchive([IO.Stream]$Stream, [string]$Destination) {
+    $Stream.Position = 0
+    $archive = [IO.Compression.ZipArchive]::new($Stream,
+        [IO.Compression.ZipArchiveMode]::Read, $true)
     try {
         [long]$expandedBytes = 0
         foreach ($entry in $archive.Entries) {
-            $entryPath = $entry.FullName.Replace(
-                [IO.Path]::AltDirectorySeparatorChar,
-                [IO.Path]::DirectorySeparatorChar)
-            $target = [IO.Path]::GetFullPath((Join-Path $destinationRoot $entryPath))
-            if (-not $target.StartsWith($destinationPrefix,
-                    [StringComparison]::OrdinalIgnoreCase)) {
-                throw "The update ZIP entry escapes the staging directory: $($entry.FullName)"
-            }
+            $target = Get-SafeZipTarget $entry.FullName $Destination
 
             $isDirectory = $entry.FullName.EndsWith('/', [StringComparison]::Ordinal) -or
                 $entry.FullName.EndsWith('\', [StringComparison]::Ordinal)
@@ -182,7 +243,14 @@ function Expand-SafeZipArchive([string]$Path, [string]$Destination) {
 try {
     $installRoot = Get-NormalizedPath $InstallDirectory
     $installPrefix = Get-ChildPathPrefix $installRoot
-    Assert-SafeZipArchive $ZipPath $stagingRoot
+    $zipLock = [IO.File]::Open((Get-NormalizedPath $ZipPath),
+        [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $actualSha256 = Get-StreamSha256 $zipLock
+    if (-not $actualSha256.Equals($ExpectedSha256,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The update ZIP changed after verification.'
+    }
+    Assert-SafeZipArchive $zipLock $stagingRoot
     $trackedIds = @($WaitPids -split ';' | ForEach-Object {
         [int]::Parse($_, [Globalization.CultureInfo]::InvariantCulture)
     } | Where-Object { $_ -gt 0 } | Select-Object -Unique)
@@ -249,8 +317,8 @@ try {
             throw 'iPhoneMirror or its driver manager did not exit before the update timeout.'
         }
     }
-    New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
-    Expand-SafeZipArchive $ZipPath $stagingRoot
+    New-PrivilegedDirectory $stagingRoot
+    Expand-SafeZipArchive $zipLock $stagingRoot
     $children = @(Get-ChildItem -LiteralPath $stagingRoot -Force)
     $payloadRoot = if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
         $children[0].FullName
@@ -273,7 +341,7 @@ try {
     New-Item -ItemType Directory -Force -Path $InstallDirectory | Out-Null
     Assert-NoReparsePath $installRoot $installRoot
 
-    New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+    New-PrivilegedDirectory $backupRoot
     $changes = [Collections.Generic.List[object]]::new()
     $createdDirectories = [Collections.Generic.List[string]]::new()
     try {
@@ -382,6 +450,7 @@ try {
     Start-Process -FilePath $RestartExecutable -WorkingDirectory $InstallDirectory
 }
 finally {
+    if ($null -ne $zipLock) { $zipLock.Dispose() }
     if (Test-Path -LiteralPath $stagingRoot) {
         Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

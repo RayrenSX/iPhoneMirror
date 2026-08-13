@@ -40,9 +40,9 @@ public:
 } // namespace
 } // namespace iPhoneMirror::virtual_camera
 
-extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID class_id,
-                                                REFIID riid,
-                                                void** object) {
+_Check_return_
+STDAPI DllGetClassObject(_In_ REFCLSID class_id, _In_ REFIID riid,
+                         _Outptr_ LPVOID FAR* object) {
     if (object == nullptr) return E_POINTER;
     *object = nullptr;
     if (class_id != iPhoneMirror::virtual_camera::MediaSourceClsid)
@@ -53,7 +53,8 @@ extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID class_id,
                               : factory->QueryInterface(riid, object);
 }
 
-extern "C" HRESULT __stdcall DllCanUnloadNow() {
+__control_entrypoint(DllExport)
+STDAPI DllCanUnloadNow(void) {
     return iPhoneMirror::virtual_camera::module_object_count.load(
                std::memory_order_relaxed) == 0
         ? S_OK : S_FALSE;

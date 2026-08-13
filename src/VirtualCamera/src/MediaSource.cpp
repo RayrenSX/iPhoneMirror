@@ -8,7 +8,6 @@
 #include <propvarutil.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -32,14 +31,17 @@ bool discover_channel_path(std::wstring& path) {
     HANDLE pipe = CreateFileW(FrameChannelPipeName, GENERIC_READ, 0, nullptr,
         OPEN_EXISTING, 0, nullptr);
     if (pipe == INVALID_HANDLE_VALUE) return false;
-    std::array<wchar_t, 32768> buffer{};
+    std::vector<wchar_t> buffer(32768);
     DWORD bytes{};
     const BOOL read = ReadFile(pipe, buffer.data(),
         static_cast<DWORD>(buffer.size() * sizeof(wchar_t)), &bytes, nullptr);
     CloseHandle(pipe);
-    if (!read || bytes < sizeof(wchar_t)) return false;
-    buffer.back() = L'\0';
-    path.assign(buffer.data());
+    if (!read || bytes < sizeof(wchar_t) || bytes % sizeof(wchar_t) != 0 ||
+        bytes > buffer.size() * sizeof(wchar_t)) return false;
+    const auto characters = bytes / sizeof(wchar_t);
+    const auto length = wcsnlen_s(buffer.data(), characters);
+    if (length == characters) return false;
+    path.assign(buffer.data(), length);
     return !path.empty();
 }
 
@@ -68,9 +70,14 @@ HRESULT create_media_type(GUID subtype, UINT32 width, UINT32 height,
         return hr;
 
     const bool nv12 = subtype == MFVideoFormat_NV12;
-    const UINT32 sample_size = nv12 ? width * height * 3U / 2U
-                                    : width * height * 4U;
-    const UINT32 bitrate = sample_size * 8U * frame_rate;
+    const auto sample_bytes = static_cast<std::uint64_t>(width) * height *
+        (nv12 ? 3U : 8U) / 2U;
+    if (sample_bytes > std::numeric_limits<UINT32>::max())
+        return MF_E_INVALIDMEDIATYPE;
+    const auto bitrate_bytes = sample_bytes * 8U * frame_rate;
+    const auto sample_size = static_cast<UINT32>(sample_bytes);
+    const auto bitrate = static_cast<UINT32>(std::min<std::uint64_t>(
+        bitrate_bytes, std::numeric_limits<UINT32>::max()));
     const UINT32 stride = nv12 ? width : width * 4U;
     if (FAILED(hr = type->SetUINT32(MF_MT_SAMPLE_SIZE, sample_size)) ||
         FAILED(hr = type->SetUINT32(MF_MT_AVG_BITRATE, bitrate)) ||
@@ -259,10 +266,15 @@ HRESULT media_type_layout(IMFMediaType* media_type, GUID& subtype,
     if (FAILED(hr = MFGetAttributeSize(media_type, MF_MT_FRAME_SIZE,
                                        &width, &height)))
         return hr;
-    if (width == 0 || height == 0 || (width & 1U) != 0 || (height & 1U) != 0)
+    if (width == 0 || width > MaximumFrameWidth ||
+        height == 0 || height > MaximumFrameHeight ||
+        (width & 1U) != 0 || (height & 1U) != 0)
         return MF_E_INVALIDMEDIATYPE;
-    sample_size = subtype == MFVideoFormat_NV12
-        ? width * height * 3U / 2U : width * height * 4U;
+    const auto sample_bytes = static_cast<std::uint64_t>(width) * height *
+        (subtype == MFVideoFormat_NV12 ? 3U : 8U) / 2U;
+    if (sample_bytes > std::numeric_limits<UINT32>::max())
+        return MF_E_INVALIDMEDIATYPE;
+    sample_size = static_cast<UINT32>(sample_bytes);
     return S_OK;
 }
 

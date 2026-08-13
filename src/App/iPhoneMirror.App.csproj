@@ -195,5 +195,7 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
+    <EmbeddedResource Include="tools\updater\Apply-ZipUpdate.ps1"
+                      LogicalName="IPhoneMirror.App.Updater.Apply-ZipUpdate.ps1" />
   </ItemGroup>
 </Project>
