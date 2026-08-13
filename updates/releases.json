@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.6.3",
+    "name": "iPhoneMirror v1.6.3",
+    "body": "### Changed\n\n- Show the complete tagged release document in the updater, include the release\n  title, and provide a trusted link to the corresponding GitHub Release page.\n- Stream release metadata, release notes, and checksum manifests through\n  explicit size limits instead of buffering unbounded responses.\n\n### Fixed\n\n- Make installed and portable updates revalidate the downloaded package at the\n  elevation boundary, and execute only the verified installer or embedded ZIP\n  helper from access-controlled staging directories.\n- Make portable updates transactional: reject unsafe or oversized archives,\n  avoid reparse-point traversal, verify every copied file, and roll back\n  replaced or removed files when an update cannot complete.\n- Restrict update-cache cleanup and single-instance process discovery to their\n  intended directories and executable paths.\n- Compare arbitrarily large numeric prerelease identifiers without integer\n  overflow.\n- Clean up FFmpeg processes, named pipes, and recording staging files after\n  every partial startup failure.\n- Reject malformed decoder, virtual-camera pipe, registry, frame-size, and\n  bitrate inputs instead of accepting truncated data or entering stalled paths.\n- Dispose timed-out Apple device metadata connections deterministically.",
+    "published_at": "2026-08-13T01:31:47Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.6.3-x64.exe",
+        "size": 91770304,
+        "digest": "sha256:b4699ecb31c3306ba2bf4d16ede68eda4cc0dc9645f8999b44b05374766b8859",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-Setup-v1.6.3-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.3-win-x64.zip",
+        "size": 190954900,
+        "digest": "sha256:d9e04316b8fb3cea3dc4177fd8f08121b3fb9141efd0c8f74b4bbb0cfab339b5",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-v1.6.3-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.3-win-x64-sbom.spdx.json",
+        "size": 38215,
+        "digest": "sha256:0214dd4fd62c1db7ef21b86c54c96f26781b7adad817e477b04786bc8c3a59da",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-v1.6.3-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 307,
+        "digest": "sha256:733c89142a201a0a8afe2914d0d78cf19d5a0a2b7b5e3b8dfdbd02869f6e89be",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.6.2",
     "name": "iPhoneMirror v1.6.2",
     "body": "### Added\n\n- Add fully localized Traditional Chinese (Hong Kong) resources for the main\n  application and driver manager, including automatic `zh-HK` system-language\n  selection, Hong Kong terminology, and the Microsoft JhengHei UI font.\n\n### Fixed\n\n- Keep the running version open until Setup is ready to replace its files, so\n  cancelled or early-failing updates no longer look like the app uninstalled\n  itself.",
