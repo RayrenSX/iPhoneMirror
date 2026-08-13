@@ -5,6 +5,33 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-08-13
+
+### Changed
+
+- Show the complete tagged release document in the updater, include the release
+  title, and provide a trusted link to the corresponding GitHub Release page.
+- Stream release metadata, release notes, and checksum manifests through
+  explicit size limits instead of buffering unbounded responses.
+
+### Fixed
+
+- Make installed and portable updates revalidate the downloaded package at the
+  elevation boundary, and execute only the verified installer or embedded ZIP
+  helper from access-controlled staging directories.
+- Make portable updates transactional: reject unsafe or oversized archives,
+  avoid reparse-point traversal, verify every copied file, and roll back
+  replaced or removed files when an update cannot complete.
+- Restrict update-cache cleanup and single-instance process discovery to their
+  intended directories and executable paths.
+- Compare arbitrarily large numeric prerelease identifiers without integer
+  overflow.
+- Clean up FFmpeg processes, named pipes, and recording staging files after
+  every partial startup failure.
+- Reject malformed decoder, virtual-camera pipe, registry, frame-size, and
+  bitrate inputs instead of accepting truncated data or entering stalled paths.
+- Dispose timed-out Apple device metadata connections deterministically.
+
 ## [1.6.2] - 2026-08-12
 
 ### Added
@@ -1018,7 +1045,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.2...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.3...HEAD
+[1.6.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.5.11...v1.6.0
