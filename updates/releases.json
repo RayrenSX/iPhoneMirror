@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.6.5",
+    "name": "iPhoneMirror v1.6.5",
+    "body": "### Added\n\n- Add structured capture failure kind, stage, and error-code reporting across\n  the native API, managed UI, diagnostic logs, and USB lifecycle probe.\n- Add an isolated USB configuration switch helper and include it in installed\n  and portable release packages.\n- Add localized recovery guidance for USB connection, driver, stream, decoder,\n  timeout, duplicate-session, device-disconnect, and phone-closed failures.\n\n### Changed\n\n- Serialize start and stop work per device, queue requests behind in-progress\n  teardown, and revoke session handles before native cleanup begins.\n- Suspend wired enumeration and Lockdown metadata refresh while USB devices are\n  switching configurations, then require stable exact-device evidence before\n  treating a restored device as ready.\n- Keep wired capture available for Apple/libusb0 stacked filter installations\n  through a conservative open, activation, and teardown path.\n- Hide preview-only controls while the selected device is not actively\n  mirroring and show explicit queued and cleanup states during transitions.\n- Disable real-device USB stress probes in default builds unless explicitly\n  enabled with the dangerous-tools build option.\n\n### Fixed\n\n- Restore the normal Apple USB configuration more reliably after stopping,\n  including repeated start/stop cycles and multi-device sessions.\n- Avoid stale or cross-device USB matches by correlating exact serial,\n  topology, PnP interface transitions, descriptor state, and usbmux presence.\n- Prevent concurrent stop callers, background error cleanup, and window-close\n  shutdown from destroying or reusing the same native session twice.\n- Distinguish user-initiated mirroring stops from cable disconnects and provide\n  the correct recovery action without exposing raw diagnostics in prompts.\n- Bound socket shutdown waits and tighten QuickTime control-channel cleanup so\n  teardown cannot hang indefinitely on a stalled peer.",
+    "published_at": "2026-08-14T09:01:14Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.6.5-x64.exe",
+        "size": 91824551,
+        "digest": "sha256:ffcf1f2f8a76ccc79fcd8220dd2e9b09c5b1d3f9b4cdcf137b7afe30ccfe4ea3",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-Setup-v1.6.5-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.5-win-x64.zip",
+        "size": 191238068,
+        "digest": "sha256:7428df3f60b3ea16c0465120b170b3afd446c2cdd81551076cc55e81ab886d4e",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-v1.6.5-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.5-win-x64-sbom.spdx.json",
+        "size": 38969,
+        "digest": "sha256:92c211485bbfe6c6da17795d0badd5e620d5b723d49dc7fff6229c4aad09f732",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-v1.6.5-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 307,
+        "digest": "sha256:5c46205b1dab6a1db86e0cf4635ef28c97223489cae3e42831939e5ffd7571c5",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.6.3",
     "name": "iPhoneMirror v1.6.3",
     "body": "### Changed\n\n- Show the complete tagged release document in the updater, include the release\n  title, and provide a trusted link to the corresponding GitHub Release page.\n- Stream release metadata, release notes, and checksum manifests through\n  explicit size limits instead of buffering unbounded responses.\n\n### Fixed\n\n- Make installed and portable updates revalidate the downloaded package at the\n  elevation boundary, and execute only the verified installer or embedded ZIP\n  helper from access-controlled staging directories.\n- Make portable updates transactional: reject unsafe or oversized archives,\n  avoid reparse-point traversal, verify every copied file, and roll back\n  replaced or removed files when an update cannot complete.\n- Restrict update-cache cleanup and single-instance process discovery to their\n  intended directories and executable paths.\n- Compare arbitrarily large numeric prerelease identifiers without integer\n  overflow.\n- Clean up FFmpeg processes, named pipes, and recording staging files after\n  every partial startup failure.\n- Reject malformed decoder, virtual-camera pipe, registry, frame-size, and\n  bitrate inputs instead of accepting truncated data or entering stalled paths.\n- Dispose timed-out Apple device metadata connections deterministically.",
