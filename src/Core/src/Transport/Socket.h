@@ -35,6 +35,8 @@ public:
     void send_all(std::span<const std::uint8_t> bytes);
     [[nodiscard]] std::vector<std::uint8_t> receive_exact(std::size_t length);
     [[nodiscard]] std::size_t receive(std::span<std::uint8_t> destination);
+    [[nodiscard]] bool shutdown_send_and_wait_for_peer_close(
+        int timeout_ms = 500) noexcept;
 
     [[nodiscard]] bool valid() const noexcept { return handle_ != INVALID_SOCKET; }
     [[nodiscard]] SOCKET native_handle() const noexcept { return handle_; }
@@ -47,4 +49,3 @@ private:
 void ensure_winsock();
 
 } // namespace iPhoneMirror::transport
-

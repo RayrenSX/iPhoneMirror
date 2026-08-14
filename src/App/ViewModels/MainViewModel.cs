@@ -86,6 +86,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     // Serializes every native-core operation that can race USB teardown,
     // device enumeration, restart, or application shutdown.
     private readonly SemaphoreSlim _coreGate = new(1, 1);
+    // Keeps duplicate commands for one device out of the USB queue while still
+    // allowing commands for another selected device to queue behind it.
+    private readonly object _sessionLifecycleGate = new();
+    private readonly HashSet<string> _sessionLifecycleDevices =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _shutdownCancellation = new();
     private readonly NativeLogTailReader _logReader = new();
     private readonly CaptureShutdownCoordinator _shutdownCoordinator = new();
@@ -274,9 +279,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         "WirelessProfileAppliedFormat", _wireless.AppliedProfile.Label);
     private DeviceCaptureState? CurrentDeviceSession => SelectedDevice is null ? null :
         _sessions.Get(SelectedDevice.Udid);
-    public ulong CurrentSessionHandle => CurrentDeviceSession?.Handle ?? 0;
+    // A handle remains owned until native teardown completes, but it must never
+    // be presented or queried after a stop was requested.
+    public ulong CurrentSessionHandle => IsSessionPresentable(CurrentDeviceSession)
+        ? CurrentDeviceSession!.Handle
+        : 0;
     public bool HasCaptureSession => CurrentDeviceSession?.HasSession == true;
-    public Visibility PreviewAndObsVisibility => HasCaptureSession
+    public Visibility PreviewAndObsVisibility => CurrentSessionHandle != 0
         ? Visibility.Visible : Visibility.Collapsed;
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) { StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); } } }
     public bool IsBusy
@@ -649,9 +658,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _selectedResolutionPreset = ResolutionPresets[0];
         StartCommand = new RelayCommand(() => _ = StartAsync(),
             () => SelectedDevice is not null && !HasCaptureSession &&
-                !IsCapturing && !IsBusy && !IsMediaCasting);
+                !IsCapturing && !IsMediaCasting &&
+                CanQueueSessionLifecycleOperation(SelectedDevice));
         StopCommand = new RelayCommand(() => _ = StopAsync(),
-            () => HasCaptureSession && !IsBusy);
+            () => HasCaptureSession &&
+                CanQueueSessionLifecycleOperation(SelectedDevice));
         MediaCastStopCommand = new RelayCommand(() => RequestMediaCastStop(),
             () => IsMediaCasting);
         // A manual refresh is guaranteed to run after a short in-flight poll;
@@ -710,24 +721,72 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             await _mediaCast.EnsureStartedAsync();
             RefreshMediaCastStatus();
             NativeEnvironmentInfo? environment = null;
-            IReadOnlyList<NativeDeviceInfo> wirelessDevices;
-            if (_sessions.AnySession)
+            var wiredStates = _sessions.Values.Where(state =>
+                    !DeviceViewModel.IsWirelessUdid(state.Udid))
+                .ToArray();
+            var managedUsbTransition = wiredStates.Any(state =>
+                state.IsStarting || state.IsStopping);
+            CaptureState[] nativeWiredStates = [];
+            if (!managedUsbTransition)
             {
-                // usbmux/Lockdown discovery is independent of the active
-                // capture transport. Keep refreshing it so unrelated wired
-                // devices can appear and disappear while any session is live.
-                var result = await Task.Run(() =>
-                    (_core.GetDevices(), _core.GetWirelessDevices()));
-                _lastUsbDevices = result.Item1;
-                wirelessDevices = result.Item2;
+                try
+                {
+                    nativeWiredStates = await Task.Run(() => wiredStates
+                        .Where(state => state.Handle != 0)
+                        .Select(state => _core.GetDeviceSessionStatus(state.Handle).State)
+                        .ToArray());
+                }
+                catch (Exception error)
+                {
+                    // A handle can be revoked by an independent preview while
+                    // this poll starts. Treat that race as a transition and
+                    // retain the last wired inventory for this pass.
+                    managedUsbTransition = true;
+                    DiagnosticLogger.ExceptionOnce(
+                        "device-refresh-transition-status", "devices",
+                        "device_refresh_transition_status_failed", error);
+                }
             }
-            else
+
+            var enumerateWired = UsbDeviceRefreshPolicy.ShouldEnumerateWiredDevices(
+                managedUsbTransition, nativeWiredStates);
+            var refreshWiredMetadata = UsbDeviceRefreshPolicy.ShouldRefreshMetadata(
+                forceDeviceEnumeration, wiredStates.Any(state => state.HasSession));
+            var wirelessDevices = await Task.Run(_core.GetWirelessDevices);
+            if (enumerateWired)
             {
-                var result = await Task.Run(() =>
-                    (_core.GetEnvironment(), _core.GetDevices(), _core.GetWirelessDevices()));
-                environment = result.Item1;
-                _lastUsbDevices = result.Item2;
-                wirelessDevices = result.Item3;
+                try
+                {
+                    if (_sessions.AnySession)
+                    {
+                        _lastUsbDevices = await Task.Run(() =>
+                            _core.GetDevices(refreshWiredMetadata));
+                    }
+                    else
+                    {
+                        var result = await Task.Run(() =>
+                            (_core.GetEnvironment(),
+                                _core.GetDevices(refreshWiredMetadata)));
+                        environment = result.Item1;
+                        _lastUsbDevices = result.Item2;
+                    }
+                }
+                catch (UsbDeviceRefreshDeferredException error)
+                {
+                    enumerateWired = false;
+                    AddDiagnosticLog(AppLog.Event("device_refresh_deferred",
+                        ("id", refreshId), ("trigger", trigger),
+                        ("reason", "native_usb_transition"),
+                        ("cached_wired", _lastUsbDevices.Count),
+                        ("message", error.Message)));
+                }
+            }
+            if (!enumerateWired && forceDeviceEnumeration)
+            {
+                AddDiagnosticLog(AppLog.Event("device_refresh_deferred",
+                    ("id", refreshId), ("trigger", trigger),
+                    ("reason", "capture_usb_transition"),
+                    ("cached_wired", _lastUsbDevices.Count)));
             }
 
             if (environment is { } currentEnvironment)
@@ -742,6 +801,23 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 .GroupBy(device => device.Udid, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToList();
+            var wiredDevices = devices.Where(device => !device.IsWireless &&
+                !device.IsMediaCast).ToList();
+            if (wiredDevices.Count == 0 &&
+                _lastEnvironment is { PhysicalAppleUsbDevices: > 0 })
+            {
+                // QuickTime activation and teardown temporarily remove the
+                // device from usbmux. SetupAPI still proves the cable/device is
+                // physically present, so keep the known card and expose the
+                // degraded Apple-channel state instead of deleting it.
+                foreach (var known in Devices.Where(device => !device.IsWireless &&
+                             !device.IsMediaCast).ToArray())
+                {
+                    if (!devices.Any(device => DeviceViewModel.UdidEquals(
+                            device.Udid, known.Udid)))
+                        devices.Add(known.AsUsbPresentNoMux());
+                }
+            }
             var currentWirelessDeviceIds = devices
                 .Where(device => device.IsWireless)
                 .Select(device => device.Udid)
@@ -1061,6 +1137,47 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _sessions.TryGet(udid, out var session) && !session.IsStopping
             ? session.Handle : 0;
 
+    private static bool IsSessionPresentable(DeviceCaptureState? session) =>
+        session is { HasSession: true, IsStopping: false };
+
+    private bool IsSessionLifecycleOperationInProgress(string? udid)
+    {
+        if (string.IsNullOrWhiteSpace(udid)) return false;
+        lock (_sessionLifecycleGate) return _sessionLifecycleDevices.Contains(udid);
+    }
+
+    private bool HasSessionLifecycleOperationInProgress
+    {
+        get { lock (_sessionLifecycleGate) return _sessionLifecycleDevices.Count != 0; }
+    }
+
+    private bool CanQueueSessionLifecycleOperation(DeviceViewModel? device) =>
+        device is not null && !IsSessionLifecycleOperationInProgress(device.Udid) &&
+        (!IsBusy || HasSessionLifecycleOperationInProgress);
+
+    private bool TryBeginSessionLifecycleOperation(string udid)
+    {
+        bool added;
+        lock (_sessionLifecycleGate) added = _sessionLifecycleDevices.Add(udid);
+        if (added)
+        {
+            StartCommand.NotifyCanExecuteChanged();
+            StopCommand.NotifyCanExecuteChanged();
+        }
+        return added;
+    }
+
+    private void EndSessionLifecycleOperation(string udid)
+    {
+        bool removed;
+        lock (_sessionLifecycleGate) removed = _sessionLifecycleDevices.Remove(udid);
+        if (removed)
+        {
+            StartCommand.NotifyCanExecuteChanged();
+            StopCommand.NotifyCanExecuteChanged();
+        }
+    }
+
     private void SetSelectedDevice(DeviceViewModel? value, bool updateDriverStatus)
     {
         // Collection notifications can cause a two-way ListBox binding to
@@ -1087,11 +1204,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
         var session = CurrentDeviceSession;
-        _activeCaptureUdid = session?.HasSession == true ? value?.Udid : null;
-        IsCapturing = session?.HasSession == true;
+        var presentableSession = IsSessionPresentable(session);
+        _activeCaptureUdid = presentableSession ? value?.Udid : null;
+        IsCapturing = presentableSession;
         NotifyCaptureSessionChanged();
-        NativeCore.SelectPreviewSession(session?.Handle ?? 0);
-        OnPropertyChanged(nameof(CurrentSessionHandle));
+        NativeCore.SelectPreviewSession(presentableSession ? session!.Handle : 0);
         RestoreSelectedVideoControls(session);
         // Selection restores controls only. These values already belong to
         // this session; invoking their public setters would resend native
@@ -1100,10 +1217,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _playAudio = session?.PlayAudio ?? true;
         if (value is { IsWireless: false, IsMediaCast: false })
             RestoreSelectedSettingsStatus(session);
-        CaptureStatus = session?.HasSession == true
+        CaptureStatus = presentableSession
             ? LocalizationService.Get("CaptureStreaming")
-            : value?.StatusDisplay ?? LocalizationService.Get("StatusWaitingDevice");
-        if (session?.HasSession == true && _lastCaptureStatus is { } cached &&
+            : session?.IsStopping == true
+                ? LocalizationService.Get("CaptureCleaningDevice")
+                : value?.StatusDisplay ?? LocalizationService.Get("StatusWaitingDevice");
+        if (presentableSession && session is not null &&
+            _lastCaptureStatus is { } cached &&
             _lastCaptureStatusHandle == session.Handle)
             ApplyCaptureStatus(cached);
         else
@@ -1159,6 +1279,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void NotifyCaptureSessionChanged()
     {
+        OnPropertyChanged(nameof(CurrentSessionHandle));
         OnPropertyChanged(nameof(HasCaptureSession));
         OnPropertyChanged(nameof(PreviewAndObsVisibility));
         OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
@@ -1207,14 +1328,68 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             state.ErrorShown = true;
             var name = Devices.FirstOrDefault(device =>
                 DeviceViewModel.UdidEquals(device.Udid, state.Udid))?.DisplayName ?? state.Udid;
-            var noPing = CaptureErrorGuidance.IsNoPingTimeout(status.Message);
-            if (noPing)
-                CaptureRecoveryWindow.ShowRecovery();
+            var sessionClosedWarning =
+                CaptureErrorGuidance.IsDeviceSessionClosedWarning(status);
+            var errorTitle = LocalizationService.Format(
+                sessionClosedWarning
+                    ? "DeviceSessionClosedWarningTitleFormat"
+                    : "DeviceCaptureErrorTitleFormat",
+                name);
+            var errorBody = CaptureErrorGuidance.UserMessage(status);
+            if (sessionClosedWarning)
+            {
+                ShowDeviceSessionClosedWarningThenRelease(
+                    state, status, errorTitle, errorBody);
+            }
             else
-                AppPromptWindow.Inform(
-                    LocalizationService.Format("DeviceCaptureErrorTitleFormat", name),
-                    CaptureErrorGuidance.UserMessage(status.Message));
+            {
+                await ReleaseFailedSessionLockedAsync(state, status);
+                AppPromptWindow.Inform(errorTitle, errorBody);
+            }
         }
+    }
+
+    private async Task ReleaseFailedSessionLockedAsync(DeviceCaptureState state,
+        NativeCaptureStatus status)
+    {
+        var failedHandle = state.Handle;
+        if (failedHandle == 0) return;
+        AddDiagnosticLog(AppLog.Event("capture_error_release_begin",
+            ("device", AppLog.Device(state.Udid)),
+            ("handle", AppLog.Handle(failedHandle)),
+            ("failure_kind", status.FailureKind),
+            ("failure_stage", status.FailureStage),
+            ("error_code", status.ErrorCode)));
+        try
+        {
+            // StopAndDestroyAsync revokes the handle synchronously before its
+            // first yield. This hides every preview immediately and guarantees
+            // native teardown even if recorder or virtual-camera shutdown
+            // reports a separate failure.
+            var teardown = _sessions.StopAndDestroyAsync(state);
+            try { await StopMediaOutputForSessionAsync(state.Udid); }
+            finally { await teardown; }
+        }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("capture", "capture_error_release_failed",
+                error, ("device", AppLog.Device(state.Udid)),
+                ("handle", AppLog.Handle(failedHandle)));
+        }
+        finally
+        {
+            NotifyCaptureSessionChanged();
+            if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, state.Udid))
+                ClearSelectedSessionState(state.Udid);
+        }
+    }
+
+    private void ShowDeviceSessionClosedWarningThenRelease(
+        DeviceCaptureState state, NativeCaptureStatus status,
+        string errorTitle, string errorBody)
+    {
+        AppPromptWindow.InformThen(errorTitle, errorBody,
+            () => ReleaseFailedSessionLockedAsync(state, status));
     }
 
     private void ResetPreviewState()
@@ -1233,9 +1408,26 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task StartAsync()
     {
-        if (_disposed || SelectedDevice is null || HasCaptureSession || IsBusy) return;
+        if (_disposed || SelectedDevice is null || HasCaptureSession) return;
         var requestedDevice = SelectedDevice;
         var requestedState = GetOrCreateDeviceState(requestedDevice);
+        var queuedBehindAnotherOperation = IsBusy || HasSessionLifecycleOperationInProgress;
+        if (!CanQueueSessionLifecycleOperation(requestedDevice) ||
+            !TryBeginSessionLifecycleOperation(requestedDevice.Udid)) return;
+        if (requestedState.IsStarting || requestedState.IsStopping)
+        {
+            EndSessionLifecycleOperation(requestedDevice.Udid);
+            return;
+        }
+
+        // A queued request still owns this device's lifecycle. Mark it before
+        // waiting for the process-wide USB lock so the request is visible to
+        // the user and device refresh never treats the transition as idle.
+        requestedState.IsStarting = true;
+        var startMarked = true;
+        if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, requestedDevice.Udid))
+            CaptureStatus = LocalizationService.Get(queuedBehindAnotherOperation
+                ? "CaptureQueued" : "StartRequested");
         var operation = Stopwatch.StartNew();
         AddDiagnosticLog(AppLog.Event("capture_start_begin",
             ("device", AppLog.Device(requestedDevice.Udid)),
@@ -1247,20 +1439,27 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             ("contrast", requestedState.Contrast),
             ("saturation", requestedState.Saturation),
             ("gamma", requestedState.Gamma),
-            ("usb_mode", requestedState.UsbProjectionMode)));
-        IsBusy = true;
+            ("usb_mode", requestedState.UsbProjectionMode),
+            ("queued", queuedBehindAnotherOperation)));
+        var ownsBusyState = !IsBusy;
+        if (ownsBusyState) IsBusy = true;
         var gateHeld = false;
-        var startMarked = false;
         try
         {
-            if (requestedDevice is null) return;
             // A user click that lands during the short background poll should
             // run immediately after it, rather than being silently discarded.
             await _coreGate.WaitAsync();
             gateHeld = true;
+            if (!ownsBusyState && !IsBusy)
+            {
+                IsBusy = true;
+                ownsBusyState = true;
+            }
             if (_disposed) return;
-            var device = SelectedDevice;
-            if (device is null || !DeviceViewModel.UdidEquals(device.Udid, requestedDevice.Udid)) return;
+            // This request belongs to the device selected when the button was
+            // clicked. Do not silently abandon it if the user changes tabs
+            // while it waits behind another device's USB teardown.
+            var device = requestedDevice;
             if (requestedState.Handle != 0)
             {
                 AddDiagnosticLog(AppLog.Event("capture_start_reused",
@@ -1275,9 +1474,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 CaptureStatus = LocalizationService.Get("StartRequested");
                 return;
             }
-            if (requestedState.IsStarting || requestedState.IsStopping) return;
-            requestedState.IsStarting = true;
-            startMarked = true;
             // Keep readiness checks, teardown and native session creation on
             // one per-process path so independent windows cannot race the
             // selected device into a duplicate wired start.
@@ -1285,8 +1481,23 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             AddDiagnosticLog(AppLog.Event("capture_start_preflight",
                 ("device", AppLog.Device(device.Udid)),
                 ("success", preflight.Success),
+                ("failure_kind", preflight.FailureKind),
+                ("failure_stage", CaptureFailureStage.UsbPreflight),
+                ("error_code", preflight.ErrorCode),
                 ("message", preflight.Message)));
-            if (!preflight.Success) return;
+            if (!preflight.Success)
+            {
+                AddUiLog(LocalizationService.Format(
+                    "StartFailedFormat", preflight.Message));
+                if (preflight.ErrorCode != 0)
+                    AppPromptWindow.Inform(
+                        LocalizationService.Format("DeviceCaptureErrorTitleFormat",
+                            device.DisplayName),
+                        CaptureErrorGuidance.StartFailureMessage(
+                            preflight.ErrorCode, preflight.Message,
+                            preflight.FailureKind));
+                return;
+            }
             var preference = (Success: true, Message: LocalizationService.Get("VideoPreferencesApplied"));
             // Own the session before the native start call can block in USB
             // activation. A device click or window close during that interval
@@ -1307,6 +1518,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("success", created.Success),
                 ("handle", AppLog.Handle(created.Handle)),
                 ("elapsed_ms", operation.ElapsedMilliseconds),
+                ("error_code", created.ErrorCode),
                 ("message", created.Message)));
             // Handle is not observable itself; explicitly refresh the style
             // trigger and command availability as soon as creation finishes.
@@ -1328,6 +1540,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             AddUiLog(result.Success
                 ? LocalizationService.Get("StartRequested")
                 : LocalizationService.Format("StartFailedFormat", result.Message));
+            if (!result.Success)
+                AppPromptWindow.Inform(
+                    LocalizationService.Format("DeviceCaptureErrorTitleFormat",
+                        device.DisplayName),
+                    CaptureErrorGuidance.StartFailureMessage(
+                        created.ErrorCode, created.Message));
         }
         catch (Exception error)
         {
@@ -1344,12 +1562,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 CaptureStatus = failure;
             }
             AddUiLog(failure);
+            AppPromptWindow.Inform(
+                LocalizationService.Format("DeviceCaptureErrorTitleFormat",
+                    requestedDevice?.DisplayName ??
+                    LocalizationService.Get("CaptureError")),
+                CaptureErrorGuidance.StartFailureMessage(
+                    (int)NativeResult.CaptureBackendUnavailable, error.Message));
         }
         finally
         {
             if (startMarked) requestedState.IsStarting = false;
-            IsBusy = false;
+            if (ownsBusyState) IsBusy = false;
             if (gateHeld) _coreGate.Release();
+            EndSessionLifecycleOperation(requestedDevice.Udid);
         }
     }
 
@@ -1568,23 +1793,41 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task StopAsync()
     {
-        if (_disposed || !HasCaptureSession || IsBusy) return;
+        if (_disposed || !HasCaptureSession) return;
         var requestedState = CurrentDeviceSession;
         var requestedHandle = requestedState?.Handle ?? 0;
         if (requestedState is null || requestedHandle == 0) return;
+        if (!CanQueueSessionLifecycleOperation(SelectedDevice) ||
+            !TryBeginSessionLifecycleOperation(requestedState.Udid)) return;
         var operation = Stopwatch.StartNew();
         AddDiagnosticLog(AppLog.Event("capture_stop_begin",
             ("device", AppLog.Device(requestedState.Udid)),
             ("handle", AppLog.Handle(requestedHandle)),
             ("wireless", DeviceViewModel.IsWirelessUdid(requestedState.Udid))));
-        IsBusy = true;
+        var ownsBusyState = !IsBusy;
+        if (ownsBusyState) IsBusy = true;
         var gateHeld = false;
         DeviceCaptureState? stoppedState = null;
-        CaptureStatus = LocalizationService.Get("CaptureStopping");
+        // Hide the native HwndHost before USB teardown starts. Native stop can
+        // wait on QuickTime and configuration restore; keeping its last frame
+        // visible during that interval falsely implies that mirroring is still
+        // active and allows a stale preview to be presented after tab changes.
+        requestedState.IsStopping = true;
+        _activeCaptureUdid = null;
+        IsCapturing = false;
+        NativeCore.SelectPreviewSession(0);
+        NotifyCaptureSessionChanged();
+        CaptureStatus = LocalizationService.Get("CaptureCleaningDevice");
+        ResetPreviewState();
         try
         {
             await _coreGate.WaitAsync();
             gateHeld = true;
+            if (!ownsBusyState && !IsBusy)
+            {
+                IsBusy = true;
+                ownsBusyState = true;
+            }
             if (_disposed) return;
             // Native stop waits for USB release packets and configuration
             // restore. Keep that wait off the WPF UI thread.
@@ -1614,7 +1857,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             stoppedState = requestedState;
             var stoppedUdid = stoppedState.Udid;
             await StopMediaOutputForSessionAsync(stoppedState.Udid);
-            await _sessions.StopAndDestroyAsync(stoppedState);
+            UsbConfigurationRestoreWarningException? restoreWarning = null;
+            try
+            {
+                await _sessions.StopAndDestroyAsync(stoppedState);
+            }
+            catch (UsbConfigurationRestoreWarningException warning)
+            {
+                restoreWarning = warning;
+            }
             if (DeviceViewModel.IsWirelessUdid(stoppedUdid))
             {
                 _sessions.SetWirelessPaused(stoppedUdid, true);
@@ -1632,12 +1883,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ClearSelectedSessionState(stoppedUdid);
                 CaptureStatus = LocalizationService.Get("CaptureStopped");
             }
-            AddUiLog(LocalizationService.Get("StopSessionReleased"));
+            AddUiLog(restoreWarning is null
+                ? LocalizationService.Get("StopSessionReleased")
+                : LocalizationService.Format("StopUsbRestoreWarningFormat",
+                    AppLog.Message(restoreWarning.Message)));
             AddDiagnosticLog(AppLog.Event("capture_stop_complete",
                 ("device", AppLog.Device(stoppedUdid)),
                 ("handle", AppLog.Handle(requestedHandle)),
                 ("elapsed_ms", operation.ElapsedMilliseconds),
-                ("success", true)));
+                ("success", true),
+                ("usb_restore_confirmed", restoreWarning is null),
+                ("warning_code", restoreWarning?.ErrorCode ?? 0),
+                ("warning", restoreWarning is null
+                    ? string.Empty : AppLog.Message(restoreWarning.Message))));
         }
         catch (Exception error)
         {
@@ -1646,6 +1904,21 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("handle", AppLog.Handle(requestedHandle)),
                 ("elapsed_ms", operation.ElapsedMilliseconds),
                 ("error", AppLog.Error(error))));
+            // StopMediaOutput can fail before DeviceSessionManager takes
+            // ownership of teardown. In that case the native session is still
+            // usable, so restore only its presentation state instead of
+            // leaving it permanently marked as "cleaning".
+            if (requestedState.Handle == requestedHandle)
+            {
+                requestedState.IsStopping = false;
+                if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, requestedState.Udid))
+                {
+                    _activeCaptureUdid = requestedState.Udid;
+                    IsCapturing = true;
+                    NativeCore.SelectPreviewSession(requestedHandle);
+                    CaptureStatus = LocalizationService.Get("CaptureStreaming");
+                }
+            }
             NotifyCaptureSessionChanged();
             var failure = LocalizationService.Format("StopFailedFormat", error.Message);
             if (stoppedState is not null && stoppedState.Handle == 0 &&
@@ -1655,11 +1928,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 CaptureStatus = failure;
             }
             AddUiLog(failure);
+            AppPromptWindow.Inform(
+                LocalizationService.Format("DeviceCaptureErrorTitleFormat",
+                    SelectedDevice?.DisplayName ??
+                    LocalizationService.Get("CaptureError")),
+                CaptureErrorGuidance.UserMessage(CaptureFailureKind.UsbConnection,
+                    CaptureFailureStage.SessionTeardown,
+                    (int)NativeResult.SessionTeardownFailed, error.Message));
         }
         finally
         {
-            IsBusy = false;
+            if (ownsBusyState) IsBusy = false;
             if (gateHeld) _coreGate.Release();
+            EndSessionLifecycleOperation(requestedState.Udid);
         }
     }
 
@@ -2009,8 +2290,16 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 AddDiagnosticLog(AppLog.Event("independent_session_preflight_failed",
                     ("device", AppLog.Device(device.Udid)),
                     ("elapsed_ms", operation.ElapsedMilliseconds),
+                    ("failure_kind", preflight.FailureKind),
+                    ("failure_stage", CaptureFailureStage.UsbPreflight),
+                    ("error_code", preflight.ErrorCode),
                     ("message", preflight.Message)));
-                return (false, 0, false, preflight.Message);
+                var message = preflight.ErrorCode == 0
+                    ? preflight.Message
+                    : CaptureErrorGuidance.StartFailureMessage(
+                        preflight.ErrorCode, preflight.Message,
+                        preflight.FailureKind);
+                return (false, 0, false, message);
             }
             var state = existing ?? new DeviceCaptureState
             {
@@ -2026,7 +2315,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (state.IsStarting || state.IsStopping)
                 return (false, 0, false, LocalizationService.Get("StatusWaiting"));
             state.IsStarting = true;
-            (bool Success, ulong Handle, string Message) result;
+            NativeSessionCreateResult result;
             try
             {
                 result = await Task.Run(() => CreateSession(device, startSettings));
@@ -2046,6 +2335,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("success", result.Success), ("created", result.Success),
                 ("handle", AppLog.Handle(result.Handle)),
                 ("elapsed_ms", operation.ElapsedMilliseconds),
+                ("error_code", result.ErrorCode),
                 ("message", result.Message)));
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
             {
@@ -2084,6 +2374,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             AddDiagnosticLog(AppLog.Event("independent_session_stop_complete",
                 ("device", AppLog.Device(udid)),
                 ("elapsed_ms", operation.ElapsedMilliseconds), ("success", true)));
+        }
+        catch (UsbConfigurationRestoreWarningException warning)
+        {
+            AddDiagnosticLog(AppLog.Event("independent_session_stop_complete",
+                ("device", AppLog.Device(udid)),
+                ("elapsed_ms", operation.ElapsedMilliseconds), ("success", true),
+                ("usb_restore_confirmed", false),
+                ("warning_code", warning.ErrorCode),
+                ("warning", AppLog.Message(warning.Message))));
         }
         catch (Exception error)
         {
@@ -2140,6 +2439,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("latency_ms", status.LatencyMs.ToString("F1")),
                 ("video_frames", status.VideoFrames),
                 ("audio_packets", status.AudioPackets),
+                ("failure_kind", status.FailureKind),
+                ("failure_stage", status.FailureStage),
+                ("error_code", status.ErrorCode),
                 ("message", status.Message)));
         }
         var captureActive = IsActiveCaptureState(status.State);
@@ -2149,18 +2451,27 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (status.State is not CaptureState.Idle || SelectedDevice is null)
             CaptureStatus = GetCaptureStatusText(status, IsWirelessSelected);
         if (status.State == CaptureState.Error &&
-            CaptureErrorGuidance.HasRecoveryGuidance(status.Message) &&
             CurrentDeviceSession is { ErrorShown: false } failedSession)
         {
             failedSession.ErrorShown = true;
-            if (CaptureErrorGuidance.IsNoPingTimeout(status.Message))
-                CaptureRecoveryWindow.ShowRecovery();
+            var sessionClosedWarning =
+                CaptureErrorGuidance.IsDeviceSessionClosedWarning(status);
+            var errorTitle = LocalizationService.Format(
+                sessionClosedWarning
+                    ? "DeviceSessionClosedWarningTitleFormat"
+                    : "DeviceCaptureErrorTitleFormat",
+                SelectedDevice?.DisplayName ?? LocalizationService.Get("CaptureError"));
+            var errorBody = CaptureErrorGuidance.UserMessage(status);
+            if (sessionClosedWarning)
+            {
+                ShowDeviceSessionClosedWarningThenRelease(
+                    failedSession, status, errorTitle, errorBody);
+            }
             else
-                AppPromptWindow.Inform(
-                    LocalizationService.Format("DeviceCaptureErrorTitleFormat",
-                        SelectedDevice?.DisplayName ??
-                        LocalizationService.Get("CaptureError")),
-                    CaptureErrorGuidance.UserMessage(status.Message));
+            {
+                _ = ReleaseSelectedFailedSessionAsync(
+                    failedSession, status, errorTitle, errorBody);
+            }
         }
         Resolution = status.Width > 0 && status.Height > 0 ? $"{status.Width}×{status.Height}" : "—";
         if (status.Width > 0 && status.Height > 0 &&
@@ -2178,6 +2489,24 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         AudioDisplay = status.AudioSampleRate > 0
             ? $"{status.AudioSampleRate / 1000.0:F0} kHz · {status.AudioChannels} ch"
             : LocalizationService.Get("StatusWaiting");
+    }
+
+    private async Task ReleaseSelectedFailedSessionAsync(
+        DeviceCaptureState state, NativeCaptureStatus status,
+        string errorTitle, string errorBody)
+    {
+        await _coreGate.WaitAsync();
+        try
+        {
+            if (state.Handle != 0)
+                await ReleaseFailedSessionLockedAsync(state, status);
+        }
+        finally { _coreGate.Release(); }
+
+        // A modal prompt must never own the lifetime of a failed USB session.
+        // Stop and destroy first so an unattended error dialog cannot retain
+        // device handles or delay Windows shutdown.
+        AppPromptWindow.Inform(errorTitle, errorBody);
     }
 
     private void UpdateVideoOutputStatus()
@@ -2332,12 +2661,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             IPhoneFilterDriverState.Missing => LocalizationService.Get("DriverDeviceFilterMissing"),
             IPhoneFilterDriverState.PendingRestart => LocalizationService.Get("DriverReplugRequired"),
             IPhoneFilterDriverState.InvalidStack => LocalizationService.Get("DriverInvalidAppleStack"),
+            IPhoneFilterDriverState.UnsafeStack => LocalizationService.Get("DriverUnsafeAppleStack"),
             IPhoneFilterDriverState.Error => LocalizationService.Get("DriverFilterStateError"),
             _ => DriverState,
         };
     }
 
-    private async Task<(bool Success, string Message)> EnsureSourceReadyAsync(
+    private async Task<(bool Success, int ErrorCode,
+        CaptureFailureKind FailureKind, string Message)> EnsureSourceReadyAsync(
         DeviceViewModel device)
     {
         if (device.IsWireless)
@@ -2348,13 +2679,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
                     CaptureStatus = message;
                 RefreshWirelessStatus();
-                return (false, message);
+                return (false, 0, CaptureFailureKind.Unknown, message);
             }
 
             if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
                 CaptureStatus = WirelessStatus;
             ApplySelectedDriverState();
-            return (true, WirelessStatus);
+            return (true, 0, CaptureFailureKind.None, WirelessStatus);
         }
 
         // Wireless devices return above and never enter the USB driver path.
@@ -2370,7 +2701,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         if (driverStatus.CanStartCapture)
         {
-            return (true, string.Empty);
+            if (driverStatus.State == IPhoneFilterDriverState.UnsafeStack)
+                AddUiLog($"driver safety warning: {driverStatus.Diagnostic}");
+            return (true, 0, CaptureFailureKind.None, string.Empty);
         }
         var failure = LocalizationService.Get(driverStatus.State switch
         {
@@ -2378,6 +2711,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             IPhoneFilterDriverState.PendingRestart => "DriverReplugRequired",
             IPhoneFilterDriverState.Missing => "DriverExternalRequired",
             IPhoneFilterDriverState.InvalidStack => "DriverInvalidAppleStack",
+            IPhoneFilterDriverState.UnsafeStack => "DriverUnsafeAppleStack",
             _ => "DriverFilterStateError",
         });
         if (DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
@@ -2387,7 +2721,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             IPhoneFilterDriverState.Missing or IPhoneFilterDriverState.InvalidStack or
             IPhoneFilterDriverState.Error)
             OpenDriverManager(automatic: true);
-        return (false, failure);
+        var errorCode = (int)NativeResult.CaptureBackendUnavailable;
+        var failureKind = driverStatus.State == IPhoneFilterDriverState.NoDevice
+            ? CaptureFailureKind.UsbConnection
+            : CaptureFailureKind.Driver;
+        return (false, errorCode, failureKind, failure);
     }
 
     private bool OpenDriverManager(bool automatic = false)
@@ -2418,8 +2756,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         CaptureState.Streaming => LocalizationService.Get(wireless ? "WirelessStreaming" : "CaptureStreaming"),
         CaptureState.Stopping => LocalizationService.Get(wireless ? "WirelessStopping" : "CaptureStopping"),
         CaptureState.Stopped => LocalizationService.Get(wireless ? "WirelessStopped" : "CaptureStopped"),
-        CaptureState.Error when CaptureErrorGuidance.HasRecoveryGuidance(status.Message) =>
-            CaptureErrorGuidance.UserMessage(status.Message),
+        CaptureState.Error => CaptureErrorGuidance.StatusText(status),
         _ => LocalizationService.Get("CaptureError"),
     };
 
@@ -2475,7 +2812,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             state.Saturation,
             state.Gamma);
 
-    private (bool Success, ulong Handle, string Message) CreateSession(
+    private NativeSessionCreateResult CreateSession(
         DeviceViewModel device, SessionStartSettings settings)
     {
         if (device.IsWireless)
@@ -2505,7 +2842,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 error, ("handle", AppLog.Handle(created.Handle)));
         }
         _core.DestroyDeviceSession(created.Handle);
-        return (false, 0, adjustments.Message);
+        return new(false, 0, (int)NativeResult.CaptureBackendUnavailable,
+            adjustments.Message);
     }
 
     private DeviceCaptureState GetOrCreateDeviceState(DeviceViewModel device)
@@ -2674,7 +3012,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             values => SaveImageAdjustments(udid, state, expectedHandle, values),
             values => RevertImageAdjustments(udid, state, expectedHandle, values));
         var mainWindow = Application.Current?.MainWindow;
-        var restoreMainWindowEnabled = mainWindow?.IsEnabled == true;
         if (ownerHwnd == 0 && mainWindow is not null)
             window.Owner = mainWindow;
         else if (ownerHwnd != 0)
@@ -2689,8 +3026,6 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ReferenceEquals(tracked, window))
                 _imageSettingsWindows.Remove(udid);
             SetSettingsDialogOpen(false);
-            if (restoreMainWindowEnabled && mainWindow is not null)
-                mainWindow.IsEnabled = true;
         }
         window.Closed += (_, _) =>
         {
@@ -2698,13 +3033,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         };
         AddDiagnosticLog(AppLog.Event("image_adjustments_window_opened",
             ("device", AppLog.Device(udid)), ("handle", AppLog.Handle(expectedHandle))));
-        // Keep the WPF main window blocked so image and video settings remain
-        // serialized, but use a modeless window. ShowDialog disables every
-        // top-level HWND on this UI thread, including the native independent
-        // preview that opened the adjustment window.
+        // Serialize image and video setting submissions without disabling the
+        // owner window. Disabling it applies WPF's washed-out overlay to the
+        // source list and makes the connected-device state appear unavailable.
         SetSettingsDialogOpen(true);
-        if (restoreMainWindowEnabled && mainWindow is not null)
-            mainWindow.IsEnabled = false;
         try
         {
             window.Show();
@@ -3358,6 +3690,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         IsBusy = true;
         var startSettings = CaptureSessionStartSettings(state);
         var gateHeld = false;
+        NativeSessionCreateResult? failedCreate = null;
+        NativeCaptureStatus? failedStatus = null;
         try
         {
             await _coreGate.WaitAsync();
@@ -3366,15 +3700,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             await StopMediaOutputForSessionAsync(state.Udid);
             await _sessions.StopAndDestroyAsync(state);
             ClearSelectedSessionState(state.Udid);
-            // libusb0 restores the phone's normal configuration during the
-            // stop path. Give Windows and the Apple USB stack a complete
-            // re-enumeration window before opening QuickTime again.
-            Exception? lastFailure = null;
-            (bool Success, ulong Handle, string Message) created = (false, 0, "");
-            for (var attempt = 1; attempt <= 3; attempt++)
+            // Native start waits for the device to expose a stable QuickTime
+            // descriptor. Do not add speculative delays or repeat activation;
+            // a failed state is surfaced with its native stage and code.
+            NativeSessionCreateResult created = new(false, 0, 0, string.Empty);
             {
-                await Task.Delay(attempt == 1 ? 1500 : 2500,
-                    _shutdownCancellation.Token);
                 if (_disposed) return;
                 created = await Task.Run(() => CreateSession(device, startSettings));
                 if (_disposed)
@@ -3388,8 +3718,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 }
                 if (!created.Success)
                 {
-                    lastFailure = new InvalidOperationException(created.Message);
-                    continue;
+                    failedCreate = created;
+                    throw new InvalidOperationException(created.Message);
                 }
 
                 _sessions.SetHandle(state, created.Handle);
@@ -3407,14 +3737,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                         DiagnosticLogger.Exception("capture", "restart_status_failed",
                             error, ("device", AppLog.Device(state.Udid)),
                             ("handle", AppLog.Handle(created.Handle)));
-                        lastFailure = error;
-                        break;
+                        throw;
                     }
                     if (status.State == CaptureState.Streaming) { ready = true; break; }
                     if (status.State == CaptureState.Error || status.State == CaptureState.Stopped)
                     {
-                        lastFailure = new InvalidOperationException(status.Message);
-                        break;
+                        failedStatus = status;
+                        throw new InvalidOperationException(status.Message);
                     }
                 }
                 if (ready)
@@ -3461,15 +3790,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                         ("handle", AppLog.Handle(state.Handle))));
                     return;
                 }
-                try { await _sessions.StopAndDestroyAsync(state); }
-                catch (Exception cleanupError)
-                {
-                    DiagnosticLogger.Exception("capture", "restart_cleanup_failed",
-                        cleanupError, ("device", AppLog.Device(state.Udid)));
-                }
-                NotifyCaptureSessionChanged();
+                throw new InvalidOperationException(
+                    "USB capture session did not reach Streaming before the readiness timeout");
             }
-            throw lastFailure ?? new InvalidOperationException(created.Message);
         }
         catch (OperationCanceledException) when (_disposed)
         {
@@ -3483,9 +3806,32 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             AddDiagnosticLog(AppLog.Event("video_pipeline_restart_failed",
                 ("reason", reason), ("device", AppLog.Device(state.Udid)),
                 ("error", AppLog.Error(error))));
-            _sessions.SetHandle(state, 0);
+            if (state.Handle != 0)
+            {
+                try { await _sessions.StopAndDestroyAsync(state); }
+                catch (Exception cleanupError)
+                {
+                    DiagnosticLogger.Exception("capture", "restart_cleanup_failed",
+                        cleanupError, ("device", AppLog.Device(state.Udid)));
+                }
+            }
             ClearSelectedSessionState(state.Udid);
             NotifyCaptureSessionChanged();
+            // Settings-triggered restarts use the same error contract as an
+            // initial start. Do not leave a failed USB/QuickTime transition
+            // represented only by the generic status-bar text.
+            if (!_disposed)
+            {
+                var errorBody = failedStatus is { } status
+                    ? CaptureErrorGuidance.UserMessage(status)
+                    : CaptureErrorGuidance.StartFailureMessage(
+                        failedCreate?.ErrorCode ??
+                            (int)NativeResult.TransportUnavailable,
+                        failedCreate?.Message ?? error.Message);
+                AppPromptWindow.Inform(
+                    LocalizationService.Format("DeviceCaptureErrorTitleFormat",
+                        device.DisplayName), errorBody);
+            }
         }
         finally
         {
@@ -3534,7 +3880,17 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                             AddDiagnosticLog(AppLog.Event("app_shutdown_stop_session",
                                 ("device", AppLog.Device(session.Udid)),
                                 ("handle", AppLog.Handle(session.Handle))));
-                            await _sessions.StopAndDestroyAsync(session);
+                            try
+                            {
+                                await _sessions.StopAndDestroyAsync(session);
+                            }
+                            catch (UsbConfigurationRestoreWarningException warning)
+                            {
+                                AddDiagnosticLog(AppLog.Event("app_shutdown_stop_warning",
+                                    ("device", AppLog.Device(session.Udid)),
+                                    ("warning_code", warning.ErrorCode),
+                                    ("warning", AppLog.Message(warning.Message))));
+                            }
                         }
                         // Defensive cleanup for a legacy session created by an
                         // older component in the same process.

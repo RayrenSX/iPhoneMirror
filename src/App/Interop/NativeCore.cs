@@ -8,7 +8,26 @@ internal enum NativeResult : int
 {
     Ok = 0,
     BufferTooSmall = -3,
+    TransportUnavailable = -4,
+    DeviceNotFound = -6,
     CaptureBackendUnavailable = -7,
+    SessionAlreadyExists = -8,
+    DriverSafetyBlocked = -9,
+    UsbConfigurationNotReady = -10,
+    SessionTeardownFailed = -11,
+    UsbConfigurationRestoreWarning = -12,
+}
+
+internal readonly record struct NativeSessionCreateResult(
+    bool Success, ulong Handle, int ErrorCode, string Message);
+
+internal sealed class UsbDeviceRefreshDeferredException(string message)
+    : InvalidOperationException(message);
+
+internal sealed class UsbConfigurationRestoreWarningException(
+    string message, int errorCode) : InvalidOperationException(message)
+{
+    internal int ErrorCode { get; } = errorCode;
 }
 
 internal enum ConnectionState : int
@@ -31,6 +50,37 @@ internal enum CaptureState : int
     Stopping,
     Stopped,
     Error,
+}
+
+internal enum CaptureFailureKind : int
+{
+    None,
+    UsbConnection,
+    SessionCreation,
+    Driver,
+    VideoStream,
+    InvalidVideoDimensions,
+    NoVideoFrames,
+    SystemClosed,
+    DeviceDisconnected,
+    Timeout,
+    ExistingSession,
+    ChildProcessExited,
+    Unknown = 100,
+}
+
+internal enum CaptureFailureStage : int
+{
+    None,
+    UsbPreflight,
+    UsbActivation,
+    DeviceReenumeration,
+    InterfaceOpen,
+    QuickTimeHandshake,
+    VideoStream,
+    Decoder,
+    SessionTeardown,
+    DeviceDiscovery,
 }
 
 internal enum MonitorHdrCapability : uint
@@ -117,6 +167,9 @@ internal struct NativeCaptureStatus
     public ulong AudioPackets;
     public uint AudioSampleRate;
     public uint AudioChannels;
+    public CaptureFailureKind FailureKind;
+    public CaptureFailureStage FailureStage;
+    public int ErrorCode;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 192)] public string Message;
 }
 
@@ -215,6 +268,10 @@ internal sealed class NativeCore : IDisposable
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_refresh_devices([Out] NativeDeviceInfo[]? devices, ref uint count);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_refresh_devices_ex([Out] NativeDeviceInfo[]? devices,
+        ref uint count, int refreshMetadata);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     private static extern int im_wireless_receiver_start(
@@ -500,7 +557,7 @@ internal sealed class NativeCore : IDisposable
         return available != 0;
     }
 
-    public IReadOnlyList<NativeDeviceInfo> GetDevices()
+    public IReadOnlyList<NativeDeviceInfo> GetDevices(bool refreshMetadata = false)
     {
         // usbmux is live state: another iPhone can appear or disappear between
         // the count query and the fill call. Retry a changed-size snapshot and
@@ -508,7 +565,11 @@ internal sealed class NativeCore : IDisposable
         for (var attempt = 0; attempt < 3; ++attempt)
         {
             uint count = 0;
-            var result = im_refresh_devices(null, ref count);
+            var result = im_refresh_devices_ex(null, ref count,
+                refreshMetadata ? 1 : 0);
+            if (result == (int)NativeResult.UsbConfigurationNotReady)
+                throw new UsbDeviceRefreshDeferredException(GetLastError(
+                    LocalizationService.Get("EnumerateDevicesFailed")));
             if (result != 0) throw new InvalidOperationException(GetLastError(
                 LocalizationService.Get("EnumerateDevicesFailed")));
             if (count == 0) return [];
@@ -525,8 +586,12 @@ internal sealed class NativeCore : IDisposable
                 devices[i].Status = string.Empty;
             }
             var capacity = count;
-            result = im_refresh_devices(devices, ref capacity);
+            result = im_refresh_devices_ex(devices, ref capacity,
+                refreshMetadata ? 1 : 0);
             if (result == (int)NativeResult.BufferTooSmall) continue;
+            if (result == (int)NativeResult.UsbConfigurationNotReady)
+                throw new UsbDeviceRefreshDeferredException(GetLastError(
+                    LocalizationService.Get("ReadDeviceInfoFailed")));
             if (result != 0) throw new InvalidOperationException(GetLastError(
                 LocalizationService.Get("ReadDeviceInfoFailed")));
             return devices.Take(checked((int)Math.Min(capacity, (uint)devices.Length))).ToArray();
@@ -651,7 +716,7 @@ internal sealed class NativeCore : IDisposable
             : (false, GetLastError(LocalizationService.Get("CannotStartCapture")));
     }
 
-    public (bool Success, ulong Handle, string Message) CreateDeviceSession(string udid,
+    public NativeSessionCreateResult CreateDeviceSession(string udid,
         uint width, uint height, uint fps, bool playAudio, double volume,
         uint usbWidth = 0, uint usbHeight = 0, uint usbProjectionMode = 0,
         uint decoderPreference = 0, uint colorOutputPreference = 0)
@@ -659,7 +724,7 @@ internal sealed class NativeCore : IDisposable
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 17,
+            ApiVersion = 18,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,
@@ -674,18 +739,19 @@ internal sealed class NativeCore : IDisposable
         options.Reserved[4] = Math.Min(colorOutputPreference, 2U);
         var result = im_session_create(udid, ref options, out var handle);
         return result == 0
-            ? (true, handle, LocalizationService.Get("CaptureStarted"))
-            : (false, 0, GetLastError(LocalizationService.Get("CannotStartCapture")));
+            ? new(true, handle, 0, LocalizationService.Get("CaptureStarted"))
+            : new(false, 0, result,
+                GetLastError(LocalizationService.Get("CannotStartCapture")));
     }
 
-    public (bool Success, ulong Handle, string Message) CreateWirelessSession(
+    public NativeSessionCreateResult CreateWirelessSession(
         string deviceId, uint width, uint height, uint fps,
         bool playAudio, double volume)
     {
         var options = new NativeCaptureOptions
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureOptions>(),
-            ApiVersion = 17,
+            ApiVersion = 18,
             RequestedWidth = width,
             RequestedHeight = height,
             TargetFps = fps,
@@ -695,16 +761,21 @@ internal sealed class NativeCore : IDisposable
         };
         var result = im_wireless_session_create(deviceId, ref options, out var handle);
         return result == 0
-            ? (true, handle, LocalizationService.Get("CaptureStarted"))
-            : (false, 0, GetLastError(LocalizationService.Get("CannotStartCapture")));
+            ? new(true, handle, 0, LocalizationService.Get("CaptureStarted"))
+            : new(false, 0, result,
+                GetLastError(LocalizationService.Get("CannotStartCapture")));
     }
 
     public void StopDeviceSession(ulong handle)
     {
         if (handle == 0) return;
         var result = im_session_stop(handle);
-        if (result != 0) throw new InvalidOperationException(GetLastError(
-            LocalizationService.Get("StopFailedFormat")));
+        if (result == 0) return;
+        var message = GetLastError(
+            $"{LocalizationService.Get("StopFailedFormat")} (error {result})");
+        if (result == (int)NativeResult.UsbConfigurationRestoreWarning)
+            throw new UsbConfigurationRestoreWarningException(message, result);
+        throw new InvalidOperationException(message);
     }
 
     public void DestroyDeviceSession(ulong handle)
@@ -955,12 +1026,6 @@ internal sealed class NativeCore : IDisposable
 
     private static string GetLastError(string fallback)
     {
-        // The native ABI currently exposes human-readable Chinese diagnostics.
-        // Keep those details in the native log, but do not leak mixed-language
-        // text into the English UI until the ABI provides stable error codes.
-        if (!LocalizationService.EffectiveCulture.Name.Equals(
-                LocalizationService.SimplifiedChinese,
-                StringComparison.OrdinalIgnoreCase)) return fallback;
         var pointer = im_last_error();
         return pointer == 0 ? fallback : Marshal.PtrToStringUni(pointer) ?? fallback;
     }

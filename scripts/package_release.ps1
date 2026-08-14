@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.3',
+    [string]$Version = '1.6.5',
     [switch]$SkipBuild,
     [switch]$GenerateSbom,
     [switch]$UpdateReleaseManifest,
@@ -50,6 +50,7 @@ $MediaOutputRuntimeHashes = [Collections.IDictionary]$MediaOutputManifest.Files
 $RequiredArtifacts = @(
     'iPhoneMirror.exe',
     'iPhoneMirror.Core.dll',
+    'iPhoneMirror.UsbConfigurationSwitch.exe',
     'iPhoneMirror.VirtualCamera.dll',
     'iPhoneMirror.VirtualCamera.Admin.exe',
     'iPhoneMirror.Driver.exe',
@@ -505,6 +506,7 @@ try {
     $installerRequiredArtifacts = @(
         'iPhoneMirror.exe', 'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
         'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.exe',
+        'iPhoneMirror.UsbConfigurationSwitch.exe',
         'iPhoneMirror.Driver.dll', 'iPhoneMirror.Driver.deps.json',
         'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',

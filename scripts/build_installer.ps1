@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.3',
+    [string]$Version = '1.6.5',
     [switch]$SkipAppBuild,
     [string]$SourceDirectory,
     [string]$OutputDirectory
@@ -47,6 +47,7 @@ try {
             'THIRD_PARTY_NOTICES.md',
             'tools\updater\Apply-ZipUpdate.ps1', 'libusb0.dll', 'msvcp140.dll',
             'vcruntime140.dll', 'vcruntime140_1.dll',
+            'iPhoneMirror.Core.dll', 'iPhoneMirror.UsbConfigurationSwitch.exe',
             'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
             'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.dll',
             'iPhoneMirror.Driver.exe', 'iPhoneMirror.Driver.deps.json',

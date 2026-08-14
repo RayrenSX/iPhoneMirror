@@ -338,8 +338,8 @@
                                 Padding="{TemplateBinding Padding}"
                                 SnapsToDevicePixels="True">
                             <TextBlock Text="{TemplateBinding Content}"
-                                       Foreground="{TemplateBinding Foreground}"
-                                       HorizontalAlignment="Center"
+                                        Foreground="{TemplateBinding Foreground}"
+                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -499,15 +499,33 @@
             <StackPanel Grid.Column="5" Orientation="Horizontal"
                         shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <Button Style="{StaticResource TitleBarButton}"
-                        ToolTip="{DynamicResource Minimize}" Click="OnMinimizeClick">
+                        AutomationProperties.Name="{DynamicResource Minimize}"
+                        Click="OnMinimizeClick">
+                    <Button.ToolTip>
+                        <ToolTip FontFamily="{DynamicResource NavigationTextFontFamily}"
+                                 FontSize="12"
+                                 Content="{DynamicResource TitleBarMinimizeToolTip}"/>
+                    </Button.ToolTip>
                     <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE921;" FontSize="12"/>
                 </Button>
                 <Button Style="{StaticResource TitleBarButton}"
-                        ToolTip="{DynamicResource Maximize}" Click="OnMaximizeClick">
+                        AutomationProperties.Name="{DynamicResource Maximize}"
+                        Click="OnMaximizeClick">
+                    <Button.ToolTip>
+                        <ToolTip FontFamily="{DynamicResource NavigationTextFontFamily}"
+                                 FontSize="12"
+                                 Content="{DynamicResource TitleBarMaximizeToolTip}"/>
+                    </Button.ToolTip>
                     <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE922;" FontSize="12"/>
                 </Button>
                 <Button Style="{StaticResource TitleBarButton}"
-                        ToolTip="{DynamicResource Close}" Click="OnCloseWindowClick">
+                        AutomationProperties.Name="{DynamicResource Close}"
+                        Click="OnCloseWindowClick">
+                    <Button.ToolTip>
+                        <ToolTip FontFamily="{DynamicResource NavigationTextFontFamily}"
+                                 FontSize="12"
+                                 Content="{DynamicResource TitleBarCloseToolTip}"/>
+                    </Button.ToolTip>
                     <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="12"/>
                 </Button>
             </StackPanel>
@@ -748,22 +766,30 @@
             <Grid x:Name="CenterPanel" Grid.Column="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition x:Name="EnvironmentGapRow" Height="14"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition x:Name="StatsGapRow" Height="14"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <Border x:Name="EnvironmentPanel" Grid.Row="0" Style="{StaticResource WorkspaceCardBorder}" Padding="10,9,10,9">
+                <Border x:Name="EnvironmentPanel" Grid.Row="0"
+                        Margin="0,0,0,14" Padding="10,9,10,9">
+                    <Border.Style>
+                        <Style TargetType="{x:Type Border}"
+                               BasedOn="{StaticResource WorkspaceCardBorder}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding PreviewAndObsVisibility}" Value="Visible">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="12"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="{Binding EnvironmentStatus}" Foreground="{DynamicResource WarningBrush}"
-                                   FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                        <StackPanel x:Name="PreviewQuickActions" Grid.Column="2"
+                        <StackPanel x:Name="PreviewQuickActions" Grid.Column="1"
                                     Orientation="Horizontal" VerticalAlignment="Center"
                                     Visibility="{Binding PreviewAndObsVisibility}">
                             <Button Command="{Binding MoreImageSettingsCommand}"
@@ -806,7 +832,7 @@
                     </Grid>
                 </Border>
 
-                <Border x:Name="PreviewPanel" Grid.Row="2" Background="{DynamicResource PreviewChromeBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                <Border x:Name="PreviewPanel" Grid.Row="1" Background="{DynamicResource PreviewChromeBrush}" BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1" CornerRadius="16" ClipToBounds="True"
                         HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                         MinWidth="0" MinHeight="0" SnapsToDevicePixels="True">
@@ -936,45 +962,14 @@
                     </Grid>
                 </Border>
 
-                <Border x:Name="StatsPanel" Grid.Row="4" Style="{StaticResource WorkspaceCardBorder}" Padding="0">
+                <Border x:Name="StatsPanel" Grid.Row="3" Style="{StaticResource WorkspaceCardBorder}" Padding="0">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid Grid.Row="0" Margin="13,10"
-                              Visibility="{Binding DecoderStatusVisibility}">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="10"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Ellipse Width="6" Height="6" VerticalAlignment="Center">
-                                <Ellipse.Style>
-                                    <Style TargetType="Ellipse">
-                                        <Setter Property="Fill" Value="{DynamicResource StatusPendingBrush}"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding DecoderStatusTone}" Value="Applied">
-                                                <Setter Property="Fill" Value="{DynamicResource StatusAppliedBrush}"/>
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding DecoderStatusTone}" Value="Failed">
-                                                <Setter Property="Fill" Value="{DynamicResource StatusFailedBrush}"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Ellipse.Style>
-                            </Ellipse>
-                            <TextBlock Grid.Column="2" Text="{Binding DecoderStatus}"
-                                       Foreground="{DynamicResource MutedTextBrush}"
-                                       FontSize="11" TextWrapping="Wrap"
-                                       AutomationProperties.AutomationId="DecoderStatusText"/>
-                        </Grid>
-                        <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderSoftBrush}"
-                                Visibility="{Binding DecoderStatusVisibility}"/>
-                        <Grid Grid.Row="2" Margin="13,10"
                               Visibility="{Binding MediaOutputStatusVisibility}">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
@@ -1001,9 +996,9 @@
                                        FontSize="11" TextWrapping="Wrap"
                                        AutomationProperties.AutomationId="MediaOutputStatusText"/>
                         </Grid>
-                        <Border Grid.Row="3" Height="1" Background="{DynamicResource BorderSoftBrush}"
+                        <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderSoftBrush}"
                                 Visibility="{Binding MediaOutputStatusVisibility}"/>
-                        <Grid Grid.Row="4">
+                        <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="1"/>

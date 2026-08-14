@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Updater;
@@ -143,6 +144,24 @@ foreach (var localizationPath in Directory.GetFiles(
     Equal(true,
         noPingRecovery.Contains("MFi", StringComparison.OrdinalIgnoreCase),
         $"no-PING recovery recommends an original or MFi cable in {Path.GetFileName(localizationPath)}");
+    var driverSafetyBlocked = localization.Descendants()
+        .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
+            "CaptureDriverSafetyBlocked", StringComparison.Ordinal)).Value;
+    Equal(true,
+        driverSafetyBlocked.Contains("USB", StringComparison.OrdinalIgnoreCase) &&
+        driverSafetyBlocked.Contains("libusb0", StringComparison.OrdinalIgnoreCase),
+        $"driver safety guidance explains conservative handling without blocking capture in {Path.GetFileName(localizationPath)}");
+    var unsafeDriverStatus = localization.Descendants()
+        .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
+            "DriverUnsafeAppleStack", StringComparison.Ordinal)).Value;
+    Equal(false, string.IsNullOrWhiteSpace(unsafeDriverStatus),
+        $"unsafe Apple USB stack has a localized status in {Path.GetFileName(localizationPath)}");
+    var stopUsbRestoreWarning = localization.Descendants()
+        .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
+            "StopUsbRestoreWarningFormat", StringComparison.Ordinal)).Value;
+    Equal(true, stopUsbRestoreWarning.Contains("USB", StringComparison.OrdinalIgnoreCase) &&
+        stopUsbRestoreWarning.Contains("{0}", StringComparison.Ordinal),
+        $"USB restore warning is localized and includes diagnostic text in {Path.GetFileName(localizationPath)}");
     var usbRecovery = localization.Descendants()
         .Single(element => string.Equals((string?)element.Attribute(xaml + "Key"),
             "CaptureUsbConfigurationRecovery", StringComparison.Ordinal)).Value;
@@ -250,9 +269,34 @@ var previewQuickActions = mainWindow.Descendants()
     .SingleOrDefault(element =>
         string.Equals((string?)element.Attribute(xaml + "Name"),
             "PreviewQuickActions", StringComparison.Ordinal));
+var previewToolbar = mainWindow.Descendants()
+    .SingleOrDefault(element =>
+        string.Equals((string?)element.Attribute(xaml + "Name"),
+            "EnvironmentPanel", StringComparison.Ordinal));
 Equal("{Binding PreviewAndObsVisibility}",
     (string?)previewQuickActions?.Attribute("Visibility"),
     "preview quick actions follow the active projection session");
+Equal(true, previewToolbar?.Descendants().Any(element =>
+        string.Equals(element.Name.LocalName, "DataTrigger", StringComparison.Ordinal) &&
+        string.Equals((string?)element.Attribute("Binding"),
+            "{Binding PreviewAndObsVisibility}", StringComparison.Ordinal) &&
+        string.Equals((string?)element.Attribute("Value"), "Visible",
+            StringComparison.Ordinal)) == true,
+    "the complete preview toolbar is collapsed when the selected device is not mirroring");
+Equal("0,0,0,14", (string?)previewToolbar?.Attribute("Margin"),
+    "the active preview toolbar owns its spacing so collapsing it removes the gap");
+Equal(false, mainWindow.Descendants().Any(element =>
+        string.Equals((string?)element.Attribute(xaml + "Name"),
+            "EnvironmentGapRow", StringComparison.Ordinal)),
+    "no standalone toolbar gap remains above an idle preview");
+Equal(false, mainWindow.Descendants().Any(element =>
+        string.Equals((string?)element.Attribute("Text"), "{Binding EnvironmentStatus}",
+            StringComparison.Ordinal)),
+    "the preview toolbar does not show passive environment-probe status text");
+Equal(false, mainWindow.Descendants().Any(element =>
+        string.Equals((string?)element.Attribute("AutomationProperties.AutomationId"),
+            "DecoderStatusText", StringComparison.Ordinal)),
+    "the main statistics bar does not show the passive decoder status row");
 foreach (var automationId in new[]
          {
              "QuickImageSettingsButton", "QuickPreviewWindowButton",
@@ -270,9 +314,28 @@ var sourceDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", ".."));
 var mainViewModelSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "ViewModels", "MainViewModel.cs"));
+Equal(true, mainViewModelSource.Contains(
+        "PreviewAndObsVisibility => CurrentSessionHandle != 0",
+        StringComparison.Ordinal),
+    "a session being cleaned up is not treated as a visible preview toolbar session");
 Equal(false, mainViewModelSource.Contains(".IsLibUsb0DeviceAvailable(",
         StringComparison.Ordinal),
     "automatic UI refresh never enters the exact legacy USB probe");
+Equal(false, UsbDeviceRefreshPolicy.ShouldEnumerateWiredDevices(false,
+        [CaptureState.WaitingForDevice]),
+    "wired discovery is suspended while USB re-enumerates");
+Equal(false, UsbDeviceRefreshPolicy.ShouldEnumerateWiredDevices(true,
+        [CaptureState.Streaming]),
+    "managed start or stop ownership suspends wired discovery");
+Equal(true, UsbDeviceRefreshPolicy.ShouldEnumerateWiredDevices(false,
+        [CaptureState.Streaming]),
+    "wired discovery resumes after the session reaches streaming");
+Equal(false, UsbDeviceRefreshPolicy.ShouldRefreshMetadata(false, false),
+    "automatic wired polling reuses cached Lockdown metadata");
+Equal(true, UsbDeviceRefreshPolicy.ShouldRefreshMetadata(true, false),
+    "an explicit idle refresh may update Lockdown metadata");
+Equal(false, UsbDeviceRefreshPolicy.ShouldRefreshMetadata(true, true),
+    "an explicit refresh cannot open Lockdown while a wired session exists");
 var captureStartIndex = mainViewModelSource.IndexOf(
     "private async Task StartAsync()", StringComparison.Ordinal);
 var captureReuseIndex = captureStartIndex >= 0
@@ -286,7 +349,78 @@ var capturePreflightIndex = captureStartIndex >= 0
 Equal(true, captureStartIndex >= 0 && captureReuseIndex > captureStartIndex &&
             capturePreflightIndex > captureReuseIndex,
     "main start reuses a session created by an independent window before USB preflight");
+Equal(true, mainViewModelSource.Contains(
+        "IPhoneFilterDriverState.UnsafeStack => LocalizationService.Get(\"DriverUnsafeAppleStack\")",
+        StringComparison.Ordinal),
+    "unsafe Apple USB filter stacks have a dedicated visible driver state");
+Equal(true, mainViewModelSource.Contains(
+        "driver safety warning: {driverStatus.Diagnostic}", StringComparison.Ordinal) &&
+    mainViewModelSource.Contains(
+        "CaptureErrorGuidance.StartFailureMessage(\n                            preflight.ErrorCode",
+        StringComparison.Ordinal),
+    "wired preflight records the filter warning while preserving start error propagation");
+Equal(true, mainViewModelSource.Contains(
+        "? CaptureFailureKind.UsbConnection\n            : CaptureFailureKind.Driver",
+        StringComparison.Ordinal),
+    "managed USB preflight distinguishes a missing device from a driver failure");
+var stopMethodIndex = mainViewModelSource.IndexOf(
+    "private async Task StopAsync()", StringComparison.Ordinal);
+var restoreWarningCatchIndex = stopMethodIndex >= 0
+    ? mainViewModelSource.IndexOf(
+        "catch (UsbConfigurationRestoreWarningException warning)",
+        stopMethodIndex, StringComparison.Ordinal)
+    : -1;
+var stopGenericCatchIndex = restoreWarningCatchIndex >= 0
+    ? mainViewModelSource.IndexOf("catch (Exception error)",
+        restoreWarningCatchIndex, StringComparison.Ordinal)
+    : -1;
+Equal(true, restoreWarningCatchIndex > stopMethodIndex &&
+        stopGenericCatchIndex > restoreWarningCatchIndex &&
+        mainViewModelSource.Contains("StopUsbRestoreWarningFormat",
+            StringComparison.Ordinal),
+    "USB restore confirmation warnings complete Stop without using the generic error prompt");
+Equal(true, stopMethodIndex >= 0 &&
+        mainViewModelSource.IndexOf("requestedState.IsStopping = true;", stopMethodIndex,
+            StringComparison.Ordinal) > stopMethodIndex &&
+        mainViewModelSource.IndexOf("NativeCore.SelectPreviewSession(0);", stopMethodIndex,
+            StringComparison.Ordinal) > stopMethodIndex &&
+        mainViewModelSource.IndexOf("CaptureCleaningDevice", stopMethodIndex,
+            StringComparison.Ordinal) > stopMethodIndex,
+    "stop hides the preview and presents device cleanup before native USB teardown");
+Equal(true, mainViewModelSource.Contains(
+        "private static bool IsSessionPresentable(DeviceCaptureState? session)",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains(
+        "session is { HasSession: true, IsStopping: false }", StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("OnPropertyChanged(nameof(CurrentSessionHandle));",
+        StringComparison.Ordinal),
+    "selected-device transitions do not present a session that is being cleaned up");
+Equal(false, mainViewModelSource.Contains("mainWindow.IsEnabled = false;",
+        StringComparison.Ordinal) ||
+    mainViewModelSource.Contains("mainWindow.IsEnabled = true;", StringComparison.Ordinal),
+    "image adjustments keep the main window visually enabled while serializing settings");
+Equal(true, mainViewModelSource.Contains(
+        "private bool CanQueueSessionLifecycleOperation(DeviceViewModel? device)",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains(
+        "(!IsBusy || HasSessionLifecycleOperationInProgress)", StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("TryBeginSessionLifecycleOperation(requestedDevice.Udid)",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("EndSessionLifecycleOperation(requestedState.Udid)",
+        StringComparison.Ordinal),
+    "a lifecycle operation on one device queues rather than disables the selected other device");
+Equal(true, captureStartIndex >= 0 &&
+    mainViewModelSource.Contains("var device = requestedDevice;", StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("? \"CaptureQueued\" : \"StartRequested\"", StringComparison.Ordinal),
+    "a queued start remains bound to the clicked device and immediately reports that it is waiting");
 var repositoryRoot = Path.GetFullPath(Path.Combine(sourceDirectory, ".."));
+var rootCMake = File.ReadAllText(Path.Combine(repositoryRoot, "CMakeLists.txt"));
+Equal(true, rootCMake.Contains(
+        "IPHONEMIRROR_BUILD_DANGEROUS_USB_TOOLS", StringComparison.Ordinal) &&
+    rootCMake.Contains(
+        "Build tools that issue real Apple USB configuration and bulk requests\" OFF",
+        StringComparison.Ordinal),
+    "real-device USB stress tools are disabled in default builds");
 var installerScript = File.ReadAllText(Path.Combine(repositoryRoot,
     "installer", "iPhoneMirror.iss"));
 Equal(true, installerScript.Contains(
@@ -374,10 +508,10 @@ foreach (var blueActionTextBrush in new[]
 }
 foreach (var requiredThemeKey in new[]
          {
-             "AppBackgroundBrush", "SidebarBrush", "CardBrush", "CardHoverBrush",
-             "ControlFillBrush", "ControlHoverBrush", "AccentBrush", "OnAccentBrush",
-             "IconButtonHoverBrush", "IconButtonPressedBrush",
-             "SuccessBrush", "WarningBrush", "ErrorBrush", "WarningSurfaceBrush",
+              "AppBackgroundBrush", "SidebarBrush", "CardBrush", "CardHoverBrush",
+               "ControlFillBrush", "ControlHoverBrush", "AccentBrush", "OnAccentBrush",
+               "IconButtonHoverBrush", "IconButtonPressedBrush",
+              "SuccessBrush", "WarningBrush", "ErrorBrush", "WarningSurfaceBrush",
               "ErrorSurfaceBrush", "PreviewChromeBrush", "PreviewPanelAltBrush",
               "PreviewBorderBrush", "PreviewTextBrush", "PreviewMutedTextBrush",
              "CaptureStartBrush", "CaptureStopBrush", "CaptureActionTextBrush",
@@ -400,10 +534,10 @@ var modernControlsText = File.ReadAllText(modernControlsPath);
 foreach (var reusableControl in new[]
          {
              "ModernDialogSurface", "SettingsSection", "IconButton",
-             "TitleBarButton", "SubWindowCloseButton", "CornerRadius=\"8\"",
-             "SubWindowPageRoot", "SubWindowHeader", "SubWindowTitle",
-             "SubWindowSubtitle", "SubWindowTabControl", "SubWindowTabItem",
-             "IconButtonHoverBrush",
+              "TitleBarButton", "SubWindowCloseButton", "CornerRadius=\"8\"",
+              "SubWindowPageRoot", "SubWindowHeader", "SubWindowTitle",
+               "SubWindowSubtitle", "SubWindowTabControl", "SubWindowTabItem",
+               "IconButtonHoverBrush",
              "ModernVerticalScrollThumbStyle", "ModernHorizontalScrollThumbStyle",
              "ModernScrollBarStyle", "ContentEdgeScrollBarStyle",
              "ui:ModernButton", "ui:ModernCard", "ui:ModernDialog",
@@ -435,6 +569,18 @@ Equal(true,
     modernControlsText.Contains("PageLeftCommand", StringComparison.Ordinal) &&
     modernControlsText.Contains("PageRightCommand", StringComparison.Ordinal),
     "shared scrollbars are thin, rounded, animated, and support both orientations");
+Equal(true, modernControlsText.Contains(
+        "<Style x:Key=\"TitleBarButton\" TargetType=\"Button\" BasedOn=\"{StaticResource IconButton}\">",
+        StringComparison.Ordinal) &&
+    !modernControlsText.Contains("x:Name=\"CaptionRoot\"", StringComparison.Ordinal),
+    "title-bar controls retain the shared icon-button visual treatment");
+var titleBarWindowText = File.ReadAllText(mainWindowPath);
+Equal(true, titleBarWindowText.Contains("TitleBarMinimizeToolTip", StringComparison.Ordinal) &&
+    titleBarWindowText.Contains("TitleBarMaximizeToolTip", StringComparison.Ordinal) &&
+    titleBarWindowText.Contains("TitleBarCloseToolTip", StringComparison.Ordinal) &&
+    titleBarWindowText.Contains("<ToolTip FontFamily=\"{DynamicResource NavigationTextFontFamily}\"",
+        StringComparison.Ordinal),
+    "title-bar tooltips use descriptive text outside the Fluent icon font");
 foreach (var appXamlPath in new[]
          {
              Path.Combine(sourceDirectory, "App", "App.xaml"),
@@ -500,6 +646,24 @@ foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
         windowText.Contains("EntranceTransform", StringComparison.Ordinal),
         $"{windowName} has a restrained entrance transition");
 }
+
+var appPromptWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "AppPromptWindow.xaml"));
+Equal(true,
+    appPromptWindowText.Contains("WindowBackdropType=\"None\"", StringComparison.Ordinal) &&
+    appPromptWindowText.Contains("Background=\"{DynamicResource WindowBackgroundBrush}\"",
+        StringComparison.Ordinal) &&
+    appPromptWindowText.Contains("Effect=\"{x:Null}\" CornerRadius=\"0\" BorderThickness=\"0\"",
+        StringComparison.Ordinal),
+    "application prompts use one native corner without an acrylic halo or outer shadow");
+var appPromptWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "AppPromptWindow.xaml.cs"));
+var promptRenderedIndex = appPromptWindowSource.IndexOf("prompt.ContentRendered +=",
+    StringComparison.Ordinal);
+var promptAfterShownIndex = appPromptWindowSource.IndexOf("await afterShown();",
+    promptRenderedIndex, StringComparison.Ordinal);
+Equal(true, promptRenderedIndex >= 0 && promptAfterShownIndex > promptRenderedIndex,
+    "prompt follow-up actions begin only after the warning content is rendered");
 
 var resizableWindowPaths = themedWindowDirectories
     .SelectMany(directory => Directory.GetFiles(directory, "*.xaml"))
@@ -780,6 +944,77 @@ Equal(true, CaptureErrorGuidance.IsUsbConfigurationFailure(
 Equal(false, CaptureErrorGuidance.IsUsbConfigurationFailure(
         "QuickTime endpoint opened but iPhone sent no PING; keep the device unlocked"),
     "capture guidance does not confuse a no-PING timeout with a USB configuration failure");
+var compactCaptureGuidance = CaptureErrorGuidance.UserMessage(
+    CaptureFailureKind.NoVideoFrames, CaptureFailureStage.VideoStream, -42,
+    "decoder failed while opening a 1920x1080 frame");
+Equal(LocalizationService.Get("CaptureActionVideoRetry"), compactCaptureGuidance,
+    "capture failure prompts tell the user how to recover");
+Equal(false, compactCaptureGuidance.Contains("-42", StringComparison.Ordinal) ||
+    compactCaptureGuidance.Contains("1920x1080", StringComparison.Ordinal),
+    "capture failure prompts do not expose native codes or diagnostic details");
+var deviceSessionClosedStatus = new NativeCaptureStatus
+{
+    FailureKind = CaptureFailureKind.SystemClosed,
+    FailureStage = CaptureFailureStage.VideoStream,
+    ErrorCode = -2109,
+    Message = "wired media silence",
+};
+Equal(LocalizationService.Get("DeviceSessionClosedWarningBody"),
+    CaptureErrorGuidance.UserMessage(deviceSessionClosedStatus),
+    "a phone-side mirroring stop explains the Control Center action and required restart");
+Equal(true, CaptureErrorGuidance.IsDeviceSessionClosedWarning(deviceSessionClosedStatus),
+    "phone-side mirroring stops use the dedicated warning presentation");
+Equal(false, CaptureErrorGuidance.IsDeviceSessionClosedWarning(
+        deviceSessionClosedStatus with { ErrorCode = -2110 }),
+    "USB disconnects do not use the phone-side stop warning presentation");
+foreach (var cultureFile in new[] { "Strings.zh-CN.xaml", "Strings.zh-HK.xaml", "Strings.en-US.xaml" })
+{
+    Equal(true, File.ReadAllText(Path.Combine(sourceDirectory, "App", "Localization", cultureFile))
+            .Contains("DeviceSessionClosedWarningTitleFormat", StringComparison.Ordinal) &&
+        File.ReadAllText(Path.Combine(sourceDirectory, "App", "Localization", cultureFile))
+            .Contains("DeviceSessionClosedWarningBody", StringComparison.Ordinal),
+        $"{cultureFile} localizes the phone-side mirroring stop warning");
+}
+Equal(LocalizationService.Get("CaptureActionWaitForCleanup"),
+    CaptureErrorGuidance.UserMessage(CaptureFailureKind.ExistingSession,
+        CaptureFailureStage.SessionTeardown, (int)NativeResult.SessionAlreadyExists, "duplicate"),
+    "existing-session prompts wait for lifecycle cleanup instead of suggesting concurrent retries");
+Equal(CaptureFailureKind.ExistingSession,
+    CaptureErrorGuidance.StartFailureKind((int)NativeResult.SessionAlreadyExists),
+    "duplicate native sessions are presented as an existing-session failure");
+Equal(CaptureFailureKind.Driver,
+    CaptureErrorGuidance.StartFailureKind((int)NativeResult.DriverSafetyBlocked),
+    "unsafe Apple/libusb0 stacks are presented as a driver failure");
+Equal(CaptureFailureKind.UsbConnection,
+    CaptureErrorGuidance.StartFailureKind((int)NativeResult.TransportUnavailable),
+    "native USB transport failures are presented as a USB connection failure");
+Equal(CaptureFailureKind.UsbConnection,
+    CaptureErrorGuidance.StartFailureKind((int)NativeResult.DeviceNotFound),
+    "native missing-device failures are presented as a USB connection failure");
+Equal(true, new IPhoneFilterDriverStatus(
+        IPhoneFilterDriverState.UnsafeStack, "test", "unsafe").CanStartCapture,
+    "managed driver preflight keeps wired capture available on the diagnosed filter stack");
+Equal(true, File.ReadAllText(Path.Combine(sourceDirectory, "App", "Services",
+        "IPhoneFilterDriverService.cs")).Contains(
+        "(status & DnStarted) != 0", StringComparison.Ordinal),
+    "managed driver preflight accepts only a started Apple USB parent node");
+Equal("-9 (0xFFFFFFF7)", CaptureErrorGuidance.ErrorCodeText(
+        (int)NativeResult.DriverSafetyBlocked),
+    "driver safety blocks retain their decimal and hexadecimal code");
+Equal("-8 (0xFFFFFFF8)", CaptureErrorGuidance.ErrorCodeText(
+        (int)NativeResult.SessionAlreadyExists),
+    "duplicate native session errors retain their decimal and hexadecimal code");
+Equal(CaptureFailureKind.UsbConnection,
+    CaptureErrorGuidance.StartFailureKind((int)NativeResult.UsbConfigurationNotReady),
+    "an unfinished previous USB configuration is presented as a connection lifecycle failure");
+Equal("-11 (0xFFFFFFF5)", CaptureErrorGuidance.ErrorCodeText(
+        (int)NativeResult.SessionTeardownFailed),
+    "teardown failures retain their decimal and hexadecimal code");
+Equal("-12 (0xFFFFFFF4)", CaptureErrorGuidance.ErrorCodeText(
+        (int)NativeResult.UsbConfigurationRestoreWarning),
+    "USB restore warnings retain their decimal and hexadecimal code");
+Equal(464, System.Runtime.InteropServices.Marshal.SizeOf<NativeCaptureStatus>(),
+    "managed capture status matches the native API v18 layout");
 
 const string releaseFixture = """
 [
@@ -2452,6 +2687,109 @@ await shutdown.StopAndDisposeOnceAsync(
     () => { shutdownOrder.Add("duplicate-stop"); return Task.CompletedTask; },
     () => { shutdownOrder.Add("duplicate-dispose"); return Task.CompletedTask; });
 Sequence(["stop", "dispose"], shutdownOrder, "window close cleanup is ordered and idempotent");
+
+var teardownEntered = new TaskCompletionSource(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var allowTeardown = new TaskCompletionSource(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var teardownStops = 0;
+var teardownDestroys = 0;
+var sessionManager = new DeviceSessionManager(
+    _ =>
+    {
+        Interlocked.Increment(ref teardownStops);
+        teardownEntered.SetResult();
+        allowTeardown.Task.GetAwaiter().GetResult();
+    },
+    _ => Interlocked.Increment(ref teardownDestroys));
+var concurrentSession = new DeviceCaptureState
+{
+    Udid = "concurrent-stop-device",
+    Handle = 77,
+};
+var firstTeardown = sessionManager.StopAndDestroyAsync(concurrentSession);
+await teardownEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+var secondTeardown = sessionManager.StopAndDestroyAsync(concurrentSession);
+Equal(true, ReferenceEquals(firstTeardown, secondTeardown),
+    "concurrent stop callers share the in-flight teardown task");
+Equal((ulong)0, concurrentSession.Handle,
+    "session handle is revoked before native teardown finishes");
+Equal(true, concurrentSession.IsStopping,
+    "session remains stopping while native teardown is in flight");
+allowTeardown.SetResult();
+await Task.WhenAll(firstTeardown, secondTeardown);
+Equal(1, teardownStops, "concurrent stop invokes native stop exactly once");
+Equal(1, teardownDestroys, "concurrent stop destroys the native handle exactly once");
+Equal(false, concurrentSession.IsStopping,
+    "completed teardown resets the session transition state");
+
+var warningStops = 0;
+var warningDestroys = 0;
+var warningManager = new DeviceSessionManager(
+    _ =>
+    {
+        Interlocked.Increment(ref warningStops);
+        throw new UsbConfigurationRestoreWarningException(
+            "normal USB configuration was not observed",
+            (int)NativeResult.UsbConfigurationRestoreWarning);
+    },
+    _ => Interlocked.Increment(ref warningDestroys));
+var warningSession = new DeviceCaptureState
+{
+    Udid = "restore-warning-device",
+    Handle = 88,
+};
+try
+{
+    await warningManager.StopAndDestroyAsync(warningSession);
+    throw new InvalidOperationException("USB restore warning was not propagated");
+}
+catch (UsbConfigurationRestoreWarningException warning)
+{
+    Equal((int)NativeResult.UsbConfigurationRestoreWarning, warning.ErrorCode,
+        "USB restore warning preserves the native result code");
+}
+Equal(1, warningStops,
+    "USB restore warning still invokes native stop exactly once");
+Equal(1, warningDestroys,
+    "USB restore warning still destroys the native session handle");
+Equal((ulong)0, warningSession.Handle,
+    "USB restore warning revokes the session handle before reporting the warning");
+Equal(false, warningSession.IsStopping,
+    "USB restore warning clears the in-flight stop state");
+
+var backgroundReleaseIndex = mainViewModelSource.IndexOf(
+    "await ReleaseFailedSessionLockedAsync(state, status);",
+    StringComparison.Ordinal);
+var backgroundPromptIndex = mainViewModelSource.IndexOf(
+    "errorTitle, errorBody);",
+    backgroundReleaseIndex,
+    StringComparison.Ordinal);
+Equal(true, backgroundReleaseIndex >= 0 && backgroundPromptIndex > backgroundReleaseIndex,
+    "background capture errors release the failed session before showing a modal prompt");
+var selectedReleaseIndex = mainViewModelSource.IndexOf(
+    "await ReleaseFailedSessionLockedAsync(state, status);",
+    backgroundReleaseIndex + 1,
+    StringComparison.Ordinal);
+var selectedPromptIndex = mainViewModelSource.IndexOf(
+    "AppPromptWindow.Inform(errorTitle, errorBody);",
+    selectedReleaseIndex,
+    StringComparison.Ordinal);
+Equal(true, selectedReleaseIndex >= 0 && selectedPromptIndex > selectedReleaseIndex,
+    "selected capture errors release the failed session before showing a modal prompt");
+var sessionClosedWarningMethodIndex = mainViewModelSource.IndexOf(
+    "private void ShowDeviceSessionClosedWarningThenRelease(",
+    StringComparison.Ordinal);
+var sessionClosedPromptIndex = mainViewModelSource.IndexOf(
+    "AppPromptWindow.InformThen(errorTitle, errorBody,",
+    sessionClosedWarningMethodIndex, StringComparison.Ordinal);
+var sessionClosedCleanupIndex = mainViewModelSource.IndexOf(
+    "() => ReleaseFailedSessionLockedAsync(state, status)",
+    sessionClosedPromptIndex, StringComparison.Ordinal);
+Equal(true, sessionClosedWarningMethodIndex >= 0 &&
+    sessionClosedPromptIndex > sessionClosedWarningMethodIndex &&
+    sessionClosedCleanupIndex > sessionClosedPromptIndex,
+    "phone-side stop warnings are displayed before their teardown callback runs");
 
 var currentExecutable = Environment.ProcessPath!;
 Equal(true, SingleInstanceCoordinator.IsSameExecutable(currentExecutable,

@@ -59,6 +59,53 @@ bool read_status(Session& session, iPhoneMirror::CaptureStatus& status) {
     return true;
 }
 
+const wchar_t* failure_kind_name(
+    iPhoneMirror::CaptureFailureKind kind) noexcept {
+    switch (kind) {
+    case iPhoneMirror::CaptureFailureKind::None: return L"none";
+    case iPhoneMirror::CaptureFailureKind::UsbConnection: return L"usb-connection";
+    case iPhoneMirror::CaptureFailureKind::SessionCreation: return L"session-creation";
+    case iPhoneMirror::CaptureFailureKind::Driver: return L"driver";
+    case iPhoneMirror::CaptureFailureKind::VideoStream: return L"video-stream";
+    case iPhoneMirror::CaptureFailureKind::InvalidVideoDimensions: return L"invalid-video-dimensions";
+    case iPhoneMirror::CaptureFailureKind::NoVideoFrames: return L"no-video-frames";
+    case iPhoneMirror::CaptureFailureKind::SystemClosed: return L"system-closed";
+    case iPhoneMirror::CaptureFailureKind::DeviceDisconnected: return L"device-disconnected";
+    case iPhoneMirror::CaptureFailureKind::Timeout: return L"timeout";
+    case iPhoneMirror::CaptureFailureKind::ExistingSession: return L"existing-session";
+    case iPhoneMirror::CaptureFailureKind::ChildProcessExited: return L"child-process-exited";
+    case iPhoneMirror::CaptureFailureKind::Unknown: return L"unknown";
+    }
+    return L"invalid";
+}
+
+const wchar_t* failure_stage_name(
+    iPhoneMirror::CaptureFailureStage stage) noexcept {
+    switch (stage) {
+    case iPhoneMirror::CaptureFailureStage::None: return L"none";
+    case iPhoneMirror::CaptureFailureStage::UsbPreflight: return L"usb-preflight";
+    case iPhoneMirror::CaptureFailureStage::UsbActivation: return L"usb-activation";
+    case iPhoneMirror::CaptureFailureStage::DeviceReenumeration: return L"device-reenumeration";
+    case iPhoneMirror::CaptureFailureStage::InterfaceOpen: return L"interface-open";
+    case iPhoneMirror::CaptureFailureStage::QuickTimeHandshake: return L"quicktime-handshake";
+    case iPhoneMirror::CaptureFailureStage::VideoStream: return L"video-stream";
+    case iPhoneMirror::CaptureFailureStage::Decoder: return L"decoder";
+    case iPhoneMirror::CaptureFailureStage::SessionTeardown: return L"session-teardown";
+    case iPhoneMirror::CaptureFailureStage::DeviceDiscovery: return L"device-discovery";
+    }
+    return L"invalid";
+}
+
+void print_capture_failure(const Session& session,
+    const iPhoneMirror::CaptureStatus& status) {
+    std::wcerr << L"capture_failure device=\"" << session.name
+               << L"\" kind=" << failure_kind_name(status.failure_kind)
+               << L" stage=" << failure_stage_name(status.failure_stage)
+               << L" code=" << status.error_code
+               << L" state=" << static_cast<int>(status.state)
+               << L" message=\"" << status.message << L"\"\n";
+}
+
 const wchar_t* decoder_name(std::uint32_t decoder) noexcept {
     switch (decoder) {
     case 0: return L"auto";
@@ -268,8 +315,7 @@ bool wait_for_streaming(Session& session, std::chrono::seconds timeout,
         }
         if (status.state == iPhoneMirror::CaptureState::Error ||
             status.state == iPhoneMirror::CaptureState::Stopped) {
-            std::wcerr << L"session failed for " << session.name << L": "
-                       << status.message << L'\n';
+            print_capture_failure(session, status);
             return false;
         }
         if (status.state == iPhoneMirror::CaptureState::Streaming &&
@@ -290,6 +336,7 @@ bool wait_for_streaming(Session& session, std::chrono::seconds timeout,
                << L" frames=" << status.video_frames << L" message="
                << status.message << L" decoded_advances=" << decoded_advances
                << L" timestamp=" << latest_timestamp << L'\n';
+    print_capture_failure(session, status);
     return false;
 }
 
@@ -308,24 +355,80 @@ void close_sessions(std::vector<Session>& sessions) noexcept {
     }
 }
 
+bool stop_and_destroy(Session& session) noexcept {
+    if (session.preview_window) {
+        if (session.handle != 0)
+            im_session_detach_preview(session.handle, session.preview_window);
+        DestroyWindow(session.preview_window);
+        session.preview_window = nullptr;
+    }
+    if (session.handle == 0) return true;
+    const auto handle = session.handle;
+    const int stop_result = im_session_stop(handle);
+    if (stop_result != 0) {
+        std::wcerr << L"stop failed for " << session.name << L" handle="
+                   << handle << L": " << last_error() << L'\n';
+    }
+    im_session_destroy(handle);
+    session.handle = 0;
+    return stop_result == 0;
+}
+
+bool create_session(Session& session) {
+    iPhoneMirror::CaptureOptions options{};
+    options.struct_size = sizeof(options);
+    options.api_version = iPhoneMirror::ApiVersion;
+    options.target_fps = 60;
+    options.play_audio = 0;
+    options.audio_volume = 0.0F;
+    if (im_session_create(session.udid.c_str(), &options, &session.handle) != 0) {
+        std::wcerr << L"create failed for " << session.name << L": "
+                   << last_error() << L'\n';
+        return false;
+    }
+    if (attach_probe_preview(session)) return true;
+    im_session_stop(session.handle);
+    im_session_destroy(session.handle);
+    session.handle = 0;
+    return false;
+}
+
+bool device_is_discoverable(std::wstring_view udid) {
+    std::uint32_t count{};
+    if (im_refresh_devices(nullptr, &count) != 0 || count == 0) return false;
+    std::vector<iPhoneMirror::DeviceInfo> devices(count);
+    auto capacity = count;
+    if (im_refresh_devices(devices.data(), &capacity) != 0) return false;
+    return std::ranges::any_of(devices, [udid](const auto& device) {
+        return device.usb_connected != 0 && device.udid == udid;
+    });
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
     SetConsoleOutputCP(CP_UTF8);
     std::optional<std::size_t> requested_device;
-    if (argc == 2) {
+    bool lifecycle_probe{};
+    int argument_index = 1;
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--lifecycle") {
+        lifecycle_probe = true;
+        argument_index = 2;
+    }
+    if (argument_index < argc && argument_index + 1 == argc) {
         try {
-            const auto parsed = std::stoul(argv[1]);
+            const auto parsed = std::stoul(argv[argument_index]);
             if (parsed == 0) throw std::invalid_argument("device index is one-based");
             requested_device = parsed;
         } catch (...) {
-            std::wcerr << L"usage: iPhoneMirror.PipelineSwitchProbe [wired-device-index]\n";
+            std::wcerr << L"usage: iPhoneMirror.PipelineSwitchProbe [--lifecycle] [wired-device-index]\n";
             return 2;
         }
-    } else if (argc != 1) {
-        std::wcerr << L"usage: iPhoneMirror.PipelineSwitchProbe [wired-device-index]\n";
+    } else if (argument_index != argc) {
+        std::wcerr << L"usage: iPhoneMirror.PipelineSwitchProbe [--lifecycle] [wired-device-index]\n";
         return 2;
     }
+    if (lifecycle_probe && !requested_device) requested_device = 1;
     if (im_initialize() != 0) {
         std::wcerr << L"initialize failed: " << last_error() << L'\n';
         return 1;
@@ -359,19 +462,9 @@ int wmain(int argc, wchar_t** argv) {
                 : device.name;
             session.udid = device.udid;
 
-            iPhoneMirror::CaptureOptions options{};
-            options.struct_size = sizeof(options);
-            options.api_version = iPhoneMirror::ApiVersion;
-            options.target_fps = 60;
-            options.play_audio = 0;
-            options.audio_volume = 0.0F;
-            if (im_session_create(session.udid.c_str(), &options, &session.handle) != 0) {
-                std::wcerr << L"create failed for " << session.name << L": "
-                           << last_error() << L'\n';
-                continue;
-            }
+            if (!create_session(session)) continue;
             sessions.push_back(std::move(session));
-            if (!attach_probe_preview(sessions.back()))
+            if (sessions.back().handle == 0)
                 throw std::runtime_error("could not attach diagnostic preview");
         }
         if (sessions.empty()) throw std::runtime_error("no wired capture session could be created");
@@ -389,6 +482,33 @@ int wmain(int argc, wchar_t** argv) {
             };
             if (!wait_for_decoder_commit(session, initial, before, 10s))
                 throw std::runtime_error("initial decoder runtime was not confirmed");
+        }
+
+        if (lifecycle_probe) {
+            if (sessions.size() != 1)
+                throw std::runtime_error("lifecycle mode requires exactly one selected device");
+            auto& session = sessions.front();
+            std::wcout << L"lifecycle first_stream_complete device=\""
+                       << session.name << L"\"\n";
+            if (!stop_and_destroy(session))
+                throw std::runtime_error("first lifecycle stop did not confirm USB teardown");
+            if (!device_is_discoverable(session.udid))
+                throw std::runtime_error("device was not discoverable after first lifecycle stop");
+            std::wcout << L"lifecycle normal_device_rediscovered device=\""
+                       << session.name << L"\"\n";
+            if (!create_session(session))
+                throw std::runtime_error("second lifecycle session could not be created");
+            if (!wait_for_streaming(session, 30s, 5))
+                throw std::runtime_error("second lifecycle stream did not stabilize");
+            std::wcout << L"lifecycle second_stream_complete device=\""
+                       << session.name << L"\"\n";
+            if (!stop_and_destroy(session))
+                throw std::runtime_error("second lifecycle stop did not confirm USB teardown");
+            std::wcout << L"lifecycle probe passed device=\""
+                       << session.name << L"\"\n";
+            exit_code = 0;
+            im_shutdown();
+            return exit_code;
         }
 
         constexpr Step steps[] = {

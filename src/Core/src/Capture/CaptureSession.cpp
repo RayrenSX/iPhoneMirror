@@ -1,4 +1,5 @@
 #include "Capture/CaptureSession.h"
+#include "Device/AppleUsbDiscovery.h"
 #include "Capture/UsbConfigurationRestorePolicy.h"
 
 #include "Transport/UsbMuxClient.h"
@@ -11,6 +12,7 @@
 #include "Transport/QtUsbTransport.h"
 
 #include <Windows.h>
+#include <cfgmgr32.h>
 
 #include <algorithm>
 #include <array>
@@ -33,6 +35,13 @@ namespace iPhoneMirror::capture {
 namespace {
 
 std::binary_semaphore usb_transition_gate{1};
+// The legacy libusb0/AppleUsbFilter stack performs configuration changes as
+// asynchronous PnP transactions. A per-session transition gate cannot
+// protect the driver when two CaptureSession instances tear down close
+// together, so serialize only the restore phase process-wide. Streaming bulk
+// transfers remain concurrent; the lease is held from the active-handle 0x52
+// request through descriptor observation and any bounded fallback.
+std::counting_semaphore<1> libusb0_restore_gate{1};
 std::mutex active_usb_backend_mutex;
 std::array<std::uint32_t, 3> active_usb_backend_counts{};
 
@@ -92,6 +101,58 @@ public:
 
 private:
     std::function<void()> cleanup_;
+};
+
+class LibUsb0RestoreLease final {
+public:
+    LibUsb0RestoreLease() = default;
+    ~LibUsb0RestoreLease() { release(); }
+    LibUsb0RestoreLease(const LibUsb0RestoreLease&) = delete;
+    LibUsb0RestoreLease& operator=(const LibUsb0RestoreLease&) = delete;
+
+    [[nodiscard]] bool acquire(std::string_view device_fp) noexcept {
+        if (held_) return true;
+        // Do not retry a timed-out acquisition from a second cleanup path. A
+        // second wait would make application shutdown unbounded and could
+        // overlap the previous owner's late PnP transition.
+        if (attempted_) return false;
+        attempted_ = true;
+        device_fp_ = device_fp;
+        logging::write(std::format(
+            "usb_restore_gate acquire_begin device_fp={} timeout_ms=15000",
+            device_fp));
+        try {
+            held_ = libusb0_restore_gate.try_acquire_for(
+                std::chrono::seconds(15));
+        } catch (...) {
+            held_ = false;
+        }
+        if (held_) {
+            logging::write(std::format(
+                "usb_restore_gate acquired=true device_fp={}", device_fp));
+        } else {
+            logging::write(logging::Level::Warning, "usb_restore_gate",
+                std::format(
+                    "usb_restore_gate timeout device_fp={} action=skip_restore_controls",
+                    device_fp));
+        }
+        return held_;
+    }
+
+    void release() noexcept {
+        if (!held_) return;
+        held_ = false;
+        try { libusb0_restore_gate.release(); } catch (...) {}
+        logging::write(std::format(
+            "usb_restore_gate released device_fp={}", device_fp_));
+    }
+
+    [[nodiscard]] bool held() const noexcept { return held_; }
+
+private:
+    bool attempted_{};
+    bool held_{};
+    std::string_view device_fp_;
 };
 
 struct NativeDisplaySize { std::uint32_t width; std::uint32_t height; };
@@ -188,6 +249,22 @@ std::uint16_t mux_product_id_for(std::string_view serial) noexcept {
     return 0;
 }
 
+bool usbmux_contains_serial(std::string_view serial) noexcept {
+    if (serial.empty()) return false;
+    for (const auto port : {std::uint16_t{27015}, std::uint16_t{37015}}) {
+        if (!transport::Socket::probe_loopback(port)) continue;
+        try {
+            transport::UsbMuxClient mux(port);
+            for (const auto& device : mux.list_devices()) {
+                if (transport::apple_usb_serial_equal(device.serial, serial))
+                    return true;
+            }
+        } catch (...) {
+        }
+    }
+    return false;
+}
+
 transport::AppleUsbIdentity requested_usb_identity(std::string_view serial) {
     transport::AppleUsbIdentity identity;
     identity.serial = serial;
@@ -202,6 +279,9 @@ public:
     virtual void write(std::span<const std::uint8_t> source, unsigned timeout_ms) = 0;
     virtual void clear_halt() = 0;
     virtual void recover_handshake() = 0;
+    [[nodiscard]] virtual bool request_normal_configuration() = 0;
+    virtual void cancel_pending_io() noexcept = 0;
+    virtual void clear_io_cancellation() noexcept = 0;
     virtual void close() noexcept = 0;
 };
 
@@ -218,6 +298,13 @@ public:
     }
     void clear_halt() override { connection_.clear_halt(); }
     void recover_handshake() override { connection_.recover_handshake(); }
+    bool request_normal_configuration() override {
+        return connection_.request_normal_configuration();
+    }
+    void cancel_pending_io() noexcept override { connection_.cancel_pending_io(); }
+    void clear_io_cancellation() noexcept override {
+        connection_.clear_io_cancellation();
+    }
     void close() noexcept override { connection_.close(); }
 private:
     Connection connection_;
@@ -231,9 +318,15 @@ struct UsbConfigurationRestoreResult {
 template <typename Observe, typename Disable>
 UsbConfigurationRestoreResult restore_usb_configuration(
     std::string_view backend, Observe&& observe,
-    Disable&& disable) noexcept {
-    detail::UsbConfigurationRestorePolicy policy;
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    Disable&& disable, bool primary_request_sent = false) noexcept {
+    detail::UsbConfigurationRestorePolicy policy(primary_request_sent);
+    // Windows tears down the temporary QuickTime composite node and starts
+    // the Apple parent in separate PnP transactions. On the affected
+    // libusb0/Apple filter stack this bounded state transition can take several
+    // seconds; keep observing the descriptor/PnP evidence without issuing
+    // another configuration request.
+    constexpr auto RestoreObservationWindow = std::chrono::seconds(12);
+    auto deadline = std::chrono::steady_clock::now() + RestoreObservationWindow;
     while (std::chrono::steady_clock::now() < deadline) {
         auto observation = detail::UsbConfigurationObservation::Missing;
         try { observation = observe(); } catch (...) {}
@@ -254,7 +347,7 @@ UsbConfigurationRestoreResult restore_usb_configuration(
             // transport so no error path can send the request a second time.
             logging::write(std::format(
                 "usb_configuration_restore backend={} action=disable_requested", backend));
-            deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            deadline = std::chrono::steady_clock::now() + RestoreObservationWindow;
             try { disable(); } catch (...) {}
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -269,20 +362,87 @@ UsbConfigurationRestoreResult restore_usb_configuration(
 }
 
 UsbConfigurationRestoreResult restore_libusb0_configuration(
-    const transport::AppleUsbIdentity& identity) noexcept {
-    return restore_usb_configuration("libusb0", [&] {
-        const auto device = transport::find_libusb0_device(identity);
-        if (!device) return detail::UsbConfigurationObservation::Missing;
-        return device->quicktime_configuration
-            ? detail::UsbConfigurationObservation::QuickTime
-            : detail::UsbConfigurationObservation::Normal;
+    const transport::AppleUsbIdentity& identity,
+    bool primary_request_sent = false) noexcept {
+    bool restore_request_sent = primary_request_sent;
+    const auto filter_safety =
+        device::inspect_apple_usb_filter_stack(identity.serial);
+    // The exact-device helper now owns the old handle until removal/arrival is
+    // complete, including on the known libusb0 + Apple filter stack. Keep an
+    // indeterminate stack observation-only, but allow the guarded one-shot
+    // restore for a positively identified safe or known-unsafe stack.
+    const bool fallback_allowed =
+        filter_safety.safety != device::AppleUsbFilterSafety::Indeterminate;
+    if (filter_safety.safety == device::AppleUsbFilterSafety::Unsafe) {
+        logging::write(logging::Level::Warning, "usb_safety",
+            std::format(
+                "usb_configuration_restore backend=libusb0 fallback=guarded_exact_pnp diagnostic={}",
+                filter_safety.diagnostic));
+    } else if (!fallback_allowed) {
+        logging::write(logging::Level::Warning, "usb_safety",
+            std::format(
+                "usb_configuration_restore backend=libusb0 fallback=disabled diagnostic={}",
+                filter_safety.diagnostic));
+    }
+    auto result = restore_usb_configuration("libusb0",
+        [&, previous_state = std::optional<bool>{}, stable_normal = 0U,
+            stable_quicktime_residual = 0U,
+            automatic_restore_deadline = std::chrono::steady_clock::now() +
+                std::chrono::seconds(3)]() mutable {
+        // USBMux is the exact, open-free authority for normal configuration.
+        // Do not enumerate or reopen libusb0 while AppleUsbFilter is processing
+        // the disconnecting control request.
+        const bool mux_present = usbmux_contains_serial(identity.serial);
+        const auto pnp =
+            device::inspect_apple_normal_usb_stack(identity.serial);
+        const bool pnp_normal =
+            device::is_complete_apple_normal_usb_stack(pnp);
+        const bool parent_present = pnp.parent_started;
+        const bool normal = mux_present && pnp_normal && parent_present;
+        stable_normal = normal ? stable_normal + 1U : 0U;
+        // The QuickTime parent is started but has no normal management child
+        // or exact USBMux row. A missing parent is only an in-flight PnP
+        // transition and must never authorize a control open.
+        const bool quicktime_residual = detail::is_libusb0_quicktime_pnp_state(
+            mux_present, pnp_normal, parent_present, true);
+        stable_quicktime_residual = quicktime_residual
+            ? stable_quicktime_residual + 1U : 0U;
+        auto observation = detail::stabilize_normal_configuration_observation(
+            normal, stable_normal);
+        // Closing the claimed stream handle can complete iOS's transition back
+        // to the management configuration without another vendor request. Give
+        // that observed transition a bounded grace period. Only if it fails to
+        // stabilize do we authorize one separate-control fallback request.
+        if (fallback_allowed && !restore_request_sent &&
+            stable_quicktime_residual >= 2 &&
+            std::chrono::steady_clock::now() >= automatic_restore_deadline)
+            observation = detail::UsbConfigurationObservation::QuickTime;
+        if (!previous_state || *previous_state != normal || stable_normal == 2 ||
+            stable_quicktime_residual == 2) {
+            logging::write(std::format(
+                "usb_configuration_restore backend=libusb0 observation={} usbmux_exact_present={} pnp_normal_stack={} parent_present={} mi00_media_started={} mi01_management_started={} request_sent={} stable_normal={} stable_quicktime_residual={}",
+                observation == detail::UsbConfigurationObservation::VerifiedNormal
+                    ? "verified_normal" :
+                observation == detail::UsbConfigurationObservation::QuickTime
+                    ? "fallback_validation_ready" : normal ? "normal_pending" : "missing",
+                mux_present, pnp_normal, parent_present,
+                pnp.media_interface_started,
+                pnp.management_interface_started, restore_request_sent,
+                stable_normal, stable_quicktime_residual));
+            previous_state = normal;
+        }
+        return observation;
     }, [&] {
+        restore_request_sent = true;
         (void)transport::LibUsb0Connection::disable_quicktime_configuration(identity);
-    });
+    }, primary_request_sent);
+    result.disable_requested = restore_request_sent;
+    return result;
 }
 
 UsbConfigurationRestoreResult restore_qt_configuration(bool use_usbdk,
-    const transport::AppleUsbIdentity& identity) noexcept {
+    const transport::AppleUsbIdentity& identity,
+    bool primary_request_sent = false) noexcept {
     const auto backend = use_usbdk ? std::string_view("usbdk") :
         std::string_view("libusb1");
     return restore_usb_configuration(backend, [&] {
@@ -296,7 +456,7 @@ UsbConfigurationRestoreResult restore_qt_configuration(bool use_usbdk,
         transport::QtUsbContext context(use_usbdk);
         (void)transport::QtUsbConnection::disable_quicktime_configuration(
             context, identity);
-    });
+    }, primary_request_sent);
 }
 
 std::uint8_t luma_as_8bit(const media::DecodedFrame& frame,
@@ -389,6 +549,18 @@ bool sample_contains_keyframe(const coremedia::SampleBuffer& sample,
 }
 
 } // namespace
+
+bool try_begin_usb_device_discovery() noexcept {
+    try {
+        return usb_transition_gate.try_acquire();
+    } catch (...) {
+        return false;
+    }
+}
+
+void end_usb_device_discovery() noexcept {
+    usb_transition_gate.release();
+}
 
 namespace detail {
 
@@ -536,45 +708,106 @@ void CaptureSession::start(bool use_usbdk) {
     acquire_usb_transition_gate();
     try {
         preflight_device_.reset();
+        const auto filter_safety =
+            device::inspect_apple_usb_filter_stack(serial_);
+        if (filter_safety.safety != device::AppleUsbFilterSafety::Safe) {
+            logging::write(logging::Level::Warning, "usb_safety",
+                std::format("capture proceeding with conservative USB lifecycle device_fp={} diagnostic={}",
+                    logging::fingerprint(serial_), filter_safety.diagnostic));
+        }
         // Synchronous preflight keeps the GUI from reporting a false successful start.
         std::string failure =
             "libusb cannot see the selected iPhone; USB backend/driver is not ready";
+        std::vector<std::string> backend_diagnostics;
         bool ready{};
         std::unique_ptr<transport::AppleUsbDevice> selected_device;
         const auto requested_identity = requested_usb_identity(serial_);
+        const auto backend_name = [](UsbBackend backend) constexpr -> std::string_view {
+            return backend == UsbBackend::LibUsb0 ? "libusb0" :
+                backend == UsbBackend::UsbDk ? "usbdk" : "libusb1";
+        };
+        const auto record_backend = [&](UsbBackend backend, std::string detail) {
+            backend_diagnostics.push_back(std::format("{}:{}", backend_name(backend), detail));
+            logging::write(std::format("usb_backend_attempt backend={} {}",
+                backend_name(backend), detail));
+        };
 
         std::vector<UsbBackend> backend_order;
         const auto append_backend = [&](UsbBackend backend) {
             if (std::find(backend_order.begin(), backend_order.end(), backend) ==
                 backend_order.end()) backend_order.push_back(backend);
         };
-        // Continue on the backend already used by a live session whenever it
-        // can see the target. That keeps active-device topology keys in the
-        // same namespace and avoids a cross-backend descriptor reopen.
-        if (const auto active = preferred_active_usb_backend())
-            append_backend(static_cast<UsbBackend>(*active));
-        append_backend(UsbBackend::LibUsb0);
-        append_backend(use_usbdk ? UsbBackend::UsbDk : UsbBackend::LibUsb1);
-        append_backend(use_usbdk ? UsbBackend::LibUsb1 : UsbBackend::UsbDk);
+        const auto active_backend = preferred_active_usb_backend();
+        const bool unsafe_filter_stack =
+            filter_safety.safety != device::AppleUsbFilterSafety::Safe;
+        if (unsafe_filter_stack) {
+            // AppleUsbFilter has a known WDF handle-lifetime failure when the
+            // legacy libusb0 path changes the QuickTime configuration. Prefer
+            // the WinUSB/libusb-1 backend (and UsbDk when installed) so this
+            // process does not enter that filter unless no safer backend can
+            // open the exact device. The libusb0 fallback preserves wired
+            // capture on installations that only expose the legacy filter.
+            append_backend(use_usbdk ? UsbBackend::UsbDk : UsbBackend::LibUsb1);
+            append_backend(use_usbdk ? UsbBackend::LibUsb1 : UsbBackend::UsbDk);
+            if (active_backend)
+                append_backend(static_cast<UsbBackend>(*active_backend));
+            append_backend(UsbBackend::LibUsb0);
+            logging::write(std::format(
+                "usb_backend_order safety={} preferred=non_libusb0 active_backend={} order=libusb1_or_usbdk_then_fallback",
+                filter_safety.safety == device::AppleUsbFilterSafety::Unsafe
+                    ? "unsafe" : "indeterminate",
+                active_backend ? std::to_string(*active_backend) : "none"));
+        } else {
+            // Continue on the backend already used by a live session whenever
+            // it can see the target. This keeps active-device topology keys in
+            // the same namespace and avoids a cross-backend descriptor reopen.
+            if (active_backend)
+                append_backend(static_cast<UsbBackend>(*active_backend));
+            append_backend(UsbBackend::LibUsb0);
+            append_backend(use_usbdk ? UsbBackend::UsbDk : UsbBackend::LibUsb1);
+            append_backend(use_usbdk ? UsbBackend::LibUsb1 : UsbBackend::UsbDk);
+        }
 
         for (const auto backend : backend_order) {
+            record_backend(backend, "begin");
             if (backend == UsbBackend::LibUsb0) {
-                if (!transport::libusb0_available()) continue;
+                if (!transport::libusb0_available()) {
+                    record_backend(backend, "unavailable");
+                    continue;
+                }
                 try {
                     const auto device =
                         transport::find_libusb0_device(requested_identity);
-                    if (!device) continue;
+                    if (!device) {
+                        failure = "libusb0 cannot find the selected iPhone";
+                        record_backend(backend, "target_not_found");
+                        continue;
+                    }
                     if (!device->can_open) {
                         failure = "libusb0 sees the iPhone but cannot open it";
+                        record_backend(backend, "target_not_openable");
+                        continue;
+                    }
+                    if (!device->active_configuration_known) {
+                        failure = "libusb0 opened the selected iPhone but could not read its active USB configuration; no configuration change was attempted";
+                        record_backend(backend, "active_configuration_unreadable");
                         continue;
                     }
                     usb_backend_ = backend;
                     selected_device =
                         std::make_unique<transport::AppleUsbDevice>(*device);
                     ready = true;
+                    record_backend(backend, std::format(
+                        "selected topology={} active_configuration={} quicktime_descriptor={}",
+                        device->topology_id, device->active_configuration,
+                        device->quicktime_configuration));
                     break;
                 } catch (const std::exception& error) {
                     failure = error.what();
+                    record_backend(backend, std::format("exception={}", error.what()));
+                } catch (...) {
+                    failure = "libusb0 backend raised an unknown exception";
+                    record_backend(backend, "exception=unknown");
                 }
                 continue;
             }
@@ -583,22 +816,44 @@ void CaptureSession::start(bool use_usbdk) {
             try {
                 transport::QtUsbContext context(candidate_uses_usbdk);
                 const auto device = find_device(context, requested_identity);
-                if (!device) continue;
+                if (!device) {
+                    failure = std::format("{} cannot find the selected iPhone", backend_name(backend));
+                    record_backend(backend, "target_not_found");
+                    continue;
+                }
                 if (!device->can_open) {
                     failure = "libusb sees the iPhone but cannot open it; check the USB filter backend";
+                    record_backend(backend, "target_not_openable");
                     continue;
                 }
                 usb_backend_ = backend;
                 selected_device =
                     std::make_unique<transport::AppleUsbDevice>(*device);
                 ready = true;
+                record_backend(backend, std::format(
+                    "selected topology={} quicktime_descriptor={} usbdk={}",
+                    device->topology_id, device->quicktime_configuration,
+                    candidate_uses_usbdk));
                 break;
             } catch (const std::exception& error) {
                 failure = error.what();
+                record_backend(backend, std::format("exception={}", error.what()));
+            } catch (...) {
+                failure = std::format("{} backend raised an unknown exception",
+                    backend_name(backend));
+                record_backend(backend, "exception=unknown");
             }
         }
 
-        if (!ready) throw std::runtime_error(failure);
+        if (!ready) {
+            std::string attempts;
+            for (const auto& diagnostic : backend_diagnostics) {
+                if (!attempts.empty()) attempts += "; ";
+                attempts += diagnostic;
+            }
+            throw std::runtime_error(std::format("{}; backend_attempts={}",
+                failure, attempts));
+        }
         preflight_device_ = std::move(selected_device);
         set_state(State::ActivatingUsb, L"正在激活 QuickTime USB 配置");
         worker_ = std::jthread([this](std::stop_token token) { run(token); });
@@ -621,13 +876,24 @@ void CaptureSession::release_usb_transition_gate() noexcept {
 
 void CaptureSession::stop() noexcept {
     if (worker_.joinable()) {
-        set_state(State::Stopping, L"正在停止投屏");
+        const bool terminal_error_already_published =
+            snapshot().state == State::Error;
+        if (!terminal_error_already_published)
+            set_state(State::Stopping, L"正在停止投屏");
         worker_.request_stop();
+        // Cancel pending I/O only on transports that implement a safe cancel.
+        // The legacy libusb0 transport deliberately treats this callback as a
+        // no-op and lets its bounded synchronous transfers return naturally.
+        {
+            std::scoped_lock lock(active_usb_mutex_);
+            if (active_usb_cancel_) active_usb_cancel_();
+        }
         worker_.join();
         // A normal stop may race with the bulk read timeout/close path. Keep
         // the terminal state stable for the GUI unless the worker reported a
         // genuine capture error.
-        if (snapshot().state != State::Error) set_state(State::Stopped, L"投屏已停止");
+        if (!terminal_error_already_published && snapshot().state != State::Error)
+            set_state(State::Stopped, L"投屏已停止");
     }
     // Decoded frames are immutable but device-specific. Do not let the native
     // preview or screenshot path expose the previous iPhone after a stop and
@@ -772,6 +1038,31 @@ std::shared_ptr<const AudioPacket> CaptureSession::next_audio_packet(
 void CaptureSession::set_state(State state, std::wstring message) {
     std::scoped_lock lock(mutex_);
     snapshot_.state = state;
+    if (state != State::Error) {
+        snapshot_.failure_kind = FailureKind::None;
+        snapshot_.failure_stage = FailureStage::None;
+        snapshot_.error_code = 0;
+    }
+    snapshot_.message = std::move(message);
+}
+
+void CaptureSession::set_failure(FailureKind kind, FailureStage stage,
+    std::int32_t error_code, std::wstring message) {
+    std::scoped_lock lock(mutex_);
+    snapshot_.state = State::Error;
+    snapshot_.failure_kind = kind;
+    snapshot_.failure_stage = stage;
+    snapshot_.error_code = error_code;
+    snapshot_.message = std::move(message);
+}
+
+void CaptureSession::set_stopped_warning(FailureKind kind, FailureStage stage,
+    std::int32_t error_code, std::wstring message) {
+    std::scoped_lock lock(mutex_);
+    snapshot_.state = State::Stopped;
+    snapshot_.failure_kind = kind;
+    snapshot_.failure_stage = stage;
+    snapshot_.error_code = error_code;
     snapshot_.message = std::move(message);
 }
 
@@ -798,6 +1089,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         static_cast<unsigned>(preferences_.color_output_preference)));
     DeferredCleanup transition_release(
         [this] { release_usb_transition_gate(); });
+    UsbConfigurationRestoreResult configuration_restore_result;
+    bool configuration_restore_attempted{};
+    bool active_normal_request_sent{};
+    bool libusb0_restore_authorized{};
+    std::optional<transport::AppleUsbIdentity> libusb0_restore_identity;
+    LibUsb0RestoreLease libusb0_restore_lease;
+    bool libusb0_restore_lease_acquired{};
     DeferredCleanup configuration_restore;
     DeferredCleanup active_backend_release;
     auto preflight_device = std::move(preflight_device_);
@@ -806,6 +1104,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
     // order, so the handle must be declared after its owning context.
     std::unique_ptr<transport::QtUsbContext> qt_context;
     std::unique_ptr<CaptureConnection> usb;
+    DeferredCleanup active_connection_release([this] {
+        std::scoped_lock lock(active_usb_mutex_);
+        active_usb_cancel_ = {};
+    });
     quicktime::StreamDecoder decoder;
     const auto display_configuration = make_usb_display_configuration(
         preferences_.usb_projection_mode, native.width, native.height,
@@ -834,6 +1136,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
     std::vector<std::uint8_t> read_buffer(1024U * 1024U);
     bool shutdown_done{};
     detail::VideoWorkerFailure video_worker_failure;
+    auto failure_stage = FailureStage::UsbActivation;
+    auto failure_kind = FailureKind::UsbConnection;
+    std::int32_t failure_code{-2101};
+    bool peer_session_ended{};
 
     // Once the QuickTime endpoint is open, every exit path must send the same
     // HPA0/HPD0 shutdown controls used by the working macOS/Aisi clients.
@@ -843,25 +1149,51 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         shutdown_done = true;
         const bool handshake_started = protocol.state() != quicktime::SessionState::WaitingForPing;
         const auto stop_messages = protocol.stop_messages();
-        logging::write(std::format("shutdown_usb handshake_started={} stop_messages={}",
-            handshake_started, stop_messages.size()));
+        logging::write(std::format(
+            "shutdown_usb device_fp={} handshake_started={} stop_messages={}",
+            device_fp, handshake_started, stop_messages.size()));
         try {
+            std::size_t stop_messages_written{};
             for (const auto& message : stop_messages) {
-                try { usb->write(message, 500); } catch (...) {}
+                try {
+                    usb->write(message, 500);
+                    ++stop_messages_written;
+                } catch (const std::exception& error) {
+                    logging::write(logging::Level::Warning, "shutdown",
+                        std::format(
+                            "shutdown_usb device_fp={} stop_write_failed index={} error={}",
+                            device_fp, stop_messages_written, error.what()));
+                    break;
+                } catch (...) {
+                    logging::write(logging::Level::Warning, "shutdown",
+                        std::format(
+                            "shutdown_usb device_fp={} stop_write_failed index={} error=unknown",
+                            device_fp, stop_messages_written));
+                    break;
+                }
             }
 
             std::size_t release_count{};
+            std::size_t sync_stop_count{};
+            std::size_t decoded_packet_count{};
+            std::string drain_result = "timeout";
             const auto release_deadline = std::chrono::steady_clock::now() +
-                (handshake_started ? std::chrono::seconds(6) : std::chrono::seconds(1));
+                (peer_session_ended || !handshake_started
+                    ? std::chrono::seconds(1)
+                    : std::chrono::seconds(6));
             while (release_count < 2 && std::chrono::steady_clock::now() < release_deadline) {
                 try {
                     const auto count = usb->read(read_buffer, 250);
                     if (count == 0) continue;
                     for (const auto& packet : decoder.push(std::span(read_buffer).first(count))) {
+                        ++decoded_packet_count;
                         // Reply to SYNC STOP before accepting RELS. Dropping
                         // this RPLY leaves the device clock session open.
                         try {
                             const auto event = protocol.process(packet);
+                            if (packet.kind == quicktime::PacketKind::Sync &&
+                                packet.subtype == quicktime::fourcc('s', 't', 'o', 'p'))
+                                ++sync_stop_count;
                             for (const auto& response : event.outbound) {
                                 try { usb->write(response, 500); } catch (...) {}
                             }
@@ -871,23 +1203,98 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                             ++release_count;
                         }
                     }
+                } catch (const std::exception& error) {
+                    drain_result = std::format("io_error:{}", error.what());
+                    break;
                 } catch (...) {
+                    drain_result = "io_error:unknown";
                     break;
                 }
             }
+            bool final_hpd0_sent{};
+            if (release_count >= 2) {
+                drain_result = "complete";
+                for (const auto& message : protocol.complete_stop_messages()) {
+                    try {
+                        usb->write(message, 500);
+                        final_hpd0_sent = true;
+                    } catch (const std::exception& error) {
+                        drain_result = std::format("final_hpd0_error:{}", error.what());
+                    } catch (...) {
+                        drain_result = "final_hpd0_error:unknown";
+                    }
+                }
+            }
+            logging::write(std::format(
+                "shutdown_usb device_fp={} drain_result={} stop_written={}/{} sync_stop={} releases={}/2 decoded_packets={} final_hpd0_sent={}",
+                device_fp, drain_result, stop_messages_written, stop_messages.size(),
+                sync_stop_count, release_count, decoded_packet_count,
+                final_hpd0_sent));
         } catch (...) {}
-        // Close the claimed streaming handle while the device is still in a
-        // stable configuration. The deferred restore then uses an independent,
-        // unclaimed control handle for the single disconnecting 0x52 request.
+        // AppleUsbFilter is unsafe when the stream handle that owns bulk pipes
+        // is also used to disconnect its own PnP node. For libusb0, take the
+        // process-wide restore lease and close that claimed stream handle
+        // first; the deferred restore then opens one short-lived, unclaimed
+        // control handle. libusb-1/UsbDk retain their active-handle path.
+        try {
+            if (usb_backend_ == UsbBackend::LibUsb0) {
+                libusb0_restore_lease_acquired =
+                    libusb0_restore_lease.acquire(device_fp);
+                logging::write(std::format(
+                    "usb_configuration_restore action=close_stream_before_control device_fp={} lease_acquired={}",
+                    device_fp, libusb0_restore_lease_acquired));
+            } else {
+                libusb0_restore_lease_acquired = true;
+                const bool acknowledged = usb->request_normal_configuration();
+                active_normal_request_sent = true;
+                logging::write(std::format(
+                    "usb_configuration_restore action=active_handle_requested acknowledged={}",
+                    acknowledged));
+            }
+        } catch (const std::exception& error) {
+            // An exception means interface release failed before 0x52, so
+            // keep the marker clear and permit one fallback only after close.
+            logging::write(logging::Level::Warning, "usb",
+                std::format("usb_configuration_restore action=active_handle_not_sent error={}",
+                    error.what()));
+        } catch (...) {
+            logging::write(logging::Level::Warning, "usb",
+                "usb_configuration_restore action=active_handle_not_sent error=unknown");
+        }
         usb->close();
-        // Let libusb-win32 finish its internal interface release and CloseHandle
-        // before opening a new control handle on the same physical device.
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    };
+    const auto prepare_shutdown_usb = [&]() noexcept {
+        // Stop and teardown use the same lock so a cancellation cannot be
+        // lost between a transfer being submitted and published. Clear the
+        // persistent marker only after any concurrent Stop callback returns;
+        // a later Stop can still cancel a teardown transfer if the driver
+        // stalls while the worker is releasing QuickTime.
+        std::scoped_lock lock(active_usb_mutex_);
+        if (usb) usb->clear_io_cancellation();
+    };
+    const auto finalize_configuration_restore = [&](bool publish_failure = true) noexcept {
+        if (!configuration_restore_attempted) return true;
+        const bool restored = configuration_restore_result.normal_observed;
+        logging::write(std::format(
+            "usb_configuration_restore finalized device_fp={} normal_observed={} disable_requested={} primary_request_sent={}",
+            device_fp, configuration_restore_result.normal_observed,
+            configuration_restore_result.disable_requested,
+            active_normal_request_sent));
+        if (!restored && publish_failure) {
+            set_stopped_warning(FailureKind::UsbConnection,
+                FailureStage::SessionTeardown,
+                -2108,
+                L"投屏停止时未确认 Apple USB 设备恢复普通配置；已释放投屏资源，请重新插拔数据线后再试");
+        }
+        return restored;
     };
 
     try {
         bool quicktime_open_recovered{};
+        bool newly_activated_libusb0{};
         if (usb_backend_ == UsbBackend::LibUsb0) {
+            bool quicktime_activation_requested{};
+            bool adopted_existing_quicktime{};
             std::optional<transport::AppleUsbDevice> device;
             if (preflight_device) device = std::move(*preflight_device);
             else device = transport::find_libusb0_device(serial_);
@@ -895,151 +1302,117 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 throw std::runtime_error("Apple device disconnected before capture started");
             auto identity = transport::make_apple_usb_identity(*device);
             logging::write(std::format(
-                "usb_identity device_fp={} pid={:04x} configs={}/{} expected_qt_config={} topology={}",
+                "usb_identity device_fp={} pid={:04x} configs={}/{} active_config={} active_config_known={} expected_qt_config={} topology={}",
                 device_fp, device->product_id, device->configuration_count,
                 device->highest_configuration_value,
+                device->active_configuration,
+                device->active_configuration_known,
                 identity.expected_quicktime_configuration,
-                !identity.topology_id.empty()));
-            if (device->quicktime_configuration) {
-                configuration_restore.arm([identity] {
-                    (void)restore_libusb0_configuration(identity);
+                identity.topology_id));
+            if (transport::is_libusb0_quicktime_configuration_active(*device)) {
+                adopted_existing_quicktime = true;
+                // Preflight successfully opened and read the exact target in
+                // its QuickTime configuration, so a bounded restore is safe if
+                // the subsequent claim fails.
+                libusb0_restore_authorized = true;
+                logging::write(std::format(
+                    "usb_preflight device_fp={} configuration=quicktime action=adopt_existing_exact_serial",
+                    device_fp));
+                libusb0_restore_identity = identity;
+                configuration_restore.arm([&] {
+                    configuration_restore_attempted = true;
+                    if (!libusb0_restore_authorized) {
+                        logging::write(logging::Level::Warning, "usb",
+                            std::format(
+                                "usb_configuration_restore backend=libusb0 action=skip_control reason=quicktime_interface_not_ready device_fp={}",
+                                device_fp));
+                        return;
+                    }
+                    if (!libusb0_restore_lease_acquired) {
+                        libusb0_restore_lease_acquired =
+                            libusb0_restore_lease.acquire(device_fp);
+                    }
+                    if (!libusb0_restore_lease_acquired) return;
+                    configuration_restore_result = restore_libusb0_configuration(
+                        *libusb0_restore_identity, active_normal_request_sent);
                 });
             }
-            if (!device->quicktime_configuration) {
+            if (!transport::is_libusb0_quicktime_configuration_active(*device)) {
+                quicktime_activation_requested = true;
+                newly_activated_libusb0 = true;
+                set_state(State::WaitingForDevice,
+                    L"等待 Apple 设备以 QuickTime 配置重新连接");
+                failure_stage = FailureStage::DeviceReenumeration;
+                failure_code = -2102;
                 const bool activation_acknowledged =
                     transport::LibUsb0Connection::enable_quicktime_configuration(identity);
-                configuration_restore.arm([identity] {
-                    (void)restore_libusb0_configuration(identity);
+                if (!activation_acknowledged) {
+                    throw std::runtime_error(
+                        "Apple device rejected the QuickTime configuration request and no USB interface transition occurred");
+                }
+                libusb0_restore_identity = identity;
+                configuration_restore.arm([&] {
+                    configuration_restore_attempted = true;
+                    if (!libusb0_restore_authorized) {
+                        logging::write(logging::Level::Warning, "usb",
+                            std::format(
+                                "usb_configuration_restore backend=libusb0 action=skip_control reason=quicktime_interface_not_ready device_fp={}",
+                                device_fp));
+                        return;
+                    }
+                    if (!libusb0_restore_lease_acquired) {
+                        libusb0_restore_lease_acquired =
+                            libusb0_restore_lease.acquire(device_fp);
+                    }
+                    if (!libusb0_restore_lease_acquired) return;
+                    configuration_restore_result = restore_libusb0_configuration(
+                        *libusb0_restore_identity, active_normal_request_sent);
                 });
                 logging::write(std::format(
                     "usb_activation requested device_fp={} acknowledged={} expected_qt_config={}",
                     device_fp, activation_acknowledged,
                     identity.expected_quicktime_configuration));
-                set_state(State::WaitingForDevice,
-                    L"等待 Apple 设备以 QuickTime 配置重新连接");
-                const auto activation_started = std::chrono::steady_clock::now();
-                const auto deadline = activation_started + std::chrono::seconds(20);
-                std::string last_usb_diagnostic;
-                std::string last_usb_open_error;
-                do {
-                    if (stop_token.stop_requested()) {
-                        set_state(State::Stopped, L"投屏已取消");
-                        return;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                    device = transport::find_libusb0_device(identity, true);
-                    const auto diagnostic = device
-                        ? std::format("target_ready=true config={} interface={}",
-                            device->quicktime_endpoints.configuration,
-                            device->quicktime_endpoints.interface_number)
-                        : std::string("target_ready=false");
-                    if (diagnostic != last_usb_diagnostic) {
-                        logging::write(std::format(
-                            "usb_reenumeration device_fp={} backend=libusb0 {}",
-                            device_fp, diagnostic));
-                        last_usb_diagnostic = diagnostic;
-                    }
-                    if (device && device->quicktime_configuration) break;
-                    if (std::chrono::steady_clock::now() - activation_started >=
-                        std::chrono::milliseconds(1500)) {
-                        try {
-                            usb = std::make_unique<CaptureConnectionAdapter<transport::LibUsb0Connection>>(
-                                transport::LibUsb0Connection::open_quicktime(identity, true));
-                            logging::write(std::format(
-                                "usb_reenumeration ready device_fp={} backend=libusb0 fallback=conventional expected_qt_config={}",
-                                device_fp, identity.expected_quicktime_configuration));
-                            break;
-                        } catch (const std::exception& error) {
-                            if (last_usb_open_error != error.what()) {
-                                last_usb_open_error = error.what();
-                                logging::write(std::format(
-                                    "usb_reenumeration pending device_fp={} backend=libusb0 error={}",
-                                    device_fp, last_usb_open_error));
-                            }
-                        }
-                    }
-                } while (std::chrono::steady_clock::now() < deadline);
-                if (!usb && (!device || !device->quicktime_configuration)) {
-                    logging::write(std::format(
-                        "usb_reenumeration descriptor_timeout device_fp={} expected_qt_config={} fallback=conventional",
-                        device_fp, identity.expected_quicktime_configuration));
+                if (stop_token.stop_requested()) {
+                    set_state(State::Stopped, L"投屏已取消");
+                    return;
                 }
-                // Aisi waits roughly one second after discovering the new
-                // device node before set-configuration/claim. Give Windows
-                // and iOS the same settle window after re-enumeration.
-                if (!usb) std::this_thread::sleep_for(std::chrono::seconds(1));
+                logging::write(std::format(
+                    "usb_reenumeration device_fp={} backend=libusb0 source=configuration_helper stable=true stop_requested=false",
+                    device_fp));
             }
+            failure_stage = FailureStage::InterfaceOpen;
+            failure_code = -2103;
             if (!usb) {
                 try {
-                    usb = std::make_unique<CaptureConnectionAdapter<transport::LibUsb0Connection>>(
-                        transport::LibUsb0Connection::open_quicktime(identity,
-                            !device || !device->quicktime_configuration));
-                } catch (const std::exception& first_error) {
-                    // An appended QuickTime configuration can survive a
-                    // crashed owner while its interface claim does not.
-                    // Recover this device in-place instead of requiring the
-                    // entire GUI process to restart.
-                    logging::write(std::format(
-                        "quicktime_open recovery begin device_fp={} first_error={}",
-                        device_fp, first_error.what()));
-                    set_state(State::ActivatingUsb,
-                        L"正在恢复 Apple 设备的 QuickTime USB 配置");
-                    const auto recovery = restore_libusb0_configuration(identity);
-                    // A transport error after 0x52 still consumes this
-                    // activation's one request. A pure Missing timeout does
-                    // not, so keep deferred cleanup available for a late node.
-                    if (recovery.normal_observed || recovery.disable_requested)
-                        configuration_restore.disarm();
-
-                    std::optional<transport::AppleUsbDevice> normal_device;
-                    const auto restore_deadline = std::chrono::steady_clock::now() +
-                        std::chrono::seconds(10);
-                    do {
-                        if (stop_token.stop_requested()) {
-                            set_state(State::Stopped, L"投屏已取消");
-                            return;
-                        }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                        auto candidate = transport::find_libusb0_device(identity);
-                        if (candidate && !candidate->quicktime_configuration) {
-                            normal_device = std::move(candidate);
-                            break;
-                        }
-                    } while (std::chrono::steady_clock::now() < restore_deadline);
-                    if (!normal_device) {
-                        throw std::runtime_error(std::string(first_error.what()) +
-                            "; recovery did not observe the selected Apple device's normal USB configuration");
-                    }
-
-                    identity = transport::make_apple_usb_identity(*normal_device);
-                    (void)transport::LibUsb0Connection::enable_quicktime_configuration(identity);
-                    configuration_restore.arm([identity] {
-                        (void)restore_libusb0_configuration(identity);
-                    });
-                    const auto retry_deadline = std::chrono::steady_clock::now() +
-                        std::chrono::seconds(20);
-                    do {
-                        if (stop_token.stop_requested()) {
-                            set_state(State::Stopped, L"投屏已取消");
-                            return;
-                        }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                        device = transport::find_libusb0_device(identity, true);
-                        if (device && device->quicktime_configuration) break;
-                    } while (std::chrono::steady_clock::now() < retry_deadline);
-                    if (!device || !device->quicktime_configuration) {
+                    auto connection = transport::LibUsb0Connection::open_quicktime(
+                        identity, {
+                            .allow_conventional_fallback = false,
+                            .allow_configuration_initialization =
+                                quicktime_activation_requested ||
+                                adopted_existing_quicktime,
+                            .wait_for_activated_descriptor =
+                                quicktime_activation_requested,
+                            .stop_token = stop_token,
+                        });
+                    if (libusb0_restore_identity &&
+                        !connection.active_topology_id().empty()) {
+                        const auto previous_topology =
+                            libusb0_restore_identity->topology_id;
+                        libusb0_restore_identity->topology_id =
+                            connection.active_topology_id();
                         logging::write(std::format(
-                            "quicktime_open recovery descriptor_timeout device_fp={} expected_qt_config={} fallback=conventional",
-                            device_fp, identity.expected_quicktime_configuration));
-                    } else {
-                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                            "usb_identity device_fp={} action=update_restore_topology previous={} active={}",
+                            device_fp, previous_topology,
+                            libusb0_restore_identity->topology_id));
                     }
                     usb = std::make_unique<CaptureConnectionAdapter<transport::LibUsb0Connection>>(
-                        transport::LibUsb0Connection::open_quicktime(identity,
-                            !device || !device->quicktime_configuration));
-                    quicktime_open_recovered = true;
-                    logging::write(std::format(
-                        "quicktime_open recovery success device_fp={}", device_fp));
+                        std::move(connection));
+                    libusb0_restore_authorized = true;
+                } catch (const std::exception& error) {
+                    logging::write(logging::Level::Warning, "usb",
+                        std::format("quicktime_open failed device_fp={} recovery=disabled error={}",
+                            device_fp, error.what()));
+                    throw;
                 }
             }
         } else {
@@ -1053,16 +1426,20 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 throw std::runtime_error("Apple device disconnected before capture started");
             const auto identity = transport::make_apple_usb_identity(*device);
             if (device->quicktime_configuration) {
-                configuration_restore.arm([use_usbdk, identity] {
-                    (void)restore_qt_configuration(use_usbdk, identity);
+                configuration_restore.arm([&, use_usbdk, identity] {
+                    configuration_restore_attempted = true;
+                    configuration_restore_result = restore_qt_configuration(
+                        use_usbdk, identity, active_normal_request_sent);
                 });
             }
             if (!device->quicktime_configuration) {
                 const bool activation_acknowledged =
                     transport::QtUsbConnection::enable_quicktime_configuration(
                         *qt_context, identity);
-                configuration_restore.arm([use_usbdk, identity] {
-                    (void)restore_qt_configuration(use_usbdk, identity);
+                configuration_restore.arm([&, use_usbdk, identity] {
+                    configuration_restore_attempted = true;
+                    configuration_restore_result = restore_qt_configuration(
+                        use_usbdk, identity, active_normal_request_sent);
                 });
                 logging::write(std::format(
                     "usb_activation requested device_fp={} acknowledged={} expected_qt_config={}",
@@ -1071,10 +1448,11 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 qt_context.reset();
                 set_state(State::WaitingForDevice,
                     L"等待 Apple 设备以 QuickTime 配置重新连接");
-                const auto activation_started = std::chrono::steady_clock::now();
-                const auto deadline = activation_started + std::chrono::seconds(20);
+                failure_stage = FailureStage::DeviceReenumeration;
+                failure_code = -2102;
+                const auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::seconds(20);
                 std::string last_usb_diagnostic;
-                std::string last_usb_open_error;
                 do {
                     if (stop_token.stop_requested()) {
                         qt_context.reset();
@@ -1098,43 +1476,30 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                             last_usb_diagnostic = diagnostic;
                         }
                         if (device && device->quicktime_configuration) break;
-                        if (std::chrono::steady_clock::now() - activation_started >=
-                            std::chrono::milliseconds(1500)) {
-                            auto connection = transport::QtUsbConnection::open_quicktime(
-                                *qt_context, identity, true);
-                            logging::write(std::format(
-                                "usb_reenumeration ready device_fp={} backend={} fallback=conventional expected_qt_config={}",
-                                device_fp, use_usbdk ? "usbdk" : "libusb1",
-                                identity.expected_quicktime_configuration));
-                            usb = std::make_unique<CaptureConnectionAdapter<transport::QtUsbConnection>>(
-                                std::move(connection));
-                            break;
-                        }
                     } catch (const std::exception& error) {
                         qt_context.reset();
-                        if (last_usb_open_error != error.what()) {
-                            last_usb_open_error = error.what();
-                            logging::write(std::format(
-                                "usb_reenumeration pending device_fp={} backend={} error={}",
-                                device_fp, use_usbdk ? "usbdk" : "libusb1",
-                                last_usb_open_error));
-                        }
+                        logging::write(logging::Level::Warning, "usb",
+                            std::format("usb_reenumeration pending device_fp={} backend={} error={}",
+                                device_fp, use_usbdk ? "usbdk" : "libusb1", error.what()));
                     }
                 } while (std::chrono::steady_clock::now() < deadline);
-                if (!usb && (!device || !device->quicktime_configuration)) {
+                if (!device || !device->quicktime_configuration) {
                     logging::write(std::format(
-                        "usb_reenumeration descriptor_timeout device_fp={} backend={} expected_qt_config={} fallback=conventional",
+                        "usb_reenumeration descriptor_timeout device_fp={} backend={} expected_qt_config={} fallback=disabled",
                         device_fp, use_usbdk ? "usbdk" : "libusb1",
                         identity.expected_quicktime_configuration));
+                    throw std::runtime_error(
+                        "Apple device did not expose a stable QuickTime USB interface after activation");
                 }
                 if (!usb) std::this_thread::sleep_for(std::chrono::seconds(1));
             }
+            failure_stage = FailureStage::InterfaceOpen;
+            failure_code = -2103;
             if (!usb) {
                 if (!qt_context)
                     qt_context = std::make_unique<transport::QtUsbContext>(use_usbdk);
                 usb = std::make_unique<CaptureConnectionAdapter<transport::QtUsbConnection>>(
-                    transport::QtUsbConnection::open_quicktime(*qt_context, identity,
-                        !device || !device->quicktime_configuration));
+                    transport::QtUsbConnection::open_quicktime(*qt_context, identity, false));
             }
         }
         // libusb1/UsbDk needs an explicit halt clear. The libusb0 filter
@@ -1144,12 +1509,22 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         if (usb_backend_ != UsbBackend::LibUsb0) {
             try { usb->clear_halt(); } catch (...) {}
         }
+        {
+            std::scoped_lock lock(active_usb_mutex_);
+            active_usb_cancel_ = [connection = usb.get()] {
+                connection->cancel_pending_io();
+            };
+        }
+        if (stop_token.stop_requested()) usb->cancel_pending_io();
         const auto active_backend = static_cast<std::size_t>(usb_backend_);
         retain_active_usb_backend(active_backend);
         active_backend_release.arm([active_backend] {
             release_active_usb_backend(active_backend);
         });
         set_state(State::Handshaking, L"已连接 QuickTime 端点，等待 PING");
+        failure_stage = FailureStage::QuickTimeHandshake;
+        failure_kind = FailureKind::Timeout;
+        failure_code = -2104;
         struct PendingVideoSample {
             coremedia::SampleBuffer sample;
             std::optional<coremedia::FormatDescription> format;
@@ -1606,13 +1981,62 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         bool display_reconfigure_landscape{};
         auto display_release_deadline = started;
         const auto ping_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+        std::optional<std::chrono::steady_clock::time_point>
+            first_video_wait_started;
         const auto ping_recovery_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
         bool ping_recovery_attempted{};
+        detail::StreamingSilenceWatchdog media_silence_watchdog;
+        const auto detect_streaming_media_silence = [&] {
+            const auto now = std::chrono::steady_clock::now();
+            if (!media_silence_watchdog.expired(now)) return;
+
+            const auto silence = media_silence_watchdog.silence_duration(now);
+            const bool usb_parent_present =
+                device::is_apple_usb_parent_present(serial_);
+            failure_stage = FailureStage::VideoStream;
+            failure_kind = usb_parent_present
+                ? FailureKind::SystemClosed
+                : FailureKind::DeviceDisconnected;
+            failure_code = usb_parent_present ? -2109 : -2110;
+            peer_session_ended = usb_parent_present;
+            const auto diagnostic = usb_parent_present
+                ? "The iPhone or iPad ended mirroring while the wired USB device remained connected"
+                : "The wired Apple USB device disappeared after the media stream became silent";
+            logging::write(logging::Level::Warning, "capture",
+                std::format(
+                    "streaming_media_silence device_fp={} elapsed_ms={} "
+                    "video_frames={} audio_packets={} usb_parent_present={} "
+                    "classification={}",
+                    device_fp, silence.count(), protocol.video_frames(),
+                    protocol.audio_packets(), usb_parent_present,
+                    usb_parent_present ? "system_closed" : "device_disconnected"));
+            if (peer_session_ended) {
+                // Publish the terminal reason before teardown. The managed
+                // layer immediately detaches previews, then waits for Stop to
+                // finish the bounded native cleanup before showing a prompt.
+                set_failure(failure_kind, failure_stage, failure_code,
+                    widen(diagnostic));
+            }
+            throw std::runtime_error(diagnostic);
+        };
         while (!stop_token.stop_requested()) {
             video_worker_failure.rethrow_if_set();
             const auto count = usb->read(read_buffer, 250);
             video_worker_failure.rethrow_if_set();
+            if (protocol.state() != quicktime::SessionState::WaitingForPing &&
+                protocol.video_frames() == 0) {
+                const auto now = std::chrono::steady_clock::now();
+                if (!first_video_wait_started) first_video_wait_started = now;
+                if (now - *first_video_wait_started >= std::chrono::seconds(12)) {
+                    failure_stage = FailureStage::VideoStream;
+                    failure_kind = FailureKind::NoVideoFrames;
+                    failure_code = -2105;
+                    throw std::runtime_error(
+                        "QuickTime session established but no video frame arrived within 12 seconds");
+                }
+            }
             if (count == 0) {
+                detect_streaming_media_silence();
                 if (display_reconfigure_pending &&
                     std::chrono::steady_clock::now() >= display_release_deadline) {
                     const auto native_size = read_native_portrait_size();
@@ -1630,14 +2054,24 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     std::chrono::steady_clock::now() >= ping_recovery_deadline) {
                     ping_recovery_attempted = true;
                     try {
-                        // Aisi sends a normal PING after its first bulk
-                        // timeout. Do not issue the extra 0x40/0x40 control
-                        // request here; it can reset an otherwise valid iOS
-                        // QuickTime session.
+                        // A freshly activated Apple QuickTime configuration
+                        // can expose and claim its bulk pipes before iOS starts
+                        // the endpoint. The reference libusb0 path performs
+                        // this one control kick after the first read timeout.
+                        // Never send it while adopting an existing session.
+                        if (newly_activated_libusb0)
+                            usb->recover_handshake();
                         usb->write(quicktime::make_ping(), 1000);
-                    } catch (...) {
+                        logging::write(std::format(
+                            "quicktime_handshake recovery_sent=true control_kick={}",
+                            newly_activated_libusb0));
+                    } catch (const std::exception& error) {
                         // Some libusb0 filter builds report a cancelled OUT
                         // request while the device still processes the kick.
+                        logging::write(logging::Level::Warning, "usb",
+                            std::format(
+                                "quicktime_handshake recovery_error={} control_kick={}",
+                                error.what(), newly_activated_libusb0));
                     }
                 }
                 if (protocol.state() == quicktime::SessionState::WaitingForPing &&
@@ -1668,6 +2102,9 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 for (const auto& response : event.outbound) usb->write(response, 1000);
 
                 if (event.video_sample) {
+                    failure_stage = FailureStage::Decoder;
+                    failure_kind = FailureKind::VideoStream;
+                    failure_code = -2107;
                     PendingVideoSample pending;
                     pending.received_at = std::chrono::steady_clock::now();
                     pending.sample = std::move(*event.video_sample);
@@ -1791,6 +2228,8 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 }
 
                 if (event.video_sample || event.audio_sample) {
+                    const auto media_received_at = std::chrono::steady_clock::now();
+                    media_silence_watchdog.observe_media(media_received_at);
                     // Keep all wired preflight, activation, re-enumeration,
                     // claim and handshake work serialized. A second wired
                     // session may begin only after this one proves a stable
@@ -1801,7 +2240,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     snapshot_.message = L"投屏中";
                     snapshot_.video_frames = protocol.video_frames();
                     snapshot_.audio_packets = protocol.audio_packets();
-                    const auto now = std::chrono::steady_clock::now();
+                    const auto now = media_received_at;
                     const double fps_seconds = std::chrono::duration<double>(now - fps_sample_at).count();
                     if (fps_seconds >= 0.5) {
                         snapshot_.fps = static_cast<double>(
@@ -1812,6 +2251,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     if (protocol.video_format()) {
                         snapshot_.width = protocol.video_format()->width;
                         snapshot_.height = protocol.video_format()->height;
+                        if (snapshot_.width == 0 || snapshot_.height == 0) {
+                            failure_stage = FailureStage::VideoStream;
+                            failure_kind = FailureKind::InvalidVideoDimensions;
+                            failure_code = -2106;
+                            throw std::runtime_error(
+                                "QuickTime video stream reported invalid zero dimensions");
+                        }
                     }
                     if (protocol.audio_format() && protocol.audio_format()->audio) {
                         snapshot_.audio_sample_rate = static_cast<std::uint32_t>(protocol.audio_format()->audio->sample_rate);
@@ -1819,6 +2265,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     }
                 }
             }
+            detect_streaming_media_silence();
             const auto probed_size = display_reconfigure_pending ? 0 :
                 native_probe_size_.exchange(0, std::memory_order_acq_rel);
             if (adaptive_display && probed_size != 0 && !display_reconfigure_pending) {
@@ -1884,29 +2331,55 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         video_queue_cv.notify_all();
         video_worker.join();
         stop_audio_renderer();
+        prepare_shutdown_usb();
         shutdown_usb();
         configuration_restore.run_now();
+        const bool restored = finalize_configuration_restore();
         active_backend_release.run_now();
+        libusb0_restore_lease.release();
         transition_release.run_now();
         release_usb_transition_gate();
         logging::write("capture_run stop path");
-        set_state(State::Stopped, L"投屏已停止");
+        if (restored) set_state(State::Stopped, L"投屏已停止");
     } catch (const std::exception& error) {
         // Stop requests intentionally interrupt USB I/O while iOS restores
         // its normal configuration. This is a normal terminal condition.
         acquire_usb_transition_gate();
         stop_audio_renderer();
+        prepare_shutdown_usb();
         shutdown_usb();
         configuration_restore.run_now();
+        const bool stopped_by_request = stop_token.stop_requested() &&
+            !video_worker_failure.failed() && !peer_session_ended;
+        const bool restored = finalize_configuration_restore(stopped_by_request);
         active_backend_release.run_now();
+        libusb0_restore_lease.release();
         transition_release.run_now();
         release_usb_transition_gate();
         logging::write(std::format("capture_run exception stop_requested={} error={}",
             stop_token.stop_requested(), error.what()));
-        if (stop_token.stop_requested() && !video_worker_failure.failed()) {
-            set_state(State::Stopped, L"投屏已停止");
+        if (stopped_by_request) {
+            if (restored) set_state(State::Stopped, L"投屏已停止");
         } else {
-            set_state(State::Error, L"采集失败：" + widen(error.what()));
+            std::string diagnostic = error.what();
+            if (!restored) {
+                diagnostic += "; teardown released application resources but "
+                    "could not confirm that the Apple USB device returned to "
+                    "its normal configuration";
+            }
+            if (const auto* usb_error =
+                    dynamic_cast<const transport::UsbError*>(&error))
+                failure_code = usb_error->code();
+            if (diagnostic.find("disconnected") != std::string::npos ||
+                diagnostic.find("NO_DEVICE") != std::string::npos ||
+                diagnostic.find("no device") != std::string::npos) {
+                failure_kind = FailureKind::DeviceDisconnected;
+            } else if (diagnostic.find("driver") != std::string::npos ||
+                diagnostic.find("libusb0") != std::string::npos) {
+                failure_kind = FailureKind::Driver;
+            }
+            set_failure(failure_kind, failure_stage, failure_code,
+                L"采集失败：" + widen(diagnostic));
         }
     }
 }

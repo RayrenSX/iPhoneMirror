@@ -17,7 +17,7 @@
 
 namespace iPhoneMirror {
 
-constexpr std::uint32_t ApiVersion = 17;
+constexpr std::uint32_t ApiVersion = 18;
 using SessionHandle = std::uint64_t;
 constexpr std::size_t MaxUdid = 128;
 constexpr std::size_t MaxName = 128;
@@ -37,6 +37,11 @@ enum class Result : std::int32_t {
     ProtocolError = -5,
     DeviceNotFound = -6,
     CaptureBackendUnavailable = -7,
+    SessionAlreadyExists = -8,
+    DriverSafetyBlocked = -9,
+    UsbConfigurationNotReady = -10,
+    SessionTeardownFailed = -11,
+    UsbConfigurationRestoreWarning = -12,
     InternalError = -100,
 };
 
@@ -97,6 +102,35 @@ enum class CaptureState : std::int32_t {
     Error = 7,
 };
 
+enum class CaptureFailureKind : std::int32_t {
+    None = 0,
+    UsbConnection = 1,
+    SessionCreation = 2,
+    Driver = 3,
+    VideoStream = 4,
+    InvalidVideoDimensions = 5,
+    NoVideoFrames = 6,
+    SystemClosed = 7,
+    DeviceDisconnected = 8,
+    Timeout = 9,
+    ExistingSession = 10,
+    ChildProcessExited = 11,
+    Unknown = 100,
+};
+
+enum class CaptureFailureStage : std::int32_t {
+    None = 0,
+    UsbPreflight = 1,
+    UsbActivation = 2,
+    DeviceReenumeration = 3,
+    InterfaceOpen = 4,
+    QuickTimeHandshake = 5,
+    VideoStream = 6,
+    Decoder = 7,
+    SessionTeardown = 8,
+    DeviceDiscovery = 9,
+};
+
 struct CaptureStatus {
     std::uint32_t struct_size;
     std::uint32_t api_version;
@@ -109,6 +143,9 @@ struct CaptureStatus {
     std::uint64_t audio_packets;
     std::uint32_t audio_sample_rate;
     std::uint32_t audio_channels;
+    CaptureFailureKind failure_kind;
+    CaptureFailureStage failure_stage;
+    std::int32_t error_code;
     wchar_t message[MaxStatus];
 };
 
@@ -218,6 +255,12 @@ IM_API std::int32_t IM_CALL im_log_message(const wchar_t* message);
 IM_API std::int32_t IM_CALL im_refresh_devices(
     iPhoneMirror::DeviceInfo* devices,
     std::uint32_t* count);
+// Explicit idle-state refreshes may request fresh Lockdown metadata. Normal
+// polling only performs usbmux presence discovery and reuses cached metadata.
+IM_API std::int32_t IM_CALL im_refresh_devices_ex(
+    iPhoneMirror::DeviceInfo* devices,
+    std::uint32_t* count,
+    std::int32_t refresh_metadata);
 
 // The AirPlay receiver is process-global and remains active independently of
 // preview sessions. Connected clients are enumerated as ordinary devices.

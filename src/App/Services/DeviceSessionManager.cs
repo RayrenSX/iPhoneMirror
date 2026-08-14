@@ -3,13 +3,27 @@ using IPhoneMirror.App.Models;
 
 namespace IPhoneMirror.App.Services;
 
-internal sealed class DeviceSessionManager(NativeCore core)
+internal sealed class DeviceSessionManager
 {
+    private readonly Action<ulong> _stopSession;
+    private readonly Action<ulong> _destroySession;
     private readonly object _gate = new();
     private readonly Dictionary<string, DeviceCaptureState> _states =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _pausedWirelessDevices =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Task> _teardowns =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    internal DeviceSessionManager(NativeCore core)
+        : this(core.StopDeviceSession, core.DestroyDeviceSession) { }
+
+    internal DeviceSessionManager(Action<ulong> stopSession,
+        Action<ulong> destroySession)
+    {
+        _stopSession = stopSession;
+        _destroySession = destroySession;
+    }
 
     internal event Action<string, ulong>? SessionHandleChanged;
 
@@ -87,29 +101,60 @@ internal sealed class DeviceSessionManager(NativeCore core)
         }
     }
 
-    internal async Task StopAndDestroyAsync(DeviceCaptureState state)
+    internal Task StopAndDestroyAsync(DeviceCaptureState state)
     {
+        Task teardown;
         ulong handle;
         lock (_gate)
         {
+            if (_teardowns.TryGetValue(state.Udid, out teardown!))
+                return teardown;
             handle = state.Handle;
-            if (handle == 0 || state.IsStopping) return;
+            if (handle == 0) return Task.CompletedTask;
             state.IsStopping = true;
+            state.Handle = 0;
+            teardown = StopAndDestroyCoreAsync(state, handle);
+            _teardowns[state.Udid] = teardown;
         }
         // Revoke the handle before yielding so no preview can attach while
         // native teardown is releasing the decoder and USB configuration.
-        SetHandle(state, 0);
+        PublishHandleChanged(state.Udid, 0);
+        return teardown;
+    }
+
+    private async Task StopAndDestroyCoreAsync(DeviceCaptureState state,
+        ulong handle)
+    {
+        // Always return to StopAndDestroyAsync before native work can finish,
+        // so the in-flight task is registered before any concurrent caller or
+        // completion path observes it.
+        await Task.Yield();
         try
         {
-            await Task.Run(() => core.StopDeviceSession(handle));
+            await Task.Run(() => _stopSession(handle));
         }
         finally
         {
-            try { core.DestroyDeviceSession(handle); }
+            try { _destroySession(handle); }
             finally
             {
-                lock (_gate) state.IsStopping = false;
+                lock (_gate)
+                {
+                    state.IsStopping = false;
+                    _teardowns.Remove(state.Udid);
+                }
             }
+        }
+    }
+
+    private void PublishHandleChanged(string udid, ulong handle)
+    {
+        try { SessionHandleChanged?.Invoke(udid, handle); }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("capture", "session_handle_observer_failed",
+                error, ("device", AppLog.Device(udid)),
+                ("handle", AppLog.Handle(handle)));
         }
     }
 }

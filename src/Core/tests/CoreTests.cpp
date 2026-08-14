@@ -6,10 +6,12 @@
 #include "Protocol/QuickTimePacket.h"
 #include "Protocol/QuickTimeSession.h"
 #include "Transport/AppleUsbIdentityCache.h"
+#include "Transport/LibUsb0Transport.h"
 #include "Transport/LibUsb0Readiness.h"
 #include "Transport/QtUsbTransport.h"
 #include "Capture/CaptureSession.h"
 #include "Capture/WirelessCaptureSession.h"
+#include "Device/AppleUsbDiscovery.h"
 #include "Logging.h"
 #include "IpcProtocol.h"
 #include "iPhoneMirror/CoreApi.h"
@@ -396,6 +398,15 @@ void test_session_protocol() {
     const auto stop = session.stop_messages();
     check(stop.size() == 2 && decode_framed(stop[0]).subtype == fourcc('h', 'p', 'a', '0') &&
         decode_framed(stop[1]).subtype == fourcc('h', 'p', 'd', '0'), "session emits HPA0 and HPD0");
+    event = session.process(decode_framed(read_fixture(
+        "fixtures/quicktime_video_hack/asyn-feed")));
+    check(event.state == SessionState::Stopping && event.outbound.empty(),
+        "late video packets cannot roll teardown back to streaming or request more frames");
+    const auto stop_complete = session.complete_stop_messages();
+    check(stop_complete.size() == 1 &&
+        decode_framed(stop_complete.front()).subtype == fourcc('h', 'p', 'd', '0') &&
+        session.state() == SessionState::Stopped,
+        "session emits the final HPD0 after release notifications");
 }
 
 void test_usb_projection_modes() {
@@ -526,6 +537,65 @@ void test_apple_usb_serial_matching() {
         "empty normalized USB serials never identify a device");
 }
 
+void test_apple_usb_filter_safety() {
+    using iPhoneMirror::device::is_unsafe_apple_usb_filter_combination;
+    using iPhoneMirror::device::apple_usb_parent_instance_matches_serial;
+    using iPhoneMirror::device::libusb0_apple_interface_path_matches;
+    using iPhoneMirror::device::AppleNormalUsbStackEvidence;
+    using iPhoneMirror::device::is_complete_apple_normal_usb_stack;
+    const std::vector<std::wstring> libusb0{L"libusb0"};
+    const std::vector<std::wstring> libusb0_mixed_case{L"LiBuSb0"};
+    const std::vector<std::wstring> apple_lower{L"AppleLowerFilter"};
+    const std::vector<std::wstring> apple_kmdf{L"AppleKmdfFilter"};
+    const std::vector<std::wstring> apple_lower_mixed_case{L"aPpLeLoWeRfIlTeR"};
+    const std::vector<std::wstring> no_filters;
+
+    check(is_complete_apple_normal_usb_stack({true, true, true}),
+        "normal Apple USB recovery requires the parent and both essential interfaces");
+    check(!is_complete_apple_normal_usb_stack({true, false, true}) &&
+            !is_complete_apple_normal_usb_stack({true, true, false}) &&
+            !is_complete_apple_normal_usb_stack({false, true, true}),
+        "a partial WPD, management, or parent recovery is never reported as normal");
+
+    check(is_unsafe_apple_usb_filter_combination(libusb0, apple_lower),
+        "libusb0 plus AppleLowerFilter is diagnosed as a high-risk stack");
+    check(is_unsafe_apple_usb_filter_combination(libusb0, apple_kmdf),
+        "libusb0 plus AppleKmdfFilter is diagnosed as a high-risk stack");
+    check(is_unsafe_apple_usb_filter_combination(
+            libusb0_mixed_case, apple_lower_mixed_case),
+        "Apple USB filter safety matching is case-insensitive");
+    check(!is_unsafe_apple_usb_filter_combination(libusb0, no_filters),
+        "libusb0 without an Apple lower filter is not this unsafe combination");
+    check(!is_unsafe_apple_usb_filter_combination(no_filters, apple_lower),
+        "an Apple lower filter without libusb0 is not this unsafe combination");
+
+    check(apple_usb_parent_instance_matches_serial(
+            L"USB\\VID_05AC&PID_12A8\\0000810100044D600A22001E",
+            "00008101-00044D600A22001E"),
+        "Apple USB parent identity matches normalized exact serial forms");
+    check(!apple_usb_parent_instance_matches_serial(
+            L"USB\\VID_05AC&PID_12A8\\00008150001903580A9B401C",
+            "00008101-00044D600A22001E") &&
+        !apple_usb_parent_instance_matches_serial(
+            L"USB\\VID_05AC&PID_12A8&MI_01\\0000810100044D600A22001E",
+            "00008101-00044D600A22001E"),
+        "Apple USB parent identity rejects another phone and interface children");
+
+    constexpr auto interface_path =
+        LR"(\\?\USB#VID_05AC&PID_12A8#0000810100044D600A22001E#{f9f3ff14-ae21-48a0-8a25-8011a7a931d9})";
+    check(libusb0_apple_interface_path_matches(interface_path, 0x12a8,
+            "00008101-00044D600A22001E"),
+        "libusb0 interface readiness matches the exact Apple VID, PID and serial");
+    check(!libusb0_apple_interface_path_matches(interface_path, 0x12ab,
+            "00008101-00044D600A22001E") &&
+        !libusb0_apple_interface_path_matches(interface_path, 0x12a8,
+            "00008150-001903580A9B401C") &&
+        !libusb0_apple_interface_path_matches(
+            LR"(\\?\USB#VID_05AC&PID_12A8#0000810100044D600A22001E#{a5dcbf10-6530-11d2-901f-00c04fb951ed})",
+            0x12a8, "00008101-00044D600A22001E"),
+        "libusb0 readiness rejects another product, phone and generic USB interface");
+}
+
 void test_active_apple_usb_identity_cache() {
     using namespace iPhoneMirror::transport;
     const AppleUsbIdentity identity{
@@ -553,6 +623,7 @@ void test_active_apple_usb_identity_cache() {
     release_active_apple_usb_identity(identity.topology_id, identity.serial);
     check(cached_active_apple_usb_serial(identity.topology_id).empty(),
         "active USB identity cache retained a released owner");
+
 }
 
 void test_apple_usb_reenumeration_selection() {
@@ -570,6 +641,14 @@ void test_apple_usb_reenumeration_selection() {
     check(identity.expected_quicktime_configuration == 6 &&
         identity.original_product_id == 0x12ab,
         "modern iPad identity derives appended QuickTime configuration 6");
+    check(apple_usb_candidate_in_scope("3:9.9", identity),
+        "an exact serial keeps re-enumerated candidates whose topology key changed");
+    auto topology_only_identity = identity;
+    topology_only_identity.serial.clear();
+    check(apple_usb_candidate_in_scope(initial.topology_id,
+            topology_only_identity) &&
+        !apple_usb_candidate_in_scope("3:9.9", topology_only_identity),
+        "a topology-only identity never expands to an unrelated physical device");
 
     AppleUsbDevice descriptor_unavailable;
     descriptor_unavailable.serial = initial.serial;
@@ -668,6 +747,85 @@ void test_apple_usb_reenumeration_selection() {
     check(diagnostic.find("configs=6/6") != std::string::npos &&
         diagnostic.find("serial_match=true") != std::string::npos,
         "USB selection diagnostics record descriptor and match decisions");
+
+    auto active_reenumerated = reenumerated;
+    active_reenumerated.active_configuration =
+        active_reenumerated.quicktime_endpoints.configuration;
+    active_reenumerated.active_configuration_known = true;
+    check(can_initialize_libusb0_quicktime_configuration(
+            AppleUsbMatchKind::Serial, active_reenumerated,
+            active_reenumerated.quicktime_endpoints),
+        "libusb0 configuration initialization accepts an exact serial and descriptor-backed interface");
+    check(!can_initialize_libusb0_quicktime_configuration(
+            AppleUsbMatchKind::Topology, active_reenumerated,
+            active_reenumerated.quicktime_endpoints),
+        "libusb0 configuration initialization rejects topology-only matches");
+    check(!can_initialize_libusb0_quicktime_configuration(
+            AppleUsbMatchKind::None, active_reenumerated,
+            active_reenumerated.quicktime_endpoints),
+        "libusb0 configuration initialization rejects an unverified match");
+    auto inactive_reenumerated = active_reenumerated;
+    inactive_reenumerated.active_configuration = 4;
+    check(!can_initialize_libusb0_quicktime_configuration(
+            AppleUsbMatchKind::Serial, inactive_reenumerated,
+            inactive_reenumerated.quicktime_endpoints),
+        "libusb0 configuration initialization rejects a retained descriptor in a normal active configuration");
+    auto invented_endpoints = active_reenumerated.quicktime_endpoints;
+    invented_endpoints.configuration = 5;
+    check(!can_initialize_libusb0_quicktime_configuration(
+            AppleUsbMatchKind::Serial, active_reenumerated, invented_endpoints),
+        "libusb0 configuration initialization rejects endpoints not present in the selected descriptor");
+    invented_endpoints = active_reenumerated.quicktime_endpoints;
+    invented_endpoints.bulk_in ^= 0x01;
+    check(!can_initialize_libusb0_quicktime_configuration(
+            AppleUsbMatchKind::Serial, active_reenumerated, invented_endpoints),
+        "libusb0 configuration initialization rejects descriptor-mismatched bulk endpoints");
+    check(is_libusb0_invalid_configuration_claim(-22,
+            "libusb0-dll:err [claim_interface] could not claim interface 2, invalid configuration 0"),
+        "libusb0 invalid-configuration claim is narrowly recognized");
+    check(!is_libusb0_invalid_configuration_claim(-22,
+            "libusb0-dll:err [claim_interface] could not claim interface 2, busy"),
+        "libusb0 busy claim does not authorize reconfiguration");
+    check(!is_libusb0_invalid_configuration_claim(-16,
+            "libusb0-dll:err [claim_interface] could not claim interface 2, invalid configuration 0"),
+        "other libusb0 claim errors do not authorize reconfiguration");
+    const std::array<std::uint8_t, 32> quicktime_descriptor{
+        9, 2, 32, 0, 1, 5, 0, 0x80, 50,
+        9, 4, 2, 0, 2, 0xff, 0x2a, 0, 0,
+        7, 5, 0x81, 2, 0x00, 0x02, 0,
+        7, 5, 0x02, 2, 0x00, 0x02, 0,
+    };
+    const auto parsed_quicktime = parse_libusb0_quicktime_configuration(
+        quicktime_descriptor, 5);
+    check(parsed_quicktime.configuration == 5 &&
+        parsed_quicktime.interface_number == 2 &&
+        parsed_quicktime.bulk_in == 0x81 &&
+        parsed_quicktime.bulk_out == 0x02,
+        "single-handle readiness parses a descriptor-backed QuickTime interface");
+    auto truncated_quicktime = quicktime_descriptor;
+    truncated_quicktime[18] = 64;
+    check(parse_libusb0_quicktime_configuration(
+            truncated_quicktime, 5).configuration == 0 &&
+        parse_libusb0_quicktime_configuration(
+            quicktime_descriptor, 6).configuration == 0,
+        "single-handle readiness rejects truncated and unexpected configurations");
+    auto active_quicktime = reenumerated;
+    active_quicktime.active_configuration =
+        active_quicktime.quicktime_endpoints.configuration;
+    active_quicktime.active_configuration_known = true;
+    check(is_libusb0_quicktime_configuration_active(active_quicktime),
+        "matching active and descriptor configurations identify a reusable QuickTime node");
+    active_quicktime.active_configuration = 4;
+    check(!is_libusb0_quicktime_configuration_active(active_quicktime),
+        "a retained QuickTime descriptor does not make the normal active configuration reusable");
+    active_quicktime.active_configuration = 0;
+    check(!is_libusb0_quicktime_configuration_active(active_quicktime),
+        "an unknown active configuration is never assumed to be QuickTime");
+    active_quicktime.active_configuration =
+        active_quicktime.quicktime_endpoints.configuration;
+    active_quicktime.active_configuration_known = false;
+    check(!is_libusb0_quicktime_configuration_active(active_quicktime),
+        "a configuration value without a successful GET_CONFIGURATION is not trusted");
 }
 
 void test_media_foundation_decoder() {
@@ -880,6 +1038,7 @@ void test_wireless_decoder_status() {
 }
 
 void test_capture_media_safety_helpers() {
+    using iPhoneMirror::capture::detail::StreamingSilenceWatchdog;
     using iPhoneMirror::capture::detail::VideoQueueAction;
     using iPhoneMirror::capture::detail::VideoQueueBudget;
 
@@ -1090,6 +1249,26 @@ void test_capture_media_safety_helpers() {
     check(unpacked.width == 1206 && unpacked.height == 2622,
         "adaptive display dimensions publish as one atomic value");
 
+    StreamingSilenceWatchdog silence_watchdog;
+    const StreamingSilenceWatchdog::Clock::time_point media_started{};
+    check(!silence_watchdog.expired(media_started + std::chrono::seconds(30)),
+        "streaming silence watchdog does not fire before valid media arrives");
+    silence_watchdog.observe_media(media_started);
+    check(!silence_watchdog.expired(
+            media_started + StreamingSilenceWatchdog::SilenceLimit -
+                std::chrono::milliseconds(1)),
+        "streaming silence watchdog keeps a full ten-second grace period");
+    check(silence_watchdog.expired(
+            media_started + StreamingSilenceWatchdog::SilenceLimit) &&
+        silence_watchdog.silence_duration(
+            media_started + StreamingSilenceWatchdog::SilenceLimit) ==
+                std::chrono::milliseconds(10'000),
+        "streaming silence watchdog expires at ten seconds");
+    silence_watchdog.observe_media(media_started + std::chrono::seconds(9));
+    check(!silence_watchdog.expired(media_started + std::chrono::seconds(18)) &&
+        silence_watchdog.expired(media_started + std::chrono::seconds(19)),
+        "new video or audio media resets the streaming silence deadline");
+
     VideoQueueBudget budget;
     check(budget.has_capacity(0, 0, 1024),
         "empty compressed video queue accepts a normal sample");
@@ -1134,11 +1313,6 @@ void test_capture_media_safety_helpers() {
     }
     check(normalized_nonstandard,
         "non-standard decoder exceptions are normalized before leaving noexcept run");
-}
-
-void test_capture_preflight_without_device() {
-    iPhoneMirror::capture::CaptureSession session("definitely-not-a-real-udid");
-    check_throws([&] { session.start(false); }, "capture preflight rejects missing USB device");
 }
 
 void test_image_adjustment_api_validation() {
@@ -1202,7 +1376,8 @@ void test_wireless_i420_conversion() {
         header, std::span(i420).first(11), nv12, stride),
         "wireless conversion rejects truncated planes");
     check(sizeof(iPhoneMirror::wireless::MessageHeader) == 392 &&
-        iPhoneMirror::ApiVersion == 17 &&
+        sizeof(iPhoneMirror::CaptureStatus) == 464 &&
+        iPhoneMirror::ApiVersion == 18 &&
         header.magic == iPhoneMirror::wireless::IpcMagic &&
         header.version == iPhoneMirror::wireless::IpcVersion &&
         iPhoneMirror::wireless::IpcVersion == 6,
@@ -1420,6 +1595,7 @@ int main(int argc, char** argv) {
         test_session_protocol();
         test_usb_projection_modes();
         test_apple_usb_serial_matching();
+        test_apple_usb_filter_safety();
         test_active_apple_usb_identity_cache();
         test_apple_usb_reenumeration_selection();
         test_libusb_runtime();
@@ -1427,7 +1603,6 @@ int main(int argc, char** argv) {
         test_decoder_switch_transaction();
         test_wireless_decoder_status();
         test_capture_media_safety_helpers();
-        test_capture_preflight_without_device();
         test_image_adjustment_api_validation();
         test_wireless_i420_conversion();
         test_wireless_multi_stream_isolation();

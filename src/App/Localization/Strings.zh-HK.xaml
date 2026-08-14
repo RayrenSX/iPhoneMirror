@@ -23,6 +23,8 @@
     <system:String x:Key="SimultaneousMirrorStartedFormat">已為 {0} 開啟同時螢幕鏡像視窗</system:String>
     <system:String x:Key="SimultaneousMirrorFailedFormat">同時螢幕鏡像啟動失敗：{0}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">{0} 螢幕鏡像錯誤</system:String>
+    <system:String x:Key="DeviceSessionClosedWarningTitleFormat">{0} 螢幕鏡像已停止</system:String>
+    <system:String x:Key="DeviceSessionClosedWarningBody">偵測到您已在控制中心點擊停止螢幕鏡像，下次使用此裝置進行有線螢幕鏡像前需重新啟動 iPhone/iPad</system:String>
     <system:String x:Key="IndependentWindowPin">置頂</system:String>
     <system:String x:Key="IndependentWindowUnpin">取消置頂</system:String>
     <system:String x:Key="IndependentWindowEnterFullScreen">進入全螢幕</system:String>
@@ -119,6 +121,7 @@
     <system:String x:Key="DriverDeviceFilterMissing">目前裝置需要外部擷取驅動程式</system:String>
     <system:String x:Key="DriverExternalRequired">請先安裝或修復外部擷取驅動程式，然後重新連接這部 Apple 裝置。</system:String>
     <system:String x:Key="DriverInvalidAppleStack">Apple USB 父裝置驅動程式不相容。</system:String>
+    <system:String x:Key="DriverUnsafeAppleStack">驅動程式疊加：已啟用保守 USB 模式</system:String>
     <system:String x:Key="DriverFilterStateError">無法確認 Apple 裝置擷取驅動程式狀態。</system:String>
     <system:String x:Key="DriverReconnectPhone">請解鎖並重新連接這部 Apple 裝置，然後重新整理裝置。</system:String>
     <system:String x:Key="DriverReplugRequired">請重新連接這部 Apple 裝置，以便外部擷取驅動程式接管。</system:String>
@@ -131,6 +134,8 @@
     <system:String x:Key="CaptureHandshaking">正在建立螢幕鏡像會話…</system:String>
     <system:String x:Key="CaptureStreaming">正在螢幕鏡像</system:String>
     <system:String x:Key="CaptureStopping">正在停止螢幕鏡像…</system:String>
+    <system:String x:Key="CaptureCleaningDevice">正在清理裝置…</system:String>
+    <system:String x:Key="CaptureQueued">等待裝置清理…</system:String>
     <system:String x:Key="SwitchingDeviceFormat">正在停止目前螢幕鏡像並切換到 {0}…</system:String>
     <system:String x:Key="SwitchDeviceFailedFormat">切換裝置失敗：{0}</system:String>
     <system:String x:Key="CaptureStopped">螢幕鏡像已停止</system:String>
@@ -143,9 +148,43 @@
     <system:String x:Key="CaptureNoPingCableAction">更換 Apple 原裝或 MFi 認證傳輸線</system:String>
     <system:String x:Key="CaptureNoPingUnlockHint">重新連接並開始螢幕鏡像時，請保持裝置處於解鎖狀態。</system:String>
     <system:String x:Key="CaptureUsbConfigurationRecovery">未能切換 iPhone 或 iPad 的 USB 螢幕鏡像設定。&#x0A;&#x0A;請依序嘗試：&#x0A;1. 拔下傳輸線，等待幾秒後重新插入&#x0A;2. 重新啟動 iPhone 或 iPad 後再連接&#x0A;3. 更換 Apple 原裝或 MFi 認證傳輸線&#x0A;&#x0A;重新連接並開始螢幕鏡像時，請保持裝置處於解鎖狀態。</system:String>
+    <system:String x:Key="CaptureFailureDetailsFormat">錯誤類型：{0}&#x0A;失敗階段：{1}&#x0A;錯誤碼：{2}&#x0A;&#x0A;詳細資料：{3}</system:String>
+    <system:String x:Key="CaptureActionReconnectDevice">請保持裝置解鎖，重新插拔傳輸線後再試。</system:String>
+    <system:String x:Key="CaptureActionRestartDevice">請重新啟動 iPhone 或 iPad 後再試。</system:String>
+    <system:String x:Key="CaptureActionWaitForCleanup">請等待裝置清理完成後，再次開始螢幕鏡像。</system:String>
+    <system:String x:Key="CaptureActionVideoRetry">請停止螢幕鏡像後重新開始；仍無畫面時重新連接傳輸線。</system:String>
+    <system:String x:Key="CaptureActionDriverRecovery">請重新插拔裝置後再試；仍無法螢幕鏡像時請重新啟動電腦。</system:String>
+    <system:String x:Key="CaptureActionDeviceDisconnected">請重新連接並解鎖裝置後，再次開始螢幕鏡像。</system:String>
+    <system:String x:Key="CaptureActionRestartApplication">請關閉後重新開啟 iPhoneMirror，再試一次。</system:String>
+    <system:String x:Key="CaptureActionRetry">請停止螢幕鏡像後重新開始；仍失敗時重新連接裝置。</system:String>
+    <system:String x:Key="CaptureFailureStatusFormat">螢幕鏡像錯誤：{0}（{1}，錯誤碼 {2}）</system:String>
+    <system:String x:Key="CaptureFailureUsbConnection">USB 裝置連接失敗</system:String>
+    <system:String x:Key="CaptureFailureSessionCreation">螢幕鏡像工作階段建立失敗</system:String>
+    <system:String x:Key="CaptureFailureDriver">Apple/libusb 驅動程式異常</system:String>
+    <system:String x:Key="CaptureDriverSafetyBlocked">偵測到舊版 libusb0 與 Apple USB 篩選驅動程式疊加。應用程式不會修改驅動程式；本次會使用保守的 USB 工作階段開啟及釋放順序。</system:String>
+    <system:String x:Key="CaptureFailureVideoStream">視訊串流建立或解碼失敗</system:String>
+    <system:String x:Key="CaptureFailureVideoDimensions">視訊串流解像度異常</system:String>
+    <system:String x:Key="CaptureFailureNoFrames">視訊串流沒有畫面或黑畫面</system:String>
+    <system:String x:Key="CaptureFailureSystemClosed">工作階段已被系統關閉</system:String>
+    <system:String x:Key="CaptureFailureDeviceDisconnected">裝置已中斷連接</system:String>
+    <system:String x:Key="CaptureFailureTimeout">操作逾時</system:String>
+    <system:String x:Key="CaptureFailureExistingSession">仍存在舊的螢幕鏡像工作階段</system:String>
+    <system:String x:Key="CaptureFailureChildProcess">子程序異常結束</system:String>
+    <system:String x:Key="CaptureFailureUnknown">未知錯誤</system:String>
+    <system:String x:Key="CaptureStageUsbPreflight">USB 裝置預檢</system:String>
+    <system:String x:Key="CaptureStageUsbActivation">啟用 QuickTime USB 設定</system:String>
+    <system:String x:Key="CaptureStageDeviceReenumeration">等待 USB 裝置重新枚舉</system:String>
+    <system:String x:Key="CaptureStageInterfaceOpen">開啟 QuickTime USB 介面</system:String>
+    <system:String x:Key="CaptureStageQuickTimeHandshake">QuickTime 工作階段交握</system:String>
+    <system:String x:Key="CaptureStageVideoStream">建立視訊串流</system:String>
+    <system:String x:Key="CaptureStageDecoder">視訊解碼</system:String>
+    <system:String x:Key="CaptureStageSessionTeardown">釋放螢幕鏡像工作階段</system:String>
+    <system:String x:Key="CaptureStageDeviceDiscovery">裝置探索</system:String>
+    <system:String x:Key="CaptureStageUnknown">未知階段</system:String>
     <system:String x:Key="StartRequested">已請求開始螢幕鏡像</system:String>
     <system:String x:Key="StartFailedFormat">開始螢幕鏡像失敗：{0}</system:String>
     <system:String x:Key="StopSessionReleased">螢幕鏡像已停止，會話資源已釋放</system:String>
+    <system:String x:Key="StopUsbRestoreWarningFormat">螢幕鏡像已停止，會話資源已釋放；但未能確認 iPhone 已還原普通 USB 設定。診斷：{0}</system:String>
     <system:String x:Key="StopFailedFormat">停止螢幕鏡像失敗：{0}</system:String>
     <system:String x:Key="LogViewCleared">記錄檢視已清除（不會刪除磁碟上的記錄檔）</system:String>
 
@@ -474,4 +513,7 @@
     <system:String x:Key="CloseOtherInstancesFailedFormat">仍有 {0} 個 iPhoneMirror 執行個體未能關閉。請在工作列或工作管理員中關閉後重試。</system:String>
     <system:String x:Key="Minimize">最小化</system:String>
     <system:String x:Key="Maximize">最大化</system:String>
+    <system:String x:Key="TitleBarMinimizeToolTip">最小化</system:String>
+    <system:String x:Key="TitleBarMaximizeToolTip">最大化或還原</system:String>
+    <system:String x:Key="TitleBarCloseToolTip">關閉</system:String>
 </ResourceDictionary>

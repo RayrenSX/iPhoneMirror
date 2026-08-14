@@ -5,13 +5,16 @@
 #include "Protocol/QuickTimeSession.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -24,6 +27,16 @@ struct AppleUsbDevice;
 }
 
 namespace iPhoneMirror::capture {
+
+// Device discovery enters usbmux/lockdownd and can make Apple's management
+// stack reopen interfaces. Keep it outside the wired USB transition window.
+[[nodiscard]] bool try_begin_usb_device_discovery() noexcept;
+void end_usb_device_discovery() noexcept;
+
+class UsbConfigurationNotReadyError final : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
 
 namespace detail {
 
@@ -55,6 +68,29 @@ private:
     mutable std::mutex mutex_;
     std::exception_ptr error_;
     std::atomic_bool failed_{};
+};
+
+class StreamingSilenceWatchdog final {
+public:
+    using Clock = std::chrono::steady_clock;
+    static constexpr auto SilenceLimit = std::chrono::seconds(10);
+
+    void observe_media(Clock::time_point now) noexcept { last_media_at_ = now; }
+
+    [[nodiscard]] bool expired(Clock::time_point now) const noexcept {
+        return last_media_at_ && now >= *last_media_at_ &&
+            now - *last_media_at_ >= SilenceLimit;
+    }
+
+    [[nodiscard]] std::chrono::milliseconds silence_duration(
+        Clock::time_point now) const noexcept {
+        if (!last_media_at_ || now < *last_media_at_) return {};
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - *last_media_at_);
+    }
+
+private:
+    std::optional<Clock::time_point> last_media_at_;
 };
 
 enum class VideoQueueAction {
@@ -140,6 +176,8 @@ private:
     std::uint64_t stale_render_frames_{};
     std::uint64_t selected_render_frames_{};
     std::jthread worker_;
+    mutable std::mutex active_usb_mutex_;
+    std::function<void()> active_usb_cancel_;
     UsbBackend usb_backend_{UsbBackend::LibUsb1};
     // The explicit start preflight already opened and identified this device.
     // Reuse that descriptor in the worker so startup does not immediately
@@ -164,6 +202,10 @@ private:
     void acquire_usb_transition_gate() noexcept;
     void release_usb_transition_gate() noexcept;
     void set_state(State state, std::wstring message);
+    void set_failure(FailureKind kind, FailureStage stage,
+        std::int32_t error_code, std::wstring message);
+    void set_stopped_warning(FailureKind kind, FailureStage stage,
+        std::int32_t error_code, std::wstring message);
     void stop_audio_renderer() noexcept;
 };
 

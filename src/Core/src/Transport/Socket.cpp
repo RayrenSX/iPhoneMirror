@@ -3,6 +3,8 @@
 #include <WS2tcpip.h>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <format>
 #include <mutex>
 
@@ -127,6 +129,43 @@ std::size_t Socket::receive(std::span<std::uint8_t> destination) {
     return static_cast<std::size_t>(received);
 }
 
+bool Socket::shutdown_send_and_wait_for_peer_close(int timeout_ms) noexcept {
+    if (handle_ == INVALID_SOCKET) return true;
+    if (timeout_ms <= 0) return false;
+
+    // A usbmux Connect socket is a device tunnel. Closing it immediately can
+    // leave lockdownd teardown queued in Apple's user-mode driver after the
+    // application-side discovery lease has been released. Half-close first
+    // and wait for peer EOF so the lease covers the real tunnel lifetime.
+    if (::shutdown(handle_, SD_SEND) == SOCKET_ERROR) {
+        const auto error = WSAGetLastError();
+        if (error != WSAENOTCONN && error != WSAESHUTDOWN) return false;
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(timeout_ms);
+    std::array<char, 512> buffer{};
+    for (;;) {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0) return false;
+        const auto bounded_timeout = static_cast<int>(
+            std::min<std::int64_t>(remaining, 100));
+        if (setsockopt(handle_, SOL_SOCKET, SO_RCVTIMEO,
+                reinterpret_cast<const char*>(&bounded_timeout),
+                sizeof(bounded_timeout)) == SOCKET_ERROR) return false;
+
+        const int received = ::recv(handle_, buffer.data(),
+            static_cast<int>(buffer.size()), 0);
+        if (received == 0) return true;
+        if (received == SOCKET_ERROR) {
+            const auto error = WSAGetLastError();
+            if (error == WSAETIMEDOUT || error == WSAEWOULDBLOCK) continue;
+            return error == WSAECONNRESET || error == WSAENOTCONN;
+        }
+    }
+}
+
 void Socket::close() noexcept {
     if (handle_ != INVALID_SOCKET) {
         closesocket(handle_);
@@ -135,4 +174,3 @@ void Socket::close() noexcept {
 }
 
 } // namespace iPhoneMirror::transport
-

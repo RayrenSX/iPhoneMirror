@@ -6,10 +6,11 @@
         Width="520" SizeToContent="Height" MinHeight="250" MaxHeight="540"
         ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
         WindowStyle="None" ExtendsContentIntoTitleBar="True"
-        WindowBackdropType="Acrylic" WindowCornerPreference="Round"
-        Background="{DynamicResource AppBackgroundBrush}"
+        WindowBackdropType="None" WindowCornerPreference="Round"
+        Background="{DynamicResource WindowBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False">
-    <Border Style="{StaticResource ModernDialogSurface}" Margin="10">
+    <Border Style="{StaticResource ModernDialogSurface}" Margin="0"
+            Effect="{x:Null}" CornerRadius="0" BorderThickness="0">
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/><RowDefinition Height="16"/>

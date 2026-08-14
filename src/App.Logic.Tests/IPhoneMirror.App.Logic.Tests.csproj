@@ -14,7 +14,9 @@
     <Compile Include="Program.cs" />
     <Compile Include="..\Shared\Networking\SegmentedHttpDownloader.cs" Link="Networking\SegmentedHttpDownloader.cs" />
     <Compile Include="..\App\Services\StableDeviceSelection.cs" Link="StableDeviceSelection.cs" />
+    <Compile Include="..\App\Services\UsbDeviceRefreshPolicy.cs" Link="UsbDeviceRefreshPolicy.cs" />
     <Compile Include="..\App\Services\CaptureShutdownCoordinator.cs" Link="CaptureShutdownCoordinator.cs" />
+    <Compile Include="..\App\Services\DeviceSessionManager.cs" Link="DeviceSessionManager.cs" />
     <Compile Include="..\App\Services\SingleInstanceCoordinator.cs" Link="SingleInstanceCoordinator.cs" />
     <Compile Include="..\App\Models\DeviceCornerProfile.cs" Link="DeviceCornerProfile.cs" />
     <Compile Include="..\App\Models\DeviceCaptureState.cs" Link="DeviceCaptureState.cs" />
@@ -30,6 +32,8 @@
     <Compile Include="..\App\Services\DiagnosticLogger.cs" Link="DiagnosticLogger.cs" />
     <Compile Include="..\App\Services\StartupDiagnostics.cs" Link="StartupDiagnostics.cs" />
     <Compile Include="..\App\Services\CaptureErrorGuidance.cs" Link="CaptureErrorGuidance.cs" />
+    <Compile Include="..\App\Services\IPhoneFilterDriverService.cs" Link="IPhoneFilterDriverService.cs" />
+    <Compile Include="..\App\Interop\NativeCore.cs" Link="NativeCore.cs" />
     <Compile Include="..\App\Services\MediaSourceClassifier.cs" Link="MediaSourceClassifier.cs" />
     <Compile Include="..\App\Services\MediaCastEventGate.cs" Link="MediaCastEventGate.cs" />
     <Compile Include="..\App\Services\MediaRecoveryBackoff.cs" Link="MediaRecoveryBackoff.cs" />
@@ -42,7 +46,6 @@
     <Compile Include="..\App\Updater\GitHubReleaseClient.cs" Link="Updater\GitHubReleaseClient.cs" />
     <Compile Include="..\App\Updater\VersionManager.cs" Link="Updater\VersionManager.cs" />
     <Compile Include="..\App\Updater\UpdateInstallerLauncher.cs" Link="Updater\UpdateInstallerLauncher.cs" />
-    <Compile Include="MediaOutputTestInterop.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\App\tools\updater\Apply-ZipUpdate.ps1"

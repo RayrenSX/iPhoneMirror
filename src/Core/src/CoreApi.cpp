@@ -1,6 +1,7 @@
 #include "iPhoneMirror/CoreApi.h"
 
 #include "Device/DeviceManager.h"
+#include "Device/AppleUsbDiscovery.h"
 #include "Capture/CaptureSession.h"
 #include "Capture/WirelessCaptureSession.h"
 #include "Capture/WirelessReceiverHub.h"
@@ -24,16 +25,21 @@
 #include <limits>
 #include <chrono>
 #include <unordered_map>
+#include <unordered_set>
 #include <Windows.h>
 
 namespace {
 
 std::mutex state_mutex;
 std::mutex preview_window_mutex;
+std::mutex device_metadata_mutex;
 std::shared_mutex initialization_mutex;
 bool initialized{};
 thread_local std::wstring last_error;
 iPhoneMirror::device::DeviceManager device_manager;
+std::unordered_map<std::string, std::wstring> product_type_cache;
+thread_local std::vector<iPhoneMirror::device::DeviceRecord> device_refresh_snapshot;
+thread_local bool device_refresh_snapshot_valid{};
 std::unique_ptr<iPhoneMirror::capture::ICaptureSession> capture_session;
 std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer> preview_renderer;
 HWND preview_renderer_window{};
@@ -50,11 +56,15 @@ struct MultiSessionContext {
     iPhoneMirror::capture::CapturePreferences preferences;
     float corner_radius{0.1784F};
     float corner_exponent{2.36F};
+    std::string wired_device_identity;
     bool stopped{};
     std::atomic_bool accepting_renderers{true};
 };
 
 std::unordered_map<iPhoneMirror::SessionHandle, std::shared_ptr<MultiSessionContext>> multi_sessions;
+// Reserve before USB preflight and release after the capture object is
+// destroyed. This prevents concurrent starts and start/teardown overlap.
+std::unordered_set<std::string> wired_session_reservations;
 iPhoneMirror::SessionHandle next_session_handle{1};
 
 // Caller holds preview_window_mutex. A flip-model swap chain is exclusive to
@@ -100,13 +110,24 @@ std::string narrow(const wchar_t* text) {
     return result;
 }
 
+std::string normalized_wired_device_identity(const wchar_t* udid) {
+    auto identity = narrow(udid);
+    std::transform(identity.begin(), identity.end(), identity.begin(),
+        [](unsigned char character) {
+            return character >= 'A' && character <= 'Z'
+                ? static_cast<char>(character - 'A' + 'a')
+                : static_cast<char>(character);
+        });
+    return identity;
+}
+
 std::wstring product_type_for_udid(const wchar_t* udid) {
     if (!udid || !*udid) return {};
-    try {
-        for (const auto& device : device_manager.refresh())
-            if (device.udid == udid) return device.product_type;
-    } catch (...) {}
-    return {};
+    const auto identity = normalized_wired_device_identity(udid);
+    if (identity.empty()) return {};
+    std::scoped_lock lock(device_metadata_mutex);
+    const auto found = product_type_cache.find(identity);
+    return found == product_type_cache.end() ? std::wstring{} : found->second;
 }
 
 std::wstring widen(std::string_view text) {
@@ -462,6 +483,11 @@ std::int32_t start_capture_locked(const wchar_t* udid,
         capture_session = std::move(usb_capture);
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+    } catch (const iPhoneMirror::capture::UsbConfigurationNotReadyError& error) {
+        capture_session.reset();
+        return fail(iPhoneMirror::Result::UsbConfigurationNotReady,
+            L"USB configuration is not ready for a new capture session: " +
+                widen(error.what()));
     } catch (const std::exception& error) {
         capture_session.reset();
         return fail(iPhoneMirror::Result::TransportUnavailable,
@@ -551,6 +577,11 @@ void IM_CALL im_shutdown() {
             context->stopped = true;
         }
         if (session_capture && !stopped) session_capture->stop();
+        session_capture.reset();
+    }
+    {
+        std::scoped_lock lock(state_mutex);
+        wired_session_reservations.clear();
     }
     if (legacy_capture) legacy_capture->stop();
     if (receiver) receiver->stop();
@@ -585,29 +616,58 @@ std::int32_t IM_CALL im_log_message(const wchar_t* message) {
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
-std::int32_t IM_CALL im_refresh_devices(iPhoneMirror::DeviceInfo* devices, std::uint32_t* count) {
+std::int32_t IM_CALL im_refresh_devices(iPhoneMirror::DeviceInfo* devices,
+    std::uint32_t* count) {
+    return im_refresh_devices_ex(devices, count, 0);
+}
+
+std::int32_t IM_CALL im_refresh_devices_ex(iPhoneMirror::DeviceInfo* devices,
+    std::uint32_t* count, std::int32_t refresh_metadata) {
     if (!count) return fail(iPhoneMirror::Result::InvalidArgument, L"count 不能为空");
     std::shared_lock initialization_lock(initialization_mutex);
     {
-        // DeviceManager is stateless and usbmux discovery does not touch the
-        // active capture session. Holding state_mutex across Lockdown network
-        // round trips stalls the D3D frame provider and makes a manual
-        // multi-device refresh look like a frozen preview.
+        // DeviceManager serializes cached metadata internally. Holding
+        // state_mutex across usbmux/Lockdown round trips would stall the D3D
+        // frame provider and make a manual refresh look like a frozen preview.
         std::scoped_lock lock(state_mutex);
         if (!initialized) return fail(iPhoneMirror::Result::NotInitialized, L"核心尚未初始化");
     }
+    if (!iPhoneMirror::capture::try_begin_usb_device_discovery()) {
+        return fail(iPhoneMirror::Result::UsbConfigurationNotReady,
+            L"Apple USB 配置正在切换；本次设备刷新已跳过");
+    }
+    struct DiscoveryGuard final {
+        ~DiscoveryGuard() { iPhoneMirror::capture::end_usb_device_discovery(); }
+    } discovery_guard;
     try {
         const auto started = std::chrono::steady_clock::now();
-        const auto records = device_manager.refresh();
+        if (!devices || !device_refresh_snapshot_valid) {
+            device_refresh_snapshot = device_manager.refresh(refresh_metadata != 0);
+            device_refresh_snapshot_valid = true;
+            std::scoped_lock metadata_lock(device_metadata_mutex);
+            for (const auto& record : device_refresh_snapshot) {
+                const auto identity = normalized_wired_device_identity(
+                    record.udid.c_str());
+                if (!identity.empty() && !record.product_type.empty())
+                    product_type_cache.insert_or_assign(
+                        identity, record.product_type);
+            }
+        }
+        const auto& records = device_refresh_snapshot;
         const auto required = static_cast<std::uint32_t>(records.size());
         iPhoneMirror::logging::write_event(iPhoneMirror::logging::Level::Info,
-            "devices", "refresh", std::format("count={} elapsed_ms={:.3f} buffer_query={}",
+            "devices", "refresh", std::format(
+                "count={} elapsed_ms={:.3f} buffer_query={} metadata={}",
                 required,
                 std::chrono::duration<double, std::milli>(
                     std::chrono::steady_clock::now() - started).count(),
-                devices == nullptr));
+                devices == nullptr, refresh_metadata != 0));
         if (!devices) {
             *count = required;
+            if (required == 0) {
+                device_refresh_snapshot.clear();
+                device_refresh_snapshot_valid = false;
+            }
             last_error.clear();
             return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
         }
@@ -615,9 +675,13 @@ std::int32_t IM_CALL im_refresh_devices(iPhoneMirror::DeviceInfo* devices, std::
         *count = required;
         if (capacity < required) return fail(iPhoneMirror::Result::BufferTooSmall, L"设备列表缓冲区不足");
         for (std::size_t index = 0; index < records.size(); ++index) fill_device(devices[index], records[index]);
+        device_refresh_snapshot.clear();
+        device_refresh_snapshot_valid = false;
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
     } catch (...) {
+        device_refresh_snapshot.clear();
+        device_refresh_snapshot_valid = false;
         return fail(iPhoneMirror::Result::InternalError, L"刷新 Apple 设备时发生异常");
     }
 }
@@ -923,7 +987,25 @@ std::int32_t IM_CALL im_start_capture_with_options(const wchar_t* udid,
 std::int32_t IM_CALL im_stop_capture() {
     std::scoped_lock lock(state_mutex);
     iPhoneMirror::logging::write("im_stop_capture");
-    if (capture_session) capture_session->stop();
+    if (capture_session) {
+        capture_session->stop();
+        const auto snapshot = capture_session->snapshot();
+        if (snapshot.state == iPhoneMirror::capture::State::Error &&
+            snapshot.failure_stage ==
+                iPhoneMirror::capture::FailureStage::SessionTeardown)
+            return fail(iPhoneMirror::Result::SessionTeardownFailed,
+                snapshot.message.empty() ? L"投屏停止时 USB 资源恢复失败" : snapshot.message);
+        if (snapshot.state == iPhoneMirror::capture::State::Stopped &&
+            snapshot.failure_stage ==
+                iPhoneMirror::capture::FailureStage::SessionTeardown &&
+            snapshot.error_code == -2108) {
+            if (preview_renderer) preview_renderer->clear();
+            return fail(iPhoneMirror::Result::UsbConfigurationRestoreWarning,
+                snapshot.message.empty()
+                    ? L"Mirroring stopped and resources were released, but the normal Apple USB configuration was not observed"
+                    : snapshot.message);
+        }
+    }
     if (preview_renderer) preview_renderer->clear();
     last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
@@ -941,6 +1023,9 @@ std::int32_t IM_CALL im_get_capture_status(iPhoneMirror::CaptureStatus* status) 
         status->fps = status->latency_ms = 0;
         status->video_frames = status->audio_packets = 0;
         status->audio_sample_rate = status->audio_channels = 0;
+        status->failure_kind = iPhoneMirror::CaptureFailureKind::None;
+        status->failure_stage = iPhoneMirror::CaptureFailureStage::None;
+        status->error_code = 0;
         copy_text(status->message, L"等待设备");
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
     }
@@ -954,6 +1039,11 @@ std::int32_t IM_CALL im_get_capture_status(iPhoneMirror::CaptureStatus* status) 
     status->audio_packets = snapshot.audio_packets;
     status->audio_sample_rate = snapshot.audio_sample_rate;
     status->audio_channels = snapshot.audio_channels;
+    status->failure_kind = static_cast<iPhoneMirror::CaptureFailureKind>(
+        snapshot.failure_kind);
+    status->failure_stage = static_cast<iPhoneMirror::CaptureFailureStage>(
+        snapshot.failure_stage);
+    status->error_code = snapshot.error_code;
     copy_text(status->message, snapshot.message);
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
@@ -1284,13 +1374,23 @@ std::int32_t IM_CALL im_session_create(const wchar_t* udid,
     // keeps capture startup, rollback, and its final log writes inside the
     // initialized lifetime while still allowing devices to start in parallel.
     std::shared_lock initialization_lock(initialization_mutex);
+    *handle = 0;
+    std::string wired_device_identity;
     {
         std::scoped_lock lock(state_mutex);
         if (!initialized) return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
+        wired_device_identity = normalized_wired_device_identity(udid);
+        if (wired_device_identity.empty())
+            return fail(iPhoneMirror::Result::InvalidArgument,
+                L"Device UDID could not be converted to UTF-8");
+        if (!wired_session_reservations.emplace(wired_device_identity).second)
+            return fail(iPhoneMirror::Result::SessionAlreadyExists,
+                L"A wired capture session for this device already exists or is still stopping");
     }
     try {
         auto context = std::make_shared<MultiSessionContext>();
         context->preferences = preferences_from_options(*options);
+        context->wired_device_identity = wired_device_identity;
         auto usb_capture = std::make_unique<iPhoneMirror::capture::CaptureSession>(
             narrow(udid), context->preferences, product_type_for_udid(udid));
         usb_capture->start(false);
@@ -1303,13 +1403,37 @@ std::int32_t IM_CALL im_session_create(const wchar_t* udid,
         const auto id = next_session_handle++;
         multi_sessions.emplace(id, std::move(context));
         *handle = id;
-        iPhoneMirror::logging::write(std::format("multi_session create handle={} udid_fp={}",
-            id, iPhoneMirror::logging::fingerprint(narrow(udid))));
+        try {
+            iPhoneMirror::logging::write(std::format(
+                "multi_session create handle={} udid_fp={}", id,
+                iPhoneMirror::logging::fingerprint(wired_device_identity)));
+        } catch (...) {
+            // The handle is committed. Logging cannot turn success into an
+            // orphaned session that the caller has no handle to destroy.
+        }
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+    } catch (const iPhoneMirror::capture::UsbConfigurationNotReadyError& error) {
+        {
+            std::scoped_lock lock(state_mutex);
+            wired_session_reservations.erase(wired_device_identity);
+        }
+        return fail(iPhoneMirror::Result::UsbConfigurationNotReady,
+            L"Could not create device session: " + widen(error.what()));
     } catch (const std::exception& error) {
+        {
+            std::scoped_lock lock(state_mutex);
+            wired_session_reservations.erase(wired_device_identity);
+        }
         return fail(iPhoneMirror::Result::TransportUnavailable,
             L"Could not create device session: " + widen(error.what()));
+    } catch (...) {
+        {
+            std::scoped_lock lock(state_mutex);
+            wired_session_reservations.erase(wired_device_identity);
+        }
+        return fail(iPhoneMirror::Result::InternalError,
+            L"Could not create device session: unknown error");
     }
 }
 
@@ -1384,6 +1508,26 @@ std::int32_t IM_CALL im_session_stop(iPhoneMirror::SessionHandle handle) {
         context->stopped = true;
     }
     iPhoneMirror::logging::write(std::format("multi_session stop handle={}", handle));
+    iPhoneMirror::capture::Snapshot snapshot;
+    {
+        std::shared_lock lock(context->lifecycle_mutex);
+        if (context->capture) snapshot = context->capture->snapshot();
+    }
+    if (snapshot.state == iPhoneMirror::capture::State::Error &&
+        snapshot.failure_stage ==
+            iPhoneMirror::capture::FailureStage::SessionTeardown) {
+        return fail(iPhoneMirror::Result::SessionTeardownFailed,
+            snapshot.message.empty() ? L"投屏停止时 USB 资源恢复失败" : snapshot.message);
+    }
+    if (snapshot.state == iPhoneMirror::capture::State::Stopped &&
+        snapshot.failure_stage ==
+            iPhoneMirror::capture::FailureStage::SessionTeardown &&
+        snapshot.error_code == -2108) {
+        return fail(iPhoneMirror::Result::UsbConfigurationRestoreWarning,
+            snapshot.message.empty()
+                ? L"Mirroring stopped and resources were released, but the normal Apple USB configuration was not observed"
+                : snapshot.message);
+    }
     last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
@@ -1414,6 +1558,13 @@ void IM_CALL im_session_destroy(iPhoneMirror::SessionHandle handle) {
         context->stopped = true;
     }
     if (capture && !stopped) capture->stop();
+    // Capture destruction calls stop() defensively. Complete it before a new
+    // session can reserve and reopen the same USB device.
+    capture.reset();
+    if (!context->wired_device_identity.empty()) {
+        std::scoped_lock lock(state_mutex);
+        wired_session_reservations.erase(context->wired_device_identity);
+    }
     iPhoneMirror::logging::write(std::format("multi_session destroy handle={}", handle));
 }
 
@@ -1441,6 +1592,11 @@ std::int32_t IM_CALL im_session_get_status(iPhoneMirror::SessionHandle handle,
     status->audio_packets = snapshot.audio_packets;
     status->audio_sample_rate = snapshot.audio_sample_rate;
     status->audio_channels = snapshot.audio_channels;
+    status->failure_kind = static_cast<iPhoneMirror::CaptureFailureKind>(
+        snapshot.failure_kind);
+    status->failure_stage = static_cast<iPhoneMirror::CaptureFailureStage>(
+        snapshot.failure_stage);
+    status->error_code = snapshot.error_code;
     copy_text(status->message, snapshot.message);
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }

@@ -13,6 +13,7 @@ internal enum IPhoneFilterDriverState
     PendingRestart,
     Missing,
     InvalidStack,
+    UnsafeStack,
     Error,
 }
 
@@ -22,7 +23,7 @@ internal sealed record IPhoneFilterDriverStatus(
     string Diagnostic)
 {
     public bool CanStartCapture => State is IPhoneFilterDriverState.Ready or
-        IPhoneFilterDriverState.Provisional;
+        IPhoneFilterDriverState.Provisional or IPhoneFilterDriverState.UnsafeStack;
 }
 
 /// <summary>
@@ -33,6 +34,7 @@ internal sealed class IPhoneFilterDriverService
 {
     private const string AppleVendorPrefix = "VID_05AC&PID_";
     private const uint CrSuccess = 0x00000000;
+    private const uint DnStarted = 0x00000008;
 
     internal IPhoneFilterDriverStatus Inspect(string? udid, bool? exactBackendAvailable = null)
     {
@@ -58,11 +60,25 @@ internal sealed class IPhoneFilterDriverService
                 return new(IPhoneFilterDriverState.InvalidStack, ReadInstalledVersion(),
                     $"Unexpected parent service: {service ?? "(none)"}.");
 
-            var hasFilter = ReadMultiString(deviceKey, "UpperFilters")
+            if (!TryReadMultiString(deviceKey, "UpperFilters", out var upperFilters) ||
+                !TryReadMultiString(deviceKey, "LowerFilters", out var lowerFilters))
+                return new(IPhoneFilterDriverState.Error, ReadInstalledVersion(),
+                    "The iPhone USB filter chain could not be read reliably.");
+
+            var hasFilter = upperFilters
                 .Any(value => string.Equals(value, "libusb0", StringComparison.OrdinalIgnoreCase));
+            var hasAppleKernelFilter = lowerFilters
+                .Any(value => string.Equals(value, "AppleLowerFilter",
+                                  StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(value, "AppleKmdfFilter",
+                                  StringComparison.OrdinalIgnoreCase));
             var installedVersion = ReadInstalledVersion();
             if (hasFilter)
             {
+                if (hasAppleKernelFilter)
+                    return new(IPhoneFilterDriverState.UnsafeStack, installedVersion,
+                        "Legacy libusb0 is stacked with AppleLowerFilter/AppleKmdfFilter; " +
+                        "wired capture remains available with the conservative USB lifecycle path.");
                 var systemDriver = Path.Combine(Environment.GetFolderPath(
                     Environment.SpecialFolder.System), "drivers", "libusb0.sys");
                 if (!File.Exists(systemDriver))
@@ -137,19 +153,29 @@ internal sealed class IPhoneFilterDriverService
         }
     }
 
-    private static IEnumerable<string> ReadMultiString(RegistryKey key, string name) =>
-        key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) switch
+    private static bool TryReadMultiString(RegistryKey key, string name,
+        out string[] values)
+    {
+        values = [];
+        if (!key.GetValueNames().Contains(name, StringComparer.OrdinalIgnoreCase))
+            return true;
+        if (key.GetValueKind(name) != RegistryValueKind.MultiString)
+            return false;
+        values = key.GetValue(name, null,
+            RegistryValueOptions.DoNotExpandEnvironmentNames) switch
         {
-            string[] values => values,
-            string value when !string.IsNullOrWhiteSpace(value) => [value],
-            _ => [],
+            string[] entries => entries,
+            _ => null!,
         };
+        return values is not null;
+    }
 
     private static bool IsDevicePresent(string instanceId)
     {
         var locate = CM_Locate_DevNodeW(out var node, instanceId, 0);
         return locate == CrSuccess &&
-            CM_Get_DevNode_Status(out _, out _, node, 0) == CrSuccess;
+            CM_Get_DevNode_Status(out var status, out _, node, 0) == CrSuccess &&
+            (status & DnStarted) != 0;
     }
 
     private static bool IsServiceRunning(string name)

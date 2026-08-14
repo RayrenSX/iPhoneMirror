@@ -97,7 +97,8 @@ try {
     $suffix = Read-LogSuffix $logOffset
     $starts = ([regex]::Matches($suffix, 'im_start_capture udid=')).Count
     if ($starts -ne 1) { throw "Expected exactly one start request, found $starts." }
-    if ($suffix -notmatch 'shutdown_usb handshake_started=.* stop_messages=') {
+    if ($suffix -notmatch
+            'shutdown_usb device_fp=[^ ]+ handshake_started=.* stop_messages=') {
         throw 'Window close did not send the QuickTime shutdown controls.'
     }
     if ($suffix -notmatch 'im_shutdown') {

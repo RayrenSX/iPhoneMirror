@@ -23,6 +23,8 @@
     <system:String x:Key="SimultaneousMirrorStartedFormat">Opened a simultaneous mirror window for {0}</system:String>
     <system:String x:Key="SimultaneousMirrorFailedFormat">Could not start simultaneous mirroring: {0}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">Mirroring error — {0}</system:String>
+    <system:String x:Key="DeviceSessionClosedWarningTitleFormat">Mirroring stopped — {0}</system:String>
+    <system:String x:Key="DeviceSessionClosedWarningBody">You stopped mirroring from Control Center. Restart the iPhone or iPad before using wired mirroring with this device again.</system:String>
     <system:String x:Key="IndependentWindowPin">Always on top</system:String>
     <system:String x:Key="IndependentWindowUnpin">Disable always on top</system:String>
     <system:String x:Key="IndependentWindowEnterFullScreen">Enter full screen</system:String>
@@ -119,6 +121,7 @@
     <system:String x:Key="DriverDeviceFilterMissing">This device needs the external capture driver</system:String>
     <system:String x:Key="DriverExternalRequired">Install or repair the external capture driver, then reconnect this Apple device.</system:String>
     <system:String x:Key="DriverInvalidAppleStack">The Apple USB parent driver is not compatible.</system:String>
+    <system:String x:Key="DriverUnsafeAppleStack">Driver stack detected; conservative USB mode enabled</system:String>
     <system:String x:Key="DriverFilterStateError">The Apple device capture-driver state could not be verified.</system:String>
     <system:String x:Key="DriverReconnectPhone">Unlock and reconnect this Apple device, then refresh devices.</system:String>
     <system:String x:Key="DriverReplugRequired">Reconnect this Apple device so the external capture driver can attach.</system:String>
@@ -131,6 +134,8 @@
     <system:String x:Key="CaptureHandshaking">Establishing the mirroring session…</system:String>
     <system:String x:Key="CaptureStreaming">Mirroring</system:String>
     <system:String x:Key="CaptureStopping">Stopping mirroring…</system:String>
+    <system:String x:Key="CaptureCleaningDevice">Cleaning up device…</system:String>
+    <system:String x:Key="CaptureQueued">Waiting for device cleanup…</system:String>
     <system:String x:Key="SwitchingDeviceFormat">Stopping the current session before switching to {0}…</system:String>
     <system:String x:Key="SwitchDeviceFailedFormat">Could not switch devices: {0}</system:String>
     <system:String x:Key="CaptureStopped">Mirroring stopped</system:String>
@@ -143,9 +148,43 @@
     <system:String x:Key="CaptureNoPingCableAction">Replace the cable with an Apple original or MFi-certified cable</system:String>
     <system:String x:Key="CaptureNoPingUnlockHint">Keep the device unlocked when reconnecting and starting mirroring again.</system:String>
     <system:String x:Key="CaptureUsbConfigurationRecovery">iPhone or iPad USB mirroring configuration could not be activated.&#x0A;&#x0A;Try these steps in order:&#x0A;1. Unplug the cable, wait a few seconds, and plug it back in&#x0A;2. Restart the iPhone or iPad, then reconnect it&#x0A;3. Replace the cable with an Apple original or MFi-certified cable&#x0A;&#x0A;Keep the device unlocked when reconnecting and starting mirroring again.</system:String>
+    <system:String x:Key="CaptureFailureDetailsFormat">Error type: {0}&#x0A;Failure stage: {1}&#x0A;Error code: {2}&#x0A;&#x0A;Details: {3}</system:String>
+    <system:String x:Key="CaptureActionReconnectDevice">Keep the device unlocked, reconnect the cable, then try again.</system:String>
+    <system:String x:Key="CaptureActionRestartDevice">Restart the iPhone or iPad, then try again.</system:String>
+    <system:String x:Key="CaptureActionWaitForCleanup">Wait for device cleanup to finish, then start mirroring again.</system:String>
+    <system:String x:Key="CaptureActionVideoRetry">Stop and start mirroring again. If there is still no picture, reconnect the cable.</system:String>
+    <system:String x:Key="CaptureActionDriverRecovery">Reconnect the device, then try again. If it still fails, restart the computer.</system:String>
+    <system:String x:Key="CaptureActionDeviceDisconnected">Reconnect and unlock the device, then start mirroring again.</system:String>
+    <system:String x:Key="CaptureActionRestartApplication">Close and reopen iPhoneMirror, then try again.</system:String>
+    <system:String x:Key="CaptureActionRetry">Stop and start mirroring again. If it still fails, reconnect the device.</system:String>
+    <system:String x:Key="CaptureFailureStatusFormat">Mirroring error: {0} ({1}, code {2})</system:String>
+    <system:String x:Key="CaptureFailureUsbConnection">USB device connection failed</system:String>
+    <system:String x:Key="CaptureFailureSessionCreation">Mirroring session creation failed</system:String>
+    <system:String x:Key="CaptureFailureDriver">Apple/libusb driver error</system:String>
+    <system:String x:Key="CaptureDriverSafetyBlocked">Legacy libusb0 and Apple USB filters are stacked. The installed drivers are unchanged; this session uses a conservative USB open and teardown order.</system:String>
+    <system:String x:Key="CaptureFailureVideoStream">Video stream or decoding failed</system:String>
+    <system:String x:Key="CaptureFailureVideoDimensions">Invalid video stream dimensions</system:String>
+    <system:String x:Key="CaptureFailureNoFrames">No video frames or black screen</system:String>
+    <system:String x:Key="CaptureFailureSystemClosed">Session was closed by the system</system:String>
+    <system:String x:Key="CaptureFailureDeviceDisconnected">Device disconnected</system:String>
+    <system:String x:Key="CaptureFailureTimeout">Operation timed out</system:String>
+    <system:String x:Key="CaptureFailureExistingSession">A previous mirroring session still exists</system:String>
+    <system:String x:Key="CaptureFailureChildProcess">Child process exited unexpectedly</system:String>
+    <system:String x:Key="CaptureFailureUnknown">Unknown error</system:String>
+    <system:String x:Key="CaptureStageUsbPreflight">USB device preflight</system:String>
+    <system:String x:Key="CaptureStageUsbActivation">QuickTime USB activation</system:String>
+    <system:String x:Key="CaptureStageDeviceReenumeration">USB device re-enumeration</system:String>
+    <system:String x:Key="CaptureStageInterfaceOpen">QuickTime USB interface open</system:String>
+    <system:String x:Key="CaptureStageQuickTimeHandshake">QuickTime session handshake</system:String>
+    <system:String x:Key="CaptureStageVideoStream">Video stream setup</system:String>
+    <system:String x:Key="CaptureStageDecoder">Video decoder</system:String>
+    <system:String x:Key="CaptureStageSessionTeardown">Session teardown</system:String>
+    <system:String x:Key="CaptureStageDeviceDiscovery">Device discovery</system:String>
+    <system:String x:Key="CaptureStageUnknown">Unknown stage</system:String>
     <system:String x:Key="StartRequested">Mirroring start requested</system:String>
     <system:String x:Key="StartFailedFormat">Could not start mirroring: {0}</system:String>
     <system:String x:Key="StopSessionReleased">Mirroring stopped and session resources were released</system:String>
+    <system:String x:Key="StopUsbRestoreWarningFormat">Mirroring stopped and session resources were released, but the iPhone's normal USB configuration was not confirmed. Diagnostic: {0}</system:String>
     <system:String x:Key="StopFailedFormat">Could not stop mirroring: {0}</system:String>
     <system:String x:Key="LogViewCleared">Log view cleared (the log file was not deleted)</system:String>
 
@@ -474,4 +513,7 @@
     <system:String x:Key="CloseOtherInstancesFailedFormat">{0} iPhoneMirror instance could not be closed. Close it from the taskbar or Task Manager, then try again.</system:String>
     <system:String x:Key="Minimize">Minimize</system:String>
     <system:String x:Key="Maximize">Maximize</system:String>
+    <system:String x:Key="TitleBarMinimizeToolTip">Minimize</system:String>
+    <system:String x:Key="TitleBarMaximizeToolTip">Maximize or restore</system:String>
+    <system:String x:Key="TitleBarCloseToolTip">Close</system:String>
 </ResourceDictionary>

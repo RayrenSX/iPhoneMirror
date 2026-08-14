@@ -56,6 +56,7 @@ public:
 
     [[nodiscard]] SessionEvent process(const Packet& packet);
     [[nodiscard]] std::vector<std::vector<std::uint8_t>> stop_messages();
+    [[nodiscard]] std::vector<std::vector<std::uint8_t>> complete_stop_messages();
     [[nodiscard]] std::vector<std::vector<std::uint8_t>> begin_display_reconfigure(
         std::uint32_t width, std::uint32_t height);
     [[nodiscard]] std::vector<std::vector<std::uint8_t>> complete_display_reconfigure();

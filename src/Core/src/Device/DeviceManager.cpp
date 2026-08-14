@@ -12,9 +12,11 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <map>
 #include <span>
 #include <stdexcept>
+#include <utility>
 
 namespace iPhoneMirror::device {
 namespace {
@@ -77,7 +79,8 @@ void enrich_from_lockdown(transport::Socket& socket, DeviceRecord& record) {
     if (record.name.empty()) record.name = L"iPhone";
 }
 
-void add_devices_from_port(std::uint16_t port, std::map<std::string, DeviceRecord, std::less<>>& devices) {
+[[maybe_unused]] void add_devices_from_port(std::uint16_t port,
+    std::map<std::string, DeviceRecord, std::less<>>& devices) {
     transport::UsbMuxClient mux(port);
     for (const auto& mux_device : mux.list_devices()) {
         if (!mux_device.connection_type.empty() &&
@@ -124,7 +127,111 @@ void add_devices_from_port(std::uint16_t port, std::map<std::string, DeviceRecor
         } catch (const std::exception&) {
             if (record.pair_record_present) record.status = L"已配对；请解锁 iPhone 后重试";
         }
+        const bool peer_closed =
+            lockdown.shutdown_send_and_wait_for_peer_close();
+        lockdown.close();
+        logging::write_event(peer_closed ? logging::Level::Info :
+                logging::Level::Warning,
+            "devices", "lockdown_tunnel_close",
+            std::format("device_fp={} peer_closed={}",
+                logging::fingerprint(mux_device.serial), peer_closed));
         devices.insert_or_assign(mux_device.serial, std::move(record));
+    }
+}
+
+struct MuxDeviceRecord {
+    std::uint16_t port{};
+    transport::MuxDevice device;
+};
+
+void list_devices_from_port(std::uint16_t port,
+    std::map<std::string, MuxDeviceRecord, std::less<>>& devices) {
+    transport::UsbMuxClient mux(port);
+    for (const auto& mux_device : mux.list_devices()) {
+        if (!mux_device.connection_type.empty() &&
+            _stricmp(mux_device.connection_type.c_str(), "USB") != 0)
+            continue;
+        devices.insert_or_assign(mux_device.serial,
+            MuxDeviceRecord{port, mux_device});
+    }
+}
+
+DeviceRecord make_presence_record(const MuxDeviceRecord& source) {
+    DeviceRecord record;
+    record.device_id = source.device.device_id;
+    record.mux_port = source.port;
+    record.usb_connected = true;
+    record.state = ConnectionState::Connected;
+    record.udid = widen(source.device.serial);
+    record.connection_type = widen(source.device.connection_type.empty()
+        ? "USB" : source.device.connection_type);
+    record.name = L"iPhone";
+    record.status = L"USB connected";
+    return record;
+}
+
+void apply_cached_metadata(DeviceRecord& target, const DeviceRecord& cached) {
+    target.pair_record_present = cached.pair_record_present;
+    target.lockdown_accessible = cached.lockdown_accessible;
+    target.state = cached.state;
+    target.name = cached.name;
+    target.product_type = cached.product_type;
+    target.os_version = cached.os_version;
+    target.status = cached.status;
+}
+
+void enrich_device_metadata(const MuxDeviceRecord& source,
+    DeviceRecord& record) noexcept {
+    transport::Socket lockdown;
+    try {
+        transport::UsbMuxClient mux(source.port);
+        lockdown = mux.connect_device(source.device.device_id, 62078);
+        try {
+            record.pair_record_present =
+                mux.has_pair_record(source.device.serial);
+            if (record.pair_record_present) {
+                record.state = ConnectionState::Paired;
+                record.status = L"Paired; verifying the device session";
+            } else {
+                record.status = L"Waiting for this computer to be trusted";
+            }
+        } catch (...) {
+            // Presence remains useful when pair-record access is unavailable.
+        }
+
+        try {
+            enrich_from_lockdown(lockdown, record);
+            if (record.lockdown_accessible) {
+                record.state = ConnectionState::Ready;
+                record.status = record.pair_record_present
+                    ? L"Connected and paired"
+                    : L"Connected; device information is available";
+            }
+        } catch (...) {
+            if (record.pair_record_present)
+                record.status = L"Paired; unlock the iPhone and refresh";
+        }
+
+        const bool peer_closed =
+            lockdown.shutdown_send_and_wait_for_peer_close();
+        lockdown.close();
+        logging::write_event(peer_closed ? logging::Level::Info :
+                logging::Level::Warning,
+            "devices", "lockdown_tunnel_close",
+            std::format("device_fp={} peer_closed={}",
+                logging::fingerprint(source.device.serial), peer_closed));
+    } catch (const std::exception& error) {
+        lockdown.close();
+        logging::write_event(logging::Level::Warning, "devices",
+            "metadata_refresh_failed",
+            std::format("device_fp={} error={}",
+                logging::fingerprint(source.device.serial), error.what()));
+    } catch (...) {
+        lockdown.close();
+        logging::write_event(logging::Level::Warning, "devices",
+            "metadata_refresh_failed",
+            std::format("device_fp={} error=unknown",
+                logging::fingerprint(source.device.serial)));
     }
 }
 
@@ -185,18 +292,37 @@ EnvironmentRecord DeviceManager::environment() const {
     return result;
 }
 
-std::vector<DeviceRecord> DeviceManager::refresh() const {
-    std::map<std::string, DeviceRecord, std::less<>> devices;
+std::vector<DeviceRecord> DeviceManager::refresh(bool refresh_metadata) {
+    std::map<std::string, MuxDeviceRecord, std::less<>> devices;
     if (transport::Socket::probe_loopback(27015)) {
-        try { add_devices_from_port(27015, devices); } catch (...) {}
+        try { list_devices_from_port(27015, devices); } catch (...) {}
     }
     if (transport::Socket::probe_loopback(37015)) {
-        try { add_devices_from_port(37015, devices); } catch (...) {}
+        try { list_devices_from_port(37015, devices); } catch (...) {}
     }
 
     std::vector<DeviceRecord> result;
     result.reserve(devices.size());
-    for (auto& [_, device] : devices) result.push_back(std::move(device));
+    std::scoped_lock metadata_lock(metadata_mutex_);
+    for (const auto& [serial, source] : devices) {
+        auto record = make_presence_record(source);
+        const auto cached = metadata_cache_.find(serial);
+        const bool metadata_needed = refresh_metadata ||
+            cached == metadata_cache_.end();
+        if (!metadata_needed) {
+            apply_cached_metadata(record, cached->second);
+        } else {
+            enrich_device_metadata(source, record);
+            // A transient explicit refresh must not erase known model/name data.
+            if (!record.lockdown_accessible &&
+                cached != metadata_cache_.end()) {
+                apply_cached_metadata(record, cached->second);
+            } else {
+                metadata_cache_.insert_or_assign(serial, record);
+            }
+        }
+        result.push_back(std::move(record));
+    }
     return result;
 }
 

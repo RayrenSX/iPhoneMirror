@@ -51,6 +51,7 @@ target_link_libraries(iPhoneMirror.Core PRIVATE
     ws2_32
     bcrypt
     setupapi
+    cfgmgr32
     advapi32
     mfplat
     mf
@@ -80,6 +81,19 @@ set_target_properties(iPhoneMirror.Core PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS OFF
 )
 
+add_executable(iPhoneMirror.UsbConfigurationSwitch
+    tools/UsbConfigurationSwitch.cpp)
+target_include_directories(iPhoneMirror.UsbConfigurationSwitch PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/third_party/libusb-win32/include)
+target_compile_definitions(iPhoneMirror.UsbConfigurationSwitch PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(iPhoneMirror.UsbConfigurationSwitch PRIVATE
+    /W4 /permissive- /utf-8 /EHsc)
+target_link_libraries(iPhoneMirror.UsbConfigurationSwitch PRIVATE
+    cfgmgr32
+    "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib")
+
 if(IPHONEMIRROR_BUILD_TESTS)
     enable_testing()
     add_executable(iPhoneMirror.Core.Tests
@@ -95,6 +109,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         src/Transport/UsbMuxClient.cpp
         src/Transport/QtUsbTransport.cpp
         src/Transport/LibUsb0Transport.cpp
+        src/Device/AppleUsbDiscovery.cpp
         src/Capture/CaptureSession.cpp
         src/Capture/WirelessReceiverHub.cpp
         src/Capture/WirelessCaptureSession.cpp
@@ -116,7 +131,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         "${PROJECT_SOURCE_DIR}/third_party/libusb/lib/x64/libusb-1.0.lib"
         "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib"
         mfplat mf mfuuid wmcodecdspuuid d3d11 dxgi
-        ole32 advapi32 avrt winhttp
+        ole32 advapi32 setupapi cfgmgr32 avrt winhttp
         ws2_32
         bcrypt
         delayimp
@@ -152,18 +167,31 @@ if(IPHONEMIRROR_BUILD_TESTS)
     add_test(NAME UsbConfigurationRestorePolicyTests
         COMMAND iPhoneMirror.UsbConfigurationRestorePolicy.Tests)
 
-    add_executable(iPhoneMirror.LibUsb0Probe
-        tools/LibUsb0Probe.cpp
-        src/Transport/LibUsb0Transport.cpp
-        src/Protocol/QuickTimePacket.cpp
-    )
-    target_include_directories(iPhoneMirror.LibUsb0Probe PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${PROJECT_SOURCE_DIR}/third_party/libusb/include
-        ${PROJECT_SOURCE_DIR}/third_party/libusb-win32/include)
-    target_compile_options(iPhoneMirror.LibUsb0Probe PRIVATE /W4 /permissive- /utf-8 /EHsc)
-    target_link_libraries(iPhoneMirror.LibUsb0Probe PRIVATE
-        "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib")
+    if(IPHONEMIRROR_BUILD_DANGEROUS_USB_TOOLS)
+        add_executable(iPhoneMirror.LibUsb0Probe
+            tools/LibUsb0Probe.cpp
+            src/Transport/LibUsb0Transport.cpp
+            src/Protocol/QuickTimePacket.cpp
+        )
+        target_include_directories(iPhoneMirror.LibUsb0Probe PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/third_party/libusb/include
+            ${PROJECT_SOURCE_DIR}/third_party/libusb-win32/include)
+        target_compile_options(iPhoneMirror.LibUsb0Probe PRIVATE
+            /W4 /permissive- /utf-8 /EHsc)
+        target_link_libraries(iPhoneMirror.LibUsb0Probe PRIVATE
+            "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib")
+    else()
+        # Multi-config generators keep artifacts for targets removed from a
+        # later configure. Remove the old real-device probe so a default safe
+        # build cannot accidentally launch a stale binary.
+        foreach(config Debug Release RelWithDebInfo MinSizeRel)
+            file(REMOVE
+                "${CMAKE_CURRENT_BINARY_DIR}/${config}/iPhoneMirror.LibUsb0Probe.exe")
+        endforeach()
+        file(REMOVE
+            "${CMAKE_CURRENT_BINARY_DIR}/iPhoneMirror.LibUsb0Probe.exe")
+    endif()
 
     add_executable(iPhoneMirror.PipelineSwitchProbe
         tools/PipelineSwitchProbe.cpp)
@@ -175,9 +203,10 @@ if(IPHONEMIRROR_BUILD_TESTS)
         /W4 /permissive- /utf-8 /EHsc)
     target_link_libraries(iPhoneMirror.PipelineSwitchProbe PRIVATE
         iPhoneMirror.Core)
+
 endif()
 
-install(TARGETS iPhoneMirror.Core
+install(TARGETS iPhoneMirror.Core iPhoneMirror.UsbConfigurationSwitch
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .
     ARCHIVE DESTINATION lib

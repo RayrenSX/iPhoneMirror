@@ -35,6 +35,11 @@ struct AppleUsbDevice {
     bool can_open{};
     bool mux_configuration{};
     bool quicktime_configuration{};
+    // Active bConfigurationValue read from the currently opened device. A
+    // QuickTime descriptor can remain cached after the device has returned to
+    // its normal configuration, so descriptor presence alone is not state.
+    std::uint8_t active_configuration{};
+    bool active_configuration_known{};
     std::uint8_t configuration_count{};
     std::uint8_t highest_configuration_value{};
     UsbEndpointSet mux_endpoints;
@@ -69,6 +74,9 @@ struct AppleUsbSelection {
 [[nodiscard]] AppleUsbSelection select_apple_usb_device(
     std::span<const AppleUsbDevice> devices, const AppleUsbIdentity& identity,
     bool require_quicktime) noexcept;
+[[nodiscard]] bool apple_usb_candidate_in_scope(
+    std::string_view candidate_topology,
+    const AppleUsbIdentity& identity) noexcept;
 [[nodiscard]] UsbEndpointSet select_best_quicktime_endpoints(
     std::span<const UsbEndpointSet> candidates) noexcept;
 [[nodiscard]] UsbEndpointSet conventional_quicktime_endpoints(
@@ -156,6 +164,9 @@ public:
     void write(std::span<const std::uint8_t> source, unsigned timeout_ms);
     void clear_halt();
     void recover_handshake();
+    [[nodiscard]] bool request_normal_configuration();
+    void cancel_pending_io() noexcept;
+    void clear_io_cancellation() noexcept;
     void close() noexcept;
     [[nodiscard]] bool valid() const noexcept { return handle_ != nullptr; }
 

@@ -20,6 +20,35 @@ enum class State : std::int32_t {
     Error = 7,
 };
 
+enum class FailureKind : std::int32_t {
+    None = 0,
+    UsbConnection = 1,
+    SessionCreation = 2,
+    Driver = 3,
+    VideoStream = 4,
+    InvalidVideoDimensions = 5,
+    NoVideoFrames = 6,
+    SystemClosed = 7,
+    DeviceDisconnected = 8,
+    Timeout = 9,
+    ExistingSession = 10,
+    ChildProcessExited = 11,
+    Unknown = 100,
+};
+
+enum class FailureStage : std::int32_t {
+    None = 0,
+    UsbPreflight = 1,
+    UsbActivation = 2,
+    DeviceReenumeration = 3,
+    InterfaceOpen = 4,
+    QuickTimeHandshake = 5,
+    VideoStream = 6,
+    Decoder = 7,
+    SessionTeardown = 8,
+    DeviceDiscovery = 9,
+};
+
 enum class UsbProjectionMode : std::uint32_t {
     Demo = 0,
     AirPlay = 1,
@@ -36,6 +65,9 @@ struct Snapshot {
     std::uint64_t audio_packets{};
     std::uint32_t audio_sample_rate{};
     std::uint32_t audio_channels{};
+    FailureKind failure_kind{FailureKind::None};
+    FailureStage failure_stage{FailureStage::None};
+    std::int32_t error_code{};
     std::wstring message{L"Idle"};
 };
 

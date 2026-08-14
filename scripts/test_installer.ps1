@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.3',
+    [string]$Version = '1.6.5',
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$PreviousVersion = '1.4.1'
 )
@@ -105,7 +105,8 @@ try {
         throw "Published application is missing: $SourceDirectory"
     }
     $sourceRequiredArtifacts = @(
-        'iPhoneMirror.dll', 'iPhoneMirror.Driver.exe',
+        'iPhoneMirror.dll', 'iPhoneMirror.Core.dll',
+        'iPhoneMirror.UsbConfigurationSwitch.exe', 'iPhoneMirror.Driver.exe',
         'iPhoneMirror.Driver.dll', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll'
@@ -152,7 +153,8 @@ try {
 
     $installedRequiredArtifacts = @(
         'libusb0.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
-        'iPhoneMirror.dll', 'iPhoneMirror.Driver.exe',
+        'iPhoneMirror.dll', 'iPhoneMirror.Core.dll',
+        'iPhoneMirror.UsbConfigurationSwitch.exe', 'iPhoneMirror.Driver.exe',
         'iPhoneMirror.Driver.dll', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',

@@ -1,12 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(iPhoneMirror VERSION 1.6.3 LANGUAGES CXX)
+project(iPhoneMirror VERSION 1.6.5 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "iPhoneMirror currently targets Windows 10/11 only")
 endif()
 
 option(IPHONEMIRROR_BUILD_TESTS "Build native protocol tests" ON)
+option(IPHONEMIRROR_BUILD_DANGEROUS_USB_TOOLS
+    "Build tools that issue real Apple USB configuration and bulk requests" OFF)
 
 if(IPHONEMIRROR_BUILD_TESTS)
     enable_testing()

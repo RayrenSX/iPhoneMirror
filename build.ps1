@@ -199,6 +199,8 @@ try {
 
     if (Test-Path 'src/App/iPhoneMirror.App.csproj') {
         $NativeDll = Join-Path $Root "build/native/src/Core/$Configuration/iPhoneMirror.Core.dll"
+        $UsbConfigurationSwitch = Join-Path $Root `
+            "build/native/src/Core/$Configuration/iPhoneMirror.UsbConfigurationSwitch.exe"
         $VirtualCameraDll = Join-Path $Root `
             "build/native/src/VirtualCamera/$Configuration/iPhoneMirror.VirtualCamera.dll"
         $VirtualCameraAdmin = Join-Path $Root `
@@ -224,6 +226,8 @@ try {
                 'Media-output FFmpeg runtime' $MediaOutputRuntimeHashes
         }
         Copy-Item $NativeDll (Join-Path $AppNative 'iPhoneMirror.Core.dll') -Force
+        Copy-Item $UsbConfigurationSwitch `
+            (Join-Path $AppNative 'iPhoneMirror.UsbConfigurationSwitch.exe') -Force
         Copy-Item $VirtualCameraDll `
             (Join-Path $AppNative 'iPhoneMirror.VirtualCamera.dll') -Force
         Copy-Item $VirtualCameraAdmin `
@@ -302,6 +306,7 @@ try {
         $requiredArtifacts = @(
             'iPhoneMirror.exe',
             'iPhoneMirror.Core.dll',
+            'iPhoneMirror.UsbConfigurationSwitch.exe',
             'iPhoneMirror.VirtualCamera.dll',
             'iPhoneMirror.VirtualCamera.Admin.exe',
             'libusb-1.0.dll',
@@ -400,6 +405,7 @@ try {
         $allowedTopLevelFiles = @(
             'iPhoneMirror.exe',
             'iPhoneMirror.Core.dll',
+            'iPhoneMirror.UsbConfigurationSwitch.exe',
             'iPhoneMirror.VirtualCamera.dll',
             'iPhoneMirror.VirtualCamera.Admin.exe',
             'iPhoneMirror.Driver.exe',
@@ -464,6 +470,7 @@ try {
         }
         $installerRequiredArtifacts = @(
             'iPhoneMirror.exe', 'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
+            'iPhoneMirror.UsbConfigurationSwitch.exe',
             'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.exe',
             'iPhoneMirror.Driver.dll', 'iPhoneMirror.Driver.deps.json',
             'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',

@@ -5,6 +5,44 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-08-14
+
+### Added
+
+- Add structured capture failure kind, stage, and error-code reporting across
+  the native API, managed UI, diagnostic logs, and USB lifecycle probe.
+- Add an isolated USB configuration switch helper and include it in installed
+  and portable release packages.
+- Add localized recovery guidance for USB connection, driver, stream, decoder,
+  timeout, duplicate-session, device-disconnect, and phone-closed failures.
+
+### Changed
+
+- Serialize start and stop work per device, queue requests behind in-progress
+  teardown, and revoke session handles before native cleanup begins.
+- Suspend wired enumeration and Lockdown metadata refresh while USB devices are
+  switching configurations, then require stable exact-device evidence before
+  treating a restored device as ready.
+- Keep wired capture available for Apple/libusb0 stacked filter installations
+  through a conservative open, activation, and teardown path.
+- Hide preview-only controls while the selected device is not actively
+  mirroring and show explicit queued and cleanup states during transitions.
+- Disable real-device USB stress probes in default builds unless explicitly
+  enabled with the dangerous-tools build option.
+
+### Fixed
+
+- Restore the normal Apple USB configuration more reliably after stopping,
+  including repeated start/stop cycles and multi-device sessions.
+- Avoid stale or cross-device USB matches by correlating exact serial,
+  topology, PnP interface transitions, descriptor state, and usbmux presence.
+- Prevent concurrent stop callers, background error cleanup, and window-close
+  shutdown from destroying or reusing the same native session twice.
+- Distinguish user-initiated mirroring stops from cable disconnects and provide
+  the correct recovery action without exposing raw diagnostics in prompts.
+- Bound socket shutdown waits and tighten QuickTime control-channel cleanup so
+  teardown cannot hang indefinitely on a stalled peer.
+
 ## [1.6.3] - 2026-08-13
 
 ### Changed
@@ -1045,7 +1083,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.3...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.5...HEAD
+[1.6.5]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.3...v1.6.5
 [1.6.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.0...v1.6.1

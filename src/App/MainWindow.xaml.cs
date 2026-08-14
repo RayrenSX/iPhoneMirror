@@ -510,7 +510,34 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             }
             try
             {
-                await _viewModel.ShutdownAsync();
+                var shutdown = _viewModel.ShutdownAsync();
+                var shutdownLimit = (Application.Current as App)?
+                    .IsSystemSessionEnding == true
+                    ? TimeSpan.FromSeconds(4)
+                    : TimeSpan.FromSeconds(15);
+                try
+                {
+                    await shutdown.WaitAsync(shutdownLimit);
+                }
+                catch (TimeoutException)
+                {
+                    _viewModel.AddDiagnosticLog(AppLog.Event(
+                        "main_window_shutdown_timeout",
+                        ("elapsed_ms", shutdownTimer.ElapsedMilliseconds),
+                        ("limit_ms", shutdownLimit.TotalMilliseconds),
+                        ("system_session_ending", (Application.Current as App)?
+                            .IsSystemSessionEnding == true)));
+                    // Observe a late completion without keeping the WPF close
+                    // path alive. Process termination is the only reliable
+                    // escape when a third-party USB kernel call never returns.
+                    _ = shutdown.ContinueWith(task =>
+                    {
+                        if (task.Exception is not null)
+                            DiagnosticLogger.Exception("shutdown",
+                                "late_shutdown_failed",
+                                task.Exception.GetBaseException());
+                    }, TaskScheduler.Default);
+                }
             }
             catch (Exception error)
             {
@@ -1775,12 +1802,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             RootNavigation.IsPaneOpen = false;
             RootLayout.Margin = new Thickness(12, 18, 18, 18);
             HeaderGapRow.Height = new GridLength(18);
-            EnvironmentGapRow.Height = new GridLength(14);
             StatsGapRow.Height = new GridLength(14);
             PreviewPanel.BorderThickness = new Thickness(1);
             PreviewPanel.CornerRadius = new CornerRadius(16);
             HeaderPanel.Visibility = Visibility.Visible;
-            EnvironmentPanel.Visibility = Visibility.Visible;
+            // Entering full screen applies a temporary local Collapsed value.
+            // Clear it on exit so the selected session controls toolbar visibility again.
+            EnvironmentPanel.ClearValue(UIElement.VisibilityProperty);
             StatsPanel.Visibility = Visibility.Visible;
             FooterPanel.Visibility = Visibility.Visible;
             ApplyWorkspacePanelState();
@@ -1830,7 +1858,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ControlColumn.Width = new GridLength(0);
             RootLayout.Margin = new Thickness(0);
             HeaderGapRow.Height = new GridLength(0);
-            EnvironmentGapRow.Height = new GridLength(0);
             StatsGapRow.Height = new GridLength(0);
             PreviewPanel.BorderThickness = new Thickness(0);
             PreviewPanel.CornerRadius = new CornerRadius(0);

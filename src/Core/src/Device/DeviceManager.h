@@ -3,7 +3,9 @@
 #include "iPhoneMirror/CoreApi.h"
 
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace iPhoneMirror::device {
@@ -44,7 +46,12 @@ struct EnvironmentRecord {
 class DeviceManager {
 public:
     [[nodiscard]] EnvironmentRecord environment() const;
-    [[nodiscard]] std::vector<DeviceRecord> refresh() const;
+    [[nodiscard]] std::vector<DeviceRecord> refresh(
+        bool refresh_metadata = false);
+
+private:
+    std::mutex metadata_mutex_;
+    std::unordered_map<std::string, DeviceRecord> metadata_cache_;
 };
 
 } // namespace iPhoneMirror::device

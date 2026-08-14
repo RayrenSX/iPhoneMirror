@@ -10,6 +10,7 @@ namespace IPhoneMirror.App;
 
 public partial class App : Application
 {
+    internal bool IsSystemSessionEnding { get; private set; }
     private readonly UpdateSettingsStore _settingsStore = new();
     private readonly GitHubReleaseClient _releaseClient = new();
     private AboutWindow? _aboutWindow;
@@ -183,5 +184,13 @@ public partial class App : Application
         _singleInstanceCoordinator = null;
         DiagnosticLogger.Shutdown(e.ApplicationExitCode);
         base.OnExit(e);
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        IsSystemSessionEnding = true;
+        DiagnosticLogger.Info("shutdown", "windows_session_ending",
+            ("reason", e.ReasonSessionEnding));
+        base.OnSessionEnding(e);
     }
 }

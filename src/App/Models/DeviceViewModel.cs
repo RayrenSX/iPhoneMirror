@@ -134,4 +134,8 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
         info.ConnectionType ?? "USB",
         info.Status ?? string.Empty,
         info.State);
+
+    internal DeviceViewModel AsUsbPresentNoMux() => new(
+        Udid, Name, ProductType, OsVersion, ConnectionType, Status,
+        ConnectionState.UsbPresentNoMux);
 }

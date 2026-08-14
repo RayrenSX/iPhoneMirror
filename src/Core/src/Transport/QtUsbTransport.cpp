@@ -163,8 +163,12 @@ libusb_device* find_device(const QtUsbContext& context,
         candidate.address = libusb_get_device_address(raw_devices[index]);
         candidate.configuration_count = descriptor.bNumConfigurations;
         candidate.topology_id = topology_for(raw_devices[index]);
-        if (!identity.topology_id.empty() &&
-            candidate.topology_id != identity.topology_id) continue;
+        // USB addresses and the libusb device object are recreated during the
+        // QuickTime configuration switch. With a real serial, topology is
+        // only a fallback for a temporarily unreadable serial and must not
+        // discard the re-enumerated device before serial matching runs.
+        if (!apple_usb_candidate_in_scope(candidate.topology_id, identity))
+            continue;
         candidate.serial = cached_active_apple_usb_serial(candidate.topology_id);
         candidate.can_open = !candidate.serial.empty();
         candidates.push_back(std::move(candidate));
@@ -365,6 +369,7 @@ QtUsbConnection QtUsbConnection::open_quicktime(QtUsbContext& context,
     if (!device)
         throw std::runtime_error("Apple USB device not found by serial or physical port");
     std::unique_ptr<libusb_device, decltype(&libusb_unref_device)> device_guard(device, &libusb_unref_device);
+    const bool descriptor_quicktime = info.quicktime_configuration;
     if (!info.quicktime_configuration && allow_conventional_fallback) {
         info.quicktime_endpoints = conventional_quicktime_endpoints(identity);
         info.quicktime_configuration =
@@ -377,11 +382,18 @@ QtUsbConnection QtUsbConnection::open_quicktime(QtUsbContext& context,
     const int open_result = libusb_open(device, &result.handle_);
     if (open_result != LIBUSB_SUCCESS) throw UsbError("libusb_open", open_result);
     result.endpoints_ = info.quicktime_endpoints;
-    const int config_result = libusb_set_configuration(result.handle_, result.endpoints_.configuration);
-    if (config_result != LIBUSB_SUCCESS && config_result != LIBUSB_ERROR_BUSY) {
-        throw UsbError("libusb_set_configuration", config_result);
+    int claim_result = libusb_claim_interface(result.handle_,
+        result.endpoints_.interface_number);
+    const bool conventional_fallback = allow_conventional_fallback &&
+        !descriptor_quicktime;
+    if (claim_result != LIBUSB_SUCCESS && conventional_fallback) {
+        const int config_result = libusb_set_configuration(result.handle_,
+            result.endpoints_.configuration);
+        if (config_result != LIBUSB_SUCCESS && config_result != LIBUSB_ERROR_BUSY)
+            throw UsbError("libusb_set_configuration", config_result);
+        claim_result = libusb_claim_interface(result.handle_,
+            result.endpoints_.interface_number);
     }
-    const int claim_result = libusb_claim_interface(result.handle_, result.endpoints_.interface_number);
     if (claim_result != LIBUSB_SUCCESS) throw UsbError("libusb_claim_interface", claim_result);
     result.claimed_ = true;
     if (result.endpoints_.alternate_setting != 0) {
@@ -457,6 +469,39 @@ void QtUsbConnection::recover_handshake() {
     const int result = libusb_control_transfer(handle_, 0x40, 0x40, 0x6400, 0x6400,
         nullptr, 0, 1000);
     if (result < 0) throw UsbError("recover QuickTime handshake", result);
+}
+
+bool QtUsbConnection::request_normal_configuration() {
+    if (!handle_)
+        throw std::runtime_error(
+            "cannot restore normal USB configuration: QuickTime handle is closed");
+    // Keep interface release ahead of the control request that removes the
+    // active USB node. libusb_close must not implicitly release an interface
+    // through a handle that 0x52 has already disconnected.
+    if (claimed_) {
+        const int release_result = libusb_release_interface(
+            handle_, endpoints_.interface_number);
+        if (release_result != LIBUSB_SUCCESS)
+            throw UsbError("release QuickTime interface before USB restore",
+                release_result);
+        claimed_ = false;
+    }
+    const int result = libusb_control_transfer(handle_,
+        static_cast<std::uint8_t>(LIBUSB_ENDPOINT_OUT) |
+            static_cast<std::uint8_t>(LIBUSB_REQUEST_TYPE_VENDOR) |
+            static_cast<std::uint8_t>(LIBUSB_RECIPIENT_DEVICE),
+        0x52, 0, 0, nullptr, 0, 1000);
+    // The accepted request disconnects the handle and may be reported as an
+    // I/O/NO_DEVICE result. Device re-enumeration determines final success.
+    return result >= 0;
+}
+
+void QtUsbConnection::cancel_pending_io() noexcept {
+    // libusb-1 synchronous transfers are bounded by the short timeout supplied
+    // by the capture loop and do not hold a process-global close lock.
+}
+
+void QtUsbConnection::clear_io_cancellation() noexcept {
 }
 
 void QtUsbConnection::close() noexcept {

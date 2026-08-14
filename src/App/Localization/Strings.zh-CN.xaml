@@ -23,6 +23,8 @@
     <system:String x:Key="SimultaneousMirrorStartedFormat">已为 {0} 打开同时投屏窗口</system:String>
     <system:String x:Key="SimultaneousMirrorFailedFormat">同时投屏启动失败：{0}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">{0} 投屏错误</system:String>
+    <system:String x:Key="DeviceSessionClosedWarningTitleFormat">{0} 投屏已停止</system:String>
+    <system:String x:Key="DeviceSessionClosedWarningBody">检测到您已经在控制中心点击了停止镜像，下一次该设备有线镜像需重启 iPhone/iPad</system:String>
     <system:String x:Key="IndependentWindowPin">置顶</system:String>
     <system:String x:Key="IndependentWindowUnpin">取消置顶</system:String>
     <system:String x:Key="IndependentWindowEnterFullScreen">进入全屏</system:String>
@@ -119,6 +121,7 @@
     <system:String x:Key="DriverDeviceFilterMissing">当前设备需要外部采集驱动</system:String>
     <system:String x:Key="DriverExternalRequired">请先安装或修复外部采集驱动，然后重新连接这台 Apple 设备。</system:String>
     <system:String x:Key="DriverInvalidAppleStack">Apple USB 父设备驱动不兼容。</system:String>
+    <system:String x:Key="DriverUnsafeAppleStack">驱动叠加：已启用保守 USB 模式</system:String>
     <system:String x:Key="DriverFilterStateError">无法确认 Apple 设备采集驱动状态。</system:String>
     <system:String x:Key="DriverReconnectPhone">请解锁并重新连接这台 Apple 设备，然后刷新设备。</system:String>
     <system:String x:Key="DriverReplugRequired">请重新连接这台 Apple 设备，以便外部采集驱动接管。</system:String>
@@ -131,6 +134,8 @@
     <system:String x:Key="CaptureHandshaking">正在建立投屏会话…</system:String>
     <system:String x:Key="CaptureStreaming">正在投屏</system:String>
     <system:String x:Key="CaptureStopping">正在停止投屏…</system:String>
+    <system:String x:Key="CaptureCleaningDevice">正在清理设备…</system:String>
+    <system:String x:Key="CaptureQueued">等待设备清理…</system:String>
     <system:String x:Key="SwitchingDeviceFormat">正在停止当前投屏并切换到 {0}…</system:String>
     <system:String x:Key="SwitchDeviceFailedFormat">切换设备失败：{0}</system:String>
     <system:String x:Key="CaptureStopped">投屏已停止</system:String>
@@ -143,9 +148,43 @@
     <system:String x:Key="CaptureNoPingCableAction">更换 Apple 原装或 MFi 认证数据线</system:String>
     <system:String x:Key="CaptureNoPingUnlockHint">重新连接并开始投屏时，请保持设备处于解锁状态。</system:String>
     <system:String x:Key="CaptureUsbConfigurationRecovery">未能切换 iPhone 或 iPad 的 USB 投屏配置。&#x0A;&#x0A;请依次尝试：&#x0A;1. 拔下数据线，等待几秒后重新插入&#x0A;2. 重启 iPhone 或 iPad 后再连接&#x0A;3. 更换 Apple 原装或 MFi 认证数据线&#x0A;&#x0A;重新连接并开始投屏时，请保持设备处于解锁状态。</system:String>
+    <system:String x:Key="CaptureFailureDetailsFormat">错误类型：{0}&#x0A;失败阶段：{1}&#x0A;错误码：{2}&#x0A;&#x0A;详细信息：{3}</system:String>
+    <system:String x:Key="CaptureActionReconnectDevice">请保持设备解锁，重新插拔数据线后再试。</system:String>
+    <system:String x:Key="CaptureActionRestartDevice">请重启 iPhone 或 iPad 后再试。</system:String>
+    <system:String x:Key="CaptureActionWaitForCleanup">请等待设备清理完成后，再次开始投屏。</system:String>
+    <system:String x:Key="CaptureActionVideoRetry">请停止投屏后重新开始；仍无画面时重新连接数据线。</system:String>
+    <system:String x:Key="CaptureActionDriverRecovery">请重新插拔设备后再试；仍无法投屏时重启电脑。</system:String>
+    <system:String x:Key="CaptureActionDeviceDisconnected">请重新连接并解锁设备后，再次开始投屏。</system:String>
+    <system:String x:Key="CaptureActionRestartApplication">请关闭后重新打开 iPhoneMirror，再试一次。</system:String>
+    <system:String x:Key="CaptureActionRetry">请停止投屏后重新开始；仍失败时重新连接设备。</system:String>
+    <system:String x:Key="CaptureFailureStatusFormat">投屏错误：{0}（{1}，错误码 {2}）</system:String>
+    <system:String x:Key="CaptureFailureUsbConnection">USB 设备连接失败</system:String>
+    <system:String x:Key="CaptureFailureSessionCreation">投屏会话创建失败</system:String>
+    <system:String x:Key="CaptureFailureDriver">Apple/libusb 驱动异常</system:String>
+    <system:String x:Key="CaptureDriverSafetyBlocked">检测到旧版 libusb0 与 Apple USB 过滤驱动叠加。应用不会修改驱动；本次将使用保守的 USB 会话打开和释放顺序。</system:String>
+    <system:String x:Key="CaptureFailureVideoStream">视频流建立或解码失败</system:String>
+    <system:String x:Key="CaptureFailureVideoDimensions">视频流分辨率异常</system:String>
+    <system:String x:Key="CaptureFailureNoFrames">视频流无帧或黑屏</system:String>
+    <system:String x:Key="CaptureFailureSystemClosed">会话被系统关闭</system:String>
+    <system:String x:Key="CaptureFailureDeviceDisconnected">设备已断开</system:String>
+    <system:String x:Key="CaptureFailureTimeout">操作超时</system:String>
+    <system:String x:Key="CaptureFailureExistingSession">已存在旧投屏会话</system:String>
+    <system:String x:Key="CaptureFailureChildProcess">子进程异常退出</system:String>
+    <system:String x:Key="CaptureFailureUnknown">未知异常</system:String>
+    <system:String x:Key="CaptureStageUsbPreflight">USB 设备预检</system:String>
+    <system:String x:Key="CaptureStageUsbActivation">激活 QuickTime USB 配置</system:String>
+    <system:String x:Key="CaptureStageDeviceReenumeration">等待 USB 设备重新枚举</system:String>
+    <system:String x:Key="CaptureStageInterfaceOpen">打开 QuickTime USB 接口</system:String>
+    <system:String x:Key="CaptureStageQuickTimeHandshake">QuickTime 会话握手</system:String>
+    <system:String x:Key="CaptureStageVideoStream">建立视频流</system:String>
+    <system:String x:Key="CaptureStageDecoder">视频解码</system:String>
+    <system:String x:Key="CaptureStageSessionTeardown">释放投屏会话</system:String>
+    <system:String x:Key="CaptureStageDeviceDiscovery">设备发现</system:String>
+    <system:String x:Key="CaptureStageUnknown">未知阶段</system:String>
     <system:String x:Key="StartRequested">已请求开始投屏</system:String>
     <system:String x:Key="StartFailedFormat">开始投屏失败：{0}</system:String>
     <system:String x:Key="StopSessionReleased">投屏已停止，会话资源已释放</system:String>
+    <system:String x:Key="StopUsbRestoreWarningFormat">投屏已停止，会话资源已释放；但未能确认 iPhone 已恢复普通 USB 配置。诊断：{0}</system:String>
     <system:String x:Key="StopFailedFormat">停止投屏失败：{0}</system:String>
     <system:String x:Key="LogViewCleared">日志视图已清空（不会删除磁盘日志）</system:String>
 
@@ -474,4 +513,7 @@
     <system:String x:Key="CloseOtherInstancesFailedFormat">仍有 {0} 个 iPhoneMirror 实例未能关闭。请在任务栏或任务管理器中关闭后重试。</system:String>
     <system:String x:Key="Minimize">最小化</system:String>
     <system:String x:Key="Maximize">最大化</system:String>
+    <system:String x:Key="TitleBarMinimizeToolTip">最小化</system:String>
+    <system:String x:Key="TitleBarMaximizeToolTip">最大化或还原</system:String>
+    <system:String x:Key="TitleBarCloseToolTip">关闭</system:String>
 </ResourceDictionary>

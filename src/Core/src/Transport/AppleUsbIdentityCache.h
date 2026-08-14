@@ -74,4 +74,18 @@ inline void release_active_apple_usb_identity(
     }
 }
 
+inline void forget_active_apple_usb_identity(
+    std::string_view topology, std::string_view serial) noexcept {
+    if (topology.empty() || serial.empty()) return;
+    try {
+        std::scoped_lock lock(detail::active_apple_usb_identity_mutex());
+        auto& identities = detail::active_apple_usb_identities();
+        const auto found = identities.find(std::string(topology));
+        if (found == identities.end() ||
+            !apple_usb_serial_equal(found->second.serial, serial)) return;
+        identities.erase(found);
+    } catch (...) {
+    }
+}
+
 } // namespace iPhoneMirror::transport

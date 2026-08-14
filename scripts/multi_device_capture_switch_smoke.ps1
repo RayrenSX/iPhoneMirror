@@ -157,7 +157,7 @@ try {
         throw "Both devices did not independently reach Streaming; observed $streamingStates state transitions."
     }
     $shutdowns = [regex]::Matches($newLog,
-        'shutdown_usb handshake_started=.*?stop_messages=').Count
+        'shutdown_usb device_fp=[^ ]+ handshake_started=.*?stop_messages=').Count
     if ($shutdowns -lt 2) {
         throw "Expected two QuickTime shutdown handshakes; observed $shutdowns."
     }

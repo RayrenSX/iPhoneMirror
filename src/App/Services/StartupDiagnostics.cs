@@ -151,6 +151,7 @@ internal static class StartupDiagnostics
     private static IEnumerable<(string Relative, bool Required)> RequiredNativeFiles()
     {
         yield return ("iPhoneMirror.Core.dll", true);
+        yield return ("iPhoneMirror.UsbConfigurationSwitch.exe", true);
         yield return ("libusb-1.0.dll", true);
         yield return ("libusb0.dll", true);
         yield return ("msvcp140.dll", true);

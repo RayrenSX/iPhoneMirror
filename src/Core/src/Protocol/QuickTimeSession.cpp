@@ -276,13 +276,20 @@ SessionEvent SessionProtocol::process(const Packet& packet) {
             }
         } else if (packet.kind == PacketKind::Async) {
             if (packet.is_video_sample()) {
+                const bool tearing_down = state_ == SessionState::Stopping ||
+                    state_ == SessionState::Stopped;
                 const auto envelope = coremedia::parse_sample_envelope(packet.payload);
                 auto sample = coremedia::parse_sample_buffer(envelope.serialized_sample_buffer);
                 if (sample.format) video_format_ = sample.format;
                 event.video_sample = std::move(sample);
                 ++video_frames_;
-                if (device_video_clock_ != 0) event.outbound.push_back(make_need(device_video_clock_));
-                state_ = SessionState::Streaming;
+                if (!tearing_down && device_video_clock_ != 0)
+                    event.outbound.push_back(make_need(device_video_clock_));
+                // Media already queued by the device can arrive after HPD0 or
+                // SYNC STOP. It must not roll a teardown state back to
+                // Streaming and suppress the final HPD0 release control.
+                if (!tearing_down)
+                    state_ = SessionState::Streaming;
             } else if (packet.is_audio_sample()) {
                 const auto envelope = coremedia::parse_sample_envelope(packet.payload);
                 auto sample = coremedia::parse_sample_buffer(envelope.serialized_sample_buffer);
@@ -311,6 +318,14 @@ std::vector<std::vector<std::uint8_t>> SessionProtocol::stop_messages() {
     }
     messages.push_back(async_control(fourcc('h', 'p', 'd', '0'), EmptyClockRef));
     return messages;
+}
+
+std::vector<std::vector<std::uint8_t>> SessionProtocol::complete_stop_messages() {
+    state_ = SessionState::Stopped;
+    // Apple's reference teardown sends HPD0 once to request display release,
+    // waits for both audio/video RELS notifications, then sends HPD0 once more
+    // before the USB interface is released.
+    return {async_control(fourcc('h', 'p', 'd', '0'), EmptyClockRef)};
 }
 
 std::vector<std::vector<std::uint8_t>> SessionProtocol::begin_display_reconfigure(
