@@ -32,6 +32,9 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ### Fixed
 
+- Restore the application icon on the Windows taskbar by assigning the
+  executable icon to top-level windows, registering a stable AppUserModelID
+  icon source, and removing stale per-user shortcuts during all-users upgrades.
 - Restore the normal Apple USB configuration more reliably after stopping,
   including repeated start/stop cycles and multi-device sessions.
 - Avoid stale or cross-device USB matches by correlating exact serial,

@@ -185,6 +185,8 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\iPhoneMirror.exe"; WorkingD
 [Registry]
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#MyAppPathName}"; ValueType: string; ValueName: ""; ValueData: "{app}\iPhoneMirror.exe"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#MyAppPathName}"; ValueType: string; ValueName: "Path"; ValueData: "{app}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelId}"; ValueType: string; ValueName: "DisplayName"; ValueData: "{#MyAppName}"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKA; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelId}"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\iPhoneMirror.exe"; Flags: uninsdeletevalue uninsdeletekeyifempty
 
 [Run]
 Filename: "{app}\iPhoneMirror.exe"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
@@ -225,6 +227,15 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
 begin
+  { A previous per-user installation shadows the all-users shortcut because
+    both use the same AppUserModelID. Remove its shortcuts only when the user
+    explicitly switches to an administrative all-users installation. }
+  if (CurStep = ssInstall) and IsAdminInstallMode then
+  begin
+    DelTree(ExpandConstant('{userprograms}\{#MyAppName}'), True, True, True);
+    DeleteFile(ExpandConstant('{userdesktop}\{#MyAppName}.lnk'));
+  end;
+
   if (CurStep = ssDone) and
      (ExpandConstant('{param:STARTAPP|0}') = '1') then
   begin

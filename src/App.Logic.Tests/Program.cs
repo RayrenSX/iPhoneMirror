@@ -435,6 +435,16 @@ Equal(true, installerScript.Contains("[InstallDelete]", StringComparison.Ordinal
             installerScript.Contains(
                 "{app}\\tools\\ffmpeg\\ffmpeg.exe", StringComparison.Ordinal),
     "installer removes legacy media-output FFmpeg files before upgrade");
+Equal(true, installerScript.Contains(
+        "{userprograms}\\{#MyAppName}", StringComparison.Ordinal) &&
+    installerScript.Contains("IsAdminInstallMode", StringComparison.Ordinal) &&
+    installerScript.Contains("DelTree(ExpandConstant", StringComparison.Ordinal),
+    "all-users installs remove a shadowing per-user shortcut group");
+Equal(true, installerScript.Contains(
+        "Software\\Classes\\AppUserModelId\\{#MyAppUserModelId}",
+        StringComparison.Ordinal) &&
+    installerScript.Contains("ValueName: \"IconUri\"", StringComparison.Ordinal),
+    "installer registers a stable icon source for the application identity");
 Equal(true, installerScript.Contains("{param:STARTAPP|0}", StringComparison.Ordinal) &&
             installerScript.Contains("Sleep(1000)", StringComparison.Ordinal),
     "installer restarts only after a post-install handle-release delay");
@@ -757,6 +767,14 @@ Equal(false, mainWindowText.Contains("x:Name=\"LogExpander\"",
 
 var mainWindowCodePath = Path.Combine(sourceDirectory, "App", "MainWindow.xaml.cs");
 var mainWindowCode = File.ReadAllText(mainWindowCodePath);
+var appStartupCode = File.ReadAllText(Path.Combine(sourceDirectory, "App", "App.xaml.cs"));
+var appIdentityCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "AppIdentity.cs"));
+Equal(true, appStartupCode.Contains("AppIdentity.Attach(MainWindow)",
+        StringComparison.Ordinal) &&
+    appIdentityCode.Contains("ExtractIconExW", StringComparison.Ordinal) &&
+    appIdentityCode.Contains("WmSetIcon", StringComparison.Ordinal),
+    "main window publishes its executable icon to the Windows taskbar");
 Equal(true,
     mainWindowCode.Contains("private enum LeftWorkspacePanel", StringComparison.Ordinal) &&
     mainWindowCode.Contains("private bool _isSettingsPanelVisible;",

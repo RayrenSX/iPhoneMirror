@@ -46,6 +46,7 @@ public partial class App : Application
                     ("owns_primary", _singleInstanceCoordinator.OwnsPrimaryInstance));
                 ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 var conflictWindow = new InstanceConflictWindow(_singleInstanceCoordinator);
+                AppIdentity.Attach(conflictWindow);
                 conflictWindow.ShowDialog();
                 if (!conflictWindow.ContinueWithCurrentInstance ||
                     !_singleInstanceCoordinator.OwnsPrimaryInstance)
@@ -60,6 +61,7 @@ public partial class App : Application
             StartupDiagnostics.ValidateRequiredRuntime();
             GitHubReleaseClient.CleanupInterruptedDownloads();
             MainWindow = new MainWindow();
+            AppIdentity.Attach(MainWindow);
             MainWindow.ContentRendered += OnMainWindowContentRendered;
             MainWindow.Show();
             DiagnosticLogger.Info("lifecycle", "startup_complete");

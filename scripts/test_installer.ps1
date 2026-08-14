@@ -188,6 +188,15 @@ try {
             [StringComparison]::OrdinalIgnoreCase)) {
         throw "App Paths registration points to an unexpected executable: $appPath"
     }
+    $appIdentityRegistry =
+        "HKCU:\Software\Classes\AppUserModelId\$AppUserModelId"
+    $appIdentity = Get-ItemProperty -LiteralPath $appIdentityRegistry
+    if ($appIdentity.DisplayName -ne $AppName -or
+        -not [string]::Equals([IO.Path]::GetFullPath($appIdentity.IconUri),
+            [IO.Path]::GetFullPath($installedExecutable),
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'AppUserModelID registration does not expose the installed icon.'
+    }
     $shortcuts = @(Get-ChildItem -LiteralPath $StartMenuDirectory -Filter '*.lnk' -File)
     if ($shortcuts.Count -lt 3) {
         throw "Expected at least three Start menu shortcuts, found $($shortcuts.Count)."
@@ -202,6 +211,9 @@ try {
     }
     if (Test-Path -LiteralPath $UninstallRegistryPath) {
         throw 'Uninstall registration remained after uninstall.'
+    }
+    if (Test-Path -LiteralPath $appIdentityRegistry) {
+        throw 'AppUserModelID registration remained after uninstall.'
     }
     if (Test-Path -LiteralPath $StartMenuDirectory) {
         throw 'Start menu shortcuts remained after uninstall.'
