@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.6.6",
+    "name": "iPhoneMirror v1.6.6",
+    "body": "### Changed\n\n- Speed up update downloads on constrained GitHub routes by testing GitHub and\n  all 115 mirrors listed by MoreTools, measuring a 256 KB sample only from\n  reachable routes, and failing over through the resulting throughput ranking.",
+    "published_at": "2026-08-15T02:23:32Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.6.6-x64.exe",
+        "size": 91881976,
+        "digest": "sha256:0885a3c6eaa26cc77465edb78d9e95cfb7ee64a6781c9e2f10449881c567b8b0",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-Setup-v1.6.6-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.6-win-x64.zip",
+        "size": 191244971,
+        "digest": "sha256:d9c973e73dba0636d9b0ca40039cc69d9ee6b5a6117cb2961b946679e9b877d3",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-v1.6.6-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.6-win-x64-sbom.spdx.json",
+        "size": 38969,
+        "digest": "sha256:f5cdf2c7d92727c4dc0f595869575f94788b39d3e2b900c5e88642808dbd52a8",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-v1.6.6-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 307,
+        "digest": "sha256:196dd4d64b4330a45b154687013e714d3a64860bec0b713fb8f13bdfaf45f9df",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.6.5",
     "name": "iPhoneMirror v1.6.5",
     "body": "### Added\n\n- Add structured capture failure kind, stage, and error-code reporting across\n  the native API, managed UI, diagnostic logs, and USB lifecycle probe.\n- Add an isolated USB configuration switch helper and include it in installed\n  and portable release packages.\n- Add localized recovery guidance for USB connection, driver, stream, decoder,\n  timeout, duplicate-session, device-disconnect, and phone-closed failures.\n\n### Changed\n\n- Serialize start and stop work per device, queue requests behind in-progress\n  teardown, and revoke session handles before native cleanup begins.\n- Suspend wired enumeration and Lockdown metadata refresh while USB devices are\n  switching configurations, then require stable exact-device evidence before\n  treating a restored device as ready.\n- Keep wired capture available for Apple/libusb0 stacked filter installations\n  through a conservative open, activation, and teardown path.\n- Hide preview-only controls while the selected device is not actively\n  mirroring and show explicit queued and cleanup states during transitions.\n- Disable real-device USB stress probes in default builds unless explicitly\n  enabled with the dangerous-tools build option.\n\n### Fixed\n\n- Restore the normal Apple USB configuration more reliably after stopping,\n  including repeated start/stop cycles and multi-device sessions.\n- Avoid stale or cross-device USB matches by correlating exact serial,\n  topology, PnP interface transitions, descriptor state, and usbmux presence.\n- Prevent concurrent stop callers, background error cleanup, and window-close\n  shutdown from destroying or reusing the same native session twice.\n- Distinguish user-initiated mirroring stops from cable disconnects and provide\n  the correct recovery action without exposing raw diagnostics in prompts.\n- Bound socket shutdown waits and tighten QuickTime control-channel cleanup so\n  teardown cannot hang indefinitely on a stalled peer.",
