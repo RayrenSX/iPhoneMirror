@@ -70,6 +70,17 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
         OnPropertyChanged(nameof(CanUpdate));
         var progress = new Progress<UpdateDownloadProgress>(value =>
         {
+            if (value.Phase != UpdateDownloadPhase.Download)
+            {
+                IsIndeterminate = true;
+                ProgressValue = 0;
+                SpeedText = string.Empty;
+                StatusText = LocalizationService.Get(value.Phase ==
+                    UpdateDownloadPhase.ConnectivityTest
+                        ? "TestingUpdateRoutes"
+                        : "MeasuringUpdateRoutes");
+                return;
+            }
             IsIndeterminate = value.Percentage is null;
             ProgressValue = value.Percentage ?? 0;
             StatusText = value.Percentage is double percentage

@@ -443,7 +443,7 @@
     <system:String x:Key="Changelog">更新記錄</system:String>
     <system:String x:Key="LicenseInformation">許可證資訊</system:String>
     <system:String x:Key="UpdateSettingsTitle">更新設定</system:String>
-    <system:String x:Key="UpdateSettingsDescription">控制背景更新檢查、自動下載、後備下載來源和發佈通道。</system:String>
+    <system:String x:Key="UpdateSettingsDescription">控制背景更新檢查、自動下載、鏡像加速和發佈通道。</system:String>
     <system:String x:Key="DiagnosticsTitle">診斷</system:String>
     <system:String x:Key="DiagnosticsDescription">應用程式錯誤、螢幕鏡像核心和更新流程會寫入本機記錄，方便排解其他電腦上的問題。</system:String>
     <system:String x:Key="DiagnosticsLocation">記錄位置</system:String>
@@ -454,8 +454,8 @@
     <system:String x:Key="DiagnosticsCleanupFailedFormat">清理失敗：{0}</system:String>
     <system:String x:Key="CheckOnStartup">啟動時檢查更新</system:String>
     <system:String x:Key="AutoDownloadUpdates">發現更新後自動開始下載</system:String>
-    <system:String x:Key="AllowUpdateMirrorFallback">GitHub 無法使用時採用後備下載來源</system:String>
-    <system:String x:Key="AllowUpdateMirrorFallbackDescription">後備來源只用於傳輸；下載內容仍必須通過官方發佈摘要中的 SHA-256 驗證。</system:String>
+    <system:String x:Key="AllowUpdateMirrorFallback">自動選擇最快更新下載線路</system:String>
+    <system:String x:Key="AllowUpdateMirrorFallbackDescription">測試 GitHub 和全部鏡像，只對可達線路進行 256 KB 下載測速；下載內容仍必須通過官方發佈摘要中的 SHA-256 驗證。</system:String>
     <system:String x:Key="NotifyStableReleases">提醒正式版更新</system:String>
     <system:String x:Key="NotifyPrereleaseReleases">提醒 Beta 預覽版更新</system:String>
     <system:String x:Key="ThemeTitle">應用程式主題</system:String>
@@ -480,6 +480,8 @@
     <system:String x:Key="UpdateNow">立即更新</system:String>
     <system:String x:Key="DownloadingUpdate">正在下載更新</system:String>
     <system:String x:Key="PreparingDownload">正在準備安全下載…</system:String>
+    <system:String x:Key="TestingUpdateRoutes">正在測試 GitHub 和鏡像線路…</system:String>
+    <system:String x:Key="MeasuringUpdateRoutes">正在測試可達線路的下載速度…</system:String>
     <system:String x:Key="DownloadProgressFormat">正在下載更新 {0:F0}%</system:String>
     <system:String x:Key="UpdateVerified">下載完成，SHA-256 驗證通過。</system:String>
     <system:String x:Key="UpdateDownloadedNoChecksum">下載完成；此 Release 未提供 SHA-256 驗證值。</system:String>

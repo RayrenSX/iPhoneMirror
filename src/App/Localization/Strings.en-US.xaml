@@ -443,7 +443,7 @@
     <system:String x:Key="Changelog">Changelog</system:String>
     <system:String x:Key="LicenseInformation">License information</system:String>
     <system:String x:Key="UpdateSettingsTitle">Update settings</system:String>
-    <system:String x:Key="UpdateSettingsDescription">Control background checks, automatic downloads, mirror fallback, and release channels.</system:String>
+    <system:String x:Key="UpdateSettingsDescription">Control background checks, automatic downloads, mirror acceleration, and release channels.</system:String>
     <system:String x:Key="DiagnosticsTitle">Diagnostics</system:String>
     <system:String x:Key="DiagnosticsDescription">Application errors, capture-core events, and update workflows are written to local logs for troubleshooting failures on other PCs.</system:String>
     <system:String x:Key="DiagnosticsLocation">Log location</system:String>
@@ -454,8 +454,8 @@
     <system:String x:Key="DiagnosticsCleanupFailedFormat">Cleanup failed: {0}</system:String>
     <system:String x:Key="CheckOnStartup">Check for updates at startup</system:String>
     <system:String x:Key="AutoDownloadUpdates">Start downloading automatically when an update is found</system:String>
-    <system:String x:Key="AllowUpdateMirrorFallback">Use update mirrors when GitHub is unavailable</system:String>
-    <system:String x:Key="AllowUpdateMirrorFallbackDescription">Mirrors are used only for transport; downloads must still pass SHA-256 verification from trusted release metadata.</system:String>
+    <system:String x:Key="AllowUpdateMirrorFallback">Automatically select the fastest update route</system:String>
+    <system:String x:Key="AllowUpdateMirrorFallbackDescription">Tests GitHub and every mirror, then downloads a 256 KB sample from reachable routes; downloads must still pass SHA-256 verification from trusted release metadata.</system:String>
     <system:String x:Key="NotifyStableReleases">Notify me about stable releases</system:String>
     <system:String x:Key="NotifyPrereleaseReleases">Notify me about Beta preview releases</system:String>
     <system:String x:Key="ThemeTitle">App theme</system:String>
@@ -480,6 +480,8 @@
     <system:String x:Key="UpdateNow">Update now</system:String>
     <system:String x:Key="DownloadingUpdate">Downloading update</system:String>
     <system:String x:Key="PreparingDownload">Preparing a secure download…</system:String>
+    <system:String x:Key="TestingUpdateRoutes">Testing GitHub and mirror routes…</system:String>
+    <system:String x:Key="MeasuringUpdateRoutes">Measuring reachable download routes…</system:String>
     <system:String x:Key="DownloadProgressFormat">Downloading update {0:F0}%</system:String>
     <system:String x:Key="UpdateVerified">Download complete. SHA256 verification passed.</system:String>
     <system:String x:Key="UpdateDownloadedNoChecksum">Download complete. This release did not provide a SHA256 value.</system:String>

@@ -105,6 +105,20 @@ static HttpResponseMessage HttpResponse(HttpRequestMessage request,
     Content = content,
 };
 
+static HttpResponseMessage RangeResponse(HttpRequestMessage request,
+    byte[] content)
+{
+    var response = new HttpResponseMessage(System.Net.HttpStatusCode.PartialContent)
+    {
+        RequestMessage = request,
+        Content = new ByteArrayContent(content),
+    };
+    response.Content.Headers.ContentRange =
+        new System.Net.Http.Headers.ContentRangeHeaderValue(
+            0, content.LongLength - 1, content.LongLength);
+    return response;
+}
+
 var localizationDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "Localization"));
 XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
@@ -1132,14 +1146,20 @@ var mirroredAsset = new ReleaseAsset("setup.exe",
     10, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 var mirrorCandidates = GitHubReleaseClient.BuildDownloadCandidates(
     mirroredAsset, allowMirrorFallback: true);
-Equal(4, mirrorCandidates.Count,
-    "verified update assets include GitHub and three mirror candidates");
-Equal("github.com", mirrorCandidates[0].Host,
-    "official GitHub download remains the first candidate");
-Equal(true, mirrorCandidates.Skip(1).All(candidate =>
+Equal(116, mirrorCandidates.Count,
+    "verified update assets include all 115 MoreTools mirrors and GitHub");
+Equal("gh-proxy.net", mirrorCandidates[0].Host,
+    "mirror candidates preserve the MoreTools source order");
+Equal("github.com", mirrorCandidates[^1].Host,
+    "official GitHub remains the final trusted fallback");
+Equal(116, mirrorCandidates.Select(candidate => candidate.Host)
+        .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+    "download candidate hosts are unique");
+Equal(true, mirrorCandidates.Take(mirrorCandidates.Count - 1).All(candidate =>
+        candidate.Scheme == Uri.UriSchemeHttps &&
         candidate.AbsoluteUri.EndsWith(mirroredAsset.DownloadUri.AbsoluteUri,
             StringComparison.Ordinal)),
-    "mirror candidates proxy the exact trusted GitHub asset URL");
+    "all mirrors proxy the exact trusted GitHub asset URL over HTTPS");
 Equal(1, GitHubReleaseClient.BuildDownloadCandidates(
         mirroredAsset with { Sha256 = null }, allowMirrorFallback: true).Count,
     "unverified assets never use third-party download mirrors");
@@ -1556,20 +1576,35 @@ try
             checksumRelease, allowMirrorFallback: false, preferInstaller: true),
         "unknown-length checksum manifest is rejected at the streaming limit");
 
-    var downloadRequests = new List<string>();
+    var pingRequests = new System.Collections.Concurrent.ConcurrentQueue<string>();
+    var throughputRequests =
+        new System.Collections.Concurrent.ConcurrentQueue<string>();
+    var packageRequests = new System.Collections.Concurrent.ConcurrentQueue<string>();
     using var downloadHttpClient = new HttpClient(new StubHttpMessageHandler(
-        (request, _) =>
+        async (request, cancellationToken) =>
         {
             var host = request.RequestUri?.Host ?? string.Empty;
-            downloadRequests.Add(host);
-            if (host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
-                return Task.FromException<HttpResponseMessage>(
-                    new HttpRequestException("simulated GitHub asset outage"));
-            if (host.Equals("gh-proxy.org", StringComparison.OrdinalIgnoreCase))
-                return Task.FromResult(HttpResponse(request,
-                    new ByteArrayContent(payload)));
-            return Task.FromException<HttpResponseMessage>(
-                new HttpRequestException($"unexpected endpoint {host}"));
+            if (request.Method == HttpMethod.Head)
+            {
+                pingRequests.Enqueue(host);
+                return HttpResponse(request, new ByteArrayContent([]));
+            }
+            var range = request.Headers.Range?.Ranges.SingleOrDefault();
+            if (range?.To == 0)
+            {
+                packageRequests.Enqueue(host);
+                return HttpResponse(request, new ByteArrayContent(payload));
+            }
+
+            throughputRequests.Enqueue(host);
+            var delay = host.ToLowerInvariant() switch
+            {
+                "github.cnxiaobai.com" => 5,
+                "github.com" => 20,
+                _ => 60,
+            };
+            await Task.Delay(delay, cancellationToken);
+            return RangeResponse(request, payload);
         }));
     using var downloadClient = new GitHubReleaseClient(downloadHttpClient,
         Path.Combine(updateNetworkRoot, "downloads"));
@@ -1583,8 +1618,95 @@ try
         "download result retains the digest verified from release metadata");
     Equal(true, File.ReadAllBytes(downloaded.Path).SequenceEqual(payload),
         "mirror download preserves the verified payload exactly");
-    Sequence(["github.com", "gh-proxy.org"], downloadRequests,
-        "asset download tries GitHub before the first verified mirror");
+    Sequence(["github.cnxiaobai.com"], packageRequests,
+        "asset download uses the fastest responsive mirror");
+    Equal(116, pingRequests.Count,
+        "availability probing includes GitHub and all mirrors");
+    Equal(116, throughputRequests.Count,
+        "throughput probing includes every reachable candidate");
+    Equal(true, throughputRequests.Contains("github.com"),
+        "official GitHub participates in throughput ranking");
+
+    var officialPingRequests =
+        new System.Collections.Concurrent.ConcurrentQueue<string>();
+    var officialThroughputRequests =
+        new System.Collections.Concurrent.ConcurrentQueue<string>();
+    var officialPackageRequests =
+        new System.Collections.Concurrent.ConcurrentQueue<string>();
+    using var officialFallbackHttpClient = new HttpClient(
+        new StubHttpMessageHandler((request, _) =>
+        {
+            var host = request.RequestUri?.Host ?? string.Empty;
+            if (request.Method == HttpMethod.Head)
+            {
+                officialPingRequests.Enqueue(host);
+                return host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                    ? Task.FromResult(HttpResponse(request,
+                        new ByteArrayContent([])))
+                    : Task.FromException<HttpResponseMessage>(
+                        new HttpRequestException("simulated unreachable mirror"));
+            }
+            var range = request.Headers.Range?.Ranges.SingleOrDefault();
+            if (range?.To == 0)
+            {
+                officialPackageRequests.Enqueue(host);
+                return Task.FromResult(HttpResponse(request,
+                    new ByteArrayContent(payload)));
+            }
+            officialThroughputRequests.Enqueue(host);
+            return Task.FromResult(RangeResponse(request, payload));
+        }));
+    using var officialFallbackClient = new GitHubReleaseClient(
+        officialFallbackHttpClient,
+        Path.Combine(updateNetworkRoot, "official-fallback"));
+    var officialDownload = await officialFallbackClient.DownloadAsync(
+        downloadRelease, cancellationToken: default,
+        allowMirrorFallback: true, preferInstaller: true);
+    Equal(true, officialDownload.HashVerified,
+        "official fallback remains SHA256 verified");
+    Equal(116, officialPingRequests.Count,
+        "the reachability stage pings every configured candidate");
+    Sequence(["github.com"], officialThroughputRequests,
+        "only reachable candidates receive a throughput sample");
+    Sequence(["github.com"], officialPackageRequests,
+        "unreachable mirrors leave official GitHub as the download route");
+
+    var failoverPackageRequests =
+        new System.Collections.Concurrent.ConcurrentQueue<string>();
+    using var failoverHttpClient = new HttpClient(new StubHttpMessageHandler(
+        async (request, cancellationToken) =>
+        {
+            var host = request.RequestUri?.Host ?? string.Empty;
+            if (request.Method == HttpMethod.Head)
+                return HttpResponse(request, new ByteArrayContent([]));
+            var range = request.Headers.Range?.Ranges.SingleOrDefault();
+            if (range?.To == 0)
+            {
+                failoverPackageRequests.Enqueue(host);
+                if (host.Equals("gh-proxy.net",
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new HttpRequestException(
+                        "simulated fastest mirror download failure");
+                return HttpResponse(request, new ByteArrayContent(payload));
+            }
+            var delay = host.ToLowerInvariant() switch
+            {
+                "gh-proxy.net" => 2,
+                "github.com" => 15,
+                _ => 80,
+            };
+            await Task.Delay(delay, cancellationToken);
+            return RangeResponse(request, payload);
+        }));
+    using var failoverClient = new GitHubReleaseClient(failoverHttpClient,
+        Path.Combine(updateNetworkRoot, "ranked-failover"));
+    var failoverDownload = await failoverClient.DownloadAsync(downloadRelease,
+        cancellationToken: default, allowMirrorFallback: true,
+        preferInstaller: true);
+    Equal(true, failoverDownload.HashVerified,
+        "ranked failover download remains SHA256 verified");
+    Sequence(["gh-proxy.net", "github.com"], failoverPackageRequests,
+        "a failed fastest mirror immediately switches to the next ranked route");
     Throws<InvalidDataException>(() => UpdateInstallerLauncher.Launch(
             downloaded with { HashVerified = false }),
         "installer launcher refuses an update without verified integrity");

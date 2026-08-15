@@ -5,6 +5,14 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.6.6] - 2026-08-15
+
+### Changed
+
+- Speed up update downloads on constrained GitHub routes by testing GitHub and
+  all 115 mirrors listed by MoreTools, measuring a 256 KB sample only from
+  reachable routes, and failing over through the resulting throughput ranking.
+
 ## [1.6.5] - 2026-08-14
 
 ### Added
@@ -1086,7 +1094,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.5...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.6...HEAD
+[1.6.6]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.5...v1.6.6
 [1.6.5]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.3...v1.6.5
 [1.6.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.1...v1.6.2

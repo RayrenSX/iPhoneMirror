@@ -1,4 +1,7 @@
+using System.Buffers;
+using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -10,8 +13,16 @@ using IPhoneMirror.Shared.Networking;
 
 namespace IPhoneMirror.App.Updater;
 
+internal enum UpdateDownloadPhase
+{
+    Download,
+    ConnectivityTest,
+    ThroughputTest,
+}
+
 internal sealed record UpdateDownloadProgress(
-    long BytesReceived, long? TotalBytes, double BytesPerSecond)
+    long BytesReceived, long? TotalBytes, double BytesPerSecond,
+    UpdateDownloadPhase Phase = UpdateDownloadPhase.Download)
 {
     internal double? Percentage => TotalBytes is > 0
         ? Math.Clamp(BytesReceived * 100.0 / TotalBytes.Value, 0, 100)
@@ -115,6 +126,11 @@ internal sealed class GitHubReleaseClient : IDisposable
     private const int MaximumReleaseListCharacters = 4 * 1024 * 1024;
     private const int MaximumReleaseNotesCharacters = 1024 * 1024;
     private const int MaximumChecksumCharacters = 1024 * 1024;
+    private const int MirrorProbeBytes = 256 * 1024;
+    private static readonly TimeSpan CandidatePingWindow = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan CandidateThroughputWindow =
+        TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan DownloadStallTimeout = TimeSpan.FromSeconds(30);
     private static readonly (string Name, Uri Uri)[] ReleaseEndpoints =
     [
         ("github-api", new Uri(
@@ -122,11 +138,125 @@ internal sealed class GitHubReleaseClient : IDisposable
         ("github-raw", new Uri(
             "https://raw.githubusercontent.com/RayrenSX/iPhoneMirror/main/updates/releases.json")),
     ];
+    // Snapshot of all 115 mirrors published by moretools.app/zh-CN/github-proxy
+    // on 2026-08-15. The original trusted GitHub URL is appended separately.
     private static readonly string[] DownloadMirrorPrefixes =
     [
-        "https://gh-proxy.org/",
-        "https://ghfast.top/",
+        "https://gh-proxy.net/",
+        "https://github.cnxiaobai.com/",
+        "https://hub.gitmirror.com/",
+        "https://www.5555.cab/",
+        "https://git.tangbai.cc/",
+        "https://gh.ddlc.top/",
+        "https://ghproxy.xiaopa.cc/",
+        "https://ghproxy.cfd/",
+        "https://ghproxy.cc/",
+        "https://ghproxy.monkeyray.net/",
+        "https://cf.ghproxy.cc/",
+        "https://gitproxy.mrhjx.cn/",
+        "https://gh.xxooo.cf/",
+        "https://github.xxlab.tech/",
+        "https://ghproxy.1888866.xyz/",
+        "https://github.mlmle.cn/",
+        "https://fastgit.cc/",
+        "https://gh.1k.ink/",
         "https://ghproxy.net/",
+        "https://github.boringhex.top/",
+        "https://ghfast.top/",
+        "https://y.whereisdoge.work/",
+        "https://ghproxy.imciel.com/",
+        "https://gh.jdck.fun/",
+        "https://xiaomo-station.top/",
+        "https://gh.monlor.com/",
+        "https://g.blfrp.cn/",
+        "https://gh.con.sh/",
+        "https://gh.b52m.cn/",
+        "https://github.dpik.top/",
+        "https://github.geekery.cn/",
+        "https://gh.halonice.com/",
+        "https://github.limoruirui.com/",
+        "https://git.yylx.win/",
+        "https://github.tbedu.top/",
+        "https://ghproxy.vansour.top/",
+        "https://tvv.tw/",
+        "https://ghproxy.xzhouqd.com/",
+        "https://github-proxy.memory-echoes.cn/",
+        "https://gh.catmak.name/",
+        "https://hub.ddayh.com/",
+        "https://github.ruojian.space/",
+        "https://ghproxy.cxkpro.top/",
+        "https://ghp.keleyaa.com/",
+        "https://ghf.\u65e0\u540d\u6c0f.top/",
+        "https://github-proxy.lixxing.top/",
+        "https://gh.padao.fun/",
+        "https://gp.871201.xyz/",
+        "https://gh.wsmdn.dpdns.org/",
+        "https://ggg.clwap.dpdns.org/",
+        "https://gh-proxy.com/",
+        "https://gh.dpik.top/",
+        "https://gp.zkitefly.eu.org/",
+        "https://gh.bugdey.us.kg/",
+        "https://code-hub-hk.freexy.top/",
+        "https://github.chenc.dev/",
+        "https://ghfile.geekertao.top/",
+        "https://kenyu.ggff.net/",
+        "https://gh.nxnow.top/",
+        "https://github.bullb.net/",
+        "https://gitproxy.197545.xyz/",
+        "https://gitproxy.127731.xyz/",
+        "https://gitproxy1.127731.xyz/",
+        "https://jiashu.1win.eu.org/",
+        "https://ghproxy.mf-dust.dpdns.org/",
+        "https://j.1lin.dpdns.org/",
+        "https://gh.jasonzeng.dev/",
+        "https://proxy.baguoyuyan.com/",
+        "https://github.1ms.xx.kg/",
+        "https://gh.198962.xyz/",
+        "https://github.880824.xyz/",
+        "https://ghps.cc/",
+        "https://30006000.xyz/",
+        "https://github.tianrld.top/",
+        "https://getgit.love8yun.eu.org/",
+        "https://github.788787.xyz/",
+        "https://ghm.078465.xyz/",
+        "https://github-proxy.com/",
+        "https://proxy.yaoyaoling.net/",
+        "https://ghproxy.sakuramoe.dev/",
+        "https://ghproxy.053000.xyz/",
+        "https://gh.chjina.com/",
+        "https://git.zeas.cc/",
+        "https://ghpxy.hwinzniej.top/",
+        "https://gh.echofree.xyz/",
+        "https://github.zzrbk.xyz/",
+        "https://git.669966.xyz/",
+        "https://github.ihnic.com/",
+        "https://gh.996986.xyz/",
+        "https://gh.idayer.com/",
+        "https://github.ednovas.xyz/",
+        "https://gh.chalin.tk/",
+        "https://j.1win.ggff.net/",
+        "https://github.lsdfxdk.nyc.mn/",
+        "https://gh.aaa.team/",
+        "https://github.crdz.eu.org/",
+        "https://gh.shiina-rimo.cafe/",
+        "https://ghproxy.mirror.skybyte.me/",
+        "https://gh.llkk.cc/",
+        "https://git.40609891.xyz/",
+        "https://github.oterea.top/",
+        "https://gh.noki.icu/",
+        "https://gh.39.al/",
+        "https://ghproxy.cn/",
+        "https://down.npee.cn/",
+        "https://github.kkproxy.dpdns.org/",
+        "https://free.cn.eu.org/",
+        "https://git.951959483.xyz/",
+        "https://git.820828.xyz/",
+        "https://ghproxy.fangkuai.fun/",
+        "https://github.cn86.dev/",
+        "https://github.zjzzy.cloudns.org/",
+        "https://ghb.nilive.top/",
+        "https://gitproxy.click/",
+        "https://proxy.atoposs.com/",
     ];
     private static readonly HashSet<string> OfficialDownloadHosts = new(
         StringComparer.OrdinalIgnoreCase)
@@ -283,7 +413,9 @@ internal sealed class GitHubReleaseClient : IDisposable
         TryDelete(partial);
         TryDelete(destination);
         Exception? lastError = null;
-        foreach (var downloadUri in BuildDownloadCandidates(asset, allowMirrorFallback))
+        var downloadCandidates = await RankDownloadCandidatesAsync(asset,
+            allowMirrorFallback, progress, cancellationToken);
+        foreach (var downloadUri in downloadCandidates)
         {
             TryDelete(partial);
             progress?.Report(new UpdateDownloadProgress(0,
@@ -293,13 +425,14 @@ internal sealed class GitHubReleaseClient : IDisposable
                 DiagnosticLogger.Info("updater", "download_begin",
                     ("release", release.TagName), ("asset", asset.Name),
                     ("bytes", asset.Size), ("endpoint", downloadUri.Host));
-                using var timeout =
+                using var stallTimeout =
                     CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(TimeSpan.FromMinutes(30));
+                stallTimeout.CancelAfter(DownloadStallTimeout);
                 var segmentCount = await DownloadFileAsync(asset, downloadUri, partial, progress,
-                    timeout.Token);
+                    stallTimeout, stallTimeout.Token);
+                stallTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
                 var verifiedSha256 = await VerifyAsync(release, asset, partial, allowMirrorFallback,
-                    timeout.Token);
+                    cancellationToken);
                 File.Move(partial, destination, overwrite: true);
                 DiagnosticLogger.Info("updater", "download_complete",
                     ("release", release.TagName), ("asset", asset.Name),
@@ -336,22 +469,208 @@ internal sealed class GitHubReleaseClient : IDisposable
     {
         if (!ReleaseParser.IsTrustedGitHubAssetUri(asset.DownloadUri))
             throw new InvalidDataException("The update asset URL is not trusted.");
-        var candidates = new List<Uri> { asset.DownloadUri };
-        if (!allowMirrorFallback || asset.Sha256 is null) return candidates;
-        candidates.AddRange(DownloadMirrorPrefixes.Select(prefix =>
-            new Uri(prefix + asset.DownloadUri.AbsoluteUri, UriKind.Absolute)));
+        if (!allowMirrorFallback || asset.Sha256 is null)
+            return [asset.DownloadUri];
+        var candidates = DownloadMirrorPrefixes.Select(prefix =>
+            new Uri(prefix + asset.DownloadUri.AbsoluteUri, UriKind.Absolute)).ToList();
+        candidates.Add(asset.DownloadUri);
         return candidates;
     }
 
-    private async Task<int> DownloadFileAsync(ReleaseAsset asset, Uri downloadUri,
-        string destination, IProgress<UpdateDownloadProgress>? progress,
+    private async Task<IReadOnlyList<Uri>> RankDownloadCandidatesAsync(
+        ReleaseAsset asset, bool allowMirrorFallback,
+        IProgress<UpdateDownloadProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var downloadProgress = progress is null
-            ? null
-            : new Progress<SegmentedDownloadProgress>(value =>
-                progress.Report(new UpdateDownloadProgress(value.BytesReceived,
-                    value.TotalBytes, value.BytesPerSecond)));
+        var candidates = BuildDownloadCandidates(asset, allowMirrorFallback);
+        if (candidates.Count <= 1) return candidates;
+
+        progress?.Report(new UpdateDownloadProgress(0, null, 0,
+            UpdateDownloadPhase.ConnectivityTest));
+        using var pingTimeout =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        pingTimeout.CancelAfter(CandidatePingWindow);
+        var pingTasks = candidates.Select(uri =>
+            PingDownloadCandidateAsync(uri, pingTimeout.Token)).ToArray();
+        var pings = await Task.WhenAll(pingTasks);
+        cancellationToken.ThrowIfCancellationRequested();
+        var successfulPings = pings
+            .Where(result => result is not null)
+            .Select(result => result!)
+            .ToArray();
+        var reachable = successfulPings.Select(result => result.Uri).ToArray();
+        var fastestPing = successfulPings
+            .OrderBy(result => result.Milliseconds)
+            .FirstOrDefault();
+        DiagnosticLogger.Info("updater", "download_candidate_ping_complete",
+            ("candidates", candidates.Count), ("reachable", reachable.Length),
+            ("fastest", fastestPing?.Uri.Host ?? "none"),
+            ("fastest_ms", Math.Round(fastestPing?.Milliseconds ?? 0)));
+        if (reachable.Length == 0) return [asset.DownloadUri];
+
+        progress?.Report(new UpdateDownloadProgress(0, null, 0,
+            UpdateDownloadPhase.ThroughputTest));
+        using var throughputTimeout =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        throughputTimeout.CancelAfter(CandidateThroughputWindow);
+        var probeTasks = reachable.Select(uri =>
+            ProbeDownloadCandidateAsync(asset, uri,
+                throughputTimeout.Token)).ToArray();
+        var probes = await Task.WhenAll(probeTasks);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var available = probes
+            .Where(probe => probe is not null)
+            .Select(probe => probe!)
+            .OrderByDescending(probe => probe.BytesPerSecond)
+            .ToArray();
+        DiagnosticLogger.Info("updater", "download_throughput_probe_complete",
+            ("reachable", reachable.Length), ("measured", available.Length),
+            ("selected", available.FirstOrDefault()?.Uri.Host ?? "unmeasured"),
+            ("probe_bytes", MirrorProbeBytes));
+        return available.Length > 0
+            ? available.Select(probe => probe.Uri).ToArray()
+            : successfulPings
+                .OrderBy(result => result.Milliseconds)
+                .Select(result => result.Uri)
+                .ToArray();
+    }
+
+    private async Task<ReachableDownloadCandidate?> PingDownloadCandidateAsync(
+        Uri uri, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var pingUri = new Uri(uri.GetLeftPart(UriPartial.Authority) + "/",
+                UriKind.Absolute);
+            using var request = new HttpRequestMessage(HttpMethod.Head, pingUri);
+            var stopwatch = Stopwatch.StartNew();
+            using var response = await _httpClient.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var finalUri = response.RequestMessage?.RequestUri;
+            if (finalUri is null || finalUri.Scheme != Uri.UriSchemeHttps ||
+                !finalUri.Host.Equals(pingUri.Host,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException(
+                    "The candidate ping redirected to an untrusted host.");
+            return new ReachableDownloadCandidate(uri,
+                stopwatch.Elapsed.TotalMilliseconds);
+        }
+        catch (Exception error) when (error is HttpRequestException or
+                                           OperationCanceledException or
+                                           IOException or InvalidDataException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<DownloadCandidateProbe?> ProbeDownloadCandidateAsync(
+        ReleaseAsset asset, Uri uri, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var probeEnd = asset.Size > 0
+                ? Math.Min(asset.Size - 1, MirrorProbeBytes - 1)
+                : MirrorProbeBytes - 1;
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.AcceptEncoding.Add(
+                new StringWithQualityHeaderValue("identity"));
+            request.Headers.Range = new RangeHeaderValue(0, probeEnd);
+            var stopwatch = Stopwatch.StartNew();
+            using var response = await _httpClient.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            EnsureTrustedDownloadResponse(uri, response);
+            response.EnsureSuccessStatusCode();
+
+            var expectedSampleBytes = checked((int)(probeEnd + 1));
+            int received;
+            if (response.StatusCode == HttpStatusCode.OK)
+            {
+                if (asset.Size > 0 && response.Content.Headers.ContentLength is > 0 and
+                    var contentLength && contentLength != asset.Size)
+                    throw new InvalidDataException(
+                        "The mirror probe size does not match the release metadata.");
+                received = await ReadProbePayloadAsync(response.Content,
+                    expectedSampleBytes, requireExactLength: false,
+                    cancellationToken);
+            }
+            else if (response.StatusCode == HttpStatusCode.PartialContent)
+            {
+                var range = response.Content.Headers.ContentRange;
+                if (range?.From != 0 || range.To != probeEnd ||
+                    range.Length is not { } totalBytes || totalBytes <= probeEnd ||
+                    asset.Size > 0 && totalBytes != asset.Size)
+                    throw new InvalidDataException(
+                        "The mirror probe returned an invalid content range.");
+                received = await ReadProbePayloadAsync(response.Content,
+                    expectedSampleBytes, requireExactLength: true,
+                    cancellationToken);
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    "The mirror probe returned an unexpected status.");
+            }
+            var seconds = Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
+            return new DownloadCandidateProbe(uri, received / seconds);
+        }
+        catch (Exception error) when (error is HttpRequestException or
+                                           OperationCanceledException or
+                                           IOException or InvalidDataException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<int> ReadProbePayloadAsync(HttpContent content,
+        int expectedBytes, bool requireExactLength,
+        CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength is { } contentLength &&
+            (requireExactLength && contentLength != expectedBytes ||
+             !requireExactLength && contentLength < expectedBytes))
+            throw new InvalidDataException(
+                "The mirror probe returned an unexpected content length.");
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        var buffer = ArrayPool<byte>.Shared.Rent(Math.Min(expectedBytes, 64 * 1024));
+        try
+        {
+            var received = 0;
+            while (received < expectedBytes)
+            {
+                var count = await stream.ReadAsync(buffer.AsMemory(0,
+                    Math.Min(buffer.Length, expectedBytes - received)), cancellationToken);
+                if (count == 0)
+                    throw new EndOfStreamException(
+                        "The mirror probe ended before its requested range completed.");
+                received = checked(received + count);
+            }
+            if (requireExactLength &&
+                await stream.ReadAsync(buffer.AsMemory(0, 1), cancellationToken) != 0)
+                throw new InvalidDataException(
+                    "The mirror probe exceeded its requested range.");
+            return received;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private sealed record ReachableDownloadCandidate(Uri Uri, double Milliseconds);
+    private sealed record DownloadCandidateProbe(Uri Uri, double BytesPerSecond);
+
+    private async Task<int> DownloadFileAsync(ReleaseAsset asset, Uri downloadUri,
+        string destination, IProgress<UpdateDownloadProgress>? progress,
+        CancellationTokenSource stallTimeout,
+        CancellationToken cancellationToken)
+    {
+        var downloadProgress = new InlineProgress<SegmentedDownloadProgress>(value =>
+            {
+                stallTimeout.CancelAfter(DownloadStallTimeout);
+                progress?.Report(new UpdateDownloadProgress(value.BytesReceived,
+                    value.TotalBytes, value.BytesPerSecond));
+            });
         var result = await SegmentedHttpDownloader.DownloadAsync(_httpClient,
             downloadUri, destination, new SegmentedDownloadOptions(
                 MaximumUpdateBytes,
@@ -359,6 +678,11 @@ internal sealed class GitHubReleaseClient : IDisposable
             finalUri => IsTrustedDownloadFinalUri(downloadUri, finalUri),
             downloadProgress, cancellationToken);
         return result.SegmentCount;
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
     private async Task<string> VerifyAsync(ReleaseInfo release, ReleaseAsset asset,
