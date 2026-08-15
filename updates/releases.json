@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.6.7",
+    "name": "iPhoneMirror v1.6.7",
+    "body": "### Fixed\n\n- Keep the elevated PowerShell host hidden while verified installer and\n  portable ZIP updates are applied, without suppressing the required UAC prompt.",
+    "published_at": "2026-08-15T02:50:17Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.6.7-x64.exe",
+        "size": 91873324,
+        "digest": "sha256:d1acc9a5248b6cf4484e20102687936bb97c83077acb23e73c5a899bcba99bb1",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-Setup-v1.6.7-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.7-win-x64.zip",
+        "size": 191245100,
+        "digest": "sha256:3b5a5677caca6d79b2b093e26245c806389a1cf1b131f945ba1c33e9bd517711",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-v1.6.7-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.7-win-x64-sbom.spdx.json",
+        "size": 38969,
+        "digest": "sha256:57988241efc15aeda87eddc4fe51a8e48b5004f4e460b61c91ad34ae9e4f51f4",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-v1.6.7-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 307,
+        "digest": "sha256:9f848c55183d5b3a4d5614c3418207b1ed3dafe979f0419916b19655cd37f2eb",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.6.6",
     "name": "iPhoneMirror v1.6.6",
     "body": "### Changed\n\n- Speed up update downloads on constrained GitHub routes by testing GitHub and\n  all 115 mirrors listed by MoreTools, measuring a 256 KB sample only from\n  reachable routes, and failing over through the resulting throughput ranking.",
