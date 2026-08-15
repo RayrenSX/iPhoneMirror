@@ -151,20 +151,10 @@ internal static class UpdateInstallerLauncher
         if (isInstaller)
         {
             using (LockAndValidatePackage(update.Path, update.VerifiedSha256!)) { }
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = Path.Combine(Environment.SystemDirectory,
-                    "WindowsPowerShell", "v1.0", "powershell.exe"),
-                UseShellExecute = true,
-                Verb = "runas",
-                WorkingDirectory = Path.GetDirectoryName(update.Path),
-                ArgumentList =
-                {
-                    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                    "-EncodedCommand", BuildVerifiedInstallerBootstrap(update.Path,
-                        update.VerifiedSha256!, BuildInstallerArguments()),
-                },
-            });
+            using var process = Process.Start(BuildElevatedPowerShellStartInfo(
+                Path.GetDirectoryName(update.Path) ?? AppContext.BaseDirectory,
+                BuildVerifiedInstallerBootstrap(update.Path,
+                    update.VerifiedSha256!, BuildInstallerArguments())));
             if (process is null)
                 throw new InvalidOperationException("The update installer could not be started.");
             DiagnosticLogger.Info("updater", "installer_launched",
@@ -194,20 +184,8 @@ internal static class UpdateInstallerLauncher
             AppContext.BaseDirectory, executable, update.VerifiedSha256!, waitProcessIds);
         var encodedBootstrap = BuildVerifiedScriptBootstrap(helperScript,
             helperSha256, scriptArguments, cleanupDirectory: true);
-        var start = new ProcessStartInfo
-        {
-            FileName = Path.Combine(Environment.SystemDirectory,
-                "WindowsPowerShell", "v1.0", "powershell.exe"),
-            UseShellExecute = true,
-            Verb = "runas",
-            WorkingDirectory = helperDirectory,
-        };
-        start.ArgumentList.Add("-NoProfile");
-        start.ArgumentList.Add("-NonInteractive");
-        start.ArgumentList.Add("-ExecutionPolicy");
-        start.ArgumentList.Add("Bypass");
-        start.ArgumentList.Add("-EncodedCommand");
-        start.ArgumentList.Add(encodedBootstrap);
+        var start = BuildElevatedPowerShellStartInfo(helperDirectory,
+            encodedBootstrap);
         try
         {
             using var process = Process.Start(start) ??
@@ -220,6 +198,29 @@ internal static class UpdateInstallerLauncher
             throw;
         }
         DiagnosticLogger.Info("updater", "installer_launched", ("format", "zip"));
+    }
+
+    internal static ProcessStartInfo BuildElevatedPowerShellStartInfo(
+        string workingDirectory, string encodedCommand)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(encodedCommand);
+        var start = new ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.SystemDirectory,
+                "WindowsPowerShell", "v1.0", "powershell.exe"),
+            UseShellExecute = true,
+            Verb = "runas",
+            WorkingDirectory = workingDirectory,
+            WindowStyle = ProcessWindowStyle.Hidden,
+        };
+        foreach (var argument in new[]
+                 {
+                     "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                     "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodedCommand,
+                 })
+            start.ArgumentList.Add(argument);
+        return start;
     }
 
     internal static void ValidateAssetForDeployment(string assetName,

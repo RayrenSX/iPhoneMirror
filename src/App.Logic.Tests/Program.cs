@@ -1916,6 +1916,20 @@ Equal(false, UpdateInstallerLauncher.BuildInstallerArguments()
 Equal(true, UpdateInstallerLauncher.BuildInstallerArguments()
         .Contains("/LOG=", StringComparison.Ordinal),
     "one-click installer update persists an installer log");
+var elevatedUpdateStart = UpdateInstallerLauncher.BuildElevatedPowerShellStartInfo(
+    Path.GetTempPath(), Convert.ToBase64String(Encoding.Unicode.GetBytes("exit 0")));
+Equal(true, elevatedUpdateStart.UseShellExecute &&
+            elevatedUpdateStart.Verb.Equals("runas", StringComparison.OrdinalIgnoreCase),
+    "update helper preserves UAC elevation through the Windows shell");
+Equal(System.Diagnostics.ProcessWindowStyle.Hidden, elevatedUpdateStart.WindowStyle,
+    "update helper asks Windows to hide the elevated PowerShell host");
+var elevatedUpdateArguments = elevatedUpdateStart.ArgumentList.ToArray();
+var windowStyleArgument = Array.IndexOf(elevatedUpdateArguments, "-WindowStyle");
+Equal(true, windowStyleArgument >= 0 &&
+            windowStyleArgument + 1 < elevatedUpdateArguments.Length &&
+            elevatedUpdateArguments[windowStyleArgument + 1].Equals(
+                "Hidden", StringComparison.OrdinalIgnoreCase),
+    "update helper passes PowerShell an explicit hidden-window mode");
 var updateWindowCode = File.ReadAllText(Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory, "..", "..", "..", "..", "App", "Windows",
     "UpdateWindow.xaml.cs")));

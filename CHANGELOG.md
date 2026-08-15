@@ -5,6 +5,13 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.6.7] - 2026-08-15
+
+### Fixed
+
+- Keep the elevated PowerShell host hidden while verified installer and
+  portable ZIP updates are applied, without suppressing the required UAC prompt.
+
 ## [1.6.6] - 2026-08-15
 
 ### Changed
@@ -1094,7 +1101,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.6...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.7...HEAD
+[1.6.7]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.6...v1.6.7
 [1.6.6]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.5...v1.6.6
 [1.6.5]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.3...v1.6.5
 [1.6.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.2...v1.6.3

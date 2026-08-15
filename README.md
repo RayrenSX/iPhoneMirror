@@ -329,7 +329,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.6.6 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.6.7 -GenerateSbom
 ```
 
 正式生成待上传资产时传入 `-UpdateReleaseManifest`，发布脚本会同步
