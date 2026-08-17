@@ -48,6 +48,8 @@ namespace detail {
 [[nodiscard]] bool convert_i420_to_nv12(const wireless::MessageHeader& header,
     std::span<const std::uint8_t> payload, std::vector<std::uint8_t>& destination,
     std::int32_t& destination_stride) noexcept;
+[[nodiscard]] bool is_valid_pcm_audio(const wireless::MessageHeader& header,
+    std::span<const std::uint8_t> payload) noexcept;
 
 class MediaCommandQueue final {
 public:

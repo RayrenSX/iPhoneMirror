@@ -400,6 +400,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
         var frameInterval = TimeSpan.FromSeconds(1.0 / request.FrameRate);
         var frameCanvas = new byte[checked((int)request.Width * (int)request.Height * 4)];
         var staleSince = Stopwatch.StartNew();
+        var outputClock = Stopwatch.StartNew();
+        long framesWritten = 0;
         long lastTimestamp = long.MinValue;
         using var timer = new PeriodicTimer(frameInterval);
         while (await timer.WaitForNextTickAsync(cancellationToken))
@@ -407,6 +409,15 @@ internal sealed class MediaOutputService : IAsyncDisposable
             if (process.HasExited)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(_lastError)
                     ? $"FFmpeg exited with code {process.ExitCode}." : _lastError);
+            // The rawvideo input has a fixed frame rate and therefore assigns
+            // one frame interval to every frame received. A slow frame copy,
+            // resize, encode, or pipe write can make a timer tick miss its
+            // deadline; writing only one frame in that case would shorten the
+            // resulting recording. Keep the frame count aligned with elapsed
+            // wall time and repeat the newest frame to cover missed slots.
+            var dueBeforeRead = CalculateDueVideoFrames(outputClock.Elapsed,
+                request.FrameRate, framesWritten);
+            if (dueBeforeRead <= 0) continue;
             var frame = _frameProvider(sessionHandle, request.Width, request.Height);
             if (frame is null)
             {
@@ -423,9 +434,28 @@ internal sealed class MediaOutputService : IAsyncDisposable
             {
                 throw new TimeoutException("The projection session stopped producing frames.");
             }
-            await WriteFrameAsync(process.StandardInput.BaseStream, frame,
-                request.Width, request.Height, frameCanvas, cancellationToken);
+            var framesToWrite = CalculateDueVideoFrames(outputClock.Elapsed,
+                request.FrameRate, framesWritten);
+            var preparedFrame = PrepareFrame(frame, request.Width,
+                request.Height, frameCanvas);
+            for (long index = 0; index < framesToWrite; ++index)
+            {
+                await process.StandardInput.BaseStream.WriteAsync(preparedFrame,
+                    cancellationToken);
+                ++framesWritten;
+            }
         }
+    }
+
+    internal static long CalculateDueVideoFrames(TimeSpan elapsed,
+        int frameRate, long framesWritten)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(frameRate);
+        ArgumentOutOfRangeException.ThrowIfNegative(framesWritten);
+        if (elapsed <= TimeSpan.Zero) return 0;
+        var due = (long)Math.Round(elapsed.TotalSeconds * frameRate,
+            MidpointRounding.AwayFromZero);
+        return Math.Max(0, due - framesWritten);
     }
 
     private async Task PumpAudioAsync(Process process, Stream output,
@@ -534,6 +564,13 @@ internal sealed class MediaOutputService : IAsyncDisposable
     internal static async Task WriteFrameAsync(Stream output, VideoFrame frame,
         uint width, uint height, byte[] canvas, CancellationToken cancellationToken)
     {
+        await output.WriteAsync(PrepareFrame(frame, width, height, canvas),
+            cancellationToken);
+    }
+
+    internal static ReadOnlyMemory<byte> PrepareFrame(VideoFrame frame,
+        uint width, uint height, byte[] canvas)
+    {
         var targetRowBytes = checked((int)width * 4);
         var targetRows = checked((int)height);
         var targetBytes = checked(targetRowBytes * targetRows);
@@ -547,10 +584,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
             throw new InvalidDataException("The native output frame has an invalid layout.");
         if (frame.Width == width && frame.Height == height &&
             frame.Stride == targetRowBytes)
-        {
-            await output.WriteAsync(frame.Pixels.AsMemory(0, targetBytes), cancellationToken);
-            return;
-        }
+            return frame.Pixels.AsMemory(0, targetBytes);
 
         Array.Clear(canvas, 0, targetBytes);
         var leftBytes = checked(((int)width - (int)frame.Width) / 2 * 4);
@@ -562,7 +596,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
             frame.Pixels.AsSpan(sourceOffset, frameRowBytes)
                 .CopyTo(canvas.AsSpan(destinationOffset, frameRowBytes));
         }
-        await output.WriteAsync(canvas.AsMemory(0, targetBytes), cancellationToken);
+        return canvas.AsMemory(0, targetBytes);
     }
 
     private static Process CreateProcess(string path, IReadOnlyList<string> arguments)

@@ -19,6 +19,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -1177,6 +1178,13 @@ void test_capture_media_safety_helpers() {
         "WASAPI validates PCM before computing its bounded ring layout");
     const auto audio_capacity = audio_layout ? audio_layout->capacity_frames : 0;
 
+    const auto network_audio_layout =
+        iPhoneMirror::audio::detail::checked_wasapi_buffer_layout(
+            audio_format, 24000);
+    check(network_audio_layout && network_audio_layout->capacity_frames == 24000 &&
+        network_audio_layout->capacity_bytes == 96000,
+        "WASAPI expands its bounded ring for network jitter buffering");
+
     const auto queue_1024 = iPhoneMirror::audio::detail::wasapi_queue_thresholds(
         1024, audio_capacity, 1056);
     const auto queue_2048 = iPhoneMirror::audio::detail::wasapi_queue_thresholds(
@@ -1190,6 +1198,16 @@ void test_capture_media_safety_helpers() {
         queue_4096.startup_frames == 5152 &&
         queue_4096.high_water_frames == 8192,
         "WASAPI jitter thresholds adapt to the observed PCM packet and endpoint sizes");
+
+    const auto network_queue = iPhoneMirror::audio::detail::wasapi_queue_thresholds(
+        352, 24000, 1056, 8640, 19200);
+    const auto network_burst = iPhoneMirror::audio::detail::plan_wasapi_enqueue(
+        19000, 352, 24000, network_queue);
+    check(network_queue.startup_frames == 8640 &&
+        network_queue.high_water_frames == 19200 &&
+        network_burst.drop_existing_frames == 152 &&
+        network_burst.final_frames == 19200,
+        "WASAPI network buffering covers retransmit jitter before bounded catch-up");
 
     const auto queue_4096_before_endpoint =
         iPhoneMirror::audio::detail::wasapi_queue_thresholds(
@@ -1443,6 +1461,43 @@ void test_wireless_multi_stream_isolation() {
     second->detach();
 }
 
+void test_wireless_audio_only_stream() {
+    iPhoneMirror::capture::WirelessClientStream stream(
+        L"00:11:22:33:44:55", L"Music iPhone");
+    stream.set_identity(L"Music iPhone", true);
+
+    iPhoneMirror::wireless::MessageHeader video;
+    video.type = iPhoneMirror::wireless::MessageType::Video;
+    video.width = video.height = 2;
+    video.stride[0] = 2;
+    video.stride[1] = video.stride[2] = 1;
+    video.plane_size[0] = 4;
+    video.plane_size[1] = video.plane_size[2] = 1;
+    stream.publish_video(video, std::array<std::uint8_t, 6>{1, 2, 3, 4, 5, 6});
+    stream.set_identity(L"Music iPhone", false);
+    stream.set_identity(L"Music iPhone", true);
+
+    iPhoneMirror::wireless::MessageHeader header;
+    header.type = iPhoneMirror::wireless::MessageType::Audio;
+    header.sample_rate = 44100;
+    header.channels = 2;
+    header.bits_per_sample = 16;
+    const std::vector<std::uint8_t> pcm{0, 0, 1, 0, 2, 0, 3, 0};
+    stream.publish_audio(header, pcm);
+
+    const auto audio = stream.snapshot();
+    check(audio.state == iPhoneMirror::capture::State::Streaming &&
+        audio.width == 0 && audio.height == 0 && audio.video_frames == 1 &&
+        audio.audio_packets == 1 && audio.message == L"AirPlay music streaming" &&
+        audio.audio_sample_rate == 44100 && audio.audio_channels == 2,
+        "audio-only AirPlay packet starts a new music session after prior video");
+
+    header.bits_per_sample = 24;
+    stream.publish_audio(header, pcm);
+    check(stream.snapshot().audio_packets == 1,
+        "unsupported AirPlay audio does not advance the stream state");
+}
+
 void test_media_command_queue() {
     using iPhoneMirror::capture::MediaCastCommand;
     using iPhoneMirror::capture::MediaCastCommandType;
@@ -1606,6 +1661,7 @@ int main(int argc, char** argv) {
         test_image_adjustment_api_validation();
         test_wireless_i420_conversion();
         test_wireless_multi_stream_isolation();
+        test_wireless_audio_only_stream();
         test_media_command_queue();
         test_logging_shutdown_boundary();
     } catch (const std::exception& error) {

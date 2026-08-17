@@ -108,6 +108,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private string _captureStatus = string.Empty;
     private string _driverState = string.Empty;
     private bool _isCapturing;
+    private bool _isAudioOnlyAirPlay;
     private bool _isBusy;
     private bool _isSettingsDialogOpen;
     private bool _isMediaOutputTransitioning;
@@ -288,6 +289,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public Visibility PreviewAndObsVisibility => CurrentSessionHandle != 0
         ? Visibility.Visible : Visibility.Collapsed;
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) { StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); } } }
+    public bool IsAudioOnlyAirPlay => _isAudioOnlyAirPlay;
+    public bool CanUseVisualPreviewTools => HasCaptureSession && !IsAudioOnlyAirPlay;
     public bool IsBusy
     {
         get => _isBusy;
@@ -335,7 +338,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public string LatencyDisplay { get => _latencyDisplay; private set => Set(ref _latencyDisplay, value); }
     public string AudioDisplay { get => _audioDisplay; private set => Set(ref _audioDisplay, value); }
     public string AudioDetailDisplay => IsMediaCastSelected
-        ? LocalizationService.Get("MediaCastSystemDecoder") : "48 kHz PCM";
+        ? LocalizationService.Get("MediaCastSystemDecoder")
+        : IsAudioOnlyAirPlay ? LocalizationService.Get("WirelessMusicAudioFormat")
+        : "48 kHz PCM";
     public ResolutionPreset SelectedResolutionPreset
     {
         get => _selectedResolutionPreset;
@@ -606,10 +611,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public Visibility VirtualCameraUninstallVisibility =>
         _virtualCameraCapabilities.Registered
             ? Visibility.Visible : Visibility.Collapsed;
-    public string TargetResolutionDisplay => IsMediaCastSelected
+    public string TargetResolutionDisplay => IsAudioOnlyAirPlay
+        ? LocalizationService.Get("WirelessMusicNoVideo")
+        : IsMediaCastSelected
         ? LocalizationService.Get("MediaCastOriginalResolution")
         : LocalizationService.Format("RenderLimitFormat", SelectedResolutionPreset.Label);
-    public string TargetFpsDisplay => IsMediaCastSelected
+    public string TargetFpsDisplay => IsAudioOnlyAirPlay
+        ? LocalizationService.Get("WirelessMusicNoVideo")
+        : IsMediaCastSelected
         ? LocalizationService.Format("MediaCastFpsCapabilityFormat",
             _wireless.AppliedProfile.FrameRate)
         : LocalizationService.Format("TargetFpsFormat", SelectedFrameRate);
@@ -1273,6 +1282,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(AdvancedSettingsVisibility));
         OnPropertyChanged(nameof(PlaybackVolume));
         OnPropertyChanged(nameof(PlayAudio));
+        OnPropertyChanged(nameof(CanUseVisualPreviewTools));
         NotifyMediaOutputStateChanged();
         MediaOutputSettingsCommand.NotifyCanExecuteChanged();
     }
@@ -1282,6 +1292,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(CurrentSessionHandle));
         OnPropertyChanged(nameof(HasCaptureSession));
         OnPropertyChanged(nameof(PreviewAndObsVisibility));
+        OnPropertyChanged(nameof(CanUseVisualPreviewTools));
         OnPropertyChanged(nameof(UsbProjectionSettingsVisibility));
         OnPropertyChanged(nameof(CanChangeVideoPipeline));
         OnPropertyChanged(nameof(CanChangeDecoderPipeline));
@@ -1394,6 +1405,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void ResetPreviewState()
     {
+        SetAudioOnlyAirPlay(false);
         SetDecoderStatus(string.Empty, "Hidden");
         _lastVideoOutputSignature = null;
         _sourceVideoWidth = 0;
@@ -2444,6 +2456,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("error_code", status.ErrorCode),
                 ("message", status.Message)));
         }
+        var audioOnlyAirPlay = IsWirelessSelected && status.AudioSampleRate > 0 &&
+            status.Width == 0 && status.Height == 0;
+        SetAudioOnlyAirPlay(audioOnlyAirPlay);
         var captureActive = IsActiveCaptureState(status.State);
         IsCapturing = captureActive;
         if (!captureActive && status.State is CaptureState.Idle or CaptureState.Stopped or CaptureState.Error)
@@ -2473,7 +2488,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     failedSession, status, errorTitle, errorBody);
             }
         }
-        Resolution = status.Width > 0 && status.Height > 0 ? $"{status.Width}×{status.Height}" : "—";
+        Resolution = audioOnlyAirPlay
+            ? LocalizationService.Get("WirelessMusicAudioOnly")
+            : status.Width > 0 && status.Height > 0 ? $"{status.Width}×{status.Height}" : "—";
         if (status.Width > 0 && status.Height > 0 &&
             (status.Width != _sourceVideoWidth || status.Height != _sourceVideoHeight))
         {
@@ -2484,7 +2501,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         if (status.Width != 0 && status.Height != 0 && SelectedDevice is { } selected)
             DeviceVideoSizeChanged?.Invoke(selected.Udid, status.Width, status.Height);
-        FpsDisplay = status.Fps > 0 ? $"{status.Fps:F1} fps" : "— fps";
+        FpsDisplay = audioOnlyAirPlay
+            ? LocalizationService.Get("WirelessMusicNoVideo")
+            : status.Fps > 0 ? $"{status.Fps:F1} fps" : "— fps";
         LatencyDisplay = status.LatencyMs > 0 ? $"{status.LatencyMs:F1} ms" : "— ms";
         AudioDisplay = status.AudioSampleRate > 0
             ? $"{status.AudioSampleRate / 1000.0:F0} kHz · {status.AudioChannels} ch"
@@ -2747,18 +2766,34 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         return false;
     }
 
-    private static string GetCaptureStatusText(NativeCaptureStatus status, bool wireless) => status.State switch
+    private static string GetCaptureStatusText(NativeCaptureStatus status, bool wireless)
     {
-        CaptureState.Idle => LocalizationService.Get("CaptureIdle"),
-        CaptureState.ActivatingUsb => LocalizationService.Get(wireless ? "WirelessStarting" : "CaptureActivating"),
-        CaptureState.WaitingForDevice => LocalizationService.Get(wireless ? "WirelessWaitingDevice" : "CaptureWaitingDevice"),
-        CaptureState.Handshaking => LocalizationService.Get(wireless ? "WirelessConnecting" : "CaptureHandshaking"),
-        CaptureState.Streaming => LocalizationService.Get(wireless ? "WirelessStreaming" : "CaptureStreaming"),
-        CaptureState.Stopping => LocalizationService.Get(wireless ? "WirelessStopping" : "CaptureStopping"),
-        CaptureState.Stopped => LocalizationService.Get(wireless ? "WirelessStopped" : "CaptureStopped"),
-        CaptureState.Error => CaptureErrorGuidance.StatusText(status),
-        _ => LocalizationService.Get("CaptureError"),
-    };
+        if (wireless && status.AudioSampleRate > 0 &&
+            status.Width == 0 && status.Height == 0)
+            return LocalizationService.Get("WirelessMusicStreaming");
+        if (status.State == CaptureState.Error)
+            return CaptureErrorGuidance.StatusText(status);
+        return LocalizationService.Get(status.State switch
+        {
+            CaptureState.Idle => "CaptureIdle",
+            CaptureState.ActivatingUsb => wireless ? "WirelessStarting" : "CaptureActivating",
+            CaptureState.WaitingForDevice => wireless ? "WirelessWaitingDevice" : "CaptureWaitingDevice",
+            CaptureState.Handshaking => wireless ? "WirelessConnecting" : "CaptureHandshaking",
+            CaptureState.Streaming => wireless ? "WirelessStreaming" : "CaptureStreaming",
+            CaptureState.Stopping => wireless ? "WirelessStopping" : "CaptureStopping",
+            CaptureState.Stopped => wireless ? "WirelessStopped" : "CaptureStopped",
+            _ => "CaptureError",
+        });
+    }
+
+    private void SetAudioOnlyAirPlay(bool value)
+    {
+        if (!Set(ref _isAudioOnlyAirPlay, value, nameof(IsAudioOnlyAirPlay))) return;
+        OnPropertyChanged(nameof(CanUseVisualPreviewTools));
+        OnPropertyChanged(nameof(TargetResolutionDisplay));
+        OnPropertyChanged(nameof(TargetFpsDisplay));
+        OnPropertyChanged(nameof(AudioDetailDisplay));
+    }
 
     private void RefreshWirelessStatus()
     {

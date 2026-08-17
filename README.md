@@ -224,9 +224,21 @@ AirPlay 接收服务随主程序自动启动，不需要点击“开始投屏”
 
 无线选项卡不显示有线的本地分辨率/FPS 上限。无线清晰度需要在连接前通过 AirPlay
 广播规格声明；修改名称或规格会重启接收端，并断开当前所有无线会话，随后需要在手机上
-重新选择接收端。无线来源仍可使用主预览、音量、截图、独立窗口、全屏、多窗口和 OBS。
+重新选择接收端。无线屏幕镜像仍可使用主预览、音量、截图、独立窗口、全屏、多窗口和 OBS。
 
 当前实现没有固定的无线设备数量上限；实际同时连接数量取决于 CPU/GPU、内存和局域网带宽。
+
+## AirPlay 音乐投放
+
+无需启动“屏幕镜像”，也可以只把 iPhone/iPad 的音乐通过 AirPlay 播放到 Windows：
+
+1. 保持电脑与 iPhone/iPad 位于同一可信局域网，并启动 iPhoneMirror。
+2. 在音乐 App 或控制中心“正在播放”面板中点击 AirPlay 音频按钮。
+3. 选择与屏幕镜像相同的接收端名称。
+4. 连接后程序会自动创建无线来源并播放 PCM 音频；可在主界面调节音量、静音或停止投放。
+
+纯音乐会话不传输视频。主预览会显示“AirPlay 音乐”状态，截图、独立预览和全屏等视频工具
+会暂时禁用；如果发送端随后开始屏幕镜像，视频到达后这些工具会自动恢复。
 
 ## 视频应用投屏
 
@@ -329,7 +341,7 @@ outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.6.7 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.6.8 -GenerateSbom
 ```
 
 正式生成待上传资产时传入 `-UpdateReleaseManifest`，发布脚本会同步

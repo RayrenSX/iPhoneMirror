@@ -25,6 +25,12 @@ use the same receiver name, model, features, and device ID. The SETUP
 metadata patch reads the sender's
 `deviceID`, `model` (Apple ProductType), and `osVersion` plist values and
 forwards them to the host as an explicit IPC `DeviceInfo` message.
+iPhoneMirror also detects the ALAC frames used by audio-only RAOP sessions and
+decodes them through the vendored FFmpeg runtime. Screen-mirroring AAC-ELD keeps
+using the upstream FDK AAC path, and failed decoder output is no longer exposed
+to the host as valid PCM. RAOP packet retransmission and a bounded jitter wait
+smooth Wi-Fi delivery, while unrecovered packets use the negotiated PCM frame
+length so concealment does not advance the playback clock at the wrong rate.
 iPhoneMirror's receiver build script reapplies all patches and verifies the
 compiled DLL contains the runtime width, height and frame-rate capability
 markers before installation. The host only accepts the predefined maximum,

@@ -14,6 +14,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     private readonly Dictionary<string, Task<(bool Success, string Message)>> _opening =
         new(StringComparer.OrdinalIgnoreCase);
     private bool _disposing;
+    private bool _disposed;
 
     internal MultiDevicePreviewManager(MainViewModel viewModel)
     {
@@ -202,9 +203,27 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         // that menu choice as soon as the window is focused or resized.
     }
 
+    internal void HideForShutdown()
+    {
+        if (_disposed) return;
+        _disposing = true;
+        foreach (var window in _windows.Values.ToArray())
+        {
+            try { window.HideForShutdown(); }
+            catch (Exception error)
+            {
+                viewModel.AddDiagnosticLog(AppLog.Event(
+                    "independent_preview_hide_failed",
+                    ("handle", AppLog.Handle(window.SessionHandle)),
+                    ("error", AppLog.Error(error))));
+            }
+        }
+    }
+
     public void Dispose()
     {
-        if (_disposing) return;
+        if (_disposed) return;
+        _disposed = true;
         _disposing = true;
         viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_manager_dispose",
             ("count", _windows.Count)));

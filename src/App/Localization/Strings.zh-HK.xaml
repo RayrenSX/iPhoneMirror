@@ -333,6 +333,11 @@
     <system:String x:Key="WirelessWaitingDevice">AirPlay 接收端已啟動，請在 iPhone 控制中心選擇螢幕鏡像。</system:String>
     <system:String x:Key="WirelessConnecting">AirPlay 裝置正在連接...</system:String>
     <system:String x:Key="WirelessStreaming">AirPlay 無線螢幕鏡像中</system:String>
+    <system:String x:Key="WirelessMusicTitle">AirPlay 音樂</system:String>
+    <system:String x:Key="WirelessMusicStreaming">正在透過 AirPlay 播放音樂</system:String>
+    <system:String x:Key="WirelessMusicAudioOnly">只限音訊</system:String>
+    <system:String x:Key="WirelessMusicNoVideo">沒有視訊串流</system:String>
+    <system:String x:Key="WirelessMusicAudioFormat">AirPlay PCM 音訊</system:String>
     <system:String x:Key="WirelessStopping">正在停止 AirPlay 接收端...</system:String>
     <system:String x:Key="WirelessStopped">無線螢幕鏡像已停止</system:String>
     <system:String x:Key="WirelessRunningFormat">無線接收端正在運作：{0}</system:String>

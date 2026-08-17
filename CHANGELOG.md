@@ -5,6 +5,30 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.6.8] - 2026-08-17
+
+### Added
+
+- Add AirPlay audio-only reception for music playback, including automatic
+  source creation when a RAOP sender omits the generic connection callback.
+- Show a dedicated music state for audio-only sessions and disable video-only
+  preview tools until the sender starts delivering video.
+
+### Changed
+
+- Use a bounded network-jitter playback mode for AirPlay music, with deeper
+  startup and high-water buffers sized for RAOP retransmission bursts.
+
+### Fixed
+
+- Decode audio-only AirPlay ALAC frames and recover smoothly from missing or
+  delayed Wi-Fi packets instead of producing silence or repeated underruns.
+- Keep recording duration and playback speed aligned with elapsed wall-clock
+  time, including when FFmpeg encoding briefly falls behind and catches up.
+- Hide the main window, child windows, and native preview windows immediately
+  after a close request, then finish bounded media and USB cleanup in the
+  background before the process exits.
+
 ## [1.6.7] - 2026-08-15
 
 ### Fixed
@@ -1101,7 +1125,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.7...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.8...HEAD
+[1.6.8]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.7...v1.6.8
 [1.6.7]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.6...v1.6.7
 [1.6.6]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.5...v1.6.6
 [1.6.5]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.3...v1.6.5

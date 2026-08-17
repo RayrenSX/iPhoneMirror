@@ -731,28 +731,30 @@
                                 <TextBlock Text="{DynamicResource IndependentWindowImageSettings}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
-                        <Button Click="OnPreviewWindowClick" IsEnabled="{Binding HasCaptureSession}"
+                        <Button Click="OnPreviewWindowClick" IsEnabled="{Binding CanUseVisualPreviewTools}"
                                 Style="{StaticResource ToolButton}" Margin="0,0,0,8">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8A7;" FontSize="15"/>
                                 <TextBlock Text="{DynamicResource SeparateWindow}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
-                        <Button Click="OnScreenshotClick" IsEnabled="{Binding HasCaptureSession}"
+                        <Button Click="OnScreenshotClick" IsEnabled="{Binding CanUseVisualPreviewTools}"
                                 Style="{StaticResource ToolButton}" Margin="0,0,0,8">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE722;" FontSize="15"/>
                                 <TextBlock Text="{DynamicResource Screenshot}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
-                        <Button Click="OnRefreshPreviewClick" Style="{StaticResource ToolButton}"
+                        <Button Click="OnRefreshPreviewClick" IsEnabled="{Binding CanUseVisualPreviewTools}"
+                                Style="{StaticResource ToolButton}"
                                 Margin="0,0,0,8">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE72C;" FontSize="15"/>
                                 <TextBlock Text="{DynamicResource RefreshFrame}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
-                        <Button Click="OnFullScreenClick" Style="{StaticResource ToolButton}">
+                        <Button Click="OnFullScreenClick" IsEnabled="{Binding CanUseVisualPreviewTools}"
+                                Style="{StaticResource ToolButton}">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE740;" FontSize="15"/>
                                 <TextBlock Text="{DynamicResource FullScreenPreview}" Margin="9,0,0,0"/>
@@ -803,6 +805,7 @@
                             </Button>
                             <Button x:Name="QuickPreviewWindowButton" Click="OnPreviewWindowClick"
                                     Style="{StaticResource PreviewToolButton}"
+                                    IsEnabled="{Binding CanUseVisualPreviewTools}"
                                     ToolTip="{DynamicResource SeparateWindow}"
                                     AutomationProperties.AutomationId="QuickPreviewWindowButton">
                                 <StackPanel Orientation="Horizontal">
@@ -812,18 +815,21 @@
                             </Button>
                             <Button x:Name="QuickScreenshotButton" Click="OnScreenshotClick"
                                     Style="{StaticResource PreviewToolButton}"
+                                    IsEnabled="{Binding CanUseVisualPreviewTools}"
                                     ToolTip="{DynamicResource Screenshot}"
                                     AutomationProperties.AutomationId="QuickScreenshotButton">
                                 <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE722;" FontSize="15"/>
                             </Button>
                             <Button x:Name="QuickRefreshPreviewButton" Click="OnRefreshPreviewClick"
                                     Style="{StaticResource PreviewToolButton}"
+                                    IsEnabled="{Binding CanUseVisualPreviewTools}"
                                     ToolTip="{DynamicResource RefreshFrame}"
                                     AutomationProperties.AutomationId="QuickRefreshPreviewButton">
                                 <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE72C;" FontSize="15"/>
                             </Button>
                             <Button x:Name="QuickFullScreenButton" Click="OnFullScreenClick"
                                     Style="{StaticResource PreviewToolButton}"
+                                    IsEnabled="{Binding CanUseVisualPreviewTools}"
                                     ToolTip="{DynamicResource FullScreenPreview}"
                                     AutomationProperties.AutomationId="QuickFullScreenButton">
                                 <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE740;" FontSize="15"/>
@@ -924,13 +930,55 @@
                                     <Setter Property="Visibility" Value="Collapsed"/>
                                     <Setter Property="IsHitTestVisible" Value="False"/>
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsCapturing}" Value="True">
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsCapturing}" Value="True"/>
+                                                <Condition Binding="{Binding IsAudioOnlyAirPlay}" Value="False"/>
+                                            </MultiDataTrigger.Conditions>
                                             <Setter Property="Visibility" Value="Visible"/>
-                                        </DataTrigger>
+                                        </MultiDataTrigger>
                                     </Style.Triggers>
                                 </Style>
                             </controls:NativePreviewHost.Style>
                         </controls:NativePreviewHost>
+                        <Grid x:Name="AirPlayMusicSurface"
+                              AutomationProperties.AutomationId="AirPlayMusicSurface"
+                              Background="{DynamicResource PreviewChromeBrush}"
+                              Panel.ZIndex="1" IsHitTestVisible="False">
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsAudioOnlyAirPlay}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        MaxWidth="460">
+                                <Border Width="96" Height="96" CornerRadius="48"
+                                        Background="{DynamicResource PreviewPanelAltBrush}"
+                                        BorderBrush="{DynamicResource PreviewBorderBrush}"
+                                        BorderThickness="1" HorizontalAlignment="Center">
+                                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8D6;"
+                                               Foreground="{DynamicResource PreviewTextBrush}"
+                                               FontSize="38" HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"/>
+                                </Border>
+                                <TextBlock Text="{DynamicResource WirelessMusicTitle}"
+                                           Foreground="{DynamicResource PreviewTextBrush}"
+                                           FontSize="21" FontWeight="SemiBold" TextAlignment="Center"
+                                           Margin="0,20,0,0"/>
+                                <TextBlock Text="{Binding SelectedName}"
+                                           Foreground="{DynamicResource PreviewTextBrush}"
+                                           FontSize="14" TextAlignment="Center" Margin="0,8,0,0"/>
+                                <TextBlock Text="{Binding CaptureStatus}"
+                                           Foreground="{DynamicResource PreviewMutedTextBrush}"
+                                           FontSize="12" TextAlignment="Center" TextWrapping="Wrap"
+                                           Margin="0,6,0,0"/>
+                            </StackPanel>
+                        </Grid>
                         <Grid x:Name="MediaCastSurface" Visibility="Collapsed"
                               AutomationProperties.AutomationId="MediaCastSurface"
                               Background="{DynamicResource PreviewChromeBrush}" Panel.ZIndex="2">

@@ -817,6 +817,45 @@ Equal(true,
         "SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: 336)",
         StringComparison.Ordinal),
     "entering full screen cancels pending workspace panel animations");
+var closeMethodIndex = mainWindowCode.IndexOf(
+    "private async void OnClosing", StringComparison.Ordinal);
+var explicitShutdownModeIndex = mainWindowCode.IndexOf(
+    "application.ShutdownMode = ShutdownMode.OnExplicitShutdown;",
+    closeMethodIndex, StringComparison.Ordinal);
+var hideWpfWindowsIndex = mainWindowCode.IndexOf(
+    "window.Hide();", explicitShutdownModeIndex, StringComparison.Ordinal);
+var hideNativeWindowsIndex = mainWindowCode.IndexOf(
+    "_secondaryMirrors.HideForShutdown();", hideWpfWindowsIndex,
+    StringComparison.Ordinal);
+var yieldAfterHideIndex = mainWindowCode.IndexOf(
+    "await Dispatcher.Yield(DispatcherPriority.Background);",
+    hideNativeWindowsIndex, StringComparison.Ordinal);
+var coreShutdownIndex = mainWindowCode.IndexOf(
+    "_viewModel.ShutdownAsync();", yieldAfterHideIndex, StringComparison.Ordinal);
+var explicitApplicationExitIndex = mainWindowCode.IndexOf(
+    "application.Shutdown(0);", coreShutdownIndex, StringComparison.Ordinal);
+Equal(true, closeMethodIndex >= 0 &&
+            explicitShutdownModeIndex > closeMethodIndex &&
+            hideWpfWindowsIndex > explicitShutdownModeIndex &&
+            hideNativeWindowsIndex > hideWpfWindowsIndex &&
+            yieldAfterHideIndex > hideNativeWindowsIndex &&
+            coreShutdownIndex > yieldAfterHideIndex &&
+            explicitApplicationExitIndex > coreShutdownIndex,
+    "window close hides every UI surface before background cleanup and exits explicitly");
+var nativePreviewWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "NativePreviewWindow.cs"));
+var multiPreviewManagerCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "MultiDevicePreviewManager.cs"));
+Equal(true,
+    nativePreviewWindowCode.Contains("internal void HideForShutdown()",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains("ShowWindow(_handle, SwHide)",
+        StringComparison.Ordinal) &&
+    multiPreviewManagerCode.Contains("internal void HideForShutdown()",
+        StringComparison.Ordinal) &&
+    multiPreviewManagerCode.Contains("_disposing = true;",
+        StringComparison.Ordinal),
+    "native preview windows hide immediately and reject openings during shutdown");
 var themeServiceText = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "ThemeService.cs"));
 Equal(true,
@@ -2279,6 +2318,23 @@ Equal(false, silentRecordingArguments.Contains("s16le", StringComparer.Ordinal),
 Sequence(["-movflags", "+faststart", "-y", "silent.mp4"],
     silentRecordingArguments.TakeLast(4),
     "video-only recording still finalizes a seekable MP4");
+
+Equal(30L, MediaOutputService.CalculateDueVideoFrames(
+        TimeSpan.FromSeconds(1), 30, 0),
+    "video output schedules one second of frames after one second");
+Equal(20L, MediaOutputService.CalculateDueVideoFrames(
+        TimeSpan.FromSeconds(1), 30, 10),
+    "video output catches up frames missed by a slow encoder");
+Equal(0L, MediaOutputService.CalculateDueVideoFrames(
+        TimeSpan.FromSeconds(1), 30, 30),
+    "video output does not exceed the elapsed wall-clock duration");
+Equal(8L, MediaOutputService.CalculateDueVideoFrames(
+        TimeSpan.FromMilliseconds(250), 30, 0),
+    "video output rounds fractional frame intervals to the nearest frame");
+Throws<ArgumentOutOfRangeException>(() =>
+        MediaOutputService.CalculateDueVideoFrames(
+            TimeSpan.FromSeconds(1), 0, 0),
+    "video output rejects an invalid frame rate");
 
 var queuedAudio = new[]
 {

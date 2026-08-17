@@ -15,6 +15,16 @@ $logOffset = if (Test-Path -LiteralPath $Log) { (Get-Item $Log).Length } else { 
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class WindowVisibility
+{
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr window);
+}
+'@
 
 function Find-ById(
     [System.Windows.Automation.AutomationElement]$RootElement,
@@ -88,7 +98,23 @@ try {
     }
 
     Start-Sleep -Seconds $CaptureSeconds
-    [void]$process.CloseMainWindow()
+    $mainWindowHandle = $process.MainWindowHandle
+    $closeTimer = [Diagnostics.Stopwatch]::StartNew()
+    if (-not $process.CloseMainWindow()) {
+        throw 'Windows did not accept the main-window close request.'
+    }
+    $hideDeadline = [DateTime]::UtcNow.AddSeconds(2)
+    do {
+        $process.Refresh()
+        if ($process.HasExited -or
+            -not [WindowVisibility]::IsWindowVisible($mainWindowHandle)) { break }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $hideDeadline)
+    if (!$process.HasExited -and
+        [WindowVisibility]::IsWindowVisible($mainWindowHandle)) {
+        throw 'Main GUI window stayed visible for more than two seconds after close.'
+    }
+    $windowHiddenMilliseconds = $closeTimer.ElapsedMilliseconds
     if (-not $process.WaitForExit(35000)) {
         throw 'Window did not complete protocol cleanup and exit within 35 seconds.'
     }
@@ -111,6 +137,7 @@ try {
         StartRequests = $starts
         QuickTimeShutdownLogged = $true
         CoreShutdownLogged = $true
+        WindowHiddenMilliseconds = $windowHiddenMilliseconds
         CleanExit = $true
     }
 }

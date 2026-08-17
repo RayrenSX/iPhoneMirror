@@ -247,8 +247,8 @@ after a sender connects and is auto-selected once at connection time.
 Wireless tabs do not show the wired local resolution/FPS caps. AirPlay quality
 must be advertised before connection. Applying a new name or profile restarts
 the receiver, disconnects all current wireless sessions, and requires the phone
-to select the receiver again. Wireless sessions still support volume,
-screenshots, detached/full-screen windows, simultaneous previews and OBS.
+to select the receiver again. Wireless screen-mirroring sessions still support
+volume, screenshots, detached/full-screen windows, simultaneous previews and OBS.
 
 There is no fixed application-level wireless device count; practical capacity
 depends on CPU/GPU resources, memory and local-network bandwidth.
@@ -259,6 +259,20 @@ from the binary plist. The values cross the versioned named-pipe IPC as a
 `DeviceInfo` message and are shown in the selected-device panel. Known
 ProductTypes are rendered as a human-readable model while retaining the raw
 identifier in parentheses; unknown identifiers are shown unchanged.
+
+## AirPlay music casting
+
+An iPhone or iPad can send music to Windows without starting Screen Mirroring:
+
+1. Keep the computer and iPhone/iPad on the same private network and start iPhoneMirror.
+2. Tap the AirPlay audio button in a music app or the Control Center Now Playing panel.
+3. Select the same receiver name used for Screen Mirroring.
+4. iPhoneMirror creates a wireless source automatically and plays the PCM audio. Use
+   the main audio controls to change volume, mute playback, or stop the session.
+
+An audio-only session carries no video. The preview shows an **AirPlay Music** state,
+and screenshot, detached-preview and full-screen tools remain disabled until the sender
+starts delivering video.
 
 ## Third-party dependencies and licensing
 
@@ -335,7 +349,7 @@ publishing the compact edition.
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.6.7 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.6.8 -GenerateSbom
 ```
 
 Pass `-UpdateReleaseManifest` when producing the assets that will be uploaded.

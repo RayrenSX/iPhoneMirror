@@ -204,6 +204,14 @@ bool convert_i420_to_nv12(const wireless::MessageHeader& header,
     return true;
 }
 
+bool is_valid_pcm_audio(const wireless::MessageHeader& header,
+    std::span<const std::uint8_t> payload) noexcept {
+    return !payload.empty() && header.bits_per_sample == 16 &&
+        header.channels != 0 && header.channels <= 8 &&
+        header.sample_rate >= 8000 && header.sample_rate <= 192000 &&
+        payload.size() % (static_cast<std::size_t>(header.channels) * 2U) == 0;
+}
+
 void MediaCommandQueue::reset() noexcept {
     commands_.clear();
     latest_id_ = 0;
@@ -414,9 +422,7 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
 
 void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
     std::span<const std::uint8_t> payload) {
-    if (payload.empty() || header.bits_per_sample != 16 || header.channels == 0 ||
-        header.channels > 8 || header.sample_rate < 8000 || header.sample_rate > 192000 ||
-        payload.size() % (static_cast<std::size_t>(header.channels) * 2U) != 0) {
+    if (!detail::is_valid_pcm_audio(header, payload)) {
         if (++rejected_audio_messages_ == 1)
             logging::write(std::format("wireless_audio rejected device_fp={}",
                 anonymous_label(id_)));
@@ -425,7 +431,14 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
     bool attached{};
     {
         std::scoped_lock lock(mutex_);
+        if (!connected_) return;
         attached = attachments_ != 0;
+        snapshot_.state = State::Streaming;
+        snapshot_.message = snapshot_.width == 0 || snapshot_.height == 0
+            ? L"AirPlay music streaming" : L"Wireless mirroring";
+        ++snapshot_.audio_packets;
+        snapshot_.audio_sample_rate = header.sample_rate;
+        snapshot_.audio_channels = header.channels;
     }
     if (attached) {
         std::scoped_lock lock(audio_mutex_);
@@ -466,7 +479,8 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
             try {
                 audio_renderer_ = std::make_unique<audio::WasapiRenderer>(format,
                     play_audio_.load(std::memory_order_relaxed),
-                    audio_volume_.load(std::memory_order_relaxed));
+                    audio_volume_.load(std::memory_order_relaxed),
+                    audio::WasapiBufferingMode::NetworkJitter);
             } catch (const std::exception& error) {
                 audio_renderer_failed_ = true;
                 logging::write(std::format("wireless audio playback disabled for device_fp={}: {}",
@@ -475,11 +489,6 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
         }
         if (audio_renderer_) audio_renderer_->enqueue(payload);
     }
-    std::scoped_lock lock(mutex_);
-    if (!connected_ || attachments_ == 0) return;
-    ++snapshot_.audio_packets;
-    snapshot_.audio_sample_rate = header.sample_rate;
-    snapshot_.audio_channels = header.channels;
 }
 
 void WirelessClientStream::clear_media() noexcept {
@@ -835,7 +844,14 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
         if (const auto stream = find_connected(header)) stream->publish_video(header, payload);
         break;
     case wireless::MessageType::Audio:
-        if (const auto stream = find_connected(header)) stream->publish_audio(header, payload);
+        // Some RAOP-only senders begin publishing PCM without invoking the
+        // wrapper's generic connected callback. A valid media packet still
+        // proves that this sender owns a live AirPlay session, so let it create
+        // the source card and start the automatic managed capture session.
+        if (detail::is_valid_pcm_audio(header, payload)) {
+            if (const auto stream = get_or_create(header, true))
+                stream->publish_audio(header, payload);
+        }
         break;
     case wireless::MessageType::Log:
         logging::write("airplay_host: " + std::string(

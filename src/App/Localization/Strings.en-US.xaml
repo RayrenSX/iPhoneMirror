@@ -333,6 +333,11 @@
     <system:String x:Key="WirelessWaitingDevice">The AirPlay receiver is running. Choose Screen Mirroring in iPhone Control Center.</system:String>
     <system:String x:Key="WirelessConnecting">An AirPlay device is connecting...</system:String>
     <system:String x:Key="WirelessStreaming">Wireless AirPlay mirroring</system:String>
+    <system:String x:Key="WirelessMusicTitle">AirPlay Music</system:String>
+    <system:String x:Key="WirelessMusicStreaming">Playing music through AirPlay</system:String>
+    <system:String x:Key="WirelessMusicAudioOnly">Audio only</system:String>
+    <system:String x:Key="WirelessMusicNoVideo">No video stream</system:String>
+    <system:String x:Key="WirelessMusicAudioFormat">AirPlay PCM audio</system:String>
     <system:String x:Key="WirelessStopping">Stopping the AirPlay receiver...</system:String>
     <system:String x:Key="WirelessStopped">Wireless mirroring stopped</system:String>
     <system:String x:Key="WirelessRunningFormat">Wireless receiver active: {0}</system:String>

@@ -33,15 +33,23 @@ struct WasapiEnqueuePlan {
 };
 
 [[nodiscard]] std::optional<WasapiBufferLayout> checked_wasapi_buffer_layout(
-    const coremedia::AudioStreamBasicDescription& format) noexcept;
+    const coremedia::AudioStreamBasicDescription& format,
+    std::size_t minimum_capacity_frames = 0) noexcept;
 [[nodiscard]] WasapiQueueThresholds wasapi_queue_thresholds(
     std::size_t maximum_packet_frames, std::size_t capacity_frames,
-    std::size_t endpoint_buffer_frames = 0) noexcept;
+    std::size_t endpoint_buffer_frames = 0,
+    std::size_t base_startup_frames = 3072,
+    std::size_t base_high_water_frames = 4096) noexcept;
 [[nodiscard]] WasapiEnqueuePlan plan_wasapi_enqueue(
     std::size_t queued_frames, std::size_t incoming_frames,
     std::size_t capacity_frames, WasapiQueueThresholds thresholds) noexcept;
 
 } // namespace detail
+
+enum class WasapiBufferingMode {
+    LowLatency,
+    NetworkJitter,
+};
 
 struct PlaybackStats {
     bool active{};
@@ -57,7 +65,8 @@ struct PlaybackStats {
 class WasapiRenderer {
 public:
     explicit WasapiRenderer(const coremedia::AudioStreamBasicDescription& format,
-        bool playback_enabled = true, float volume = 1.0F);
+        bool playback_enabled = true, float volume = 1.0F,
+        WasapiBufferingMode buffering_mode = WasapiBufferingMode::LowLatency);
     ~WasapiRenderer();
     WasapiRenderer(const WasapiRenderer&) = delete;
     WasapiRenderer& operator=(const WasapiRenderer&) = delete;
@@ -81,6 +90,8 @@ private:
     std::array<std::size_t, 16> recent_packet_frames_{};
     std::size_t packet_history_index_{};
     std::size_t endpoint_buffer_frames_{};
+    std::size_t base_startup_frames_{};
+    std::size_t base_high_water_frames_{};
     std::size_t startup_frames_{};
     std::size_t high_water_frames_{};
 

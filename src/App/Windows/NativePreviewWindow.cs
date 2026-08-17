@@ -414,6 +414,14 @@ internal sealed class NativePreviewWindow : IDisposable
             ("full_screen", _isFullScreen));
     }
 
+    internal void HideForShutdown()
+    {
+        if (_disposed || _handle == 0) return;
+        _contextMenu.IsOpen = false;
+        _contextMenu.PlacementTarget = null;
+        _ = ShowWindow(_handle, SwHide);
+    }
+
     internal bool RefreshPreview()
     {
         var refreshed = !_disposed && _handle != 0 && _refreshPreview(_handle);

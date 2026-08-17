@@ -48,6 +48,8 @@ if ($LASTEXITCODE -ne 0 -or $Head -ne $Commit) {
     -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-ScreenMirroringOnlyPatch.ps1') `
     -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AudioCodecPatch.ps1') `
+    -SourceRoot $SourceRoot
 
 $VsWhere = Join-Path ${env:ProgramFiles(x86)} `
     'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -125,6 +127,7 @@ foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIG
         'IPHONE_MIRROR_RAOP_MEDIA_CAST_BLOCKED',
         'IPHONE_MIRROR_AIRPLAY_PAIRING_SEED',
         'IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY',
+        'IPHONE_MIRROR_ALAC_AUDIO_DECODE',
         'IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC',
         'IPHONE_MIRROR_RUNTIME_DEVICE_ID',
         'iphonemirror://pause',

@@ -464,13 +464,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (_allowClose) return;
         e.Cancel = true;
         if (_shutdownStarted) return;
+        _shutdownStarted = true;
         var shutdownTimer = Stopwatch.StartNew();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_closing",
             ("media_cast", _mediaCastActive),
             ("independent_media_window", _mediaCastPreviewWindow is not null),
             ("full_screen", _isFullScreen)));
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_shutdown_begin"));
-        _shutdownStarted = true;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.Devices.CollectionChanged -= OnDevicesCollectionChanged;
         _viewModel.DeviceVideoSizeChanged -= OnDeviceVideoSizeChanged;
@@ -482,6 +482,28 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.MediaOutputSettingsRequested -= OnMediaOutputSettingsRequested;
         _refreshTimer.Stop();
         _mediaCastTimer.Stop();
+        var application = Application.Current;
+        application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        foreach (Window window in application.Windows.Cast<Window>().ToArray())
+        {
+            try { window.Hide(); }
+            catch (Exception error)
+            {
+                _viewModel.AddDiagnosticLog(AppLog.Event(
+                    "shutdown_window_hide_failed",
+                    ("window", window.GetType().Name),
+                    ("error", AppLog.Error(error))));
+            }
+        }
+        try { _mediaCastPreviewWindow?.HideForShutdown(); }
+        catch (Exception error)
+        {
+            _viewModel.AddDiagnosticLog(AppLog.Event(
+                "shutdown_media_preview_hide_failed",
+                ("error", AppLog.Error(error))));
+        }
+        _secondaryMirrors.HideForShutdown();
+        await Dispatcher.Yield(DispatcherPriority.Background);
         try
         {
             try
@@ -554,7 +576,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             Debug.WriteLine($"iPhoneMirror main window close dispatch completed in " +
                 $"{shutdownTimer.ElapsedMilliseconds} ms");
             _allowClose = true;
-            Close();
+            application.Shutdown(0);
         }
     }
 
@@ -1687,7 +1709,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 () => AdvancedSettingsCard.BringIntoView());
         }
 
-        if (e.PropertyName == nameof(MainViewModel.IsCapturing) && !_viewModel.IsCapturing)
+        if ((e.PropertyName == nameof(MainViewModel.IsCapturing) && !_viewModel.IsCapturing) ||
+            (e.PropertyName == nameof(MainViewModel.IsAudioOnlyAirPlay) &&
+             _viewModel.IsAudioOnlyAirPlay))
             MainPreviewHost.SetPresentationVisible(false);
 
         // Width is raised before height as one atomic status update. Listening
@@ -1695,7 +1719,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // format/orientation change.
         if (e.PropertyName is nameof(MainViewModel.SourceVideoHeight) or
             nameof(MainViewModel.SelectedDevice) or nameof(MainViewModel.SelectedModel) or
-            nameof(MainViewModel.CurrentSessionHandle))
+            nameof(MainViewModel.CurrentSessionHandle) or
+            nameof(MainViewModel.IsAudioOnlyAirPlay))
         {
             if (e.PropertyName == nameof(MainViewModel.SelectedDevice))
             {
@@ -1716,7 +1741,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 _viewModel.SourceVideoWidth,
                 _viewModel.SourceVideoHeight);
             if (e.PropertyName is nameof(MainViewModel.SelectedDevice) or
-                nameof(MainViewModel.CurrentSessionHandle))
+                nameof(MainViewModel.CurrentSessionHandle) or
+                nameof(MainViewModel.IsAudioOnlyAirPlay))
                 QueueMainPreviewHostSync();
         }
         else if (e.PropertyName == nameof(MainViewModel.IsCapturing))
@@ -1749,7 +1775,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ? Visibility.Visible : Visibility.Collapsed;
         MainPreviewHost.ClearValue(VisibilityProperty);
         var visible = !mediaOnMain && !_viewModel.IsMediaCastSelected &&
-            _viewModel.IsCapturing &&
+            _viewModel.IsCapturing && !_viewModel.IsAudioOnlyAirPlay &&
             _viewModel.CurrentSessionHandle != 0;
         MainPreviewHost.SetPresentationVisible(visible);
         if (visible) MainPreviewHost.Activate();
