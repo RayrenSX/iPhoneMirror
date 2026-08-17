@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.6.8",
+    "name": "iPhoneMirror v1.6.8",
+    "body": "### Added\n\n- Add AirPlay audio-only reception for music playback, including automatic\n  source creation when a RAOP sender omits the generic connection callback.\n- Show a dedicated music state for audio-only sessions and disable video-only\n  preview tools until the sender starts delivering video.\n\n### Changed\n\n- Use a bounded network-jitter playback mode for AirPlay music, with deeper\n  startup and high-water buffers sized for RAOP retransmission bursts.\n\n### Fixed\n\n- Decode audio-only AirPlay ALAC frames and recover smoothly from missing or\n  delayed Wi-Fi packets instead of producing silence or repeated underruns.\n- Keep recording duration and playback speed aligned with elapsed wall-clock\n  time, including when FFmpeg encoding briefly falls behind and catches up.\n- Hide the main window, child windows, and native preview windows immediately\n  after a close request, then finish bounded media and USB cleanup in the\n  background before the process exits.",
+    "published_at": "2026-08-17T02:22:32Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.6.8-x64.exe",
+        "size": 91847003,
+        "digest": "sha256:e12720341bb47400c108e52c3cd7351ac1540fc1232b4398dac59f16ed15435e",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-Setup-v1.6.8-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.8-win-x64.zip",
+        "size": 191250605,
+        "digest": "sha256:4cf0ab64d313330b6b816ca8791c94667dff901844d2c709148e2995d1f87e81",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-v1.6.8-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.6.8-win-x64-sbom.spdx.json",
+        "size": 38969,
+        "digest": "sha256:a44008f96968cb5816b7c0d49619aab309f6e0f858764b0bde0fe5a59f24aaf5",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-v1.6.8-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 307,
+        "digest": "sha256:963a5b33579f1ee6e3e3ae56d5694149fa62a29c3e41fd7e215629fd1b27bdf0",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.6.7",
     "name": "iPhoneMirror v1.6.7",
     "body": "### Fixed\n\n- Keep the elevated PowerShell host hidden while verified installer and\n  portable ZIP updates are applied, without suppressing the required UAC prompt.",
