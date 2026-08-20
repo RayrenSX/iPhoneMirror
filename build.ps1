@@ -184,8 +184,7 @@ try {
             "build/native/src/VirtualCamera/$Configuration/iPhoneMirror.VirtualCamera.Admin.exe"
         $WirelessHost = Join-Path $Root `
             "build/native/src/WirelessHost/$Configuration/iPhoneMirror.WirelessHost.exe"
-        $DnsSdShim = Join-Path $Root `
-            "build/native/src/WirelessHost/$Configuration/dnssd.dll"
+        $DnsSdRuntime = Join-Path $WirelessRoot 'bin\x64\dnssd.dll'
         $AppNative = Join-Path $Root 'src/App/native'
         $AppWireless = Join-Path $AppNative 'Wireless'
         $AppFfmpeg = Join-Path $AppNative 'tools\ffmpeg'
@@ -211,7 +210,9 @@ try {
             (Join-Path $AppNative 'iPhoneMirror.VirtualCamera.Admin.exe') -Force
         Copy-Item $WirelessHost `
             (Join-Path $AppWireless 'iPhoneMirror.WirelessHost.exe') -Force
-        Copy-Item $DnsSdShim (Join-Path $AppWireless 'dnssd.dll') -Force
+        # Ship the hash-pinned receiver runtime, not the build-local shim. The
+        # latter is compiled for native tests and is not reproducible byte for byte.
+        Copy-Item $DnsSdRuntime (Join-Path $AppWireless 'dnssd.dll') -Force
         Copy-Item (Join-Path $Root 'third_party/libusb/bin/x64/libusb-1.0.dll') `
             (Join-Path $AppNative 'libusb-1.0.dll') -Force
         if (-not (Test-Path -LiteralPath $PrepareLibUsb0Runtime -PathType Leaf)) {
