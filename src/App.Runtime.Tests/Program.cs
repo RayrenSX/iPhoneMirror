@@ -27,6 +27,10 @@ internal static class Program
                 return RunLiveRecordingAsync(recordingArgs).GetAwaiter().GetResult();
             TestUpdateWindowThemeSwitch();
             Console.WriteLine("App runtime tests passed.");
+            // The test creates WPF and native objects without a desktop message
+            // loop. Exit explicitly after all assertions to avoid the headless
+            // runner's unreliable WPF teardown path.
+            Environment.Exit(0);
             return 0;
         }
         catch (Exception error)
