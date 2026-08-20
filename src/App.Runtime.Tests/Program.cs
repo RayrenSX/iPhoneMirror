@@ -477,6 +477,10 @@ internal static class Program
         }
         finally
         {
+            var allowClose = typeof(MainWindow).GetField("_allowClose",
+                BindingFlags.Instance | BindingFlags.NonPublic) ??
+                throw new MissingFieldException(typeof(MainWindow).FullName, "_allowClose");
+            allowClose.SetValue(owner, true);
             owner.Close();
         }
     }
