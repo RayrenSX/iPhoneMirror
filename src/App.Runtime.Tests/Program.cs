@@ -27,10 +27,6 @@ internal static class Program
                 return RunLiveRecordingAsync(recordingArgs).GetAwaiter().GetResult();
             TestUpdateWindowThemeSwitch();
             Console.WriteLine("App runtime tests passed.");
-            // The test creates WPF and native objects without a desktop message
-            // loop. Exit explicitly after all assertions to avoid the headless
-            // runner's unreliable WPF teardown path.
-            Environment.Exit(0);
             return 0;
         }
         catch (Exception error)
@@ -407,9 +403,7 @@ internal static class Program
         {
             ((IDisposable)client).Dispose();
             owner.Close();
-            // This is a process-scoped STA smoke test, not a running WPF
-            // application. Calling Application.Shutdown after the windows are
-            // closed can crash in the headless GitHub Actions desktop session.
+            application.Shutdown();
         }
     }
 
@@ -483,10 +477,6 @@ internal static class Program
         }
         finally
         {
-            var allowClose = typeof(MainWindow).GetField("_allowClose",
-                BindingFlags.Instance | BindingFlags.NonPublic) ??
-                throw new MissingFieldException(typeof(MainWindow).FullName, "_allowClose");
-            allowClose.SetValue(owner, true);
             owner.Close();
         }
     }
