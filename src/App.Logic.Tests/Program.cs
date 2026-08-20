@@ -71,7 +71,7 @@ static async Task ThrowsAsync<TException>(Func<Task> action, string name)
 
 static async Task<(int ExitCode, string Output)> RunWindowsPowerShellAsync(
     string script, string zipPath, string installDirectory, string restartExecutable,
-    string? expectedSha256 = null)
+    string? expectedSha256 = null, bool skipRestart = false)
 {
     expectedSha256 ??= Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(zipPath)));
     var start = new System.Diagnostics.ProcessStartInfo
@@ -92,6 +92,8 @@ static async Task<(int ExitCode, string Output)> RunWindowsPowerShellAsync(
                  "-RestartExecutable", restartExecutable,
              })
         start.ArgumentList.Add(argument);
+    if (skipRestart)
+        start.ArgumentList.Add("-SkipRestart");
     using var process = System.Diagnostics.Process.Start(start) ??
         throw new InvalidOperationException("Windows PowerShell test process did not start.");
     var stdout = process.StandardOutput.ReadToEndAsync();
@@ -1946,7 +1948,7 @@ try
     var successResult = await RunWindowsPowerShellAsync(script: Path.Combine(
             sourceDirectory, "App", "tools", "updater", "Apply-ZipUpdate.ps1"),
         zipPath: successZip, installDirectory: successInstall,
-        restartExecutable: Environment.ProcessPath!);
+        restartExecutable: Environment.ProcessPath!, skipRestart: true);
     Equal(0, successResult.ExitCode,
         $"Windows PowerShell portable update succeeds: {successResult.Output}");
     Equal("new-app", File.ReadAllText(Path.Combine(successInstall, "iPhoneMirror.exe")),

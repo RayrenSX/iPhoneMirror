@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][string]$ZipPath,
     [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedSha256,
     [Parameter(Mandatory)][string]$InstallDirectory,
-    [Parameter(Mandatory)][string]$RestartExecutable
+    [Parameter(Mandatory)][string]$RestartExecutable,
+    [switch]$SkipRestart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -502,6 +503,8 @@ try {
         }
         throw $updateError
     }
+    if ($SkipRestart) { return }
+
     $restartPath = Get-NormalizedPath $RestartExecutable
     $restartInsideInstall = $restartPath.StartsWith($installPrefix,
         [StringComparison]::OrdinalIgnoreCase)
