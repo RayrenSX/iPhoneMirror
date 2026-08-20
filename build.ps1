@@ -174,30 +174,6 @@ try {
     & $CMake --build --preset $BuildPreset --parallel
     if ($LASTEXITCODE -ne 0) { throw "Native build failed: $LASTEXITCODE" }
 
-    if (-not $SkipTests) {
-        & $CTest --test-dir build/native -C $Configuration --output-on-failure
-        if ($LASTEXITCODE -ne 0) { throw "Native tests failed: $LASTEXITCODE" }
-
-        foreach ($Project in @(
-            'src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj',
-            'src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj',
-            'src/DriverInstaller.Tests/iPhoneMirror.DriverInstaller.Tests.csproj'
-        )) {
-            dotnet restore $Project -p:NuGetAudit=false
-            if ($LASTEXITCODE -ne 0) { throw "Test restore failed: $Project ($LASTEXITCODE)" }
-            dotnet run --no-restore --project $Project --configuration $Configuration
-            if ($LASTEXITCODE -ne 0) { throw "Tests failed: $Project ($LASTEXITCODE)" }
-        }
-        & (Join-Path $Root 'scripts\test_vc_runtime_version.ps1') | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            throw "VC runtime version parser tests failed: $LASTEXITCODE"
-        }
-        & (Join-Path $Root 'scripts\test_apple_support_package.ps1') | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            throw "Apple support package validation tests failed: $LASTEXITCODE"
-        }
-    }
-
     if (Test-Path 'src/App/iPhoneMirror.App.csproj') {
         $NativeDll = Join-Path $Root "build/native/src/Core/$Configuration/iPhoneMirror.Core.dll"
         $UsbConfigurationSwitch = Join-Path $Root `
@@ -247,6 +223,30 @@ try {
         }
         & $PrepareVcRuntime -DestinationDirectory $AppNative `
             -AdditionalDestinationDirectories $AppWireless | Out-Host
+    }
+
+    if (-not $SkipTests) {
+        & $CTest --test-dir build/native -C $Configuration --output-on-failure
+        if ($LASTEXITCODE -ne 0) { throw "Native tests failed: $LASTEXITCODE" }
+
+        foreach ($Project in @(
+            'src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj',
+            'src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj',
+            'src/DriverInstaller.Tests/iPhoneMirror.DriverInstaller.Tests.csproj'
+        )) {
+            dotnet restore $Project -p:NuGetAudit=false
+            if ($LASTEXITCODE -ne 0) { throw "Test restore failed: $Project ($LASTEXITCODE)" }
+            dotnet run --no-restore --project $Project --configuration $Configuration
+            if ($LASTEXITCODE -ne 0) { throw "Tests failed: $Project ($LASTEXITCODE)" }
+        }
+        & (Join-Path $Root 'scripts\test_vc_runtime_version.ps1') | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "VC runtime version parser tests failed: $LASTEXITCODE"
+        }
+        & (Join-Path $Root 'scripts\test_apple_support_package.ps1') | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Apple support package validation tests failed: $LASTEXITCODE"
+        }
     }
 
     if ($NoPublish) {
