@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.8',
+    [string]$Version = '1.6.9',
     [switch]$SkipBuild,
     [switch]$GenerateSbom,
     [switch]$UpdateReleaseManifest,
@@ -328,7 +328,7 @@ function Assert-PublishedOutput {
     if (@($entries).Count -eq 0) { throw 'Published wireless hash manifest is empty.' }
     $expectedWirelessBinaries = @(
         'airplay2dll.dll', 'avcodec-58.dll', 'avutil-56.dll',
-        'swresample-3.dll', 'swscale-5.dll'
+        'dnssd.dll', 'swresample-3.dll', 'swscale-5.dll'
     )
     $manifestNames = @($entries | ForEach-Object { $_.Name } | Select-Object -Unique)
     $missingHashes = @($expectedWirelessBinaries | Where-Object { $_ -notin $manifestNames })

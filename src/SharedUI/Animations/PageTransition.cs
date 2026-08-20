@@ -26,11 +26,11 @@ public static class PageTransition
     private static void Play(object sender, RoutedEventArgs args)
     {
         if (sender is not FrameworkElement element) return;
-        element.BeginAnimation(UIElement.OpacityProperty,
-            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(240))
-            {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-            });
+        // Clear any stale opacity clock before a re-load. A root container can
+        // be unloaded/reloaded when a child surface opens; leaving the old
+        // clock in place may keep the entire page permanently transparent.
+        element.BeginAnimation(UIElement.OpacityProperty, null);
+        element.Opacity = 1;
         var transform = element.RenderTransform as TranslateTransform ??
                         new TranslateTransform();
         element.RenderTransform = transform;

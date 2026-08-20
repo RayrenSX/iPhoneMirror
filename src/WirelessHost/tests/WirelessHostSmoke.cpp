@@ -124,7 +124,60 @@ std::string tcp_request(unsigned short port, std::string_view request) {
     return response;
 }
 
-bool dlna_ssdp_discover(unsigned short port) {
+std::string http_header(std::string_view response, std::string_view name) {
+    const auto header_end = response.find("\r\n\r\n");
+    if (header_end == std::string_view::npos) return {};
+    std::size_t line_at{};
+    while (line_at < header_end) {
+        const auto line_end = response.find("\r\n", line_at);
+        const auto end = line_end == std::string_view::npos ? header_end : line_end;
+        const auto line = response.substr(line_at, end - line_at);
+        const auto separator = line.find(':');
+        if (separator != std::string_view::npos) {
+            auto actual = std::string(line.substr(0, separator));
+            auto expected = std::string(name);
+            std::ranges::transform(actual, actual.begin(), [](unsigned char value) {
+                return static_cast<char>(std::tolower(value));
+            });
+            std::ranges::transform(expected, expected.begin(), [](unsigned char value) {
+                return static_cast<char>(std::tolower(value));
+            });
+            if (actual == expected) {
+                auto value = line.substr(separator + 1);
+                while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                    value.remove_prefix(1);
+                while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+                    value.remove_suffix(1);
+                return std::string(value);
+            }
+        }
+        if (line_end == std::string_view::npos) break;
+        line_at = line_end + 2;
+    }
+    return {};
+}
+
+std::string receive_event(SOCKET listener, int timeout_ms = 3000) {
+    WSAPOLLFD descriptor{.fd = listener, .events = POLLRDNORM};
+    if (WSAPoll(&descriptor, 1, timeout_ms) <= 0) return {};
+    const auto client = accept(listener, nullptr, nullptr);
+    if (client == INVALID_SOCKET) return {};
+    DWORD timeout = static_cast<DWORD>(timeout_ms);
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
+        reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    std::string request;
+    std::array<char, 4096> bytes{};
+    while (request.size() < 1024U * 1024U) {
+        const auto count = recv(client, bytes.data(), static_cast<int>(bytes.size()), 0);
+        if (count <= 0) break;
+        request.append(bytes.data(), static_cast<std::size_t>(count));
+    }
+    closesocket(client);
+    return request;
+}
+
+bool dlna_ssdp_discover(unsigned short port, bool* has_date = nullptr,
+    bool* within_mx = nullptr) {
     const auto socket = WSASocketW(AF_INET, SOCK_DGRAM, IPPROTO_UDP,
         nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
     if (socket == INVALID_SOCKET) return false;
@@ -151,10 +204,11 @@ bool dlna_ssdp_discover(unsigned short port) {
     sockaddr_in local{AF_INET, 0, interface_address};
     sockaddr_in destination{AF_INET, htons(port)};
     inet_pton(AF_INET, "239.255.255.250", &destination.sin_addr);
-    const auto request = std::string(
-        "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
+    const auto request = std::format(
+        "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:{}\r\n"
         "MAN: \"ssdp:discover\"\r\nMX: 1\r\n"
-        "ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n");
+        "ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n", port);
+    const auto started = GetTickCount64();
     auto success = bind(socket, reinterpret_cast<const sockaddr*>(&local), sizeof(local)) == 0 &&
         setsockopt(socket, IPPROTO_IP, IP_MULTICAST_IF,
             reinterpret_cast<const char*>(&interface_address), sizeof(interface_address)) == 0 &&
@@ -168,10 +222,17 @@ bool dlna_ssdp_discover(unsigned short port) {
         const auto count = recvfrom(socket, response.data(),
             static_cast<int>(response.size()), 0,
             reinterpret_cast<sockaddr*>(&source), &source_length);
-        discovered = count > 0 &&
-            std::string_view(response.data(), static_cast<std::size_t>(count))
-                .find("iPhoneMirror/1.0") != std::string_view::npos;
+        const auto message = count > 0
+            ? std::string_view(response.data(), static_cast<std::size_t>(count))
+            : std::string_view{};
+        discovered = message.starts_with("HTTP/1.1 200 OK\r\n") &&
+            message.find("iPhoneMirror/1.0") != std::string_view::npos;
+        if (discovered && has_date) {
+            const auto date = http_header(message, "DATE");
+            *has_date = !date.empty() && date.ends_with(" GMT");
+        }
     }
+    if (within_mx) *within_mx = discovered && GetTickCount64() - started <= 1500;
     closesocket(socket);
     return discovered;
 }
@@ -204,7 +265,7 @@ int wmain(int argc, wchar_t** argv) {
         L" --parent-pid " + std::to_wstring(GetCurrentProcessId()) +
         L" --width 1280 --height 720 --fps 30 --mode combined" +
         L" --raop-port 5001 --airplay-port 7001 --dlna-port 18090" +
-        L" --dlna-ssdp-port 1900 --library " + quote(argv[2]);
+        L" --dlna-ssdp-port 19091 --library " + quote(argv[2]);
     STARTUPINFOW startup{.cb = sizeof(startup)};
     PROCESS_INFORMATION process{};
     if (!CreateProcessW(argv[1], command.data(), nullptr, nullptr, FALSE,
@@ -229,6 +290,7 @@ int wmain(int argc, wchar_t** argv) {
     bool callback_connected{};
     bool callback_video{};
     bool callback_audio{};
+    bool callback_volume{};
     bool second_connected{};
     bool second_video{};
     bool second_audio{};
@@ -239,12 +301,25 @@ int wmain(int argc, wchar_t** argv) {
     std::atomic_bool dlna_media_pause{};
     std::atomic_bool dlna_media_seek{};
     std::atomic_bool dlna_media_resume{};
+    std::atomic_bool dlna_media_volume{};
+    std::atomic_bool dlna_media_mute{};
+    std::atomic_bool dlna_media_unmute{};
+    std::atomic_bool dlna_media_next{};
+    bool dlna_next_uri_ok{};
+    bool dlna_next_info_ok{};
+    bool dlna_next_action_ok{};
+    bool dlna_next_promoted_ok{};
+    bool dlna_metadata_duration_ok{};
+    bool dlna_short_hls_duration_suppressed{};
+    bool dlna_transport_actions_ok{};
+    bool invalid_volume_rejected{};
+    bool invalid_mute_rejected{};
     std::atomic_uint64_t latest_media_command_id{};
     bool protocol_valid = connected;
     int message_count{};
     auto last_type = iPhoneMirror::wireless::MessageType::Ready;
     std::thread pipe_reader([&] {
-        for (int message = 0; protocol_valid && message < 128; ++message) {
+        for (int message = 0; protocol_valid && message < 192; ++message) {
             iPhoneMirror::wireless::MessageHeader header;
             const auto header_read = read_exact(pipe, &header, sizeof(header), 5000);
             if (!header_read && ready.load(std::memory_order_acquire)) break;
@@ -310,6 +385,12 @@ int wmain(int argc, wchar_t** argv) {
                     device_id == "00:11:22:33:44:55" &&
                     header.sample_rate == 48000 && header.channels == 2 &&
                     header.bits_per_sample == 16 && payload.size() == 8);
+            callback_volume = callback_volume ||
+                (header.type == iPhoneMirror::wireless::MessageType::MediaVolume &&
+                    device_id == "00:11:22:33:44:55" &&
+                    header.reserved == static_cast<std::uint32_t>(
+                        iPhoneMirror::wireless::MediaVolumeTarget::MirroredStream) &&
+                    std::abs(header.media_volume - 0.4) < 0.001);
             second_connected = second_connected ||
                 (header.type == iPhoneMirror::wireless::MessageType::Connected &&
                     device_id == "66:77:88:99:AA:BB" && device_name == "Second iPhone");
@@ -336,8 +417,21 @@ int wmain(int argc, wchar_t** argv) {
                         "https://example.test/invalid-values.mp4");
             if (header.type == iPhoneMirror::wireless::MessageType::MediaPlay &&
                 std::string(reinterpret_cast<const char*>(payload.data()), payload.size()) ==
-                    "https://example.test/dlna.m3u8?x=1&y=2") {
+                    "https://example.test/dlna.m3u8?x=1&y=2" &&
+                std::abs(header.media_volume - 0.35) < 0.001 &&
+                std::abs(header.media_duration - 2523.0) < 0.001 &&
+                header.reserved ==
+                    (iPhoneMirror::wireless::MediaVolumeMuteSpecified |
+                     iPhoneMirror::wireless::MediaVolumeMuted)) {
                 dlna_media_play.store(true, std::memory_order_release);
+                latest_media_command_id.store(
+                    header.media_command_id, std::memory_order_release);
+            }
+            if (header.type == iPhoneMirror::wireless::MessageType::MediaPlay &&
+                std::string(reinterpret_cast<const char*>(payload.data()), payload.size()) ==
+                    "https://example.test/next.m3u8" &&
+                std::abs(header.media_volume - 0.35) < 0.001) {
+                dlna_media_next.store(true, std::memory_order_release);
                 latest_media_command_id.store(
                     header.media_command_id, std::memory_order_release);
             }
@@ -356,6 +450,32 @@ int wmain(int argc, wchar_t** argv) {
                 dlna_media_resume.store(true, std::memory_order_release);
                 latest_media_command_id.store(
                     header.media_command_id, std::memory_order_release);
+            }
+            if (header.type == iPhoneMirror::wireless::MessageType::MediaVolume &&
+                device_id.empty() &&
+                header.reserved == static_cast<std::uint32_t>(
+                    iPhoneMirror::wireless::MediaVolumeTarget::MediaCast) &&
+                std::abs(header.media_volume - 0.35) < 0.001) {
+                dlna_media_volume.store(true, std::memory_order_release);
+            }
+            if (header.type == iPhoneMirror::wireless::MessageType::MediaVolume &&
+                device_id.empty() &&
+                header.reserved ==
+                    (static_cast<std::uint32_t>(
+                        iPhoneMirror::wireless::MediaVolumeTarget::MediaCast) |
+                     iPhoneMirror::wireless::MediaVolumeMuteSpecified |
+                     iPhoneMirror::wireless::MediaVolumeMuted) &&
+                std::abs(header.media_volume - 0.35) < 0.001) {
+                dlna_media_mute.store(true, std::memory_order_release);
+            }
+            if (header.type == iPhoneMirror::wireless::MessageType::MediaVolume &&
+                device_id.empty() &&
+                header.reserved ==
+                    (static_cast<std::uint32_t>(
+                        iPhoneMirror::wireless::MediaVolumeTarget::MediaCast) |
+                     iPhoneMirror::wireless::MediaVolumeMuteSpecified) &&
+                std::abs(header.media_volume - 0.35) < 0.001) {
+                dlna_media_unmute.store(true, std::memory_order_release);
             }
             if (header.type == iPhoneMirror::wireless::MessageType::Ready)
                 ready.store(true, std::memory_order_release);
@@ -404,15 +524,126 @@ int wmain(int argc, wchar_t** argv) {
         "<s:Body><u:SetAVTransportURI xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
         "<InstanceID>0</InstanceID>"
         "<CurrentURI>https://example.test/dlna.m3u8?x=1&amp;y=2</CurrentURI>"
-        "<CurrentURIMetaData></CurrentURIMetaData>"
+        "<CurrentURIMetaData>&lt;DIDL-Lite&gt;&lt;item&gt;"
+        "&lt;res duration=&quot;00:42:03&quot;&gt;video&lt;/res&gt;"
+        "&lt;/item&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData>"
         "</u:SetAVTransportURI></s:Body></s:Envelope>";
+    const auto set_uri_split = set_uri_body.size() / 2;
+    const auto set_uri_chunks = std::format(
+        "{:x};controller=smoke\r\n{}\r\n{:x}\r\n{}\r\n"
+        "0\r\nX-Smoke-Trailer: complete\r\n\r\n",
+        set_uri_split, std::string_view(set_uri_body).substr(0, set_uri_split),
+        set_uri_body.size() - set_uri_split,
+        std::string_view(set_uri_body).substr(set_uri_split));
     const auto set_uri_request = std::format(
         "POST /dlna/control/avtransport HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
         "SOAPACTION: \"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI\"\r\n"
-        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        set_uri_body.size(), set_uri_body);
+        "Content-Type: text/xml\r\nTransfer-Encoding: chunked\r\n"
+        "Connection: close\r\n\r\n{}", set_uri_chunks);
     const auto set_uri_ok = tcp_request(18090, set_uri_request).find("200 OK") !=
         std::string::npos;
+    const std::string set_next_uri_body =
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+        "<s:Body><u:SetNextAVTransportURI xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
+        "<InstanceID>0</InstanceID>"
+        "<NextURI>https://example.test/next.m3u8</NextURI>"
+        "<NextURIMetaData>next</NextURIMetaData>"
+        "</u:SetNextAVTransportURI></s:Body></s:Envelope>";
+    const auto set_next_uri_request = std::format(
+        "POST /dlna/control/avtransport HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+        "SOAPACTION: \"urn:schemas-upnp-org:service:AVTransport:1#SetNextAVTransportURI\"\r\n"
+        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        set_next_uri_body.size(), set_next_uri_body);
+    dlna_next_uri_ok = tcp_request(18090, set_next_uri_request).find("200 OK") !=
+        std::string::npos;
+    const std::string get_media_info_body =
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+        "<s:Body><u:GetMediaInfo xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
+        "<InstanceID>0</InstanceID></u:GetMediaInfo></s:Body></s:Envelope>";
+    const auto get_media_info_request = std::format(
+        "POST /dlna/control/avtransport HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+        "SOAPACTION: \"urn:schemas-upnp-org:service:AVTransport:1#GetMediaInfo\"\r\n"
+        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        get_media_info_body.size(), get_media_info_body);
+    const auto get_media_info_response = tcp_request(18090, get_media_info_request);
+    dlna_next_info_ok = get_media_info_response.find(
+        "<NextURI>https://example.test/next.m3u8</NextURI>") != std::string::npos &&
+        get_media_info_response.find("<NextURIMetaData>next</NextURIMetaData>") !=
+            std::string::npos;
+    dlna_metadata_duration_ok = get_media_info_response.find(
+        "<MediaDuration>00:42:03</MediaDuration>") != std::string::npos;
+    const std::string next_body =
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+        "<s:Body><u:Next xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
+        "<InstanceID>0</InstanceID></u:Next></s:Body></s:Envelope>";
+    const auto next_request = std::format(
+        "POST /dlna/control/avtransport HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+        "SOAPACTION: \"urn:schemas-upnp-org:service:AVTransport:1#Next\"\r\n"
+        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        next_body.size(), next_body);
+    const std::string actions_body =
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+        "<s:Body><u:GetCurrentTransportActions xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
+        "<InstanceID>0</InstanceID></u:GetCurrentTransportActions></s:Body></s:Envelope>";
+    const auto actions_request = std::format(
+        "POST /dlna/control/avtransport HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+        "SOAPACTION: \"urn:schemas-upnp-org:service:AVTransport:1#GetCurrentTransportActions\"\r\n"
+        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        actions_body.size(), actions_body);
+    const auto actions_response = tcp_request(18090, actions_request);
+    dlna_transport_actions_ok = actions_response.find(
+        "<Actions>Play,Pause,Stop,Seek,Next,Previous</Actions>") != std::string::npos;
+    const std::string set_volume_body =
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+        "<s:Body><u:SetVolume xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">"
+        "<InstanceID>0</InstanceID><Channel>Master</Channel>"
+        "<DesiredVolume>35</DesiredVolume></u:SetVolume></s:Body></s:Envelope>";
+    const auto set_volume_request = std::format(
+        "POST /dlna/control/renderingcontrol HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+        "SOAPACTION: \"urn:schemas-upnp-org:service:RenderingControl:1#SetVolume\"\r\n"
+        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        set_volume_body.size(), set_volume_body);
+    const auto dlna_set_volume_ok = tcp_request(18090, set_volume_request)
+        .find("200 OK") != std::string::npos;
+    const std::string invalid_volume_body =
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+        "<s:Body><u:SetVolume xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">"
+        "<InstanceID>0</InstanceID><Channel>Master</Channel>"
+        "<DesiredVolume>101</DesiredVolume></u:SetVolume></s:Body></s:Envelope>";
+    const auto invalid_volume_request = std::format(
+        "POST /dlna/control/renderingcontrol HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+        "SOAPACTION: \"urn:schemas-upnp-org:service:RenderingControl:1#SetVolume\"\r\n"
+        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        invalid_volume_body.size(), invalid_volume_body);
+    invalid_volume_rejected = tcp_request(18090, invalid_volume_request)
+        .find("500 Internal Server Error") != std::string::npos;
+    const auto set_mute = [&](bool muted) {
+        const auto desired = muted ? 1 : 0;
+        const auto body = std::format(
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+            "<s:Body><u:SetMute xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">"
+            "<InstanceID>0</InstanceID><Channel>Master</Channel>"
+            "<DesiredMute>{}</DesiredMute></u:SetMute></s:Body></s:Envelope>", desired);
+        const auto request = std::format(
+            "POST /dlna/control/renderingcontrol HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+            "SOAPACTION: \"urn:schemas-upnp-org:service:RenderingControl:1#SetMute\"\r\n"
+            "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.size(), body);
+        return tcp_request(18090, request).find("200 OK") != std::string::npos;
+    };
+    const auto dlna_set_mute_ok = set_mute(true);
+    const std::string invalid_mute_body =
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+        "<s:Body><u:SetMute xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">"
+        "<InstanceID>0</InstanceID><Channel>Master</Channel>"
+        "<DesiredMute>invalid</DesiredMute></u:SetMute></s:Body></s:Envelope>";
+    const auto invalid_mute_request = std::format(
+        "POST /dlna/control/renderingcontrol HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+        "SOAPACTION: \"urn:schemas-upnp-org:service:RenderingControl:1#SetMute\"\r\n"
+        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        invalid_mute_body.size(), invalid_mute_body);
+    invalid_mute_rejected = tcp_request(18090, invalid_mute_request)
+        .find("500 Internal Server Error") != std::string::npos;
     const std::string play_body =
         "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
         "<s:Body><u:Play xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
@@ -424,6 +655,7 @@ int wmain(int argc, wchar_t** argv) {
         play_body.size(), play_body);
     const auto dlna_play_ok = tcp_request(18090, play_request).find("200 OK") !=
         std::string::npos;
+    const auto dlna_clear_mute_ok = set_mute(false);
     const std::string pause_body =
         "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
         "<s:Body><u:Pause xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
@@ -433,8 +665,31 @@ int wmain(int argc, wchar_t** argv) {
         "SOAPACTION: \"urn:schemas-upnp-org:service:AVTransport:1#Pause\"\r\n"
         "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         pause_body.size(), pause_body);
-    const auto dlna_pause_ok = tcp_request(18090, pause_request).find("200 OK") !=
-        std::string::npos;
+    std::array<SOCKET, 2> concurrent_slow_clients{INVALID_SOCKET, INVALID_SOCKET};
+    bool concurrent_slow_connected{true};
+    constexpr std::string_view incomplete_soap =
+        "POST /dlna/control/avtransport HTTP/1.1\r\n"
+        "Host: 127.0.0.1:18090\r\nContent-Length: 1\r\n"
+        "Expect: 100-continue\r\nConnection: close\r\n\r\n";
+    for (auto& slow : concurrent_slow_clients) {
+        slow = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP,
+            nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+        sockaddr_in address{AF_INET, htons(18090),
+            {.S_un = {.S_addr = htonl(INADDR_LOOPBACK)}}};
+        concurrent_slow_connected = concurrent_slow_connected &&
+            slow != INVALID_SOCKET &&
+            ::connect(slow, reinterpret_cast<const sockaddr*>(&address),
+                sizeof(address)) == 0 &&
+            send_exact(slow, incomplete_soap);
+    }
+    Sleep(100);
+    const auto pause_started = GetTickCount64();
+    const auto pause_response = tcp_request(18090, pause_request);
+    const auto dlna_pause_ok = concurrent_slow_connected &&
+        pause_response.find("200 OK") != std::string::npos &&
+        GetTickCount64() - pause_started < 1500;
+    for (const auto slow : concurrent_slow_clients)
+        if (slow != INVALID_SOCKET) closesocket(slow);
     const std::string seek_body =
         "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
         "<s:Body><u:Seek xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
@@ -447,14 +702,59 @@ int wmain(int argc, wchar_t** argv) {
         seek_body.size(), seek_body);
     const auto dlna_seek_ok = tcp_request(18090, seek_request).find("200 OK") !=
         std::string::npos;
+    // iQIYI puts the absolute programme seconds in the seconds field
+    // (for example 00:00:663), rather than carrying into minutes.
+    const std::string iqiyi_seek_body =
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+        "<s:Body><u:Seek xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
+        "<InstanceID>0</InstanceID><Unit>REL_TIME</Unit><Target>00:00:663</Target>"
+        "</u:Seek></s:Body></s:Envelope>";
+    const auto iqiyi_seek_request = std::format(
+        "POST /dlna/control/avtransport HTTP/1.1\r\nHost: 127.0.0.1:18090\r\n"
+        "SOAPACTION: \"urn:schemas-upnp-org:service:AVTransport:1#Seek\"\r\n"
+        "Content-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        iqiyi_seek_body.size(), iqiyi_seek_body);
+    const auto dlna_iqiyi_seek_ok = tcp_request(18090, iqiyi_seek_request)
+        .find("200 OK") != std::string::npos;
     const auto dlna_resume_ok = tcp_request(18090, play_request).find("200 OK") !=
         std::string::npos;
-    const auto dlna_discovery = dlna_ssdp_discover(1900);
+    dlna_next_action_ok = tcp_request(18090, next_request).find("200 OK") !=
+        std::string::npos;
+    const auto media_info_after_next = tcp_request(18090, get_media_info_request);
+    dlna_next_promoted_ok = media_info_after_next.find(
+        "<CurrentURI>https://example.test/next.m3u8</CurrentURI>") !=
+            std::string::npos &&
+        media_info_after_next.find(
+            "<CurrentURIMetaData>next</CurrentURIMetaData>") != std::string::npos &&
+        media_info_after_next.find("<NextURI></NextURI>") != std::string::npos &&
+        media_info_after_next.find("<NextURIMetaData></NextURIMetaData>") !=
+            std::string::npos;
+    bool dlna_ssdp_date{};
+    bool dlna_ssdp_within_mx{};
+    const auto dlna_discovery = dlna_ssdp_discover(
+        19091, &dlna_ssdp_date, &dlna_ssdp_within_mx);
     for (int attempt = 0; attempt < 40 &&
             (!dlna_media_play.load(std::memory_order_acquire) ||
              !dlna_media_pause.load(std::memory_order_acquire) ||
              !dlna_media_seek.load(std::memory_order_acquire) ||
-             !dlna_media_resume.load(std::memory_order_acquire)); ++attempt) Sleep(50);
+             !dlna_media_resume.load(std::memory_order_acquire) ||
+             !dlna_media_volume.load(std::memory_order_acquire) ||
+             !dlna_media_mute.load(std::memory_order_acquire) ||
+              !dlna_media_unmute.load(std::memory_order_acquire) ||
+               !dlna_media_next.load(std::memory_order_acquire)); ++attempt) Sleep(50);
+    iPhoneMirror::wireless::MessageHeader short_hls_playback;
+    short_hls_playback.type = iPhoneMirror::wireless::MessageType::PlaybackState;
+    short_hls_playback.media_command_id = latest_media_command_id.load(
+        std::memory_order_acquire);
+    short_hls_playback.media_duration = 5.8;
+    short_hls_playback.media_position = 1;
+    short_hls_playback.media_rate = 1;
+    const auto short_hls_playback_write = short_hls_playback.media_command_id != 0 &&
+        write_exact(pipe, &short_hls_playback, sizeof(short_hls_playback), 5000);
+    Sleep(100);
+    dlna_short_hls_duration_suppressed = short_hls_playback_write &&
+        tcp_request(18090, get_media_info_request).find(
+            "<MediaDuration>00:00:00</MediaDuration>") != std::string::npos;
     const auto command_before_invalid_seek = latest_media_command_id.load(
         std::memory_order_acquire);
     const std::string invalid_seek_body =
@@ -531,6 +831,59 @@ int wmain(int argc, wchar_t** argv) {
         position_body.size(), position_body);
     const auto late_playback_ignored = late_playback_write &&
         tcp_request(18090, position_request).find("00:01:39") == std::string::npos;
+
+    const auto event_listener = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP,
+        nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+    sockaddr_in event_address{AF_INET, 0,
+        {.S_un = {.S_addr = htonl(INADDR_LOOPBACK)}}};
+    auto event_length = static_cast<int>(sizeof(event_address));
+    const auto event_listener_ready = event_listener != INVALID_SOCKET &&
+        bind(event_listener, reinterpret_cast<const sockaddr*>(&event_address),
+            sizeof(event_address)) == 0 &&
+        listen(event_listener, 4) == 0 &&
+        getsockname(event_listener, reinterpret_cast<sockaddr*>(&event_address),
+            &event_length) == 0;
+    const auto event_port = ntohs(event_address.sin_port);
+    const auto subscribe_request = std::format(
+        "SUBSCRIBE /dlna/event/avtransport HTTP/1.1\r\n"
+        "Host: 127.0.0.1:18090\r\n"
+        "CALLBACK: <http://127.0.0.1:{}/events?controller=smoke>\r\n"
+        "NT: upnp:event\r\nTIMEOUT: Second-120\r\n"
+        "Connection: close\r\n\r\n", event_port);
+    const auto subscribe_response = event_listener_ready
+        ? tcp_request(18090, subscribe_request) : std::string{};
+    const auto event_sid = http_header(subscribe_response, "SID");
+    const auto initial_event = event_listener_ready
+        ? receive_event(event_listener) : std::string{};
+    const auto initial_notify_ok =
+        subscribe_response.find("200 OK") != std::string::npos &&
+        !event_sid.empty() &&
+        initial_event.starts_with("NOTIFY /events?controller=smoke HTTP/1.1\r\n") &&
+        http_header(initial_event, "SID") == event_sid &&
+        http_header(initial_event, "SEQ") == "0" &&
+        initial_event.find("LastChange") != std::string::npos;
+    const auto renewal_request = std::format(
+        "SUBSCRIBE /dlna/event/avtransport HTTP/1.1\r\n"
+        "Host: 127.0.0.1:18090\r\nSID: {}\r\n"
+        "TIMEOUT: Second-120\r\nConnection: close\r\n\r\n", event_sid);
+    const auto renewal_response = initial_notify_ok
+        ? tcp_request(18090, renewal_request) : std::string{};
+    WSAPOLLFD event_poll{.fd = event_listener, .events = POLLRDNORM};
+    const auto renewal_ok = renewal_response.find("200 OK") != std::string::npos &&
+        http_header(renewal_response, "SID") == event_sid &&
+        http_header(renewal_response, "TIMEOUT") == "Second-120" &&
+        WSAPoll(&event_poll, 1, 100) == 0;
+    const auto unsubscribe_request = std::format(
+        "UNSUBSCRIBE /dlna/event/avtransport HTTP/1.1\r\n"
+        "Host: 127.0.0.1:18090\r\nSID: {}\r\n"
+        "Connection: close\r\n\r\n", event_sid);
+    const auto unsubscribe_ok = renewal_ok &&
+        tcp_request(18090, unsubscribe_request).find("200 OK") != std::string::npos;
+    if (event_listener != INVALID_SOCKET) closesocket(event_listener);
+    const auto unreachable_subscribe = tcp_request(18090, subscribe_request);
+    const auto unreachable_callback_cleaned =
+        unreachable_subscribe.find("412 Precondition Failed") != std::string::npos;
+
     const auto slow_client = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP,
         nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
     sockaddr_in slow_address{AF_INET, htons(18090),
@@ -571,15 +924,26 @@ int wmain(int argc, wchar_t** argv) {
         !wait_end_log || !ipc_summary_log || !callback_summary_log || !dlna_http_log ||
         !dlna_soap_log || raw_sensitive_log || !callback_metadata ||
         !callback_connected ||
-        !callback_video || !callback_audio || !second_connected || !second_video ||
+        !callback_video || !callback_audio || !callback_volume ||
+        !second_connected || !second_video ||
         !second_audio || !second_disconnected || !media_play ||
         !invalid_media_values_normalized || !dlna_media_play ||
         !dlna_media_pause || !dlna_media_seek || !dlna_media_resume ||
+        !dlna_media_volume || !dlna_media_mute || !dlna_media_unmute ||
         !dlna_description || !dlna_scpd || !url_validation ||
-        !invalid_uri_rejected || !set_uri_ok || !dlna_play_ok ||
-        !dlna_pause_ok || !dlna_seek_ok || !dlna_resume_ok ||
+         !invalid_uri_rejected || !set_uri_ok || !dlna_set_volume_ok ||
+         !dlna_next_uri_ok || !dlna_next_info_ok || !dlna_next_action_ok ||
+         !dlna_next_promoted_ok || !dlna_metadata_duration_ok ||
+         !dlna_short_hls_duration_suppressed || !dlna_transport_actions_ok ||
+         !dlna_media_next.load(std::memory_order_acquire) ||
+         !invalid_volume_rejected || !invalid_mute_rejected || !dlna_play_ok ||
+        !dlna_set_mute_ok || !dlna_clear_mute_ok ||
+         !dlna_pause_ok || !dlna_seek_ok || !dlna_iqiyi_seek_ok ||
+         !dlna_resume_ok ||
         !invalid_seek_rejected || !invalid_seek_not_forwarded ||
-        !dlna_discovery || !stale_stop_write || !stale_stop_ignored ||
+        !dlna_discovery || !dlna_ssdp_date || !dlna_ssdp_within_mx ||
+        !initial_notify_ok || !renewal_ok || !unsubscribe_ok ||
+        !unreachable_callback_cleaned || !stale_stop_write || !stale_stop_ignored ||
         !controller_stop_write ||
         !dlna_controller_stop || !late_playback_write ||
         !late_playback_ignored || !prompt_slow_client_shutdown) {
@@ -598,6 +962,7 @@ int wmain(int argc, wchar_t** argv) {
             << " callback_connected=" << callback_connected
             << " callback_video=" << callback_video
             << " callback_audio=" << callback_audio
+            << " callback_volume=" << callback_volume
             << " second_connected=" << second_connected
             << " second_video=" << second_video
             << " second_audio=" << second_audio
@@ -608,18 +973,40 @@ int wmain(int argc, wchar_t** argv) {
             << " dlna_media_pause=" << dlna_media_pause
             << " dlna_media_seek=" << dlna_media_seek
             << " dlna_media_resume=" << dlna_media_resume
+            << " dlna_media_volume=" << dlna_media_volume
+            << " dlna_media_mute=" << dlna_media_mute
+            << " dlna_media_unmute=" << dlna_media_unmute
             << " dlna_description=" << dlna_description
             << " dlna_scpd=" << dlna_scpd
-            << " set_uri_ok=" << set_uri_ok
+         << " set_uri_ok=" << set_uri_ok
+         << " dlna_next_uri_ok=" << dlna_next_uri_ok
+         << " dlna_next_info_ok=" << dlna_next_info_ok
+         << " dlna_next_action_ok=" << dlna_next_action_ok
+         << " dlna_next_promoted_ok=" << dlna_next_promoted_ok
+         << " dlna_metadata_duration_ok=" << dlna_metadata_duration_ok
+         << " dlna_short_hls_duration_suppressed="
+         << dlna_short_hls_duration_suppressed
+         << " dlna_transport_actions_ok=" << dlna_transport_actions_ok
+         << " dlna_media_next=" << dlna_media_next
+            << " dlna_set_volume_ok=" << dlna_set_volume_ok
+            << " dlna_set_mute_ok=" << dlna_set_mute_ok
+            << " dlna_clear_mute_ok=" << dlna_clear_mute_ok
             << " url_validation=" << url_validation
             << " invalid_uri_rejected=" << invalid_uri_rejected
             << " dlna_play_ok=" << dlna_play_ok
-            << " dlna_pause_ok=" << dlna_pause_ok
-            << " dlna_seek_ok=" << dlna_seek_ok
-            << " dlna_resume_ok=" << dlna_resume_ok
+         << " dlna_pause_ok=" << dlna_pause_ok
+         << " dlna_seek_ok=" << dlna_seek_ok
+         << " dlna_iqiyi_seek_ok=" << dlna_iqiyi_seek_ok
+         << " dlna_resume_ok=" << dlna_resume_ok
             << " invalid_seek_rejected=" << invalid_seek_rejected
             << " invalid_seek_not_forwarded=" << invalid_seek_not_forwarded
             << " dlna_discovery=" << dlna_discovery
+            << " dlna_ssdp_date=" << dlna_ssdp_date
+            << " dlna_ssdp_within_mx=" << dlna_ssdp_within_mx
+            << " initial_notify_ok=" << initial_notify_ok
+            << " renewal_ok=" << renewal_ok
+            << " unsubscribe_ok=" << unsubscribe_ok
+            << " unreachable_callback_cleaned=" << unreachable_callback_cleaned
             << " stale_stop_write=" << stale_stop_write
             << " stale_stop_ignored=" << stale_stop_ignored
             << " controller_stop_write=" << controller_stop_write

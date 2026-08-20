@@ -15,6 +15,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
     private readonly ReleaseInfo _release;
     private readonly GitHubReleaseClient _client;
     private readonly bool _allowMirrorFallback;
+    private readonly bool _readOnlyPreview;
     private readonly CancellationTokenSource _cancellation = new();
     private bool _downloading;
     private bool _installationStarted;
@@ -31,19 +32,31 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
     public string PublishedAt => _release.PublishedAt.LocalDateTime.ToString("yyyy-MM-dd");
     public Visibility ProgressVisibility => _downloading || !string.IsNullOrWhiteSpace(StatusText)
         ? Visibility.Visible : Visibility.Collapsed;
-    public bool CanUpdate => !_downloading;
+    public bool CanUpdate => !_downloading && !_readOnlyPreview;
     public double ProgressValue { get => _progressValue; private set { _progressValue = value; OnPropertyChanged(); } }
     public bool IsIndeterminate { get => _isIndeterminate; private set { _isIndeterminate = value; OnPropertyChanged(); } }
     public string StatusText { get => _statusText; private set { _statusText = value; OnPropertyChanged(); OnPropertyChanged(nameof(ProgressVisibility)); } }
     public string SpeedText { get => _speedText; private set { _speedText = value; OnPropertyChanged(); } }
     public string UpdateButtonText { get => _updateButtonText; private set { _updateButtonText = value; OnPropertyChanged(); } }
 
+    // Keep the historical constructor shape available to reflection-based
+    // runtime tests and other in-process preview callers. Optional parameters
+    // are not applied by Activator.CreateInstance.
     internal UpdateWindow(ReleaseInfo release, GitHubReleaseClient client,
-        bool autoDownload, bool allowMirrorFallback = true)
+        bool autoDownload, bool allowMirrorFallback)
+        : this(release, client, autoDownload, allowMirrorFallback,
+            readOnlyPreview: false)
+    {
+    }
+
+    internal UpdateWindow(ReleaseInfo release, GitHubReleaseClient client,
+        bool autoDownload, bool allowMirrorFallback = true,
+        bool readOnlyPreview = false)
     {
         _release = release;
         _client = client;
         _allowMirrorFallback = allowMirrorFallback;
+        _readOnlyPreview = readOnlyPreview;
         _statusText = string.Empty;
         _updateButtonText = LocalizationService.Get("UpdateNow");
         DataContext = this;

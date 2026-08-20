@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Buffers.Binary;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -35,6 +36,8 @@ internal sealed record MediaOutputCapabilities(
     string FfmpegPath,
     string Detail)
 {
+    internal IReadOnlyList<string> H264EncoderCandidates { get; init; } = [];
+
     // Audio is optional: the capture pipeline can explicitly pass -an when
     // no PCM packet is available. Keep video-only output available with a
     // minimal FFmpeg build that has H.264 but no AAC/Opus encoder.
@@ -60,8 +63,11 @@ internal sealed class MediaOutputService : IAsyncDisposable
         TimeSpan.FromSeconds(15);
     private static readonly TimeSpan AudioSilenceGrace =
         TimeSpan.FromMilliseconds(100);
+    private const uint DefaultAudioSampleRate = 48000;
+    private const ushort DefaultAudioChannels = 2;
     private const int MaximumAudioDrainPackets = 512;
-    private readonly Func<ulong, uint, uint, VideoFrame?> _frameProvider;
+    private const int MaximumVideoCatchUpSeconds = 2;
+    private readonly Func<ulong, uint, uint, Nv12VideoFrame?> _frameProvider;
     private readonly Func<ulong, ulong, AudioPacket?> _audioProvider;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private CancellationTokenSource? _runCancellation;
@@ -73,7 +79,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
     internal bool IsRunning => _runTask is { IsCompleted: false };
     internal ulong SessionHandle { get; private set; }
 
-    internal MediaOutputService(Func<ulong, uint, uint, VideoFrame?> frameProvider,
+    internal MediaOutputService(Func<ulong, uint, uint, Nv12VideoFrame?> frameProvider,
         Func<ulong, ulong, AudioPacket?> audioProvider)
     {
         _frameProvider = frameProvider;
@@ -101,8 +107,11 @@ internal sealed class MediaOutputService : IAsyncDisposable
                     ["-hide_banner", "-muxers"], cancellationToken);
                 var capabilities = CreateCapabilities(path, encoders, protocols,
                     muxers);
+                capabilities = await ResolveWorkingEncoderAsync(capabilities,
+                    640, 360, cancellationToken);
                 best = SelectBestCapabilities([best, capabilities]);
-                if (capabilities.HasH264Encoder && CapabilityScore(capabilities) == 34)
+                if (capabilities.HasH264Encoder && CapabilityScore(capabilities) == 34 &&
+                    EncoderPreferenceScore(capabilities.PreferredH264Encoder) == 5)
                     break;
             }
             catch (OperationCanceledException) when (
@@ -159,7 +168,22 @@ internal sealed class MediaOutputService : IAsyncDisposable
             return candidate.HasH264Encoder;
         if (candidate.FfmpegAvailable != current.FfmpegAvailable)
             return candidate.FfmpegAvailable;
-        return CapabilityScore(candidate) > CapabilityScore(current);
+        var candidateScore = CapabilityScore(candidate);
+        var currentScore = CapabilityScore(current);
+        if (candidateScore != currentScore)
+            return candidateScore > currentScore;
+        return EncoderPreferenceScore(candidate.PreferredH264Encoder) >
+            EncoderPreferenceScore(current.PreferredH264Encoder);
+    }
+
+    private static int EncoderPreferenceScore(string encoder)
+    {
+        if (encoder.Equals("h264_nvenc", StringComparison.OrdinalIgnoreCase)) return 5;
+        if (encoder.Equals("h264_amf", StringComparison.OrdinalIgnoreCase)) return 4;
+        if (encoder.Equals("h264_qsv", StringComparison.OrdinalIgnoreCase)) return 3;
+        if (encoder.Equals("h264_mf", StringComparison.OrdinalIgnoreCase)) return 2;
+        if (encoder.Equals("libx264", StringComparison.OrdinalIgnoreCase)) return 1;
+        return 0;
     }
 
     internal async Task StartAsync(ulong sessionHandle, MediaOutputRequest request,
@@ -171,6 +195,11 @@ internal sealed class MediaOutputService : IAsyncDisposable
         try
         {
             if (IsRunning) throw new InvalidOperationException("A media output is already active.");
+            capabilities = await ResolveWorkingEncoderAsync(capabilities,
+                request.Width, request.Height, cancellationToken);
+            if (!capabilities.HasH264Encoder)
+                throw new InvalidOperationException(
+                    "No installed FFmpeg H.264 encoder could encode at the requested size.");
             _lastError = string.Empty;
             var firstAudio = await TryWaitForAudioAsync(sessionHandle, cancellationToken);
             string? recordingStagingPath = null;
@@ -182,10 +211,11 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 TryDeleteFile(recordingStagingPath);
                 processRequest = request with { Destination = recordingStagingPath };
             }
-            var includeAudio = firstAudio is not null &&
-                (request.Kind == MediaOutputKind.Whip
-                    ? capabilities.HasOpusEncoder
-                    : capabilities.HasAacEncoder);
+            var includeAudio = request.Kind == MediaOutputKind.Whip
+                ? capabilities.HasOpusEncoder
+                : capabilities.HasAacEncoder;
+            var audioSampleRate = firstAudio?.SampleRate ?? DefaultAudioSampleRate;
+            var audioChannels = firstAudio?.Channels ?? DefaultAudioChannels;
             var audioPipeName = includeAudio
                 ? $"iphoneMirror-audio-{Environment.ProcessId}-{Guid.NewGuid():N}"
                 : null;
@@ -199,8 +229,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 process = CreateProcess(capabilities.FfmpegPath,
                     BuildArguments(processRequest, capabilities,
                         audioPipeName is null ? null : $@"\\.\pipe\{audioPipeName}",
-                        firstAudio?.SampleRate ?? 48000,
-                        firstAudio?.Channels ?? 2,
+                        audioSampleRate,
+                        audioChannels,
                         includeAudio: includeAudio));
                 process.ErrorDataReceived += (_, args) =>
                 {
@@ -235,11 +265,17 @@ internal sealed class MediaOutputService : IAsyncDisposable
 
                 var runCancellation =
                     CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                _process = process;
+                var activeProcess = process;
+                var activeAudioPipe = audioPipe;
+                var activeRecordingStagingPath = recordingStagingPath;
+                _process = activeProcess;
                 SessionHandle = sessionHandle;
                 _runCancellation = runCancellation;
-                _runTask = PumpAsync(process, audioPipe, sessionHandle, request,
-                    firstAudio, recordingStagingPath, runCancellation.Token);
+                _runTask = Task.Run(() => PumpAsync(activeProcess,
+                    activeAudioPipe, sessionHandle, request, firstAudio,
+                    audioSampleRate, audioChannels, activeRecordingStagingPath,
+                    runCancellation.Token),
+                    CancellationToken.None);
                 process = null;
                 audioPipe = null;
                 recordingStagingPath = null;
@@ -282,7 +318,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
 
     private async Task PumpAsync(Process process, NamedPipeServerStream? audioPipe,
         ulong sessionHandle, MediaOutputRequest request, AudioPacket? firstAudio,
-        string? recordingStagingPath, CancellationToken cancellationToken)
+        uint audioSampleRate, ushort audioChannels, string? recordingStagingPath,
+        CancellationToken cancellationToken)
     {
         Exception? failure = null;
         Task? videoTask = null;
@@ -293,9 +330,10 @@ internal sealed class MediaOutputService : IAsyncDisposable
         {
             videoTask = PumpVideoAsync(process, sessionHandle, request,
                 pumpCancellation.Token);
-            audioTask = audioPipe is not null && firstAudio is not null
+            audioTask = audioPipe is not null
                 ? PumpAudioAsync(process, audioPipe, sessionHandle,
-                    firstAudio, pumpCancellation.Token)
+                    firstAudio, audioSampleRate, audioChannels,
+                    pumpCancellation.Token)
                 : Task.Delay(Timeout.InfiniteTimeSpan, pumpCancellation.Token);
             var completed = await Task.WhenAny(videoTask, audioTask);
             await completed;
@@ -398,11 +436,10 @@ internal sealed class MediaOutputService : IAsyncDisposable
         MediaOutputRequest request, CancellationToken cancellationToken)
     {
         var frameInterval = TimeSpan.FromSeconds(1.0 / request.FrameRate);
-        var frameCanvas = new byte[checked((int)request.Width * (int)request.Height * 4)];
-        var staleSince = Stopwatch.StartNew();
+        var firstFrameWait = Stopwatch.StartNew();
         var outputClock = Stopwatch.StartNew();
         long framesWritten = 0;
-        long lastTimestamp = long.MinValue;
+        ReadOnlyMemory<byte> lastFrame = default;
         using var timer = new PeriodicTimer(frameInterval);
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
@@ -419,28 +456,22 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 request.FrameRate, framesWritten);
             if (dueBeforeRead <= 0) continue;
             var frame = _frameProvider(sessionHandle, request.Width, request.Height);
-            if (frame is null)
+            if (frame is not null)
             {
-                if (staleSince.Elapsed > TimeSpan.FromSeconds(5))
+                lastFrame = GetNv12FramePayload(frame, request.Width, request.Height);
+            }
+            else if (lastFrame.IsEmpty)
+            {
+                if (firstFrameWait.Elapsed > TimeSpan.FromSeconds(5))
                     throw new TimeoutException("No projection frame was received for 5 seconds.");
                 continue;
             }
-            if (frame.Timestamp100Ns != lastTimestamp)
-            {
-                lastTimestamp = frame.Timestamp100Ns;
-                staleSince.Restart();
-            }
-            else if (staleSince.Elapsed > TimeSpan.FromSeconds(5))
-            {
-                throw new TimeoutException("The projection session stopped producing frames.");
-            }
-            var framesToWrite = CalculateDueVideoFrames(outputClock.Elapsed,
+            var schedule = CalculateVideoWritePlan(outputClock.Elapsed,
                 request.FrameRate, framesWritten);
-            var preparedFrame = PrepareFrame(frame, request.Width,
-                request.Height, frameCanvas);
-            for (long index = 0; index < framesToWrite; ++index)
+            framesWritten = schedule.FramesWrittenBaseline;
+            for (long index = 0; index < schedule.FramesToWrite; ++index)
             {
-                await process.StandardInput.BaseStream.WriteAsync(preparedFrame,
+                await process.StandardInput.BaseStream.WriteAsync(lastFrame,
                     cancellationToken);
                 ++framesWritten;
             }
@@ -458,24 +489,49 @@ internal sealed class MediaOutputService : IAsyncDisposable
         return Math.Max(0, due - framesWritten);
     }
 
-    private async Task PumpAudioAsync(Process process, Stream output,
-        ulong sessionHandle, AudioPacket firstAudio,
-        CancellationToken cancellationToken)
+    internal static (long FramesToWrite, long FramesWrittenBaseline)
+        CalculateVideoWritePlan(TimeSpan elapsed, int frameRate,
+            long framesWritten)
     {
-        var blockAlign = checked(firstAudio.Channels * sizeof(short));
-        var bytesPerSecond = checked((long)firstAudio.SampleRate * blockAlign);
-        if (firstAudio.Pcm.Length == 0 || firstAudio.Pcm.Length % blockAlign != 0)
-            throw new InvalidDataException(
-                "The projection audio packet has an invalid PCM layout.");
-        var sequence = firstAudio.Sequence;
-        await output.WriteAsync(firstAudio.Pcm, cancellationToken);
+        var framesToWrite = CalculateDueVideoFrames(elapsed, frameRate,
+            framesWritten);
+        var maximumCatchUpFrames = checked((long)frameRate *
+            MaximumVideoCatchUpSeconds);
+        if (framesToWrite <= maximumCatchUpFrames)
+            return (framesToWrite, framesWritten);
+
+        // Raw video has no timestamps. Drop the oldest backlog and advance the
+        // logical schedule so the next tick follows current wall time instead
+        // of repeatedly trying to drain an unbounded historical queue.
+        return (maximumCatchUpFrames,
+            checked(framesWritten + framesToWrite - maximumCatchUpFrames));
+    }
+
+    private async Task PumpAudioAsync(Process process, Stream output,
+        ulong sessionHandle, AudioPacket? firstAudio, uint outputSampleRate,
+        ushort outputChannels, CancellationToken cancellationToken)
+    {
+        var blockAlign = checked(outputChannels * sizeof(short));
+        var bytesPerSecond = checked((long)outputSampleRate * blockAlign);
+        var normalizer = new Pcm16AudioNormalizer(outputSampleRate, outputChannels);
+        var sequence = firstAudio?.Sequence ?? 0;
+        long emittedBytes = 0;
+        long initialBytes = 0;
+        if (firstAudio is not null)
+        {
+            var pcm = normalizer.Convert(firstAudio);
+            if (pcm.Length != 0)
+            {
+                await output.WriteAsync(pcm, cancellationToken);
+                emittedBytes = initialBytes = pcm.Length;
+            }
+        }
         var audioClock = Stopwatch.StartNew();
         var lastRealPacket = Stopwatch.StartNew();
-        long emittedBytes = firstAudio.Pcm.Length;
         var silenceChunkBytes = checked((int)Math.Max(blockAlign,
             bytesPerSecond / 50 / blockAlign * blockAlign));
         var silence = new byte[silenceChunkBytes];
-        var insertedSilence = false;
+        var insertedSilence = firstAudio is null;
         while (!cancellationToken.IsCancellationRequested)
         {
             if (process.HasExited)
@@ -487,9 +543,9 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 : _audioProvider(sessionHandle, sequence);
             if (packet is null)
             {
-                if (lastRealPacket.Elapsed >= AudioSilenceGrace)
+                if (firstAudio is null || lastRealPacket.Elapsed >= AudioSilenceGrace)
                 {
-                    var targetBytes = checked(firstAudio.Pcm.Length +
+                    var targetBytes = checked(initialBytes +
                         (long)(audioClock.Elapsed.TotalSeconds * bytesPerSecond));
                     var missingBytes = targetBytes - emittedBytes;
                     var bytesToWrite = checked((int)Math.Min(
@@ -507,21 +563,127 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 await Task.Delay(5, cancellationToken);
                 continue;
             }
-            if (packet.SampleRate != firstAudio.SampleRate ||
-                packet.Channels != firstAudio.Channels ||
-                packet.BitsPerSample != 16 || packet.Pcm.Length == 0 ||
-                packet.Pcm.Length % blockAlign != 0)
-                throw new InvalidDataException(
-                    "The projection audio format changed during output.");
             if (packet.Sequence <= sequence)
                 throw new InvalidDataException(
                     "The projection audio sequence did not advance.");
-            await output.WriteAsync(packet.Pcm, cancellationToken);
-            emittedBytes = checked(emittedBytes + packet.Pcm.Length);
+            var normalized = normalizer.Convert(packet);
+            if (normalized.Length != 0)
+            {
+                await output.WriteAsync(normalized, cancellationToken);
+                emittedBytes = checked(emittedBytes + normalized.Length);
+            }
             sequence = packet.Sequence;
             lastRealPacket.Restart();
             insertedSilence = false;
         }
+    }
+
+    internal sealed class Pcm16AudioNormalizer
+    {
+        private readonly uint _targetSampleRate;
+        private readonly ushort _targetChannels;
+        private uint _sourceSampleRate;
+        private ushort _sourceChannels;
+        private long _rateRemainder;
+
+        internal Pcm16AudioNormalizer(uint targetSampleRate, ushort targetChannels)
+        {
+            if (targetSampleRate is < 8000 or > 192000)
+                throw new ArgumentOutOfRangeException(nameof(targetSampleRate));
+            if (targetChannels is < 1 or > 8)
+                throw new ArgumentOutOfRangeException(nameof(targetChannels));
+            _targetSampleRate = targetSampleRate;
+            _targetChannels = targetChannels;
+        }
+
+        internal byte[] Convert(AudioPacket packet)
+        {
+            if (packet.SampleRate is < 8000 or > 192000 ||
+                packet.Channels is < 1 or > 8 || packet.BitsPerSample != 16)
+                throw new InvalidDataException(
+                    "The projection audio packet has an unsupported PCM format.");
+            var sourceBlockAlign = checked(packet.Channels * sizeof(short));
+            if (packet.Pcm.Length == 0 || packet.Pcm.Length % sourceBlockAlign != 0)
+                throw new InvalidDataException(
+                    "The projection audio packet has an invalid PCM layout.");
+            if (packet.SampleRate == _targetSampleRate &&
+                packet.Channels == _targetChannels)
+                return packet.Pcm;
+
+            if (_sourceSampleRate != packet.SampleRate ||
+                _sourceChannels != packet.Channels)
+            {
+                _sourceSampleRate = packet.SampleRate;
+                _sourceChannels = packet.Channels;
+                _rateRemainder = 0;
+            }
+
+            var sourceFrames = packet.Pcm.Length / sourceBlockAlign;
+            var scaledFrames = checked((long)sourceFrames * _targetSampleRate +
+                _rateRemainder);
+            var targetFrames = checked((int)(scaledFrames / packet.SampleRate));
+            _rateRemainder = scaledFrames % packet.SampleRate;
+            if (targetFrames == 0) return [];
+
+            var targetBlockAlign = checked(_targetChannels * sizeof(short));
+            var output = new byte[checked(targetFrames * targetBlockAlign)];
+            var source = packet.Pcm.AsSpan();
+            for (var targetFrame = 0; targetFrame < targetFrames; ++targetFrame)
+            {
+                var position = targetFrames == 1 || sourceFrames == 1
+                    ? 0
+                    : (double)targetFrame * (sourceFrames - 1) / (targetFrames - 1);
+                var lowerFrame = (int)position;
+                var upperFrame = Math.Min(lowerFrame + 1, sourceFrames - 1);
+                var fraction = position - lowerFrame;
+                for (var targetChannel = 0;
+                     targetChannel < _targetChannels; ++targetChannel)
+                {
+                    var sample = ReadMappedSample(source, lowerFrame, upperFrame,
+                        fraction, packet.Channels, targetChannel, _targetChannels);
+                    BinaryPrimitives.WriteInt16LittleEndian(output.AsSpan(
+                        (targetFrame * _targetChannels + targetChannel) * sizeof(short),
+                        sizeof(short)), sample);
+                }
+            }
+            return output;
+        }
+
+        private static short ReadMappedSample(ReadOnlySpan<byte> source,
+            int lowerFrame, int upperFrame, double fraction,
+            ushort sourceChannels, int targetChannel, ushort targetChannels)
+        {
+            if (targetChannels == 1 && sourceChannels > 1)
+            {
+                double mixed = 0;
+                for (var channel = 0; channel < sourceChannels; ++channel)
+                    mixed += Interpolate(source, lowerFrame, upperFrame,
+                        fraction, sourceChannels, channel);
+                return ClampSample(mixed / sourceChannels);
+            }
+            var sourceChannel = sourceChannels == 1 ? 0 :
+                Math.Min(targetChannel, sourceChannels - 1);
+            return ClampSample(Interpolate(source, lowerFrame, upperFrame,
+                fraction, sourceChannels, sourceChannel));
+        }
+
+        private static double Interpolate(ReadOnlySpan<byte> source,
+            int lowerFrame, int upperFrame, double fraction,
+            ushort channels, int channel)
+        {
+            var lower = ReadSample(source, lowerFrame, channels, channel);
+            var upper = ReadSample(source, upperFrame, channels, channel);
+            return lower + (upper - lower) * fraction;
+        }
+
+        private static short ReadSample(ReadOnlySpan<byte> source, int frame,
+            ushort channels, int channel) => BinaryPrimitives.ReadInt16LittleEndian(
+                source.Slice((frame * channels + channel) * sizeof(short),
+                    sizeof(short)));
+
+        private static short ClampSample(double value) => checked((short)Math.Clamp(
+            Math.Round(value, MidpointRounding.AwayFromZero), short.MinValue,
+            short.MaxValue));
     }
 
     private async Task<AudioPacket?> TryWaitForAudioAsync(ulong sessionHandle,
@@ -561,42 +723,16 @@ internal sealed class MediaOutputService : IAsyncDisposable
         return newest;
     }
 
-    internal static async Task WriteFrameAsync(Stream output, VideoFrame frame,
-        uint width, uint height, byte[] canvas, CancellationToken cancellationToken)
+    internal static ReadOnlyMemory<byte> GetNv12FramePayload(Nv12VideoFrame frame,
+        uint width, uint height)
     {
-        await output.WriteAsync(PrepareFrame(frame, width, height, canvas),
-            cancellationToken);
-    }
-
-    internal static ReadOnlyMemory<byte> PrepareFrame(VideoFrame frame,
-        uint width, uint height, byte[] canvas)
-    {
-        var targetRowBytes = checked((int)width * 4);
-        var targetRows = checked((int)height);
-        var targetBytes = checked(targetRowBytes * targetRows);
-        var frameRowBytes = checked((int)frame.Width * 4);
-        var frameRows = checked((int)frame.Height);
-        if (frame.Width == 0 || frame.Height == 0 ||
-            frame.Width > width || frame.Height > height ||
-            frame.Stride < frameRowBytes ||
-            frame.Pixels.Length < checked((int)frame.Stride * frameRows) ||
-            canvas.Length < targetBytes)
+        var targetBytes = checked((int)((ulong)width * height * 3U / 2U));
+        if (width == 0 || height == 0 || (width & 1U) != 0 ||
+            (height & 1U) != 0 || frame.Width != width ||
+            frame.Height != height || frame.Stride != width ||
+            frame.Pixels.Length < targetBytes)
             throw new InvalidDataException("The native output frame has an invalid layout.");
-        if (frame.Width == width && frame.Height == height &&
-            frame.Stride == targetRowBytes)
-            return frame.Pixels.AsMemory(0, targetBytes);
-
-        Array.Clear(canvas, 0, targetBytes);
-        var leftBytes = checked(((int)width - (int)frame.Width) / 2 * 4);
-        var top = ((int)height - frameRows) / 2;
-        for (var row = 0; row < frameRows; ++row)
-        {
-            var sourceOffset = checked((int)frame.Stride * row);
-            var destinationOffset = checked((top + row) * targetRowBytes + leftBytes);
-            frame.Pixels.AsSpan(sourceOffset, frameRowBytes)
-                .CopyTo(canvas.AsSpan(destinationOffset, frameRowBytes));
-        }
-        return canvas.AsMemory(0, targetBytes);
+        return frame.Pixels.AsMemory(0, targetBytes);
     }
 
     private static Process CreateProcess(string path, IReadOnlyList<string> arguments)
@@ -637,7 +773,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
             ]);
         }
         args.AddRange([
-            "-f", "rawvideo", "-pixel_format", "bgra",
+            "-f", "rawvideo", "-pixel_format", "nv12",
             "-video_size", $"{request.Width}x{request.Height}",
             "-framerate", request.FrameRate.ToString(), "-i", "pipe:0",
         ]);
@@ -653,11 +789,10 @@ internal sealed class MediaOutputService : IAsyncDisposable
             args.AddRange(["-map", "0:v:0", "-an"]);
         }
         args.AddRange(["-c:v", capabilities.PreferredH264Encoder]);
-        if (string.Equals(capabilities.PreferredH264Encoder, "libx264",
-                StringComparison.OrdinalIgnoreCase))
-            args.AddRange(["-preset", "veryfast", "-tune", "zerolatency"]);
+        AddEncoderOptions(args, capabilities.PreferredH264Encoder, request.Kind);
         args.AddRange([
-            "-pix_fmt", "yuv420p", "-g", (request.FrameRate * 2).ToString(),
+            "-pix_fmt", EncoderPixelFormat(capabilities.PreferredH264Encoder),
+            "-g", (request.FrameRate * 2).ToString(),
             "-b:v", $"{request.BitrateKbps}k", "-maxrate", $"{request.BitrateKbps}k",
             "-bufsize", $"{request.BitrateKbps * 2}k",
         ]);
@@ -691,16 +826,27 @@ internal sealed class MediaOutputService : IAsyncDisposable
 
     internal static string SelectPreferredH264Encoder(string encoders)
     {
-        if (HasToken(encoders, "libx264"))
-            return "libx264";
-        return HasToken(encoders, "h264_mf")
-            ? "h264_mf" : string.Empty;
+        return FindH264EncoderCandidates(encoders).FirstOrDefault() ?? string.Empty;
+    }
+
+    internal static IReadOnlyList<string> FindH264EncoderCandidates(string encoders)
+    {
+        string[] preference =
+        [
+            "h264_nvenc",
+            "h264_amf",
+            "h264_qsv",
+            "h264_mf",
+            "libx264",
+        ];
+        return preference.Where(candidate => HasToken(encoders, candidate)).ToArray();
     }
 
     internal static MediaOutputCapabilities CreateCapabilities(string path,
         string encoders, string protocols, string muxers)
     {
         var preferredEncoder = SelectPreferredH264Encoder(encoders);
+        var encoderCandidates = FindH264EncoderCandidates(encoders);
         var h264 = !string.IsNullOrWhiteSpace(preferredEncoder);
         var aac = HasToken(encoders, "aac");
         var opus = HasToken(encoders, "libopus");
@@ -708,8 +854,144 @@ internal sealed class MediaOutputService : IAsyncDisposable
         var srt = HasToken(protocols, "srt") && HasToken(muxers, "mpegts");
         var whip = HasToken(muxers, "whip");
         return new(true, h264, aac, opus, rtmp, srt, whip, preferredEncoder, path,
-            $"{Path.GetFileName(path)} / {preferredEncoder}");
+            $"{Path.GetFileName(path)} / {preferredEncoder}")
+        {
+            H264EncoderCandidates = encoderCandidates,
+        };
     }
+
+    private static async Task<MediaOutputCapabilities> ResolveWorkingEncoderAsync(
+        MediaOutputCapabilities capabilities, uint width, uint height,
+        CancellationToken cancellationToken)
+    {
+        var candidates = capabilities.H264EncoderCandidates.Count == 0
+            ? [capabilities.PreferredH264Encoder]
+            : capabilities.H264EncoderCandidates;
+        var ordered = candidates
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .OrderByDescending(candidate => string.Equals(candidate,
+                capabilities.PreferredH264Encoder, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var encoder in ordered)
+        {
+            var usable = await CanEncodeNv12FrameAsync(capabilities.FfmpegPath,
+                encoder, width, height, cancellationToken);
+            DiagnosticLogger.Info("media_output", "encoder_probe",
+                ("file", Path.GetFileName(capabilities.FfmpegPath)),
+                ("encoder", encoder), ("width", width), ("height", height),
+                ("usable", usable));
+            if (usable)
+            {
+                return capabilities with
+                {
+                    HasH264Encoder = true,
+                    PreferredH264Encoder = encoder,
+                    Detail = $"{Path.GetFileName(capabilities.FfmpegPath)} / {encoder}",
+                };
+            }
+        }
+        return capabilities with
+        {
+            HasH264Encoder = false,
+            PreferredH264Encoder = string.Empty,
+            Detail = $"{Path.GetFileName(capabilities.FfmpegPath)} / no usable H.264 encoder",
+        };
+    }
+
+    private static async Task<bool> CanEncodeNv12FrameAsync(string path,
+        string encoder, uint width, uint height, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(encoder) ||
+            width == 0 || height == 0 || (width & 1U) != 0 || (height & 1U) != 0)
+            return false;
+        var start = new ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardError = true,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        var arguments = new List<string>
+        {
+            "-hide_banner", "-loglevel", "error", "-nostdin",
+            "-f", "rawvideo", "-pixel_format", "nv12",
+            "-video_size", $"{width}x{height}", "-framerate", "30",
+            "-i", "pipe:0", "-frames:v", "1", "-an", "-c:v", encoder,
+        };
+        AddEncoderOptions(arguments, encoder, MediaOutputKind.Recording);
+        arguments.AddRange([
+            "-pix_fmt", EncoderPixelFormat(encoder), "-f", "null", "-",
+        ]);
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+
+        using var process = new Process { StartInfo = start };
+        var started = false;
+        try
+        {
+            if (!process.Start()) return false;
+            started = true;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            var errorOutput = process.StandardError.ReadToEndAsync(timeout.Token);
+            var yBytes64 = CalculateLumaPlaneSize(width, height);
+            if (yBytes64 > int.MaxValue * 2L / 3L) return false;
+            var yBytes = checked((int)yBytes64);
+            var frame = new byte[checked(yBytes + yBytes / 2)];
+            Array.Fill(frame, (byte)16, 0, yBytes);
+            Array.Fill(frame, (byte)128, yBytes, frame.Length - yBytes);
+            await process.StandardInput.BaseStream.WriteAsync(frame, timeout.Token);
+            process.StandardInput.Close();
+            await process.WaitForExitAsync(timeout.Token);
+            _ = await errorOutput;
+            return process.ExitCode == 0;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (started && !process.HasExited)
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (Exception error) when (error is InvalidOperationException or
+                                              System.ComponentModel.Win32Exception) { }
+            }
+        }
+
+        static long CalculateLumaPlaneSize(uint frameWidth, uint frameHeight) =>
+            checked((long)frameWidth * frameHeight);
+    }
+
+    private static void AddEncoderOptions(List<string> arguments, string encoder,
+        MediaOutputKind kind)
+    {
+        if (string.Equals(encoder, "libx264", StringComparison.OrdinalIgnoreCase))
+            arguments.AddRange(["-preset", "veryfast", "-tune", "zerolatency"]);
+        else if (string.Equals(encoder, "h264_nvenc", StringComparison.OrdinalIgnoreCase))
+            arguments.AddRange(["-preset", "p4", "-tune",
+                kind == MediaOutputKind.Recording ? "hq" : "ll"]);
+        else if (string.Equals(encoder, "h264_amf", StringComparison.OrdinalIgnoreCase))
+            arguments.AddRange(["-usage", kind == MediaOutputKind.Recording
+                ? "high_quality" : "lowlatency"]);
+        else if (string.Equals(encoder, "h264_qsv", StringComparison.OrdinalIgnoreCase))
+            arguments.AddRange(["-preset", kind == MediaOutputKind.Recording
+                ? "medium" : "veryfast"]);
+        else if (string.Equals(encoder, "h264_mf", StringComparison.OrdinalIgnoreCase))
+            arguments.AddRange(["-hw_encoding", "1", "-scenario",
+                kind == MediaOutputKind.Recording ? "archive" : "live_streaming"]);
+    }
+
+    private static string EncoderPixelFormat(string encoder) =>
+        string.Equals(encoder, "libx264", StringComparison.OrdinalIgnoreCase)
+            ? "yuv420p" : "nv12";
 
     private static void Validate(MediaOutputRequest request, MediaOutputCapabilities capabilities)
     {
@@ -867,7 +1149,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
             Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe"),
             Path.Combine(AppContext.BaseDirectory, "tools", "ffmpeg", "ffmpeg.exe"),
         };
-        candidates = candidates.Where(File.Exists).ToList();
+        candidates = candidates.Where(path => File.Exists(path) &&
+            RuntimeBinaryIntegrity.IsTrustedFfmpeg(path)).ToList();
         Process? process = null;
         try
         {
@@ -889,7 +1172,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
             var output = await outputTask + await errorTask;
             foreach (var path in ParseFfmpegLocations(output))
             {
-                if (!candidates.Contains(path, StringComparer.OrdinalIgnoreCase))
+                if (RuntimeBinaryIntegrity.IsTrustedFfmpeg(path) &&
+                    !candidates.Contains(path, StringComparer.OrdinalIgnoreCase))
                     candidates.Add(path);
             }
         }

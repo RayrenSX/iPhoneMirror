@@ -5,12 +5,15 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class AdvancedSettingsWindow : Wpf.Ui.Controls.FluentWindow
 {
+    private readonly bool _previewOnly;
+
     public uint RequestedWidth { get; private set; }
     public uint RequestedHeight { get; private set; }
     public bool DisableAdvancedModeRequested { get; private set; }
 
-    public AdvancedSettingsWindow(uint width, uint height)
+    public AdvancedSettingsWindow(uint width, uint height, bool previewOnly = false)
     {
+        _previewOnly = previewOnly;
         InitializeComponent();
         WidthBox.Text = width == 0 ? "" : width.ToString();
         HeightBox.Text = height == 0 ? "" : height.ToString();
@@ -27,14 +30,24 @@ public partial class AdvancedSettingsWindow : Wpf.Ui.Controls.FluentWindow
         }
         RequestedWidth = width;
         RequestedHeight = height;
-        DialogResult = true;
+        Complete(true);
     }
 
     private void OnDisableClick(object sender, RoutedEventArgs e)
     {
         DisableAdvancedModeRequested = true;
-        DialogResult = false;
+        Complete(false);
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    private void Complete(bool result)
+    {
+        if (_previewOnly)
+        {
+            Close();
+            return;
+        }
+        DialogResult = result;
+    }
 }

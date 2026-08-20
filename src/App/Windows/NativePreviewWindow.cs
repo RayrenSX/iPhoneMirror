@@ -78,6 +78,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int DwmWindowCornerPreference = 33;
     private const int DwmBorderColor = 34;
     private const int DwmDoNotRound = 1;
+    private const int DwmRound = 2;
     private const uint DwmColorNone = 0xFFFFFFFE;
 
     private readonly HwndSource _source;
@@ -129,6 +130,9 @@ internal sealed class NativePreviewWindow : IDisposable
     private nint _smallIcon;
     private WindowRect _restoreRectangle;
     private nint _restoreStyle;
+
+    internal bool IsFullScreen => _isFullScreen;
+    internal event Action<bool>? FullScreenChanged;
 
     private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string title,
         Func<nint, bool> attachPreview, Action<nint> detachPreview,
@@ -263,6 +267,12 @@ internal sealed class NativePreviewWindow : IDisposable
         }
         else
         {
+            // Media-cast content uses a normal captioned HWND. Explicitly ask
+            // DWM for the Windows default corner treatment so it remains
+            // rounded even when the app's theme changes window preferences.
+            var cornerPreference = DwmRound;
+            _ = DwmSetWindowAttribute(_handle, DwmWindowCornerPreference,
+                ref cornerPreference, sizeof(int));
             var darkTitleBar = 1;
             _ = DwmSetWindowAttribute(_handle, DwmUseImmersiveDarkMode,
                 ref darkTitleBar, sizeof(int));
@@ -334,10 +344,7 @@ internal sealed class NativePreviewWindow : IDisposable
                 return false;
             }
             candidate._attached = true;
-            _ = ShowWindow(candidate._handle, SwShow);
-            candidate._isTopMost = SetWindowPos(
-                candidate._handle, HwndTopMost, 0, 0, 0, 0,
-                SwpNoSize | SwpNoMove | SwpNoActivate);
+            candidate.ShowInitially();
             _ = SetForegroundWindow(candidate._handle);
             window = candidate;
             logDiagnostic?.Invoke(AppLog.Event("independent_window_shown",
@@ -374,10 +381,7 @@ internal sealed class NativePreviewWindow : IDisposable
                  muteOtherWindows, null, null,
                  content, contentDetached, logDiagnostic: logDiagnostic);
             candidate._attached = true;
-            _ = ShowWindow(candidate._handle, SwShow);
-            candidate._isTopMost = SetWindowPos(
-                candidate._handle, HwndTopMost, 0, 0, 0, 0,
-                SwpNoSize | SwpNoMove | SwpNoActivate);
+            candidate.ShowInitially();
             _ = SetForegroundWindow(candidate._handle);
             window = candidate;
             logDiagnostic?.Invoke(AppLog.Event("independent_window_shown",
@@ -396,6 +400,25 @@ internal sealed class NativePreviewWindow : IDisposable
             }
             return false;
         }
+    }
+
+    private void ShowInitially()
+    {
+        var boundsApplied = _aspectController.ApplyInitialBounds();
+        _isTopMost = SetWindowPos(_handle, HwndTopMost, 0, 0, 0, 0,
+            SwpNoSize | SwpNoMove | SwpNoActivate | SwpShowWindow);
+        if (!_isTopMost)
+        {
+            // Keep the window usable if the combined show/z-order operation is
+            // rejected by the shell. Its final bounds were already applied
+            // while hidden, so this fallback still cannot expose a move.
+            _ = ShowWindow(_handle, SwShow);
+            _isTopMost = SetWindowPos(_handle, HwndTopMost, 0, 0, 0, 0,
+                SwpNoSize | SwpNoMove | SwpNoActivate);
+        }
+        Log("independent_window_initial_layout",
+            ("mode", WindowMode), ("bounds_applied", boundsApplied),
+            ("top_most", _isTopMost));
     }
 
     internal void Activate()
@@ -458,6 +481,7 @@ internal sealed class NativePreviewWindow : IDisposable
             _ = SetForegroundWindow(_handle);
             Log("independent_window_fullscreen",
                 ("mode", WindowMode), ("enabled", false));
+            FullScreenChanged?.Invoke(false);
             return;
         }
 
@@ -480,6 +504,7 @@ internal sealed class NativePreviewWindow : IDisposable
         _ = SetForegroundWindow(_handle);
         Log("independent_window_fullscreen",
             ("mode", WindowMode), ("enabled", true));
+        FullScreenChanged?.Invoke(true);
     }
 
     private void ApplyApplicationIcons()

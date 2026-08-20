@@ -53,6 +53,8 @@ struct AppleUsbFilterSafetyResult {
 
 [[nodiscard]] ServiceState apple_mobile_device_service_state() noexcept;
 [[nodiscard]] std::vector<PhysicalAppleDevice> discover_physical_apple_usb_devices();
+[[nodiscard]] bool is_apple_usb_parent_instance_id(
+    std::wstring_view instance_id) noexcept;
 [[nodiscard]] bool apple_usb_parent_instance_matches_serial(
     std::wstring_view instance_id, std::string_view serial) noexcept;
 // libusb-win32 publishes one device interface for the filtered Apple parent.

@@ -58,11 +58,11 @@ HRESULT create_channel_security(SECURITY_ATTRIBUTES& attributes,
     HRESULT result = current_user_sid(sid);
     if (FAILED(result)) return result;
 
-    // Frame Server runs outside the publisher process. Keep write access with
-    // the current user and grant read access to the Windows service identities
-    // and packaged consumers that can host the custom media source.
+    // Frame Server runs as a Windows service outside the publisher process.
+    // Do not grant ALL APPLICATION PACKAGES: that would let an unrelated
+    // AppContainer discover and map the live frame file without camera consent.
     const std::wstring sddl =
-        L"D:P(A;;GA;;;SY)(A;;GR;;;LS)(A;;GR;;;AC)(A;;GA;;;" + sid + L")";
+        L"D:P(A;;GA;;;SY)(A;;GR;;;LS)(A;;GA;;;" + sid + L")";
     PSECURITY_DESCRIPTOR raw_descriptor{};
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
             sddl.c_str(), SDDL_REVISION_1, &raw_descriptor, nullptr))
@@ -232,7 +232,8 @@ void FramePublisher::serve_channel_path(std::stop_token stop_token) const noexce
         LocalMemory descriptor;
         if (FAILED(create_channel_security(attributes, descriptor))) return;
         HANDLE pipe = CreateNamedPipeW(
-            FrameChannelPipeName, PIPE_ACCESS_OUTBOUND,
+            FrameChannelPipeName,
+            PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             1, 1024, 1024, 0, &attributes);
         if (pipe == INVALID_HANDLE_VALUE) return;

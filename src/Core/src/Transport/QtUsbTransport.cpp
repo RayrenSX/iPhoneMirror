@@ -142,6 +142,19 @@ std::string serial_for(libusb_device* device, const libusb_device_descriptor& de
     return length > 0 ? std::string(reinterpret_cast<char*>(buffer), static_cast<std::size_t>(length)) : std::string{};
 }
 
+void populate_active_configuration(libusb_device* device,
+    AppleUsbDevice& info) noexcept {
+    libusb_device_handle* handle{};
+    if (libusb_open(device, &handle) != LIBUSB_SUCCESS || !handle) return;
+    int configuration{};
+    if (libusb_get_configuration(handle, &configuration) == LIBUSB_SUCCESS &&
+        configuration >= 0 && configuration <= 0xff) {
+        info.active_configuration = static_cast<std::uint8_t>(configuration);
+        info.active_configuration_known = true;
+    }
+    libusb_close(handle);
+}
+
 libusb_device* find_device(const QtUsbContext& context,
     const AppleUsbIdentity& identity, AppleUsbDevice& info,
     bool require_quicktime = false) {
@@ -219,6 +232,7 @@ libusb_device* find_device(const QtUsbContext& context,
         selected_info.mux_endpoints.configuration != 0;
     selected_info.quicktime_configuration =
         selected_info.quicktime_endpoints.configuration != 0;
+    populate_active_configuration(candidate_devices[selected_index], selected_info);
     if (require_quicktime && !selected_info.quicktime_configuration)
         return nullptr;
     info = std::move(selected_info);
@@ -271,6 +285,7 @@ std::vector<AppleUsbDevice> QtUsbContext::enumerate() const {
         device.quicktime_endpoints = endpoints_for(raw_devices[index], QuickTimeSubclass);
         device.mux_configuration = device.mux_endpoints.configuration != 0;
         device.quicktime_configuration = device.quicktime_endpoints.configuration != 0;
+        populate_active_configuration(raw_devices[index], device);
         result.push_back(std::move(device));
     }
     return result;

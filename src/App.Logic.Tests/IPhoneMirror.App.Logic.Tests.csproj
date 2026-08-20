@@ -36,9 +36,13 @@
     <Compile Include="..\App\Interop\NativeCore.cs" Link="NativeCore.cs" />
     <Compile Include="..\App\Services\MediaSourceClassifier.cs" Link="MediaSourceClassifier.cs" />
     <Compile Include="..\App\Services\MediaCastEventGate.cs" Link="MediaCastEventGate.cs" />
+    <Compile Include="..\App\Services\MediaCastPlaybackControls.cs" Link="MediaCastPlaybackControls.cs" />
+    <Compile Include="..\App\Services\HlsMediaPlaybackBridge.cs" Link="HlsMediaPlaybackBridge.cs" />
+    <Compile Include="..\App\Services\MediaCastAudioDecoder.cs" Link="MediaCastAudioDecoder.cs" />
     <Compile Include="..\App\Services\MediaRecoveryBackoff.cs" Link="MediaRecoveryBackoff.cs" />
     <Compile Include="..\App\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />
     <Compile Include="..\App\Services\MediaOutputService.cs" Link="MediaOutputService.cs" />
+    <Compile Include="..\App\Services\RuntimeBinaryIntegrity.cs" Link="RuntimeBinaryIntegrity.cs" />
     <Compile Include="..\App\Services\PendingRecordingStore.cs" Link="PendingRecordingStore.cs" />
     <Compile Include="..\App\Updater\SemanticVersion.cs" Link="Updater\SemanticVersion.cs" />
     <Compile Include="..\App\Updater\ReleaseParser.cs" Link="Updater\ReleaseParser.cs" />

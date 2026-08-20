@@ -1,5 +1,6 @@
 using IPhoneMirror.DriverInstaller.Models;
 using IPhoneMirror.DriverInstaller.Services;
+using IPhoneMirror.Shared.Security;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
@@ -35,8 +36,12 @@ Run("Apple parent allowlist", () =>
 {
     True(DriverConstants.IsAllowedAppleParent(
         @"USB\VID_05AC&PID_12A8\0000810100044D600A22001E"));
+    True(DriverConstants.IsAllowedAppleParent(
+        @"USB\VID_05AC&PID_12A8\00008150-001903580A9B401C"));
     False(DriverConstants.IsAllowedAppleParent(
         @"USB\VID_05AC&PID_12A8&MI_00\0000810100044D600A22001E"));
+    False(DriverConstants.IsAllowedAppleParent(
+        @"USB\VID_05AC&PID_12A8&MI_01\00008150-001903580A9B401C"));
     False(DriverConstants.IsAllowedAppleParent(
         @"USB\VID_1234&PID_12A8\0000810100044D600A22001E"));
     False(DriverConstants.IsAllowedAppleParent(
@@ -116,6 +121,33 @@ Run("verified file lock blocks replacement", () =>
     }
 });
 
+Run("elevation path lock blocks file and directory replacement", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    var moved = root + "-moved";
+    try
+    {
+        Directory.CreateDirectory(root);
+        var executable = Path.Combine(root, "helper.exe");
+        File.WriteAllText(executable, "trusted helper");
+        using (ElevationPathLock.Acquire(executable))
+        {
+            Throws<IOException>(() => File.OpenWrite(executable).Dispose());
+            Throws<IOException>(() => File.Delete(executable));
+            Throws<IOException>(() => Directory.Move(root, moved));
+        }
+        File.AppendAllText(executable, " updated");
+        True(File.ReadAllText(executable).EndsWith(" updated",
+            StringComparison.Ordinal));
+    }
+    finally
+    {
+        if (Directory.Exists(moved)) Directory.Delete(moved, recursive: true);
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+});
+
 Run("reparse path components are rejected", () =>
 {
     var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
@@ -189,6 +221,14 @@ Run("elevated result matches process exit code", () =>
     False(DriverOperationClient.IsResultConsistentWithExitCode(1, success));
     True(DriverOperationClient.IsResultConsistentWithExitCode(1, failure));
     False(DriverOperationClient.IsResultConsistentWithExitCode(0, failure));
+});
+
+Run("current driver executable is locked before elevation", () =>
+{
+    var success = DriverOperationClient.EnsureElevationBoundary(out var error);
+    True(success);
+    if (!success) throw error ?? new IOException(
+        "current process elevation boundary was not created");
 });
 
 Run("log sanitization", () =>

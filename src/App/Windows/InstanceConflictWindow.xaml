@@ -7,13 +7,15 @@
         Width="560" SizeToContent="Height" MinHeight="320" MaxHeight="480"
         ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
         WindowStyle="None" ExtendsContentIntoTitleBar="True"
-        WindowBackdropType="Acrylic" WindowCornerPreference="Round"
-        Background="{DynamicResource AppBackgroundBrush}"
+        WindowBackdropType="None" WindowCornerPreference="Round"
+        Background="{DynamicResource DialogSurfaceBrush}"
         Foreground="{DynamicResource TextBrush}"
         ShowInTaskbar="True"
         AutomationProperties.AutomationId="InstanceConflictWindow"
         Closing="OnWindowClosing">
-    <Border Style="{StaticResource ModernDialogSurface}" Margin="10">
+    <Border x:Name="WindowSurface" Style="{StaticResource ModernDialogSurface}" Margin="0"
+            BorderThickness="0" Effect="{x:Null}" CornerRadius="0"
+            SnapsToDevicePixels="True">
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -26,7 +28,7 @@
             </Grid.RowDefinitions>
 
             <Grid Style="{StaticResource SubWindowHeader}"
-                  MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                  animations:WindowDragBehavior.IsEnabled="True">
                 <TextBlock Text="{DynamicResource InstanceConflictTitle}"
                            Style="{StaticResource SubWindowTitle}"
                            Margin="0,0,48,0"/>

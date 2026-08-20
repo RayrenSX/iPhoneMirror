@@ -12,8 +12,11 @@
 #include <charconv>
 #include <chrono>
 #include <cctype>
+#include <cstring>
+#include <ctime>
 #include <format>
 #include <initializer_list>
+#include <memory>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -46,11 +49,33 @@ std::string lower(std::string_view value) {
 }
 
 std::string trim(std::string_view value) {
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+    const auto is_trim_character = [](unsigned char character) {
+        // Some phone DLNA stacks leave a NUL or another C0 terminator inside
+        // the XML text node. Treat it like surrounding whitespace so the
+        // actual HH:MM:SS payload can still be parsed.
+        return character == '\0' || std::isspace(character);
+    };
+    while (!value.empty() && is_trim_character(
+               static_cast<unsigned char>(value.front())))
         value.remove_prefix(1);
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+    while (!value.empty() && is_trim_character(
+               static_cast<unsigned char>(value.back())))
         value.remove_suffix(1);
     return std::string(value);
+}
+
+std::string log_token(std::string_view value) {
+    std::string result;
+    result.reserve(value.size());
+    for (const auto character : value) {
+        const auto byte = static_cast<unsigned char>(character);
+        if (byte >= 0x20 && byte < 0x7f && character != '\\') {
+            result.push_back(character);
+        } else {
+            result += std::format("\\x{:02X}", byte);
+        }
+    }
+    return result;
 }
 
 std::string xml_escape(std::string_view value) {
@@ -111,7 +136,110 @@ std::optional<std::string> xml_value(std::string_view xml, std::string_view name
     return std::nullopt;
 }
 
+std::optional<std::string> xml_attribute_value(std::string_view xml,
+    std::string_view element, std::string_view attribute) {
+    std::size_t offset{};
+    while ((offset = xml.find('<', offset)) != std::string_view::npos) {
+        if (offset + 1 >= xml.size() || xml[offset + 1] == '/' ||
+            xml[offset + 1] == '!' || xml[offset + 1] == '?') {
+            ++offset;
+            continue;
+        }
+        const auto tag_end = xml.find('>', offset + 1);
+        if (tag_end == std::string_view::npos) return std::nullopt;
+        auto tag = xml.substr(offset + 1, tag_end - offset - 1);
+        const auto tag_name_end = tag.find_first_of(" \t\r\n/");
+        const auto tag_name = tag.substr(0,
+            tag_name_end == std::string_view::npos ? tag.size() : tag_name_end);
+        const auto colon = tag_name.rfind(':');
+        const auto local_name = colon == std::string_view::npos
+            ? tag_name : tag_name.substr(colon + 1);
+        if (local_name != element) {
+            offset = tag_end + 1;
+            continue;
+        }
+        const auto attributes = tag.substr(tag_name.size());
+        std::size_t attribute_at{};
+        while ((attribute_at = attributes.find(attribute, attribute_at)) !=
+            std::string_view::npos) {
+            const auto before = attribute_at == 0 ? '\0' : attributes[attribute_at - 1];
+            const auto after = attribute_at + attribute.size() < attributes.size()
+                ? attributes[attribute_at + attribute.size()] : '\0';
+            if ((before == '\0' || std::isspace(static_cast<unsigned char>(before))) &&
+                after == '=') {
+                auto value = attributes.substr(attribute_at + attribute.size() + 1);
+                while (!value.empty() && std::isspace(
+                        static_cast<unsigned char>(value.front()))) value.remove_prefix(1);
+                if (value.empty()) return std::nullopt;
+                const auto quote = value.front();
+                if (quote != '\"' && quote != '\'') return std::nullopt;
+                value.remove_prefix(1);
+                const auto end = value.find(quote);
+                if (end == std::string_view::npos) return std::nullopt;
+                return xml_unescape(std::string(value.substr(0, end)));
+            }
+            attribute_at += attribute.size();
+        }
+        offset = tag_end + 1;
+    }
+    return std::nullopt;
+}
+
+std::optional<double> parse_dlna_time(std::string_view value) noexcept;
+
+std::optional<double> metadata_duration(std::string_view metadata) noexcept {
+    try {
+        if (const auto value = xml_attribute_value(metadata, "res", "duration")) {
+            if (const auto duration = parse_dlna_time(*value)) return duration;
+        }
+        // Some senders put the duration in a DIDL child element instead of
+        // the standard res attribute. Accept both forms so the controller
+        // receives the programme duration even when the media backend only
+        // exposes one HLS segment.
+        if (const auto value = xml_value(metadata, "duration")) {
+            if (const auto duration = parse_dlna_time(*value)) return duration;
+            try {
+                std::size_t consumed{};
+                const auto seconds = std::stod(*value, &consumed);
+                if (consumed == value->size() && std::isfinite(seconds) &&
+                    seconds > 0) return seconds;
+            } catch (...) { }
+        }
+        return std::nullopt;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+bool is_hls_uri(std::string_view uri) noexcept {
+    const auto normalized = lower(uri);
+    const auto query = normalized.find('?');
+    const auto path = std::string_view(normalized).substr(0, query);
+    return path.ends_with(".m3u8") || path.ends_with(".m3u") ||
+        (query != std::string_view::npos &&
+            std::string_view(normalized).substr(query).find("m3u8") !=
+                std::string_view::npos);
+}
+
+double reported_media_duration(std::string_view uri, std::string_view metadata,
+    double callback_duration) noexcept {
+    if (const auto duration = metadata_duration(metadata)) return *duration;
+    // A MediaElement-backed HLS renderer may only know the active segment.
+    // Platinum reports zero for this case; never expose that segment length as
+    // the duration of the program to the controller.
+    if (is_hls_uri(uri)) return 0;
+    return std::isfinite(callback_duration) && callback_duration > 0
+        ? callback_duration : 0;
+}
+
 std::optional<double> parse_dlna_time(std::string_view value) noexcept {
+    // Controllers are inconsistent about whitespace and occasionally include
+    // an explicit positive sign. Normalize those harmless variations before
+    // parsing the DLNA HH:MM:SS value.
+    const auto normalized = trim(value);
+    value = normalized;
+    if (value.starts_with('+')) value.remove_prefix(1);
+    if (value.empty() || value.starts_with('-')) return std::nullopt;
     unsigned hours{}, minutes{};
     double seconds{};
     const auto first = value.find(':');
@@ -124,16 +252,22 @@ std::optional<double> parse_dlna_time(std::string_view value) noexcept {
         return error == std::errc{} && end == text.data() + text.size();
     };
     if (!parse_unsigned(value.substr(0, first), hours) ||
-        !parse_unsigned(value.substr(first + 1, second - first - 1), minutes) ||
-        minutes >= 60) return std::nullopt;
+        !parse_unsigned(value.substr(first + 1, second - first - 1), minutes))
+        return std::nullopt;
     try {
-        const auto seconds_text = std::string(value.substr(second + 1));
+        auto seconds_text = std::string(value.substr(second + 1));
+        // A few locale-aware DLNA controllers serialize the fractional part
+        // with a comma even though REL_TIME is otherwise ASCII.
+        std::ranges::replace(seconds_text, ',', '.');
         std::size_t consumed{};
         seconds = std::stod(seconds_text, &consumed);
         if (consumed != seconds_text.size()) return std::nullopt;
     } catch (...) { return std::nullopt; }
-    if (!std::isfinite(seconds) || seconds < 0 || seconds >= 60)
+    if (!std::isfinite(seconds) || seconds < 0)
         return std::nullopt;
+    // iQIYI serializes REL_TIME as 00:00:<total-seconds> instead of carrying
+    // values above 59 into the minute/hour fields. Normalize that legal-in-
+    // practice variant together with ordinary HH:MM:SS values.
     const auto result = static_cast<double>(hours) * 3600.0 +
         static_cast<double>(minutes) * 60.0 + seconds;
     if (!std::isfinite(result) || result > 7.0 * 24.0 * 60.0 * 60.0)
@@ -155,6 +289,92 @@ struct HttpRequest {
     std::map<std::string, std::string, std::less<>> headers;
     std::string body;
 };
+
+struct EventEndpoint {
+    std::string host;
+    std::uint16_t port{80};
+    std::string path{"/"};
+};
+
+std::optional<EventEndpoint> parse_event_callback(std::string_view header) {
+    const auto open = header.find('<');
+    const auto close = open == std::string_view::npos
+        ? open : header.find('>', open + 1);
+    if (open == std::string_view::npos || close == std::string_view::npos)
+        return std::nullopt;
+    auto url = header.substr(open + 1, close - open - 1);
+    if (!lower(url.substr(0, (std::min<std::size_t>)(url.size(), 7)))
+            .starts_with("http://")) return std::nullopt;
+    url.remove_prefix(7);
+    const auto path_at = url.find_first_of("/?");
+    auto authority = url.substr(0, path_at);
+    if (authority.empty()) return std::nullopt;
+
+    EventEndpoint result;
+    if (authority.front() == '[') {
+        const auto bracket = authority.find(']');
+        if (bracket == std::string_view::npos || bracket == 1)
+            return std::nullopt;
+        result.host = std::string(authority.substr(1, bracket - 1));
+        if (bracket + 1 < authority.size()) {
+            if (authority[bracket + 1] != ':') return std::nullopt;
+            unsigned port{};
+            const auto port_text = authority.substr(bracket + 2);
+            const auto [end, error] = std::from_chars(port_text.data(),
+                port_text.data() + port_text.size(), port);
+            if (error != std::errc{} || end != port_text.data() + port_text.size() ||
+                port == 0 || port > 65535) return std::nullopt;
+            result.port = static_cast<std::uint16_t>(port);
+        }
+    } else {
+        const auto colon = authority.rfind(':');
+        if (colon != std::string_view::npos) {
+            unsigned port{};
+            const auto port_text = authority.substr(colon + 1);
+            const auto [end, error] = std::from_chars(port_text.data(),
+                port_text.data() + port_text.size(), port);
+            if (error != std::errc{} || end != port_text.data() + port_text.size() ||
+                port == 0 || port > 65535) return std::nullopt;
+            result.port = static_cast<std::uint16_t>(port);
+            authority = authority.substr(0, colon);
+        }
+        if (authority.empty()) return std::nullopt;
+        result.host = std::string(authority);
+    }
+    if (result.host.find_first_of("\r\n\t ") != std::string::npos)
+        return std::nullopt;
+    if (path_at != std::string_view::npos)
+        result.path = url[path_at] == '?' ? std::string("/") + std::string(url.substr(path_at))
+                                          : std::string(url.substr(path_at));
+    return result;
+}
+
+std::chrono::seconds event_timeout(const HttpRequest& request) noexcept {
+    const auto found = request.headers.find("timeout");
+    if (found == request.headers.end()) return std::chrono::seconds(1800);
+    const auto value = lower(trim(found->second));
+    if (value == "second-infinite") return std::chrono::hours(24);
+    constexpr std::string_view prefix = "second-";
+    if (!value.starts_with(prefix)) return std::chrono::seconds(1800);
+    unsigned seconds{};
+    const auto text = std::string_view(value).substr(prefix.size());
+    const auto [end, error] = std::from_chars(
+        text.data(), text.data() + text.size(), seconds);
+    if (error != std::errc{} || end != text.data() + text.size())
+        return std::chrono::seconds(1800);
+    return std::chrono::seconds(std::clamp(seconds, 60U, 86400U));
+}
+
+std::string http_date() {
+    std::time_t now = std::time(nullptr);
+    std::tm utc{};
+    if (gmtime_s(&utc, &now) != 0) return "Thu, 01 Jan 1970 00:00:00 GMT";
+    char buffer[64]{};
+    if (std::strftime(buffer, sizeof(buffer),
+            "%a, %d %b %Y %H:%M:%S GMT", &utc) == 0)
+        return "Thu, 01 Jan 1970 00:00:00 GMT";
+    return buffer;
+}
 
 bool wait_socket(SOCKET socket, short events, const std::atomic_bool& stopping,
     std::chrono::steady_clock::time_point deadline) noexcept {
@@ -229,8 +449,24 @@ std::optional<HttpRequest> read_request(SOCKET socket,
         const auto line = std::string_view(bytes).substr(line_at, line_end - line_at);
         const auto separator = line.find(':');
         if (separator != std::string_view::npos) {
-            request.headers.emplace(lower(trim(line.substr(0, separator))),
-                trim(line.substr(separator + 1)));
+            const auto name = lower(trim(line.substr(0, separator)));
+            const auto value = trim(line.substr(separator + 1));
+            if (name.empty()) return std::nullopt;
+            if (const auto existing = request.headers.find(name);
+                existing != request.headers.end()) {
+                // A request with conflicting framing headers is ambiguous and
+                // must never be interpreted differently by the parser and a
+                // controller or proxy. Identical Content-Length fields are
+                // safe and occur with a few older DLNA controllers; repeated
+                // Transfer-Encoding is rejected because list semantics would
+                // otherwise be lost by the single-value header map.
+                if (name == "content-length" && existing->second == value) {
+                    line_at = line_end + 2;
+                    continue;
+                }
+                return std::nullopt;
+            }
+            request.headers.emplace(name, value);
         }
         line_at = line_end + 2;
     }
@@ -243,18 +479,84 @@ std::optional<HttpRequest> read_request(SOCKET socket,
         if (error != std::errc{} || end != length->second.data() + length->second.size() ||
             content_length > 1024U * 1024U) return std::nullopt;
     }
+    const auto transfer = request.headers.find("transfer-encoding");
+    const auto transfer_value = transfer == request.headers.end()
+        ? std::string{} : lower(transfer->second);
+    const bool chunked = transfer_value == "chunked";
+    if (!transfer_value.empty() && !chunked) return std::nullopt;
+    if (chunked && request.headers.contains("content-length"))
+        return std::nullopt;
     const auto body_at = header_end + 4;
-    if (bytes.size() - body_at < content_length) {
-        const auto expect = request.headers.find("expect");
-        if (expect != request.headers.end() &&
-            lower(expect->second).find("100-continue") != std::string::npos &&
-            !send_all(socket, "HTTP/1.1 100 Continue\r\n\r\n", stopping))
-            return std::nullopt;
+    const auto receive_more = [&] {
+        const auto count = receive(buffer.data(), static_cast<int>(buffer.size()));
+        if (count <= 0) return false;
+        bytes.append(buffer.data(), static_cast<std::size_t>(count));
+        return true;
+    };
+    const auto expect = request.headers.find("expect");
+    const auto expect_continue = expect != request.headers.end() &&
+        lower(expect->second).find("100-continue") != std::string::npos;
+    if (expect_continue && bytes.size() == body_at &&
+        (chunked || content_length != 0) &&
+        !send_all(socket, "HTTP/1.1 100 Continue\r\n\r\n", stopping))
+        return std::nullopt;
+    if (chunked) {
+        std::string body;
+        std::size_t cursor = body_at;
+        while (true) {
+            std::size_t line_end{};
+            while ((line_end = bytes.find("\r\n", cursor)) == std::string::npos) {
+                if (bytes.size() > body_at + 1024U * 1024U || !receive_more())
+                    return std::nullopt;
+            }
+            auto size_text = trim(std::string_view(bytes).substr(cursor,
+                line_end - cursor));
+            const auto extension = size_text.find(';');
+            if (extension != std::string_view::npos)
+                size_text.resize(extension);
+            size_text = trim(size_text);
+            std::uint64_t chunk_size{};
+            const auto [size_end, size_error] = std::from_chars(
+                size_text.data(), size_text.data() + size_text.size(),
+                chunk_size, 16);
+            if (size_error != std::errc{} ||
+                size_end != size_text.data() + size_text.size() ||
+                chunk_size > 1024U * 1024U ||
+                body.size() > 1024U * 1024U - static_cast<std::size_t>(chunk_size))
+                return std::nullopt;
+            cursor = line_end + 2;
+            if (chunk_size == 0) {
+                // The last-chunk grammar ends after its size line. What
+                // follows is either the final CRLF or one or more trailer
+                // fields terminated by an empty line; there is no chunk-data
+                // CRLF before the first trailer.
+                while (bytes.size() - cursor < 2U) {
+                    if (!receive_more()) return std::nullopt;
+                }
+                if (bytes.compare(cursor, 2, "\r\n") == 0) {
+                    request.body = std::move(body);
+                    return request;
+                }
+                while (bytes.find("\r\n\r\n", cursor) == std::string::npos) {
+                    if (bytes.size() > body_at + 1024U * 1024U || !receive_more())
+                        return std::nullopt;
+                }
+                request.body = std::move(body);
+                return request;
+            }
+            const auto required = static_cast<std::size_t>(chunk_size) + 2U;
+            while (bytes.size() - cursor < required) {
+                if (!receive_more()) return std::nullopt;
+            }
+            body.append(bytes.data() + cursor,
+                static_cast<std::size_t>(chunk_size));
+            cursor += static_cast<std::size_t>(chunk_size);
+            if (bytes.compare(cursor, 2, "\r\n") != 0) return std::nullopt;
+            cursor += 2;
+        }
     }
     while (bytes.size() - body_at < content_length) {
-        const auto count = receive(buffer.data(), static_cast<int>(buffer.size()));
-        if (count <= 0) return std::nullopt;
-        bytes.append(buffer.data(), static_cast<std::size_t>(count));
+        if (!receive_more()) return std::nullopt;
     }
     request.body.assign(bytes.data() + body_at, content_length);
     return request;
@@ -369,6 +671,14 @@ std::string routed_local_address(const sockaddr_in& remote) {
 } // namespace
 
 struct DlnaRenderer::Impl {
+    struct EventSubscription {
+        std::string sid;
+        std::string service;
+        EventEndpoint callback;
+        std::uint32_t sequence{};
+        std::chrono::steady_clock::time_point expires;
+    };
+
     std::string name;
     std::string uuid;
     std::uint16_t http_port{};
@@ -379,10 +689,18 @@ struct DlnaRenderer::Impl {
     std::atomic_bool stopping{};
     std::thread http_thread;
     std::thread ssdp_thread;
+    std::vector<std::thread> client_threads;
     bool winsock_started{};
     std::mutex state_mutex;
     std::mutex http_listener_mutex;
+    std::mutex client_mutex;
+    std::mutex subscription_mutex;
+    std::vector<EventSubscription> subscriptions;
+    std::atomic_uint64_t next_subscription{};
     std::string media_uri;
+    std::string media_metadata;
+    std::string next_media_uri;
+    std::string next_media_metadata;
     std::vector<std::string> interfaces;
     double media_start{};
     float volume{1.0F};
@@ -401,6 +719,221 @@ struct DlnaRenderer::Impl {
         } catch (...) {
             // Diagnostics must not terminate the HTTP or SSDP worker.
         }
+    }
+
+    static std::string_view event_service(std::string_view path) noexcept {
+        if (path.find("avtransport") != std::string_view::npos)
+            return "avtransport";
+        if (path.find("renderingcontrol") != std::string_view::npos)
+            return "renderingcontrol";
+        if (path.find("connectionmanager") != std::string_view::npos)
+            return "connectionmanager";
+        return {};
+    }
+
+    std::string event_body(std::string_view service) {
+        if (service == "connectionmanager") {
+            constexpr std::string_view sink =
+                "http-get:*:video/mp4:*,http-get:*:video/mpeg:*,"
+                "http-get:*:video/x-ms-wmv:*,http-get:*:application/vnd.apple.mpegurl:*,"
+                "http-get:*:application/x-mpegURL:*,http-get:*:audio/mpeg:*,"
+                "http-get:*:audio/mp4:*,http-get:*:video/x-matroska:*,http-get:*:*:*";
+            return std::format("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                "<e:propertyset xmlns:e=\"urn:schemas-upnp-org:event-1-0\">"
+                "<e:property><SourceProtocolInfo></SourceProtocolInfo></e:property>"
+                "<e:property><SinkProtocolInfo>{}</SinkProtocolInfo></e:property>"
+                "<e:property><CurrentConnectionIDs>0</CurrentConnectionIDs></e:property>"
+                "</e:propertyset>", sink);
+        }
+
+        std::string state;
+        std::string uri;
+        std::string metadata;
+        std::string next_uri;
+        std::string next_metadata;
+        double start{};
+        float current_volume{};
+        bool current_muted{};
+        {
+            std::scoped_lock lock(state_mutex);
+            state = transport_state;
+            uri = media_uri;
+            metadata = media_metadata;
+            next_uri = next_media_uri;
+            next_metadata = next_media_metadata;
+            start = media_start;
+            current_volume = volume;
+            current_muted = muted;
+        }
+        const auto change = service == "avtransport"
+            ? std::format("<Event xmlns=\"urn:schemas-upnp-org:metadata-1-0/AVT/\">"
+                "<InstanceID val=\"0\"><TransportState val=\"{}\"/>"
+                "<TransportStatus val=\"OK\"/><TransportPlaySpeed val=\"1\"/>"
+                "<AVTransportURI val=\"{}\"/><AVTransportURIMetaData val=\"{}\"/>"
+                "<CurrentTrackURI val=\"{}\"/><CurrentTrackMetaData val=\"{}\"/>"
+                "<NextAVTransportURI val=\"{}\"/>"
+                "<NextAVTransportURIMetaData val=\"{}\"/>"
+                "<CurrentTransportActions val=\"Play,Pause,Stop,Seek,Next,Previous\"/>"
+                "<RelativeTimePosition val=\"{}\"/></InstanceID></Event>",
+                xml_escape(state), xml_escape(uri), xml_escape(metadata),
+                xml_escape(uri), xml_escape(metadata), xml_escape(next_uri),
+                xml_escape(next_metadata), format_dlna_time(start))
+            : std::format("<Event xmlns=\"urn:schemas-upnp-org:metadata-1-0/RCS/\">"
+                "<InstanceID val=\"0\"><Volume channel=\"Master\" val=\"{}\"/>"
+                "<Mute channel=\"Master\" val=\"{}\"/></InstanceID></Event>",
+                static_cast<unsigned>(std::clamp(current_volume, 0.0F, 1.0F) * 100),
+                current_muted ? 1 : 0);
+        return std::format("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+            "<e:propertyset xmlns:e=\"urn:schemas-upnp-org:event-1-0\">"
+            "<e:property><LastChange>{}</LastChange></e:property>"
+            "</e:propertyset>", xml_escape(change));
+    }
+
+    bool send_event(const EventSubscription& subscription,
+        std::string_view body) noexcept {
+        addrinfo hints{};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
+        addrinfo* addresses{};
+        const auto port = std::to_string(subscription.callback.port);
+        if (getaddrinfo(subscription.callback.host.c_str(), port.c_str(),
+                &hints, &addresses) != 0) return false;
+        std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> address_guard(
+            addresses, &freeaddrinfo);
+        SOCKET client{INVALID_SOCKET};
+        for (auto* address = addresses; address; address = address->ai_next) {
+            client = WSASocketW(address->ai_family, address->ai_socktype,
+                address->ai_protocol, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+            if (client == INVALID_SOCKET) continue;
+            u_long nonblocking = 1;
+            if (ioctlsocket(client, FIONBIO, &nonblocking) != 0) {
+                closesocket(client);
+                client = INVALID_SOCKET;
+                continue;
+            }
+            const auto connected = connect(client, address->ai_addr,
+                static_cast<int>(address->ai_addrlen));
+            const auto connect_error = connected == 0 ? 0 : WSAGetLastError();
+            const auto deadline = std::chrono::steady_clock::now() +
+                std::chrono::seconds(2);
+            if (connected != 0 && connect_error != WSAEWOULDBLOCK &&
+                connect_error != WSAEINPROGRESS && connect_error != WSAEINVAL) {
+                closesocket(client);
+                client = INVALID_SOCKET;
+                continue;
+            }
+            if (connected != 0 && !wait_socket(client, POLLWRNORM,
+                    stopping, deadline)) {
+                closesocket(client);
+                client = INVALID_SOCKET;
+                continue;
+            }
+            int socket_error{};
+            int error_length = sizeof(socket_error);
+            if (getsockopt(client, SOL_SOCKET, SO_ERROR,
+                    reinterpret_cast<char*>(&socket_error), &error_length) != 0 ||
+                socket_error != 0) {
+                closesocket(client);
+                client = INVALID_SOCKET;
+                continue;
+            }
+            break;
+        }
+        if (client == INVALID_SOCKET) return false;
+        const auto host = subscription.callback.host.find(':') == std::string::npos
+            ? subscription.callback.host
+            : std::format("[{}]", subscription.callback.host);
+        const auto request = std::format("NOTIFY {} HTTP/1.1\r\n"
+            "HOST: {}:{}\r\nCONTENT-TYPE: text/xml; charset=\"utf-8\"\r\n"
+            "NT: upnp:event\r\nNTS: upnp:propchange\r\nSID: {}\r\nSEQ: {}\r\n"
+            "CONTENT-LENGTH: {}\r\nCONNECTION: close\r\n\r\n{}",
+            subscription.callback.path, host, subscription.callback.port,
+            subscription.sid, subscription.sequence, body.size(), body);
+        const auto sent = send_all(client, request, stopping);
+        shutdown(client, SD_BOTH);
+        closesocket(client);
+        return sent;
+    }
+
+    void notify_event(std::string_view service) {
+        const auto body = event_body(service);
+        std::vector<EventSubscription> targets;
+        const auto now = std::chrono::steady_clock::now();
+        {
+            std::scoped_lock lock(subscription_mutex);
+            std::erase_if(subscriptions, [&](const auto& subscription) {
+                return subscription.expires <= now;
+            });
+            for (auto& subscription : subscriptions) {
+                if (subscription.service != service) continue;
+                targets.push_back(subscription);
+                ++subscription.sequence;
+            }
+        }
+        for (const auto& target : targets) {
+            if (!send_event(target, body)) {
+                std::scoped_lock lock(subscription_mutex);
+                std::erase_if(subscriptions, [&](const auto& subscription) {
+                    return subscription.sid == target.sid;
+                });
+                log(std::format("dlna event delivery failed sid={}", target.sid));
+            }
+        }
+    }
+
+    std::optional<EventSubscription> subscribe(const HttpRequest& request) {
+        const auto service = event_service(request.path);
+        if (service.empty()) return std::nullopt;
+        const auto timeout = event_timeout(request);
+        const auto now = std::chrono::steady_clock::now();
+        if (const auto sid = request.headers.find("sid"); sid != request.headers.end()) {
+            if (request.headers.contains("callback") || request.headers.contains("nt"))
+                return std::nullopt;
+            std::scoped_lock lock(subscription_mutex);
+            const auto found = std::ranges::find_if(subscriptions,
+                [&](const auto& subscription) {
+                    return subscription.sid == trim(sid->second) &&
+                        subscription.service == service;
+                });
+            if (found == subscriptions.end()) return std::nullopt;
+            found->expires = now + timeout;
+            return *found;
+        }
+        const auto callback = request.headers.find("callback");
+        const auto nt = request.headers.find("nt");
+        if (callback == request.headers.end() || nt == request.headers.end() ||
+            lower(trim(nt->second)) != "upnp:event") return std::nullopt;
+        const auto endpoint = parse_event_callback(callback->second);
+        if (!endpoint) return std::nullopt;
+        EventSubscription subscription{
+            .sid = std::format("{}-event-{}", uuid,
+                next_subscription.fetch_add(1, std::memory_order_relaxed) + 1),
+            .service = std::string(service),
+            .callback = *endpoint,
+            .sequence = 0,
+            .expires = now + timeout,
+        };
+        {
+            std::scoped_lock lock(subscription_mutex);
+            subscriptions.push_back(subscription);
+        }
+        return subscription;
+    }
+
+    bool unsubscribe(const HttpRequest& request) {
+        const auto sid = request.headers.find("sid");
+        const auto service = event_service(request.path);
+        if (sid == request.headers.end() || service.empty() ||
+            request.headers.contains("callback") || request.headers.contains("nt"))
+            return false;
+        const auto value = trim(sid->second);
+        std::scoped_lock lock(subscription_mutex);
+        const auto previous = subscriptions.size();
+        std::erase_if(subscriptions, [&](const auto& subscription) {
+            return subscription.sid == value && subscription.service == service;
+        });
+        return subscriptions.size() != previous;
     }
 
     std::string description() const {
@@ -440,10 +973,16 @@ struct DlnaRenderer::Impl {
             scpd_action("SetAVTransportURI", {{"InstanceID", "in", "A_ARG_TYPE_InstanceID"},
                 {"CurrentURI", "in", "AVTransportURI"},
                 {"CurrentURIMetaData", "in", "AVTransportURIMetaData"}}),
+            scpd_action("SetNextAVTransportURI", {
+                {"InstanceID", "in", "A_ARG_TYPE_InstanceID"},
+                {"NextURI", "in", "NextAVTransportURI"},
+                {"NextURIMetaData", "in", "NextAVTransportURIMetaData"}}),
             scpd_action("Play", {{"InstanceID", "in", "A_ARG_TYPE_InstanceID"},
                 {"Speed", "in", "TransportPlaySpeed"}}),
             scpd_action("Pause", {{"InstanceID", "in", "A_ARG_TYPE_InstanceID"}}),
             scpd_action("Stop", {{"InstanceID", "in", "A_ARG_TYPE_InstanceID"}}),
+            scpd_action("Next", {{"InstanceID", "in", "A_ARG_TYPE_InstanceID"}}),
+            scpd_action("Previous", {{"InstanceID", "in", "A_ARG_TYPE_InstanceID"}}),
             scpd_action("Seek", {{"InstanceID", "in", "A_ARG_TYPE_InstanceID"},
                 {"Unit", "in", "A_ARG_TYPE_SeekMode"},
                 {"Target", "in", "A_ARG_TYPE_SeekTarget"}}),
@@ -590,8 +1129,9 @@ struct DlnaRenderer::Impl {
             if (separator != std::string::npos) action = value.substr(separator + 1);
         }
         if (action.empty()) {
-            for (const auto candidate : {"SetAVTransportURI", "Play", "Pause", "Stop",
-                    "Seek", "GetTransportInfo", "GetPositionInfo", "GetMediaInfo",
+            for (const auto candidate : {"SetNextAVTransportURI", "SetAVTransportURI",
+                    "Play", "Pause", "Stop", "Next", "Previous", "Seek",
+                    "GetTransportInfo", "GetPositionInfo", "GetMediaInfo",
                     "GetCurrentTransportActions",
                     "GetProtocolInfo", "GetCurrentConnectionIDs",
                     "GetCurrentConnectionInfo", "GetVolume", "SetVolume",
@@ -613,27 +1153,54 @@ struct DlnaRenderer::Impl {
         log(std::format("dlna soap request={} action={} service={} body_bytes={}",
             soap_index, action.empty() ? "<unknown>" : action, service,
             request.body.size()));
+        std::string_view changed_service;
 
         if (action == "SetAVTransportURI" && avtransport) {
             const auto uri = xml_value(request.body, "CurrentURI");
+            const auto metadata = xml_value(request.body, "CurrentURIMetaData");
             if (!uri || !iPhoneMirror::wireless::is_valid_http_url(*uri))
                 return {service, soap_error(714, "Illegal MIME-type")};
+            bool stop_active_media{};
             {
                 std::scoped_lock lock(state_mutex);
+                stop_active_media = transport_state != "STOPPED";
                 media_uri = *uri;
+                media_metadata = metadata.value_or("");
+                next_media_uri.clear();
+                next_media_metadata.clear();
                 media_start = 0;
                 transport_state = "STOPPED";
             }
+            if (stop_active_media && callbacks.stop) callbacks.stop();
+            changed_service = "avtransport";
             log(std::format("dlna SetAVTransportURI url_bytes={}", uri->size()));
+        }
+        else if (action == "SetNextAVTransportURI" && avtransport) {
+            const auto uri = xml_value(request.body, "NextURI");
+            const auto metadata = xml_value(request.body, "NextURIMetaData");
+            if (!uri || !metadata ||
+                (!uri->empty() && !iPhoneMirror::wireless::is_valid_http_url(*uri)))
+                return {service, soap_error(714, "Illegal MIME-type")};
+            {
+                std::scoped_lock lock(state_mutex);
+                next_media_uri = *uri;
+                next_media_metadata = *metadata;
+            }
+            changed_service = "avtransport";
+            log(std::format("dlna SetNextAVTransportURI url_bytes={}", uri->size()));
         }
         else if (action == "Play" && avtransport) {
             std::string uri;
             double start{};
+            double base_volume{1.0};
+            bool play_muted{};
             bool resuming{};
             {
                 std::scoped_lock lock(state_mutex);
                 uri = media_uri;
                 start = media_start;
+                base_volume = volume;
+                play_muted = muted;
                 resuming = transport_state == "PAUSED_PLAYBACK";
                 if (!uri.empty()) transport_state = "PLAYING";
             }
@@ -642,9 +1209,16 @@ struct DlnaRenderer::Impl {
                 if (callbacks.resume) callbacks.resume();
                 log("dlna Resume");
             } else {
-                if (callbacks.play) callbacks.play(uri, start);
+                double duration{};
+                {
+                    std::scoped_lock lock(state_mutex);
+                    duration = reported_media_duration(uri, media_metadata, 0);
+                }
+                if (callbacks.play)
+                    callbacks.play(uri, duration, start, base_volume, play_muted);
                 log(std::format("dlna Play start={:.3f}", start));
             }
+            changed_service = "avtransport";
         }
         else if (action == "Stop" && avtransport) {
             {
@@ -652,7 +1226,43 @@ struct DlnaRenderer::Impl {
                 transport_state = "STOPPED";
             }
             if (callbacks.stop) callbacks.stop();
+            changed_service = "avtransport";
             log("dlna Stop");
+        }
+        else if (action == "Next" && avtransport) {
+            std::string uri;
+            double base_volume{1.0};
+            bool play_muted{};
+            {
+                std::scoped_lock lock(state_mutex);
+                if (!next_media_uri.empty()) {
+                    media_uri = std::move(next_media_uri);
+                    media_metadata = std::move(next_media_metadata);
+                    next_media_uri.clear();
+                    next_media_metadata.clear();
+                    media_start = 0;
+                    transport_state = "PLAYING";
+                    uri = media_uri;
+                    base_volume = volume;
+                    play_muted = muted;
+                }
+            }
+            if (!uri.empty()) {
+                double duration{};
+                {
+                    std::scoped_lock lock(state_mutex);
+                    duration = reported_media_duration(uri, media_metadata, 0);
+                }
+                if (callbacks.play)
+                    callbacks.play(uri, duration, 0, base_volume, play_muted);
+                changed_service = "avtransport";
+            }
+            log(std::format("dlna Next queued_uri={}", !uri.empty()));
+        }
+        else if (action == "Previous" && avtransport) {
+            // Platinum-based receivers advertise and accept Previous even when
+            // the controller owns the playlist and follows with a new URI.
+            log("dlna Previous delegated_to_controller=true");
         }
         else if (action == "Pause" && avtransport) {
             {
@@ -660,18 +1270,27 @@ struct DlnaRenderer::Impl {
                 transport_state = "PAUSED_PLAYBACK";
             }
             if (callbacks.pause) callbacks.pause();
+            changed_service = "avtransport";
             log("dlna Pause");
         }
         else if (action == "Seek" && avtransport) {
             const auto target = xml_value(request.body, "Target");
             const auto position = target ? parse_dlna_time(*target) : std::nullopt;
-            if (!position)
+            if (!position) {
+                const auto unit = xml_value(request.body, "Unit").value_or("");
+                log(std::format(
+                    "dlna Seek rejected target_present={} target_bytes={} "
+                    "target_raw={} unit={}", target.has_value(),
+                    target ? target->size() : 0,
+                    target ? log_token(*target) : "<missing>", trim(unit)));
                 return {service, soap_error(402, "Invalid Args")};
+            }
             {
                 std::scoped_lock lock(state_mutex);
                 media_start = *position;
             }
             if (callbacks.seek) callbacks.seek(*position);
+            changed_service = "avtransport";
             log(std::format("dlna Seek position={:.3f}", *position));
         }
         else if (action == "GetTransportInfo" && avtransport) {
@@ -689,37 +1308,48 @@ struct DlnaRenderer::Impl {
             double duration{}, position{}, rate{};
             if (callbacks.get_play_info) callbacks.get_play_info(&duration, &position, &rate);
             std::string uri;
+            std::string metadata;
             {
                 std::scoped_lock lock(state_mutex);
                 uri = media_uri;
+                metadata = media_metadata;
             }
+            duration = reported_media_duration(uri, metadata, duration);
             return {service, soap_envelope(service, action, std::format(
                 "<Track>1</Track><TrackDuration>{}</TrackDuration>"
-                "<TrackMetaData></TrackMetaData><TrackURI>{}</TrackURI>"
+                "<TrackMetaData>{}</TrackMetaData><TrackURI>{}</TrackURI>"
                 "<RelTime>{}</RelTime><AbsTime>{}</AbsTime>"
                 "<RelCount>2147483647</RelCount><AbsCount>2147483647</AbsCount>",
-                format_dlna_time(duration), xml_escape(uri), format_dlna_time(position),
-                format_dlna_time(position)))};
+                format_dlna_time(duration), xml_escape(metadata), xml_escape(uri),
+                format_dlna_time(position), format_dlna_time(position)))};
         }
         else if (action == "GetMediaInfo" && avtransport) {
             double duration{};
             if (callbacks.get_play_info) callbacks.get_play_info(&duration, nullptr, nullptr);
             std::string uri;
+            std::string metadata;
+            std::string next_uri;
+            std::string next_metadata;
             {
                 std::scoped_lock lock(state_mutex);
                 uri = media_uri;
+                metadata = media_metadata;
+                next_uri = next_media_uri;
+                next_metadata = next_media_metadata;
             }
+            duration = reported_media_duration(uri, metadata, duration);
             return {service, soap_envelope(service, action, std::format(
                 "<NrTracks>1</NrTracks><MediaDuration>{}</MediaDuration>"
-                "<CurrentURI>{}</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>"
-                "<NextURI></NextURI><NextURIMetaData></NextURIMetaData>"
+                "<CurrentURI>{}</CurrentURI><CurrentURIMetaData>{}</CurrentURIMetaData>"
+                "<NextURI>{}</NextURI><NextURIMetaData>{}</NextURIMetaData>"
                 "<PlayMedium>NETWORK</PlayMedium><RecordMedium>NOT_IMPLEMENTED</RecordMedium>"
                 "<WriteStatus>NOT_IMPLEMENTED</WriteStatus>",
-                format_dlna_time(duration), xml_escape(uri)))};
+                format_dlna_time(duration), xml_escape(uri), xml_escape(metadata),
+                xml_escape(next_uri), xml_escape(next_metadata)))};
         }
         else if (action == "GetCurrentTransportActions" && avtransport) {
             return {service, soap_envelope(service, action,
-                "<Actions>Play,Pause,Stop,Seek</Actions>")};
+                "<Actions>Play,Pause,Stop,Seek,Next,Previous</Actions>")};
         }
         else if (action == "GetProtocolInfo" && connection) {
             constexpr std::string_view sink =
@@ -742,15 +1372,22 @@ struct DlnaRenderer::Impl {
                 "<Status>OK</Status>")};
         }
         else if (action == "SetVolume" && rendering) {
-            if (const auto desired = xml_value(request.body, "DesiredVolume")) {
-                unsigned value{};
-                const auto [end, error] = std::from_chars(
-                    desired->data(), desired->data() + desired->size(), value);
-                if (error == std::errc{} && end == desired->data() + desired->size()) {
-                    std::scoped_lock lock(state_mutex);
-                    volume = std::min(value, 100U) / 100.0F;
-                }
+            const auto desired = xml_value(request.body, "DesiredVolume");
+            unsigned value{};
+            if (!desired) return {service, soap_error(402, "Invalid Args")};
+            const auto [end, error] = std::from_chars(
+                desired->data(), desired->data() + desired->size(), value);
+            if (error != std::errc{} || end != desired->data() + desired->size() ||
+                value > 100)
+                return {service, soap_error(402, "Invalid Args")};
+            double base_volume{};
+            {
+                std::scoped_lock lock(state_mutex);
+                volume = value / 100.0F;
+                base_volume = volume;
             }
+            if (callbacks.set_volume) callbacks.set_volume(base_volume);
+            changed_service = "renderingcontrol";
         }
         else if (action == "GetVolume" && rendering) {
             std::scoped_lock lock(state_mutex);
@@ -759,10 +1396,21 @@ struct DlnaRenderer::Impl {
                     static_cast<unsigned>(volume * 100)))};
         }
         else if (action == "SetMute" && rendering) {
-            if (const auto desired = xml_value(request.body, "DesiredMute")) {
+            const auto desired = xml_value(request.body, "DesiredMute");
+            if (!desired) return {service, soap_error(402, "Invalid Args")};
+            const auto normalized = lower(*desired);
+            if (normalized != "0" && normalized != "1" &&
+                normalized != "false" && normalized != "true")
+                return {service, soap_error(402, "Invalid Args")};
+            std::pair<bool, double> mute_change;
+            {
                 std::scoped_lock lock(state_mutex);
-                muted = *desired == "1" || lower(*desired) == "true";
+                muted = normalized == "1" || normalized == "true";
+                mute_change = {muted, static_cast<double>(volume)};
             }
+            if (callbacks.set_mute)
+                callbacks.set_mute(mute_change.first, mute_change.second);
+            changed_service = "renderingcontrol";
         }
         else if (action == "GetMute" && rendering) {
             std::scoped_lock lock(state_mutex);
@@ -772,6 +1420,7 @@ struct DlnaRenderer::Impl {
         else {
             return {service, soap_error(401, "Invalid Action")};
         }
+        if (!changed_service.empty()) notify_event(changed_service);
         return {service, soap_envelope(service, action, "")};
     }
 
@@ -828,16 +1477,52 @@ struct DlnaRenderer::Impl {
         }
         else if (request->method == "SUBSCRIBE" &&
             request->path.starts_with("/dlna/event/")) {
-            response = http_response(200, "OK", "text/plain", "",
-                std::format("SID: {}\r\nTIMEOUT: Second-1800\r\n", uuid));
-            status = 200;
-            route = "subscribe";
+            const auto renewal = request->headers.contains("sid");
+            const auto subscription = subscribe(*request);
+            if (!subscription) {
+                response = http_response(412, "Precondition Failed", "text/plain",
+                    "Invalid event subscription");
+                status = 412;
+                route = "subscribe_rejected";
+            } else if (!renewal &&
+                !send_event(*subscription, event_body(subscription->service))) {
+                std::scoped_lock lock(subscription_mutex);
+                std::erase_if(subscriptions, [&](const auto& candidate) {
+                    return candidate.sid == subscription->sid;
+                });
+                response = http_response(412, "Precondition Failed", "text/plain",
+                    "Event callback is unreachable");
+                status = 412;
+                route = "subscribe_callback_unreachable";
+            } else {
+                if (!renewal) {
+                    std::scoped_lock lock(subscription_mutex);
+                    for (auto& candidate : subscriptions) {
+                        if (candidate.sid == subscription->sid) {
+                            candidate.sequence = 1;
+                            break;
+                        }
+                    }
+                }
+                response = http_response(200, "OK", "text/plain", "",
+                    std::format("SID: {}\r\nTIMEOUT: Second-{}\r\n",
+                        subscription->sid, event_timeout(*request).count()));
+                status = 200;
+                route = renewal ? "subscribe_renew" : "subscribe";
+            }
         }
         else if (request->method == "UNSUBSCRIBE" &&
             request->path.starts_with("/dlna/event/")) {
-            response = http_response(200, "OK", "text/plain", "");
-            status = 200;
-            route = "unsubscribe";
+            if (unsubscribe(*request)) {
+                response = http_response(200, "OK", "text/plain", "");
+                status = 200;
+                route = "unsubscribe";
+            } else {
+                response = http_response(412, "Precondition Failed", "text/plain",
+                    "Unknown event subscription");
+                status = 412;
+                route = "unsubscribe_rejected";
+            }
         }
         else response = http_response(404, "Not Found", "text/plain", "Not Found");
         const auto sent = send_all(client, response, stopping);
@@ -888,12 +1573,22 @@ struct DlnaRenderer::Impl {
                 break;
             }
             try {
-                handle_http(client);
+                std::thread worker([this, client] {
+                    try {
+                        handle_http(client);
+                    } catch (...) {
+                        http_parse_failures.fetch_add(1, std::memory_order_relaxed);
+                        log("dlna http handler failed with an exception");
+                    }
+                    closesocket(client);
+                });
+                std::scoped_lock lock(client_mutex);
+                client_threads.push_back(std::move(worker));
             } catch (...) {
+                closesocket(client);
                 http_parse_failures.fetch_add(1, std::memory_order_relaxed);
-                log("dlna http handler failed with an exception");
+                log("dlna http client worker creation failed");
             }
-            closesocket(client);
         }
     }
 
@@ -916,10 +1611,10 @@ struct DlnaRenderer::Impl {
         auto address = routed_local_address(remote);
         if (address.empty()) return;
         const auto message = std::format("HTTP/1.1 200 OK\r\n"
-            "CACHE-CONTROL: max-age=1800\r\nDATE:\r\nEXT:\r\n"
+            "CACHE-CONTROL: max-age=1800\r\nDATE: {}\r\nEXT:\r\n"
             "LOCATION: {}\r\nSERVER: Windows/10.0 UPnP/1.0 iPhoneMirror/1.0\r\n"
             "ST: {}\r\nUSN: {}\r\nBOOTID.UPNP.ORG: 1\r\n"
-            "CONFIGID.UPNP.ORG: 1\r\n\r\n", location(address), st, usn);
+            "CONFIGID.UPNP.ORG: 1\r\n\r\n", http_date(), location(address), st, usn);
         sendto(ssdp_socket, message.data(), static_cast<int>(message.size()), 0,
             reinterpret_cast<const sockaddr*>(&remote), sizeof(remote));
     }
@@ -969,16 +1664,30 @@ struct DlnaRenderer::Impl {
                         .starts_with("m-search ") &&
                     lower(message).find("ssdp:discover") != std::string::npos) {
                     std::string st = "ssdp:all";
+                    unsigned mx{};
                     std::size_t at{};
                     while ((at = message.find('\n', at)) != std::string_view::npos) {
                         ++at;
-                        if (lower(message.substr(at, std::min<std::size_t>(3,
-                                message.size() - at))) == "st:") {
-                            const auto end = message.find('\n', at);
-                            st = trim(message.substr(at + 3,
-                                (end == std::string_view::npos ? message.size() : end) - at - 3));
-                            break;
+                        const auto end = message.find('\n', at);
+                        const auto line = message.substr(at,
+                            (end == std::string_view::npos ? message.size() : end) - at);
+                        const auto separator = line.find(':');
+                        if (separator == std::string_view::npos) continue;
+                        const auto header_name = lower(trim(line.substr(0, separator)));
+                        const auto value = trim(line.substr(separator + 1));
+                        if (header_name == "st") st = value;
+                        else if (header_name == "mx") {
+                            const auto [mx_end, mx_error] = std::from_chars(
+                                value.data(), value.data() + value.size(), mx);
+                            if (mx_error != std::errc{} ||
+                                mx_end != value.data() + value.size()) mx = 0;
                         }
+                    }
+                    mx = std::clamp(mx, 0U, 5U);
+                    if (mx != 0) {
+                        const auto delay = static_cast<unsigned>(
+                            GetTickCount64() % (static_cast<std::uint64_t>(mx) * 1000U + 1U));
+                        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
                     }
                     for (const auto& [type, usn] : advertised_services()) {
                         if (lower(st) == "ssdp:all" || lower(st) == lower(type))
@@ -1024,6 +1733,9 @@ bool DlnaRenderer::start(std::string friendly_name, std::string uuid,
     {
         std::scoped_lock lock(impl_->state_mutex);
         impl_->media_uri.clear();
+        impl_->media_metadata.clear();
+        impl_->next_media_uri.clear();
+        impl_->next_media_metadata.clear();
         impl_->media_start = 0;
         impl_->volume = 1.0F;
         impl_->muted = false;
@@ -1153,6 +1865,13 @@ void DlnaRenderer::stop() noexcept {
         }
     }
     if (impl_->http_thread.joinable()) impl_->http_thread.join();
+    {
+        std::scoped_lock lock(impl_->client_mutex);
+        for (auto& client : impl_->client_threads) {
+            if (client.joinable()) client.join();
+        }
+        impl_->client_threads.clear();
+    }
 
     // On Windows, closesocket can block while another thread is in recvfrom.
     // The UDP socket is nonblocking, so let the receive loop observe stopping,
@@ -1181,13 +1900,20 @@ void DlnaRenderer::stop() noexcept {
         WSACleanup();
         impl_->winsock_started = false;
     }
+    {
+        std::scoped_lock lock(impl_->subscription_mutex);
+        impl_->subscriptions.clear();
+    }
 }
 
 void DlnaRenderer::set_transport_stopped() noexcept {
     if (!impl_) return;
-    std::scoped_lock lock(impl_->state_mutex);
-    impl_->transport_state = "STOPPED";
-    impl_->media_start = 0;
+    {
+        std::scoped_lock lock(impl_->state_mutex);
+        impl_->transport_state = "STOPPED";
+        impl_->media_start = 0;
+    }
+    impl_->notify_event("avtransport");
 }
 
 } // namespace iPhoneMirror::wireless

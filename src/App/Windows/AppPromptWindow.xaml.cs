@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
@@ -8,14 +7,18 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class AppPromptWindow : Wpf.Ui.Controls.FluentWindow
 {
+    private readonly bool _previewOnly;
+
     public string PromptTitle { get; }
     public string PromptBody { get; }
     public string ConfirmText { get; }
     public string CancelText { get; }
     public Visibility CancelVisibility { get; }
 
-    private AppPromptWindow(string title, string body, bool showCancel)
+    private AppPromptWindow(string title, string body, bool showCancel,
+        bool previewOnly = false)
     {
+        _previewOnly = previewOnly;
         PromptTitle = title;
         PromptBody = body;
         ConfirmText = LocalizationService.Get(showCancel ? "Continue" : "Close");
@@ -62,10 +65,28 @@ public partial class AppPromptWindow : Wpf.Ui.Controls.FluentWindow
         prompt.ShowDialog();
     }
 
-    private void OnConfirmClick(object sender, RoutedEventArgs e) => DialogResult = true;
-    private void OnCancelClick(object sender, RoutedEventArgs e) => DialogResult = false;
-    private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    internal static void ShowDeveloperPreview(Window owner)
     {
-        if (e.ChangedButton == MouseButton.Left) DragMove();
+        var prompt = new AppPromptWindow(
+            LocalizationService.Get("DeveloperPreviewPromptTitle"),
+            LocalizationService.Get("DeveloperPreviewPromptBody"), showCancel: true,
+            previewOnly: true)
+        {
+            Owner = owner,
+        };
+        prompt.Show();
+    }
+
+    private void OnConfirmClick(object sender, RoutedEventArgs e) => Complete(true);
+    private void OnCancelClick(object sender, RoutedEventArgs e) => Complete(false);
+
+    private void Complete(bool result)
+    {
+        if (_previewOnly)
+        {
+            Close();
+            return;
+        }
+        DialogResult = result;
     }
 }

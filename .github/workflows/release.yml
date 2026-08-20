@@ -882,8 +882,17 @@ jobs:
 
           git push origin "HEAD:refs/heads/$env:DEFAULT_BRANCH"
           $pushExit = $LASTEXITCODE
-          $remoteSha = Get-DefaultBranchSha
-          $publication = Get-ManifestPublication $remoteSha
+          $publication = 'unknown'
+          for ($attempt = 0; $attempt -lt 6; ++$attempt) {
+            $remoteSha = Get-DefaultBranchSha
+            $publication = Get-ManifestPublication $remoteSha
+            if ($publication -eq 'published') { break }
+            if ($attempt -lt 5) {
+              $delay = [Math]::Min([Math]::Pow(2, $attempt), 10)
+              Write-Host "Release manifest is $publication; retrying in $delay seconds."
+              Start-Sleep -Seconds $delay
+            }
+          }
           if ($publication -eq 'not-published') {
             Restore-Draft "Failed to publish the release manifest to $env:DEFAULT_BRANCH."
           }

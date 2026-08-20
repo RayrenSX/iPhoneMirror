@@ -25,6 +25,8 @@ struct MessageHeader;
 
 namespace iPhoneMirror::capture {
 
+struct WirelessReceiverHubTestAccess;
+
 struct WirelessDeviceSnapshot {
     std::wstring id;
     std::wstring name;
@@ -33,13 +35,15 @@ struct WirelessDeviceSnapshot {
 };
 
 enum class MediaCastCommandType : std::uint32_t {
-    None, Play, Stop, Pause, Resume, Seek,
+    None, Play, Stop, Pause, Resume, Seek, Volume,
 };
 
 struct MediaCastCommand {
     std::uint64_t id{};
     MediaCastCommandType type{};
+    std::uint32_t flags{};
     std::wstring url;
+    double duration{};
     double start_position{};
     double volume{};
 };
@@ -85,6 +89,7 @@ public:
         std::uint64_t after_sequence) const;
     void set_audio_enabled(bool enabled) noexcept;
     void set_audio_volume(float volume) noexcept;
+    void set_remote_audio_volume(float volume) noexcept;
     void set_target_fps(std::uint32_t target_fps) noexcept;
     [[nodiscard]] std::uint32_t target_fps() const noexcept;
     void publish_video(const wireless::MessageHeader& header,
@@ -93,6 +98,7 @@ public:
         std::span<const std::uint8_t> payload);
 
 private:
+    friend struct WirelessReceiverHubTestAccess;
     std::wstring id_;
     std::wstring name_;
     std::wstring product_type_;
@@ -105,7 +111,8 @@ private:
     std::deque<std::shared_ptr<const media::DecodedFrame>> render_queue_;
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
-    std::atomic<float> audio_volume_{1.0F};
+    std::atomic<float> local_audio_volume_{1.0F};
+    std::atomic<float> remote_audio_volume_{1.0F};
     mutable std::mutex audio_mutex_;
     std::unique_ptr<audio::WasapiRenderer> audio_renderer_;
     std::deque<std::shared_ptr<const AudioPacket>> audio_output_queue_;
@@ -122,6 +129,7 @@ private:
 
     void clear_media() noexcept;
     void stop_audio_renderer() noexcept;
+    [[nodiscard]] float effective_audio_volume() const noexcept;
 };
 
 class WirelessReceiverHub final {
@@ -145,6 +153,7 @@ public:
     bool request_media_stop() noexcept;
 
 private:
+    friend struct WirelessReceiverHubTestAccess;
     mutable std::mutex lifecycle_mutex_;
     mutable std::mutex mutex_;
     mutable std::mutex pipe_write_mutex_;

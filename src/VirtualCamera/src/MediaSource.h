@@ -62,11 +62,15 @@ private:
     HRESULT check_shutdown_locked() const noexcept;
     HRESULT start_locked(IMFMediaType* media_type, bool send_event);
     HRESULT stop_locked(bool send_event);
-    HRESULT allocate_sample(IMFSample** sample, IMFMediaBuffer** buffer);
-    HRESULT render_frame(IMFMediaBuffer* buffer, IMFMediaType* media_type);
+    HRESULT allocate_sample(IMFVideoSampleAllocator* allocator,
+                            IMFMediaType* media_type,
+                            IMFSample** sample, IMFMediaBuffer** buffer);
+    HRESULT render_frame(IMFMediaBuffer* buffer, IMFMediaType* media_type,
+                         std::stop_token stop_token);
     void process_sample_requests(std::stop_token stop_token) noexcept;
 
     std::mutex mutex_;
+    std::mutex sample_allocator_mutex_;
     std::condition_variable_any sample_condition_;
     Microsoft::WRL::ComPtr<IMFMediaSource> parent_;
     Microsoft::WRL::ComPtr<IMFMediaEventQueue> event_queue_;
@@ -83,6 +87,7 @@ private:
     std::wstring channel_path_;
     LONGLONG frame_duration_100ns_{10'000'000LL / 30};
     LONGLONG next_sample_time_{};
+    std::uint64_t stream_generation_{};
     MF_STREAM_STATE state_{MF_STREAM_STATE_STOPPED};
     bool selected_{};
     bool shutdown_{};

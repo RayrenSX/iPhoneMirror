@@ -105,6 +105,39 @@ function New-PrivilegedDirectory([string]$Path) {
     [IO.DirectoryInfo]::new($Path).Create($security)
 }
 
+function Enable-DirectoryInheritance([string]$Path) {
+    if (-not $isElevated) { return }
+    $directory = [IO.DirectoryInfo]::new($Path)
+    $security = $directory.GetAccessControl(
+        [Security.AccessControl.AccessControlSections]::Access)
+    $security.SetAccessRuleProtection($false, $false)
+    $directory.SetAccessControl($security)
+}
+
+function Start-RestartProcess([string]$Path, [string]$WorkingDirectory) {
+    if (-not $isElevated) {
+        Start-Process -FilePath $Path -WorkingDirectory $WorkingDirectory
+        return
+    }
+
+    # Delegate process creation to the interactive desktop shell. Shell.Application
+    # is hosted by Explorer at the user's normal integrity level, so the updated
+    # GUI does not inherit this helper's administrator token.
+    $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+    $desktopShell = Get-Process -Name explorer -ErrorAction SilentlyContinue |
+        Where-Object { $_.SessionId -eq $sessionId } | Select-Object -First 1
+    if ($null -eq $desktopShell) {
+        throw 'The updated application could not be restarted at normal user privileges.'
+    }
+    $shell = New-Object -ComObject Shell.Application
+    try { $shell.ShellExecute($Path, '', $WorkingDirectory, 'open', 1) }
+    finally {
+        if ($null -ne $shell) {
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
+        }
+    }
+}
+
 function Assert-NoReparsePath([string]$Root, [string]$Path) {
     $rootPath = Get-NormalizedPath $Root
     $currentPath = Get-NormalizedPath $Path
@@ -344,6 +377,7 @@ try {
     New-PrivilegedDirectory $backupRoot
     $changes = [Collections.Generic.List[object]]::new()
     $createdDirectories = [Collections.Generic.List[string]]::new()
+    $fileChangesCommitted = $false
     try {
         foreach ($directory in @($payloadItems | Where-Object { $_.PSIsContainer } |
                      Sort-Object { $_.FullName.Length })) {
@@ -354,7 +388,10 @@ try {
                 throw "An update directory conflicts with an installed file: $relative"
             }
             if (-not (Test-Path -LiteralPath $destination -PathType Container)) {
-                New-Item -ItemType Directory -Path $destination | Out-Null
+                # Elevated updates create new topology with a protected DACL so
+                # an inheritable user ACE cannot make the directory swappable
+                # before its payload has been installed and verified.
+                New-PrivilegedDirectory $destination
                 $createdDirectories.Add($destination)
             }
         }
@@ -366,7 +403,7 @@ try {
             $parent = Split-Path -Parent $destination
             Assert-NoReparsePath $installRoot $parent
             if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
-                New-Item -ItemType Directory -Path $parent | Out-Null
+                New-PrivilegedDirectory $parent
                 $createdDirectories.Add($parent)
             }
             if (Test-Path -LiteralPath $destination -PathType Container) {
@@ -412,9 +449,27 @@ try {
             Remove-Item -LiteralPath $installedFile -Force
             ++$index
         }
+
+        # Restore ordinary inherited read/execute permissions only after every
+        # elevated file operation has completed. Explicit Administrators and
+        # SYSTEM access remains as a safe fallback.
+        $fileChangesCommitted = $true
+        # Restore children before their parents. A parent can inherit an ACE
+        # that makes its children replaceable by the unelevated caller.
+        foreach ($directory in @($createdDirectories | Sort-Object Length -Descending)) {
+            Enable-DirectoryInheritance $directory
+        }
     }
     catch {
         $updateError = $_
+        if ($fileChangesCommitted) {
+            # Some directories may already be writable by the unelevated user.
+            # Never perform privileged path-based rollback after that boundary.
+            $preserveBackup = $true
+            throw "Update files were installed, but directory permissions could not be " +
+                "fully restored: $($updateError.Exception.Message) Recovery files remain " +
+                "in $backupRoot."
+        }
         $rollbackErrors = @()
         for ($index = $changes.Count - 1; $index -ge 0; --$index) {
             $change = $changes[$index]
@@ -447,7 +502,32 @@ try {
         }
         throw $updateError
     }
-    Start-Process -FilePath $RestartExecutable -WorkingDirectory $InstallDirectory
+    $restartPath = Get-NormalizedPath $RestartExecutable
+    $restartInsideInstall = $restartPath.StartsWith($installPrefix,
+        [StringComparison]::OrdinalIgnoreCase)
+    if ($isElevated -and -not $restartInsideInstall) {
+        throw 'An elevated portable update cannot restart an executable outside the installation directory.'
+    }
+    if ($restartInsideInstall) {
+        Assert-NoReparsePath $installRoot (Split-Path -Parent $restartPath)
+    }
+    if (-not (Test-Path -LiteralPath $restartPath -PathType Leaf)) {
+        throw 'The updated application executable is missing.'
+    }
+    $restartItem = Get-Item -LiteralPath $restartPath -Force
+    if (($restartItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'The updated application executable is a reparse point.'
+    }
+
+    # Keep the verified executable immutable until CreateProcess has opened it.
+    # Writable portable trees run this helper without elevation; protected
+    # portable trees retain UAC but cannot swap this path while it is launched.
+    $restartLock = [IO.File]::Open($restartPath, [IO.FileMode]::Open,
+        [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        Start-RestartProcess $restartPath $InstallDirectory
+    }
+    finally { $restartLock.Dispose() }
 }
 finally {
     if ($null -ne $zipLock) { $zipLock.Dispose() }

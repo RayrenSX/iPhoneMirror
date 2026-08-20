@@ -56,6 +56,10 @@ internal sealed class DecoderPreferenceOption(
 
 internal sealed class MainViewModel : INotifyPropertyChanged
 {
+    // Synthetic handle used by the output services for the WPF media-cast
+    // source. It is deliberately outside the native session handle range.
+    internal const ulong MediaCastOutputHandle = 0x4D434153544F5554UL;
+
     private readonly record struct SessionStartSettings(
         uint RenderWidth,
         uint RenderHeight,
@@ -164,6 +168,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _visibleLogLines = new();
     private readonly Stopwatch _lifetime = Stopwatch.StartNew();
+    private Func<uint, uint, Nv12VideoFrame?>? _mediaCastNv12FrameProvider;
+    private Func<uint, uint, VideoFrame?>? _mediaCastVideoFrameProvider;
+    private Func<ulong, AudioPacket?>? _mediaCastAudioPacketProvider;
     private long _refreshSequence;
     private string? _lastInventorySignature;
     private string? _lastRefreshError;
@@ -286,11 +293,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         ? CurrentDeviceSession!.Handle
         : 0;
     public bool HasCaptureSession => CurrentDeviceSession?.HasSession == true;
-    public Visibility PreviewAndObsVisibility => CurrentSessionHandle != 0
-        ? Visibility.Visible : Visibility.Collapsed;
+    // Media casting is a virtual source, so it has no native capture session
+    // handle. Keep the preview/output surface visible while that source is
+    // active instead of tying the toolbar to USB/AirPlay sessions only.
+    public Visibility PreviewAndObsVisibility => CurrentSessionHandle != 0 ||
+        IsMediaCasting ? Visibility.Visible : Visibility.Collapsed;
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) { StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); } } }
     public bool IsAudioOnlyAirPlay => _isAudioOnlyAirPlay;
-    public bool CanUseVisualPreviewTools => HasCaptureSession && !IsAudioOnlyAirPlay;
+    public bool CanUseVisualPreviewTools =>
+        (HasCaptureSession || IsMediaCasting) && !IsAudioOnlyAirPlay;
     public bool IsBusy
     {
         get => _isBusy;
@@ -569,8 +580,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _mediaOutput.IsRunning || _virtualCamera.IsRunning;
     public bool IsMediaOutputTransitioning => _isMediaOutputTransitioning;
     public bool CanStopMediaOutput => IsMediaOutputRunning && !IsMediaOutputTransitioning;
-    public bool CanStartMediaOutput => CurrentSessionHandle != 0 &&
-        !IsMediaCastSelected && !IsBusy && !IsMediaOutputRunning &&
+    public bool CanStartMediaOutput => (CurrentSessionHandle != 0 ||
+        (IsMediaCasting && IsMediaCastSelected &&
+         _mediaCastNv12FrameProvider is not null)) &&
+        !IsBusy && !IsMediaOutputRunning &&
         !IsMediaOutputTransitioning;
     internal string? PendingRecordingPath =>
         !string.IsNullOrWhiteSpace(_pendingRecordingPath) &&
@@ -584,6 +597,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public bool CanStreamWhip =>
         _mediaOutputCapabilities.Supports(MediaOutputKind.Whip);
     public bool CanUseVirtualCamera => CanStartMediaOutput &&
+        (!IsMediaCastSelected || _mediaCastVideoFrameProvider is not null) &&
         _virtualCameraCapabilities.BackendAvailable &&
         _virtualCameraCapabilities.Supported &&
         _virtualCameraCapabilities.Registered &&
@@ -642,11 +656,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _wireless = new WirelessReceiverController(_core, wirelessReceiver);
         _mediaCast = new MediaCastReceiverController(_core, wirelessReceiver);
         _sessions = new DeviceSessionManager(_core);
-        _mediaOutput = new MediaOutputService(_core.GetDeviceOutputFrame,
-            _core.GetDeviceOutputAudioPacket);
+        _mediaOutput = new MediaOutputService(GetOutputNv12Frame,
+            GetOutputAudioPacket);
         _mediaOutput.StatusChanged += OnMediaOutputStatusChanged;
         _pendingRecordingPath = PendingRecordingStore.FindLatest();
-        _virtualCamera = new VirtualCameraService(_core.GetDeviceOutputFrame);
+        _virtualCamera = new VirtualCameraService(GetOutputVideoFrame);
         _virtualCamera.StatusChanged += OnMediaOutputStatusChanged;
         _sessions.SessionHandleChanged += (udid, handle) =>
         {
@@ -2059,6 +2073,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _mediaCastDevice ??= DeviceViewModel.CreateMediaCast();
             if (!Devices.Contains(_mediaCastDevice)) Devices.Insert(0, _mediaCastDevice);
             OnPropertyChanged(nameof(IsMediaCasting));
+            OnPropertyChanged(nameof(PreviewAndObsVisibility));
+            OnPropertyChanged(nameof(CanUseVisualPreviewTools));
             OnPropertyChanged(nameof(DeviceCount));
             OnPropertyChanged(nameof(TargetResolutionDisplay));
             OnPropertyChanged(nameof(TargetFpsDisplay));
@@ -2078,7 +2094,33 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(PlayAudio));
         }
         if (IsMediaCastSelected) ApplyMediaCastStatistics();
+        NotifyMediaOutputStateChanged();
     }
+
+    internal void SetMediaCastOutputProviders(
+        Func<uint, uint, Nv12VideoFrame?>? nv12FrameProvider,
+        Func<uint, uint, VideoFrame?>? videoFrameProvider,
+        Func<ulong, AudioPacket?>? audioPacketProvider)
+    {
+        _mediaCastNv12FrameProvider = nv12FrameProvider;
+        _mediaCastVideoFrameProvider = videoFrameProvider;
+        _mediaCastAudioPacketProvider = audioPacketProvider;
+        NotifyMediaOutputStateChanged();
+    }
+
+    private Nv12VideoFrame? GetOutputNv12Frame(ulong handle, uint width,
+        uint height) => handle == MediaCastOutputHandle
+            ? _mediaCastNv12FrameProvider?.Invoke(width, height)
+            : _core.GetDeviceOutputNv12Frame(handle, width, height);
+
+    private VideoFrame? GetOutputVideoFrame(ulong handle, uint width,
+        uint height) => handle == MediaCastOutputHandle
+            ? _mediaCastVideoFrameProvider?.Invoke(width, height)
+            : _core.GetDeviceOutputFrame(handle, width, height);
+
+    private AudioPacket? GetOutputAudioPacket(ulong handle, ulong afterSequence) =>
+        handle == MediaCastOutputHandle ? _mediaCastAudioPacketProvider?.Invoke(afterSequence) :
+            _core.GetDeviceOutputAudioPacket(handle, afterSequence);
 
     internal void UpdateMediaCastStatistics(uint width, uint height, bool audioEnabled)
     {
@@ -2112,12 +2154,18 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     internal void EndMediaCast()
     {
         if (!_isMediaCasting) return;
+        if (IsMediaOutputRunning &&
+            DeviceViewModel.UdidEquals(_mediaOutputUdid,
+                DeviceViewModel.MediaCastUdid))
+            _ = StopMediaOutputForSessionAsync(DeviceViewModel.MediaCastUdid);
         AddDiagnosticLog(AppLog.Event("media_cast_end",
             ("selection", AppLog.Device(SelectedDevice?.Udid)),
             ("size", $"{_mediaCastWidth}x{_mediaCastHeight}"),
             ("audio", _mediaCastAudioEnabled)));
         _isMediaCasting = false;
         OnPropertyChanged(nameof(IsMediaCasting));
+        OnPropertyChanged(nameof(PreviewAndObsVisibility));
+        OnPropertyChanged(nameof(CanUseVisualPreviewTools));
         OnPropertyChanged(nameof(TargetResolutionDisplay));
         OnPropertyChanged(nameof(TargetFpsDisplay));
         OnPropertyChanged(nameof(AudioDetailDisplay));
@@ -2133,6 +2181,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(DeviceCount));
         _selectionBeforeMediaCast = null;
         _mediaCastWidth = _mediaCastHeight = 0;
+        NotifyMediaOutputStateChanged();
         if (restore is null || !HasCaptureSession) ResetPreviewState();
         else if (_lastCaptureStatus is { } status &&
             _lastCaptureStatusHandle == CurrentSessionHandle) ApplyCaptureStatus(status);
@@ -3435,24 +3484,30 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
             var handle = CurrentSessionHandle;
             var device = SelectedDevice;
+            var mediaCast = IsMediaCasting && IsMediaCastSelected;
+            DeviceCaptureState? expectedState = null;
+            if (!mediaCast && device is not null)
+                _sessions.TryGet(device.Udid, out expectedState);
             if (!_virtualCameraCapabilities.Registered ||
                 _virtualCameraCapabilities.UpdateRequired || device is null ||
-                device.IsMediaCast || handle == 0 ||
-                !_sessions.TryGet(device.Udid, out var expectedState) ||
-                !expectedState.MatchesSessionHandle(handle))
+                (!mediaCast && (handle == 0 || expectedState is null ||
+                    !expectedState.MatchesSessionHandle(handle))) ||
+                (mediaCast && _mediaCastVideoFrameProvider is null))
                 return (false, _virtualCameraCapabilities.Registered &&
                     !_virtualCameraCapabilities.UpdateRequired
                         ? LocalizationService.Get("MediaOutputNoSession")
                         : VirtualCameraStatusText);
+            if (mediaCast) handle = MediaCastOutputHandle;
             width = NormalizeOutputWidth(width);
             height = NormalizeOutputHeight(height);
             frameRate = Math.Clamp(frameRate, 10, 60);
             await _virtualCamera.StartAsync(handle, width, height,
                 frameRate, _shutdownCancellation.Token);
-            if (_disposed || !_sessions.TryGet(device.Udid, out var currentState) ||
-                !ReferenceEquals(expectedState, currentState) ||
-                currentState.Handle != handle ||
-                !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
+            if (_disposed || !DeviceViewModel.UdidEquals(SelectedDevice?.Udid,
+                device.Udid) || (!mediaCast &&
+                (!_sessions.TryGet(device.Udid, out var currentState) ||
+                 !ReferenceEquals(expectedState, currentState) ||
+                 currentState.Handle != handle)))
             {
                 await _virtualCamera.StopAsync();
                 var staleMessage = LocalizationService.Get("MediaOutputNoSession");
@@ -3570,16 +3625,23 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
             var handle = CurrentSessionHandle;
             var device = SelectedDevice;
-            if (device is null || device.IsMediaCast || handle == 0 ||
-                !_sessions.TryGet(device.Udid, out var expectedState) ||
-                !expectedState.MatchesSessionHandle(handle))
+            var mediaCast = IsMediaCasting && IsMediaCastSelected;
+            DeviceCaptureState? expectedState = null;
+            if (!mediaCast && device is not null)
+                _sessions.TryGet(device.Udid, out expectedState);
+            if (device is null || (!mediaCast &&
+                (handle == 0 || expectedState is null ||
+                 !expectedState.MatchesSessionHandle(handle))) ||
+                (mediaCast && _mediaCastNv12FrameProvider is null))
                 return (false, LocalizationService.Get("MediaOutputNoSession"));
+            if (mediaCast) handle = MediaCastOutputHandle;
             await _mediaOutput.StartAsync(handle, request, _mediaOutputCapabilities,
                 _shutdownCancellation.Token);
-            if (_disposed || !_sessions.TryGet(device.Udid, out var currentState) ||
-                !ReferenceEquals(expectedState, currentState) ||
-                currentState.Handle != handle ||
-                !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, device.Udid))
+            if (_disposed || !DeviceViewModel.UdidEquals(SelectedDevice?.Udid,
+                device.Udid) || (!mediaCast &&
+                (!_sessions.TryGet(device.Udid, out var currentState) ||
+                 !ReferenceEquals(expectedState, currentState) ||
+                 currentState.Handle != handle)))
             {
                 await _mediaOutput.StopAsync();
                 var staleMessage = LocalizationService.Get("MediaOutputNoSession");

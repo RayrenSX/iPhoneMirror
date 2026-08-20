@@ -113,6 +113,15 @@ internal enum MediaCastCommand : uint
     Pause,
     Resume,
     Seek,
+    Volume,
+}
+
+[Flags]
+internal enum MediaCastFlags : uint
+{
+    None = 0,
+    MuteSpecified = 1,
+    Muted = 2,
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -236,16 +245,20 @@ internal struct NativeMediaCastRequest
     public ulong CommandId;
     public MediaCastCommand Command;
     public uint Reserved;
+    public double Duration;
     public double StartPosition;
     public double Volume;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16384)] public string Url;
 }
 
 public sealed record VideoFrame(uint Width, uint Height, uint Stride, long Timestamp100Ns, byte[] Pixels);
+internal sealed record Nv12VideoFrame(uint Width, uint Height, uint Stride,
+    long Timestamp100Ns, byte[] Pixels);
 internal sealed record AudioPacket(ulong Sequence, uint SampleRate,
     ushort Channels, ushort BitsPerSample, byte[] Pcm);
 internal sealed record MediaCastRequest(ulong CommandId, MediaCastCommand Command,
-    string Url, double StartPosition, double Volume);
+    MediaCastFlags Flags, string Url, double Duration, double StartPosition,
+    double Volume);
 
 internal sealed class NativeCore : IDisposable
 {
@@ -253,6 +266,7 @@ internal sealed class NativeCore : IDisposable
     private bool _initialized;
     private byte[]? _frameBuffer;
     private byte[]? _outputFrameBuffer;
+    private byte[]? _outputNv12FrameBuffer;
     private byte[]? _outputAudioBuffer;
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -393,6 +407,10 @@ internal sealed class NativeCore : IDisposable
     private static extern int im_session_copy_latest_video_frame(ulong handle,
         ref NativeVideoFrameInfo info, [Out] byte[]? buffer, ref uint bufferSize,
         uint maxWidth, uint maxHeight);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_copy_latest_video_frame_nv12(ulong handle,
+        ref NativeVideoFrameInfo info, [Out] byte[]? buffer, ref uint bufferSize,
+        uint outputWidth, uint outputHeight);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_copy_next_audio_packet(ulong handle,
         ulong afterSequence, ref NativeAudioPacketInfo info, [Out] byte[]? buffer,
@@ -642,8 +660,9 @@ internal sealed class NativeCore : IDisposable
         };
         return im_media_cast_get_request(ref request) == 0 &&
             request.Command != MediaCastCommand.None
-            ? new(request.CommandId, request.Command, request.Url,
-                request.StartPosition, request.Volume)
+            ? new(request.CommandId, request.Command,
+                (MediaCastFlags)request.Reserved, request.Url,
+                request.Duration, request.StartPosition, request.Volume)
             : null;
     }
 
@@ -998,6 +1017,31 @@ internal sealed class NativeCore : IDisposable
         if (result != 0 || _outputFrameBuffer is null) return null;
         return new VideoFrame(info.Width, info.Height, info.Stride,
             info.Timestamp100Ns, _outputFrameBuffer);
+    }
+
+    internal Nv12VideoFrame? GetDeviceOutputNv12Frame(ulong handle, uint width,
+        uint height)
+    {
+        if (handle == 0) return null;
+        var info = new NativeVideoFrameInfo
+        {
+            StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>(),
+        };
+        uint size = (uint)(_outputNv12FrameBuffer?.Length ?? 0);
+        var result = im_session_copy_latest_video_frame_nv12(handle, ref info,
+            _outputNv12FrameBuffer, ref size, width, height);
+        if (result == (int)NativeResult.BufferTooSmall)
+        {
+            _outputNv12FrameBuffer = new byte[size];
+            info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
+            result = im_session_copy_latest_video_frame_nv12(handle, ref info,
+                _outputNv12FrameBuffer, ref size, width, height);
+        }
+        if (result != 0 || _outputNv12FrameBuffer is null ||
+            info.PixelFormat != 2)
+            return null;
+        return new Nv12VideoFrame(info.Width, info.Height, info.Stride,
+            info.Timestamp100Ns, _outputNv12FrameBuffer);
     }
 
     internal AudioPacket? GetDeviceOutputAudioPacket(ulong handle,

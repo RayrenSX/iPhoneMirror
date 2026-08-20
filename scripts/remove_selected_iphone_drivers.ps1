@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 $PnpUtil = Join-Path ([Environment]::SystemDirectory) 'pnputil.exe'
 $AppleUsbRoot = 'HKLM:\SYSTEM\CurrentControlSet\Enum\USB'
 $AppleMobileProductPattern = '^VID_05AC&PID_(12A8|12AB)$'
-$AppleParentPattern = '^USB\\VID_05AC&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9]{8,40}$'
+$AppleParentPattern = '^USB\\VID_05AC&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9][A-Za-z0-9-]{7,39}$'
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()

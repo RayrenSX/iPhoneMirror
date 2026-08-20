@@ -2,12 +2,45 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using IPhoneMirror.DriverInstaller.Models;
+using IPhoneMirror.Shared.Security;
 
 namespace IPhoneMirror.DriverInstaller.Services;
 
 internal sealed class DriverOperationClient
 {
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromMinutes(5);
+    private static readonly object ElevationBoundarySync = new();
+    private static ElevationPathLock? _processImageLock;
+
+    internal static Exception? InitializeElevationBoundary() =>
+        EnsureElevationBoundary(out var error) ? null : error;
+
+    internal static bool EnsureElevationBoundary(out Exception? error)
+    {
+        lock (ElevationBoundarySync)
+        {
+            if (_processImageLock is not null)
+            {
+                error = null;
+                return true;
+            }
+            try
+            {
+                var executable = Environment.ProcessPath ??
+                    Process.GetCurrentProcess().MainModule?.FileName ??
+                    throw new FileNotFoundException(
+                        "The driver manager executable path is unavailable.");
+                _processImageLock = ElevationPathLock.Acquire(executable);
+                error = null;
+                return true;
+            }
+            catch (Exception boundaryError)
+            {
+                error = boundaryError;
+                return false;
+            }
+        }
+    }
 
     internal async Task<DriverOperationResult> RunAsync(DriverOperationKind kind,
         AppleDeviceRecord device)
@@ -30,6 +63,13 @@ internal sealed class DriverOperationClient
             ("present", device.IsPresent), ("service", device.Service),
             ("capture_filter", device.HasLibUsb0Filter));
         var paths = DriverConstants.GetOperationPaths(operationId);
+        if (!EnsureElevationBoundary(out var boundaryError))
+        {
+            DriverLogger.WriteException("driver-operation", "elevation_boundary_failed",
+                boundaryError!, ("operation", operationId), ("kind", kind),
+                ("device", deviceFingerprint));
+            return Failure(DriverLocalization.Get("ElevatedProcessStartFailed"), paths.LogPath);
+        }
         var executable = Environment.ProcessPath ??
             Process.GetCurrentProcess().MainModule?.FileName;
         if (string.IsNullOrWhiteSpace(executable))

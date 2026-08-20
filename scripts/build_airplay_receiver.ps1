@@ -36,12 +36,24 @@ if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot '.git'))) {
     if ($LASTEXITCODE -ne 0) { throw "Could not check out AirPlayServer $Commit" }
 }
 
-$SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
-$SafeSourceRoot = $SourceRoot.Replace('\', '/')
-$Head = (& git -c "safe.directory=$SafeSourceRoot" -C $SourceRoot rev-parse HEAD).Trim()
+$RepositoryRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
+$SafeRepositoryRoot = $RepositoryRoot.Replace('\', '/')
+$Head = (& git -c "safe.directory=$SafeRepositoryRoot" -C $RepositoryRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $Head -ne $Commit) {
     throw "AirPlayServer source must be at $Commit; found $Head"
 }
+
+# Build from a detached clean worktree so local tracked/untracked files can
+# never enter the vendored binary, while retaining the caller's source clone.
+$BuildSourceRoot = Join-Path $Root ("build\airplay-server-build-" +
+    [Guid]::NewGuid().ToString('N'))
+& git -c "safe.directory=$SafeRepositoryRoot" -C $RepositoryRoot worktree add --detach `
+    $BuildSourceRoot $Commit
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not create a clean AirPlayServer worktree: $LASTEXITCODE"
+}
+try {
+$SourceRoot = (Resolve-Path -LiteralPath $BuildSourceRoot).Path
 & (Join-Path $ReceiverRoot 'patches\Apply-DeviceMetadataPatch.ps1') `
     -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-DisplayCapabilityPatch.ps1') `
@@ -250,4 +262,12 @@ Write-Host "AirPlay receiver: $Binary" -ForegroundColor Green
 Write-Host "SHA256: $Hash" -ForegroundColor Green
 if (-not $Install) {
     Write-Host 'Pass -Install to replace the vendored receiver binary.' -ForegroundColor Yellow
+}
+}
+finally {
+    & git -c "safe.directory=$SafeRepositoryRoot" -C $RepositoryRoot worktree remove `
+        --force $BuildSourceRoot
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Could not remove temporary AirPlayServer worktree: $BuildSourceRoot"
+    }
 }

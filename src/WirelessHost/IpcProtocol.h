@@ -6,7 +6,7 @@
 namespace iPhoneMirror::wireless {
 
 inline constexpr std::uint32_t IpcMagic = 0x50414D49U; // IMAP
-inline constexpr std::uint16_t IpcVersion = 6;
+inline constexpr std::uint16_t IpcVersion = 7;
 inline constexpr std::uint32_t MaxPayloadBytes = 64U * 1024U * 1024U;
 inline constexpr std::size_t DeviceIdBytes = 64;
 inline constexpr std::size_t DeviceNameBytes = 128;
@@ -28,7 +28,26 @@ enum class MessageType : std::uint16_t {
     MediaResume = 12,
     MediaSeek = 13,
     MediaStopRequest = 14,
+    MediaVolume = 15,
 };
+
+// MediaVolume uses the header's reserved word as an explicit routing tag. A
+// mirrored AirPlay stream must carry a device id and never enter the logical
+// URL-cast command queue; URL-cast controls must not be applied to a mirror.
+// MediaPlay reuses only the two mute bits so a renderer can start muted without
+// briefly exposing audio at the stored base volume.
+enum class MediaVolumeTarget : std::uint32_t {
+    MirroredStream = 1,
+    MediaCast = 2,
+};
+
+inline constexpr std::uint32_t MediaVolumeTargetMask = 0x000000ffU;
+inline constexpr std::uint32_t MediaVolumeMuteSpecified = 0x00000100U;
+inline constexpr std::uint32_t MediaVolumeMuted = 0x00000200U;
+inline constexpr std::uint32_t MediaPlayAllowedMask =
+    MediaVolumeMuteSpecified | MediaVolumeMuted;
+inline constexpr std::uint32_t MediaVolumeAllowedMask =
+    MediaVolumeTargetMask | MediaVolumeMuteSpecified | MediaVolumeMuted;
 
 #pragma pack(push, 1)
 struct MessageHeader {

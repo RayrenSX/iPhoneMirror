@@ -1425,14 +1425,20 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             if (!device)
                 throw std::runtime_error("Apple device disconnected before capture started");
             const auto identity = transport::make_apple_usb_identity(*device);
-            if (device->quicktime_configuration) {
+            const auto quicktime_active = [&] {
+                return device->quicktime_configuration &&
+                    device->active_configuration_known &&
+                    device->active_configuration ==
+                        device->quicktime_endpoints.configuration;
+            };
+            if (quicktime_active()) {
                 configuration_restore.arm([&, use_usbdk, identity] {
                     configuration_restore_attempted = true;
                     configuration_restore_result = restore_qt_configuration(
                         use_usbdk, identity, active_normal_request_sent);
                 });
             }
-            if (!device->quicktime_configuration) {
+            if (!quicktime_active()) {
                 const bool activation_acknowledged =
                     transport::QtUsbConnection::enable_quicktime_configuration(
                         *qt_context, identity);
@@ -1475,7 +1481,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                 diagnostic));
                             last_usb_diagnostic = diagnostic;
                         }
-                        if (device && device->quicktime_configuration) break;
+                        if (device && device->quicktime_configuration &&
+                            device->active_configuration_known &&
+                            device->active_configuration ==
+                                device->quicktime_endpoints.configuration) break;
                     } catch (const std::exception& error) {
                         qt_context.reset();
                         logging::write(logging::Level::Warning, "usb",
@@ -1483,7 +1492,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                 device_fp, use_usbdk ? "usbdk" : "libusb1", error.what()));
                     }
                 } while (std::chrono::steady_clock::now() < deadline);
-                if (!device || !device->quicktime_configuration) {
+                if (!device || !device->quicktime_configuration ||
+                    !device->active_configuration_known ||
+                    device->active_configuration !=
+                        device->quicktime_endpoints.configuration) {
                     logging::write(std::format(
                         "usb_reenumeration descriptor_timeout device_fp={} backend={} expected_qt_config={} fallback=disabled",
                         device_fp, use_usbdk ? "usbdk" : "libusb1",

@@ -8,6 +8,8 @@ namespace IPhoneMirror.DriverInstaller;
 
 public partial class App : Application
 {
+    private readonly Exception? _elevationBoundaryError =
+        DriverOperationClient.InitializeElevationBoundary();
     private readonly Stopwatch _sessionTimer = Stopwatch.StartNew();
     private bool _elevatedHost;
     private DriverOperationKind? _elevatedKind;
@@ -50,6 +52,10 @@ public partial class App : Application
             Shutdown(exitCode);
             return;
         }
+
+        if (_elevationBoundaryError is not null)
+            DriverLogger.WriteException("lifecycle", "elevation_boundary_initialization_failed",
+                _elevationBoundaryError);
 
         base.OnStartup(e);
         DriverLocalization.Initialize(e.Args);

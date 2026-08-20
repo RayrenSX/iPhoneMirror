@@ -436,12 +436,17 @@ void MediaStream::process_sample_requests(
         sample_requests_.pop_front();
         const LONGLONG sample_time = next_sample_time_;
         next_sample_time_ += frame_duration_100ns_;
+        const auto generation = stream_generation_;
+        ComPtr<IMFVideoSampleAllocator> allocator = allocator_;
+        ComPtr<IMFMediaType> media_type = media_type_;
 
         ComPtr<IMFSample> sample;
         ComPtr<IMFMediaBuffer> buffer;
-        HRESULT hr = allocate_sample(&sample, &buffer);
+        lock.unlock();
+        HRESULT hr = allocate_sample(allocator.Get(), media_type.Get(),
+            &sample, &buffer);
         if (SUCCEEDED(hr))
-            hr = render_frame(buffer.Get(), media_type_.Get());
+            hr = render_frame(buffer.Get(), media_type.Get(), stop_token);
         if (SUCCEEDED(hr)) hr = sample->SetSampleTime(sample_time);
         if (SUCCEEDED(hr))
             hr = sample->SetSampleDuration(frame_duration_100ns_);
@@ -451,9 +456,15 @@ void MediaStream::process_sample_requests(
                 static_cast<UINT64>(sample_time));
         if (SUCCEEDED(hr) && token != nullptr)
             hr = sample->SetUnknown(MFSampleExtension_Token, token.Get());
-        if (SUCCEEDED(hr))
+        lock.lock();
+        if (shutdown_ || stop_token.stop_requested() ||
+            generation != stream_generation_ ||
+            state_ != MF_STREAM_STATE_RUNNING || !selected_)
+            continue;
+        if (SUCCEEDED(hr)) {
             hr = event_queue_->QueueEventParamUnk(
                 MEMediaSample, GUID_NULL, S_OK, sample.Get());
+        }
         if (FAILED(hr) && event_queue_ != nullptr)
             event_queue_->QueueEventParamVar(MEError, GUID_NULL, hr, nullptr);
     }
@@ -555,12 +566,15 @@ HRESULT MediaStream::start_locked(IMFMediaType* media_type, bool send_event) {
             FAILED(hr = handler->GetCurrentMediaType(&media_type_)))
             return hr;
     }
-    if (allocator_ != nullptr &&
-        FAILED(hr = allocator_->InitializeSampleAllocator(SamplePoolSize,
-                                                          media_type_.Get())))
-        return hr;
+    if (allocator_ != nullptr) {
+        std::scoped_lock allocator_lock(sample_allocator_mutex_);
+        if (FAILED(hr = allocator_->InitializeSampleAllocator(
+                SamplePoolSize, media_type_.Get())))
+            return hr;
+    }
     selected_ = true;
     next_sample_time_ = 0;
+    ++stream_generation_;
     state_ = MF_STREAM_STATE_RUNNING;
     sample_condition_.notify_all();
     return send_event
@@ -575,6 +589,7 @@ HRESULT MediaStream::stop_locked(bool send_event) {
     selected_ = false;
     sample_requests_.clear();
     next_sample_time_ = 0;
+    ++stream_generation_;
     sample_condition_.notify_all();
     return send_event
         ? event_queue_->QueueEventParamVar(MEStreamStopped, GUID_NULL, S_OK,
@@ -582,7 +597,9 @@ HRESULT MediaStream::stop_locked(bool send_event) {
         : S_OK;
 }
 
-HRESULT MediaStream::allocate_sample(IMFSample** sample,
+HRESULT MediaStream::allocate_sample(IMFVideoSampleAllocator* allocator,
+                                     IMFMediaType* media_type,
+                                     IMFSample** sample,
                                      IMFMediaBuffer** buffer) {
     if (sample == nullptr || buffer == nullptr) return E_POINTER;
     *sample = nullptr;
@@ -590,14 +607,15 @@ HRESULT MediaStream::allocate_sample(IMFSample** sample,
 
     ComPtr<IMFSample> allocated_sample;
     HRESULT hr = S_OK;
-    if (allocator_ != nullptr) {
-        hr = allocator_->AllocateSample(&allocated_sample);
+    if (allocator != nullptr) {
+        std::scoped_lock allocator_lock(sample_allocator_mutex_);
+        hr = allocator->AllocateSample(&allocated_sample);
     } else {
         hr = MFCreateSample(&allocated_sample);
         if (SUCCEEDED(hr)) {
             GUID subtype{};
             UINT32 width{}, height{}, bytes{};
-            hr = media_type_layout(media_type_.Get(), subtype, width, height,
+            hr = media_type_layout(media_type, subtype, width, height,
                                    bytes);
             ComPtr<IMFMediaBuffer> allocated_buffer;
             if (SUCCEEDED(hr)) hr = MFCreateMemoryBuffer(bytes, &allocated_buffer);
@@ -614,7 +632,8 @@ HRESULT MediaStream::allocate_sample(IMFSample** sample,
 }
 
 HRESULT MediaStream::render_frame(IMFMediaBuffer* buffer,
-                                  IMFMediaType* media_type) {
+                                  IMFMediaType* media_type,
+                                  std::stop_token stop_token) {
     if (buffer == nullptr || media_type == nullptr) return E_INVALIDARG;
     GUID subtype{};
     UINT32 width{}, height{}, sample_size{};
@@ -634,11 +653,13 @@ HRESULT MediaStream::render_frame(IMFMediaBuffer* buffer,
     bool received_frame = try_read_frame();
     if (!received_frame && last_frame_.pixels.empty()) {
         const auto deadline = std::chrono::steady_clock::now() + FirstFrameWait;
-        while (!received_frame && std::chrono::steady_clock::now() < deadline) {
+        while (!received_frame && !stop_token.stop_requested() &&
+               std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(FirstFrameRetryInterval);
             received_frame = try_read_frame();
         }
     }
+    if (stop_token.stop_requested()) return MF_E_SHUTDOWN;
     if (received_frame) std::swap(last_frame_, pending_frame_);
     // Reuse the previous snapshot whenever the publisher is briefly between
     // valid frames instead of exposing transport timing as a black sample.

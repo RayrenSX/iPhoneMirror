@@ -1,7 +1,9 @@
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Xml.Linq;
 using IPhoneMirror.App.Localization;
@@ -478,8 +480,40 @@ Equal(true, zipUpdateScript.Contains("[string]$WaitPids", StringComparison.Ordin
 Equal(true, zipUpdateScript.Contains("Rollback was incomplete", StringComparison.Ordinal) &&
             zipUpdateScript.Contains("[Security.Cryptography.SHA256]::Create()",
                 StringComparison.Ordinal) &&
-            zipUpdateScript.Contains("$changes", StringComparison.Ordinal),
-    "portable updates verify copied files and roll back partial replacements");
+            zipUpdateScript.Contains("$changes", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("$restartLock", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("Start-RestartProcess", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("Shell.Application", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("New-PrivilegedDirectory $destination",
+                StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("Enable-DirectoryInheritance $directory",
+                StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("Sort-Object Length -Descending",
+                StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("if ($fileChangesCommitted)",
+                StringComparison.Ordinal),
+    "portable updates protect new topology, verify files, drop elevation, and roll back failures");
+var virtualCameraServiceCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "VirtualCameraService.cs"));
+var appProjectCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "iPhoneMirror.App.csproj"));
+Equal(true, virtualCameraServiceCode.Contains("ElevationPathLock.Acquire(helper, mediaSource)",
+                StringComparison.Ordinal) &&
+            virtualCameraServiceCode.Contains("GetManifestResourceStream(resourceName)",
+                StringComparison.Ordinal) &&
+            virtualCameraServiceCode.Contains("CommonApplicationData",
+                StringComparison.Ordinal) &&
+            virtualCameraServiceCode.Contains("SetAccessRuleProtection($true, $false)",
+                StringComparison.Ordinal) &&
+            virtualCameraServiceCode.Contains("Copy-VerifiedPayload $payload.HelperPath",
+                StringComparison.Ordinal) &&
+            virtualCameraServiceCode.Contains("Start-Process -FilePath $helper",
+                StringComparison.Ordinal) &&
+            appProjectCode.Contains("IPhoneMirror.App.Payload.iPhoneMirror.VirtualCamera.Admin.exe",
+                StringComparison.Ordinal) &&
+            appProjectCode.Contains("IPhoneMirror.App.Payload.iPhoneMirror.VirtualCamera.dll",
+                StringComparison.Ordinal),
+    "virtual camera elevation copies locked embedded payloads into an admin-only directory");
 Equal(false, zipUpdateScript.Contains("Get-FileHash", StringComparison.Ordinal),
     "portable update verification does not depend on optional PowerShell cmdlets");
 Equal(false, zipUpdateScript.Contains("[IO.Path]::GetRelativePath",
@@ -542,9 +576,17 @@ foreach (var requiredThemeKey in new[]
              "PrimaryActionBrush", "PrimaryActionHoverBrush",
              "PrimaryActionPressedBrush", "PrimaryActionTextBrush",
              "AboutCheckUpdatesTextBrush",
-             "PrimaryActionFocusBrush", "PrimaryActionDisabledBrush",
-             "PrimaryActionDisabledTextBrush",
-             "ScrollTrackBrush", "ScrollTrackHoverBrush", "ScrollThumbBrush",
+              "PrimaryActionFocusBrush", "PrimaryActionDisabledBrush",
+              "PrimaryActionDisabledTextBrush",
+              "MediaPlayerScrimBrush", "MediaPlayerControlFillBrush",
+              "MediaPlayerControlHoverBrush", "MediaPlayerControlPressedBrush",
+              "MediaPlayerPrimaryBrush", "MediaPlayerPrimaryHoverBrush",
+              "MediaPlayerPrimaryPressedBrush", "MediaPlayerPrimaryBorderBrush",
+              "MediaPlayerPrimaryIconBrush",
+              "MediaPlayerSecondaryTextBrush", "MediaPlayerTrackBrush",
+              "MediaPlayerProgressBrush", "MediaPlayerThumbBrush",
+              "MediaPlayerFocusBrush",
+              "ScrollTrackBrush", "ScrollTrackHoverBrush", "ScrollThumbBrush",
              "ScrollThumbHoverBrush", "ScrollThumbPressedBrush",
          })
 {
@@ -778,9 +820,64 @@ Equal(true, mainWindowText.Contains("x:Name=\"ThemeComboBox\"",
 Equal(false, mainWindowText.Contains("x:Name=\"LogExpander\"",
         StringComparison.Ordinal),
     "live logs are no longer rendered in the main preview workspace");
+Equal(true, mainWindowText.Contains("x:Name=\"MediaCastSeekSlider\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("x:Name=\"MediaCastPlayPauseButton\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("x:Name=\"MediaCastVolumeSlider\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("x:Name=\"MediaCastFullScreenButton\"",
+                StringComparison.Ordinal),
+    "video casting exposes conventional playback, seek, and volume controls");
+Equal(true, mainWindowText.Contains("x:Key=\"MediaPlayerIconButtonStyle\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("x:Key=\"MediaPlayerPrimaryButtonStyle\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("x:Key=\"MediaPlayerSliderStyle\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("{DynamicResource MediaPlayerScrimBrush}",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("{DynamicResource MediaPlayerPrimaryBorderBrush}",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("Foreground=\"{DynamicResource MediaPlayerPrimaryIconBrush}\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("OnMediaCastPlayerMouseMove",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("OnMediaCastPlayerSizeChanged",
+                StringComparison.Ordinal),
+    "cast playback controls share one themed, responsive interaction system");
+var mediaPlayerButtonStyleStart = mainWindowText.IndexOf(
+    "<Style x:Key=\"MediaPlayerIconButtonStyle\"", StringComparison.Ordinal);
+var mediaPlayerButtonStyleEnd = mainWindowText.IndexOf("</Style>",
+    mediaPlayerButtonStyleStart, StringComparison.Ordinal);
+var mediaPlayerButtonStyle = mainWindowText[mediaPlayerButtonStyleStart..
+    (mediaPlayerButtonStyleEnd + "</Style>".Length)];
+Equal(true, mediaPlayerButtonStyle.Contains(
+                "Value=\"{DynamicResource NavigationTextFontFamily}\"",
+                StringComparison.Ordinal) &&
+            !mediaPlayerButtonStyle.Contains("Segoe Fluent Icons",
+                StringComparison.Ordinal),
+    "cast button tooltips inherit a CJK-capable UI font instead of the glyph font");
+Equal(false, mainWindowText.Contains("CloseMediaCastButton",
+        StringComparison.Ordinal),
+    "video casting preview has no redundant corner close button");
 
 var mainWindowCodePath = Path.Combine(sourceDirectory, "App", "MainWindow.xaml.cs");
 var mainWindowCode = File.ReadAllText(mainWindowCodePath);
+Equal(true, mainWindowCode.Contains("_mediaControlsHideTimer",
+                StringComparison.Ordinal) &&
+            mainWindowCode.Contains("SetMediaCastControlsVisible",
+                StringComparison.Ordinal) &&
+            mainWindowCode.Contains("width >= 430", StringComparison.Ordinal) &&
+            mainWindowCode.Contains("width >= 620", StringComparison.Ordinal),
+    "cast playback controls fade when idle and adapt at compact widths");
+Equal(true, mainWindowCode.Contains("AddHandler(Mouse.PreviewMouseDownEvent",
+                StringComparison.Ordinal) &&
+            mainWindowCode.Contains("handledEventsToo: true",
+                StringComparison.Ordinal) &&
+            mainWindowCode.Contains("RetryPendingMediaCastSeek",
+                StringComparison.Ordinal),
+    "cast progress clicks survive handled slider events and confirm the seek");
 var appStartupCode = File.ReadAllText(Path.Combine(sourceDirectory, "App", "App.xaml.cs"));
 var appIdentityCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "AppIdentity.cs"));
@@ -844,6 +941,8 @@ Equal(true, closeMethodIndex >= 0 &&
     "window close hides every UI surface before background cleanup and exits explicitly");
 var nativePreviewWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "NativePreviewWindow.cs"));
+var aspectRatioControllerCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "AspectRatioWindowController.cs"));
 var multiPreviewManagerCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "MultiDevicePreviewManager.cs"));
 Equal(true,
@@ -856,6 +955,17 @@ Equal(true,
     multiPreviewManagerCode.Contains("_disposing = true;",
         StringComparison.Ordinal),
     "native preview windows hide immediately and reject openings during shutdown");
+Equal(true,
+    aspectRatioControllerCode.Contains("internal bool ApplyInitialBounds()",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains("candidate.ShowInitially();",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains(
+        "SwpNoSize | SwpNoMove | SwpNoActivate | SwpShowWindow",
+        StringComparison.Ordinal) &&
+    !nativePreviewWindowCode.Contains("ShowWindow(candidate._handle, SwShow)",
+        StringComparison.Ordinal),
+    "native previews apply final bounds while hidden and become visible in one step");
 var themeServiceText = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "ThemeService.cs"));
 Equal(true,
@@ -912,7 +1022,11 @@ var conflictWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "InstanceConflictWindow.xaml"));
 Equal(true,
     conflictWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal) &&
-    conflictWindowText.Contains("WindowBackdropType=\"Acrylic\"",
+    conflictWindowText.Contains("WindowBackdropType=\"None\"",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("WindowCornerPreference=\"Round\"",
+        StringComparison.Ordinal) &&
+    conflictWindowText.Contains("Style=\"{StaticResource ModernDialogSurface}\"",
         StringComparison.Ordinal) &&
     conflictWindowText.Contains("CloseOtherInstancesButton",
         StringComparison.Ordinal) &&
@@ -921,7 +1035,7 @@ Equal(true,
     conflictWindowText.Contains("Style=\"{StaticResource PrimaryButton}\"",
         StringComparison.Ordinal) &&
     conflictWindowText.Contains("IsDefault=\"True\"", StringComparison.Ordinal),
-    "instance conflict uses a Fluent Acrylic decision dialog");
+    "instance conflict uses the shared DWM-rounded decision dialog");
 Equal(false, aboutWindowText.Contains("SettingsSection", StringComparison.Ordinal),
     "about content uses lightweight unframed sections instead of a large nested card");
 Equal(true, aboutWindowText.Contains("DiagnosticPath, Mode=OneWay",
@@ -1639,8 +1753,11 @@ try
             var delay = host.ToLowerInvariant() switch
             {
                 "github.cnxiaobai.com" => 5,
-                "github.com" => 20,
-                _ => 60,
+                // The probe fan-out covers every configured mirror. Keep a
+                // meaningful gap here so thread-pool scheduling jitter cannot
+                // turn this throughput-ranking test into a timing race.
+                "github.com" => 100,
+                _ => 500,
             };
             await Task.Delay(delay, cancellationToken);
             return RangeResponse(request, payload);
@@ -1730,9 +1847,9 @@ try
             }
             var delay = host.ToLowerInvariant() switch
             {
-                "gh-proxy.net" => 2,
-                "github.com" => 15,
-                _ => 80,
+                "gh-proxy.net" => 5,
+                "github.com" => 100,
+                _ => 500,
             };
             await Task.Delay(delay, cancellationToken);
             return RangeResponse(request, payload);
@@ -1960,6 +2077,55 @@ var elevatedUpdateStart = UpdateInstallerLauncher.BuildElevatedPowerShellStartIn
 Equal(true, elevatedUpdateStart.UseShellExecute &&
             elevatedUpdateStart.Verb.Equals("runas", StringComparison.OrdinalIgnoreCase),
     "update helper preserves UAC elevation through the Windows shell");
+var unelevatedUpdateStart = UpdateInstallerLauncher.BuildUnelevatedPowerShellStartInfo(
+    Path.GetTempPath(), Convert.ToBase64String(Encoding.Unicode.GetBytes("exit 0")));
+Equal(true, unelevatedUpdateStart.UseShellExecute &&
+            string.IsNullOrEmpty(unelevatedUpdateStart.Verb),
+    "writable portable copies keep the update helper at caller integrity");
+Equal(true, UpdateInstallerLauncher.CanUpdateDirectoryWithoutElevation(
+        Path.GetTempPath()),
+    "portable updater detects a writable installation directory without UAC");
+var writablePortableRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-elevation-check-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(writablePortableRoot);
+    Equal(false, UpdateInstallerLauncher.CanSafelyElevateDirectoryTree(
+            writablePortableRoot),
+        "portable updater never elevates a user-writable installation tree");
+}
+finally
+{
+    if (Directory.Exists(writablePortableRoot))
+        Directory.Delete(writablePortableRoot, recursive: true);
+}
+var topologyWritableRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-topology-check-{Guid.NewGuid():N}");
+try
+{
+    Directory.CreateDirectory(topologyWritableRoot);
+    var currentUser = WindowsIdentity.GetCurrent().User ??
+        throw new InvalidOperationException("The test user SID is unavailable.");
+    var topologySecurity = new DirectorySecurity();
+    topologySecurity.SetOwner(currentUser);
+    topologySecurity.SetAccessRuleProtection(isProtected: true,
+        preserveInheritance: false);
+    topologySecurity.AddAccessRule(new FileSystemAccessRule(currentUser,
+        FileSystemRights.ReadAndExecute | FileSystemRights.CreateDirectories |
+        FileSystemRights.Delete, AccessControlType.Allow));
+    new DirectoryInfo(topologyWritableRoot).SetAccessControl(topologySecurity);
+    Equal(false, UpdateInstallerLauncher.CanUpdateDirectoryWithoutElevation(
+            topologyWritableRoot),
+        "topology-only ACL does not pass the ordinary file-write probe");
+    Equal(false, UpdateInstallerLauncher.CanSafelyElevateDirectoryTree(
+            topologyWritableRoot),
+        "portable updater rejects topology rights hidden from the file-write probe");
+}
+finally
+{
+    if (Directory.Exists(topologyWritableRoot))
+        Directory.Delete(topologyWritableRoot, recursive: true);
+}
 Equal(System.Diagnostics.ProcessWindowStyle.Hidden, elevatedUpdateStart.WindowStyle,
     "update helper asks Windows to hide the elevated PowerShell host");
 var elevatedUpdateArguments = elevatedUpdateStart.ArgumentList.ToArray();
@@ -1969,6 +2135,34 @@ Equal(true, windowStyleArgument >= 0 &&
             elevatedUpdateArguments[windowStyleArgument + 1].Equals(
                 "Hidden", StringComparison.OrdinalIgnoreCase),
     "update helper passes PowerShell an explicit hidden-window mode");
+var updateLauncherCode = File.ReadAllText(Path.Combine(sourceDirectory, "App",
+    "Updater", "UpdateInstallerLauncher.cs"));
+Equal(true, updateLauncherCode.Contains("SeeMaskNoConsole", StringComparison.Ordinal) &&
+            updateLauncherCode.Contains("ShellExecuteExW", StringComparison.Ordinal) &&
+            updateLauncherCode.Contains("Mask = SeeMaskNoCloseProcess | SeeMaskNoConsole",
+                StringComparison.Ordinal),
+    "elevated update helper requests ShellExecuteEx no-console mode");
+Equal(true, updateLauncherCode.Contains("FileAddSubdirectory",
+                StringComparison.Ordinal) &&
+            updateLauncherCode.Contains("FileDeleteChild", StringComparison.Ordinal) &&
+            updateLauncherCode.Contains("WriteDac", StringComparison.Ordinal) &&
+            updateLauncherCode.Contains("Directory.GetParent(current)",
+                StringComparison.Ordinal) &&
+            updateLauncherCode.Contains("FileFlagOpenReparsePoint",
+                StringComparison.Ordinal),
+    "portable updater checks topology and ancestor mutation rights before UAC");
+Equal(true, updateLauncherCode.IndexOf("if (IsCurrentProcessElevated())",
+                StringComparison.Ordinal) <
+            updateLauncherCode.IndexOf("var helperBytes = ReadZipHelperBytes();",
+                StringComparison.Ordinal),
+    "portable updater validates its privilege boundary before creating a helper");
+var frameExchangeCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "VirtualCamera", "src", "FrameExchange.cpp"));
+Equal(true, !frameExchangeCode.Contains("(A;;GR;;;AC)",
+                StringComparison.Ordinal) &&
+            frameExchangeCode.Contains("FILE_FLAG_FIRST_PIPE_INSTANCE",
+                StringComparison.Ordinal),
+    "virtual camera frame channel excludes arbitrary AppContainers");
 var updateWindowCode = File.ReadAllText(Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory, "..", "..", "..", "..", "App", "Windows",
     "UpdateWindow.xaml.cs")));
@@ -2221,12 +2415,123 @@ Equal(true, MediaSourceClassifier.IsLikelyLive(
 Equal(false, MediaSourceClassifier.IsLikelyLive(
         new Uri("https://example.test/library/video.mp4")),
     "ordinary MP4 remains on-demand media");
+Equal(false, MediaCastPlaybackControls.IsReliableDuration(
+        segmented: true, duration: 5.8),
+    "a short HLS segment duration is not reported as the program duration");
+Equal(0d, MediaCastPlaybackControls.ReportedDuration(
+        segmented: true, duration: 5.8),
+    "a short HLS segment reports an unknown total duration");
+Equal(true, MediaCastPlaybackControls.IsReliableDuration(
+        segmented: true, duration: 2400),
+    "a long HLS duration can be used when the backend reports the full program");
+Equal(false, MediaCastPlaybackControls.IsReliableDuration(
+        segmented: true, duration: 95443.718),
+    "a bogus multi-day HLS duration remains unknown");
+var hlsBridgeArguments = HlsMediaPlaybackBridge.BuildArguments(
+    new Uri("https://example.test/episode.m3u8?token=secret"),
+    new Uri("http://127.0.0.1:18081/stream.ts"));
+Equal(true,
+    hlsBridgeArguments.Contains("-protocol_whitelist", StringComparer.Ordinal) &&
+    hlsBridgeArguments.Contains("http,https,tcp,tls,crypto",
+        StringComparer.Ordinal) &&
+    !hlsBridgeArguments.Contains("-reconnect_at_eof", StringComparer.Ordinal) &&
+    hlsBridgeArguments.Contains("mpegts", StringComparer.Ordinal) &&
+    hlsBridgeArguments[^1] == "http://127.0.0.1:18081/stream.ts",
+    "HLS playback uses FFmpeg playlist recovery and a continuous MPEG-TS bridge");
+var hlsSeekArguments = HlsMediaPlaybackBridge.BuildArguments(
+    new Uri("https://example.test/episode.m3u8"),
+    new Uri("http://127.0.0.1:18081/stream.ts"), 123.5);
+Equal(true,
+    hlsSeekArguments.Contains("-ss", StringComparer.Ordinal) &&
+    hlsSeekArguments.Contains("123.5", StringComparer.Ordinal) &&
+    Array.IndexOf(hlsSeekArguments.ToArray(), "-ss") <
+        Array.IndexOf(hlsSeekArguments.ToArray(), "-i"),
+    "HLS bridge seeks the demuxer from the requested programme position");
+Equal(true,
+    hlsSeekArguments.Contains("-output_ts_offset", StringComparer.Ordinal) &&
+    hlsSeekArguments.Contains("-123.5", StringComparer.Ordinal),
+    "HLS bridge resets timestamps after an input seek");
+var mediaAudioArguments = MediaCastAudioDecoder.BuildArguments(
+    new Uri("https://example.test/episode.m3u8"), 123.5, 1.5);
+Equal(true,
+    mediaAudioArguments.Contains("-map", StringComparer.Ordinal) &&
+    mediaAudioArguments.Contains("0:a:0?", StringComparer.Ordinal) &&
+    mediaAudioArguments.Contains("pcm_s16le", StringComparer.Ordinal) &&
+    mediaAudioArguments.Contains("atempo=1.5", StringComparer.Ordinal) &&
+    mediaAudioArguments.Contains("123.5", StringComparer.Ordinal) &&
+    !mediaAudioArguments.Contains("wasapi", StringComparer.Ordinal),
+    "media output decodes the cast source audio instead of system loopback");
+Equal(true, HlsMediaPlaybackBridge.TryParseDuration(
+        "  Duration: 00:42:03.125, start: 1.400000, bitrate: N/A",
+        out var parsedHlsDuration) && Math.Abs(parsedHlsDuration - 2523.125) < 0.001,
+    "HLS bridge extracts the programme duration reported by FFmpeg");
+Equal(false, HlsMediaPlaybackBridge.TryParseDuration(
+        "  Duration: N/A, start: 12.000000, bitrate: N/A", out _),
+    "HLS bridge does not invent a duration for a genuine live playlist");
+Equal(0d, MediaCastPlaybackControls.ClampPosition(double.NaN, 100),
+    "media controls reject a non-finite seek position");
+Equal(100d, MediaCastPlaybackControls.ClampPosition(150, 100),
+    "media controls clamp seeking to the known duration");
+Equal("01:05", MediaCastPlaybackControls.FormatTime(65),
+    "media controls format ordinary playback time");
+Equal("1:01:01", MediaCastPlaybackControls.FormatTime(3661),
+    "media controls retain hours for long videos");
+Equal(true, MediaCastPlaybackControls.CanSeek(
+        opened: true, isLive: false, duration: 30),
+    "opened on-demand media can be scrubbed");
+Equal(false, MediaCastPlaybackControls.CanSeek(
+        opened: true, isLive: true, duration: 30),
+    "live media does not expose a misleading fixed seek range");
+Equal(true, MediaCastPlaybackControls.ShouldRetainPendingSeek(
+        actualPosition: 10, targetPosition: 40,
+        elapsed: TimeSpan.FromMilliseconds(250)),
+    "a direct track click is not overwritten during the seek handoff");
+Equal(true, MediaCastPlaybackControls.ShouldRetainPendingSeek(
+        actualPosition: 40, targetPosition: 40,
+        elapsed: TimeSpan.FromMilliseconds(250)),
+    "an immediate position echo does not prematurely clear a pending seek");
+Equal(false, MediaCastPlaybackControls.ShouldRetainPendingSeek(
+        actualPosition: 41, targetPosition: 40,
+        elapsed: TimeSpan.FromSeconds(1)),
+    "a converged seek yields to the advancing playback clock");
+Equal(false, MediaCastPlaybackControls.ShouldRetainPendingSeek(
+        actualPosition: 10, targetPosition: 40,
+        elapsed: TimeSpan.FromSeconds(11)),
+    "a failed seek eventually releases its optimistic progress position");
+Equal(true, MediaCastPlaybackControls.ShouldRetryPendingSeek(
+        actualPosition: 10, targetPosition: 40,
+        sinceLastAttempt: TimeSpan.FromMilliseconds(500), attemptCount: 1,
+        buffering: false),
+    "an ignored media seek is retried after the backend acknowledgement window");
+Equal(false, MediaCastPlaybackControls.ShouldRetryPendingSeek(
+        actualPosition: 10, targetPosition: 40,
+        sinceLastAttempt: TimeSpan.FromSeconds(1), attemptCount: 1,
+        buffering: true),
+    "seek confirmation waits while the media backend is buffering");
+Equal(false, MediaCastPlaybackControls.ShouldRetryPendingSeek(
+        actualPosition: 10, targetPosition: 40,
+        sinceLastAttempt: TimeSpan.FromSeconds(1), attemptCount: 20,
+        buffering: false),
+    "seek confirmation has a bounded retry count");
+Equal(true, MediaCastPlaybackControls.ShouldRetryPendingSeek(
+        actualPosition: 10, targetPosition: 40,
+        sinceLastAttempt: TimeSpan.FromSeconds(1), attemptCount: 4,
+        buffering: false),
+    "slow media keeps retrying a pending seek beyond the original short window");
+Equal(false, MediaCastPlaybackControls.ShouldRevealVideo(
+        shouldPlay: true, buffering: true, openingPosition: 0,
+        currentPosition: 1, openedFor: TimeSpan.FromSeconds(2)),
+    "the loading card remains visible while the player is buffering");
+Equal(true, MediaCastPlaybackControls.ShouldRevealVideo(
+        shouldPlay: true, buffering: false, openingPosition: 0,
+        currentPosition: 0.1, openedFor: TimeSpan.FromMilliseconds(100)),
+    "the loading card yields when the first frame clock advances");
 
 var ffmpegCapabilities = MediaOutputService.CreateCapabilities("ffmpeg.exe",
     " V..... h264_mf\n V..... libx264\n A..... aac\n A..... libopus ",
     "Input:\nrtmp\nOutput:\nrtmp\nsrt", " E flv\n E mpegts\n E whip");
-Equal("libx264", ffmpegCapabilities.PreferredH264Encoder,
-    "libx264 is preferred when software and Media Foundation encoders are available");
+Equal("h264_mf", ffmpegCapabilities.PreferredH264Encoder,
+    "hardware encoding is preferred over libx264 when both are available");
 Equal(true, ffmpegCapabilities.Supports(MediaOutputKind.Recording),
     "recording requires FFmpeg and an H.264 encoder");
 Equal(true, ffmpegCapabilities.Supports(MediaOutputKind.Rtmp),
@@ -2240,6 +2545,12 @@ var mediaFoundationOnly = MediaOutputService.CreateCapabilities("ffmpeg.exe",
     " V..... h264_mf\n A..... aac\n A..... libopus ", "rtmp", "flv");
 Equal("h264_mf", mediaFoundationOnly.PreferredH264Encoder,
     "Media Foundation encoder is the hardware fallback");
+var hardwareEncoderCandidates = MediaOutputService.FindH264EncoderCandidates(
+    " V..... libx264 V..... h264_mf V..... h264_qsv " +
+    "V..... h264_amf V..... h264_nvenc ");
+Sequence(["h264_nvenc", "h264_amf", "h264_qsv", "h264_mf", "libx264"],
+    hardwareEncoderCandidates,
+    "H.264 candidates prefer dedicated hardware and retain software fallback");
 Equal(false, mediaFoundationOnly.Supports(MediaOutputKind.Srt),
     "missing SRT capability is gated");
 Equal(string.Empty, MediaOutputService.SelectPreferredH264Encoder(
@@ -2271,6 +2582,12 @@ Equal(videoOnlyCapabilities,
     MediaOutputService.SelectBestCapabilities([
         protocolOnlyCapabilities, videoOnlyCapabilities]),
     "FFmpeg discovery never prefers a candidate without H.264");
+var hardwareTieCapabilities = MediaOutputService.CreateCapabilities("hardware.exe",
+    " V..... h264_mf ", "rtmp srt", "flv mpegts whip");
+Equal(hardwareTieCapabilities,
+    MediaOutputService.SelectBestCapabilities([
+        videoOnlyCapabilities, hardwareTieCapabilities]),
+    "equally capable FFmpeg builds prefer a working hardware encoder");
 
 var ffmpegLocationRoot = Path.Combine(Path.GetTempPath(),
     $"iphone-mirror-ffmpeg-locations-{Guid.NewGuid():N}");
@@ -2298,15 +2615,24 @@ var recordingArguments = MediaOutputService.BuildArguments(
 Sequence(["-hide_banner", "-loglevel", "warning", "-nostdin",
         "-thread_queue_size", "512", "-f", "s16le", "-ar", "48000", "-ac", "2",
         "-i", @"\\.\pipe\iphoneMirror-audio-test", "-f", "rawvideo",
-        "-pixel_format", "bgra", "-video_size", "1280x720", "-framerate", "30",
-        "-i", "pipe:0", "-map", "1:v:0", "-map", "0:a:0", "-c:v", "libx264",
-        "-preset", "veryfast", "-tune",
-        "zerolatency", "-pix_fmt", "yuv420p", "-g", "60", "-b:v", "6000k",
+        "-pixel_format", "nv12", "-video_size", "1280x720", "-framerate", "30",
+        "-i", "pipe:0", "-map", "1:v:0", "-map", "0:a:0", "-c:v", "h264_mf",
+        "-hw_encoding", "1", "-scenario", "archive", "-pix_fmt", "nv12",
+        "-g", "60", "-b:v", "6000k",
         "-maxrate", "6000k", "-bufsize", "12000k", "-c:a", "aac",
         "-b:a", "192k", "-movflags", "+faststart",
         "-y", "capture.mp4"],
     recordingArguments,
     "recording opens the audio pipe before stdin video and keeps stable mapping");
+
+var softwareRecordingArguments = MediaOutputService.BuildArguments(
+    new MediaOutputRequest(MediaOutputKind.Recording, "software.mp4", 1280, 720,
+        30, 6000), videoOnlyCapabilities, audioPipePath: null,
+    includeAudio: false);
+Sequence(["-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p"],
+    softwareRecordingArguments
+        .SkipWhile(argument => argument != "-preset").Take(6),
+    "libx264 remains the compatible software fallback");
 
 var silentRecordingArguments = MediaOutputService.BuildArguments(
     new MediaOutputRequest(MediaOutputKind.Recording, "silent.mp4", 1280, 720, 30, 6000),
@@ -2318,6 +2644,15 @@ Equal(false, silentRecordingArguments.Contains("s16le", StringComparer.Ordinal),
 Sequence(["-movflags", "+faststart", "-y", "silent.mp4"],
     silentRecordingArguments.TakeLast(4),
     "video-only recording still finalizes a seekable MP4");
+
+var lateAudioNormalizer = new MediaOutputService.Pcm16AudioNormalizer(48000, 2);
+var lateAudio = lateAudioNormalizer.Convert(
+    new IPhoneMirror.App.Interop.AudioPacket(1, 44100, 1, 16,
+        new byte[] { 0, 0, 0xFF, 0x7F }));
+Equal(8, lateAudio.Length,
+    "late audio is normalized to the fixed FFmpeg stereo sample rate");
+Equal(0, lateAudio[0],
+    "late audio normalization preserves the first PCM sample");
 
 Equal(30L, MediaOutputService.CalculateDueVideoFrames(
         TimeSpan.FromSeconds(1), 30, 0),
@@ -2331,10 +2666,28 @@ Equal(0L, MediaOutputService.CalculateDueVideoFrames(
 Equal(8L, MediaOutputService.CalculateDueVideoFrames(
         TimeSpan.FromMilliseconds(250), 30, 0),
     "video output rounds fractional frame intervals to the nearest frame");
+var normalVideoSchedule = MediaOutputService.CalculateVideoWritePlan(
+    TimeSpan.FromSeconds(1), 30, 10);
+Equal(20L, normalVideoSchedule.FramesToWrite,
+    "video output preserves ordinary short catch-up behavior");
+Equal(10L, normalVideoSchedule.FramesWrittenBaseline,
+    "ordinary video catch-up does not move the output baseline");
+var boundedVideoSchedule = MediaOutputService.CalculateVideoWritePlan(
+    TimeSpan.FromSeconds(10), 30, 0);
+Equal(60L, boundedVideoSchedule.FramesToWrite,
+    "video output bounds catch-up to two seconds of repeated frames");
+Equal(240L, boundedVideoSchedule.FramesWrittenBaseline,
+    "video output discards the oldest backlog before resuming current output");
 Throws<ArgumentOutOfRangeException>(() =>
         MediaOutputService.CalculateDueVideoFrames(
             TimeSpan.FromSeconds(1), 0, 0),
     "video output rejects an invalid frame rate");
+
+var mediaOutputServiceCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "MediaOutputService.cs"));
+Equal(true, mediaOutputServiceCode.Contains("_runTask = Task.Run(",
+        StringComparison.Ordinal),
+    "media output frame and audio pumps are scheduled off the WPF dispatcher");
 
 var queuedAudio = new[]
 {
@@ -2384,6 +2737,11 @@ var rtmpArguments = MediaOutputService.BuildArguments(
         60, 9000), mediaFoundationOnly);
 Equal(false, rtmpArguments.Contains("-preset", StringComparer.Ordinal),
     "h264_mf does not receive libx264-only tuning arguments");
+Equal(true, rtmpArguments.Contains("-hw_encoding", StringComparer.Ordinal),
+    "h264_mf explicitly requires hardware encoding");
+Sequence(["-pix_fmt", "nv12"], rtmpArguments
+        .SkipWhile(argument => argument != "-pix_fmt").Take(2),
+    "hardware H.264 encoding consumes NV12 without a BGRA or planar conversion");
 Sequence(["-f", "flv", "rtmps://example.test/live"], rtmpArguments.TakeLast(3),
     "RTMP output uses the FLV muxer");
 
@@ -2410,46 +2768,21 @@ Throws<ArgumentOutOfRangeException>(() => MediaOutputService.BuildArguments(
         ffmpegCapabilities),
     "unknown output kind is rejected during argument construction");
 
-var portraitPixels = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
-await using (var portraitOutput = new MemoryStream())
-{
-    await MediaOutputService.WriteFrameAsync(portraitOutput,
-        new IPhoneMirror.App.Interop.VideoFrame(2, 4, 8, 1, portraitPixels),
-        4, 4, new byte[64], CancellationToken.None);
-    var output = portraitOutput.ToArray();
-    Equal(64, output.Length, "portrait output keeps the requested fixed canvas size");
-    for (var row = 0; row < 4; ++row)
-    {
-        Equal(true, output.AsSpan(row * 16, 4).SequenceEqual(new byte[4]),
-            $"portrait row {row} has a black left pillar");
-        Equal(true, output.AsSpan(row * 16 + 4, 8)
-                .SequenceEqual(portraitPixels.AsSpan(row * 8, 8)),
-            $"portrait row {row} is centered without distortion");
-        Equal(true, output.AsSpan(row * 16 + 12, 4).SequenceEqual(new byte[4]),
-            $"portrait row {row} has a black right pillar");
-    }
-}
-
-var landscapePixels = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
-await using (var landscapeOutput = new MemoryStream())
-{
-    await MediaOutputService.WriteFrameAsync(landscapeOutput,
-        new IPhoneMirror.App.Interop.VideoFrame(4, 2, 16, 2, landscapePixels),
-        4, 4, new byte[64], CancellationToken.None);
-    var output = landscapeOutput.ToArray();
-    Equal(true, output.AsSpan(0, 16).SequenceEqual(new byte[16]),
-        "landscape output has a black top bar");
-    Equal(true, output.AsSpan(16, 32).SequenceEqual(landscapePixels),
-        "landscape output is vertically centered without distortion");
-    Equal(true, output.AsSpan(48, 16).SequenceEqual(new byte[16]),
-        "landscape output has a black bottom bar");
-}
-
-await ThrowsAsync<InvalidDataException>(() => MediaOutputService.WriteFrameAsync(
-        Stream.Null,
-        new IPhoneMirror.App.Interop.VideoFrame(8, 8, 32, 3, new byte[256]),
-        4, 4, new byte[64], CancellationToken.None),
-    "a native frame larger than the fixed output canvas is rejected");
+var nv12Pixels = Enumerable.Range(1, 24).Select(value => (byte)value).ToArray();
+var nv12Payload = MediaOutputService.GetNv12FramePayload(
+    new IPhoneMirror.App.Interop.Nv12VideoFrame(4, 4, 4, 1, nv12Pixels), 4, 4);
+Equal(24, nv12Payload.Length,
+    "NV12 output writes one-and-a-half bytes per pixel");
+Equal(true, nv12Payload.Span.SequenceEqual(nv12Pixels),
+    "NV12 output is forwarded without a managed color conversion or copy");
+Throws<InvalidDataException>(() => MediaOutputService.GetNv12FramePayload(
+        new IPhoneMirror.App.Interop.Nv12VideoFrame(4, 4, 8, 2, nv12Pixels),
+        4, 4),
+    "NV12 output rejects a non-tightly-packed native frame");
+Throws<InvalidDataException>(() => MediaOutputService.GetNv12FramePayload(
+        new IPhoneMirror.App.Interop.Nv12VideoFrame(4, 4, 4, 3, new byte[23]),
+        4, 4),
+    "NV12 output rejects a truncated native frame");
 
 var processTestRequest = new MediaOutputRequest(MediaOutputKind.Recording,
     Path.Combine(Path.GetTempPath(), $"process-test-{Guid.NewGuid():N}.mp4"),
@@ -2515,12 +2848,17 @@ if (installedFfmpegCapabilities.Supports(MediaOutputKind.Recording))
     var silentRecordingPath = Path.Combine(Path.GetTempPath(),
         $"iphone-mirror-silent-recording-{Guid.NewGuid():N}.mp4");
     long recordingTimestamp = 0;
+    var lateAudioAvailableAt = Environment.TickCount64 + 600;
     await using var silentRecordingOutput = new MediaOutputService(
-        (_, width, height) => new IPhoneMirror.App.Interop.VideoFrame(
-            width, height, width * 4,
+        (_, width, height) => new IPhoneMirror.App.Interop.Nv12VideoFrame(
+            width, height, width,
             Interlocked.Add(ref recordingTimestamp, 1_000_000),
-            new byte[checked((int)(width * height * 4))]),
-        (_, _) => null);
+            new byte[checked((int)((ulong)width * height * 3U / 2U))]),
+        (_, afterSequence) => afterSequence == 0 &&
+                Environment.TickCount64 >= lateAudioAvailableAt
+            ? new IPhoneMirror.App.Interop.AudioPacket(
+                1, 48000, 2, 16, new byte[3840])
+            : null);
     try
     {
         await silentRecordingOutput.StartAsync(1,
@@ -2544,6 +2882,9 @@ if (installedFfmpegCapabilities.Supports(MediaOutputKind.Recording))
             "video-only recording writes an MP4 file type box");
         Equal(true, silentMp4.AsSpan().IndexOf("moov"u8) >= 0,
             "video-only recording writes the finalized MP4 index");
+        if (installedFfmpegCapabilities.HasAacEncoder)
+            Equal(true, silentMp4.AsSpan().IndexOf("soun"u8) >= 0,
+                "audio that arrives after recording start is included in the MP4 track");
         Equal(false, File.Exists(silentStagingPath),
             "successful finalization atomically promotes and removes the partial MP4");
     }
@@ -2558,10 +2899,10 @@ if (installedFfmpegCapabilities.Supports(MediaOutputKind.Recording))
     long audioSequence = 0;
     long nextAudioPacketAt = 0;
     await using var audioRecordingOutput = new MediaOutputService(
-        (_, width, height) => new IPhoneMirror.App.Interop.VideoFrame(
-            width, height, width * 4,
+        (_, width, height) => new IPhoneMirror.App.Interop.Nv12VideoFrame(
+            width, height, width,
             Interlocked.Add(ref audioRecordingTimestamp, 1_000_000),
-            new byte[checked((int)(width * height * 4))]),
+            new byte[checked((int)((ulong)width * height * 3U / 2U))]),
         (_, afterSequence) =>
         {
             var now = Environment.TickCount64;
@@ -2601,12 +2942,11 @@ if (installedFfmpegCapabilities.Supports(MediaOutputKind.Recording))
 
     var interruptedAudioPath = Path.Combine(Path.GetTempPath(),
         $"iphone-mirror-interrupted-audio-{Guid.NewGuid():N}.mp4");
-    long interruptedVideoTimestamp = 0;
     await using var interruptedAudioOutput = new MediaOutputService(
-        (_, width, height) => new IPhoneMirror.App.Interop.VideoFrame(
-            width, height, width * 4,
-            Interlocked.Add(ref interruptedVideoTimestamp, 1_000_000),
-            new byte[checked((int)(width * height * 4))]),
+        (_, width, height) => new IPhoneMirror.App.Interop.Nv12VideoFrame(
+            width, height, width,
+            1_000_000,
+            new byte[checked((int)((ulong)width * height * 3U / 2U))]),
         (_, afterSequence) => afterSequence == 0
             ? new IPhoneMirror.App.Interop.AudioPacket(
                 1, 48000, 2, 16, new byte[3840])
@@ -2621,7 +2961,7 @@ if (installedFfmpegCapabilities.Supports(MediaOutputKind.Recording))
             installedFfmpegCapabilities, startupTimeout.Token);
         await Task.Delay(TimeSpan.FromSeconds(5.5));
         Equal(true, interruptedAudioOutput.IsRunning,
-            "a PCM interruption longer than five seconds does not stop video output");
+            "a PCM interruption and static frame longer than five seconds do not stop video output");
         await interruptedAudioOutput.StopAsync();
         var interruptedMp4 = File.ReadAllBytes(interruptedAudioPath);
         Equal(true, interruptedMp4.AsSpan().IndexOf("moov"u8) >= 0,
@@ -2690,6 +3030,13 @@ recoveryNow += TimeSpan.FromSeconds(11);
 Equal(true, mediaRecovery.TryGetNext(out var stableAttempt, out var stableDelay) &&
     stableAttempt == 1 && stableDelay == TimeSpan.FromMilliseconds(250),
     "stable playback resets live recovery backoff");
+var segmentedRecovery = new MediaRecoveryBackoff(() => recoveryNow,
+    maximumAttempts: 2, stablePlaybackWindow: TimeSpan.FromSeconds(3));
+segmentedRecovery.MarkOpened();
+recoveryNow += TimeSpan.FromSeconds(5.8);
+Equal(true, segmentedRecovery.TryGetNext(out var segmentedAttempt, out _) &&
+    segmentedAttempt == 1,
+    "HLS segment handoff resets recovery after real playback progress");
 Equal<string?>(null,
     WirelessReceiverConfiguration.FindExecutable(Path.GetTempPath(),
         Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.exe")),

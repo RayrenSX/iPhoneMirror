@@ -5,6 +5,147 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.6.9] - 2026-08-20
+
+### Added
+
+- Add a five-click version-button entry point for the independent Developer
+  Tools window. It can preview every workspace page and existing child window
+  without performing real network, device, update, or destructive operations.
+- Add a read-only runtime inspector for the current version, culture, theme,
+  DPI scale, open-window count, diagnostics, theme/language selection, opacity,
+  topmost state, and compact/default/maximized window presets.
+- Add conventional controls to AirPlay and DLNA video playback, including
+  pause/resume, seek, 10-second skip, volume, mute, time display, and keyboard
+  shortcuts, while disabling seek for live streams.
+- Unify cast-video playback controls into a responsive themed overlay with a
+  centered primary action, consistent Fluent icons, full-screen access, and
+  lightweight hover, press, state-change, and idle-fade feedback.
+- Add safe preview entry points for confirmation prompts, recovery guidance,
+  image settings, projection settings, media output, USB mode details, startup
+  errors, updates, instance conflicts, and the native independent preview.
+- Add native NV12 frame export from decoded sessions for recording and live
+  output, including aspect-preserving letterboxing and P010-to-NV12 conversion.
+- Let media-app casting use recording, live publishing, virtual camera, and an
+  independent preview window from the same toolbar as device mirroring.
+- Decode the media source audio track directly for recording and live output,
+  without capturing unrelated Windows system, notification, or microphone audio.
+
+### Changed
+
+- Standardize top-level window chrome, drag surfaces, close-button behavior,
+  theme resources, and light/dark contrast across the main window and child
+  windows.
+- Let Windows/DWM own the outer rounded corners of the Developer Tools and
+  instance-conflict windows; remove their duplicate hand-drawn outer corner
+  radius and border while retaining rounded internal cards and warning panels.
+- Keep the Developer Tools window independent, draggable, non-topmost, and
+  coverable by the main window, matching the requested multi-window workflow.
+- Keep WPF on its hardware-first composition path and flush the local HLS bridge
+  immediately, improving high-resolution media-cast frame pacing and smoothness.
+- Remove the root-page opacity transition that could leave a newly selected
+  page transparent, and keep page content visible through navigation changes.
+- Apply final work-area size and centered position to an independent preview
+  while its HWND is hidden, then show it in one operation to prevent the first
+  frame from flashing at the default origin or jumping during aspect fitting.
+- Add stable aspect-ratio sizing for portrait, landscape, rotated, mixed-DPI,
+  and high-DPI native previews, with work-area and minimum-size constraints.
+- Keep native preview windows independently manageable per device, with
+  fullscreen, rotation, audio, fixed-size, corner, display, and context-menu
+  controls isolated from the main preview.
+- Improve AirPlay/DLNA playback state handling around buffering, live streams,
+  pending seeks, volume/mute commands, and Play/Stop command boundaries.
+- Prefer an available hardware H.264 encoder (NVENC, AMF, QSV, or Media
+  Foundation) after probing the requested output size, while retaining libx264
+  fallback behavior.
+
+### Fixed
+
+- Keep a localized loading card visible until cast video playback advances or
+  buffering ends, and remove the redundant close button from the preview.
+- Make direct clicks on the cast-video progress track seek deterministically
+  and keep the selected position stable while the media backend catches up.
+- Match Platinum/i4AirPlayer AVTransport behavior for video-app casting by
+  advertising and accepting `Next`/`Previous`, preserving current and queued
+  media metadata, and promoting a queued next URI without returning an action
+  error that prevents iQIYI from automatically playing the next episode.
+- Prevent Windows MediaElement's short HLS segment duration from being exposed
+  as the programme duration, preserving playback state and progress across
+  segment changes instead of restarting or advancing after a few seconds.
+- Route HLS cast URLs through the bundled FFmpeg demuxer and a continuous local
+  MPEG-TS stream so playlist refresh, encryption keys, discontinuities,
+  reconnects, seeks, and genuine end-of-stream are coordinated in one pipeline.
+- Keep mouse and mobile seeks stable while a replacement HLS stream opens, and
+  prevent the progress thumb from jumping through transient segment timestamps.
+- Prevent the elevated update PowerShell host from creating a console window
+  by launching it through Windows ShellExecuteEx no-console mode.
+- Reject elevated portable updates when the current user can replace any
+  installation path component, including through topology-only ACL rights.
+- Restrict the virtual-camera frame channel to the current user and Windows
+  Frame Server identities instead of every packaged application.
+- Copy hash-verified virtual-camera installer payloads into an administrator-only
+  directory before launching the elevated helper, preventing DLL side-loading
+  from a user-writable staging path.
+- Run recording and live-output frame, pipe, and audio pumps outside the WPF
+  dispatcher so encoding backpressure cannot freeze the application UI.
+- Feed recording and live-output FFmpeg directly with native letterboxed NV12
+  frames, eliminating redundant BGRA conversion and high-resolution frame copies.
+- Prefer a working hardware H.264 encoder (NVENC, AMF, QSV, or Media Foundation),
+  probe the requested output size, and retain libx264 as an automatic fallback.
+- Bound repeated-frame catch-up after prolonged FFmpeg stalls while preserving
+  normal short-delay compensation and resynchronizing future output to current
+  wall-clock time.
+- Keep media-volume coalescing within the current Play/Stop command boundary
+  so an earlier cast cannot change a later cast's mute state.
+- Prevent header drag handling from intercepting close buttons and other
+  interactive controls, restoring reliable close behavior for every child
+  window.
+- Make Developer Tools confirmation and cancellation previews close safely
+  without triggering a process crash, and keep read-only preview actions
+  isolated from real application operations.
+- Restore the close button on all existing child windows, including settings,
+  update, recovery, prompt, and instance-conflict surfaces.
+- Prevent duplicate outer borders and corner artifacts from reappearing after
+  opening a child window, dragging a window, changing DPI, or switching pages.
+- Keep the main window and every native preview hidden immediately during
+  shutdown before bounded background cleanup begins.
+- Match Apple USB parent devices by exact VID/PID/topology identity, record the
+  active USB configuration, and avoid treating interface nodes or stale device
+  matches as the selected phone.
+- Restore QuickTime/Apple USB configuration only when the active configuration
+  is known to require it, reducing unnecessary reconfiguration during capture
+  start, failure, cancellation, and teardown.
+- Add deterministic native Media Foundation decoder and NV12/P010 frame-copy
+  validation for malformed dimensions, strides, buffers, and odd output sizes.
+- Keep virtual-camera frame exchange scoped to the current user and Windows
+  Frame Server identities, rejecting unauthorized mapping attempts.
+- Bound FFmpeg catch-up after prolonged stalls and resynchronize future output
+  to wall-clock time instead of emitting an unbounded burst of repeated frames.
+- Move recording/live-output frame, pipe, and audio pumps off the WPF dispatcher
+  so encoder backpressure cannot freeze the application UI.
+
+### Security
+
+- Revalidate portable update path ownership at the elevation boundary,
+  including topology-only ACL rights that could permit replacement of a parent
+  directory or file.
+- Copy hash-verified virtual-camera installer payloads into an
+  administrator-only staging directory before launching the elevated helper,
+  preventing DLL side-loading from user-writable paths.
+- Lock the current driver-manager executable across its elevation boundary and
+  reject unsafe replacement paths before privileged operations begin.
+- Launch elevated update helpers through a no-console ShellExecuteEx path and
+  preserve the required UAC boundary without exposing an extra console window.
+
+### Tests
+
+- Add runtime coverage for the five-click Developer Tools entry point, all
+  read-only preview surfaces, drag behavior, independent/non-topmost state,
+  outer-corner ownership, and safe confirmation actions.
+- Add logic and native coverage for media command ordering, volume/mute state,
+  NV12/P010 frame export, DLNA control handling, USB identity/configuration,
+  update boundaries, and driver elevation-path locking.
+
 ## [1.6.8] - 2026-08-17
 
 ### Added

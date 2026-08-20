@@ -191,7 +191,7 @@ struct VideoFrameInfo {
     std::uint32_t width;
     std::uint32_t height;
     std::uint32_t stride;
-    std::uint32_t pixel_format; // 1 = BGRA8
+    std::uint32_t pixel_format; // 1 = BGRA8, 2 = tightly packed NV12
     std::int64_t timestamp_100ns;
 };
 
@@ -228,6 +228,13 @@ enum class MediaCastCommand : std::uint32_t {
     Pause = 3,
     Resume = 4,
     Seek = 5,
+    Volume = 6,
+};
+
+enum class MediaCastFlags : std::uint32_t {
+    None = 0,
+    MuteSpecified = 1,
+    Muted = 2,
 };
 
 struct MediaCastRequest {
@@ -236,6 +243,7 @@ struct MediaCastRequest {
     std::uint64_t command_id;
     MediaCastCommand command;
     std::uint32_t reserved;
+    double duration;
     double start_position;
     double volume;
     wchar_t url[MaxMediaUrl];
@@ -419,6 +427,13 @@ IM_API std::int32_t IM_CALL im_session_copy_latest_video_frame(
     iPhoneMirror::SessionHandle handle, iPhoneMirror::VideoFrameInfo* info,
     std::uint8_t* buffer, std::uint32_t* buffer_size,
     std::uint32_t max_width, std::uint32_t max_height);
+// Copies the latest frame into an exact-size, tightly packed 8-bit NV12 canvas.
+// The source is downscaled if needed, aspect ratio is preserved, and unused
+// canvas pixels are filled with YUV black. P010 sources are reduced to 8-bit.
+IM_API std::int32_t IM_CALL im_session_copy_latest_video_frame_nv12(
+    iPhoneMirror::SessionHandle handle, iPhoneMirror::VideoFrameInfo* info,
+    std::uint8_t* buffer, std::uint32_t* buffer_size,
+    std::uint32_t output_width, std::uint32_t output_height);
 // Copies the oldest buffered PCM packet newer than after_sequence. Audio is
 // signed little-endian interleaved PCM. Callers retain sequence and request
 // the next packet; a slow caller may skip packets evicted by the bounded queue.

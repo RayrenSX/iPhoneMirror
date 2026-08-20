@@ -117,8 +117,9 @@ internal sealed class WirelessReceiverService
             var executable = ExecutablePath;
             if (executable is null) return false;
             var directory = Path.GetDirectoryName(executable);
-            return directory is not null && RequiredRuntimeFiles.All(file =>
-                File.Exists(Path.Combine(directory, file)));
+            return directory is not null &&
+                RequiredRuntimeFiles.All(file => File.Exists(Path.Combine(directory, file))) &&
+                RuntimeBinaryIntegrity.VerifyWirelessDirectory(directory, out _);
         }
     }
 
@@ -130,6 +131,15 @@ internal sealed class WirelessReceiverService
             var executable = ExecutablePath;
             if (executable is null)
                 return new(WirelessRuntimeProbeStatus.LoadFailed, -1);
+            var directory = Path.GetDirectoryName(executable);
+            var integrityFailure = string.Empty;
+            if (directory is null ||
+                !RuntimeBinaryIntegrity.VerifyWirelessDirectory(directory, out integrityFailure))
+            {
+                DiagnosticLogger.Info("wireless", "runtime_hash_mismatch",
+                    ("detail", integrityFailure ?? "runtime directory is unavailable"));
+                return new(WirelessRuntimeProbeStatus.CodeIntegrityBlocked, 40);
+            }
             try
             {
                 var start = new ProcessStartInfo

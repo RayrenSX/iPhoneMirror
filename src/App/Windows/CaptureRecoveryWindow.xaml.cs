@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Input;
 
 namespace IPhoneMirror.App.Windows;
 
@@ -10,10 +9,9 @@ public partial class CaptureRecoveryWindow : Wpf.Ui.Controls.FluentWindow
     internal static void ShowRecovery() =>
         new CaptureRecoveryWindow { Owner = Application.Current.MainWindow }.ShowDialog();
 
+    internal static void ShowDeveloperPreview(Window owner) =>
+        new CaptureRecoveryWindow { Owner = owner }.Show();
+
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
-    private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton == MouseButton.Left) DragMove();
-    }
 }

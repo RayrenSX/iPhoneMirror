@@ -81,6 +81,24 @@
     <SolidColorBrush x:Key="OverlayBrush" Color="#BFFFFFFF"/>
     <SolidColorBrush x:Key="MediaOverlayBrush" Color="#E62B2B2E"/>
     <SolidColorBrush x:Key="MediaOverlayTextBrush" Color="#FFFFFFFF"/>
+    <LinearGradientBrush x:Key="MediaPlayerScrimBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#001A1A1C" Offset="0"/>
+        <GradientStop Color="#991A1A1C" Offset="0.48"/>
+        <GradientStop Color="#DE1A1A1C" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="MediaPlayerControlFillBrush" Color="#18FFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerControlHoverBrush" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerControlPressedBrush" Color="#47FFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerPrimaryBrush" Color="#F5FFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerPrimaryHoverBrush" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerPrimaryPressedBrush" Color="#DEFFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerPrimaryBorderBrush" Color="#52000000"/>
+    <SolidColorBrush x:Key="MediaPlayerPrimaryIconBrush" Color="#FF171719"/>
+    <SolidColorBrush x:Key="MediaPlayerSecondaryTextBrush" Color="#E6FFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerTrackBrush" Color="#57FFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerProgressBrush" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerThumbBrush" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="MediaPlayerFocusBrush" Color="#FF69B1F8"/>
     <SolidColorBrush x:Key="PreviewChromeBrush" Color="#FFF1F1F3"/>
     <SolidColorBrush x:Key="PreviewPanelAltBrush" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="PreviewBorderBrush" Color="#33000000"/>

@@ -9,7 +9,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         mc:Ignorable="d"
         Title="{DynamicResource WindowTitleConnectivity}"
-        Icon="pack://application:,,,/Assets/iPhoneMirror.ico"
+        Icon="pack://application:,,,/iPhoneMirror;component/Assets/iPhoneMirror.ico"
         Width="1540" Height="900" MinWidth="1280" MinHeight="700"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
@@ -245,6 +245,263 @@
             <Setter Property="MinHeight" Value="36"/>
             <Setter Property="Padding" Value="10,6"/>
             <Setter Property="Margin" Value="6,0,0,0"/>
+        </Style>
+        <Style x:Key="MediaPlayerIconButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="Background" Value="{DynamicResource MediaPlayerControlFillBrush}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="{DynamicResource MediaOverlayTextBrush}"/>
+            <!-- Keep the icon font on each glyph element. ToolTip text inherits
+                 this button font and must use the normal UI font for CJK. -->
+            <Setter Property="FontFamily" Value="{DynamicResource NavigationTextFontFamily}"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="PlayerButtonRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10"
+                                Padding="{TemplateBinding Padding}"
+                                RenderTransformOrigin="0.5,0.5"
+                                SnapsToDevicePixels="True">
+                            <Border.RenderTransform>
+                                <ScaleTransform/>
+                            </Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PlayerButtonRoot" Property="Background"
+                                        Value="{DynamicResource MediaPlayerControlHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="PlayerButtonRoot" Property="Background"
+                                        Value="{DynamicResource MediaPlayerControlPressedBrush}"/>
+                                <Setter TargetName="PlayerButtonRoot" Property="RenderTransform">
+                                    <Setter.Value><ScaleTransform ScaleX="0.94" ScaleY="0.94"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="PlayerButtonRoot" Property="BorderBrush"
+                                        Value="{DynamicResource MediaPlayerFocusBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="PlayerButtonRoot" Property="Opacity" Value="0.38"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="MediaPlayerPrimaryButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource MediaPlayerIconButtonStyle}">
+            <Setter Property="Width" Value="44"/>
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="MinHeight" Value="44"/>
+            <Setter Property="Margin" Value="5,0"/>
+            <Setter Property="Background" Value="{DynamicResource MediaPlayerPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource MediaPlayerPrimaryBorderBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MediaPlayerPrimaryIconBrush}"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="PrimaryPlayerButtonRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="22"
+                                Padding="{TemplateBinding Padding}"
+                                RenderTransformOrigin="0.5,0.5"
+                                SnapsToDevicePixels="True">
+                            <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PrimaryPlayerButtonRoot" Property="Background"
+                                        Value="{DynamicResource MediaPlayerPrimaryHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="PrimaryPlayerButtonRoot" Property="Background"
+                                        Value="{DynamicResource MediaPlayerPrimaryPressedBrush}"/>
+                                <Setter TargetName="PrimaryPlayerButtonRoot" Property="RenderTransform">
+                                    <Setter.Value><ScaleTransform ScaleX="0.92" ScaleY="0.92"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="PrimaryPlayerButtonRoot" Property="BorderBrush"
+                                        Value="{DynamicResource MediaPlayerFocusBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="PrimaryPlayerButtonRoot" Property="Opacity" Value="0.38"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="MediaPlayerTimeTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MediaPlayerSecondaryTextBrush}"/>
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
+        </Style>
+        <Style x:Key="MediaPlayerSliderDecreaseButtonStyle" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border x:Name="CompletedTrack" Height="4" VerticalAlignment="Center"
+                                Background="{DynamicResource MediaPlayerProgressBrush}"
+                                CornerRadius="2"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CompletedTrack" Property="Height" Value="6"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="CompletedTrack" Property="Opacity" Value="0.78"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="MediaPlayerSliderIncreaseButtonStyle" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border x:Name="RemainingTrack" Height="4" VerticalAlignment="Center"
+                                Background="{DynamicResource MediaPlayerTrackBrush}"
+                                CornerRadius="2"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RemainingTrack" Property="Height" Value="6"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="RemainingTrack" Property="Opacity" Value="0.78"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="MediaPlayerSliderThumbStyle" TargetType="Thumb">
+            <Setter Property="Width" Value="14"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Ellipse x:Name="PlayerThumb" Fill="{DynamicResource MediaPlayerThumbBrush}"
+                                 RenderTransformOrigin="0.5,0.5">
+                            <Ellipse.RenderTransform><ScaleTransform/></Ellipse.RenderTransform>
+                        </Ellipse>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PlayerThumb" Property="RenderTransform">
+                                    <Setter.Value><ScaleTransform ScaleX="1.12" ScaleY="1.12"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="PlayerThumb" Property="RenderTransform">
+                                    <Setter.Value><ScaleTransform ScaleX="1.22" ScaleY="1.22"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="MediaPlayerSliderStyle" TargetType="Slider">
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <!-- Keep an actual hit-test surface after the seek
+                             RepeatButtons are made visual-only. Without a
+                             transparent background, clicks in the empty rail
+                             never reach Slider at all. -->
+                        <Grid x:Name="MediaPlayerSliderRoot"
+                              Height="24" VerticalAlignment="Center"
+                              Background="Transparent"
+                              RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="1"/>
+                            </Grid.RenderTransform>
+                            <Track x:Name="PART_Track" Height="24"
+                                   Orientation="Horizontal"
+                                   IsDirectionReversed="{TemplateBinding IsDirectionReversed}"
+                                   Minimum="{TemplateBinding Minimum}"
+                                   Maximum="{TemplateBinding Maximum}"
+                                   Value="{Binding Value, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <Track.DecreaseRepeatButton>
+                                    <!-- The programme seek slider has
+                                         IsMoveToPointEnabled=False, so these are
+                                         visual-only. Volume keeps the normal
+                                         RepeatButton interaction. -->
+                                    <RepeatButton IsHitTestVisible="{Binding RelativeSource={RelativeSource AncestorType={x:Type Slider}}, Path=IsMoveToPointEnabled}"
+                                                  Focusable="False"
+                                                  Command="{x:Static Slider.DecreaseLarge}"
+                                                  Style="{StaticResource MediaPlayerSliderDecreaseButtonStyle}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource MediaPlayerSliderThumbStyle}"/>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton IsHitTestVisible="{Binding RelativeSource={RelativeSource AncestorType={x:Type Slider}}, Path=IsMoveToPointEnabled}"
+                                                  Focusable="False"
+                                                  Command="{x:Static Slider.IncreaseLarge}"
+                                                  Style="{StaticResource MediaPlayerSliderIncreaseButtonStyle}"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="MediaPlayerSliderRoot"
+                                                             Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleY)"
+                                                             To="1.18" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="MediaPlayerSliderRoot"
+                                                             Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleY)"
+                                                             To="1" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.34"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="UsbModeTabItem" TargetType="ListBoxItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -794,6 +1051,17 @@
                         <StackPanel x:Name="PreviewQuickActions" Grid.Column="1"
                                     Orientation="Horizontal" VerticalAlignment="Center"
                                     Visibility="{Binding PreviewAndObsVisibility}">
+                            <Button x:Name="QuickMediaOutputButton"
+                                    Click="OnMediaOutputToolbarClick"
+                                    Style="{StaticResource PreviewToolButton}"
+                                    IsEnabled="{Binding CanUseVisualPreviewTools}"
+                                    ToolTip="{DynamicResource MediaOutputButton}"
+                                    AutomationProperties.AutomationId="QuickMediaOutputButton">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE714;" FontSize="15"/>
+                                    <TextBlock Text="{DynamicResource MediaOutputButton}" Margin="6,0,0,0"/>
+                                </StackPanel>
+                            </Button>
                             <Button Command="{Binding MoreImageSettingsCommand}"
                                     Style="{StaticResource PreviewToolButton}"
                                     ToolTip="{DynamicResource IndependentWindowImageSettings}"
@@ -983,29 +1251,153 @@
                               AutomationProperties.AutomationId="MediaCastSurface"
                               Background="{DynamicResource PreviewChromeBrush}" Panel.ZIndex="2">
                             <Grid x:Name="MediaCastPlayerHost"
-                                  Background="{DynamicResource PreviewChromeBrush}">
-                                <MediaElement x:Name="MediaCastMediaElement"
-                                              LoadedBehavior="Manual" UnloadedBehavior="Manual"
-                                              Stretch="Uniform" ScrubbingEnabled="True"/>
+                                  Background="{DynamicResource PreviewChromeBrush}"
+                                  ClipToBounds="True"
+                                  MouseEnter="OnMediaCastPlayerMouseEnter"
+                                  MouseMove="OnMediaCastPlayerMouseMove"
+                                  MouseLeave="OnMediaCastPlayerMouseLeave"
+                                  SizeChanged="OnMediaCastPlayerSizeChanged">
+                                <Grid x:Name="MediaCastVideoHost"
+                                      Background="{DynamicResource PreviewChromeBrush}">
+                                    <MediaElement x:Name="MediaCastMediaElement"
+                                                  LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                                                  Stretch="Uniform" ScrubbingEnabled="True"/>
+                                </Grid>
+
+                                <Border x:Name="MediaCastStatusPanel"
+                                        Visibility="Collapsed" Panel.ZIndex="3"
+                                        AutomationProperties.AutomationId="MediaCastStatusPanel"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Background="{DynamicResource MediaOverlayBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                        CornerRadius="12" Padding="22,15" Margin="20,20,20,76">
+                                    <StackPanel>
+                                        <ProgressBar IsIndeterminate="True" Height="3" MinWidth="180"
+                                                     Foreground="{DynamicResource AccentBrush}"/>
+                                        <TextBlock x:Name="MediaCastStatusText"
+                                                   Text="{DynamicResource MediaCastWaitingVideo}"
+                                                   Foreground="{DynamicResource MediaOverlayTextBrush}"
+                                                   FontSize="14" TextWrapping="Wrap" TextAlignment="Center"
+                                                   MaxWidth="560" Margin="0,11,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border x:Name="MediaCastControlsPanel" Panel.ZIndex="4"
+                                        VerticalAlignment="Bottom"
+                                        Background="{DynamicResource MediaPlayerScrimBrush}"
+                                        Padding="18,32,18,14" Opacity="1">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="48"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="48"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="MediaCastCurrentTimeText" Text="00:00"
+                                                       Style="{StaticResource MediaPlayerTimeTextStyle}"
+                                                       HorizontalAlignment="Left"/>
+                                            <Slider x:Name="MediaCastSeekSlider" Grid.Column="1"
+                                                    Style="{StaticResource MediaPlayerSliderStyle}"
+                                                    Margin="8,0"
+                                                    Minimum="0" Maximum="1" Value="0"
+                                                    IsEnabled="False" IsMoveToPointEnabled="False"
+                                                    ValueChanged="OnMediaCastSeekValueChanged"
+                                                    AutomationProperties.AutomationId="MediaCastSeekSlider"
+                                                    ToolTip="{DynamicResource MediaCastSeek}"/>
+                                            <TextBlock x:Name="MediaCastDurationText" Grid.Column="2" Text="--:--"
+                                                       Style="{StaticResource MediaPlayerTimeTextStyle}"
+                                                       HorizontalAlignment="Right"/>
+                                        </Grid>
+                                        <Grid Grid.Row="1" Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                        VerticalAlignment="Center">
+                                                <Button x:Name="MediaCastSeekBackwardButton"
+                                                        Style="{StaticResource MediaPlayerIconButtonStyle}"
+                                                        Click="OnMediaCastSeekBackwardClick"
+                                                        ToolTip="{DynamicResource MediaCastSeekBackward}"
+                                                        AutomationProperties.AutomationId="MediaCastSeekBackwardButton">
+                                                    <TextBlock Text="−10" FontFamily="Segoe UI Variable Text, Segoe UI"
+                                                               FontSize="11" FontWeight="SemiBold"/>
+                                                </Button>
+                                                <Button x:Name="MediaCastPlayPauseButton"
+                                                        Style="{StaticResource MediaPlayerPrimaryButtonStyle}"
+                                                        Click="OnMediaCastPlayPauseClick"
+                                                        ToolTip="{DynamicResource MediaCastPause}"
+                                                        AutomationProperties.AutomationId="MediaCastPlayPauseButton">
+                                                    <TextBlock x:Name="MediaCastPlayPauseIcon"
+                                                               FontFamily="Segoe Fluent Icons"
+                                                               Foreground="{DynamicResource MediaPlayerPrimaryIconBrush}"
+                                                               Text="&#xE769;" FontSize="18"
+                                                               RenderTransformOrigin="0.5,0.5">
+                                                        <TextBlock.RenderTransform><ScaleTransform/></TextBlock.RenderTransform>
+                                                    </TextBlock>
+                                                </Button>
+                                                <Button x:Name="MediaCastSeekForwardButton"
+                                                        Style="{StaticResource MediaPlayerIconButtonStyle}"
+                                                        Click="OnMediaCastSeekForwardClick"
+                                                        ToolTip="{DynamicResource MediaCastSeekForward}"
+                                                        AutomationProperties.AutomationId="MediaCastSeekForwardButton">
+                                                    <TextBlock Text="+10" FontFamily="Segoe UI Variable Text, Segoe UI"
+                                                               FontSize="11" FontWeight="SemiBold"/>
+                                                </Button>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                <ComboBox x:Name="MediaCastSpeedComboBox"
+                                                          Width="66" Height="30" Margin="0,0,6,0"
+                                                          Padding="6,0"
+                                                          VerticalContentAlignment="Center"
+                                                          SelectedIndex="2"
+                                                          SelectionChanged="OnMediaCastSpeedSelectionChanged"
+                                                          ToolTip="{DynamicResource PlaybackSpeed}"
+                                                          AutomationProperties.AutomationId="MediaCastSpeedComboBox">
+                                                    <ComboBoxItem Tag="0.5" Content="0.5x"/>
+                                                    <ComboBoxItem Tag="0.75" Content="0.75x"/>
+                                                    <ComboBoxItem Tag="1" Content="1x"/>
+                                                    <ComboBoxItem Tag="1.25" Content="1.25x"/>
+                                                    <ComboBoxItem Tag="1.5" Content="1.5x"/>
+                                                    <ComboBoxItem Tag="2" Content="2x"/>
+                                                </ComboBox>
+                                                <Button x:Name="MediaCastMuteButton"
+                                                        Style="{StaticResource MediaPlayerIconButtonStyle}"
+                                                        Click="OnMediaCastMuteClick"
+                                                        ToolTip="{DynamicResource MediaCastMute}"
+                                                        AutomationProperties.AutomationId="MediaCastMuteButton">
+                                                    <TextBlock x:Name="MediaCastVolumeIcon"
+                                                               FontFamily="Segoe Fluent Icons"
+                                                               Text="&#xE767;" FontSize="15"/>
+                                                </Button>
+                                                <Slider x:Name="MediaCastVolumeSlider"
+                                                        Style="{StaticResource MediaPlayerSliderStyle}"
+                                                        Width="82" Margin="6,0,7,0"
+                                                        Minimum="0" Maximum="100" Value="100"
+                                                        VerticalAlignment="Center" IsMoveToPointEnabled="True"
+                                                        ValueChanged="OnMediaCastVolumeValueChanged"
+                                                        AutomationProperties.AutomationId="MediaCastVolumeSlider"
+                                                        ToolTip="{DynamicResource PlaybackVolume}"/>
+                                                <Button x:Name="MediaCastFullScreenButton"
+                                                        Style="{StaticResource MediaPlayerIconButtonStyle}"
+                                                        Click="OnFullScreenClick"
+                                                        ToolTip="{DynamicResource FullScreenPreview}"
+                                                        AutomationProperties.AutomationId="MediaCastFullScreenButton">
+                                                    <TextBlock x:Name="MediaCastFullScreenIcon"
+                                                               FontFamily="Segoe Fluent Icons"
+                                                               Text="&#xE740;" FontSize="16"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
                             </Grid>
-                            <Border x:Name="MediaCastStatusPanel"
-                                    Visibility="Collapsed"
-                                    AutomationProperties.AutomationId="MediaCastStatusPanel"
-                                    HorizontalAlignment="Center" VerticalAlignment="Center"
-                                    Background="{DynamicResource MediaOverlayBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                                    CornerRadius="12" Padding="20,12">
-                                <TextBlock x:Name="MediaCastStatusText"
-                                           Text="{DynamicResource MediaCastWaitingVideo}"
-                                           Foreground="{DynamicResource MediaOverlayTextBrush}"
-                                           FontSize="14" TextWrapping="Wrap" TextAlignment="Center"
-                                           MaxWidth="560"/>
-                            </Border>
-                            <Button HorizontalAlignment="Right" VerticalAlignment="Top"
-                                    Width="34" Height="30" MinHeight="30" Margin="0,8,8,0"
-                                    Padding="0" Content="&#x00D7;"
-                                    AutomationProperties.AutomationId="CloseMediaCastButton"
-                                    Click="OnMediaCastCloseClick"/>
                         </Grid>
                     </Grid>
                 </Border>
@@ -1394,10 +1786,16 @@
 
         <Grid x:Name="FooterPanel" Grid.Row="3" Margin="0,16,0,0">
             <TextBlock Text="{DynamicResource FooterConnectivity}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10"/>
-            <TextBlock Text="{Binding VersionText, RelativeSource={RelativeSource AncestorType=Window}}"
-                       Foreground="{DynamicResource MutedTextBrush}"
-                       FontSize="10" HorizontalAlignment="Right" Cursor="Hand"
-                       MouseLeftButtonDown="OnVersionClick"/>
+            <Button x:Name="VersionButton"
+                    Content="{Binding VersionText, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Foreground="{DynamicResource MutedTextBrush}" Background="Transparent"
+                    BorderBrush="Transparent" BorderThickness="0" Padding="0"
+                    Height="22" MinHeight="22" MinWidth="150" FontSize="10" FontWeight="Normal"
+                    HorizontalAlignment="Right" Cursor="Hand" FocusVisualStyle="{x:Null}"
+                    Focusable="True" IsTabStop="True" IsHitTestVisible="True"
+                    AutomationProperties.AutomationId="VersionButton"
+                    AutomationProperties.Name="{Binding VersionText, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Click="OnVersionClick"/>
         </Grid>
 
         <Popup x:Name="PreviewTransitionMask"

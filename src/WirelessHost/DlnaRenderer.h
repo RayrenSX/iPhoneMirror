@@ -13,11 +13,13 @@ namespace iPhoneMirror::wireless {
 class DlnaRenderer final {
 public:
     struct Callbacks {
-        std::function<void(std::string_view, double)> play;
+        std::function<void(std::string_view, double, double, double, bool)> play;
         std::function<void()> stop;
         std::function<void()> pause;
         std::function<void()> resume;
         std::function<void(double)> seek;
+        std::function<void(double)> set_volume;
+        std::function<void(bool, double)> set_mute;
         std::function<void(double*, double*, double*)> get_play_info;
         std::function<void(std::string_view)> log;
     };

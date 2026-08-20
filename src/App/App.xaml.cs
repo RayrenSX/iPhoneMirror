@@ -22,6 +22,11 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Keep WPF on its normal hardware-first composition path. Forcing the
+        // whole shell to SoftwareOnly also forces MediaElement composition and
+        // makes high-resolution media casting visibly drop frames. WPF still
+        // falls back to software automatically when the GPU path is not
+        // available; the native DirectComposition preview remains unaffected.
         StartupDiagnostics.Initialize();
         DispatcherUnhandledException += (_, args) =>
             StartupDiagnostics.Write("WPF dispatcher", args.Exception);
@@ -161,6 +166,23 @@ public partial class App : Application
         };
         _updateWindow = window;
         window.Closed += (_, _) => _updateWindow = null;
+        window.Show();
+    }
+
+    internal void ShowDeveloperUpdateWindow(Window owner)
+    {
+        var current = VersionManager.Current;
+        var previewVersion = new SemanticVersion(current.Major, current.Minor,
+            current.Patch + 1, "developer-preview");
+        var release = new ReleaseInfo(
+            $"v{previewVersion}", LocalizationService.Get("DeveloperPreviewUpdateTitle"),
+            LocalizationService.Get("DeveloperPreviewUpdateBody"),
+            DateTimeOffset.Now, previewVersion, true, null, null, null);
+        var window = new UpdateWindow(release, _releaseClient, autoDownload: false,
+            allowMirrorFallback: false, readOnlyPreview: true)
+        {
+            Owner = owner,
+        };
         window.Show();
     }
 

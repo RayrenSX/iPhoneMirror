@@ -57,8 +57,13 @@ internal sealed class AspectRatioWindowController : IDisposable
         _minHeightDips = minHeightDips;
         _aspectRatio = ValidAspect(sourceWidth, sourceHeight) ?? (201.0 / 437.0);
         AttachSource(source);
-        QueueResize(fitToWorkArea: true);
     }
+
+    /// <summary>
+    /// Applies the first work-area fit synchronously while a raw HWND is still
+    /// hidden, so its initial visible frame already has the final bounds.
+    /// </summary>
+    internal bool ApplyInitialBounds() => ResizeWindowToAspect(fitToWorkArea: true);
 
     internal void SetSourceDimensions(uint width, uint height)
     {
@@ -115,14 +120,14 @@ internal sealed class AspectRatioWindowController : IDisposable
         _dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
             _resizeQueued = false;
-            ResizeWindowToAspect(fitToWorkArea);
+            _ = ResizeWindowToAspect(fitToWorkArea);
         });
     }
 
-    private void ResizeWindowToAspect(bool fitToWorkArea)
+    private bool ResizeWindowToAspect(bool fitToWorkArea)
     {
         if (_disposed || _handle == 0 || !_canResize() ||
-            !GetWindowRect(_handle, out var current) || !TryGetWorkArea(out var workArea)) return;
+            !GetWindowRect(_handle, out var current) || !TryGetWorkArea(out var workArea)) return false;
 
         GetFrameSize(out var frameWidth, out var frameHeight);
         var workWidth = Math.Max(1, workArea.Right - workArea.Left);
@@ -185,7 +190,7 @@ internal sealed class AspectRatioWindowController : IDisposable
         var top = Math.Clamp(centerY - targetHeight / 2,
             workArea.Top, Math.Max(workArea.Top, workArea.Bottom - targetHeight));
 
-        _ = SetWindowPos(_handle, 0, left, top, targetWidth, targetHeight,
+        return SetWindowPos(_handle, 0, left, top, targetWidth, targetHeight,
             SwpNoActivate | SwpNoZOrder);
     }
 

@@ -841,16 +841,18 @@ std::int32_t IM_CALL im_media_cast_get_request(iPhoneMirror::MediaCastRequest* r
     request->api_version = iPhoneMirror::ApiVersion;
     request->command_id = command.id;
     request->command = static_cast<iPhoneMirror::MediaCastCommand>(command.type);
-    request->reserved = 0;
+    request->reserved = command.flags;
+    request->duration = command.duration;
     request->start_position = command.start_position;
     request->volume = command.volume;
     copy_text(request->url, command.url);
     if (command.id != 0) {
         iPhoneMirror::logging::write_event(iPhoneMirror::logging::Level::Info,
             "media", "command_received", std::format(
-                "id={} type={} start_position={:.3f} volume={:.3f} url_bytes={}",
+                "id={} type={} duration={:.3f} start_position={:.3f} volume={:.3f} url_bytes={}",
                 command.id, static_cast<std::uint32_t>(command.type),
-                command.start_position, command.volume, command.url.size()));
+                command.duration, command.start_position, command.volume,
+                command.url.size()));
     }
     last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
@@ -1928,6 +1930,52 @@ std::int32_t IM_CALL im_session_copy_latest_video_frame(iPhoneMirror::SessionHan
         : nv12_to_bgra_scaled(*frame, buffer, width, height);
     return converted ? static_cast<std::int32_t>(iPhoneMirror::Result::Ok)
         : fail(iPhoneMirror::Result::ProtocolError, L"Invalid decoded NV12 frame");
+}
+
+std::int32_t IM_CALL im_session_copy_latest_video_frame_nv12(
+    iPhoneMirror::SessionHandle handle, iPhoneMirror::VideoFrameInfo* info,
+    std::uint8_t* buffer, std::uint32_t* buffer_size,
+    std::uint32_t output_width, std::uint32_t output_height) {
+    if (!info || info->struct_size != sizeof(iPhoneMirror::VideoFrameInfo) ||
+        !buffer_size || output_width == 0 || output_height == 0 ||
+        (output_width & 1U) != 0 || (output_height & 1U) != 0) {
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"Invalid NV12 video frame request");
+    }
+    auto context = find_multi_session(handle);
+    if (!context)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    std::shared_ptr<const iPhoneMirror::media::DecodedFrame> frame;
+    {
+        std::shared_lock lock(context->lifecycle_mutex);
+        if (!context->capture)
+            return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+        frame = context->capture->latest_frame();
+    }
+    if (!frame || frame->width == 0 || frame->height == 0)
+        return fail(iPhoneMirror::Result::CaptureBackendUnavailable,
+            L"Waiting for first decoded frame");
+    const auto required =
+        iPhoneMirror::media::detail::checked_nv12_buffer_size(
+            output_width, output_height);
+    if (!required)
+        return fail(iPhoneMirror::Result::InternalError, L"NV12 frame is too large");
+    info->api_version = iPhoneMirror::ApiVersion;
+    info->width = output_width;
+    info->height = output_height;
+    info->stride = output_width;
+    info->pixel_format = 2;
+    info->timestamp_100ns = frame->timestamp_100ns;
+    const auto capacity = *buffer_size;
+    *buffer_size = *required;
+    if (!buffer || capacity < *required)
+        return static_cast<std::int32_t>(iPhoneMirror::Result::BufferTooSmall);
+    return iPhoneMirror::media::detail::copy_nv12_frame_letterboxed(
+        *frame, std::span<std::uint8_t>(buffer, *required), output_width,
+        output_height)
+        ? static_cast<std::int32_t>(iPhoneMirror::Result::Ok)
+        : fail(iPhoneMirror::Result::ProtocolError,
+            L"Invalid decoded NV12/P010 frame");
 }
 
 std::int32_t IM_CALL im_session_copy_next_audio_packet(

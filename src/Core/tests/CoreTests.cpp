@@ -37,6 +37,33 @@
 #include <thread>
 #include <vector>
 
+namespace iPhoneMirror::capture {
+
+struct WirelessReceiverHubTestAccess {
+    static void handle(WirelessReceiverHub& hub,
+        const wireless::MessageHeader& header) {
+        hub.handle_message(header, {});
+    }
+
+    static bool connected(const WirelessReceiverHub& hub, std::wstring_view id) {
+        std::scoped_lock lock(hub.mutex_);
+        const auto found = hub.clients_.find(id);
+        return found != hub.clients_.end() && found->second->connected();
+    }
+
+    static float remote_volume(const WirelessReceiverHub& hub,
+        std::wstring_view id) {
+        std::scoped_lock lock(hub.mutex_);
+        const auto found = hub.clients_.find(id);
+        if (found == hub.clients_.end())
+            throw std::runtime_error("wireless test client is missing");
+        return found->second->remote_audio_volume_.load(
+            std::memory_order_relaxed);
+    }
+};
+
+} // namespace iPhoneMirror::capture
+
 namespace {
 
 int failures{};
@@ -542,6 +569,7 @@ void test_apple_usb_filter_safety() {
     using iPhoneMirror::device::is_unsafe_apple_usb_filter_combination;
     using iPhoneMirror::device::apple_usb_parent_instance_matches_serial;
     using iPhoneMirror::device::libusb0_apple_interface_path_matches;
+    using iPhoneMirror::device::is_apple_usb_parent_instance_id;
     using iPhoneMirror::device::AppleNormalUsbStackEvidence;
     using iPhoneMirror::device::is_complete_apple_normal_usb_stack;
     const std::vector<std::wstring> libusb0{L"libusb0"};
@@ -581,6 +609,15 @@ void test_apple_usb_filter_safety() {
             L"USB\\VID_05AC&PID_12A8&MI_01\\0000810100044D600A22001E",
             "00008101-00044D600A22001E"),
         "Apple USB parent identity rejects another phone and interface children");
+    check(is_apple_usb_parent_instance_id(
+              L"USB\\VID_05AC&PID_12A8\\0000810100044D600A22001E") &&
+            !is_apple_usb_parent_instance_id(
+              L"USB\\VID_05AC&PID_12A8&MI_00\\7&2F771A7E&3&0000") &&
+            !is_apple_usb_parent_instance_id(
+              L"USB\\VID_05AC&PID_12A8&MI_01\\7&2F771A7E&3&0001") &&
+            !is_apple_usb_parent_instance_id(
+              L"USB\\VID_1234&PID_12A8\\0000810100044D600A22001E"),
+        "physical Apple USB discovery counts a composite parent once and rejects children");
 
     constexpr auto interface_path =
         LR"(\\?\USB#VID_05AC&PID_12A8#0000810100044D600A22001E#{f9f3ff14-ae21-48a0-8a25-8011a7a931d9})";
@@ -1066,6 +1103,70 @@ void test_capture_media_safety_helpers() {
     check(maximum_p010 && *maximum_p010 == 201326592,
         "maximum supported P010 allocation remains bounded");
 
+    iPhoneMirror::media::DecodedFrame nv12_frame;
+    nv12_frame.width = 4;
+    nv12_frame.height = 4;
+    nv12_frame.stride = 4;
+    nv12_frame.pixel_format = iPhoneMirror::media::PixelFormat::Nv12;
+    nv12_frame.color.range = iPhoneMirror::coremedia::ColorRange::Limited;
+    nv12_frame.nv12 = {
+        1, 2, 3, 4,
+        5, 6, 7, 8,
+        9, 10, 11, 12,
+        13, 14, 15, 16,
+        101, 102, 103, 104,
+        105, 106, 107, 108,
+    };
+    std::vector<std::uint8_t> letterboxed(8U * 8U * 3U / 2U);
+    check(iPhoneMirror::media::detail::copy_nv12_frame_letterboxed(
+            nv12_frame, letterboxed, 8, 8),
+        "NV12 recording export accepts a valid decoded frame");
+    std::vector<std::uint8_t> expected_letterbox(letterboxed.size(),
+        std::uint8_t{16});
+    std::fill(expected_letterbox.begin() + 64, expected_letterbox.end(),
+        std::uint8_t{128});
+    for (std::size_t row{}; row < 4; ++row) {
+        std::copy_n(nv12_frame.nv12.begin() + static_cast<std::ptrdiff_t>(row * 4),
+            4, expected_letterbox.begin() +
+                static_cast<std::ptrdiff_t>((row + 2) * 8 + 2));
+    }
+    for (std::size_t row{}; row < 2; ++row) {
+        std::copy_n(nv12_frame.nv12.begin() +
+                static_cast<std::ptrdiff_t>(16 + row * 4), 4,
+            expected_letterbox.begin() +
+                static_cast<std::ptrdiff_t>(64 + (row + 1) * 8 + 2));
+    }
+    check(letterboxed == expected_letterbox,
+        "NV12 recording export centers content with limited-range black bars");
+
+    iPhoneMirror::media::DecodedFrame p010_frame;
+    p010_frame.width = 4;
+    p010_frame.height = 4;
+    p010_frame.stride = 8;
+    p010_frame.pixel_format = iPhoneMirror::media::PixelFormat::P010;
+    p010_frame.color.range = iPhoneMirror::coremedia::ColorRange::Limited;
+    p010_frame.nv12.resize(48);
+    for (std::size_t component{}; component < 24; ++component) {
+        p010_frame.nv12[component * 2] = 0x55;
+        p010_frame.nv12[component * 2 + 1] =
+            static_cast<std::uint8_t>(component + 1);
+    }
+    std::vector<std::uint8_t> p010_output(24);
+    check(iPhoneMirror::media::detail::copy_nv12_frame_letterboxed(
+            p010_frame, p010_output, 4, 4),
+        "P010 recording export accepts a valid decoded frame");
+    check(std::all_of(p010_output.begin(), p010_output.end(),
+            [index = std::size_t{}](std::uint8_t value) mutable {
+                return value == ++index;
+            }),
+        "P010 recording export reduces each component to its high eight bits");
+    p010_frame.nv12.pop_back();
+    check(!iPhoneMirror::media::detail::copy_nv12_frame_letterboxed(
+            p010_frame, p010_output, 4, 4) &&
+        !iPhoneMirror::media::detail::copy_nv12_frame_letterboxed(
+            nv12_frame, letterboxed, 3, 4),
+        "NV12 recording export rejects truncated sources and odd output sizes");
+
     using iPhoneMirror::media::detail::DecoderAcceleration;
     check(iPhoneMirror::media::detail::classify_dxva_mode(0) ==
             DecoderAcceleration::Unknown &&
@@ -1398,15 +1499,29 @@ void test_wireless_i420_conversion() {
         iPhoneMirror::ApiVersion == 18 &&
         header.magic == iPhoneMirror::wireless::IpcMagic &&
         header.version == iPhoneMirror::wireless::IpcVersion &&
-        iPhoneMirror::wireless::IpcVersion == 6,
+        iPhoneMirror::wireless::IpcVersion == 7,
         "wireless IPC header layout and version are stable");
     check(static_cast<std::uint32_t>(
             iPhoneMirror::capture::MediaCastCommandType::Pause) == 3 &&
         static_cast<std::uint32_t>(
             iPhoneMirror::capture::MediaCastCommandType::Resume) == 4 &&
         static_cast<std::uint32_t>(
-            iPhoneMirror::capture::MediaCastCommandType::Seek) == 5,
+            iPhoneMirror::capture::MediaCastCommandType::Seek) == 5 &&
+        static_cast<std::uint32_t>(
+            iPhoneMirror::capture::MediaCastCommandType::Volume) == 6,
         "media playback controls have stable public ABI values");
+    check(static_cast<std::uint32_t>(
+            iPhoneMirror::wireless::MediaVolumeTarget::MirroredStream) == 1 &&
+        static_cast<std::uint32_t>(
+            iPhoneMirror::wireless::MediaVolumeTarget::MediaCast) == 2,
+        "media volume routes have stable IPC values");
+    check(static_cast<std::uint32_t>(
+            iPhoneMirror::MediaCastFlags::MuteSpecified) == 1 &&
+        static_cast<std::uint32_t>(
+            iPhoneMirror::MediaCastFlags::Muted) == 2 &&
+        iPhoneMirror::wireless::MediaVolumeMuteSpecified == 0x100 &&
+        iPhoneMirror::wireless::MediaVolumeMuted == 0x200,
+        "media mute flags have stable public and IPC values");
 }
 
 void test_wireless_multi_stream_isolation() {
@@ -1498,6 +1613,41 @@ void test_wireless_audio_only_stream() {
         "unsupported AirPlay audio does not advance the stream state");
 }
 
+void test_wireless_volume_before_connection() {
+    using iPhoneMirror::capture::WirelessReceiverHubTestAccess;
+    iPhoneMirror::capture::WirelessReceiverHub hub;
+    constexpr char device_id[] = "00:11:22:33:44:55";
+
+    iPhoneMirror::wireless::MessageHeader volume;
+    volume.type = iPhoneMirror::wireless::MessageType::MediaVolume;
+    volume.reserved = static_cast<std::uint32_t>(
+        iPhoneMirror::wireless::MediaVolumeTarget::MirroredStream);
+    volume.media_command_id = 1;
+    volume.media_volume = 0.25;
+    std::copy(std::begin(device_id), std::end(device_id), volume.device_id);
+    WirelessReceiverHubTestAccess::handle(hub, volume);
+    check(!WirelessReceiverHubTestAccess::connected(hub, L"00:11:22:33:44:55") &&
+          std::abs(WirelessReceiverHubTestAccess::remote_volume(
+              hub, L"00:11:22:33:44:55") - 0.25F) < 0.001F,
+        "AirPlay volume is retained before the connected callback");
+
+    iPhoneMirror::wireless::MessageHeader connected;
+    connected.type = iPhoneMirror::wireless::MessageType::Connected;
+    std::copy(std::begin(device_id), std::end(device_id), connected.device_id);
+    WirelessReceiverHubTestAccess::handle(hub, connected);
+    check(WirelessReceiverHubTestAccess::connected(hub, L"00:11:22:33:44:55") &&
+          std::abs(WirelessReceiverHubTestAccess::remote_volume(
+              hub, L"00:11:22:33:44:55") - 0.25F) < 0.001F,
+        "AirPlay connection consumes the retained remote volume");
+
+    auto disconnected = connected;
+    disconnected.type = iPhoneMirror::wireless::MessageType::Disconnected;
+    WirelessReceiverHubTestAccess::handle(hub, disconnected);
+    check(std::abs(WirelessReceiverHubTestAccess::remote_volume(
+              hub, L"00:11:22:33:44:55") - 1.0F) < 0.001F,
+        "AirPlay disconnect clears the retained remote volume");
+}
+
 void test_media_command_queue() {
     using iPhoneMirror::capture::MediaCastCommand;
     using iPhoneMirror::capture::MediaCastCommandType;
@@ -1517,6 +1667,64 @@ void test_media_command_queue() {
         "stale and zero media commands are rejected");
     check(queue.size() == 0 && queue.latest_id() == 3,
         "media command queue rejects duplicate and out-of-order command ids");
+
+    queue.reset();
+    check(queue.push(MediaCastCommand{.id = 4, .type = MediaCastCommandType::Volume,
+              .volume = 0.25}) &&
+          queue.push(MediaCastCommand{.id = 5, .type = MediaCastCommandType::Volume,
+              .volume = 0.75}),
+        "newer media volume commands are accepted");
+    const auto volume = queue.pop();
+    check(volume.id == 5 && volume.type == MediaCastCommandType::Volume &&
+          volume.volume == 0.75 && queue.size() == 0,
+        "pending media volume changes coalesce to the newest value");
+
+    queue.reset();
+    const auto mute_specified = static_cast<std::uint32_t>(
+        iPhoneMirror::MediaCastFlags::MuteSpecified);
+    const auto muted = static_cast<std::uint32_t>(
+        iPhoneMirror::MediaCastFlags::Muted);
+    check(queue.push(MediaCastCommand{.id = 6, .type = MediaCastCommandType::Volume,
+              .flags = mute_specified | muted, .volume = 0.25}) &&
+          queue.push(MediaCastCommand{.id = 7, .type = MediaCastCommandType::Volume,
+              .volume = 0.60}),
+        "volume coalescing accepts a base-volume change after mute");
+    const auto muted_volume = queue.pop();
+    check(muted_volume.id == 7 && muted_volume.volume == 0.60 &&
+          muted_volume.flags == (mute_specified | muted) && queue.size() == 0,
+        "base-volume coalescing preserves the latest explicit mute state");
+
+    queue.reset();
+    check(queue.push(MediaCastCommand{.id = 8, .type = MediaCastCommandType::Volume,
+              .flags = mute_specified | muted, .volume = 0.60}) &&
+          queue.push(MediaCastCommand{.id = 9, .type = MediaCastCommandType::Volume,
+              .flags = mute_specified, .volume = 0.60}),
+        "explicit unmute supersedes an earlier muted command");
+    const auto unmuted_volume = queue.pop();
+    check(unmuted_volume.id == 9 && unmuted_volume.flags == mute_specified &&
+          queue.size() == 0,
+        "volume coalescing retains an explicit unmute state");
+
+    queue.reset();
+    check(queue.push(MediaCastCommand{.id = 10,
+              .type = MediaCastCommandType::Volume,
+              .flags = mute_specified | muted, .volume = 0.20}) &&
+          queue.push(MediaCastCommand{.id = 11,
+              .type = MediaCastCommandType::Play, .volume = 0.80}) &&
+          queue.push(MediaCastCommand{.id = 12,
+              .type = MediaCastCommandType::Volume, .volume = 0.60}),
+        "media queue accepts volume changes around a new play boundary");
+    const auto old_session_volume = queue.pop();
+    const auto next_session_play = queue.pop();
+    const auto next_session_volume = queue.pop();
+    check(old_session_volume.id == 10 &&
+          old_session_volume.type == MediaCastCommandType::Volume &&
+          next_session_play.id == 11 &&
+          next_session_play.type == MediaCastCommandType::Play &&
+          next_session_volume.id == 12 &&
+          next_session_volume.type == MediaCastCommandType::Volume &&
+          next_session_volume.flags == 0 && queue.size() == 0,
+        "volume coalescing never moves mute state across Play");
 
     queue.reset();
     check(queue.push(MediaCastCommand{.id = 10, .type = MediaCastCommandType::Play}),
@@ -1662,6 +1870,7 @@ int main(int argc, char** argv) {
         test_wireless_i420_conversion();
         test_wireless_multi_stream_isolation();
         test_wireless_audio_only_stream();
+        test_wireless_volume_before_connection();
         test_media_command_queue();
         test_logging_shutdown_boundary();
     } catch (const std::exception& error) {

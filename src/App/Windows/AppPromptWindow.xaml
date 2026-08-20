@@ -18,7 +18,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid Style="{StaticResource SubWindowHeader}"
-                  MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                  animations:WindowDragBehavior.IsEnabled="True">
                 <TextBlock Text="{Binding PromptTitle}"
                            Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
                 <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCancelClick">

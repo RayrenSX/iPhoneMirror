@@ -25,6 +25,18 @@ public partial class ProjectionSettingsWindow : Wpf.Ui.Controls.FluentWindow
         _mediaOutput = mediaOutput;
     }
 
+    internal static void ShowDeveloperPreview(Window owner, object dataContext)
+    {
+        var window = new ProjectionSettingsWindow(dataContext,
+            () => Task.CompletedTask, () => Task.CompletedTask,
+            () => Task.CompletedTask, () => Task.CompletedTask,
+            () => { })
+        {
+            Owner = owner,
+        };
+        window.Show();
+    }
+
     private async void OnRefreshClick(object sender, RoutedEventArgs e) =>
         await RunAsync(_refresh);
 

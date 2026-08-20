@@ -34,7 +34,7 @@ internal static partial class DriverConstants
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "iPhoneMirror.Driver", "Packages");
 
-    [GeneratedRegex(@"^USB\\VID_05AC&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9]+$",
+    [GeneratedRegex(@"^USB\\VID_05AC&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9][A-Za-z0-9-]{6,38}$",
         RegexOptions.CultureInvariant)]
     private static partial Regex AppleParentPattern();
 

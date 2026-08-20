@@ -5,7 +5,6 @@ using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
@@ -90,20 +89,6 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
 
     private void OnLiveLogTextChanged(object sender, TextChangedEventArgs e) =>
         LiveLogTextBox.ScrollToEnd();
-
-    private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton != MouseButton.Left) return;
-        if (e.ClickCount == 2)
-        {
-            WindowState = WindowState == WindowState.Maximized
-                ? WindowState.Normal
-                : WindowState.Maximized;
-            return;
-        }
-
-        DragMove();
-    }
 
     internal void ShowDiagnostics() => AboutTabs.SelectedIndex = 2;
 

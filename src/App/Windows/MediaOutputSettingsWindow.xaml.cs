@@ -12,13 +12,15 @@ namespace IPhoneMirror.App.Windows;
 public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly MainViewModel _viewModel;
+    private readonly bool _previewOnly;
     private bool _savePromptOpen;
     private (uint Width, uint Height)? _lastDefaultSize;
 
-    internal MediaOutputSettingsWindow(MainViewModel viewModel)
+    internal MediaOutputSettingsWindow(MainViewModel viewModel, bool previewOnly = false)
     {
         InitializeComponent();
         _viewModel = viewModel;
+        _previewOnly = previewOnly;
         DataContext = viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         Loaded += OnLoaded;
@@ -31,6 +33,12 @@ public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
         RecordFpsBox.Text = StreamFpsBox.Text = "30";
         RecordBitrateBox.Text = StreamBitrateBox.Text = "6000";
         VirtualCameraFpsBox.SelectedIndex = 0;
+        if (_previewOnly)
+        {
+            FeedbackText.Text = LocalizationService.Get("DeveloperReadOnlyPreview");
+            UpdateStartButtons();
+            return;
+        }
         // Re-probe on each opening so a user can install FFmpeg or update PATH
         // without restarting the entire application.
         await RunAsync(() => _viewModel.EnsureMediaOutputCapabilitiesAsync(force: true));
@@ -146,6 +154,12 @@ public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
     private void UpdateStartButtons()
     {
         if (!IsLoaded) return;
+        if (_previewOnly)
+        {
+            StartRecordingButton.IsEnabled = false;
+            StartStreamingButton.IsEnabled = false;
+            return;
+        }
         StartRecordingButton.IsEnabled = _viewModel.CanStartMediaOutput &&
             _viewModel.CanRecordMediaOutput;
         StartStreamingButton.IsEnabled = _viewModel.CanStartMediaOutput &&

@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="..\DriverInstaller\GlobalUsings.cs" Link="GlobalUsings.cs" />
     <Compile Include="..\Shared\Networking\SegmentedHttpDownloader.cs" Link="Networking\SegmentedHttpDownloader.cs" />
+    <Compile Include="..\Shared\Security\ElevationPathLock.cs" Link="Security\ElevationPathLock.cs" />
     <Compile Include="..\DriverInstaller\Models\DriverModels.cs" Link="DriverModels.cs" />
     <Compile Include="..\DriverInstaller\Services\DriverConstants.cs" Link="DriverConstants.cs" />
     <Compile Include="..\DriverInstaller\Services\DriverPayload.cs" Link="DriverPayload.cs" />

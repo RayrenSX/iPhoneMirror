@@ -4,6 +4,7 @@
 #include "Audio/WasapiRenderer.h"
 #include "IpcProtocol.h"
 #include "Logging.h"
+#include "iPhoneMirror/CoreApi.h"
 
 #include <Windows.h>
 #include <objbase.h>
@@ -220,11 +221,38 @@ void MediaCommandQueue::reset() noexcept {
 bool MediaCommandQueue::push(MediaCastCommand command) {
     if (command.id == 0 || command.id <= latest_id_) return false;
     latest_id_ = command.id;
+    if (command.type == MediaCastCommandType::Volume) {
+        auto coalesce_begin = commands_.begin();
+        const auto boundary = std::ranges::find_if(
+            commands_.rbegin(), commands_.rend(), [](const auto& queued) {
+                return queued.type == MediaCastCommandType::Play ||
+                    queued.type == MediaCastCommandType::Stop;
+            });
+        if (boundary != commands_.rend()) coalesce_begin = boundary.base();
+        for (auto position = coalesce_begin; position != commands_.end();) {
+            if (position->type == MediaCastCommandType::Volume) {
+                if ((command.flags & static_cast<std::uint32_t>(
+                        iPhoneMirror::MediaCastFlags::MuteSpecified)) == 0 &&
+                    (position->flags & static_cast<std::uint32_t>(
+                        iPhoneMirror::MediaCastFlags::MuteSpecified)) != 0) {
+                    command.flags |= position->flags &
+                        (static_cast<std::uint32_t>(
+                            iPhoneMirror::MediaCastFlags::MuteSpecified) |
+                         static_cast<std::uint32_t>(
+                            iPhoneMirror::MediaCastFlags::Muted));
+                }
+                position = commands_.erase(position);
+            } else {
+                ++position;
+            }
+        }
+    }
     if (commands_.size() >= MaxPendingCommands) {
         const auto expendable = std::ranges::find_if(commands_, [](const auto& queued) {
             return queued.type == MediaCastCommandType::Pause ||
                 queued.type == MediaCastCommandType::Resume ||
-                queued.type == MediaCastCommandType::Seek;
+                queued.type == MediaCastCommandType::Seek ||
+                queued.type == MediaCastCommandType::Volume;
         });
         if (expendable != commands_.end()) commands_.erase(expendable);
         else commands_.pop_front();
@@ -359,9 +387,24 @@ void WirelessClientStream::set_audio_enabled(bool enabled) noexcept {
 void WirelessClientStream::set_audio_volume(float volume) noexcept {
     if (!std::isfinite(volume)) return;
     const auto clamped = std::clamp(volume, 0.0F, 1.0F);
-    audio_volume_.store(clamped, std::memory_order_relaxed);
+    local_audio_volume_.store(clamped, std::memory_order_relaxed);
     std::scoped_lock lock(audio_mutex_);
-    if (audio_renderer_) audio_renderer_->set_volume(clamped);
+    if (audio_renderer_) audio_renderer_->set_volume(effective_audio_volume());
+}
+
+void WirelessClientStream::set_remote_audio_volume(float volume) noexcept {
+    if (!std::isfinite(volume)) return;
+    remote_audio_volume_.store(std::clamp(volume, 0.0F, 1.0F),
+        std::memory_order_relaxed);
+    std::scoped_lock lock(audio_mutex_);
+    if (audio_renderer_) audio_renderer_->set_volume(effective_audio_volume());
+}
+
+float WirelessClientStream::effective_audio_volume() const noexcept {
+    return std::clamp(
+        local_audio_volume_.load(std::memory_order_relaxed) *
+            remote_audio_volume_.load(std::memory_order_relaxed),
+        0.0F, 1.0F);
 }
 
 void WirelessClientStream::set_target_fps(std::uint32_t target_fps) noexcept {
@@ -479,7 +522,7 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
             try {
                 audio_renderer_ = std::make_unique<audio::WasapiRenderer>(format,
                     play_audio_.load(std::memory_order_relaxed),
-                    audio_volume_.load(std::memory_order_relaxed),
+                    effective_audio_volume(),
                     audio::WasapiBufferingMode::NetworkJitter);
             } catch (const std::exception& error) {
                 audio_renderer_failed_ = true;
@@ -500,6 +543,7 @@ void WirelessClientStream::clear_media() noexcept {
         snapshot_.fps = snapshot_.latency_ms = 0;
         snapshot_.audio_sample_rate = snapshot_.audio_channels = 0;
     }
+    remote_audio_volume_.store(1.0F, std::memory_order_relaxed);
     stop_audio_renderer();
 }
 
@@ -876,6 +920,10 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
             !std::isfinite(header.media_position) || header.media_position < 0 ||
             !std::isfinite(header.media_volume))
             throw std::runtime_error("invalid media play command");
+        if ((header.reserved & ~wireless::MediaPlayAllowedMask) != 0 ||
+            (header.reserved & wireless::MediaVolumeMuted) != 0 &&
+            (header.reserved & wireless::MediaVolumeMuteSpecified) == 0)
+            throw std::runtime_error("invalid media play flags");
         const auto encoded_url = std::string_view(
             reinterpret_cast<const char*>(payload.data()), payload.size());
         if (!wireless::is_valid_http_url(encoded_url))
@@ -887,7 +935,16 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
             accepted = media_commands_.push({
                 .id = header.media_command_id,
                 .type = MediaCastCommandType::Play,
+                .flags =
+                    (header.reserved & wireless::MediaVolumeMuteSpecified ?
+                        static_cast<std::uint32_t>(
+                            iPhoneMirror::MediaCastFlags::MuteSpecified) : 0U) |
+                    (header.reserved & wireless::MediaVolumeMuted ?
+                        static_cast<std::uint32_t>(
+                            iPhoneMirror::MediaCastFlags::Muted) : 0U),
                 .url = url,
+                .duration = std::isfinite(header.media_duration) &&
+                    header.media_duration > 0 ? header.media_duration : 0.0,
                 .start_position = std::max(0.0, header.media_position),
                 .volume = std::clamp(header.media_volume, 0.0, 1.0),
             });
@@ -938,6 +995,57 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
             "wireless_hub media_control type={} command={} position={:.3f}",
             static_cast<unsigned>(type), header.media_command_id,
             header.media_position));
+        break;
+    }
+    case wireless::MessageType::MediaVolume: {
+        if (header.media_command_id == 0 || !payload.empty() ||
+            !std::isfinite(header.media_volume) || header.media_volume < 0.0 ||
+            header.media_volume > 1.0)
+            throw std::runtime_error("invalid media volume command");
+        if ((header.reserved & ~wireless::MediaVolumeAllowedMask) != 0 ||
+            (header.reserved & wireless::MediaVolumeMuted) != 0 &&
+            (header.reserved & wireless::MediaVolumeMuteSpecified) == 0)
+            throw std::runtime_error("invalid media volume flags");
+        const auto target = static_cast<wireless::MediaVolumeTarget>(
+            header.reserved & wireless::MediaVolumeTargetMask);
+        const auto volume_flags = header.reserved &
+            (wireless::MediaVolumeMuteSpecified | wireless::MediaVolumeMuted);
+        const auto has_device = !header_text(header.device_id).empty();
+        if (target == wireless::MediaVolumeTarget::MirroredStream) {
+            if (!has_device || volume_flags != 0)
+                throw std::runtime_error("mirrored volume is missing device id");
+            // Volume may be the first callback for RAOP-only senders. Keep it
+            // on a disconnected placeholder until Connected or audio arrives.
+            if (const auto stream = get_or_create(header, false))
+                stream->set_remote_audio_volume(
+                    static_cast<float>(header.media_volume));
+            logging::write(std::format(
+                "wireless_hub stream_volume command={} value={:.3f}",
+                header.media_command_id, header.media_volume));
+            break;
+        }
+        if (target != wireless::MediaVolumeTarget::MediaCast || has_device)
+            throw std::runtime_error("invalid media volume target");
+        bool accepted{};
+        {
+            std::scoped_lock lock(mutex_);
+            accepted = media_commands_.push({
+                .id = header.media_command_id,
+                .type = MediaCastCommandType::Volume,
+                .flags =
+                    (volume_flags & wireless::MediaVolumeMuteSpecified ?
+                        static_cast<std::uint32_t>(
+                            iPhoneMirror::MediaCastFlags::MuteSpecified) : 0U) |
+                    (volume_flags & wireless::MediaVolumeMuted ?
+                        static_cast<std::uint32_t>(
+                            iPhoneMirror::MediaCastFlags::Muted) : 0U),
+                .volume = header.media_volume,
+            });
+        }
+        if (!accepted) break;
+        logging::write(std::format(
+            "wireless_hub media_volume command={} value={:.3f}",
+            header.media_command_id, header.media_volume));
         break;
     }
     case wireless::MessageType::PlaybackState:

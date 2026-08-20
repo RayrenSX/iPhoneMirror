@@ -39,6 +39,14 @@ std::wstring uppercase(std::wstring value) {
     return value;
 }
 
+std::wstring instance_id(HDEVINFO set, SP_DEVINFO_DATA& data) {
+    std::vector<wchar_t> buffer(MAX_DEVICE_ID_LEN);
+    if (!SetupDiGetDeviceInstanceIdW(set, &data, buffer.data(),
+            static_cast<DWORD>(buffer.size()), nullptr))
+        return {};
+    return buffer.data();
+}
+
 } // namespace
 
 
@@ -86,6 +94,8 @@ std::vector<PhysicalAppleDevice> discover_physical_apple_usb_devices() {
             if (GetLastError() == ERROR_NO_MORE_ITEMS) break;
             continue;
         }
+        const auto id = instance_id(raw, data);
+        if (!is_apple_usb_parent_instance_id(id)) continue;
         const std::wstring hardware = property(raw, data, SPDRP_HARDWAREID);
         const std::wstring upper_hardware = uppercase(hardware);
         if (upper_hardware.find(L"USB\\VID_05AC") == std::wstring::npos) continue;
@@ -95,6 +105,26 @@ std::vector<PhysicalAppleDevice> discover_physical_apple_usb_devices() {
         results.push_back({std::move(description), hardware});
     }
     return results;
+}
+
+bool is_apple_usb_parent_instance_id(
+    std::wstring_view instance_id) noexcept {
+    try {
+        const auto upper = uppercase(std::wstring(instance_id));
+        constexpr std::wstring_view prefix = L"USB\\VID_05AC&PID_";
+        if (!std::wstring_view(upper).starts_with(prefix) ||
+            upper.find(L"&MI_") != std::wstring::npos)
+            return false;
+        const auto separator = upper.find(L'\\', prefix.size());
+        if (separator != prefix.size() + 4 || separator + 1 >= upper.size() ||
+            upper.find(L'\\', separator + 1) != std::wstring::npos)
+            return false;
+        return std::all_of(upper.begin() + static_cast<std::ptrdiff_t>(prefix.size()),
+            upper.begin() + static_cast<std::ptrdiff_t>(separator),
+            [](wchar_t character) { return std::iswxdigit(character) != 0; });
+    } catch (...) {
+        return false;
+    }
 }
 
 std::string normalized_serial(std::wstring_view value) {
@@ -121,9 +151,7 @@ std::string normalized_serial(std::string_view value) {
 bool apple_usb_parent_instance_matches_serial(
     std::wstring_view instance_id, std::string_view serial) noexcept {
     try {
-        const auto upper_instance = uppercase(std::wstring(instance_id));
-        if (!upper_instance.starts_with(L"USB\\VID_05AC&PID_") ||
-            upper_instance.find(L"&MI_") != std::wstring::npos)
+        if (!is_apple_usb_parent_instance_id(instance_id))
             return false;
         const auto separator = instance_id.rfind(L'\\');
         if (separator == std::wstring_view::npos ||

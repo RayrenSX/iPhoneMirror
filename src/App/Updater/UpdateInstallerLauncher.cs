@@ -1,6 +1,10 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using Microsoft.Win32.SafeHandles;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using IPhoneMirror.App.Services;
@@ -9,6 +13,21 @@ namespace IPhoneMirror.App.Updater;
 
 internal static class UpdateInstallerLauncher
 {
+    private const uint SeeMaskNoCloseProcess = 0x00000040;
+    private const uint SeeMaskNoConsole = 0x00008000;
+    private const int SwHide = 0;
+    private const uint FileAddFile = 0x00000002;
+    private const uint FileAddSubdirectory = 0x00000004;
+    private const uint FileDeleteChild = 0x00000040;
+    private const uint DeleteAccess = 0x00010000;
+    private const uint WriteDac = 0x00040000;
+    private const uint WriteOwner = 0x00080000;
+    private const uint OpenExisting = 3;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const int ErrorAccessDenied = 5;
+    private const int ErrorPrivilegeNotHeld = 1314;
+
     private const string ZipHelperResourceName =
         "IPhoneMirror.App.Updater.Apply-ZipUpdate.ps1";
     private const string VerifiedScriptBootstrap = """
@@ -150,20 +169,36 @@ internal static class UpdateInstallerLauncher
             StringComparison.OrdinalIgnoreCase);
         if (isInstaller)
         {
-            using (LockAndValidatePackage(update.Path, update.VerifiedSha256!)) { }
-            using var process = Process.Start(BuildElevatedPowerShellStartInfo(
-                Path.GetDirectoryName(update.Path) ?? AppContext.BaseDirectory,
-                BuildVerifiedInstallerBootstrap(update.Path,
-                    update.VerifiedSha256!, BuildInstallerArguments())));
-            if (process is null)
-                throw new InvalidOperationException("The update installer could not be started.");
+            // Keep the read handle open through ShellExecuteEx. FileShare.Read
+            // prevents a medium-integrity process from replacing or deleting
+            // the package between the digest check and the elevated bootstrap
+            // opening it for its own verification.
+            using var packageLock = LockAndValidatePackage(
+                update.Path, update.VerifiedSha256!);
+            var processId = StartPowerShell(BuildElevatedPowerShellStartInfo(
+                    Path.GetDirectoryName(update.Path) ?? AppContext.BaseDirectory,
+                    BuildVerifiedInstallerBootstrap(update.Path,
+                        update.VerifiedSha256!, BuildInstallerArguments())));
             DiagnosticLogger.Info("updater", "installer_launched",
-                ("format", "exe"), ("pid", process.Id));
+                ("format", "exe"), ("pid", processId));
             return;
         }
 
         if (!update.Asset.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The downloaded update format is unsupported.");
+        // Validate the integrity boundary before materializing a helper. A
+        // rejected elevated portable update must not leave temporary files.
+        if (IsCurrentProcessElevated())
+            throw new InvalidOperationException(
+                "Portable updates must be started from a non-administrator " +
+                "iPhoneMirror process. Restart the application normally and try again.");
+        var requiresElevation = !CanUpdateDirectoryWithoutElevation(
+            AppContext.BaseDirectory);
+        if (requiresElevation && !CanSafelyElevateDirectoryTree(
+                AppContext.BaseDirectory))
+            throw new InvalidOperationException(
+                "The portable installation contains a writable or reparse-point " +
+                "subdirectory and cannot be updated safely with administrator privileges.");
         var helperBytes = ReadZipHelperBytes();
         var helperSha256 = Convert.ToHexString(SHA256.HashData(helperBytes));
         var helperDirectory = Path.Combine(Path.GetTempPath(), "iPhoneMirror",
@@ -184,24 +219,77 @@ internal static class UpdateInstallerLauncher
             AppContext.BaseDirectory, executable, update.VerifiedSha256!, waitProcessIds);
         var encodedBootstrap = BuildVerifiedScriptBootstrap(helperScript,
             helperSha256, scriptArguments, cleanupDirectory: true);
-        var start = BuildElevatedPowerShellStartInfo(helperDirectory,
-            encodedBootstrap);
+        var start = requiresElevation
+            ? BuildElevatedPowerShellStartInfo(helperDirectory, encodedBootstrap)
+            : BuildUnelevatedPowerShellStartInfo(helperDirectory, encodedBootstrap);
         try
         {
-            using var process = Process.Start(start) ??
-                throw new InvalidOperationException(
-                    "The ZIP update helper could not be started.");
+            _ = StartPowerShell(start);
         }
         catch
         {
             TryDeleteHelperDirectory(helperDirectory);
             throw;
         }
-        DiagnosticLogger.Info("updater", "installer_launched", ("format", "zip"));
+        DiagnosticLogger.Info("updater", "installer_launched", ("format", "zip"),
+            ("elevated", requiresElevation));
+    }
+
+    private static int StartPowerShell(ProcessStartInfo start)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException(
+                "Windows update helpers are only supported on Windows.");
+
+        var executeInfo = new ShellExecuteInfo
+        {
+            Size = (uint)Marshal.SizeOf<ShellExecuteInfo>(),
+            Mask = SeeMaskNoCloseProcess | SeeMaskNoConsole,
+            Verb = string.IsNullOrWhiteSpace(start.Verb) ? null : start.Verb,
+            File = start.FileName,
+            Parameters = string.Join(" ",
+                start.ArgumentList.Select(QuoteCommandLineArgument)),
+            Directory = start.WorkingDirectory,
+            Show = SwHide,
+        };
+        if (!ShellExecuteExW(ref executeInfo))
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error,
+                "Windows could not start the update helper.");
+        }
+
+        try
+        {
+            return executeInfo.Process == 0
+                ? 0
+                : checked((int)GetProcessId(executeInfo.Process));
+        }
+        finally
+        {
+            if (executeInfo.Process != 0)
+                _ = CloseHandle(executeInfo.Process);
+        }
+    }
+
+    private static string QuoteCommandLineArgument(string value)
+    {
+        if (value.Length == 0) return "\"\"";
+        if (value.All(character => !char.IsWhiteSpace(character) && character != '\"'))
+            return value;
+        return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
     }
 
     internal static ProcessStartInfo BuildElevatedPowerShellStartInfo(
         string workingDirectory, string encodedCommand)
+        => BuildPowerShellStartInfo(workingDirectory, encodedCommand, "runas");
+
+    internal static ProcessStartInfo BuildUnelevatedPowerShellStartInfo(
+        string workingDirectory, string encodedCommand)
+        => BuildPowerShellStartInfo(workingDirectory, encodedCommand, null);
+
+    private static ProcessStartInfo BuildPowerShellStartInfo(
+        string workingDirectory, string encodedCommand, string? verb)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(encodedCommand);
@@ -210,7 +298,7 @@ internal static class UpdateInstallerLauncher
             FileName = Path.Combine(Environment.SystemDirectory,
                 "WindowsPowerShell", "v1.0", "powershell.exe"),
             UseShellExecute = true,
-            Verb = "runas",
+            Verb = verb ?? string.Empty,
             WorkingDirectory = workingDirectory,
             WindowStyle = ProcessWindowStyle.Hidden,
         };
@@ -221,6 +309,122 @@ internal static class UpdateInstallerLauncher
                  })
             start.ArgumentList.Add(argument);
         return start;
+    }
+
+    internal static bool CanUpdateDirectoryWithoutElevation(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        var root = Path.GetFullPath(directory);
+        var probe = Path.Combine(root,
+            $".iphonemirror-update-write-probe-{Guid.NewGuid():N}.tmp");
+        var created = false;
+        try
+        {
+            using (var stream = new FileStream(probe, FileMode.CreateNew,
+                       FileAccess.Write, FileShare.None, 1, FileOptions.WriteThrough))
+            {
+                created = true;
+                stream.WriteByte(0);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Delete(probe);
+            created = false;
+            return true;
+        }
+        catch (Exception error) when (error is UnauthorizedAccessException or
+                                      System.Security.SecurityException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (created)
+            {
+                try { File.Delete(probe); }
+                catch (Exception error) when (error is IOException or
+                                              UnauthorizedAccessException) { }
+            }
+        }
+    }
+
+    internal static bool CanSafelyElevateDirectoryTree(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        try
+        {
+            // A protected child is not a safe elevation boundary when its
+            // parent can still replace it. Validate every existing component
+            // back to the volume root before inspecting the update tree.
+            for (var current = root;;)
+            {
+                if (IsReparseDirectory(current) || HasAnyDirectoryAccess(current,
+                        DeleteAccess, WriteDac, WriteOwner))
+                    return false;
+                var parent = Directory.GetParent(current)?.FullName;
+                if (string.IsNullOrEmpty(parent)) break;
+                if (HasAnyDirectoryAccess(parent, FileDeleteChild,
+                        WriteDac, WriteOwner))
+                    return false;
+                current = parent;
+            }
+
+            var pending = new Stack<string>();
+            pending.Push(root);
+            while (pending.TryPop(out var current))
+            {
+                // Creating either a file or directory is enough to insert a
+                // link at a future payload path. DELETE_CHILD and ACL/owner
+                // rights can similarly make a checked component replaceable.
+                if (IsReparseDirectory(current) || HasAnyDirectoryAccess(current,
+                        FileAddFile, FileAddSubdirectory, FileDeleteChild,
+                        DeleteAccess, WriteDac, WriteOwner))
+                    return false;
+                foreach (var child in Directory.EnumerateDirectories(current, "*",
+                             SearchOption.TopDirectoryOnly))
+                    pending.Push(child);
+            }
+            return true;
+        }
+        catch (Exception error) when (error is IOException or
+                                      UnauthorizedAccessException or
+                                      System.Security.SecurityException or
+                                      Win32Exception)
+        {
+            // An elevated helper may only consume a tree whose complete path
+            // topology was inspected at the caller's lower integrity level.
+            return false;
+        }
+    }
+
+    private static bool IsReparseDirectory(string directory) =>
+        (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0;
+
+    private static bool HasAnyDirectoryAccess(string directory,
+        params uint[] accessMasks)
+    {
+        foreach (var accessMask in accessMasks)
+        {
+            using var handle = CreateFileW(directory, accessMask,
+                FileShare.Read | FileShare.Write | FileShare.Delete,
+                0, OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint, 0);
+            if (!handle.IsInvalid) return true;
+
+            var error = Marshal.GetLastWin32Error();
+            if (error is ErrorAccessDenied or ErrorPrivilegeNotHeld) continue;
+            throw new Win32Exception(error,
+                $"Windows could not inspect update-directory access: {directory}");
+        }
+        return false;
+    }
+
+    internal static bool IsCurrentProcessElevated()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        using var identity = WindowsIdentity.GetCurrent();
+        return new WindowsPrincipal(identity).IsInRole(
+            WindowsBuiltInRole.Administrator);
     }
 
     internal static void ValidateAssetForDeployment(string assetName,
@@ -359,6 +563,44 @@ internal static class UpdateInstallerLauncher
 
     private static bool IsSha256(string? value) =>
         value is { Length: 64 } && value.All(Uri.IsHexDigit);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ShellExecuteInfo
+    {
+        public uint Size;
+        public uint Mask;
+        public nint Window;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? Verb;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? File;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? Parameters;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? Directory;
+        public int Show;
+        public nint Instance;
+        public nint IdList;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? Class;
+        public nint ClassKey;
+        public uint HotKey;
+        public nint IconOrMonitor;
+        public nint Process;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true,
+        SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShellExecuteExW(ref ShellExecuteInfo executeInfo);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint GetProcessId(nint process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(nint handle);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true,
+        SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(string fileName,
+        uint desiredAccess, FileShare shareMode, nint securityAttributes,
+        uint creationDisposition, uint flagsAndAttributes, nint templateFile);
 
     internal static IReadOnlyList<int> FindDriverProcessIds(string appDirectory)
     {

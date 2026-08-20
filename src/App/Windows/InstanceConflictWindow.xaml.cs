@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using IPhoneMirror.App.Localization;
@@ -10,21 +9,38 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class InstanceConflictWindow : Wpf.Ui.Controls.FluentWindow
 {
-    private readonly SingleInstanceCoordinator _coordinator;
+    private readonly SingleInstanceCoordinator? _coordinator;
     private bool _allowClose;
     private bool _isClosingOtherInstances;
+    private readonly bool _previewOnly;
 
-    internal InstanceConflictWindow(SingleInstanceCoordinator coordinator)
+    internal InstanceConflictWindow(SingleInstanceCoordinator coordinator,
+        bool previewOnly = false)
     {
         _coordinator = coordinator;
+        _previewOnly = previewOnly;
         InitializeComponent();
+        if (_previewOnly)
+        {
+            CloseOtherInstancesButton.IsEnabled = false;
+            CloseCurrentInstanceButton.IsEnabled = false;
+        }
+    }
+
+    internal static void ShowDeveloperPreview(Window owner)
+    {
+        var window = new InstanceConflictWindow(null!, previewOnly: true)
+        {
+            Owner = owner,
+        };
+        window.Show();
     }
 
     internal bool ContinueWithCurrentInstance { get; private set; }
 
     private async void OnCloseOtherInstancesClick(object sender, RoutedEventArgs e)
     {
-        if (_isClosingOtherInstances) return;
+        if (_previewOnly || _coordinator is null || _isClosingOtherInstances) return;
         SetBusy(true);
         try
         {
@@ -53,6 +69,11 @@ public partial class InstanceConflictWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnCloseCurrentClick(object sender, RoutedEventArgs e)
     {
+        if (_previewOnly)
+        {
+            Close();
+            return;
+        }
         DiagnosticLogger.Info("lifecycle", "instance_conflict_resolved",
             ("action", "close_current"));
         ContinueWithCurrentInstance = false;
@@ -104,8 +125,4 @@ public partial class InstanceConflictWindow : Wpf.Ui.Controls.FluentWindow
         _allowClose = true;
     }
 
-    private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton == MouseButton.Left) DragMove();
-    }
 }

@@ -17,6 +17,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <mutex>
@@ -385,6 +386,159 @@ std::optional<std::uint32_t> checked_video_buffer_size(
 std::optional<std::uint32_t> checked_nv12_buffer_size(
     std::uint32_t width, std::uint32_t height) noexcept {
     return checked_video_buffer_size(width, height, PixelFormat::Nv12);
+}
+
+bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
+    std::span<std::uint8_t> output, std::uint32_t output_width,
+    std::uint32_t output_height) noexcept {
+    if (frame.width == 0 || frame.height == 0 || output_width == 0 ||
+        output_height == 0 || (output_width & 1U) != 0 ||
+        (output_height & 1U) != 0) {
+        return false;
+    }
+    const auto required = checked_nv12_buffer_size(output_width, output_height);
+    if (!required || output.size() < *required) return false;
+
+    const auto source_stride = static_cast<std::size_t>(std::abs(frame.stride));
+    const auto component_bytes = frame.pixel_format == PixelFormat::P010 ? 2U : 1U;
+    const auto source_y_row_bytes = static_cast<std::size_t>(frame.width) *
+        component_bytes;
+    const auto source_uv_pairs = static_cast<std::size_t>(
+        (frame.width + 1U) / 2U);
+    const auto source_uv_row_bytes = source_uv_pairs * 2U * component_bytes;
+    if (source_stride < std::max(source_y_row_bytes, source_uv_row_bytes))
+        return false;
+
+    const auto allocated_height_candidate = source_stride == 0 ? 0U :
+        (frame.nv12.size() * 2U) / (source_stride * 3U);
+    auto allocated_height = static_cast<std::size_t>(frame.height);
+    if (allocated_height_candidate >= frame.height) {
+        const auto candidate_required = source_stride * allocated_height_candidate +
+            source_stride * ((allocated_height_candidate + 1U) / 2U);
+        if (candidate_required <= frame.nv12.size())
+            allocated_height = allocated_height_candidate;
+    }
+    const auto source_y_bytes = source_stride * allocated_height;
+    const auto source_required = source_y_bytes + source_stride *
+        ((allocated_height + 1U) / 2U);
+    if (frame.nv12.size() < source_required) return false;
+
+    const auto output_y_bytes = static_cast<std::size_t>(output_width) *
+        output_height;
+    const auto black_y = frame.color.range == coremedia::ColorRange::Full
+        ? std::uint8_t{0} : std::uint8_t{16};
+    std::fill_n(output.data(), output_y_bytes, black_y);
+    std::fill(output.begin() + static_cast<std::ptrdiff_t>(output_y_bytes),
+        output.begin() + static_cast<std::ptrdiff_t>(*required),
+        std::uint8_t{128});
+
+    const auto scale = std::min(1.0, std::min(
+        static_cast<double>(output_width) / frame.width,
+        static_cast<double>(output_height) / frame.height));
+    const auto even_dimension = [](std::uint32_t value,
+        std::uint32_t limit) noexcept {
+        value = std::min(value, limit);
+        if (value < 2U) return std::uint32_t{2};
+        return value & ~1U;
+    };
+    const auto content_width = even_dimension(
+        std::max<std::uint32_t>(1U, static_cast<std::uint32_t>(
+            std::lround(frame.width * scale))), output_width);
+    const auto content_height = even_dimension(
+        std::max<std::uint32_t>(1U, static_cast<std::uint32_t>(
+            std::lround(frame.height * scale))), output_height);
+    const auto left = ((output_width - content_width) / 2U) & ~1U;
+    const auto top = ((output_height - content_height) / 2U) & ~1U;
+    const auto* source_y = frame.nv12.data();
+    const auto* source_uv = source_y + source_y_bytes;
+    auto* destination_y = output.data();
+    auto* destination_uv = output.data() + output_y_bytes;
+
+    if (frame.pixel_format == PixelFormat::Nv12 &&
+        content_width == frame.width && content_height == frame.height) {
+        for (std::uint32_t y = 0; y < content_height; ++y) {
+            std::memcpy(destination_y + static_cast<std::size_t>(top + y) *
+                output_width + left, source_y + static_cast<std::size_t>(y) *
+                source_stride, content_width);
+        }
+        for (std::uint32_t y = 0; y < content_height / 2U; ++y) {
+            std::memcpy(destination_uv + static_cast<std::size_t>(top / 2U + y) *
+                output_width + left, source_uv + static_cast<std::size_t>(y) *
+                source_stride, content_width);
+        }
+        return true;
+    }
+
+    static thread_local std::uint32_t cached_source_width{};
+    static thread_local std::uint32_t cached_source_height{};
+    static thread_local std::uint32_t cached_content_width{};
+    static thread_local std::uint32_t cached_content_height{};
+    static thread_local std::vector<std::uint32_t> x_map;
+    static thread_local std::vector<std::uint32_t> y_map;
+    static thread_local std::vector<std::uint32_t> uv_x_map;
+    static thread_local std::vector<std::uint32_t> uv_y_map;
+    if (cached_source_width != frame.width ||
+        cached_source_height != frame.height ||
+        cached_content_width != content_width ||
+        cached_content_height != content_height) {
+        x_map.resize(content_width);
+        y_map.resize(content_height);
+        uv_x_map.resize(content_width / 2U);
+        uv_y_map.resize(content_height / 2U);
+        for (std::uint32_t x = 0; x < content_width; ++x) {
+            x_map[x] = std::min<std::uint32_t>(frame.width - 1U,
+                static_cast<std::uint32_t>(static_cast<std::uint64_t>(x) *
+                    frame.width / content_width));
+        }
+        for (std::uint32_t y = 0; y < content_height; ++y) {
+            y_map[y] = std::min<std::uint32_t>(frame.height - 1U,
+                static_cast<std::uint32_t>(static_cast<std::uint64_t>(y) *
+                    frame.height / content_height));
+        }
+        const auto source_uv_height = (frame.height + 1U) / 2U;
+        for (std::uint32_t x = 0; x < content_width / 2U; ++x) {
+            uv_x_map[x] = std::min<std::uint32_t>(
+                static_cast<std::uint32_t>(source_uv_pairs - 1U),
+                static_cast<std::uint32_t>(static_cast<std::uint64_t>(x) *
+                    source_uv_pairs / (content_width / 2U)));
+        }
+        for (std::uint32_t y = 0; y < content_height / 2U; ++y) {
+            uv_y_map[y] = std::min<std::uint32_t>(source_uv_height - 1U,
+                static_cast<std::uint32_t>(static_cast<std::uint64_t>(y) *
+                    source_uv_height / (content_height / 2U)));
+        }
+        cached_source_width = frame.width;
+        cached_source_height = frame.height;
+        cached_content_width = content_width;
+        cached_content_height = content_height;
+    }
+
+    const auto sample_8bit = [&](const std::uint8_t* row,
+        std::size_t component) noexcept {
+        return frame.pixel_format == PixelFormat::P010
+            ? row[component * 2U + 1U] : row[component];
+    };
+    for (std::uint32_t y = 0; y < content_height; ++y) {
+        const auto* source_row = source_y + static_cast<std::size_t>(y_map[y]) *
+            source_stride;
+        auto* destination_row = destination_y +
+            static_cast<std::size_t>(top + y) * output_width + left;
+        for (std::uint32_t x = 0; x < content_width; ++x)
+            destination_row[x] = sample_8bit(source_row, x_map[x]);
+    }
+    for (std::uint32_t y = 0; y < content_height / 2U; ++y) {
+        const auto* source_row = source_uv +
+            static_cast<std::size_t>(uv_y_map[y]) * source_stride;
+        auto* destination_row = destination_uv +
+            static_cast<std::size_t>(top / 2U + y) * output_width + left;
+        for (std::uint32_t x = 0; x < content_width / 2U; ++x) {
+            const auto source_component = static_cast<std::size_t>(uv_x_map[x]) * 2U;
+            destination_row[x * 2U] = sample_8bit(source_row, source_component);
+            destination_row[x * 2U + 1U] = sample_8bit(source_row,
+                source_component + 1U);
+        }
+    }
+    return true;
 }
 
 DecoderAcceleration classify_dxva_mode(std::int32_t mode) noexcept {

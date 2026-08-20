@@ -38,6 +38,7 @@ $ExpectedWirelessManifestPaths = @(
     'bin/x64/airplay2dll.dll',
     'bin/x64/avcodec-58.dll',
     'bin/x64/avutil-56.dll',
+    'bin/x64/dnssd.dll',
     'bin/x64/swresample-3.dll',
     'bin/x64/swscale-5.dll'
 )

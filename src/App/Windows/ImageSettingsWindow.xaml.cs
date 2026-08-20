@@ -46,6 +46,18 @@ public partial class ImageSettingsWindow : Wpf.Ui.Controls.FluentWindow
         _ready = true;
     }
 
+    internal static void ShowDeveloperPreview(Window owner)
+    {
+        var window = new ImageSettingsWindow(
+            new ImageAdjustmentValues(0, 100, 100, 100),
+            _ => (true, string.Empty), _ => (true, string.Empty),
+            _ => (true, string.Empty))
+        {
+            Owner = owner,
+        };
+        window.Show();
+    }
+
     private void OnResetClick(object sender, RoutedEventArgs e)
     {
         BrightnessSlider.Value = 0;

@@ -88,6 +88,7 @@ extern "C" void* __cdecl stub_start(const char*, unsigned int, unsigned int,
         .data = audio_bytes,
     };
     callback->outputAudio(&audio, "Stub iPhone", "00:11:22:33:44:55");
+    callback->setVolume(0.4F, "Stub iPhone", "00:11:22:33:44:55");
     callback->connected("Second iPhone", "66:77:88:99:AA:BB");
     callback->outputVideo(&video, "Second iPhone", "66:77:88:99:AA:BB");
     callback->outputAudio(&audio, "Second iPhone", "66:77:88:99:AA:BB");

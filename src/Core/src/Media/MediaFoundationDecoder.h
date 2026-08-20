@@ -117,6 +117,17 @@ struct DecodedFrame {
     std::vector<std::uint8_t> nv12;
 };
 
+namespace detail {
+
+// Copies a decoded NV12/P010 frame into a tightly packed 8-bit NV12 canvas.
+// Scaling preserves aspect ratio without upscaling, and unused canvas pixels
+// are filled with range-correct black and neutral chroma.
+[[nodiscard]] bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
+    std::span<std::uint8_t> output, std::uint32_t output_width,
+    std::uint32_t output_height) noexcept;
+
+} // namespace detail
+
 class MediaFoundationVideoDecoder {
 public:
     explicit MediaFoundationVideoDecoder(
