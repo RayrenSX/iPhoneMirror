@@ -403,7 +403,9 @@ internal static class Program
         {
             ((IDisposable)client).Dispose();
             owner.Close();
-            application.Shutdown();
+            // This is a process-scoped STA smoke test, not a running WPF
+            // application. Calling Application.Shutdown after the windows are
+            // closed can crash in the headless GitHub Actions desktop session.
         }
     }
 
