@@ -5,6 +5,18 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-22
+
+### Changed
+
+- Replace legacy UI glyphs with packaged Fluent icons and keep button icons
+  readable across light and dark themes.
+- Bind AirPlay media sockets to the accepted control connection's interface,
+  preserving IPv4 and IPv6 routing for mirroring and media playback.
+- Remove one-pixel aspect-ratio rounding bars from independent native preview
+  windows without changing genuine letterboxing behavior.
+- Add WPF-UI license notices to portable and installer payload validation.
+
 ## [1.6.9] - 2026-08-20
 
 ### Added
@@ -1266,7 +1278,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.8...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.9...v1.7.0
 [1.6.8]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.7...v1.6.8
 [1.6.7]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.6...v1.6.7
 [1.6.6]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.5...v1.6.6

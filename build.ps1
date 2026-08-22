@@ -166,6 +166,22 @@ try {
             throw "Wireless receiver artifact hash mismatch: $($entry.Path)"
         }
     }
+    $RuntimeIntegritySource = Join-Path $Root `
+        'src\App\Services\RuntimeBinaryIntegrity.cs'
+    if (Test-Path -LiteralPath $RuntimeIntegritySource -PathType Leaf) {
+        $RuntimeIntegrityText = Get-Content -LiteralPath $RuntimeIntegritySource -Raw
+        foreach ($entry in $WirelessHashes) {
+            $RuntimeName = [IO.Path]::GetFileName($entry.Path)
+            $RuntimeHashPattern = '(?ms)\["' + [regex]::Escape($RuntimeName) +
+                '"\]\s*=\s*"([0-9a-fA-F]{64})"'
+            $RuntimeHashMatches = [regex]::Matches(
+                $RuntimeIntegrityText, $RuntimeHashPattern)
+            if ($RuntimeHashMatches.Count -ne 1 -or
+                $RuntimeHashMatches[0].Groups[1].Value -ne $entry.Hash) {
+                throw "Application runtime integrity hash is stale: $($entry.Path)"
+            }
+        }
+    }
 
     & $CMake --preset windows-x64
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
@@ -394,17 +410,51 @@ try {
             --output $DriverPublishRoot
         if ($LASTEXITCODE -ne 0) { throw "Driver installer publish failed: $LASTEXITCODE" }
 
-        $DriverPublishedFiles = @(Get-ChildItem -LiteralPath $DriverPublishRoot -File)
-        if ($DriverPublishedFiles.Count -ne 1 -or
-            $DriverPublishedFiles[0].Name -ne 'iPhoneMirror.Driver.exe') {
+        $DriverPublishedExecutables = @(Get-ChildItem -LiteralPath `
+            $DriverPublishRoot -Filter 'iPhoneMirror.Driver.exe' -File)
+        if ($DriverPublishedExecutables.Count -ne 1) {
             throw 'Driver installer output must contain exactly one iPhoneMirror.Driver.exe file.'
+        }
+        $expectedDriverTopLevelFiles = @(
+            'iPhoneMirror.Driver.exe',
+            'THIRD_PARTY_NOTICES.md'
+        )
+        $unexpectedDriverFiles = @(Get-ChildItem -LiteralPath `
+            $DriverPublishRoot -File | Where-Object {
+                $_.Name -notin $expectedDriverTopLevelFiles
+            })
+        $unexpectedDriverDirectories = @(Get-ChildItem -LiteralPath `
+            $DriverPublishRoot -Directory | Where-Object { $_.Name -ne 'licenses' })
+        $driverLicenseDirectory = Join-Path $DriverPublishRoot 'licenses'
+        $expectedDriverLicenseFiles = @(
+            'WPF-UI-LICENSE.md',
+            'WPF-UI-ThirdPartyNotices.txt'
+        )
+        $missingDriverFiles = @($expectedDriverTopLevelFiles | Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path $DriverPublishRoot $_) -PathType Leaf)
+        })
+        $missingDriverLicenseFiles = @($expectedDriverLicenseFiles | Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path $driverLicenseDirectory $_) -PathType Leaf)
+        })
+        $unexpectedDriverLicenseFiles = if (Test-Path -LiteralPath `
+                $driverLicenseDirectory -PathType Container) {
+            @(Get-ChildItem -LiteralPath $driverLicenseDirectory -File |
+                Where-Object { $_.Name -notin $expectedDriverLicenseFiles })
+        }
+        else { @() }
+        if ($missingDriverFiles.Count -ne 0 -or
+            $missingDriverLicenseFiles.Count -ne 0 -or
+            $unexpectedDriverFiles.Count -ne 0 -or
+            $unexpectedDriverDirectories.Count -ne 0 -or
+            $unexpectedDriverLicenseFiles.Count -ne 0) {
+            throw 'Driver installer output contains an unexpected licensing payload.'
         }
 
         $MainPublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
         if (-not (Test-Path -LiteralPath (Join-Path $MainPublishRoot 'iPhoneMirror.exe'))) {
             throw 'Main application output is missing before driver-manager integration.'
         }
-        Copy-Item -LiteralPath $DriverPublishedFiles[0].FullName `
+        Copy-Item -LiteralPath $DriverPublishedExecutables[0].FullName `
             -Destination (Join-Path $MainPublishRoot 'iPhoneMirror.Driver.exe') -Force
         if (-not (Test-Path -LiteralPath (Join-Path $MainPublishRoot 'iPhoneMirror.Driver.exe'))) {
             throw 'Driver manager was not copied into the main application output.'

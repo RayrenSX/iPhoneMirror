@@ -88,14 +88,20 @@ bool sample_has_nonblack_luma(IMFSample* sample, UINT32 width,
     ComPtr<IMFMediaBuffer> buffer;
     if (FAILED(sample->GetBufferByIndex(0, &buffer))) return false;
     ComPtr<IMF2DBuffer2> buffer_2d;
-    if (FAILED(buffer.As(&buffer_2d))) return false;
     BYTE* scanline{};
     BYTE* start{};
     LONG pitch{};
     DWORD length{};
-    if (FAILED(buffer_2d->Lock2DSize(MF2DBuffer_LockFlags_Read,
-                                     &scanline, &pitch, &start, &length)))
-        return false;
+    const bool is_2d = SUCCEEDED(buffer.As(&buffer_2d));
+    if (is_2d) {
+        if (FAILED(buffer_2d->Lock2DSize(MF2DBuffer_LockFlags_Read,
+                                         &scanline, &pitch, &start, &length)))
+            return false;
+    } else {
+        DWORD current{};
+        if (FAILED(buffer->Lock(&scanline, &length, &current))) return false;
+        pitch = static_cast<LONG>(width);
+    }
     const bool valid_layout = scanline != nullptr && pitch > 0 &&
         static_cast<std::uint64_t>(pitch) * height <= length;
     bool nonblack{};
@@ -110,7 +116,8 @@ bool sample_has_nonblack_luma(IMFSample* sample, UINT32 width,
                 nonblack = nonblack || row[x] != 16;
         }
     }
-    buffer_2d->Unlock2D();
+    if (is_2d) buffer_2d->Unlock2D();
+    else buffer->Unlock();
     return nonblack;
 }
 
@@ -259,7 +266,7 @@ void test_media_source() {
         SUCCEEDED(descriptor->GetMediaTypeHandler(&handler)))
         check_hr(handler->GetMediaTypeCount(&media_type_count),
                  "read media type count");
-    check(media_type_count == 4, "stream exposes NV12 and RGB32 landscape/portrait");
+    check(media_type_count == 2, "stream exposes RGB32 landscape/portrait");
 
     PROPVARIANT start_position{};
     PropVariantInit(&start_position);
@@ -381,6 +388,15 @@ void test_configured_media_source(FramePublisher& publisher) {
     if (source != nullptr)
         check_hr(source.As(&allocator_control),
                  "query configured source allocator control");
+    if (allocator_control != nullptr) {
+        DWORD input_stream{};
+        MFSampleAllocatorUsage usage{};
+        check_hr(allocator_control->GetAllocatorUsage(0, &input_stream,
+                                                       &usage),
+                 "read configured allocator usage");
+        check(usage == MFSampleAllocatorUsage_UsesProvidedAllocator,
+              "source accepts the Frame Server sample allocator");
+    }
     check_hr(MFCreateVideoSampleAllocatorEx(IID_PPV_ARGS(&sample_allocator)),
              "create Frame Server style video allocator");
     if (allocator_control != nullptr && sample_allocator != nullptr)
@@ -403,8 +419,8 @@ void test_configured_media_source(FramePublisher& publisher) {
         SUCCEEDED(descriptor->GetMediaTypeHandler(&handler)))
         check_hr(handler->GetMediaTypeCount(&media_type_count),
                  "read configured media type count");
-    check(media_type_count == 2,
-          "configured stream exposes only NV12 and RGB32 at the selected resolution");
+    check(media_type_count == 1,
+          "configured stream exposes only RGB32 at the selected resolution");
     bool saw_nv12{};
     bool saw_rgb32{};
     for (DWORD index = 0; index < media_type_count && handler != nullptr; ++index) {
@@ -430,8 +446,8 @@ void test_configured_media_source(FramePublisher& publisher) {
         saw_nv12 = saw_nv12 || subtype == MFVideoFormat_NV12;
         saw_rgb32 = saw_rgb32 || subtype == MFVideoFormat_RGB32;
     }
-    check(saw_nv12 && saw_rgb32,
-          "configured stream exposes both supported pixel formats");
+    check(!saw_nv12 && saw_rgb32,
+          "configured stream exposes RGB32 only for OBS compatibility");
 
     PROPVARIANT start_position{};
     PropVariantInit(&start_position);
@@ -462,6 +478,18 @@ void test_configured_media_source(FramePublisher& publisher) {
                  "configured stream emits allocator-backed media sample");
         sample = stream_event == nullptr
             ? ComPtr<IMFSample>{} : event_unknown<IMFSample>(stream_event.Get());
+        if (frame == 0 && sample != nullptr) {
+            ComPtr<IMFMediaBuffer> sample_buffer;
+            DWORD current_length{};
+            check_hr(sample->GetBufferByIndex(0, &sample_buffer),
+                     "read allocator-backed sample buffer");
+            if (sample_buffer != nullptr) {
+                check_hr(sample_buffer->GetCurrentLength(&current_length),
+                         "read allocator-backed sample length");
+                check(current_length == 998U * 2160U * 4U,
+                      "allocator-backed sample reports the tight media length");
+            }
+        }
         if (frame == 0 && sample != nullptr)
             check_hr(sample->GetSampleDuration(&duration),
                      "read configured sample duration");

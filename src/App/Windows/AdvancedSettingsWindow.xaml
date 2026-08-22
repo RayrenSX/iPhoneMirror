@@ -13,7 +13,7 @@
         animations:WindowDragBehavior.IsEnabled="True">
    <StackPanel Margin="0,0,48,0"><TextBlock Text="{DynamicResource AdvancedSettingsTitle}" Style="{StaticResource SubWindowTitle}"/><TextBlock Text="{DynamicResource AdvancedSettingsIntro}" Style="{StaticResource SubWindowSubtitle}"/></StackPanel>
    <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
-    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
    </Button>
   </Grid>
   <Border Grid.Row="2" Style="{StaticResource SettingsSection}">

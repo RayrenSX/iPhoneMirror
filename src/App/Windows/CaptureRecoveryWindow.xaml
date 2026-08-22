@@ -28,7 +28,7 @@
                 <Button Style="{StaticResource SubWindowCloseButton}"
                         ToolTip="{DynamicResource Close}"
                         Click="OnCloseClick">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
                 </Button>
             </Grid>
 

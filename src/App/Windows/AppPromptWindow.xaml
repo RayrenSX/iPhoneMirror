@@ -22,7 +22,7 @@
                 <TextBlock Text="{Binding PromptTitle}"
                            Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
                 <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCancelClick">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
                 </Button>
             </Grid>
             <Border Grid.Row="2" Style="{StaticResource SettingsSection}" Padding="16">

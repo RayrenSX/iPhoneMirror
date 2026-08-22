@@ -108,6 +108,40 @@ The in-app update window uses Markdig 1.3.2 to parse GitHub Release notes into
 safe WPF document elements. Markdig is distributed under the BSD 2-Clause
 License. Source and license: https://github.com/xoofx/markdig
 
+## WPF-UI 4.3.0 and Microsoft Fluent System Icons
+
+The main application and standalone driver manager use WPF-UI 4.3.0. Its
+`SymbolIcon` control embeds the Microsoft Fluent System Icons font in the
+WPF-UI assembly, so application icons do not depend on fonts installed in
+Windows.
+
+- WPF-UI: https://github.com/lepoco/wpfui
+- Microsoft Fluent System Icons: https://github.com/microsoft/fluentui-system-icons
+- WPF-UI copyright (c) 2021-2025 Leszek Pomianowski and WPF UI Contributors
+- Microsoft Fluent System Icons copyright (c) 2020 Microsoft Corporation
+- License: MIT
+- Exact upstream license and bundled component notices are copied into release
+  packages as `licenses/WPF-UI-LICENSE.md` and
+  `licenses/WPF-UI-ThirdPartyNotices.txt`.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## Inno Setup installer engine
 
 The Windows Setup executable is built with Inno Setup 6.7.3. The compiler is

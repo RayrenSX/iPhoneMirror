@@ -35,8 +35,7 @@
                 <Button x:Name="HeaderCloseButton"
                         Style="{StaticResource SubWindowCloseButton}"
                         Click="OnCloseCurrentClick">
-                    <TextBlock FontFamily="Segoe Fluent Icons"
-                               Text="&#xE8BB;" FontSize="14"/>
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
                 </Button>
             </Grid>
 
@@ -52,11 +51,10 @@
                     <Border Width="34" Height="34" CornerRadius="17"
                             Background="{DynamicResource WarningBrush}"
                             VerticalAlignment="Top">
-                        <TextBlock FontFamily="Segoe Fluent Icons"
-                                   Text="&#xE7BA;" FontSize="16"
-                                   Foreground="{DynamicResource OnAccentBrush}"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"/>
+                        <ui:SymbolIcon Symbol="Warning20" FontSize="16"
+                                       Foreground="{DynamicResource OnAccentBrush}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
                     </Border>
                     <StackPanel Grid.Column="1">
                         <TextBlock Text="{DynamicResource InstanceConflictBody}"
@@ -73,16 +71,15 @@
             <Grid Grid.Row="4" MinHeight="20">
                 <StackPanel x:Name="BusyPanel" Orientation="Horizontal"
                             Visibility="Collapsed">
-                    <TextBlock Width="18" Height="18"
-                               FontFamily="Segoe Fluent Icons"
-                               Text="&#xE895;" FontSize="14"
-                               Foreground="{DynamicResource PrimaryActionBrush}"
-                               VerticalAlignment="Center"
-                               RenderTransformOrigin="0.5,0.5">
-                        <TextBlock.RenderTransform>
+                    <ui:SymbolIcon Width="18" Height="18"
+                                   Symbol="ArrowClockwise20" FontSize="14"
+                                   Foreground="{DynamicResource PrimaryActionBrush}"
+                                   VerticalAlignment="Center"
+                                   RenderTransformOrigin="0.5,0.5">
+                        <ui:SymbolIcon.RenderTransform>
                             <RotateTransform x:Name="BusyRotation"/>
-                        </TextBlock.RenderTransform>
-                    </TextBlock>
+                        </ui:SymbolIcon.RenderTransform>
+                    </ui:SymbolIcon>
                     <TextBlock Text="{DynamicResource ClosingOtherInstances}"
                                Foreground="{DynamicResource MutedTextBrush}"
                                FontSize="12" VerticalAlignment="Center"

@@ -57,6 +57,8 @@
     <system:String x:Key="AisiBody">从爱思官网下载并完成一次正常有线投屏，然后返回重新检测。</system:String>
     <system:String x:Key="OpenWebsite">打开官网</system:String>
     <system:String x:Key="Close">关闭</system:String>
+    <system:String x:Key="Minimize">最小化</system:String>
+    <system:String x:Key="Maximize">最大化或还原</system:String>
     <system:String x:Key="Retry">重新检测</system:String>
     <system:String x:Key="Cancel">取消</system:String>
     <system:String x:Key="Continue">继续</system:String>

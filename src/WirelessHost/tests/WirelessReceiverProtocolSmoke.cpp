@@ -3,6 +3,7 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 #include <Windows.h>
+#include <iphlpapi.h>
 
 #include <algorithm>
 #include <array>
@@ -100,6 +101,92 @@ void drain_pipe(HANDLE pipe, PipeCapture& capture) {
     }
 }
 
+std::optional<in_addr> physical_ipv4_address() {
+    ULONG size = 16U * 1024U;
+    std::vector<std::uint8_t> buffer(size);
+    constexpr ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+        GAA_FLAG_SKIP_DNS_SERVER;
+    auto* adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buffer.data());
+    auto status = GetAdaptersAddresses(AF_INET, flags, nullptr, adapters, &size);
+    if (status == ERROR_BUFFER_OVERFLOW) {
+        buffer.resize(size);
+        adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buffer.data());
+        status = GetAdaptersAddresses(AF_INET, flags, nullptr, adapters, &size);
+    }
+    if (status != NO_ERROR) return std::nullopt;
+
+    constexpr std::array<ULONG, 2> physical_types{
+        IF_TYPE_IEEE80211, IF_TYPE_ETHERNET_CSMACD};
+    for (const auto type : physical_types) {
+        for (auto* adapter = adapters; adapter; adapter = adapter->Next) {
+            if (adapter->OperStatus != IfOperStatusUp ||
+                adapter->IfType != type)
+                continue;
+            for (auto* unicast = adapter->FirstUnicastAddress; unicast;
+                unicast = unicast->Next) {
+                if (!unicast->Address.lpSockaddr ||
+                    unicast->Address.lpSockaddr->sa_family != AF_INET ||
+                    unicast->DadState != IpDadStatePreferred)
+                    continue;
+                const auto* address = reinterpret_cast<const sockaddr_in*>(
+                    unicast->Address.lpSockaddr);
+                const auto host = ntohl(address->sin_addr.S_un.S_addr);
+                if ((host >> 24U) == 127U || (host >> 16U) == 0xA9FEU ||
+                    host == 0)
+                    continue;
+                return address->sin_addr;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+bool tcp_listener_matches(DWORD process_id, in_addr address,
+    unsigned short port, bool wildcard) {
+    ULONG size{};
+    if (GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET,
+            TCP_TABLE_OWNER_PID_LISTENER, 0) != ERROR_INSUFFICIENT_BUFFER)
+        return false;
+    std::vector<std::uint8_t> buffer(size);
+    auto* table = reinterpret_cast<PMIB_TCPTABLE_OWNER_PID>(buffer.data());
+    if (GetExtendedTcpTable(table, &size, FALSE, AF_INET,
+            TCP_TABLE_OWNER_PID_LISTENER, 0) != NO_ERROR)
+        return false;
+    const auto expected_address = wildcard ? htonl(INADDR_ANY) :
+        address.S_un.S_addr;
+    for (DWORD index = 0; index < table->dwNumEntries; ++index) {
+        const auto& row = table->table[index];
+        if (row.dwOwningPid == process_id &&
+            ntohs(static_cast<unsigned short>(row.dwLocalPort)) == port &&
+            row.dwLocalAddr == expected_address)
+            return true;
+    }
+    return false;
+}
+
+bool udp_endpoint_matches(DWORD process_id, in_addr address,
+    unsigned short port, bool wildcard) {
+    ULONG size{};
+    if (GetExtendedUdpTable(nullptr, &size, FALSE, AF_INET,
+            UDP_TABLE_OWNER_PID, 0) != ERROR_INSUFFICIENT_BUFFER)
+        return false;
+    std::vector<std::uint8_t> buffer(size);
+    auto* table = reinterpret_cast<PMIB_UDPTABLE_OWNER_PID>(buffer.data());
+    if (GetExtendedUdpTable(table, &size, FALSE, AF_INET,
+            UDP_TABLE_OWNER_PID, 0) != NO_ERROR)
+        return false;
+    const auto expected_address = wildcard ? htonl(INADDR_ANY) :
+        address.S_un.S_addr;
+    for (DWORD index = 0; index < table->dwNumEntries; ++index) {
+        const auto& row = table->table[index];
+        if (row.dwOwningPid == process_id &&
+            ntohs(static_cast<unsigned short>(row.dwLocalPort)) == port &&
+            row.dwLocalAddr == expected_address)
+            return true;
+    }
+    return false;
+}
+
 bool send_all(SOCKET socket, std::string_view data) {
     while (!data.empty()) {
         const auto sent = send(socket, data.data(), static_cast<int>(data.size()), 0);
@@ -118,7 +205,7 @@ std::size_t response_size(std::string_view response) {
     });
     constexpr std::string_view name = "\r\ncontent-length:";
     const auto position = headers.find(name);
-    if (position == std::string::npos) return 0;
+    if (position == std::string::npos) return header_end + 4;
     const auto value_start = headers.find_first_not_of(" \t", position + name.size());
     if (value_start == std::string::npos) return 0;
     const auto value_end = headers.find("\r\n", value_start);
@@ -171,6 +258,64 @@ std::vector<std::uint8_t> tcp_request(unsigned short port,
     }
     closesocket(socket);
     return response;
+}
+
+SOCKET connect_with_retry(unsigned short port, in_addr address) {
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        const auto socket = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP,
+            nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+        if (socket == INVALID_SOCKET) return INVALID_SOCKET;
+        const sockaddr_in endpoint{AF_INET, htons(port), address};
+        if (connect(socket, reinterpret_cast<const sockaddr*>(&endpoint),
+                sizeof(endpoint)) == 0)
+            return socket;
+        closesocket(socket);
+        Sleep(50);
+    }
+    return INVALID_SOCKET;
+}
+
+std::vector<std::uint8_t> socket_request(SOCKET socket,
+    std::string_view request) {
+    if (!send_all(socket, request)) return {};
+    DWORD timeout = 5000;
+    setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO,
+        reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    std::vector<std::uint8_t> response;
+    std::array<std::uint8_t, 4096> bytes{};
+    while (response.size() < 1024U * 1024U) {
+        const auto count = recv(socket, reinterpret_cast<char*>(bytes.data()),
+            static_cast<int>(bytes.size()), 0);
+        if (count <= 0) break;
+        response.insert(response.end(), bytes.begin(), bytes.begin() + count);
+        const auto expected = response_size(std::string_view(
+            reinterpret_cast<const char*>(response.data()), response.size()));
+        if (expected != 0 && response.size() >= expected) {
+            response.resize(expected);
+            break;
+        }
+    }
+    return response;
+}
+
+std::string rtsp_request(std::string_view method, std::string_view path,
+    unsigned int sequence, std::span<const std::uint8_t> body,
+    std::string_view content_type) {
+    auto request = std::string(method) + " " + std::string(path) +
+        " RTSP/1.0\r\nCSeq: " + std::to_string(sequence) +
+        "\r\nUser-Agent: AirPlay/550.10\r\nConnection: keep-alive\r\n";
+    if (!content_type.empty())
+        request += "Content-Type: " + std::string(content_type) + "\r\n";
+    request += "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n";
+    request.append(reinterpret_cast<const char*>(body.data()), body.size());
+    return request;
+}
+
+bool successful_rtsp_response(const std::vector<std::uint8_t>& response) {
+    if (response.empty()) return false;
+    const std::string_view text(reinterpret_cast<const char*>(response.data()),
+        response.size());
+    return text.starts_with("RTSP/1.0 200");
 }
 
 std::span<const std::uint8_t> response_body(
@@ -427,8 +572,191 @@ bool valid_device_id(std::string_view value) {
     return true;
 }
 
+std::vector<std::uint8_t> first_setup_plist(unsigned short timing_port) {
+    // Binary plist fixture generated from the documented first mirror SETUP.
+    constexpr std::uint8_t bytes[] = {
+        0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd8, 0x01, 0x02, 0x03,
+        0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x53, 0x65, 0x69, 0x76, 0x54, 0x65, 0x6b, 0x65, 0x79, 0x5a, 0x74,
+        0x69, 0x6d, 0x69, 0x6e, 0x67, 0x50, 0x6f, 0x72, 0x74, 0x5f, 0x10, 0x18,
+        0x69, 0x73, 0x53, 0x63, 0x72, 0x65, 0x65, 0x6e, 0x4d, 0x69, 0x72, 0x72,
+        0x6f, 0x72, 0x69, 0x6e, 0x67, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e,
+        0x54, 0x6e, 0x61, 0x6d, 0x65, 0x58, 0x64, 0x65, 0x76, 0x69, 0x63, 0x65,
+        0x49, 0x44, 0x55, 0x6d, 0x6f, 0x64, 0x65, 0x6c, 0x59, 0x6f, 0x73, 0x56,
+        0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x4f, 0x10, 0x10, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x4f, 0x10, 0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x11, 0xa5, 0x5a, 0x09, 0x5f, 0x10, 0x13, 0x52,
+        0x6f, 0x75, 0x74, 0x65, 0x20, 0x42, 0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67,
+        0x20, 0x53, 0x6d, 0x6f, 0x6b, 0x65, 0x5f, 0x10, 0x11, 0x30, 0x32, 0x3a,
+        0x30, 0x30, 0x3a, 0x30, 0x30, 0x3a, 0x30, 0x30, 0x3a, 0x30, 0x30, 0x3a,
+        0x30, 0x31, 0x5a, 0x69, 0x50, 0x68, 0x6f, 0x6e, 0x65, 0x31, 0x34, 0x2c,
+        0x32, 0x54, 0x31, 0x38, 0x2e, 0x30, 0x00, 0x08, 0x00, 0x19, 0x00, 0x1d,
+        0x00, 0x22, 0x00, 0x2d, 0x00, 0x48, 0x00, 0x4d, 0x00, 0x56, 0x00, 0x5c,
+        0x00, 0x66, 0x00, 0x79, 0x00, 0xc4, 0x00, 0xc7, 0x00, 0xc8, 0x00, 0xde,
+        0x00, 0xf2, 0x00, 0xfd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02,
+    };
+    std::vector<std::uint8_t> result(std::begin(bytes), std::end(bytes));
+    constexpr std::size_t port_marker = 196;
+    if (result.size() <= port_marker + 2 || result[port_marker] != 0x11 ||
+        result[port_marker + 1] != 0xa5 || result[port_marker + 2] != 0x5a)
+        return {};
+    result[port_marker + 1] = static_cast<std::uint8_t>(timing_port >> 8U);
+    result[port_marker + 2] = static_cast<std::uint8_t>(timing_port);
+    return result;
+}
+
+constexpr std::uint8_t second_setup_plist[] = {
+    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
+    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa1, 0x03, 0xd2, 0x04, 0x05,
+    0x06, 0x07, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12, 0x73, 0x74,
+    0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69,
+    0x6f, 0x6e, 0x49, 0x44, 0x10, 0x6e, 0x13, 0x10, 0x20, 0x30, 0x40, 0x50,
+    0x60, 0x70, 0x80, 0x08, 0x0b, 0x13, 0x15, 0x1a, 0x1f, 0x34, 0x36, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f,
+};
+
+bool probe_media_route(DWORD process_id, unsigned short raop_port,
+    in_addr local_address) {
+    auto timing_socket = WSASocketW(AF_INET, SOCK_DGRAM, IPPROTO_UDP,
+        nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+    if (timing_socket == INVALID_SOCKET) return false;
+    sockaddr_in timing_endpoint{AF_INET, 0, local_address};
+    if (bind(timing_socket, reinterpret_cast<const sockaddr*>(&timing_endpoint),
+            sizeof(timing_endpoint)) != 0) {
+        closesocket(timing_socket);
+        return false;
+    }
+    int timing_endpoint_size = sizeof(timing_endpoint);
+    if (getsockname(timing_socket, reinterpret_cast<sockaddr*>(&timing_endpoint),
+            &timing_endpoint_size) != 0) {
+        closesocket(timing_socket);
+        return false;
+    }
+    const auto remote_timing_port = ntohs(timing_endpoint.sin_port);
+    const auto control_socket = connect_with_retry(raop_port, local_address);
+    if (control_socket == INVALID_SOCKET) {
+        closesocket(timing_socket);
+        return false;
+    }
+
+    std::array<std::uint8_t, 16> fairplay_setup{};
+    std::memcpy(fairplay_setup.data(), "FPLY", 4);
+    fairplay_setup[4] = 3;
+    fairplay_setup[14] = 0;
+    std::array<std::uint8_t, 164> fairplay_handshake{};
+    std::memcpy(fairplay_handshake.data(), "FPLY", 4);
+    fairplay_handshake[4] = 3;
+    const auto setup_one = first_setup_plist(remote_timing_port);
+
+    const auto fairplay_one_response = socket_request(control_socket,
+        rtsp_request("POST", "/fp-setup", 1, fairplay_setup,
+            "application/octet-stream"));
+    const auto fairplay_two_response = socket_request(control_socket,
+        rtsp_request("POST", "/fp-setup", 2, fairplay_handshake,
+            "application/octet-stream"));
+    const auto setup_one_response = socket_request(control_socket,
+        rtsp_request("SETUP", "/stream", 3, setup_one,
+            "application/x-apple-binary-plist"));
+    const auto setup_two_response = socket_request(control_socket,
+        rtsp_request("SETUP", "/stream", 4, second_setup_plist,
+            "application/x-apple-binary-plist"));
+
+    const BinaryPlist response_plist(response_body(setup_two_response));
+    const auto root = response_plist.root();
+    const auto streams = root ?
+        response_plist.dictionary_value(*root, "streams") : std::nullopt;
+    const auto stream = streams ?
+        response_plist.array_value(*streams, 0) : std::nullopt;
+    const auto data_port_value = stream ?
+        plist_integer(response_plist, *stream, "dataPort") : std::nullopt;
+    const auto timing_port_value = root ?
+        plist_integer(response_plist, *root, "timingPort") : std::nullopt;
+    const auto stream_type = stream ?
+        plist_integer(response_plist, *stream, "type") : std::nullopt;
+    const auto ports_valid = data_port_value && timing_port_value &&
+        *data_port_value > 0 && *data_port_value <= 65535 &&
+        *timing_port_value > 0 && *timing_port_value <= 65535 &&
+        stream_type == 110;
+    const auto data_port = ports_valid ?
+        static_cast<unsigned short>(*data_port_value) : unsigned short{0};
+    const auto timing_port = ports_valid ?
+        static_cast<unsigned short>(*timing_port_value) : unsigned short{0};
+
+    bool tcp_exact{};
+    bool udp_exact{};
+    bool tcp_wildcard{};
+    bool udp_wildcard{};
+    if (ports_valid) {
+        for (int attempt = 0; attempt < 50 && (!tcp_exact || !udp_exact);
+            ++attempt) {
+            tcp_exact = tcp_listener_matches(process_id, local_address,
+                data_port, false);
+            udp_exact = udp_endpoint_matches(process_id, local_address,
+                timing_port, false);
+            tcp_wildcard = tcp_listener_matches(process_id, local_address,
+                data_port, true);
+            udp_wildcard = udp_endpoint_matches(process_id, local_address,
+                timing_port, true);
+            if (!tcp_exact || !udp_exact) Sleep(20);
+        }
+    }
+
+    bool timing_source_valid{};
+    if (ports_valid) {
+        DWORD timeout = 2000;
+        if (setsockopt(timing_socket, SOL_SOCKET, SO_RCVTIMEO,
+                reinterpret_cast<const char*>(&timeout), sizeof(timeout)) == 0) {
+            std::array<std::uint8_t, 128> timing_packet{};
+            sockaddr_in timing_source{};
+            int timing_source_size = sizeof(timing_source);
+            const auto timing_bytes = recvfrom(timing_socket,
+                reinterpret_cast<char*>(timing_packet.data()),
+                static_cast<int>(timing_packet.size()), 0,
+                reinterpret_cast<sockaddr*>(&timing_source),
+                &timing_source_size);
+            timing_source_valid = timing_bytes == 48 &&
+                timing_source.sin_addr.S_un.S_addr ==
+                    local_address.S_un.S_addr &&
+                ntohs(timing_source.sin_port) == timing_port;
+        }
+    }
+
+    closesocket(control_socket);
+    closesocket(timing_socket);
+    const auto responses_valid = successful_rtsp_response(fairplay_one_response) &&
+        response_body(fairplay_one_response).size() == 142 &&
+        successful_rtsp_response(fairplay_two_response) &&
+        response_body(fairplay_two_response).size() == 32 &&
+        successful_rtsp_response(setup_one_response) &&
+        successful_rtsp_response(setup_two_response) && response_plist.valid();
+    const auto passed = responses_valid && ports_valid && tcp_exact && udp_exact &&
+        !tcp_wildcard && !udp_wildcard && timing_source_valid;
+    std::array<char, INET_ADDRSTRLEN> address_text{};
+    InetNtopA(AF_INET, &local_address, address_text.data(),
+        static_cast<DWORD>(address_text.size()));
+    std::cout << "media_route address=" << address_text.data()
+        << " data_port=" << data_port << " timing_port=" << timing_port
+        << " responses=" << responses_valid << " ports=" << ports_valid
+        << " tcp_exact=" << tcp_exact << " udp_exact=" << udp_exact
+        << " tcp_wildcard=" << tcp_wildcard
+        << " udp_wildcard=" << udp_wildcard
+        << " timing_source=" << timing_source_valid
+        << " passed=" << passed << '\n';
+    return passed;
+}
+
 bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
-    std::uint32_t features) {
+    std::uint32_t features, std::optional<in_addr> route_address = std::nullopt) {
     const auto raop_port = free_port(SOCK_STREAM, IPPROTO_TCP);
     auto airplay_port = free_port(SOCK_STREAM, IPPROTO_TCP);
     for (int attempt = 0; airplay_port == raop_port && attempt < 10; ++attempt)
@@ -543,9 +871,11 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
         plist_integer(info_plist, *display, "heightPixels") == 720 &&
         plist_integer(info_plist, *display, "maxFPS") == 30 &&
         plist_integer(info_plist, *display, "refreshRate") == 30;
+    const auto media_route_passed = !route_address ||
+        probe_media_route(process.dwProcessId, raop_port, *route_address);
     auto passed = connected && server_status && info_status && server_features &&
         device_valid && info_plist.valid() && info_features && info_device &&
-        info_name && info_display;
+        info_name && info_display && media_route_passed;
 
     SetEvent(stop_event);
     const auto exited = WaitForSingleObject(process.hProcess, 10000) == WAIT_OBJECT_0;
@@ -567,6 +897,7 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
         << " info_features=" << info_features
         << " identity_match=" << (device_valid && info_device)
         << " capability_match=" << (info_name && info_display)
+        << " media_route=" << media_route_passed
         << " environment_sync=" << !pipe_capture.environment_sync_failed
         << " exited=" << exited << " exit_code=" << exit_code
         << " passed=" << passed << '\n';
@@ -581,7 +912,9 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 2) return 2;
+    const auto media_route_only = argc == 3 &&
+        std::wstring_view(argv[2]) == L"--media-route";
+    if (argc != 2 && !media_route_only) return 2;
     WSADATA winsock{};
     if (WSAStartup(MAKEWORD(2, 2), &winsock) != 0) return 2;
     constexpr std::array variables{
@@ -596,6 +929,25 @@ int wmain(int argc, wchar_t** argv) {
             GetEnvironmentVariableW(variable, nullptr, 0) == 0 && environment_clean;
     }
     const auto host = std::filesystem::absolute(argv[1]);
+    if (media_route_only) {
+        const auto route_address = physical_ipv4_address();
+        if (!route_address) {
+            std::cout << "Wireless receiver media-route smoke skipped: no "
+                "preferred non-loopback Wi-Fi or Ethernet IPv4 address\n";
+            WSACleanup();
+            return 77;
+        }
+        const auto passed = environment_clean &&
+            probe_mode(host, L"mirror", 0x5A7FFEE6U, route_address);
+        WSACleanup();
+        if (!passed) {
+            std::cerr << "Wireless receiver media-route smoke failed: "
+                "environment_clean=" << environment_clean << '\n';
+            return 1;
+        }
+        std::cout << "Wireless receiver media-route smoke passed\n";
+        return 0;
+    }
     const auto passed = environment_clean &&
         probe_mode(host, L"mirror", 0x5A7FFEE6U) &&
         probe_mode(host, L"combined", 0x5A7FFEF7U);

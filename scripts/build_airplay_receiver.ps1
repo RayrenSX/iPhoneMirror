@@ -60,6 +60,8 @@ $SourceRoot = (Resolve-Path -LiteralPath $BuildSourceRoot).Path
     -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-ScreenMirroringOnlyPatch.ps1') `
     -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-NetworkRoutePatch.ps1') `
+    -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-AudioCodecPatch.ps1') `
     -SourceRoot $SourceRoot
 
@@ -142,6 +144,8 @@ foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIG
         'IPHONE_MIRROR_ALAC_AUDIO_DECODE',
         'IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC',
         'IPHONE_MIRROR_RUNTIME_DEVICE_ID',
+        'IPHONE_MIRROR_BOUND_MEDIA_SOCKETS',
+        'IPHONE_MIRROR_PRESERVE_IPV6_MEDIA',
         'iphonemirror://pause',
         'iphonemirror://resume',
         'iphonemirror://seek',

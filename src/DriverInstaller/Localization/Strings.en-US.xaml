@@ -57,6 +57,8 @@
     <system:String x:Key="AisiBody">Download Aisi Screen Mirroring, complete one normal wired mirroring session, then return and check again.</system:String>
     <system:String x:Key="OpenWebsite">Open website</system:String>
     <system:String x:Key="Close">Close</system:String>
+    <system:String x:Key="Minimize">Minimize</system:String>
+    <system:String x:Key="Maximize">Maximize or restore</system:String>
     <system:String x:Key="Retry">Check again</system:String>
     <system:String x:Key="Cancel">Cancel</system:String>
     <system:String x:Key="Continue">Continue</system:String>

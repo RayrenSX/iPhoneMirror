@@ -1,8 +1,8 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.6.9"
+  #error MyAppVersion must be provided by scripts/build_installer.ps1
 #endif
 #ifndef MyNumericVersion
-  #define MyNumericVersion "1.6.9.0"
+  #error MyNumericVersion must be provided by scripts/build_installer.ps1
 #endif
 #ifndef MySourceDir
   #define MySourceDir "..\outputs\iPhoneMirror.Installer"

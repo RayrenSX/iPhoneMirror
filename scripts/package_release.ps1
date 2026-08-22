@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.9',
+    [string]$Version,
     [switch]$SkipBuild,
     [switch]$GenerateSbom,
     [switch]$UpdateReleaseManifest,
@@ -20,6 +20,28 @@ if ($SkipBuild -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath))
     throw '-AppleSupportPackagePath cannot be used with -SkipBuild.'
 }
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+
+function Get-ProjectVersion([string]$ProjectPath) {
+    [xml]$project = Get-Content -LiteralPath $ProjectPath -Raw
+    $versions = @($project.Project.PropertyGroup | ForEach-Object {
+        if ($null -ne $_.Version -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.Version)) {
+            ([string]$_.Version).Trim()
+        }
+    } | Select-Object -Unique)
+    if ($versions.Count -ne 1) {
+        throw "Project must declare exactly one Version: $ProjectPath"
+    }
+    return $versions[0]
+}
+
+$AppProjectPath = Join-Path $Root 'src\App\iPhoneMirror.App.csproj'
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = Get-ProjectVersion $AppProjectPath
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+    throw "Invalid package version in ${AppProjectPath}: $Version"
+}
 $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
 $InstallerPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Installer'
 $ReleaseRoot = Join-Path $Root 'outputs\releases'
@@ -63,6 +85,8 @@ $RequiredArtifacts = @(
     'THIRD_PARTY_NOTICES.md',
     'CHANGELOG.md',
     'DRIVER_DEPENDENCIES.md',
+    'licenses\WPF-UI-LICENSE.md',
+    'licenses\WPF-UI-ThirdPartyNotices.txt',
     'tools\updater\Apply-ZipUpdate.ps1',
     'licenses\libusb-COPYING.txt',
     'licenses\libusb-win32-COPYING-LGPL.txt',
@@ -83,20 +107,6 @@ $RequiredArtifacts = @(
     'Wireless\licenses\SOURCE.md',
     'Wireless\licenses\SHA256SUMS.txt'
 )
-
-function Get-ProjectVersion([string]$ProjectPath) {
-    [xml]$project = Get-Content -LiteralPath $ProjectPath -Raw
-    $versions = @($project.Project.PropertyGroup | ForEach-Object {
-        if ($null -ne $_.Version -and
-            -not [string]::IsNullOrWhiteSpace([string]$_.Version)) {
-            ([string]$_.Version).Trim()
-        }
-    } | Select-Object -Unique)
-    if ($versions.Count -ne 1) {
-        throw "Project must declare exactly one Version: $ProjectPath"
-    }
-    return $versions[0]
-}
 
 function Assert-ProductVersion([string]$Path, [string]$ExpectedVersion) {
     $actual = (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion

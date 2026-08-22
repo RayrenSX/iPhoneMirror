@@ -173,7 +173,8 @@
                                 <ContentPresenter x:Name="NavigationIcon"
                                                   Content="{TemplateBinding Icon}"
                                                   HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center"/>
+                                                  VerticalAlignment="Center"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}"/>
                                 <TextBlock x:Name="PaneItemText"
                                            Grid.Column="1"
                                            Margin="8,0,12,0"
@@ -256,8 +257,6 @@
             <Setter Property="BorderBrush" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Foreground" Value="{DynamicResource MediaOverlayTextBrush}"/>
-            <!-- Keep the icon font on each glyph element. ToolTip text inherits
-                 this button font and must use the normal UI font for CJK. -->
             <Setter Property="FontFamily" Value="{DynamicResource NavigationTextFontFamily}"/>
             <Setter Property="FontSize" Value="16"/>
             <Setter Property="FontWeight" Value="Normal"/>
@@ -659,7 +658,7 @@
                                        ToolTip="{DynamicResource NavMirroringDescription}"
                                        AutomationProperties.AutomationId="MirroringNavButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" FontSize="18"/>
+                        <ui:SymbolIcon Symbol="PhoneDesktop24" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem x:Name="DevicePanelToggle"
@@ -669,7 +668,7 @@
                                        ToolTip="{DynamicResource NavDevicesDescription}"
                                        AutomationProperties.AutomationId="DevicePanelToggle">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8EA;" FontSize="18"/>
+                        <ui:SymbolIcon Symbol="ProjectionScreen24" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem x:Name="SettingsPanelToggle"
@@ -679,7 +678,7 @@
                                        ToolTip="{DynamicResource NavSettingsDescription}"
                                        AutomationProperties.AutomationId="SettingsPanelToggle">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE713;" FontSize="18"/>
+                        <ui:SymbolIcon Symbol="Settings24" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItemSeparator/>
@@ -689,7 +688,7 @@
                                        ToolTip="{DynamicResource NavOutputDescription}"
                                        AutomationProperties.AutomationId="OutputNavButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE714;" FontSize="18"/>
+                        <ui:SymbolIcon Symbol="VideoRecording20" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem x:Name="DriverManagerButton"
@@ -699,7 +698,7 @@
                                        ToolTip="{DynamicResource NavDriverDescription}"
                                        AutomationProperties.AutomationId="DriverManagerButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE90F;" FontSize="18"/>
+                        <ui:SymbolIcon Symbol="UsbPlug24" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.MenuItems>
@@ -711,7 +710,7 @@
                                        ToolTip="{DynamicResource NavAboutDescription}"
                                        AutomationProperties.AutomationId="AboutButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE946;" FontSize="18"/>
+                        <ui:SymbolIcon Symbol="Info24" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.FooterMenuItems>
@@ -763,7 +762,7 @@
                                  FontSize="12"
                                  Content="{DynamicResource TitleBarMinimizeToolTip}"/>
                     </Button.ToolTip>
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE921;" FontSize="12"/>
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Subtract20" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource TitleBarButton}"
                         AutomationProperties.Name="{DynamicResource Maximize}"
@@ -773,9 +772,9 @@
                                  FontSize="12"
                                  Content="{DynamicResource TitleBarMaximizeToolTip}"/>
                     </Button.ToolTip>
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE922;" FontSize="12"/>
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Maximize20" FontSize="16"/>
                 </Button>
-                <Button Style="{StaticResource TitleBarButton}"
+                <Button Style="{StaticResource TitleBarCloseButton}"
                         AutomationProperties.Name="{DynamicResource Close}"
                         Click="OnCloseWindowClick">
                     <Button.ToolTip>
@@ -783,7 +782,7 @@
                                  FontSize="12"
                                  Content="{DynamicResource TitleBarCloseToolTip}"/>
                     </Button.ToolTip>
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="12"/>
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="17"/>
                 </Button>
             </StackPanel>
         </Grid>
@@ -825,7 +824,7 @@
                                 Width="32" Height="32" MinHeight="32" Margin="0" Padding="0"
                                 Click="OnCloseDevicePanelClick" ToolTip="{DynamicResource Close}"
                                 AutomationProperties.AutomationId="CloseDevicePanelButton">
-                            <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="12"/>
+                            <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="16"/>
                         </Button>
                     </Grid>
                     <Border Grid.Row="2" Style="{StaticResource ControlSectionCard}" Margin="0" Padding="12">
@@ -974,7 +973,7 @@
                                 HorizontalAlignment="Right" Click="OnCloseMirroringPanelClick"
                                 ToolTip="{DynamicResource Close}"
                                 AutomationProperties.AutomationId="CloseMirroringPanelButton">
-                            <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="12"/>
+                            <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="16"/>
                         </Button>
                     </Grid>
                     <StackPanel Grid.Row="2">
@@ -984,21 +983,21 @@
                         <Button Command="{Binding MoreImageSettingsCommand}"
                                 Style="{StaticResource ToolButton}" Margin="0,0,0,8">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE713;" FontSize="15"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ImageEdit20" FontSize="16"/>
                                 <TextBlock Text="{DynamicResource IndependentWindowImageSettings}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
                         <Button Click="OnPreviewWindowClick" IsEnabled="{Binding CanUseVisualPreviewTools}"
                                 Style="{StaticResource ToolButton}" Margin="0,0,0,8">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8A7;" FontSize="15"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="WindowNew20" FontSize="15"/>
                                 <TextBlock Text="{DynamicResource SeparateWindow}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
                         <Button Click="OnScreenshotClick" IsEnabled="{Binding CanUseVisualPreviewTools}"
                                 Style="{StaticResource ToolButton}" Margin="0,0,0,8">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE722;" FontSize="15"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Screenshot20" FontSize="15"/>
                                 <TextBlock Text="{DynamicResource Screenshot}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
@@ -1006,14 +1005,14 @@
                                 Style="{StaticResource ToolButton}"
                                 Margin="0,0,0,8">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE72C;" FontSize="15"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ArrowClockwise20" FontSize="15"/>
                                 <TextBlock Text="{DynamicResource RefreshFrame}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
                         <Button Click="OnFullScreenClick" IsEnabled="{Binding CanUseVisualPreviewTools}"
                                 Style="{StaticResource ToolButton}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE740;" FontSize="15"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="FullScreenMaximize20" FontSize="15"/>
                                 <TextBlock Text="{DynamicResource FullScreenPreview}" Margin="9,0,0,0"/>
                             </StackPanel>
                         </Button>
@@ -1058,7 +1057,7 @@
                                     ToolTip="{DynamicResource MediaOutputButton}"
                                     AutomationProperties.AutomationId="QuickMediaOutputButton">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE714;" FontSize="15"/>
+                                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="VideoRecording20" FontSize="16"/>
                                     <TextBlock Text="{DynamicResource MediaOutputButton}" Margin="6,0,0,0"/>
                                 </StackPanel>
                             </Button>
@@ -1067,7 +1066,7 @@
                                     ToolTip="{DynamicResource IndependentWindowImageSettings}"
                                     AutomationProperties.AutomationId="QuickImageSettingsButton">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE713;" FontSize="14"/>
+                                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ImageEdit20" FontSize="16"/>
                                     <TextBlock Text="{DynamicResource IndependentWindowImageSettings}" Margin="6,0,0,0"/>
                                 </StackPanel>
                             </Button>
@@ -1077,7 +1076,7 @@
                                     ToolTip="{DynamicResource SeparateWindow}"
                                     AutomationProperties.AutomationId="QuickPreviewWindowButton">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8A7;" FontSize="14"/>
+                                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="WindowNew20" FontSize="14"/>
                                     <TextBlock Text="{DynamicResource SeparateWindow}" Margin="6,0,0,0"/>
                                 </StackPanel>
                             </Button>
@@ -1086,21 +1085,21 @@
                                     IsEnabled="{Binding CanUseVisualPreviewTools}"
                                     ToolTip="{DynamicResource Screenshot}"
                                     AutomationProperties.AutomationId="QuickScreenshotButton">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE722;" FontSize="15"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Screenshot20" FontSize="15"/>
                             </Button>
                             <Button x:Name="QuickRefreshPreviewButton" Click="OnRefreshPreviewClick"
                                     Style="{StaticResource PreviewToolButton}"
                                     IsEnabled="{Binding CanUseVisualPreviewTools}"
                                     ToolTip="{DynamicResource RefreshFrame}"
                                     AutomationProperties.AutomationId="QuickRefreshPreviewButton">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE72C;" FontSize="15"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ArrowClockwise20" FontSize="15"/>
                             </Button>
                             <Button x:Name="QuickFullScreenButton" Click="OnFullScreenClick"
                                     Style="{StaticResource PreviewToolButton}"
                                     IsEnabled="{Binding CanUseVisualPreviewTools}"
                                     ToolTip="{DynamicResource FullScreenPreview}"
                                     AutomationProperties.AutomationId="QuickFullScreenButton">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE740;" FontSize="15"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="FullScreenMaximize20" FontSize="15"/>
                             </Button>
                         </StackPanel>
                     </Grid>
@@ -1229,10 +1228,10 @@
                                         Background="{DynamicResource PreviewPanelAltBrush}"
                                         BorderBrush="{DynamicResource PreviewBorderBrush}"
                                         BorderThickness="1" HorizontalAlignment="Center">
-                                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8D6;"
-                                               Foreground="{DynamicResource PreviewTextBrush}"
-                                               FontSize="38" HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"/>
+                                    <ui:SymbolIcon Symbol="MusicNote220"
+                                                   Foreground="{DynamicResource PreviewTextBrush}"
+                                                   FontSize="38" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
                                 </Border>
                                 <TextBlock Text="{DynamicResource WirelessMusicTitle}"
                                            Foreground="{DynamicResource PreviewTextBrush}"
@@ -1333,13 +1332,13 @@
                                                         Click="OnMediaCastPlayPauseClick"
                                                         ToolTip="{DynamicResource MediaCastPause}"
                                                         AutomationProperties.AutomationId="MediaCastPlayPauseButton">
-                                                    <TextBlock x:Name="MediaCastPlayPauseIcon"
-                                                               FontFamily="Segoe Fluent Icons"
-                                                               Foreground="{DynamicResource MediaPlayerPrimaryIconBrush}"
-                                                               Text="&#xE769;" FontSize="18"
-                                                               RenderTransformOrigin="0.5,0.5">
-                                                        <TextBlock.RenderTransform><ScaleTransform/></TextBlock.RenderTransform>
-                                                    </TextBlock>
+                                                    <ui:SymbolIcon x:Name="MediaCastPlayPauseIcon"
+                                                                   Symbol="Pause20"
+                                                                   Foreground="{DynamicResource MediaPlayerPrimaryIconBrush}"
+                                                                   FontSize="18"
+                                                                   RenderTransformOrigin="0.5,0.5">
+                                                        <ui:SymbolIcon.RenderTransform><ScaleTransform/></ui:SymbolIcon.RenderTransform>
+                                                    </ui:SymbolIcon>
                                                 </Button>
                                                 <Button x:Name="MediaCastSeekForwardButton"
                                                         Style="{StaticResource MediaPlayerIconButtonStyle}"
@@ -1372,9 +1371,10 @@
                                                         Click="OnMediaCastMuteClick"
                                                         ToolTip="{DynamicResource MediaCastMute}"
                                                         AutomationProperties.AutomationId="MediaCastMuteButton">
-                                                    <TextBlock x:Name="MediaCastVolumeIcon"
-                                                               FontFamily="Segoe Fluent Icons"
-                                                               Text="&#xE767;" FontSize="15"/>
+                                                    <ui:SymbolIcon x:Name="MediaCastVolumeIcon"
+                                                                   Symbol="Speaker220"
+                                                                   Foreground="{DynamicResource MediaOverlayTextBrush}"
+                                                                   FontSize="15"/>
                                                 </Button>
                                                 <Slider x:Name="MediaCastVolumeSlider"
                                                         Style="{StaticResource MediaPlayerSliderStyle}"
@@ -1389,9 +1389,10 @@
                                                         Click="OnFullScreenClick"
                                                         ToolTip="{DynamicResource FullScreenPreview}"
                                                         AutomationProperties.AutomationId="MediaCastFullScreenButton">
-                                                    <TextBlock x:Name="MediaCastFullScreenIcon"
-                                                               FontFamily="Segoe Fluent Icons"
-                                                               Text="&#xE740;" FontSize="16"/>
+                                                    <ui:SymbolIcon x:Name="MediaCastFullScreenIcon"
+                                                                   Symbol="FullScreenMaximize20"
+                                                                   Foreground="{DynamicResource MediaOverlayTextBrush}"
+                                                                   FontSize="16"/>
                                                 </Button>
                                             </StackPanel>
                                         </Grid>
@@ -1500,7 +1501,7 @@
                                     HorizontalAlignment="Right"
                                     Click="OnCloseSettingsPanelClick" ToolTip="{DynamicResource Close}"
                                     AutomationProperties.AutomationId="CloseSettingsPanelButton">
-                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="12"/>
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="16"/>
                             </Button>
                         </Grid>
 

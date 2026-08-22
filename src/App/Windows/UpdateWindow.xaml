@@ -42,7 +42,7 @@
             </Border>
             <Button Grid.Column="3" Style="{StaticResource SubWindowCloseButton}"
                     Click="OnLaterClick">
-                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
         <Grid Grid.Row="2">
@@ -89,7 +89,7 @@
                     <Button Grid.Column="1" Click="OnOpenReleaseClick"
                             ToolTip="{DynamicResource OpenReleasePage}" Margin="12,0,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8A7;" Margin="0,0,6,0"/>
+                            <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Open20" Margin="0,0,6,0"/>
                             <TextBlock Text="{DynamicResource OpenReleasePage}"/>
                         </StackPanel>
                     </Button>

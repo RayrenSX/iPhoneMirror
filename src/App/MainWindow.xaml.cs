@@ -21,6 +21,8 @@ using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
 using Microsoft.Win32;
+using SymbolIcon = Wpf.Ui.Controls.SymbolIcon;
+using SymbolRegular = Wpf.Ui.Controls.SymbolRegular;
 
 namespace IPhoneMirror.App;
 
@@ -2208,14 +2210,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 : _mediaOpened && _mediaIsLive
                     ? LocalizationService.Get("MediaCastLive") : "--:--";
 
-            SetAnimatedMediaGlyph(MediaCastPlayPauseIcon,
-                _mediaShouldPlay ? "\uE769" : "\uE768");
+            SetAnimatedMediaSymbol(MediaCastPlayPauseIcon,
+                _mediaShouldPlay ? SymbolRegular.Pause20 : SymbolRegular.Play20);
             MediaCastPlayPauseButton.ToolTip = LocalizationService.Get(
                 _mediaShouldPlay ? "MediaCastPause" : "MediaCastPlay");
 
             var muted = mediaElement.IsMuted || mediaElement.Volume <= 0;
-            SetAnimatedMediaGlyph(MediaCastVolumeIcon,
-                muted ? "\uE74F" : "\uE767");
+            SetAnimatedMediaSymbol(MediaCastVolumeIcon,
+                muted ? SymbolRegular.SpeakerMute20 : SymbolRegular.Speaker220);
             MediaCastMuteButton.ToolTip = LocalizationService.Get(
                 muted ? "MediaCastUnmute" : "MediaCastMute");
             var speedIndex = GetMediaCastSpeedIndex(_mediaPlaybackSpeed);
@@ -2234,10 +2236,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ScheduleMediaCastControlsAutoHide();
     }
 
-    private static void SetAnimatedMediaGlyph(TextBlock icon, string glyph)
+    private static void SetAnimatedMediaSymbol(SymbolIcon icon, SymbolRegular symbol)
     {
-        if (string.Equals(icon.Text, glyph, StringComparison.Ordinal)) return;
-        icon.Text = glyph;
+        if (icon.Symbol == symbol) return;
+        icon.Symbol = symbol;
         if (!SystemParameters.ClientAreaAnimation) return;
         icon.BeginAnimation(OpacityProperty, new DoubleAnimation(0.42, 1,
             TimeSpan.FromMilliseconds(120))
@@ -2344,8 +2346,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             MediaCastVolumeSlider.IsEnabled = false;
             MediaCastCurrentTimeText.Text = "00:00";
             MediaCastDurationText.Text = "--:--";
-            MediaCastPlayPauseIcon.Text = "\uE768";
-            MediaCastVolumeIcon.Text = "\uE767";
+            MediaCastPlayPauseIcon.Symbol = SymbolRegular.Play20;
+            MediaCastVolumeIcon.Symbol = SymbolRegular.Speaker220;
             _mediaPlaybackSpeed = 1.0;
             _mediaSpeedFallbackPending = false;
             _mediaSpeedFallbackPromptShown = false;
@@ -3591,8 +3593,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         var isFullScreen = independentState ??
             (_mediaCastPreviewWindow?.IsFullScreen ?? _isFullScreen);
-        SetAnimatedMediaGlyph(MediaCastFullScreenIcon,
-            isFullScreen ? "\uE73F" : "\uE740");
+        SetAnimatedMediaSymbol(MediaCastFullScreenIcon,
+            isFullScreen ? SymbolRegular.FullScreenMinimize20 :
+                SymbolRegular.FullScreenMaximize20);
         MediaCastFullScreenButton.ToolTip = LocalizationService.Get(
             isFullScreen ? "IndependentWindowExitFullScreen" : "FullScreenPreview");
     }

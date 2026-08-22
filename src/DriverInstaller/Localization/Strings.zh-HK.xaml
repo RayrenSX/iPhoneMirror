@@ -57,6 +57,8 @@
     <system:String x:Key="AisiBody">從愛思官網下載並完成一次正常有線螢幕鏡像，然後返回重新偵測。</system:String>
     <system:String x:Key="OpenWebsite">開啟官網</system:String>
     <system:String x:Key="Close">關閉</system:String>
+    <system:String x:Key="Minimize">最小化</system:String>
+    <system:String x:Key="Maximize">最大化或還原</system:String>
     <system:String x:Key="Retry">重新偵測</system:String>
     <system:String x:Key="Cancel">取消</system:String>
     <system:String x:Key="Continue">繼續</system:String>

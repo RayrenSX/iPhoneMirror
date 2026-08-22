@@ -48,7 +48,7 @@
                                Style="{StaticResource SubWindowSubtitle}"/>
                 </StackPanel>
                 <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
                 </Button>
             </Grid>
 
@@ -75,8 +75,8 @@
                                                     <ColumnDefinition Width="28"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Glyph}" FontFamily="Segoe Fluent Icons"
-                                                           FontSize="16" VerticalAlignment="Center"/>
+                                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="{Binding Icon}"
+                                                               FontSize="16" VerticalAlignment="Center"/>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Title}" FontSize="13"
                                                                FontWeight="SemiBold"/>
@@ -112,8 +112,8 @@
                                                     <ColumnDefinition Width="28"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Glyph}" FontFamily="Segoe Fluent Icons"
-                                                           FontSize="16" VerticalAlignment="Center"/>
+                                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="{Binding Icon}"
+                                                               FontSize="16" VerticalAlignment="Center"/>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Title}" FontSize="13"
                                                                FontWeight="SemiBold"/>

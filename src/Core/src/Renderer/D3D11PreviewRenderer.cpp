@@ -1248,6 +1248,26 @@ struct D3D11PreviewRenderer::Impl {
             viewport.Height = viewport.Width / source_aspect;
             viewport.TopLeftY = (static_cast<float>(target_height) - viewport.Height) * 0.5F;
         }
+        // The native window controller preserves the source aspect in integer
+        // client pixels. That final integer rounding can leave the fitted
+        // viewport less than one physical pixel short (for example 576x1253
+        // for a 1206x2622 source), which appears as a thin black strip at the
+        // bottom or side. Fill the complete client only for this sub-pixel
+        // mismatch; genuine letterboxing remains unchanged.
+        const float horizontal_gap = static_cast<float>(target_width) - viewport.Width;
+        const float vertical_gap = static_cast<float>(target_height) - viewport.Height;
+        const float aspect_error = std::abs(target_aspect - source_aspect) /
+            std::max(source_aspect, 0.000001F);
+        const float pixel_error_limit = 1.0F /
+            static_cast<float>(std::max(target_width, target_height));
+        if (horizontal_gap >= 0.0F && horizontal_gap < 1.0F &&
+            vertical_gap >= 0.0F && vertical_gap < 1.0F &&
+            aspect_error <= pixel_error_limit) {
+            viewport.TopLeftX = 0.0F;
+            viewport.TopLeftY = 0.0F;
+            viewport.Width = static_cast<float>(target_width);
+            viewport.Height = static_cast<float>(target_height);
+        }
         viewport.MinDepth = 0;
         viewport.MaxDepth = 1;
 

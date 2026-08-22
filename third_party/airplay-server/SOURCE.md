@@ -31,6 +31,10 @@ using the upstream FDK AAC path, and failed decoder output is no longer exposed
 to the host as valid PCM. RAOP packet retransmission and a bounded jitter wait
 smooth Wi-Fi delivery, while unrecovered packets use the negotiated PCM frame
 length so concealment does not advance the playback clock at the wrong rate.
+Secondary mirroring and RAOP media sockets bind to the local address of the
+accepted AirPlay control connection. This keeps their TCP listeners and UDP
+timing traffic on the same LAN interface when a system proxy or VPN installs a
+lower-metric virtual route.
 iPhoneMirror's receiver build script reapplies all patches and verifies the
 compiled DLL contains the runtime width, height and frame-rate capability
 markers before installation. The host only accepts the predefined maximum,

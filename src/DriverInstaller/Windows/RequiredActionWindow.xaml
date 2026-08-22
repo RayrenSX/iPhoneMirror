@@ -1,6 +1,7 @@
 <Window x:Class="IPhoneMirror.DriverInstaller.Windows.RequiredActionWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         Title="{DynamicResource RequiredActionTitle}" Width="520" Height="320" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" WindowStyle="None"
@@ -20,7 +21,7 @@
             <TextBlock Text="{Binding ActionTitle}"
                        Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCancelClick">
-                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="14"/>
+                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
         <Border Grid.Row="2" Style="{StaticResource SettingsSection}">

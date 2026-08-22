@@ -7,10 +7,11 @@ using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
+using SymbolRegular = Wpf.Ui.Controls.SymbolRegular;
 
 namespace IPhoneMirror.App.Windows;
 
-public sealed record DeveloperSurfaceItem(string Key, string Glyph,
+public sealed record DeveloperSurfaceItem(string Key, SymbolRegular Icon,
     string Title, string Description);
 
 public sealed record DeveloperOpenWindowItem(string Title, Window Window);
@@ -40,26 +41,26 @@ public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
         Topmost = false;
         WorkspaceItems =
         [
-            Surface("workspace-mirroring", "\uE7F4", "DeveloperMirroring", "DeveloperMirroringDescription"),
-            Surface("workspace-devices", "\uE8EA", "DeveloperDevices", "DeveloperDevicesDescription"),
-            Surface("workspace-settings", "\uE713", "DeveloperSettings", "DeveloperSettingsDescription"),
-            Surface("workspace-output", "\uE7F1", "DeveloperOutput", "DeveloperOutputDescription"),
-            Surface("driver-manager", "\uE90F", "DeveloperDriver", "DeveloperDriverDescription"),
-            Surface("about", "\uE946", "DeveloperAbout", "DeveloperAboutDescription"),
+            Surface("workspace-mirroring", SymbolRegular.ProjectionScreen20, "DeveloperMirroring", "DeveloperMirroringDescription"),
+            Surface("workspace-devices", SymbolRegular.Phone20, "DeveloperDevices", "DeveloperDevicesDescription"),
+            Surface("workspace-settings", SymbolRegular.Settings20, "DeveloperSettings", "DeveloperSettingsDescription"),
+            Surface("workspace-output", SymbolRegular.Speaker220, "DeveloperOutput", "DeveloperOutputDescription"),
+            Surface("driver-manager", SymbolRegular.WrenchScrewdriver20, "DeveloperDriver", "DeveloperDriverDescription"),
+            Surface("about", SymbolRegular.Info20, "DeveloperAbout", "DeveloperAboutDescription"),
         ];
         WindowItems =
         [
-            Surface("advanced-settings", "\uE713", "DeveloperAdvancedSettings", "DeveloperAdvancedSettingsDescription"),
-            Surface("prompt", "\uE8BD", "DeveloperPrompt", "DeveloperPromptDescription"),
-            Surface("capture-recovery", "\uE7BA", "DeveloperCaptureRecovery", "DeveloperCaptureRecoveryDescription"),
-            Surface("image-settings", "\uE790", "DeveloperImageSettings", "DeveloperImageSettingsDescription"),
-            Surface("projection-settings", "\uE713", "DeveloperProjectionSettings", "DeveloperProjectionSettingsDescription"),
-            Surface("media-output", "\uE768", "DeveloperMediaOutput", "DeveloperMediaOutputDescription"),
-            Surface("usb-mode", "\uE8AB", "DeveloperUsbMode", "DeveloperUsbModeDescription"),
-            Surface("startup-error", "\uE783", "DeveloperStartupError", "DeveloperStartupErrorDescription"),
-            Surface("update", "\uE895", "DeveloperUpdate", "DeveloperUpdateDescription"),
-            Surface("instance-conflict", "\uE7BA", "DeveloperInstanceConflict", "DeveloperInstanceConflictDescription"),
-            Surface("native-preview", "\uE7F4", "DeveloperNativePreview", "DeveloperNativePreviewDescription"),
+            Surface("advanced-settings", SymbolRegular.Settings20, "DeveloperAdvancedSettings", "DeveloperAdvancedSettingsDescription"),
+            Surface("prompt", SymbolRegular.QuestionCircle20, "DeveloperPrompt", "DeveloperPromptDescription"),
+            Surface("capture-recovery", SymbolRegular.Warning20, "DeveloperCaptureRecovery", "DeveloperCaptureRecoveryDescription"),
+            Surface("image-settings", SymbolRegular.Image20, "DeveloperImageSettings", "DeveloperImageSettingsDescription"),
+            Surface("projection-settings", SymbolRegular.ProjectionScreen20, "DeveloperProjectionSettings", "DeveloperProjectionSettingsDescription"),
+            Surface("media-output", SymbolRegular.Speaker220, "DeveloperMediaOutput", "DeveloperMediaOutputDescription"),
+            Surface("usb-mode", SymbolRegular.UsbPlug20, "DeveloperUsbMode", "DeveloperUsbModeDescription"),
+            Surface("startup-error", SymbolRegular.ErrorCircle20, "DeveloperStartupError", "DeveloperStartupErrorDescription"),
+            Surface("update", SymbolRegular.ArrowDownload20, "DeveloperUpdate", "DeveloperUpdateDescription"),
+            Surface("instance-conflict", SymbolRegular.Warning20, "DeveloperInstanceConflict", "DeveloperInstanceConflictDescription"),
+            Surface("native-preview", SymbolRegular.Window20, "DeveloperNativePreview", "DeveloperNativePreviewDescription"),
         ];
         DataContext = this;
         InitializeComponent();
@@ -79,8 +80,8 @@ public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
         };
     }
 
-    private static DeveloperSurfaceItem Surface(string key, string glyph,
-        string titleKey, string descriptionKey) => new(key, glyph,
+    private static DeveloperSurfaceItem Surface(string key, SymbolRegular icon,
+        string titleKey, string descriptionKey) => new(key, icon,
         LocalizationService.Get(titleKey), LocalizationService.Get(descriptionKey));
 
     private void OnLanguageChanged(object? sender, EventArgs e)

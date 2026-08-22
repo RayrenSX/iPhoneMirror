@@ -11,6 +11,7 @@ namespace IPhoneMirror.App;
 public partial class App : Application
 {
     internal bool IsSystemSessionEnding { get; private set; }
+    internal bool IsUiPreviewMode { get; set; }
     private readonly UpdateSettingsStore _settingsStore = new();
     private readonly GitHubReleaseClient _releaseClient = new();
     private AboutWindow? _aboutWindow;
@@ -22,6 +23,12 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (IsUiPreviewMode)
+        {
+            base.OnStartup(e);
+            return;
+        }
+
         // Keep WPF on its normal hardware-first composition path. Forcing the
         // whole shell to SoftwareOnly also forces MediaElement composition and
         // makes high-resolution media casting visibly drop frames. WPF still
@@ -197,6 +204,13 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (IsUiPreviewMode)
+        {
+            ThemeService.Shutdown();
+            base.OnExit(e);
+            return;
+        }
+
         SaveUpdateSettings();
         ThemeService.Shutdown();
         try { _releaseClient.Dispose(); }

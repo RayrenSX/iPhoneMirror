@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource AppTitle}"
         Icon="pack://application:,,,/Assets/iPhoneMirror.ico"
         Width="1180" Height="760" MinWidth="980" MinHeight="640"
@@ -84,21 +85,27 @@
                         Click="OnOpenLogsClick" IsEnabled="{Binding CanInteract}"
                         ToolTip="{DynamicResource OpenLogs}"
                         Visibility="{Binding AdvancedVisibility}" Margin="0,0,6,0">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8A7;" FontSize="16"/>
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Open20" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource IconButton}"
                         Click="OnRefreshClick" IsEnabled="{Binding CanInteract}"
                         ToolTip="{DynamicResource Refresh}" Margin="0,0,10,0">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE72C;" FontSize="16"/>
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ArrowClockwise20" FontSize="16"/>
                 </Button>
-                <Button Style="{StaticResource IconButton}" Click="OnMinimizeClick">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE921;" FontSize="12"/>
+                <Button Style="{StaticResource TitleBarButton}" Click="OnMinimizeClick"
+                        AutomationProperties.Name="{DynamicResource Minimize}"
+                        ToolTip="{DynamicResource Minimize}">
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Subtract20" FontSize="16"/>
                 </Button>
-                <Button Style="{StaticResource IconButton}" Click="OnMaximizeClick">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE922;" FontSize="12"/>
+                <Button Style="{StaticResource TitleBarButton}" Click="OnMaximizeClick"
+                        AutomationProperties.Name="{DynamicResource Maximize}"
+                        ToolTip="{DynamicResource Maximize}">
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Maximize20" FontSize="16"/>
                 </Button>
-                <Button Style="{StaticResource IconButton}" Click="OnCloseWindowClick">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8BB;" FontSize="12"/>
+                <Button Style="{StaticResource TitleBarCloseButton}" Click="OnCloseWindowClick"
+                        AutomationProperties.Name="{DynamicResource Close}"
+                        ToolTip="{DynamicResource Close}">
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="17"/>
                 </Button>
             </StackPanel>
         </Grid>

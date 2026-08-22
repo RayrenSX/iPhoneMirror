@@ -316,7 +316,10 @@ HRESULT MediaStream::RuntimeClassInitialize(MediaSource* source,
     std::vector<ComPtr<IMFMediaType>> media_types;
     media_types.reserve(sizes.size() * 2U);
     for (const auto [width, height] : sizes) {
-        for (const GUID subtype : {MFVideoFormat_NV12, MFVideoFormat_RGB32}) {
+        // OBS's DirectShow bridge has historically mishandled the padded
+        // NV12 surface exposed by Frame Server. Publish RGB32 only so the
+        // bridge receives one tightly packed, unambiguous video layout.
+        for (const GUID subtype : {MFVideoFormat_RGB32}) {
             ComPtr<IMFMediaType> type;
             if (FAILED(hr = create_media_type(
                     subtype, width, height, frame_rate, &type)))
@@ -668,19 +671,36 @@ HRESULT MediaStream::render_frame(IMFMediaBuffer* buffer,
 
     ComPtr<IMF2DBuffer2> buffer_2d;
     if (SUCCEEDED(buffer->QueryInterface(IID_PPV_ARGS(&buffer_2d)))) {
-        try {
-            rendered_frame_.resize(sample_size);
-        } catch (...) {
-            return E_OUTOFMEMORY;
+        BYTE* scanline{};
+        BYTE* buffer_start{};
+        LONG pitch{};
+        DWORD buffer_length{};
+        if (FAILED(hr = buffer_2d->Lock2DSize(
+                MF2DBuffer_LockFlags_Write, &scanline, &pitch,
+                &buffer_start, &buffer_length)))
+            return hr;
+
+        const auto row_bytes = static_cast<std::uint64_t>(width) *
+            (subtype == MFVideoFormat_NV12 ? 1U : 4U);
+        const auto absolute_pitch = static_cast<std::uint64_t>(
+            pitch < 0 ? -static_cast<std::int64_t>(pitch) : pitch);
+        const auto required_bytes = absolute_pitch * height;
+        if (scanline == nullptr || pitch <= 0 || absolute_pitch < row_bytes ||
+            required_bytes > buffer_length) {
+            buffer_2d->Unlock2D();
+            return MF_E_BUFFERTOOSMALL;
         }
-        const LONG pitch = subtype == MFVideoFormat_NV12
-            ? static_cast<LONG>(width) : static_cast<LONG>(width * 4U);
+
+        // Write directly into the allocator's rows. ContiguousCopyFrom is
+        // not reliable for the padded RGB32 surfaces used by Frame Server;
+        // the returned pitch is the only authoritative row layout.
         if (subtype == MFVideoFormat_NV12)
-            render_nv12(frame, rendered_frame_.data(), pitch, width, height);
+            render_nv12(frame, scanline, pitch, width, height);
         else
-            render_bgra(frame, rendered_frame_.data(), pitch, width, height);
-        return buffer_2d->ContiguousCopyFrom(rendered_frame_.data(),
-                                             sample_size);
+            render_bgra(frame, scanline, pitch, width, height);
+        hr = buffer_2d->Unlock2D();
+        if (SUCCEEDED(hr)) hr = buffer->SetCurrentLength(sample_size);
+        return hr;
     }
 
     BYTE* data{};

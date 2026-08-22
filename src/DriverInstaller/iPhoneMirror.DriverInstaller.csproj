@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror.Driver</AssemblyName>
     <RootNamespace>IPhoneMirror.DriverInstaller</RootNamespace>
-    <Version>1.6.9</Version>
-    <AssemblyVersion>1.6.9.0</AssemblyVersion>
-    <FileVersion>1.6.9.0</FileVersion>
+    <Version>1.7.0</Version>
+    <AssemblyVersion>1.7.0.0</AssemblyVersion>
+    <FileVersion>1.7.0.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror Driver Manager</Product>
     <Description>Standalone Apple USB and per-device capture driver manager for iPhoneMirror.</Description>
@@ -30,6 +30,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
     <Compile Include="..\Shared\Networking\SegmentedHttpDownloader.cs"
              Link="Networking\SegmentedHttpDownloader.cs" />
     <Compile Include="..\Shared\Security\ElevationPathLock.cs"
@@ -58,6 +59,26 @@
     <Resource Include="..\App\Assets\iPhoneMirror.ico">
       <Link>Assets\iPhoneMirror.ico</Link>
     </Resource>
+    <Content Include="..\..\THIRD_PARTY_NOTICES.md">
+      <Link>THIRD_PARTY_NOTICES.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)wpf-ui\4.3.0\LICENSE.md"
+             Condition="Exists('$(NuGetPackageRoot)wpf-ui\4.3.0\LICENSE.md')">
+      <Link>licenses\WPF-UI-LICENSE.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="$(NuGetPackageRoot)wpf-ui\4.3.0\ThirdPartyNotices.txt"
+             Condition="Exists('$(NuGetPackageRoot)wpf-ui\4.3.0\ThirdPartyNotices.txt')">
+      <Link>licenses\WPF-UI-ThirdPartyNotices.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
     <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\amd64\install-filter.exe"
                       LogicalName="DriverPayload.amd64.install-filter.exe" />
     <EmbeddedResource Include="Assets\libusb-win32-1.2.6.0\amd64\libusb0.sys"

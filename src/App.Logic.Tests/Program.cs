@@ -566,6 +566,65 @@ foreach (var blueActionTextBrush in new[]
     Equal("#FFFFFFFF", ResourceColor(lightThemePath, xaml, blueActionTextBrush),
         $"light theme keeps {blueActionTextBrush} white on blue actions");
 }
+
+static double RelativeLuminance(string color)
+{
+    var hex = color.TrimStart('#');
+    if (hex.Length == 8) hex = hex[2..];
+    var channels = Enumerable.Range(0, 3).Select(index =>
+    {
+        var value = Convert.ToInt32(hex.Substring(index * 2, 2), 16) / 255d;
+        return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+    }).ToArray();
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+static double ContrastRatio(string foreground, string background)
+{
+    var first = RelativeLuminance(foreground);
+    var second = RelativeLuminance(background);
+    return (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
+}
+
+foreach (var theme in new[]
+         {
+             (Name: "light", Path: lightThemePath, Background: "#FFF3F3F5"),
+             (Name: "dark", Path: darkThemePath, Background: "#FF1F1F1F"),
+         })
+{
+    foreach (var statusBrush in new[] { "SuccessBrush", "WarningBrush", "ErrorBrush" })
+    {
+        Equal(true, ContrastRatio(ResourceColor(theme.Path, xaml, statusBrush), theme.Background) >= 4.5,
+            $"{theme.Name} {statusBrush} meets normal-text contrast");
+    }
+}
+foreach (var theme in new[]
+         {
+             (Name: "light", Path: lightThemePath),
+             (Name: "dark", Path: darkThemePath),
+         })
+{
+    foreach (var pair in new[]
+             {
+                 (Foreground: "PrimaryActionTextBrush", Background: "PrimaryActionBrush"),
+                 (Foreground: "PrimaryActionTextBrush", Background: "PrimaryActionHoverBrush"),
+                 (Foreground: "PrimaryActionTextBrush", Background: "PrimaryActionPressedBrush"),
+                 (Foreground: "PrimaryActionDisabledTextBrush", Background: "PrimaryActionDisabledBrush"),
+                 (Foreground: "CaptureActionTextBrush", Background: "CaptureStartBrush"),
+                 (Foreground: "CaptureActionTextBrush", Background: "CaptureStartHoverBrush"),
+                 (Foreground: "CaptureActionTextBrush", Background: "CaptureStopBrush"),
+                 (Foreground: "CaptureActionTextBrush", Background: "CaptureStopHoverBrush"),
+                 (Foreground: "DangerButtonTextBrush", Background: "DangerBrush"),
+                 (Foreground: "DangerButtonTextBrush", Background: "DangerHoverBrush"),
+                 (Foreground: "DangerButtonTextBrush", Background: "DangerPressedBrush"),
+             })
+    {
+        Equal(true,
+            ContrastRatio(ResourceColor(theme.Path, xaml, pair.Foreground),
+                ResourceColor(theme.Path, xaml, pair.Background)) >= 4.5,
+            $"{theme.Name} {pair.Foreground} on {pair.Background} meets button-text contrast");
+    }
+}
 foreach (var requiredThemeKey in new[]
          {
               "AppBackgroundBrush", "SidebarBrush", "CardBrush", "CardHoverBrush",
@@ -602,7 +661,8 @@ var modernControlsText = File.ReadAllText(modernControlsPath);
 foreach (var reusableControl in new[]
          {
              "ModernDialogSurface", "SettingsSection", "IconButton",
-              "TitleBarButton", "SubWindowCloseButton", "CornerRadius=\"8\"",
+              "TitleBarButton", "TitleBarCloseButton", "SubWindowCloseButton", "CornerRadius=\"8\"",
+              "SymbolIcon",
               "SubWindowPageRoot", "SubWindowHeader", "SubWindowTitle",
                "SubWindowSubtitle", "SubWindowTabControl", "SubWindowTabItem",
                "IconButtonHoverBrush",
@@ -642,6 +702,12 @@ Equal(true, modernControlsText.Contains(
         StringComparison.Ordinal) &&
     !modernControlsText.Contains("x:Name=\"CaptionRoot\"", StringComparison.Ordinal),
     "title-bar controls retain the shared icon-button visual treatment");
+Equal(true,
+    modernControlsText.Contains("x:Key=\"ButtonSymbolIcon\"",
+        StringComparison.Ordinal) &&
+    modernControlsText.Contains("AncestorType=Button", StringComparison.Ordinal) &&
+    modernControlsText.Contains("Path=Foreground", StringComparison.Ordinal),
+    "shared symbol icons follow their button foreground for theme contrast");
 var titleBarWindowText = File.ReadAllText(mainWindowPath);
 Equal(true, titleBarWindowText.Contains("TitleBarMinimizeToolTip", StringComparison.Ordinal) &&
     titleBarWindowText.Contains("TitleBarMaximizeToolTip", StringComparison.Ordinal) &&
@@ -662,6 +728,36 @@ foreach (var appXamlPath in new[]
     Equal(false, appXamlText.Contains("TargetType=\"{x:Type ScrollBar}\"",
             StringComparison.Ordinal),
         $"{Path.GetFileName(Path.GetDirectoryName(appXamlPath))} does not override shared scrollbars");
+}
+
+var iconSourceDirectories = new[]
+{
+    Path.Combine(sourceDirectory, "App"),
+    Path.Combine(sourceDirectory, "DriverInstaller"),
+    Path.Combine(sourceDirectory, "SharedUI"),
+};
+var systemIconFontNames = new[]
+{
+    string.Concat("Segoe Fluent", " Icons"),
+    string.Concat("Segoe MDL2", " Assets"),
+};
+var fontIconElementName = string.Concat("<ui:", "FontIcon");
+foreach (var iconSourcePath in iconSourceDirectories.SelectMany(directory =>
+             Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories))
+         .Where(path => Path.GetExtension(path) is ".xaml" or ".cs" &&
+                        !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+                            StringComparison.OrdinalIgnoreCase) &&
+                        !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                            StringComparison.OrdinalIgnoreCase)))
+{
+    var iconSourceText = File.ReadAllText(iconSourcePath);
+    Equal(false,
+        systemIconFontNames.Any(name => iconSourceText.Contains(name,
+            StringComparison.OrdinalIgnoreCase)) ||
+        iconSourceText.Contains(fontIconElementName, StringComparison.Ordinal) ||
+        System.Text.RegularExpressions.Regex.IsMatch(iconSourceText,
+            @"&#x[EeFf][0-9A-Fa-f]{3};|\\[ux][EeFf][0-9A-Fa-f]{3}|[\uE000-\uF8FF]"),
+        $"{Path.GetRelativePath(sourceDirectory, iconSourcePath)} uses packaged semantic icons");
 }
 
 var themedWindowDirectories = new[]
@@ -749,7 +845,8 @@ foreach (var windowPath in resizableWindowPaths)
 }
 
 var appWindowDirectory = Path.Combine(sourceDirectory, "App", "Windows");
-foreach (var windowPath in Directory.GetFiles(appWindowDirectory, "*.xaml"))
+foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
+             Directory.GetFiles(directory, "*.xaml")))
 {
     var windowText = File.ReadAllText(windowPath);
     if (!windowText.Contains("SubWindowHeader", StringComparison.Ordinal)) continue;
@@ -758,6 +855,12 @@ foreach (var windowPath in Directory.GetFiles(appWindowDirectory, "*.xaml"))
             StringComparison.Ordinal) ||
         windowText.Contains("MouseLeftButtonDown=", StringComparison.Ordinal),
         $"{Path.GetFileName(windowPath)} exposes a draggable title region");
+    if (windowText.Contains("SubWindowCloseButton", StringComparison.Ordinal))
+    {
+        Equal(true, windowText.Contains("Style=\"{StaticResource ButtonSymbolIcon}\"",
+                StringComparison.Ordinal),
+            $"{Path.GetFileName(windowPath)} uses the accessible child-window close glyph");
+    }
 }
 var windowDragBehaviorText = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Animations", "WindowDragBehavior.cs"));
@@ -768,6 +871,26 @@ Equal(true,
     "shared child-window drag behavior supports moving and title double-click");
 
 var mainWindowText = File.ReadAllText(mainWindowPath);
+foreach (var navigationSymbol in new[]
+         {
+             "PhoneDesktop24", "ProjectionScreen24", "Settings24",
+             "VideoRecording20", "UsbPlug24", "Info24",
+         })
+{
+    Equal(true, mainWindowText.Contains($"Symbol=\"{navigationSymbol}\" FontSize=\"20\"",
+            StringComparison.Ordinal),
+        $"main navigation uses the semantic {navigationSymbol} icon");
+}
+Equal(true,
+    mainWindowText.Contains("Style=\"{StaticResource TitleBarCloseButton}\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("Symbol=\"Subtract20\" FontSize=\"16\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("Symbol=\"Maximize20\" FontSize=\"16\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("Style=\"{StaticResource ButtonSymbolIcon}\" Symbol=\"Dismiss20\" FontSize=\"17\"",
+        StringComparison.Ordinal),
+    "main title-bar controls have readable glyph sizes and close-button feedback");
 foreach (var navigationKey in new[]
          {
              "NavMirroring", "NavDevices", "NavOutput", "NavSettings",
@@ -857,9 +980,11 @@ var mediaPlayerButtonStyle = mainWindowText[mediaPlayerButtonStyleStart..
 Equal(true, mediaPlayerButtonStyle.Contains(
                 "Value=\"{DynamicResource NavigationTextFontFamily}\"",
                 StringComparison.Ordinal) &&
-            !mediaPlayerButtonStyle.Contains("Segoe Fluent Icons",
+            mainWindowText.Contains("x:Name=\"MediaCastPlayPauseIcon\"",
+                StringComparison.Ordinal) &&
+            mainWindowText.Contains("Symbol=\"Pause20\"",
                 StringComparison.Ordinal),
-    "cast button tooltips inherit a CJK-capable UI font instead of the glyph font");
+    "cast controls use a CJK-capable UI font and packaged SymbolIcon glyphs");
 Equal(false, mainWindowText.Contains("CloseMediaCastButton",
         StringComparison.Ordinal),
     "video casting preview has no redundant corner close button");
@@ -945,6 +1070,8 @@ var nativePreviewWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "NativePreviewWindow.cs"));
 var aspectRatioControllerCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "AspectRatioWindowController.cs"));
+var previewRendererCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "Core", "src", "Renderer", "D3D11PreviewRenderer.cpp"));
 var multiPreviewManagerCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "MultiDevicePreviewManager.cs"));
 Equal(true,
@@ -968,6 +1095,16 @@ Equal(true,
     !nativePreviewWindowCode.Contains("ShowWindow(candidate._handle, SwShow)",
         StringComparison.Ordinal),
     "native previews apply final bounds while hidden and become visible in one step");
+Equal(true,
+    previewRendererCode.Contains("horizontal_gap >= 0.0F && horizontal_gap < 1.0F",
+        StringComparison.Ordinal) &&
+    previewRendererCode.Contains("vertical_gap >= 0.0F && vertical_gap < 1.0F",
+        StringComparison.Ordinal) &&
+    previewRendererCode.Contains("aspect_error <= pixel_error_limit",
+        StringComparison.Ordinal) &&
+    previewRendererCode.Contains("viewport.Height = static_cast<float>(target_height);",
+        StringComparison.Ordinal),
+    "native preview removes only sub-pixel aspect-rounding bars");
 var themeServiceText = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "ThemeService.cs"));
 Equal(true,

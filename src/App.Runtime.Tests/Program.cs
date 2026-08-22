@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Threading;
 using System.Windows.Media;
 using IPhoneMirror.App;
 using IPhoneMirror.App.Updater;
@@ -13,6 +15,7 @@ using WpfFlowDocumentScrollViewer = System.Windows.Controls.FlowDocumentScrollVi
 using WpfScrollBar = System.Windows.Controls.Primitives.ScrollBar;
 using WpfThumb = System.Windows.Controls.Primitives.Thumb;
 using WpfTextBlock = System.Windows.Controls.TextBlock;
+using WpfSymbolIcon = Wpf.Ui.Controls.SymbolIcon;
 
 namespace IPhoneMirror.App.Runtime.Tests;
 
@@ -25,6 +28,8 @@ internal static class Program
         {
             if (args is ["--live-record", .. var recordingArgs])
                 return RunLiveRecordingAsync(recordingArgs).GetAwaiter().GetResult();
+            if (args is ["--ui-preview", var themeName, var surface])
+                return RunUiPreview(themeName, surface);
             TestUpdateWindowThemeSwitch();
             Console.WriteLine("App runtime tests passed.");
             return 0;
@@ -34,6 +39,56 @@ internal static class Program
             Console.Error.WriteLine(error);
             return 1;
         }
+    }
+
+    private static int RunUiPreview(string themeName, string surface)
+    {
+        if (!Enum.TryParse<AppTheme>(themeName, ignoreCase: true, out var theme) ||
+            theme == AppTheme.System)
+            throw new ArgumentException("UI preview theme must be Light or Dark.");
+
+        var application = new App();
+        var previewMode = typeof(App).GetProperty("IsUiPreviewMode",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new MissingMemberException(typeof(App).FullName, "IsUiPreviewMode");
+        previewMode.SetValue(application, true);
+        application.InitializeComponent();
+        var assembly = typeof(App).Assembly;
+        ApplyTheme(assembly, theme);
+        Window window;
+        if (surface.Equals("main", StringComparison.OrdinalIgnoreCase))
+        {
+            var main = new MainWindow
+            {
+                Width = 1360,
+                Height = 820,
+                ShowInTaskbar = true,
+            };
+            var loaded = typeof(MainWindow).GetMethod("OnLoaded",
+                BindingFlags.Instance | BindingFlags.NonPublic, binder: null,
+                types: [typeof(object), typeof(RoutedEventArgs)], modifiers: null) ??
+                throw new MissingMethodException(typeof(MainWindow).FullName, "OnLoaded");
+            main.Loaded -= (RoutedEventHandler)Delegate.CreateDelegate(
+                typeof(RoutedEventHandler), main, loaded);
+            window = main;
+        }
+        else if (surface.Equals("child", StringComparison.OrdinalIgnoreCase))
+        {
+            window = new IPhoneMirror.App.Windows.AdvancedSettingsWindow(
+                1920, 1080, previewOnly: true);
+        }
+        else
+        {
+            throw new ArgumentException("UI preview surface must be main or child.");
+        }
+
+        window.Title = $"iPhoneMirror UI Audit — {theme} — {surface}";
+        application.MainWindow = window;
+        window.Closed += (_, _) => application.Shutdown();
+        window.Show();
+        ApplyTheme(assembly, theme);
+        Dispatcher.Run();
+        return 0;
     }
 
     private static async Task<int> RunLiveRecordingAsync(string[] args)
@@ -398,6 +453,7 @@ internal static class Program
             }
 
             TestDeveloperToolsWindow(application, assembly);
+            TestMainWindowThemeAndCaptionControls(application, assembly);
         }
         finally
         {
@@ -478,6 +534,71 @@ internal static class Program
         finally
         {
             owner.Close();
+        }
+    }
+
+    private static void TestMainWindowThemeAndCaptionControls(Application application,
+        Assembly assembly)
+    {
+        var window = new MainWindow
+        {
+            Width = 1280,
+            Height = 760,
+            ShowInTaskbar = false,
+        };
+        application.MainWindow = window;
+        window.Show();
+        try
+        {
+            window.UpdateLayout();
+            var titleButtonStyle = window.TryFindResource("TitleBarButton");
+            var closeButtonStyle = window.TryFindResource("TitleBarCloseButton");
+            var buttons = FindVisualDescendants<WpfButton>(window)
+                .Where(button => ReferenceEquals(button.Style, titleButtonStyle) ||
+                                 ReferenceEquals(button.Style, closeButtonStyle))
+                .ToArray();
+            if (buttons.Length != 3 ||
+                buttons.Any(button => button.Width < 40 || button.Height < 38) ||
+                buttons.Count(button => ReferenceEquals(button.Style, closeButtonStyle)) != 1)
+                throw new InvalidOperationException(
+                    "Main title-bar controls do not use the accessible caption-button styles.");
+
+            ApplyTheme(assembly, AppTheme.Light);
+            AssertThemeBrush(window, "AccentBrush", Color.FromRgb(0x0F, 0x6C, 0xBD));
+            AssertThemeBrush(window, "SuccessBrush", Color.FromRgb(0x10, 0x7C, 0x41));
+            AssertThemeBrush(window, "WarningBrush", Color.FromRgb(0x9A, 0x4B, 0x00));
+            AssertCaptionIconForeground(window, Color.FromRgb(0x1D, 0x1D, 0x1F));
+            ApplyTheme(assembly, AppTheme.Dark);
+            AssertThemeBrush(window, "AccentBrush", Color.FromRgb(0x69, 0xB1, 0xF8));
+            AssertThemeBrush(window, "SuccessBrush", Color.FromRgb(0x6C, 0xCB, 0x8F));
+            AssertCaptionIconForeground(window, Color.FromRgb(0xF5, 0xF5, 0xF7));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    private static void AssertCaptionIconForeground(Window window, Color expectedColor)
+    {
+        var titleButtonStyle = window.TryFindResource("TitleBarButton");
+        var closeButtonStyle = window.TryFindResource("TitleBarCloseButton");
+        var titleButtons = FindVisualDescendants<WpfButton>(window)
+            .Where(button => ReferenceEquals(button.Style, titleButtonStyle) ||
+                             ReferenceEquals(button.Style, closeButtonStyle))
+            .ToArray();
+        if (titleButtons.Length != 3)
+            throw new InvalidOperationException(
+                "Main title-bar caption buttons were not found for icon contrast verification.");
+        foreach (var button in titleButtons)
+        {
+            var icon = FindVisualDescendant<WpfSymbolIcon>(button,
+                _ => true) ?? throw new InvalidOperationException(
+                    "Caption button does not contain a SymbolIcon.");
+            var brush = icon.Foreground as SolidColorBrush;
+            if (brush is null || brush.Color != expectedColor)
+                throw new InvalidOperationException(
+                    $"Caption icon foreground did not follow the active theme: expected {expectedColor}, got {brush?.Color.ToString() ?? "unset"}.");
         }
     }
 
@@ -616,6 +737,18 @@ internal static class Program
             if (descendant is not null) return descendant;
         }
         return null;
+    }
+
+    private static IEnumerable<T> FindVisualDescendants<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is T candidate) yield return candidate;
+            foreach (var descendant in FindVisualDescendants<T>(child))
+                yield return descendant;
+        }
     }
 
     private static void AssertBackdropBackground(Window window)

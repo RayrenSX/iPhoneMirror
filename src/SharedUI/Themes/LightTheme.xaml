@@ -8,8 +8,8 @@
     <Color x:Key="ThemeSoftBorderColor">#12000000</Color>
     <Color x:Key="ThemeTextColor">#FF1D1D1F</Color>
     <Color x:Key="ThemeMutedTextColor">#FF5F5F65</Color>
-    <Color x:Key="ThemeAccentColor">#FF303033</Color>
-    <Color x:Key="ThemeAccentHoverColor">#FF171719</Color>
+    <Color x:Key="ThemeAccentColor">#FF0F6CBD</Color>
+    <Color x:Key="ThemeAccentHoverColor">#FF115EA3</Color>
     <Color x:Key="ThemeOnAccentColor">#FFFFFFFF</Color>
 
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource ThemeBackgroundColor}"/>
@@ -62,8 +62,8 @@
     <SolidColorBrush x:Key="SliderThumbFillBrush" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="SliderThumbHoverBrush" Color="#FFF7F7F9"/>
     <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="#FF0F6CBD"/>
-    <SolidColorBrush x:Key="SuccessBrush" Color="#FF5C5C61"/>
-    <SolidColorBrush x:Key="WarningBrush" Color="#FFB15C00"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="#FF107C41"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="#FF9A4B00"/>
     <SolidColorBrush x:Key="ErrorBrush" Color="#FFD70015"/>
     <SolidColorBrush x:Key="DangerBrush" Color="#FFD70015"/>
     <SolidColorBrush x:Key="DangerHoverBrush" Color="#FFB60012"/>
@@ -72,12 +72,12 @@
     <SolidColorBrush x:Key="DangerHoverBorderBrush" Color="#FF620009"/>
     <SolidColorBrush x:Key="DangerPressedBorderBrush" Color="#FF480007"/>
     <SolidColorBrush x:Key="DangerButtonTextBrush" Color="#FFFFFFFF"/>
-    <SolidColorBrush x:Key="StatusAppliedBrush" Color="#FF5C5C61"/>
-    <SolidColorBrush x:Key="StatusPendingBrush" Color="#FFB15C00"/>
+    <SolidColorBrush x:Key="StatusAppliedBrush" Color="#FF107C41"/>
+    <SolidColorBrush x:Key="StatusPendingBrush" Color="#FF9A4B00"/>
     <SolidColorBrush x:Key="StatusFailedBrush" Color="#FFD70015"/>
-    <SolidColorBrush x:Key="WarningSurfaceBrush" Color="#12B15C00"/>
+    <SolidColorBrush x:Key="WarningSurfaceBrush" Color="#149A4B00"/>
     <SolidColorBrush x:Key="ErrorSurfaceBrush" Color="#12D70015"/>
-    <SolidColorBrush x:Key="SuccessSurfaceBrush" Color="#10000000"/>
+    <SolidColorBrush x:Key="SuccessSurfaceBrush" Color="#14107C41"/>
     <SolidColorBrush x:Key="OverlayBrush" Color="#BFFFFFFF"/>
     <SolidColorBrush x:Key="MediaOverlayBrush" Color="#E62B2B2E"/>
     <SolidColorBrush x:Key="MediaOverlayTextBrush" Color="#FFFFFFFF"/>
@@ -105,10 +105,10 @@
     <SolidColorBrush x:Key="PreviewTextBrush" Color="#FF1D1D1F"/>
     <SolidColorBrush x:Key="PreviewMutedTextBrush" Color="#FF6E6E73"/>
     <SolidColorBrush x:Key="CaptureStartBrush" Color="#FF0A67D0"/>
-    <SolidColorBrush x:Key="CaptureStartHoverBrush" Color="#FF0859B5"/>
+    <SolidColorBrush x:Key="CaptureStartHoverBrush" Color="#FF0A5FAF"/>
     <SolidColorBrush x:Key="CaptureStartBorderBrush" Color="#FF063F80"/>
     <SolidColorBrush x:Key="CaptureStopBrush" Color="#FFC9363E"/>
-    <SolidColorBrush x:Key="CaptureStopHoverBrush" Color="#FFAD2D34"/>
+    <SolidColorBrush x:Key="CaptureStopHoverBrush" Color="#FFB92F38"/>
     <SolidColorBrush x:Key="CaptureStopBorderBrush" Color="#FF761F24"/>
     <SolidColorBrush x:Key="CaptureActionTextBrush" Color="#FFFFFFFF"/>
 

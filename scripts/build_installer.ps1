@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.6.9',
+    [string]$Version,
     [switch]$SkipAppBuild,
     [string]$SourceDirectory,
     [string]$OutputDirectory
@@ -9,6 +9,39 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+
+function Get-ProjectVersion([string]$ProjectPath) {
+    [xml]$project = Get-Content -LiteralPath $ProjectPath -Raw
+    $versions = @($project.Project.PropertyGroup | ForEach-Object {
+        if ($null -ne $_.Version -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.Version)) {
+            ([string]$_.Version).Trim()
+        }
+    } | Select-Object -Unique)
+    if ($versions.Count -ne 1) {
+        throw "Project must declare exactly one Version: $ProjectPath"
+    }
+    return $versions[0]
+}
+
+$AppProjectPath = Join-Path $Root 'src\App\iPhoneMirror.App.csproj'
+$AppProjectVersion = Get-ProjectVersion $AppProjectPath
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = $AppProjectVersion
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+    throw "Invalid installer version in ${AppProjectPath}: $Version"
+}
+foreach ($project in @(
+    $AppProjectPath,
+    (Join-Path $Root 'src\DriverInstaller\iPhoneMirror.DriverInstaller.csproj')
+)) {
+    $projectVersion = Get-ProjectVersion $project
+    if (-not [string]::Equals($projectVersion, $Version,
+            [StringComparison]::Ordinal)) {
+        throw "Installer version $Version does not match $project version $projectVersion."
+    }
+}
 $SourceDirectory = if ($SourceDirectory) {
     [IO.Path]::GetFullPath($SourceDirectory)
 } else { Join-Path $Root 'outputs\iPhoneMirror.Installer' }

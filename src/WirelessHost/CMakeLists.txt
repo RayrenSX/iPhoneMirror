@@ -109,11 +109,17 @@ if(IPHONEMIRROR_BUILD_TESTS)
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_compile_options(iPhoneMirror.WirelessReceiver.ProtocolSmoke PRIVATE
         /W4 /permissive- /utf-8 /EHsc)
-    target_link_libraries(iPhoneMirror.WirelessReceiver.ProtocolSmoke PRIVATE ws2_32)
+    target_link_libraries(iPhoneMirror.WirelessReceiver.ProtocolSmoke PRIVATE
+        iphlpapi ws2_32)
     add_dependencies(iPhoneMirror.WirelessReceiver.ProtocolSmoke
         iPhoneMirror.WirelessHost)
     add_test(NAME WirelessReceiverProtocolSmoke COMMAND
         iPhoneMirror.WirelessReceiver.ProtocolSmoke
         $<TARGET_FILE:iPhoneMirror.WirelessHost>)
     set_tests_properties(WirelessReceiverProtocolSmoke PROPERTIES TIMEOUT 35)
+    add_test(NAME WirelessReceiverMediaRouteSmoke COMMAND
+        iPhoneMirror.WirelessReceiver.ProtocolSmoke
+        $<TARGET_FILE:iPhoneMirror.WirelessHost> --media-route)
+    set_tests_properties(WirelessReceiverMediaRouteSmoke PROPERTIES
+        SKIP_RETURN_CODE 77 TIMEOUT 35)
 endif()

@@ -3498,7 +3498,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                         ? LocalizationService.Get("MediaOutputNoSession")
                         : VirtualCameraStatusText);
             if (mediaCast) handle = MediaCastOutputHandle;
-            width = NormalizeOutputWidth(width);
+            // RGB32 Frame Server rows are aligned to 64 bytes. Four bytes per
+            // pixel therefore requires a width aligned to 16 pixels; choose
+            // the nearest aligned width to preserve the source aspect ratio.
+            width = NormalizeVirtualCameraWidth(width);
             height = NormalizeOutputHeight(height);
             frameRate = Math.Clamp(frameRate, 10, 60);
             await _virtualCamera.StartAsync(handle, width, height,
@@ -3740,6 +3743,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private static uint NormalizeOutputHeight(uint value) =>
         Math.Clamp(value == 0 ? 720U : value & ~1U, 160U, 2160U);
+
+    private static uint NormalizeVirtualCameraWidth(uint value)
+    {
+        value = NormalizeOutputWidth(value);
+        return Math.Clamp((value + 8U) & ~15U, 160U, 3840U);
+    }
 
     private static string MediaOutputKindLabel(MediaOutputKind kind) => kind switch
     {

@@ -8,9 +8,9 @@
     <Color x:Key="ThemeSoftBorderColor">#14FFFFFF</Color>
     <Color x:Key="ThemeTextColor">#FFF5F5F7</Color>
     <Color x:Key="ThemeMutedTextColor">#FFB7B7BC</Color>
-    <Color x:Key="ThemeAccentColor">#FFF0F0F2</Color>
-    <Color x:Key="ThemeAccentHoverColor">#FFFFFFFF</Color>
-    <Color x:Key="ThemeOnAccentColor">#FF171719</Color>
+    <Color x:Key="ThemeAccentColor">#FF69B1F8</Color>
+    <Color x:Key="ThemeAccentHoverColor">#FF8CC6FF</Color>
+    <Color x:Key="ThemeOnAccentColor">#FF0F1419</Color>
 
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource ThemeBackgroundColor}"/>
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="#E61F1F1F"/>
@@ -62,22 +62,22 @@
     <SolidColorBrush x:Key="SliderThumbFillBrush" Color="#FFF5F5F7"/>
     <SolidColorBrush x:Key="SliderThumbHoverBrush" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="#FF479EF5"/>
-    <SolidColorBrush x:Key="SuccessBrush" Color="#FFB8B8BD"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="#FF6CCB8F"/>
     <SolidColorBrush x:Key="WarningBrush" Color="#FFFFC55C"/>
     <SolidColorBrush x:Key="ErrorBrush" Color="#FFFF6961"/>
-    <SolidColorBrush x:Key="DangerBrush" Color="#FFFF453A"/>
-    <SolidColorBrush x:Key="DangerHoverBrush" Color="#FFFF6961"/>
-    <SolidColorBrush x:Key="DangerPressedBrush" Color="#FFD9362D"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#FFC9363E"/>
+    <SolidColorBrush x:Key="DangerHoverBrush" Color="#FFD13D45"/>
+    <SolidColorBrush x:Key="DangerPressedBrush" Color="#FFA82830"/>
     <SolidColorBrush x:Key="DangerBorderBrush" Color="#FFFFAAA5"/>
     <SolidColorBrush x:Key="DangerHoverBorderBrush" Color="#FFFFCBC8"/>
     <SolidColorBrush x:Key="DangerPressedBorderBrush" Color="#FFFF8E87"/>
     <SolidColorBrush x:Key="DangerButtonTextBrush" Color="#FFFFFFFF"/>
-    <SolidColorBrush x:Key="StatusAppliedBrush" Color="#FFB8B8BD"/>
+    <SolidColorBrush x:Key="StatusAppliedBrush" Color="#FF6CCB8F"/>
     <SolidColorBrush x:Key="StatusPendingBrush" Color="#FFFFC55C"/>
     <SolidColorBrush x:Key="StatusFailedBrush" Color="#FFFF6961"/>
     <SolidColorBrush x:Key="WarningSurfaceBrush" Color="#22FFC55C"/>
     <SolidColorBrush x:Key="ErrorSurfaceBrush" Color="#22FF6961"/>
-    <SolidColorBrush x:Key="SuccessSurfaceBrush" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="SuccessSurfaceBrush" Color="#226CCB8F"/>
     <SolidColorBrush x:Key="OverlayBrush" Color="#D91F1F22"/>
     <SolidColorBrush x:Key="MediaOverlayBrush" Color="#E6222226"/>
     <SolidColorBrush x:Key="MediaOverlayTextBrush" Color="#FFF7F7F8"/>
@@ -105,10 +105,10 @@
     <SolidColorBrush x:Key="PreviewTextBrush" Color="#FFF5F5F7"/>
     <SolidColorBrush x:Key="PreviewMutedTextBrush" Color="#FFB8B8BD"/>
     <SolidColorBrush x:Key="CaptureStartBrush" Color="#FF0A67D0"/>
-    <SolidColorBrush x:Key="CaptureStartHoverBrush" Color="#FF2680E3"/>
+    <SolidColorBrush x:Key="CaptureStartHoverBrush" Color="#FF0A5FAF"/>
     <SolidColorBrush x:Key="CaptureStartBorderBrush" Color="#FF78BAFF"/>
     <SolidColorBrush x:Key="CaptureStopBrush" Color="#FFC9363E"/>
-    <SolidColorBrush x:Key="CaptureStopHoverBrush" Color="#FFE04B53"/>
+    <SolidColorBrush x:Key="CaptureStopHoverBrush" Color="#FFB92F38"/>
     <SolidColorBrush x:Key="CaptureStopBorderBrush" Color="#FFFF979C"/>
     <SolidColorBrush x:Key="CaptureActionTextBrush" Color="#FFFFFFFF"/>
 

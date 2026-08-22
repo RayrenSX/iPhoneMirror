@@ -36,10 +36,12 @@ function Send-AirPlayRequest([string]$Target, [int]$CSeq) {
     }
 }
 
-$log = Join-Path $Root 'work\airplay-media-control-smoke.log'
+$logDirectory = Join-Path $Root 'work\airplay-media-control-smoke'
+$log = Join-Path $logDirectory 'capture.log'
+New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
-$previousLog = $env:IPHONE_MIRROR_LOG_FILE
-$env:IPHONE_MIRROR_LOG_FILE = $log
+$previousLogDirectory = $env:IPHONE_MIRROR_APP_LOG_DIRECTORY
+$env:IPHONE_MIRROR_APP_LOG_DIRECTORY = $logDirectory
 $process = $null
 try {
     $process = Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe) -PassThru
@@ -88,5 +90,5 @@ finally {
             Stop-Process -Id $process.Id -Force
         }
     }
-    $env:IPHONE_MIRROR_LOG_FILE = $previousLog
+    $env:IPHONE_MIRROR_APP_LOG_DIRECTORY = $previousLogDirectory
 }
