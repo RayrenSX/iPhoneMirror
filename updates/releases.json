@@ -9,26 +9,26 @@
     "assets": [
       {
         "name": "iPhoneMirror-Setup-v1.7.0-x64.exe",
-        "size": 91906113,
-        "digest": "sha256:04eaf3ab324b246bee2a7fbeed888a89dc7260809d81a90a106b92816de89ea3",
+        "size": 91958222,
+        "digest": "sha256:97ec353e9161431ac46cf087e7f6db7d0baa505f08b93c945968790840a5fec1",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-Setup-v1.7.0-x64.exe"
       },
       {
         "name": "iPhoneMirror-v1.7.0-win-x64.zip",
-        "size": 193927084,
-        "digest": "sha256:34cdd2eb818b0aba19e4cb33e267083718e9dc01e371e2b3e96d63077ddc3817",
+        "size": 194055018,
+        "digest": "sha256:2fbb8c2bd830ca9c66732d61bca8d2b9172adb0354272682de92f701613b8af3",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-v1.7.0-win-x64.zip"
       },
       {
         "name": "iPhoneMirror-v1.7.0-win-x64-sbom.spdx.json",
-        "size": 40426,
-        "digest": "sha256:397f8b98c7a1bd2b8b3137a106a9d4094e57e008bc19868fb120d2015e44aa85",
+        "size": 40432,
+        "digest": "sha256:66b2b38614acea1c319fc093f22b3f49f33791b884d0f53f4b679de5dc505db9",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-v1.7.0-win-x64-sbom.spdx.json"
       },
       {
         "name": "SHA256SUMS.txt",
         "size": 307,
-        "digest": "sha256:9202219f6fe3a6c4bb3f1f7a84b6b5b70520269fc7706635029bf010abeff846",
+        "digest": "sha256:b0b037110271c5d24eca751e657e055ca4c6d05cf69f428e30aa5f1bbace2f00",
         "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/SHA256SUMS.txt"
       }
     ]
