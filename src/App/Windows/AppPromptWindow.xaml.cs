@@ -67,13 +67,17 @@ public partial class AppPromptWindow : Wpf.Ui.Controls.FluentWindow
 
     internal static void ShowDeveloperPreview(Window owner)
     {
-        var prompt = new AppPromptWindow(
+        ShowDeveloperPreview(owner,
             LocalizationService.Get("DeveloperPreviewPromptTitle"),
-            LocalizationService.Get("DeveloperPreviewPromptBody"), showCancel: true,
-            previewOnly: true)
-        {
-            Owner = owner,
-        };
+            LocalizationService.Get("DeveloperPreviewPromptBody"),
+            showCancel: true);
+    }
+
+    private static void ShowDeveloperPreview(Window owner, string title,
+        string body, bool showCancel)
+    {
+        var prompt = new AppPromptWindow(title, body, showCancel,
+            previewOnly: true) { Owner = owner };
         prompt.Show();
     }
 

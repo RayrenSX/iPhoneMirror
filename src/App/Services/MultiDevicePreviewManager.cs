@@ -13,6 +13,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Task<(bool Success, string Message)>> _opening =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ProtectedContentPresentation> _protectionStates =
+        new(StringComparer.OrdinalIgnoreCase);
     private bool _disposing;
     private bool _disposed;
 
@@ -20,6 +22,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     {
         this.viewModel = viewModel;
         viewModel.DeviceSessionHandleChanged += OnDeviceSessionHandleChanged;
+        viewModel.DeviceProtectionStateChanged += OnDeviceProtectionStateChanged;
+        LocalizationService.LanguageChanged += OnLanguageChanged;
     }
 
     internal bool IsOpen(DeviceViewModel? device) => device is not null &&
@@ -114,6 +118,9 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             return (false, LocalizationService.Get("PreviewRendererAttachFailed"));
         }
         _windows[device.Udid] = window;
+        if (_protectionStates.TryGetValue(device.Udid, out var protection))
+            window.SetProtectedContent(protection.IsProtected,
+                protection.AudioDisplay);
         viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_opened",
             ("device", AppLog.Device(device.Udid)),
             ("handle", AppLog.Handle(started.Handle)),
@@ -152,6 +159,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
 
     private void OnDeviceSessionHandleChanged(string udid, ulong handle)
     {
+        _protectionStates.Remove(udid);
         if (!_windows.TryGetValue(udid, out var window) ||
             window.SessionHandle == handle)
             return;
@@ -174,6 +182,44 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                     uiError, ("device", AppLog.Device(udid)));
             }
         }
+    }
+
+    private void OnDeviceProtectionStateChanged(string udid,
+        ProtectedContentPresentation presentation)
+    {
+        if (presentation.IsProtected) _protectionStates[udid] = presentation;
+        else _protectionStates.Remove(udid);
+        try
+        {
+            if (_windows.TryGetValue(udid, out var window))
+                window.SetProtectedContent(presentation.IsProtected,
+                    presentation.AudioDisplay);
+        }
+        catch (Exception error)
+        {
+            viewModel.AddDiagnosticLog(AppLog.Event(
+                "independent_preview_protection_failed",
+                ("device", AppLog.Device(udid)),
+                ("protected", presentation.IsProtected),
+                ("error", AppLog.Error(error))));
+        }
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        foreach (var (udid, presentation) in _protectionStates.ToArray())
+            try
+            {
+                if (_windows.TryGetValue(udid, out var window))
+                    window.SetProtectedContent(true, presentation.AudioDisplay);
+            }
+            catch (Exception error)
+            {
+                viewModel.AddDiagnosticLog(AppLog.Event(
+                    "independent_preview_protection_language_failed",
+                    ("device", AppLog.Device(udid)),
+                    ("error", AppLog.Error(error))));
+            }
     }
 
     internal void UpdateDevice(string udid, uint width, uint height)
@@ -228,6 +274,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_manager_dispose",
             ("count", _windows.Count)));
         viewModel.DeviceSessionHandleChanged -= OnDeviceSessionHandleChanged;
+        viewModel.DeviceProtectionStateChanged -= OnDeviceProtectionStateChanged;
+        LocalizationService.LanguageChanged -= OnLanguageChanged;
         foreach (var window in _windows.Values.ToArray())
         {
             try { window.Dispose(); }
@@ -240,5 +288,6 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             }
         }
         _windows.Clear();
+        _protectionStates.Clear();
     }
 }

@@ -129,13 +129,51 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
 
     private static void Open(string target)
     {
-        try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
+        try
+        {
+            if (Uri.TryCreate(target, UriKind.Absolute, out var uri) &&
+                (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            {
+                Process.Start(new ProcessStartInfo(uri.AbsoluteUri)
+                {
+                    UseShellExecute = true,
+                });
+                return;
+            }
+
+            var path = Path.GetFullPath(target);
+            if (Directory.Exists(path))
+            {
+                StartExplorer(path);
+                return;
+            }
+            if (File.Exists(path))
+            {
+                // LICENSE and changelog files are deliberately opened through
+                // Explorer. In particular, LICENSE has no extension and must
+                // never be handed to a user's Photoshop/unknown-file handler.
+                StartExplorer(path, selectFile: true);
+                return;
+            }
+
+            throw new FileNotFoundException("The local target does not exist.", path);
+        }
         catch (Exception error)
         {
             DiagnosticLogger.Exception("shell", "open_target_failed", error,
                 ("target", Path.GetFileName(target)));
-            AppPromptWindow.Inform(LocalizationService.Get("OpenLinkFailedTitle"), error.Message);
+                AppPromptWindow.Inform(LocalizationService.Get("OpenLinkFailedTitle"), error.Message);
         }
+    }
+
+    private static void StartExplorer(string path, bool selectFile = false)
+    {
+        var arguments = selectFile ? $"/select,\"{path}\"" : $"\"{path}\"";
+        Process.Start(new ProcessStartInfo("explorer.exe", arguments)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        });
     }
 
     private void OnOpenLogsClick(object sender, RoutedEventArgs e) =>

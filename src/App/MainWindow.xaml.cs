@@ -133,6 +133,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private readonly MediaCastAudioDecoder _mediaCastAudioDecoder = new();
     private NativePreviewWindow? _mediaCastPreviewWindow;
     private ProjectionSettingsWindow? _projectionSettingsWindow;
+    private ProtectedContentNoticeWindow? _protectedContentNoticeWindow;
+    private string? _protectedContentNoticeUdid;
     private MediaOutputSettingsWindow? _mediaOutputSettingsWindow;
     private string? _projectionSettingsUdid;
     private ulong _projectionSettingsSessionHandle;
@@ -144,6 +146,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool _themeControlReady;
     private int _workspaceTransitionRevision;
     private long _mediaCastOutputTimestamp;
+    private HwndSource? _windowSource;
 
     private static readonly TimeSpan DeviceDragHoldDuration = TimeSpan.FromMilliseconds(350);
     private static readonly TimeSpan WorkspaceTransitionDuration = TimeSpan.FromMilliseconds(280);
@@ -183,6 +186,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.Devices.CollectionChanged += OnDevicesCollectionChanged;
         _viewModel.DeviceVideoSizeChanged += OnDeviceVideoSizeChanged;
         _viewModel.DeviceSessionHandleChanged += OnDeviceSessionHandleChanged;
+        _viewModel.DeviceProtectionStateChanged += OnDeviceProtectionStateChanged;
         _viewModel.MediaCastCommandReceived += OnMediaCastCommandReceived;
         _viewModel.MediaCastStopRequested += OnMediaCastStopRequested;
         _viewModel.MediaCastAudioSettingsChanged += OnMediaCastAudioSettingsChanged;
@@ -203,10 +207,37 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _mediaControlsHideTimer.Tick += OnMediaControlsHideTimerTick;
         StateChanged += OnWindowStateChanged;
         Loaded += OnLoaded;
+        SourceInitialized += OnSourceInitialized;
+        Closed += OnClosed;
         Closing += OnClosing;
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_created",
             ("thread", Environment.CurrentManagedThreadId),
             ("dpi", PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 0)));
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        _windowSource = (HwndSource?)PresentationSource.FromVisual(this);
+        _windowSource?.AddHook(WindowMessageHook);
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        _windowSource?.RemoveHook(WindowMessageHook);
+        _windowSource = null;
+    }
+
+    private nint WindowMessageHook(nint hwnd, int message, nint wParam, nint lParam,
+        ref bool handled)
+    {
+        if (!WindowsAutoPlayGuard.ShouldCancel(message,
+                _viewModel.HasAnyCaptureSession))
+            return 0;
+
+        handled = true;
+        _viewModel.AddDiagnosticLog(AppLog.Event("autoplay_cancelled",
+            ("message", "WM_QUERYCANCELAUTOPLAY"), ("capture", true)));
+        return 1;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -563,6 +594,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.Devices.CollectionChanged -= OnDevicesCollectionChanged;
         _viewModel.DeviceVideoSizeChanged -= OnDeviceVideoSizeChanged;
         _viewModel.DeviceSessionHandleChanged -= OnDeviceSessionHandleChanged;
+        _viewModel.DeviceProtectionStateChanged -= OnDeviceProtectionStateChanged;
         _viewModel.MediaCastCommandReceived -= OnMediaCastCommandReceived;
         _viewModel.MediaCastStopRequested -= OnMediaCastStopRequested;
         _viewModel.MediaCastAudioSettingsChanged -= OnMediaCastAudioSettingsChanged;
@@ -2926,6 +2958,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             case "prompt":
                 AppPromptWindow.ShowDeveloperPreview(this);
                 break;
+            case "capture-error":
+                CaptureStatusNoticeWindow.ShowDeveloperErrorPreview(this);
+                break;
+            case "session-closed":
+                CaptureStatusNoticeWindow.ShowDeveloperStoppedPreview(this);
+                break;
+            case "usb-config-error":
+                CaptureStatusNoticeWindow.ShowDeveloperUsbPreview(this);
+                break;
             case "capture-recovery":
                 CaptureRecoveryWindow.ShowDeveloperPreview(this);
                 break;
@@ -2952,6 +2993,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 break;
             case "instance-conflict":
                 InstanceConflictWindow.ShowDeveloperPreview(this);
+                break;
+            case "protected-content":
+                ProtectedContentNoticeWindow.ShowDeveloperPreview(this);
                 break;
             case "native-preview":
                 ShowDeveloperNativePreview();
@@ -3382,6 +3426,43 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
+    private void OnDeviceProtectionStateChanged(string udid,
+        ProtectedContentPresentation presentation)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() =>
+                OnDeviceProtectionStateChanged(udid, presentation));
+            return;
+        }
+        if (!presentation.IsProtected)
+        {
+            if (DeviceViewModel.UdidEquals(_protectedContentNoticeUdid, udid))
+            {
+                _protectedContentNoticeWindow?.UpdatePresentation(presentation);
+            }
+            return;
+        }
+        if (!DeviceViewModel.UdidEquals(_viewModel.SelectedDevice?.Udid, udid))
+            return;
+        if (_protectedContentNoticeWindow is null)
+        {
+            _protectedContentNoticeUdid = udid;
+            _protectedContentNoticeWindow =
+                new ProtectedContentNoticeWindow(udid, presentation, this);
+            _protectedContentNoticeWindow.Closed += (_, _) =>
+            {
+                _protectedContentNoticeWindow = null;
+                _protectedContentNoticeUdid = null;
+            };
+            _protectedContentNoticeWindow.Show();
+        }
+        else
+        {
+            _protectedContentNoticeWindow.UpdatePresentation(presentation);
+        }
+    }
+
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainViewModel.AdvancedSettingsVisibility) &&
@@ -3393,7 +3474,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         if ((e.PropertyName == nameof(MainViewModel.IsCapturing) && !_viewModel.IsCapturing) ||
             (e.PropertyName == nameof(MainViewModel.IsAudioOnlyAirPlay) &&
-             _viewModel.IsAudioOnlyAirPlay))
+             _viewModel.IsAudioOnlyAirPlay) ||
+            (e.PropertyName == nameof(MainViewModel.IsVideoProtected) &&
+             _viewModel.IsVideoProtected))
             MainPreviewHost.SetPresentationVisible(false);
 
         // Width is raised before height as one atomic status update. Listening
@@ -3402,10 +3485,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (e.PropertyName is nameof(MainViewModel.SourceVideoHeight) or
             nameof(MainViewModel.SelectedDevice) or nameof(MainViewModel.SelectedModel) or
             nameof(MainViewModel.CurrentSessionHandle) or
-            nameof(MainViewModel.IsAudioOnlyAirPlay))
+            nameof(MainViewModel.IsAudioOnlyAirPlay) or
+            nameof(MainViewModel.IsVideoProtected))
         {
             if (e.PropertyName == nameof(MainViewModel.SelectedDevice))
             {
+                if (_protectedContentNoticeWindow is not null &&
+                    !DeviceViewModel.UdidEquals(_protectedContentNoticeUdid,
+                        _viewModel.SelectedDevice?.Udid))
+                    _protectedContentNoticeWindow.Close();
                 if (_projectionSettingsWindow is not null &&
                     !DeviceViewModel.UdidEquals(_projectionSettingsUdid,
                         _viewModel.SelectedDevice?.Udid))
@@ -3424,7 +3512,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 _viewModel.SourceVideoHeight);
             if (e.PropertyName is nameof(MainViewModel.SelectedDevice) or
                 nameof(MainViewModel.CurrentSessionHandle) or
-                nameof(MainViewModel.IsAudioOnlyAirPlay))
+                nameof(MainViewModel.IsAudioOnlyAirPlay) or
+                nameof(MainViewModel.IsVideoProtected))
                 QueueMainPreviewHostSync();
         }
         else if (e.PropertyName == nameof(MainViewModel.IsCapturing))
@@ -3458,6 +3547,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         MainPreviewHost.ClearValue(VisibilityProperty);
         var visible = !mediaOnMain && !_viewModel.IsMediaCastSelected &&
             _viewModel.IsCapturing && !_viewModel.IsAudioOnlyAirPlay &&
+            !_viewModel.IsVideoProtected &&
             _viewModel.CurrentSessionHandle != 0;
         MainPreviewHost.SetPresentationVisible(visible);
         if (visible) MainPreviewHost.Activate();

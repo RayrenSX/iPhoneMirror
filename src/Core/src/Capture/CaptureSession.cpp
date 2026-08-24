@@ -526,6 +526,47 @@ bool frame_is_nearly_black(const media::DecodedFrame& frame) noexcept {
     return samples >= 128 && dark * 100U >= samples * 98U;
 }
 
+bool frame_is_protected_black_candidate(
+    const media::DecodedFrame& frame) noexcept {
+    if (frame.width < 32 || frame.height < 32 || frame.nv12.empty()) return false;
+    const auto stride = static_cast<std::size_t>(std::abs(frame.stride));
+    const auto component_bytes = frame.pixel_format == media::PixelFormat::P010
+        ? 2U : 1U;
+    const auto row_bytes = static_cast<std::size_t>(frame.width) * component_bytes;
+    const auto chroma_rows = (static_cast<std::size_t>(frame.height) + 1U) / 2U;
+    const auto luma_bytes = stride * frame.height;
+    if (stride < row_bytes || frame.nv12.size() < luma_bytes + stride * chroma_rows)
+        return false;
+
+    std::uint64_t luma_samples{}, dark_luma{}, neutral_chroma{}, chroma_samples{};
+    std::uint64_t luma_sum{};
+    constexpr std::uint32_t step = 16;
+    for (std::uint32_t y = 0; y < frame.height; y += step) {
+        const auto* row = frame.nv12.data() + static_cast<std::size_t>(y) * stride;
+        for (std::uint32_t x = 0; x < frame.width; x += step) {
+            const auto value = luma_as_8bit(frame, row, x);
+            ++luma_samples;
+            luma_sum += value;
+            if (value <= 24) ++dark_luma;
+        }
+    }
+    for (std::uint32_t y = 0; y < frame.height / 2U; y += step) {
+        const auto* row = frame.nv12.data() + luma_bytes +
+            static_cast<std::size_t>(y) * stride;
+        for (std::uint32_t x = 0; x + 1U < frame.width; x += step) {
+            const auto u = luma_as_8bit(frame, row, x);
+            const auto v = luma_as_8bit(frame, row, x + 1U);
+            ++chroma_samples;
+            if (u >= 112 && u <= 144 && v >= 112 && v <= 144)
+                ++neutral_chroma;
+        }
+    }
+    return luma_samples >= 128 && chroma_samples >= 64 &&
+        dark_luma * 1000U >= luma_samples * 995U &&
+        luma_sum <= luma_samples * 20U &&
+        neutral_chroma * 100U >= chroma_samples * 98U;
+}
+
 bool sample_contains_keyframe(const coremedia::SampleBuffer& sample,
     const std::optional<coremedia::FormatDescription>& format) noexcept {
     if (!format || !format->is_video()) return false;
@@ -1037,6 +1078,8 @@ std::shared_ptr<const AudioPacket> CaptureSession::next_audio_packet(
 
 void CaptureSession::set_state(State state, std::wstring message) {
     std::scoped_lock lock(mutex_);
+    if (state != State::Streaming)
+        protected_video_detected_.store(false, std::memory_order_release);
     snapshot_.state = state;
     if (state != State::Error) {
         snapshot_.failure_kind = FailureKind::None;
@@ -1576,6 +1619,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             int last_orientation_request{};
             std::optional<std::chrono::steady_clock::time_point> low_portrait_since;
             auto low_portrait_retry_after = std::chrono::steady_clock::time_point::min();
+            detail::ProtectedVideoDetector protected_video_detector;
             std::optional<std::chrono::steady_clock::time_point> black_with_audio_since;
             auto black_landscape_retry_after = std::chrono::steady_clock::time_point::min();
             bool native_probe_published{};
@@ -1863,6 +1907,14 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                             video_decode_count, published->width, published->height,
                             published->stride, published->nv12.size(), published->timestamp_100ns));
                     }
+                    if (published) {
+                        protected_video_detector.observe(
+                            frame_is_protected_black_candidate(*published),
+                            std::chrono::steady_clock::now());
+                        protected_video_detected_.store(
+                            protected_video_detector.detected(),
+                            std::memory_order_release);
+                    }
                     if (published && video_output_count % 15 == 0) {
                         const auto detected = padded_content_orientation(*published);
                         const bool ios_low_portrait_tier =
@@ -1907,7 +1959,11 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         const bool audio_active = audio_age_ns >= 0 &&
                             audio_age_ns <= std::chrono::duration_cast<std::chrono::nanoseconds>(
                                 std::chrono::seconds(1)).count();
-                        if (audio_active && frame_is_nearly_black(*published)) {
+                        const bool nearly_black = frame_is_nearly_black(*published);
+                        // Orientation recovery is deliberately narrower than
+                        // the protected-content hint: it needs recent audio so
+                        // a normal all-black UI does not trigger renegotiation.
+                        if (audio_active && nearly_black) {
                             if (!black_with_audio_since) black_with_audio_since = orientation_now;
                             if (orientation_now >= black_landscape_retry_after &&
                                 orientation_now - *black_with_audio_since >= std::chrono::seconds(1)) {
@@ -2249,7 +2305,23 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     transition_release.run_now();
                     std::scoped_lock lock(mutex_);
                     snapshot_.state = State::Streaming;
-                    snapshot_.message = L"投屏中";
+                    const bool video_protected = protected_video_detected_.load(
+                        std::memory_order_acquire);
+                    const auto media_now_ns =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            media_received_at.time_since_epoch()).count();
+                    const auto last_audio_ns = last_audio_activity_ns.load(
+                        std::memory_order_acquire);
+                    const auto audio_age_ns = media_now_ns - last_audio_ns;
+                    const bool audio_active = last_audio_ns > 0 &&
+                        audio_age_ns >= 0 &&
+                        audio_age_ns <= std::chrono::duration_cast<
+                            std::chrono::nanoseconds>(std::chrono::seconds(3)).count();
+                    snapshot_.message = !video_protected
+                        ? L"投屏中"
+                        : audio_active
+                            ? L"DRM_VIDEO_PROTECTED_AUDIO_ACTIVE"
+                            : L"DRM_VIDEO_PROTECTED_AUDIO_INACTIVE";
                     snapshot_.video_frames = protocol.video_frames();
                     snapshot_.audio_packets = protocol.audio_packets();
                     const auto now = media_received_at;
@@ -2272,8 +2344,17 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         }
                     }
                     if (protocol.audio_format() && protocol.audio_format()->audio) {
-                        snapshot_.audio_sample_rate = static_cast<std::uint32_t>(protocol.audio_format()->audio->sample_rate);
-                        snapshot_.audio_channels = protocol.audio_format()->audio->channels_per_frame;
+                        if (!video_protected || audio_active) {
+                            snapshot_.audio_sample_rate = static_cast<std::uint32_t>(
+                                protocol.audio_format()->audio->sample_rate);
+                            snapshot_.audio_channels = protocol.audio_format()->audio->channels_per_frame;
+                        } else {
+                            snapshot_.audio_sample_rate = 0;
+                            snapshot_.audio_channels = 0;
+                        }
+                    } else {
+                        snapshot_.audio_sample_rate = 0;
+                        snapshot_.audio_channels = 0;
                     }
                 }
             }
@@ -2382,6 +2463,17 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             if (const auto* usb_error =
                     dynamic_cast<const transport::UsbError*>(&error))
                 failure_code = usb_error->code();
+            // A bulk transfer can fail after the decoder has already accepted
+            // a frame. Do not leave the last sample's Decoder stage attached
+            // to a transport failure; that misclassifies the legacy filter
+            // error and sends the user down the wrong recovery path.
+            const bool bulk_transport_failure =
+                diagnostic.find("bulk read") != std::string::npos ||
+                diagnostic.find("bulk write") != std::string::npos;
+            if (bulk_transport_failure) {
+                failure_stage = FailureStage::VideoStream;
+                failure_kind = FailureKind::Driver;
+            }
             if (diagnostic.find("disconnected") != std::string::npos ||
                 diagnostic.find("NO_DEVICE") != std::string::npos ||
                 diagnostic.find("no device") != std::string::npos) {

@@ -214,6 +214,12 @@ Equal(LocalizationService.English,
 var captureRecoveryWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "Windows", "CaptureRecoveryWindow.xaml"));
 var captureRecoveryWindow = XDocument.Load(captureRecoveryWindowPath);
+Equal("Round", (string?)captureRecoveryWindow.Root?.Attribute("WindowCornerPreference"),
+    "capture-recovery window keeps the native Windows corner preference");
+Equal(false, captureRecoveryWindow.Descendants()
+        .Any(element => string.Equals((string?)element.Attribute("Style"),
+            "{StaticResource ModernDialogSurface}", StringComparison.Ordinal)),
+    "capture-recovery window does not add a second custom rounded surface");
 foreach (var actionKey in new[]
          {
              "CaptureNoPingRestartAction", "CaptureNoPingCableAction",
@@ -332,6 +338,71 @@ var sourceDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", ".."));
 var mainViewModelSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "ViewModels", "MainViewModel.cs"));
+var mainWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "MainWindow.xaml.cs"));
+var previewWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "NativePreviewWindow.cs"));
+var multiDevicePreviewSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "MultiDevicePreviewManager.cs"));
+Equal(true, WindowsAutoPlayGuard.ShouldCancel(
+        WindowsAutoPlayGuard.QueryCancelAutoPlayMessage, captureActive: true),
+    "active capture cancels Windows AutoPlay device claims");
+Equal(false, WindowsAutoPlayGuard.ShouldCancel(
+        WindowsAutoPlayGuard.QueryCancelAutoPlayMessage, captureActive: false),
+    "idle application leaves Windows AutoPlay unchanged");
+Equal(false, WindowsAutoPlayGuard.ShouldCancel(0x0219, captureActive: true),
+    "ordinary device-change messages are not swallowed as AutoPlay");
+
+var protectedWithoutAudio = ProtectedContentStatus.Parse(
+    ProtectedContentStatus.AudioInactiveMarker, 48000, 2);
+Equal(true, protectedWithoutAudio.IsProtected,
+    "protected content marker is recognized without audio");
+Equal(false, protectedWithoutAudio.AudioActive,
+    "protected content marker preserves missing audio activity");
+var protectedWithAudio = ProtectedContentStatus.Parse(
+    ProtectedContentStatus.AudioActiveMarker, 48000, 2);
+Equal(true, protectedWithAudio.IsProtected && protectedWithAudio.AudioActive,
+    "protected content marker reports recent audio samples independently");
+Equal(false, ProtectedContentStatus.Parse("投屏中", 48000, 2).IsProtected,
+    "ordinary streaming status is not classified as protected content");
+Equal(true, mainViewModelSource.Contains(
+        "IsVideoProtected => CurrentDeviceSession?.VideoProtected == true",
+        StringComparison.Ordinal),
+    "protected state follows the selected session instead of leaking across sources");
+Equal(true, mainViewModelSource.Contains(
+        "UpdateProtectionState(state, ProtectedContentStatus.Parse(",
+        StringComparison.Ordinal) &&
+    multiDevicePreviewSource.Contains("DeviceProtectionStateChanged +=",
+        StringComparison.Ordinal) &&
+    multiDevicePreviewSource.Contains("window.SetProtectedContent(",
+        StringComparison.Ordinal),
+    "background sessions propagate protected state to independent previews");
+Equal(true, mainWindowSource.Contains("WM_QUERYCANCELAUTOPLAY",
+        StringComparison.Ordinal) &&
+    mainWindowSource.Contains("AddHook(WindowMessageHook)",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("HasAnyCaptureSession",
+        StringComparison.Ordinal),
+    "main window installs the AutoPlay cancellation hook");
+Equal(true, previewWindowSource.Contains("autoplay_cancelled",
+        StringComparison.Ordinal) &&
+    previewWindowSource.Contains("_sessionHandle != 0",
+        StringComparison.Ordinal),
+    "active native previews cancel AutoPlay even when foreground");
+var driverManagerSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "DriverManagerLauncher.cs"));
+Equal(true, driverManagerSource.Contains("UseShellExecute = false",
+        StringComparison.Ordinal) &&
+    driverManagerSource.Contains("Path.GetExtension(executablePath)",
+        StringComparison.Ordinal),
+    "automatic driver-manager launches cannot be redirected by file associations");
+var aboutWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "AboutWindow.xaml.cs"));
+Equal(true, aboutWindowSource.Contains("StartExplorer(path, selectFile: true)",
+        StringComparison.Ordinal) &&
+    aboutWindowSource.Contains("Uri.UriSchemeHttp", StringComparison.Ordinal) &&
+    aboutWindowSource.Contains("UseShellExecute = false", StringComparison.Ordinal),
+    "local license and changelog targets bypass document file associations");
 Equal(true, mainViewModelSource.Contains(
         "PreviewAndObsVisibility => CurrentSessionHandle != 0",
         StringComparison.Ordinal),
@@ -3468,7 +3539,7 @@ var selectedReleaseIndex = mainViewModelSource.IndexOf(
     backgroundReleaseIndex + 1,
     StringComparison.Ordinal);
 var selectedPromptIndex = mainViewModelSource.IndexOf(
-    "AppPromptWindow.Inform(errorTitle, errorBody);",
+    "CaptureStatusNoticeWindow.ShowError(errorTitle, errorBody);",
     selectedReleaseIndex,
     StringComparison.Ordinal);
 Equal(true, selectedReleaseIndex >= 0 && selectedPromptIndex > selectedReleaseIndex,
@@ -3477,7 +3548,7 @@ var sessionClosedWarningMethodIndex = mainViewModelSource.IndexOf(
     "private void ShowDeviceSessionClosedWarningThenRelease(",
     StringComparison.Ordinal);
 var sessionClosedPromptIndex = mainViewModelSource.IndexOf(
-    "AppPromptWindow.InformThen(errorTitle, errorBody,",
+    "CaptureStatusNoticeWindow.ShowStoppedThen(errorTitle, errorBody,",
     sessionClosedWarningMethodIndex, StringComparison.Ordinal);
 var sessionClosedCleanupIndex = mainViewModelSource.IndexOf(
     "() => ReleaseFailedSessionLockedAsync(state, status)",
@@ -3531,6 +3602,19 @@ deviceB.FrameRate = 24;
 Equal((ulong)11, deviceA.Handle, "switching device does not release first session");
 Equal(60, deviceA.FrameRate, "device A settings remain independent");
 Equal(24, deviceB.FrameRate, "device B settings update independently");
+Equal(true, deviceA.UpdateProtectionState(true, false, 0, 0),
+    "device protection state reports its first transition");
+Equal(true, deviceA.VideoProtected && !deviceA.ProtectedAudioActive,
+    "device protection state allows video and audio protection together");
+Equal(true, deviceA.UpdateProtectionState(true, true, 48000, 2),
+    "device protection state reports an audio-activity transition");
+Equal(false, deviceA.UpdateProtectionState(true, true, 48000, 2),
+    "identical protection observations do not republish events");
+deviceA.UpdateProtectionState(false, false, 0, 0);
+deviceA.UpdateProtectionState(true, false, 0, 0);
+deviceA.ResetRuntimeObservations();
+Equal(false, deviceA.VideoProtected,
+    "replacement sessions clear stale protected-content state");
 
 var imageSettingsSession = new DeviceCaptureState
 {

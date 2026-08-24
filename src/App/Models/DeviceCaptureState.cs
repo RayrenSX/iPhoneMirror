@@ -45,6 +45,35 @@ internal sealed class DeviceCaptureState
     internal bool HasAppliedVideoSettings { get; private set; }
     internal bool HasSession => Handle != 0;
     internal bool ErrorShown { get; set; }
+    internal bool VideoProtected { get; private set; }
+    internal bool ProtectedAudioActive { get; private set; }
+    internal uint ProtectedAudioSampleRate { get; private set; }
+    internal uint ProtectedAudioChannels { get; private set; }
+
+    internal bool UpdateProtectionState(bool videoProtected,
+        bool audioActive, uint audioSampleRate, uint audioChannels)
+    {
+        audioActive = videoProtected && audioActive;
+        audioSampleRate = videoProtected ? audioSampleRate : 0;
+        audioChannels = videoProtected ? audioChannels : 0;
+        var changed = VideoProtected != videoProtected ||
+            ProtectedAudioActive != audioActive ||
+            ProtectedAudioSampleRate != audioSampleRate ||
+            ProtectedAudioChannels != audioChannels;
+        VideoProtected = videoProtected;
+        ProtectedAudioActive = audioActive;
+        ProtectedAudioSampleRate = audioSampleRate;
+        ProtectedAudioChannels = audioChannels;
+        return changed;
+    }
+
+    internal void ResetRuntimeObservations()
+    {
+        VideoProtected = false;
+        ProtectedAudioActive = false;
+        ProtectedAudioSampleRate = 0;
+        ProtectedAudioChannels = 0;
+    }
 
     // A settings window is tied to the native session that existed when it
     // opened. The state object intentionally survives reconnects, so object

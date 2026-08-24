@@ -26,15 +26,26 @@ internal sealed class DriverManagerLauncher
                 Environment.CurrentDirectory);
             if (executablePath is null)
                 return new(false, null, "The driver manager executable could not be found.");
+            if (!string.Equals(Path.GetExtension(executablePath), ".exe",
+                    StringComparison.OrdinalIgnoreCase))
+                return new(false, executablePath,
+                    "The driver manager path must point to an executable (.exe).");
 
             if (TryActivateExisting(executablePath))
                 return new(true, executablePath, "The running driver manager was activated.");
 
+            DiagnosticLogger.Info("driver", "manager_launch_requested",
+                ("file", Path.GetFileName(executablePath)),
+                ("use_shell_execute", false));
             var start = new ProcessStartInfo
             {
                 FileName = executablePath,
                 WorkingDirectory = Path.GetDirectoryName(executablePath)!,
-                UseShellExecute = true,
+                // This is an application executable, not a document or URI.
+                // Avoid ShellExecute so a user file association can never
+                // redirect the automatic driver-repair action to another app.
+                UseShellExecute = false,
+                CreateNoWindow = true,
             };
             start.ArgumentList.Add("--language");
             start.ArgumentList.Add(LocalizationService.EffectiveCulture.Name);

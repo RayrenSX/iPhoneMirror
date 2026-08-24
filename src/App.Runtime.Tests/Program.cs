@@ -28,6 +28,12 @@ internal static class Program
         {
             if (args is ["--live-record", .. var recordingArgs])
                 return RunLiveRecordingAsync(recordingArgs).GetAwaiter().GetResult();
+            if (args is ["--protected-preview", .. var protectedPreviewArgs])
+                return RunProtectedPreview(protectedPreviewArgs.FirstOrDefault());
+            if (args is ["--capture-recovery-preview", ..])
+                return RunCaptureRecoveryPreview();
+            if (args is ["--capture-status-preview", .. var statusArgs])
+                return RunCaptureStatusPreview(statusArgs.FirstOrDefault());
             if (args is ["--ui-preview", var themeName, var surface])
                 return RunUiPreview(themeName, surface);
             TestUpdateWindowThemeSwitch();
@@ -87,6 +93,136 @@ internal static class Program
         window.Closed += (_, _) => application.Shutdown();
         window.Show();
         ApplyTheme(assembly, theme);
+        Dispatcher.Run();
+        return 0;
+    }
+
+    private static int RunProtectedPreview(string? previewLanguage = null)
+    {
+        var application = new App();
+        var previewMode = typeof(App).GetProperty("IsUiPreviewMode",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new MissingMemberException(typeof(App).FullName,
+                "IsUiPreviewMode");
+        previewMode.SetValue(application, true);
+        application.InitializeComponent();
+        if (!string.IsNullOrWhiteSpace(previewLanguage))
+        {
+            var localizationService = typeof(App).Assembly.GetType(
+                "IPhoneMirror.App.Localization.LocalizationService",
+                throwOnError: true)!;
+            var applyLanguage = localizationService.GetMethod("ApplyLanguage",
+                BindingFlags.Static | BindingFlags.NonPublic) ??
+                throw new MissingMethodException(localizationService.FullName,
+                    "ApplyLanguage");
+            // Preview-only override: do not persist or broadcast a user setting.
+            applyLanguage.Invoke(null, [previewLanguage, false, false]);
+        }
+        var owner = new FluentWindow
+        {
+            Width = 800,
+            Height = 600,
+            ShowInTaskbar = true,
+            WindowStyle = WindowStyle.SingleBorderWindow,
+            Background = Brushes.Black,
+            Title = "iPhoneMirror protected-content prompt preview host",
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        };
+        application.MainWindow = owner;
+        owner.Show();
+        var noticeType = typeof(App).Assembly.GetType(
+            "IPhoneMirror.App.Windows.ProtectedContentNoticeWindow",
+            throwOnError: true)!;
+        var presentationType = typeof(App).Assembly.GetType(
+            "IPhoneMirror.App.Services.ProtectedContentPresentation",
+            throwOnError: true)!;
+        var presentation = Activator.CreateInstance(presentationType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null, [true, false, 0U, 0U], null) ??
+            throw new InvalidOperationException(
+                "Protected-content preview state was not created.");
+        var prompt = Activator.CreateInstance(noticeType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null, ["preview-device", presentation, owner], null) as Window ??
+            throw new InvalidOperationException(
+                "Protected-content notice preview was not created.");
+        prompt.Show();
+        prompt.Closed += (_, _) =>
+        {
+            owner.Close();
+            application.Shutdown();
+        };
+        Dispatcher.Run();
+        return 0;
+    }
+
+    private static int RunCaptureRecoveryPreview()
+    {
+        var application = new App();
+        var previewMode = typeof(App).GetProperty("IsUiPreviewMode",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new MissingMemberException(typeof(App).FullName,
+                "IsUiPreviewMode");
+        previewMode.SetValue(application, true);
+        application.InitializeComponent();
+        var owner = new FluentWindow
+        {
+            Width = 800,
+            Height = 600,
+            ShowInTaskbar = true,
+            WindowStyle = WindowStyle.SingleBorderWindow,
+            Background = Brushes.Black,
+            Title = "iPhoneMirror capture recovery preview host",
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        };
+        application.MainWindow = owner;
+        owner.Show();
+        var recoveryType = typeof(App).Assembly.GetType(
+            "IPhoneMirror.App.Windows.CaptureRecoveryWindow",
+            throwOnError: true)!;
+        var recovery = Activator.CreateInstance(recoveryType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null, args: null, culture: null) as Window ??
+            throw new InvalidOperationException(
+                "Capture-recovery preview was not created.");
+        recovery.Owner = owner;
+        recovery.Show();
+        recovery.Closed += (_, _) => owner.Close();
+        owner.Closed += (_, _) => application.Shutdown();
+        Dispatcher.Run();
+        return 0;
+    }
+
+    private static int RunCaptureStatusPreview(string? status)
+    {
+        var application = new App();
+        var previewMode = typeof(App).GetProperty("IsUiPreviewMode",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new MissingMemberException(typeof(App).FullName, "IsUiPreviewMode");
+        previewMode.SetValue(application, true);
+        application.InitializeComponent();
+        var owner = new FluentWindow
+        {
+            Width = 800, Height = 600, ShowInTaskbar = true,
+            WindowStyle = WindowStyle.SingleBorderWindow,
+            Background = Brushes.Black,
+            Title = "iPhoneMirror capture status preview host",
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        };
+        application.MainWindow = owner;
+        owner.Show();
+        var noticeType = typeof(App).Assembly.GetType(
+            "IPhoneMirror.App.Windows.CaptureStatusNoticeWindow",
+            throwOnError: true)!;
+        var method = noticeType.GetMethod(
+            string.Equals(status, "stopped", StringComparison.OrdinalIgnoreCase)
+                ? "ShowDeveloperStoppedPreview"
+                : string.Equals(status, "usb", StringComparison.OrdinalIgnoreCase)
+                    ? "ShowDeveloperUsbPreview" : "ShowDeveloperErrorPreview",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new MissingMethodException(noticeType.FullName, "preview");
+        method.Invoke(null, [owner]);
+        owner.Closed += (_, _) => application.Shutdown();
         Dispatcher.Run();
         return 0;
     }
@@ -452,6 +588,8 @@ internal static class Program
                 window.Close();
             }
 
+            TestProtectedContentOverlay(owner, assembly);
+            TestProtectedContentNoticeWindow(owner, assembly);
             TestDeveloperToolsWindow(application, assembly);
             TestMainWindowThemeAndCaptionControls(application, assembly);
         }
@@ -461,6 +599,115 @@ internal static class Program
             owner.Close();
             application.Shutdown();
         }
+    }
+
+    private static void TestProtectedContentOverlay(Window owner,
+        Assembly assembly)
+    {
+        var overlayType = assembly.GetType(
+            "IPhoneMirror.App.Windows.ProtectedContentOverlayWindow",
+            throwOnError: true)!;
+        var showFor = overlayType.GetMethod("ShowFor",
+            BindingFlags.Static | BindingFlags.NonPublic) ??
+            throw new MissingMethodException(overlayType.FullName, "ShowFor");
+        var ownerHandle = new System.Windows.Interop.WindowInteropHelper(owner).Handle;
+        var overlay = showFor.Invoke(null, [ownerHandle, "No audio samples received"])
+            as Window ?? throw new InvalidOperationException(
+                "Protected-content overlay was not created.");
+        try
+        {
+            overlay.UpdateLayout();
+            if (!overlay.IsVisible || overlay.ActualWidth <= 0 ||
+                overlay.ActualHeight <= 0 || overlay.ShowInTaskbar ||
+                overlay.ShowActivated)
+                throw new InvalidOperationException(
+                    $"Protected-content overlay has invalid window behavior: " +
+                    $"visible={overlay.IsVisible} size={overlay.ActualWidth}x" +
+                    $"{overlay.ActualHeight} taskbar={overlay.ShowInTaskbar} " +
+                    $"activated={overlay.ShowActivated}.");
+            var updateAudio = overlayType.GetMethod("UpdateAudioDisplay",
+                BindingFlags.Instance | BindingFlags.NonPublic) ??
+                throw new MissingMethodException(overlayType.FullName,
+                    "UpdateAudioDisplay");
+            updateAudio.Invoke(overlay, ["48 kHz · 2 ch"]);
+            var audioText = overlayType.GetField("_audioText",
+                BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(overlay)
+                as WpfTextBlock;
+            if (audioText?.Text != "48 kHz · 2 ch")
+                throw new InvalidOperationException(
+                    "Protected-content overlay audio state did not update.");
+            var windowMessageHook = overlayType.GetMethod("WindowMessageHook",
+                BindingFlags.Instance | BindingFlags.NonPublic) ??
+                throw new MissingMethodException(overlayType.FullName,
+                    "WindowMessageHook");
+            object?[] hitTestArguments = [nint.Zero, 0x0084, nint.Zero,
+                nint.Zero, false];
+            var hitTest = (nint)(windowMessageHook.Invoke(overlay,
+                hitTestArguments) ?? nint.Zero);
+            if (hitTest != -1 || hitTestArguments[4] is not true)
+                throw new InvalidOperationException(
+                    "Protected-content overlay does not pass mouse hit tests through.");
+        }
+        finally
+        {
+            overlay.Close();
+        }
+    }
+
+    private static void TestProtectedContentNoticeWindow(Window owner,
+        Assembly assembly)
+    {
+        var noticeType = assembly.GetType(
+            "IPhoneMirror.App.Windows.ProtectedContentNoticeWindow",
+            throwOnError: true)!;
+        var presentationType = assembly.GetType(
+            "IPhoneMirror.App.Services.ProtectedContentPresentation",
+            throwOnError: true)!;
+        var protectedState = Activator.CreateInstance(presentationType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null, [true, false, 0U, 0U], null) ??
+            throw new InvalidOperationException(
+                "Protected notice state was not created.");
+        var recoveredState = Activator.CreateInstance(presentationType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null, [false, false, 0U, 0U], null) ??
+            throw new InvalidOperationException(
+                "Recovered notice state was not created.");
+        var protectedAudioState = Activator.CreateInstance(presentationType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null, [true, true, 48000U, 2U], null) ??
+            throw new InvalidOperationException(
+                "Protected notice audio state was not created.");
+        var notice = Activator.CreateInstance(noticeType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null, ["runtime-device", protectedState, owner], null) as Window ??
+            throw new InvalidOperationException(
+                "Protected-content notice was not created.");
+        notice.Show();
+        notice.UpdateLayout();
+        if (!notice.IsVisible || notice.ActualWidth > 470 ||
+            notice.ActualHeight > 330)
+            throw new InvalidOperationException(
+                $"Protected-content notice is not compact: " +
+                $"{notice.ActualWidth}x{notice.ActualHeight}.");
+        var update = noticeType.GetMethod("UpdatePresentation",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new MissingMethodException(noticeType.FullName,
+                "UpdatePresentation");
+        var badge = noticeType.GetProperty("AudioBadgeText",
+            BindingFlags.Instance | BindingFlags.Public) ??
+            throw new MissingMemberException(noticeType.FullName,
+                "AudioBadgeText");
+        var initialBadge = badge.GetValue(notice) as string;
+        update.Invoke(notice, [protectedAudioState]);
+        if (string.Equals(initialBadge, badge.GetValue(notice) as string,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Protected-content notice audio badge did not update.");
+        update.Invoke(notice, [recoveredState]);
+        if (notice.IsVisible)
+            throw new InvalidOperationException(
+                "Protected-content notice did not close after video recovery.");
     }
 
     private static void TestDeveloperToolsWindow(Application application,
@@ -500,7 +747,7 @@ internal static class Program
                         "Developer tools window must be independent and non-topmost.");
                 AssertWindowsOwnOuterCorners(window, "Developer tools");
                 AssertCatalogCount(windowType, window, "WorkspaceItems", 6);
-                AssertCatalogCount(windowType, window, "WindowItems", 11);
+                AssertCatalogCount(windowType, window, "WindowItems", 15);
                 foreach (var controlName in new[]
                 {
                     "ThemeComboBox", "LanguageComboBox", "OpacitySlider",
@@ -611,6 +858,14 @@ internal static class Program
             "prompt", "AppPromptWindow", "OnConfirmClick");
         TestDeveloperPreviewAction(application, owner, openSurface,
             "prompt", "AppPromptWindow", "OnCancelClick");
+        TestDeveloperPreviewAction(application, owner, openSurface,
+            "capture-error", "CaptureStatusNoticeWindow", "OnCloseClick");
+        TestDeveloperPreviewAction(application, owner, openSurface,
+            "session-closed", "CaptureStatusNoticeWindow", "OnCloseClick");
+        TestDeveloperPreviewAction(application, owner, openSurface,
+            "usb-config-error", "CaptureStatusNoticeWindow", "OnCloseClick");
+        TestDeveloperPreviewAction(application, owner, openSurface,
+            "protected-content", "ProtectedContentNoticeWindow", "OnCloseClick");
         TestDeveloperPreviewAction(application, owner, openSurface,
             "advanced-settings", "AdvancedSettingsWindow", "OnApplyClick");
         TestDeveloperPreviewAction(application, owner, openSurface,

@@ -93,6 +93,45 @@ private:
     std::optional<Clock::time_point> last_media_at_;
 };
 
+class ProtectedVideoDetector final {
+public:
+    using Clock = std::chrono::steady_clock;
+    static constexpr auto HoldLimit = std::chrono::seconds(8);
+    static constexpr std::uint32_t ClearSamples = 2;
+    static constexpr std::uint32_t WarmupSamples = 3;
+    static constexpr std::uint32_t MinimumBlackSamples = 24;
+
+    void observe(bool nearly_black, Clock::time_point now) noexcept {
+        if (!nearly_black) {
+            black_since_.reset();
+            black_samples_ = 0;
+            ordinary_samples_ = std::min(WarmupSamples,
+                ordinary_samples_ + 1);
+            if (detected_ && ++clear_samples_ >= ClearSamples) {
+                detected_ = false;
+                clear_samples_ = 0;
+            }
+            return;
+        }
+        clear_samples_ = 0;
+        if (ordinary_samples_ < WarmupSamples) return;
+        if (!black_since_) black_since_ = now;
+        ++black_samples_;
+        if (black_samples_ >= MinimumBlackSamples && now >= *black_since_ &&
+            now - *black_since_ >= HoldLimit)
+            detected_ = true;
+    }
+
+    [[nodiscard]] bool detected() const noexcept { return detected_; }
+
+private:
+    std::optional<Clock::time_point> black_since_;
+    bool detected_{};
+    std::uint32_t clear_samples_{};
+    std::uint32_t ordinary_samples_{};
+    std::uint32_t black_samples_{};
+};
+
 enum class VideoQueueAction {
     Enqueue,
     DropIncoming,
@@ -190,6 +229,10 @@ private:
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
     std::atomic<float> audio_volume_{1.0F};
+    // Sustained black decoded video is the observable signature we can expose
+    // for iOS protected-content capture restrictions. Audio may be absent too;
+    // keep the capture session alive and let the UI explain the limitation.
+    std::atomic_bool protected_video_detected_{};
     detail::DecoderSwitchCoordinator decoder_switch_;
     std::atomic_int requested_display_orientation_{};
     std::atomic_uint64_t native_probe_size_{};

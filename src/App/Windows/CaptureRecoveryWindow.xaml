@@ -9,7 +9,12 @@
         WindowBackdropType="Acrylic" WindowCornerPreference="Round"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False">
-    <Border Style="{StaticResource ModernDialogSurface}" Margin="10">
+    <!-- Keep the window's DWM/Windows corner treatment. The previous
+         ModernDialogSurface added a second rounded border and produced a
+         bright ring around the native window corners. -->
+    <Border Background="{DynamicResource DialogSurfaceBrush}"
+            Margin="0" Padding="26" BorderThickness="0"
+            CornerRadius="0" Effect="{x:Null}">
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>

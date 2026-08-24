@@ -1076,6 +1076,7 @@ void test_wireless_decoder_status() {
 }
 
 void test_capture_media_safety_helpers() {
+    using iPhoneMirror::capture::detail::ProtectedVideoDetector;
     using iPhoneMirror::capture::detail::StreamingSilenceWatchdog;
     using iPhoneMirror::capture::detail::VideoQueueAction;
     using iPhoneMirror::capture::detail::VideoQueueBudget;
@@ -1387,6 +1388,44 @@ void test_capture_media_safety_helpers() {
     check(!silence_watchdog.expired(media_started + std::chrono::seconds(18)) &&
         silence_watchdog.expired(media_started + std::chrono::seconds(19)),
         "new video or audio media resets the streaming silence deadline");
+
+    ProtectedVideoDetector protected_video;
+    static_assert(ProtectedVideoDetector::HoldLimit == std::chrono::seconds(8));
+    const ProtectedVideoDetector::Clock::time_point black_started{};
+    ProtectedVideoDetector startup_black;
+    for (std::uint32_t index{};
+         index < ProtectedVideoDetector::MinimumBlackSamples; ++index)
+        startup_black.observe(true,
+            black_started + ProtectedVideoDetector::HoldLimit);
+    check(!startup_black.detected(),
+        "protected video hint requires ordinary frames before a black transition");
+    for (std::uint32_t index{};
+         index < ProtectedVideoDetector::WarmupSamples; ++index)
+        protected_video.observe(false, black_started);
+    protected_video.observe(true, black_started);
+    check(!protected_video.detected(),
+        "protected video hint waits for sustained black frames");
+    protected_video.observe(true,
+        black_started + ProtectedVideoDetector::HoldLimit -
+            std::chrono::milliseconds(1));
+    check(!protected_video.detected(),
+        "protected video hint ignores short black transitions");
+    for (std::uint32_t index{1};
+         index < ProtectedVideoDetector::MinimumBlackSamples; ++index)
+        protected_video.observe(true,
+            black_started + ProtectedVideoDetector::HoldLimit);
+    check(protected_video.detected(),
+        "protected video hint does not depend on audio activity");
+    protected_video.observe(false,
+        black_started + ProtectedVideoDetector::HoldLimit +
+            std::chrono::milliseconds(1));
+    check(protected_video.detected(),
+        "protected video hint uses exit hysteresis for one bright sample");
+    protected_video.observe(false,
+        black_started + ProtectedVideoDetector::HoldLimit +
+            std::chrono::milliseconds(2));
+    check(!protected_video.detected(),
+        "protected video hint clears when ordinary frames resume");
 
     VideoQueueBudget budget;
     check(budget.has_capacity(0, 0, 1024),

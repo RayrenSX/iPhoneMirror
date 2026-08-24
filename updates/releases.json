@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.7.1",
+    "name": "iPhoneMirror v1.7.1",
+    "body": "### Added\n\n- Add sustained black-video detection for wired capture after a normal-frame warm-up.\n- Add compact protected-video guidance for possible DRM / FairPlay restrictions,\n  including separate audio availability and automatic dismissal when normal video returns.\n- Add compact capture-status notices for ordinary mirroring errors, USB configuration failures,\n  and mirroring stopped from Control Center.\n- Expand Developer Tools with previews for capture errors, stopped sessions, USB configuration\n  errors, protected-video notices, and capture recovery.\n\n### Changed\n\n- Require an eight-second, multi-frame near-black and neutral-chroma signal before showing the\n  protected-video notice, reducing false positives from startup, short black scenes, and dark UI.\n- Use Windows/DWM outer corners for the capture recovery and status notices while retaining\n  compact internal status panels.\n- Keep error and stopped-session cleanup ordering explicit: failed sessions are released before\n  ordinary error notices, while stopped-session cleanup begins after the notice is shown.\n\n### Fixed\n\n- Replace unexplained black video surfaces with a clear, non-bypass warning that does not claim\n  DRM was definitively detected.\n- Prevent the protected-video notice from remaining open after normal frames return or after a\n  device switch.\n- Remove duplicate custom borders that produced bright rings around native window corners.",
+    "published_at": "2026-08-24T08:12:21Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.7.1-x64.exe",
+        "size": 91879989,
+        "digest": "sha256:26a4d0d811e1b4def2ef762347f8b3bc5ef132ad3358987956109cbc2adfb4dc",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-Setup-v1.7.1-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.7.1-win-x64.zip",
+        "size": 193948116,
+        "digest": "sha256:cc132f0297b1f6248eb106d84310bd7f8eb03b9df0479c753438c65a1467ee87",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-v1.7.1-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.7.1-win-x64-sbom.spdx.json",
+        "size": 40426,
+        "digest": "sha256:5ecd84cbfbae0a08aacf518bce5a0f6e9d1f6c139861dc625c8297bf7e0607d9",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-v1.7.1-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 307,
+        "digest": "sha256:acdde020d3f8fe29718f561c6ea1cbe703edfcbbd721bcbdfb88caa4774a5f00",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.7.0",
     "name": "iPhoneMirror v1.7.0",
     "body": "### Changed\n\n- Replace legacy UI glyphs with packaged Fluent icons and keep button icons\n  readable across light and dark themes.\n- Bind AirPlay media sockets to the accepted control connection's interface,\n  preserving IPv4 and IPv6 routing for mirroring and media playback.\n- Remove one-pixel aspect-ratio rounding bars from independent native preview\n  windows without changing genuine letterboxing behavior.\n- Add WPF-UI license notices to portable and installer payload validation.",

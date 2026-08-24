@@ -1201,6 +1201,7 @@
                                             <MultiDataTrigger.Conditions>
                                                 <Condition Binding="{Binding IsCapturing}" Value="True"/>
                                                 <Condition Binding="{Binding IsAudioOnlyAirPlay}" Value="False"/>
+                                                <Condition Binding="{Binding IsVideoProtected}" Value="False"/>
                                             </MultiDataTrigger.Conditions>
                                             <Setter Property="Visibility" Value="Visible"/>
                                         </MultiDataTrigger>
@@ -1244,6 +1245,55 @@
                                            Foreground="{DynamicResource PreviewMutedTextBrush}"
                                            FontSize="12" TextAlignment="Center" TextWrapping="Wrap"
                                            Margin="0,6,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid x:Name="ProtectedVideoSurface"
+                              AutomationProperties.AutomationId="ProtectedVideoSurface"
+                              Background="{DynamicResource PreviewChromeBrush}"
+                              Panel.ZIndex="2" IsHitTestVisible="False">
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsVideoProtected}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        MaxWidth="480" Margin="28">
+                                <Border Width="76" Height="76" CornerRadius="38"
+                                        Background="{DynamicResource PreviewPanelAltBrush}"
+                                        BorderBrush="{DynamicResource PreviewBorderBrush}"
+                                        BorderThickness="1" HorizontalAlignment="Center">
+                                    <ui:SymbolIcon Symbol="Warning20"
+                                                   Foreground="{DynamicResource PreviewTextBrush}"
+                                                   FontSize="32" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                </Border>
+                                <TextBlock Text="{DynamicResource CaptureVideoProtectedTitle}"
+                                           Foreground="{DynamicResource PreviewTextBrush}"
+                                           FontSize="19" FontWeight="SemiBold"
+                                           TextAlignment="Center" Margin="0,16,0,0"/>
+                                <TextBlock Text="{DynamicResource CaptureVideoProtectedNoticeProtection}"
+                                           Foreground="{DynamicResource PreviewMutedTextBrush}"
+                                           FontSize="12" TextAlignment="Center"
+                                           TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <Border Background="{DynamicResource PreviewPanelAltBrush}"
+                                        BorderBrush="{DynamicResource PreviewBorderBrush}"
+                                        BorderThickness="1" CornerRadius="15"
+                                        Padding="10,5" HorizontalAlignment="Center"
+                                        Margin="0,12,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Speaker220"
+                                                       Foreground="{DynamicResource PreviewMutedTextBrush}"
+                                                       FontSize="14" Margin="0,0,5,0"/>
+                                        <TextBlock Text="{Binding ProtectedAudioDisplay}"
+                                                   Foreground="{DynamicResource PreviewMutedTextBrush}"
+                                                   FontSize="11" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Grid>
                         <Grid x:Name="MediaCastSurface" Visibility="Collapsed"

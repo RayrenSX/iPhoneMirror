@@ -5,6 +5,35 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-08-24
+
+### Added
+
+- Add sustained black-video detection for wired capture after a normal-frame warm-up.
+- Add compact protected-video guidance for possible DRM / FairPlay restrictions,
+  including separate audio availability and automatic dismissal when normal video returns.
+- Add compact capture-status notices for ordinary mirroring errors, USB configuration failures,
+  and mirroring stopped from Control Center.
+- Expand Developer Tools with previews for capture errors, stopped sessions, USB configuration
+  errors, protected-video notices, and capture recovery.
+
+### Changed
+
+- Require an eight-second, multi-frame near-black and neutral-chroma signal before showing the
+  protected-video notice, reducing false positives from startup, short black scenes, and dark UI.
+- Use Windows/DWM outer corners for the capture recovery and status notices while retaining
+  compact internal status panels.
+- Keep error and stopped-session cleanup ordering explicit: failed sessions are released before
+  ordinary error notices, while stopped-session cleanup begins after the notice is shown.
+
+### Fixed
+
+- Replace unexplained black video surfaces with a clear, non-bypass warning that does not claim
+  DRM was definitively detected.
+- Prevent the protected-video notice from remaining open after normal frames return or after a
+  device switch.
+- Remove duplicate custom borders that produced bright rings around native window corners.
+
 ## [1.7.0] - 2026-08-22
 
 ### Changed
@@ -1278,7 +1307,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.9...v1.7.0
 [1.6.8]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.7...v1.6.8
 [1.6.7]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.6...v1.6.7

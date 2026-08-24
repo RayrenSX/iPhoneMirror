@@ -65,6 +65,7 @@ internal sealed class DeviceSessionManager
         {
             if (state.Handle != handle)
             {
+                state.ResetRuntimeObservations();
                 state.Handle = handle;
                 if (handle != 0) state.ErrorShown = false;
                 changed = true;
@@ -112,6 +113,7 @@ internal sealed class DeviceSessionManager
             handle = state.Handle;
             if (handle == 0) return Task.CompletedTask;
             state.IsStopping = true;
+            state.ResetRuntimeObservations();
             state.Handle = 0;
             teardown = StopAndDestroyCoreAsync(state, handle);
             _teardowns[state.Udid] = teardown;

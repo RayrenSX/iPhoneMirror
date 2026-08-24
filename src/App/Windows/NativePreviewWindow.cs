@@ -128,6 +128,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private int _rotation;
     private nint _largeIcon;
     private nint _smallIcon;
+    private ProtectedContentOverlayWindow? _protectedOverlay;
     private WindowRect _restoreRectangle;
     private nint _restoreStyle;
 
@@ -453,6 +454,22 @@ internal sealed class NativePreviewWindow : IDisposable
         return refreshed;
     }
 
+    internal void SetProtectedContent(bool protectedContent, string audioDisplay)
+    {
+        if (_disposed || _handle == 0 || _managedContent is not null) return;
+        if (!protectedContent)
+        {
+            _protectedOverlay?.Close();
+            _protectedOverlay = null;
+            return;
+        }
+        if (_protectedOverlay is null)
+            _protectedOverlay = ProtectedContentOverlayWindow.ShowFor(_handle,
+                audioDisplay);
+        else
+            _protectedOverlay.UpdateAudioDisplay(audioDisplay);
+    }
+
     internal void SetSourceDimensions(uint width, uint height)
     {
         var changed = _sourceWidth != width || _sourceHeight != height;
@@ -520,6 +537,12 @@ internal sealed class NativePreviewWindow : IDisposable
     private nint WindowProcedure(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (WindowsAutoPlayGuard.ShouldCancel(message, _sessionHandle != 0))
+        {
+            handled = true;
+            Log("autoplay_cancelled", ("message", "WM_QUERYCANCELAUTOPLAY"));
+            return 1;
+        }
         switch (message)
         {
             case WmNcCalcSize when _managedContent is null:
@@ -769,6 +792,8 @@ internal sealed class NativePreviewWindow : IDisposable
             ("mode", WindowMode), ("attached", _attached),
             ("full_screen", _isFullScreen));
         _disposed = true;
+        _protectedOverlay?.Close();
+        _protectedOverlay = null;
         _contextMenu.IsOpen = false;
         _contextMenu.PlacementTarget = null;
         _ = ShowWindow(_handle, SwHide);

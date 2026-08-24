@@ -80,6 +80,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     internal event Action? MediaCastStopRequested;
     internal event Action<bool, double>? MediaCastAudioSettingsChanged;
     internal event Action<string, ulong>? DeviceSessionHandleChanged;
+    internal event Action<string, ProtectedContentPresentation>?
+        DeviceProtectionStateChanged;
     internal event Action<string>? ProjectionSettingsRequested;
     internal event Action? MediaOutputSettingsRequested;
     private readonly NativeCore _core;
@@ -124,6 +126,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private string _fpsDisplay = "— fps";
     private string _latencyDisplay = "— ms";
     private string _audioDisplay = string.Empty;
+    private string _protectedAudioDisplay = string.Empty;
     private ResolutionPreset _selectedResolutionPreset = null!;
     private int _selectedFrameRate = 60;
     private double _playbackVolume = 100;
@@ -293,6 +296,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         ? CurrentDeviceSession!.Handle
         : 0;
     public bool HasCaptureSession => CurrentDeviceSession?.HasSession == true;
+    internal bool HasAnyCaptureSession => _sessions.AnySession;
     // Media casting is a virtual source, so it has no native capture session
     // handle. Keep the preview/output surface visible while that source is
     // active instead of tying the toolbar to USB/AirPlay sessions only.
@@ -300,8 +304,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         IsMediaCasting ? Visibility.Visible : Visibility.Collapsed;
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) { StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); } } }
     public bool IsAudioOnlyAirPlay => _isAudioOnlyAirPlay;
+    public bool IsVideoProtected => CurrentDeviceSession?.VideoProtected == true;
     public bool CanUseVisualPreviewTools =>
-        (HasCaptureSession || IsMediaCasting) && !IsAudioOnlyAirPlay;
+        (HasCaptureSession || IsMediaCasting) && !IsAudioOnlyAirPlay &&
+        !IsVideoProtected;
     public bool IsBusy
     {
         get => _isBusy;
@@ -348,6 +354,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public string FpsDisplay { get => _fpsDisplay; private set => Set(ref _fpsDisplay, value); }
     public string LatencyDisplay { get => _latencyDisplay; private set => Set(ref _latencyDisplay, value); }
     public string AudioDisplay { get => _audioDisplay; private set => Set(ref _audioDisplay, value); }
+    public string ProtectedAudioDisplay
+    {
+        get => _protectedAudioDisplay;
+        private set => Set(ref _protectedAudioDisplay, value);
+    }
     public string AudioDetailDisplay => IsMediaCastSelected
         ? LocalizationService.Get("MediaCastSystemDecoder")
         : IsAudioOnlyAirPlay ? LocalizationService.Get("WirelessMusicAudioFormat")
@@ -645,6 +656,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _captureStatus = LocalizationService.Get("StatusWaitingDevice");
         _driverState = LocalizationService.Get("StatusDetecting");
         _audioDisplay = LocalizationService.Get("StatusWaiting");
+        _protectedAudioDisplay = LocalizationService.Get("StatusWaiting");
         _settingsStatus = LocalizationService.Get("StatusDefaultSettings");
         _mediaOutputStatus = LocalizationService.Get("MediaOutputIdle");
         _mediaOutputCapabilitiesText = LocalizationService.Get("MediaOutputCapabilitiesUnknown");
@@ -669,6 +681,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             InvalidateImageSettingsWindow(udid);
             if (IsMediaOutputRunning && DeviceViewModel.UdidEquals(_mediaOutputUdid, udid))
                 _ = StopMediaOutputAsync();
+            PublishDeviceProtectionStateChanged(udid, default);
             DeviceSessionHandleChanged?.Invoke(udid, handle);
         };
         AddDiagnosticLog(AppLog.Event("app_start",
@@ -1213,6 +1226,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedDevice));
         if (value?.IsMediaCast == true)
         {
+            OnPropertyChanged(nameof(IsVideoProtected));
             ApplyMediaCastStatistics();
             AddDiagnosticLog(AppLog.Event("source_selected",
                 ("from", AppLog.Device(previous?.Udid)),
@@ -1278,6 +1292,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedConnection));
         OnPropertyChanged(nameof(IsWirelessSelected));
         OnPropertyChanged(nameof(IsMediaCastSelected));
+        OnPropertyChanged(nameof(IsVideoProtected));
         OnPropertyChanged(nameof(PreviewAndObsVisibility));
         OnPropertyChanged(nameof(TargetResolutionDisplay));
         OnPropertyChanged(nameof(TargetFpsDisplay));
@@ -1349,6 +1364,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             }
             if (status.Width != 0 && status.Height != 0)
                 DeviceVideoSizeChanged?.Invoke(state.Udid, status.Width, status.Height);
+            UpdateProtectionState(state, ProtectedContentStatus.Parse(
+                status.Message, status.AudioSampleRate, status.AudioChannels));
             if (status.State != CaptureState.Error || state.ErrorShown) continue;
             state.ErrorShown = true;
             var name = Devices.FirstOrDefault(device =>
@@ -1369,7 +1386,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             else
             {
                 await ReleaseFailedSessionLockedAsync(state, status);
-                AppPromptWindow.Inform(errorTitle, errorBody);
+                CaptureStatusNoticeWindow.ShowError(errorTitle, errorBody);
             }
         }
     }
@@ -1413,13 +1430,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         DeviceCaptureState state, NativeCaptureStatus status,
         string errorTitle, string errorBody)
     {
-        AppPromptWindow.InformThen(errorTitle, errorBody,
+        CaptureStatusNoticeWindow.ShowStoppedThen(errorTitle, errorBody,
             () => ReleaseFailedSessionLockedAsync(state, status));
     }
 
     private void ResetPreviewState()
     {
         SetAudioOnlyAirPlay(false);
+        OnPropertyChanged(nameof(IsVideoProtected));
+        OnPropertyChanged(nameof(CanUseVisualPreviewTools));
+        ProtectedAudioDisplay = CurrentDeviceSession is { VideoProtected: true } state
+            ? new ProtectedContentPresentation(true, state.ProtectedAudioActive,
+                state.ProtectedAudioSampleRate, state.ProtectedAudioChannels).AudioDisplay
+            : LocalizationService.Get("StatusWaiting");
         SetDecoderStatus(string.Empty, "Hidden");
         _lastVideoOutputSignature = null;
         _sourceVideoWidth = 0;
@@ -1516,12 +1539,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 AddUiLog(LocalizationService.Format(
                     "StartFailedFormat", preflight.Message));
                 if (preflight.ErrorCode != 0)
-                    AppPromptWindow.Inform(
-                        LocalizationService.Format("DeviceCaptureErrorTitleFormat",
-                            device.DisplayName),
+                    CaptureStatusNoticeWindow.ShowError(
+                        CaptureErrorGuidance.IsUsbConfigurationFailure(preflight.Message)
+                            ? LocalizationService.Get("CaptureUsbConfigurationTitle")
+                            : LocalizationService.Format("DeviceCaptureErrorTitleFormat",
+                                device.DisplayName),
                         CaptureErrorGuidance.StartFailureMessage(
                             preflight.ErrorCode, preflight.Message,
-                            preflight.FailureKind));
+                            preflight.FailureKind),
+                        CaptureErrorGuidance.IsUsbConfigurationFailure(preflight.Message));
                 return;
             }
             var preference = (Success: true, Message: LocalizationService.Get("VideoPreferencesApplied"));
@@ -1567,7 +1593,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ? LocalizationService.Get("StartRequested")
                 : LocalizationService.Format("StartFailedFormat", result.Message));
             if (!result.Success)
-                AppPromptWindow.Inform(
+                CaptureStatusNoticeWindow.ShowError(
                     LocalizationService.Format("DeviceCaptureErrorTitleFormat",
                         device.DisplayName),
                     CaptureErrorGuidance.StartFailureMessage(
@@ -1588,7 +1614,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 CaptureStatus = failure;
             }
             AddUiLog(failure);
-            AppPromptWindow.Inform(
+            CaptureStatusNoticeWindow.ShowError(
                 LocalizationService.Format("DeviceCaptureErrorTitleFormat",
                     requestedDevice?.DisplayName ??
                     LocalizationService.Get("CaptureError")),
@@ -1954,7 +1980,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 CaptureStatus = failure;
             }
             AddUiLog(failure);
-            AppPromptWindow.Inform(
+            CaptureStatusNoticeWindow.ShowError(
                 LocalizationService.Format("DeviceCaptureErrorTitleFormat",
                     SelectedDevice?.DisplayName ??
                     LocalizationService.Get("CaptureError")),
@@ -2508,6 +2534,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         var audioOnlyAirPlay = IsWirelessSelected && status.AudioSampleRate > 0 &&
             status.Width == 0 && status.Height == 0;
         SetAudioOnlyAirPlay(audioOnlyAirPlay);
+        var protection = ProtectedContentStatus.Parse(status.Message,
+            status.AudioSampleRate, status.AudioChannels);
+        var protectedVideo = !audioOnlyAirPlay && protection.IsProtected;
+        if (CurrentDeviceSession is { } currentState)
+        {
+            protection = protection with { IsProtected = protectedVideo };
+            UpdateProtectionState(currentState, protection);
+        }
         var captureActive = IsActiveCaptureState(status.State);
         IsCapturing = captureActive;
         if (!captureActive && status.State is CaptureState.Idle or CaptureState.Stopped or CaptureState.Error)
@@ -2557,6 +2591,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         AudioDisplay = status.AudioSampleRate > 0
             ? $"{status.AudioSampleRate / 1000.0:F0} kHz · {status.AudioChannels} ch"
             : LocalizationService.Get("StatusWaiting");
+        ProtectedAudioDisplay = protection.AudioDisplay;
     }
 
     private async Task ReleaseSelectedFailedSessionAsync(
@@ -2574,7 +2609,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         // A modal prompt must never own the lifetime of a failed USB session.
         // Stop and destroy first so an unattended error dialog cannot retain
         // device handles or delay Windows shutdown.
-        AppPromptWindow.Inform(errorTitle, errorBody);
+        CaptureStatusNoticeWindow.ShowError(errorTitle, errorBody);
     }
 
     private void UpdateVideoOutputStatus()
@@ -2817,6 +2852,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private static string GetCaptureStatusText(NativeCaptureStatus status, bool wireless)
     {
+        if (status.State == CaptureState.Streaming &&
+            ProtectedContentStatus.Parse(status.Message, status.AudioSampleRate,
+                status.AudioChannels).IsProtected)
+            return LocalizationService.Get("CaptureVideoProtected");
         if (wireless && status.AudioSampleRate > 0 &&
             status.Width == 0 && status.Height == 0)
             return LocalizationService.Get("WirelessMusicStreaming");
@@ -2842,6 +2881,41 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(TargetResolutionDisplay));
         OnPropertyChanged(nameof(TargetFpsDisplay));
         OnPropertyChanged(nameof(AudioDetailDisplay));
+    }
+
+    private void UpdateProtectionState(DeviceCaptureState state,
+        ProtectedContentPresentation presentation)
+    {
+        if (!state.UpdateProtectionState(presentation.IsProtected,
+                presentation.AudioActive, presentation.AudioSampleRate,
+                presentation.AudioChannels))
+            return;
+        if (ReferenceEquals(state, CurrentDeviceSession))
+        {
+            OnPropertyChanged(nameof(IsVideoProtected));
+            OnPropertyChanged(nameof(CanUseVisualPreviewTools));
+            ProtectedAudioDisplay = presentation.AudioDisplay;
+        }
+        AddDiagnosticLog(AppLog.Event("protected_content_state",
+            ("device", AppLog.Device(state.Udid)),
+            ("handle", AppLog.Handle(state.Handle)),
+            ("protected", presentation.IsProtected),
+            ("audio_active", presentation.AudioActive),
+            ("audio_rate", presentation.AudioSampleRate),
+            ("audio_channels", presentation.AudioChannels)));
+        PublishDeviceProtectionStateChanged(state.Udid, presentation);
+    }
+
+    private void PublishDeviceProtectionStateChanged(string udid,
+        ProtectedContentPresentation presentation)
+    {
+        try { DeviceProtectionStateChanged?.Invoke(udid, presentation); }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("window", "protected_overlay_update_failed",
+                error, ("device", AppLog.Device(udid)),
+                ("protected", presentation.IsProtected));
+        }
     }
 
     private void RefreshWirelessStatus()
@@ -3934,7 +4008,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                         failedCreate?.ErrorCode ??
                             (int)NativeResult.TransportUnavailable,
                         failedCreate?.Message ?? error.Message);
-                AppPromptWindow.Inform(
+                CaptureStatusNoticeWindow.ShowError(
                     LocalizationService.Format("DeviceCaptureErrorTitleFormat",
                         device.DisplayName), errorBody);
             }
