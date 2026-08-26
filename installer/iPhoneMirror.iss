@@ -53,6 +53,7 @@ VersionInfoCompany=RayrenSX
 VersionInfoDescription={#MyAppName} Windows x64 Setup
 VersionInfoProductName={#MyAppName}
 DefaultDirName={#MyDefaultDir}
+DisableDirPage=no
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 AllowNoIcons=no

@@ -54,6 +54,17 @@ internal sealed class DecoderPreferenceOption(
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
+internal sealed class BluetoothMouseDirectionOption(
+    BluetoothMouseDirection direction,
+    string labelResourceKey) : INotifyPropertyChanged
+{
+    public BluetoothMouseDirection Direction { get; } = direction;
+    public string Label => LocalizationService.Get(labelResourceKey);
+    internal void NotifyLanguageChanged() => PropertyChanged?.Invoke(this,
+        new PropertyChangedEventArgs(nameof(Label)));
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+
 internal sealed class MainViewModel : INotifyPropertyChanged
 {
     // Synthetic handle used by the output services for the WPF media-cast
@@ -103,6 +114,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private readonly DeviceSessionManager _sessions;
     private readonly MediaOutputService _mediaOutput;
     private readonly VirtualCameraService _virtualCamera;
+    private readonly BluetoothHidMouseService _bluetoothControl = new();
+    private readonly BluetoothControlNoticePolicy _bluetoothNoticePolicy = new();
     private readonly Dictionary<string, ImageSettingsWindow> _imageSettingsWindows =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _settingsGate = new(1, 1);
@@ -118,6 +131,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private bool _isBusy;
     private bool _isSettingsDialogOpen;
     private bool _isMediaOutputTransitioning;
+    private bool _bluetoothControlStarting;
+    private bool _bluetoothControlStopping;
+    private int _activeSessionStatusPolls;
     private string? _activeCaptureUdid;
     private int _manualRefreshPending;
     private string _resolution = "—";
@@ -158,6 +174,28 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         IPhoneFilterDriverState.NoDevice, null, string.Empty);
     private string _wirelessStatus = string.Empty;
     private string _mediaCastStatus = string.Empty;
+    private string _bluetoothControlStatus = string.Empty;
+    private bool _bluetoothControlEnabled;
+    private bool _bluetoothControlConnected;
+    private bool _bluetoothControlCalibrated;
+    private bool _bluetoothCalibrationInProgress;
+    private bool _bluetoothControlInputEnabled;
+    private bool _bluetoothControlNoticePending;
+    private string? _bluetoothControlDeviceUdid;
+    private double _bluetoothMouseSensitivity = 500;
+    private double _bluetoothWheelSensitivity = 1000;
+    private BluetoothMouseDirection _bluetoothPortraitMouseDirection;
+    private BluetoothMouseDirection _bluetoothLandscapeMouseDirection =
+        BluetoothMouseDirection.Right;
+    private bool _bluetoothMouseReverseHorizontal;
+    private bool _bluetoothMouseReverseVertical;
+    private double _appliedBluetoothMouseSensitivity = 500;
+    private double _appliedBluetoothWheelSensitivity = 1000;
+    private BluetoothMouseDirection _appliedBluetoothPortraitMouseDirection;
+    private BluetoothMouseDirection _appliedBluetoothLandscapeMouseDirection =
+        BluetoothMouseDirection.Right;
+    private bool _appliedBluetoothMouseReverseHorizontal;
+    private bool _appliedBluetoothMouseReverseVertical;
     private ulong _lastMediaCastCommandId;
     private bool _isMediaCasting;
     private DeviceViewModel? _mediaCastDevice;
@@ -213,6 +251,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         new(DecoderPreference.HardwarePreferred, "DecoderHardwarePreferred"),
         new(DecoderPreference.SoftwareCompatible, "DecoderSoftwareCompatible"),
     ];
+    public IReadOnlyList<BluetoothMouseDirectionOption> BluetoothMouseDirections { get; } =
+    [
+        new(BluetoothMouseDirection.Up, "BluetoothMouseDirectionUp"),
+        new(BluetoothMouseDirection.Right, "BluetoothMouseDirectionRight"),
+        new(BluetoothMouseDirection.Down, "BluetoothMouseDirectionDown"),
+        new(BluetoothMouseDirection.Left, "BluetoothMouseDirectionLeft"),
+    ];
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
     public RelayCommand MediaCastStopCommand { get; }
@@ -223,7 +268,190 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand ClearLogCommand { get; }
     public RelayCommand AdvancedSettingsCommand { get; }
     public RelayCommand ApplyWirelessSettingsCommand { get; }
+    public RelayCommand ApplyBluetoothMouseSettingsCommand { get; }
     public RelayCommand OpenDriverManagerCommand { get; }
+    public RelayCommand StartBluetoothControlCommand { get; }
+    public RelayCommand StopBluetoothControlCommand { get; }
+    public RelayCommand ToggleBluetoothControlCommand { get; }
+    public string BluetoothControlStatus => _bluetoothControlStatus;
+    public bool IsBluetoothControlEnabled => _bluetoothControlEnabled;
+    public bool BluetoothControlIsInputEnabled => _bluetoothControlEnabled &&
+        _bluetoothControlConnected && _bluetoothControlInputEnabled;
+    public bool CanStartBluetoothControl => CanEnableBluetoothControlFor(
+        SelectedDevice?.Udid);
+    public bool CanStopBluetoothControl => _bluetoothControlEnabled &&
+        !_bluetoothControlStarting && !_bluetoothControlStopping;
+    public bool CanToggleBluetoothControl => !_bluetoothControlStarting &&
+        !_bluetoothControlStopping &&
+        (_bluetoothControlEnabled || CanEnableBluetoothControlFor(SelectedDevice?.Udid));
+    public string BluetoothControlActionText => LocalizationService.Get(
+        _bluetoothControlEnabled ? "StopBluetoothControl" : "StartBluetoothControl");
+
+    private bool CanEnableBluetoothControlFor(string? deviceUdid) =>
+        !_bluetoothControlEnabled && !_bluetoothControlStarting &&
+        !_bluetoothControlStopping && !IsBusy &&
+        !string.IsNullOrWhiteSpace(deviceUdid) &&
+        _sessions.TryGet(deviceUdid, out var session) && IsSessionPresentable(session);
+
+    private bool HasBluetoothControlTargetSession =>
+        !string.IsNullOrWhiteSpace(_bluetoothControlDeviceUdid) &&
+        _sessions.TryGet(_bluetoothControlDeviceUdid, out var session) &&
+        IsSessionPresentable(session);
+    public double BluetoothMouseSensitivity
+    {
+        get => _bluetoothMouseSensitivity;
+        set
+        {
+            if (!double.IsFinite(value)) return;
+            var clamped = Math.Clamp(value, 10, 1000);
+            if (Set(ref _bluetoothMouseSensitivity, clamped))
+            {
+                OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+                ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+            }
+        }
+    }
+    public double BluetoothWheelSensitivity
+    {
+        get => _bluetoothWheelSensitivity;
+        set
+        {
+            if (!double.IsFinite(value)) return;
+            if (Set(ref _bluetoothWheelSensitivity, Math.Clamp(value, 10, 1000)))
+            {
+                OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+                ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+            }
+        }
+    }
+    public BluetoothMouseDirectionOption? SelectedBluetoothPortraitMouseDirection
+    {
+        get => BluetoothMouseDirections.FirstOrDefault(option =>
+            option.Direction == _bluetoothPortraitMouseDirection);
+        set
+        {
+            if (value is null ||
+                !Set(ref _bluetoothPortraitMouseDirection, value.Direction)) return;
+            OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+            ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+        }
+    }
+    public BluetoothMouseDirectionOption? SelectedBluetoothLandscapeMouseDirection
+    {
+        get => BluetoothMouseDirections.FirstOrDefault(option =>
+            option.Direction == _bluetoothLandscapeMouseDirection);
+        set
+        {
+            if (value is null ||
+                !Set(ref _bluetoothLandscapeMouseDirection, value.Direction)) return;
+            OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+            ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+        }
+    }
+    public bool BluetoothMouseReverseHorizontal
+    {
+        get => _bluetoothMouseReverseHorizontal;
+        set
+        {
+            if (Set(ref _bluetoothMouseReverseHorizontal, value))
+            {
+                OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+                ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+            }
+        }
+    }
+    public bool BluetoothMouseReverseVertical
+    {
+        get => _bluetoothMouseReverseVertical;
+        set
+        {
+            if (Set(ref _bluetoothMouseReverseVertical, value))
+            {
+                OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+                ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+            }
+        }
+    }
+    public string BluetoothDeviceOrientationDisplay =>
+        LocalizationService.Format("BluetoothCurrentOrientationFormat",
+            LocalizationService.Get(BluetoothMouseOrientationMapper.Detect(
+                SourceVideoWidth, SourceVideoHeight) switch
+            {
+                BluetoothDeviceOrientation.Portrait => "BluetoothDeviceOrientationPortrait",
+                BluetoothDeviceOrientation.Landscape => "BluetoothDeviceOrientationLandscape",
+                _ => "BluetoothDeviceOrientationUnknown",
+            }),
+            SourceVideoWidth > 0 && SourceVideoHeight > 0
+                ? $"{SourceVideoWidth}×{SourceVideoHeight}" : "—");
+    internal double AppliedBluetoothMouseSensitivity => _appliedBluetoothMouseSensitivity;
+    internal double AppliedBluetoothWheelSensitivity => _appliedBluetoothWheelSensitivity;
+    internal BluetoothMouseDirection AppliedBluetoothPortraitMouseDirection =>
+        _appliedBluetoothPortraitMouseDirection;
+    internal BluetoothMouseDirection AppliedBluetoothLandscapeMouseDirection =>
+        _appliedBluetoothLandscapeMouseDirection;
+    internal bool AppliedBluetoothMouseReverseHorizontal =>
+        _appliedBluetoothMouseReverseHorizontal;
+    internal bool AppliedBluetoothMouseReverseVertical =>
+        _appliedBluetoothMouseReverseVertical;
+    public bool HasPendingBluetoothMouseSettings => Application.Current is App app &&
+        (Math.Abs(_bluetoothMouseSensitivity - app.UpdateSettings.BluetoothMouseSensitivity) > 0.001 ||
+         Math.Abs(_bluetoothWheelSensitivity - app.UpdateSettings.BluetoothWheelSensitivity) > 0.001 ||
+         (int)_bluetoothPortraitMouseDirection != app.UpdateSettings.BluetoothPortraitMouseDirection ||
+         (int)_bluetoothLandscapeMouseDirection != app.UpdateSettings.BluetoothLandscapeMouseDirection ||
+         _bluetoothMouseReverseHorizontal != app.UpdateSettings.BluetoothMouseReverseHorizontal ||
+         _bluetoothMouseReverseVertical != app.UpdateSettings.BluetoothMouseReverseVertical);
+
+    private void ApplyBluetoothMouseSettings()
+    {
+        if (Application.Current is not App app) return;
+        var previousMouse = app.UpdateSettings.BluetoothMouseSensitivity;
+        var previousWheel = app.UpdateSettings.BluetoothWheelSensitivity;
+        var previousPortraitDirection = app.UpdateSettings.BluetoothPortraitMouseDirection;
+        var previousLandscapeDirection = app.UpdateSettings.BluetoothLandscapeMouseDirection;
+        var previousReverseHorizontal = app.UpdateSettings.BluetoothMouseReverseHorizontal;
+        var previousReverseVertical = app.UpdateSettings.BluetoothMouseReverseVertical;
+        app.UpdateSettings.BluetoothMouseSensitivity = _bluetoothMouseSensitivity;
+        app.UpdateSettings.BluetoothMouseSensitivitySchema = 2;
+        app.UpdateSettings.BluetoothWheelSensitivity = _bluetoothWheelSensitivity;
+        app.UpdateSettings.BluetoothMouseSettingsSchema = 1;
+        app.UpdateSettings.BluetoothPortraitMouseDirection =
+            (int)_bluetoothPortraitMouseDirection;
+        app.UpdateSettings.BluetoothLandscapeMouseDirection =
+            (int)_bluetoothLandscapeMouseDirection;
+        app.UpdateSettings.BluetoothMouseReverseHorizontal =
+            _bluetoothMouseReverseHorizontal;
+        app.UpdateSettings.BluetoothMouseReverseVertical =
+            _bluetoothMouseReverseVertical;
+        app.UpdateSettings.BluetoothMouseDirectionSchema = 1;
+        if (!app.SaveUpdateSettings())
+        {
+            app.UpdateSettings.BluetoothMouseSensitivity = previousMouse;
+            app.UpdateSettings.BluetoothWheelSensitivity = previousWheel;
+            app.UpdateSettings.BluetoothPortraitMouseDirection = previousPortraitDirection;
+            app.UpdateSettings.BluetoothLandscapeMouseDirection = previousLandscapeDirection;
+            app.UpdateSettings.BluetoothMouseReverseHorizontal = previousReverseHorizontal;
+            app.UpdateSettings.BluetoothMouseReverseVertical = previousReverseVertical;
+            SetRawSettingsStatus(LocalizationService.Get("BluetoothMouseSettingsSaveFailed"));
+            OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+            ApplyBluetoothMouseSettingsCommand.NotifyCanExecuteChanged();
+            return;
+        }
+        _appliedBluetoothMouseSensitivity = _bluetoothMouseSensitivity;
+        _appliedBluetoothWheelSensitivity = _bluetoothWheelSensitivity;
+        _appliedBluetoothPortraitMouseDirection = _bluetoothPortraitMouseDirection;
+        _appliedBluetoothLandscapeMouseDirection = _bluetoothLandscapeMouseDirection;
+        _appliedBluetoothMouseReverseHorizontal = _bluetoothMouseReverseHorizontal;
+        _appliedBluetoothMouseReverseVertical = _bluetoothMouseReverseVertical;
+        AddDiagnosticLog(AppLog.Event("bluetooth_mouse_settings_applied",
+            ("mouse_sensitivity", _bluetoothMouseSensitivity),
+            ("wheel_sensitivity", _bluetoothWheelSensitivity),
+            ("portrait_direction", (int)_bluetoothPortraitMouseDirection),
+            ("landscape_direction", (int)_bluetoothLandscapeMouseDirection),
+            ("reverse_horizontal", _bluetoothMouseReverseHorizontal),
+            ("reverse_vertical", _bluetoothMouseReverseVertical)));
+        OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+        ApplyBluetoothMouseSettingsCommand.NotifyCanExecuteChanged();
+    }
     public bool IsAdvancedMode { get => _advancedMode; private set { if (Set(ref _advancedMode, value)) OnPropertyChanged(nameof(AdvancedSettingsVisibility)); } }
     public bool IsWirelessSelected => SelectedDevice?.IsWireless == true;
     public bool IsMediaCasting => _isMediaCasting;
@@ -316,6 +544,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (!Set(ref _isBusy, value)) return;
             StartCommand.NotifyCanExecuteChanged();
             StopCommand.NotifyCanExecuteChanged();
+            StartBluetoothControlCommand?.NotifyCanExecuteChanged();
+            StopBluetoothControlCommand?.NotifyCanExecuteChanged();
+            ToggleBluetoothControlCommand?.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(CanStartBluetoothControl));
+            OnPropertyChanged(nameof(CanStopBluetoothControl));
+            OnPropertyChanged(nameof(CanToggleBluetoothControl));
             ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
             MoreImageSettingsCommand.NotifyCanExecuteChanged();
             ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
@@ -661,8 +895,28 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _mediaOutputStatus = LocalizationService.Get("MediaOutputIdle");
         _mediaOutputCapabilitiesText = LocalizationService.Get("MediaOutputCapabilitiesUnknown");
         _virtualCameraStatusText = LocalizationService.Get("VirtualCameraChecking");
+        _bluetoothControlStatus = LocalizationService.Get("BluetoothControlOff");
         _logText = LocalizationService.Get("StatusWaitingLog");
         _selectedLanguage = LocalizationService.SelectedLanguage;
+        if (Application.Current is App currentApp)
+        {
+            _bluetoothMouseSensitivity = Math.Clamp(
+                currentApp.UpdateSettings.BluetoothMouseSensitivity, 10, 1000);
+            _bluetoothWheelSensitivity = Math.Clamp(
+                currentApp.UpdateSettings.BluetoothWheelSensitivity, 10, 1000);
+            _bluetoothPortraitMouseDirection = (BluetoothMouseDirection)Math.Clamp(
+                currentApp.UpdateSettings.BluetoothPortraitMouseDirection, 0, 3);
+            _bluetoothLandscapeMouseDirection = (BluetoothMouseDirection)Math.Clamp(
+                currentApp.UpdateSettings.BluetoothLandscapeMouseDirection, 0, 3);
+            _bluetoothMouseReverseHorizontal = currentApp.UpdateSettings.BluetoothMouseReverseHorizontal;
+            _bluetoothMouseReverseVertical = currentApp.UpdateSettings.BluetoothMouseReverseVertical;
+            _appliedBluetoothMouseSensitivity = _bluetoothMouseSensitivity;
+            _appliedBluetoothWheelSensitivity = _bluetoothWheelSensitivity;
+            _appliedBluetoothPortraitMouseDirection = _bluetoothPortraitMouseDirection;
+            _appliedBluetoothLandscapeMouseDirection = _bluetoothLandscapeMouseDirection;
+            _appliedBluetoothMouseReverseHorizontal = _bluetoothMouseReverseHorizontal;
+            _appliedBluetoothMouseReverseVertical = _bluetoothMouseReverseVertical;
+        }
         _core = new NativeCore();
         var wirelessReceiver = new WirelessReceiverService();
         _wireless = new WirelessReceiverController(_core, wirelessReceiver);
@@ -713,16 +967,307 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         ClearLogCommand = new RelayCommand(ClearVisibleLog);
         AdvancedSettingsCommand = new RelayCommand(ShowAdvancedSettings, () => IsAdvancedMode);
         OpenDriverManagerCommand = new RelayCommand(() => OpenDriverManager());
+        StartBluetoothControlCommand = new RelayCommand(() => _ = EnableBluetoothControlAsync(),
+            () => CanStartBluetoothControl);
+        StopBluetoothControlCommand = new RelayCommand(() => _ = StopBluetoothControlAsync(),
+            () => CanStopBluetoothControl);
+        ToggleBluetoothControlCommand = new RelayCommand(
+            () => _ = ToggleBluetoothControlAsync(), () => CanToggleBluetoothControl);
+        BluetoothControlNoticeWindow.ActiveNoticeClosed += OnBluetoothControlNoticeClosed;
+        _bluetoothControl.StatusChanged += (_, _) =>
+        {
+            void Update()
+            {
+                var connected = _bluetoothControl.IsConnected;
+                var connectionChanged = connected != _bluetoothControlConnected;
+                _bluetoothControlConnected = connected;
+                if (!connected) _bluetoothControlCalibrated = false;
+                _bluetoothControlStatus = _bluetoothControl.Error is null
+                    ? _bluetoothControl.Status
+                    : $"{_bluetoothControl.Status} {_bluetoothControl.Error}";
+                AddDiagnosticLog(AppLog.Event("bluetooth_control_state",
+                    ("advertising", _bluetoothControl.IsAdvertising),
+                    ("connected", connected),
+                    ("enabled", _bluetoothControlEnabled),
+                    ("status", _bluetoothControl.Status),
+                    ("error", _bluetoothControl.Error)));
+                OnPropertyChanged(nameof(BluetoothControlStatus));
+                if (connectionChanged)
+                    OnPropertyChanged(nameof(BluetoothControlIsConnected));
+                OnPropertyChanged(nameof(CanStartBluetoothControl));
+                OnPropertyChanged(nameof(CanStopBluetoothControl));
+                OnPropertyChanged(nameof(CanToggleBluetoothControl));
+                StartBluetoothControlCommand.NotifyCanExecuteChanged();
+                StopBluetoothControlCommand.NotifyCanExecuteChanged();
+                ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
+                if (connected && _bluetoothControlEnabled)
+                    _ = CompleteBluetoothConnectionAsync();
+            }
+            if (Application.Current?.Dispatcher.CheckAccess() == true) Update();
+            else Application.Current?.Dispatcher.BeginInvoke(Update);
+        };
         ApplyWirelessSettingsCommand = new RelayCommand(() => _ = RestartWirelessReceiverAsync(),
             () => _wireless.IsAvailable && !IsBusy);
+        ApplyBluetoothMouseSettingsCommand = new RelayCommand(ApplyBluetoothMouseSettings,
+            () => HasPendingBluetoothMouseSettings);
         RefreshWirelessStatus();
         RefreshMediaCastStatus();
         LocalizationService.LanguageChanged += OnLanguageChanged;
     }
 
+    internal bool BluetoothControlIsConnected => _bluetoothControlConnected;
+    internal bool IsBluetoothControlTarget(string? udid) =>
+        _bluetoothControlEnabled && DeviceViewModel.UdidEquals(
+            _bluetoothControlDeviceUdid, udid);
+    internal int BluetoothWheelResolutionMultiplier =>
+        _bluetoothControl.WheelResolutionMultiplier;
+
+    internal Task SendBluetoothMouseAsync(int dx, int dy, byte buttons = 0, int wheel = 0) =>
+        _bluetoothControl.SendMouseAsync(dx, dy, buttons, wheel);
+
+    internal Task SendBluetoothKeyboardAsync(byte modifiers, IReadOnlyCollection<byte> usages) =>
+        _bluetoothControl.SendKeyboardAsync(modifiers, usages);
+
+    internal async Task CalibrateBluetoothControlAsync()
+    {
+        // Relative HID reports have no absolute position. Repeated large
+        // negative reports reliably clamp the iOS pointer to the top-left
+        // edge, giving preview-to-device mapping a known origin.
+        for (var i = 0; i < 4; i++)
+        {
+            await _bluetoothControl.SendMouseAsync(short.MinValue + 1,
+                short.MinValue + 1);
+            await Task.Delay(8);
+        }
+    }
+
+    internal async Task EnableBluetoothControlAsync(string? targetDeviceUdid = null)
+    {
+        var controlDeviceUdid = targetDeviceUdid ?? SelectedDevice?.Udid;
+        if (!CanEnableBluetoothControlFor(controlDeviceUdid)) return;
+        _bluetoothControlDeviceUdid = controlDeviceUdid;
+        _bluetoothControlNoticePending = _bluetoothNoticePolicy.ShouldShowForDevice(
+            controlDeviceUdid);
+        _bluetoothControlInputEnabled = !_bluetoothControlNoticePending;
+        _bluetoothControlStarting = true;
+        OnPropertyChanged(nameof(CanStartBluetoothControl));
+        OnPropertyChanged(nameof(CanStopBluetoothControl));
+        OnPropertyChanged(nameof(CanToggleBluetoothControl));
+        StartBluetoothControlCommand.NotifyCanExecuteChanged();
+        StopBluetoothControlCommand.NotifyCanExecuteChanged();
+        ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
+
+        try
+        {
+            AddDiagnosticLog(AppLog.Event("bluetooth_control_start_begin",
+                ("device", AppLog.Device(controlDeviceUdid)),
+                ("show_notice", _bluetoothControlNoticePending)));
+            var started = await _bluetoothControl.StartAsync(_shutdownCancellation.Token);
+            if (!started)
+            {
+                var showFailureNotice = _bluetoothControlNoticePending;
+                _bluetoothControlEnabled = false;
+                _bluetoothControlConnected = false;
+                ResetBluetoothControlInputState();
+                NotifyBluetoothControlStateChanged();
+                AddDiagnosticLog(AppLog.Event("bluetooth_control_start_complete",
+                    ("success", false), ("advertising", false),
+                    ("connected", false), ("error", _bluetoothControl.Error)));
+                if (showFailureNotice && Application.Current?.MainWindow is { } failedOwner)
+                    BluetoothControlNoticeWindow.ShowFailure(failedOwner,
+                        _bluetoothControl.Error ?? _bluetoothControl.Status);
+                return;
+            }
+
+            // Advertising is a valid enabled state. Bluetooth drivers can
+            // take much longer than eight seconds before iOS subscribes to
+            // the HID reports, so remain available until explicitly stopped.
+            _bluetoothControlEnabled = true;
+            _bluetoothControlConnected = _bluetoothControl.IsConnected;
+            NotifyBluetoothControlStateChanged();
+            if (!_bluetoothControlConnected && _bluetoothControlNoticePending &&
+                Application.Current?.MainWindow is { } owner)
+                BluetoothControlNoticeWindow.ShowWaiting(owner,
+                    _bluetoothControl.SuggestedDeviceName);
+            else if (!_bluetoothControlConnected && _bluetoothControlNoticePending)
+                AllowBluetoothControlInput();
+            AddUiLog(LocalizationService.Get(_bluetoothControlConnected
+                ? "BluetoothControlConnected" : "BluetoothControlWaiting"));
+            AddDiagnosticLog(AppLog.Event("bluetooth_control_start_complete",
+                ("success", true), ("advertising", _bluetoothControl.IsAdvertising),
+                ("connected", _bluetoothControlConnected)));
+            if (_bluetoothControlConnected)
+                await CompleteBluetoothConnectionAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            _bluetoothControlEnabled = false;
+            _bluetoothControlConnected = false;
+            ResetBluetoothControlInputState();
+            NotifyBluetoothControlStateChanged();
+        }
+        catch (Exception error)
+        {
+            var showFailureNotice = _bluetoothControlNoticePending;
+            _bluetoothControlEnabled = false;
+            _bluetoothControlConnected = false;
+            ResetBluetoothControlInputState();
+            NotifyBluetoothControlStateChanged();
+            AddDiagnosticLog(AppLog.Event("bluetooth_control_start_failed",
+                ("error", AppLog.Error(error))));
+            if (showFailureNotice && Application.Current?.MainWindow is { } owner)
+                BluetoothControlNoticeWindow.ShowFailure(owner, error.Message);
+        }
+        finally
+        {
+            _bluetoothControlStarting = false;
+            OnPropertyChanged(nameof(CanStartBluetoothControl));
+            OnPropertyChanged(nameof(CanStopBluetoothControl));
+            OnPropertyChanged(nameof(CanToggleBluetoothControl));
+            StartBluetoothControlCommand.NotifyCanExecuteChanged();
+            StopBluetoothControlCommand.NotifyCanExecuteChanged();
+            ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    internal async Task DisableBluetoothControlAsync()
+    {
+        if (_bluetoothControlStopping ||
+            (!_bluetoothControlEnabled && !_bluetoothControl.IsAdvertising)) return;
+        _bluetoothControlStopping = true;
+        var controlDeviceUdid = _bluetoothControlDeviceUdid;
+        AddDiagnosticLog(AppLog.Event("bluetooth_control_stop_begin",
+            ("device", AppLog.Device(controlDeviceUdid)),
+            ("connected", _bluetoothControlConnected)));
+        try
+        {
+            _bluetoothControlEnabled = false;
+            _bluetoothControlConnected = false;
+            _bluetoothControlCalibrated = false;
+            ResetBluetoothControlInputState();
+            NotifyBluetoothControlStateChanged();
+            BluetoothControlNoticeWindow.TryCloseActive();
+            await _bluetoothControl.ReleaseAllAsync();
+            await _bluetoothControl.StopAsync();
+            AddDiagnosticLog(AppLog.Event("bluetooth_control_stop_complete"));
+        }
+        finally
+        {
+            _bluetoothControlStopping = false;
+            OnPropertyChanged(nameof(CanStartBluetoothControl));
+            OnPropertyChanged(nameof(CanStopBluetoothControl));
+            OnPropertyChanged(nameof(CanToggleBluetoothControl));
+            StartBluetoothControlCommand.NotifyCanExecuteChanged();
+            StopBluetoothControlCommand.NotifyCanExecuteChanged();
+            ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private async Task CompleteBluetoothConnectionAsync()
+    {
+        if (!_bluetoothControlEnabled || !_bluetoothControlConnected ||
+            _bluetoothControlCalibrated || _bluetoothCalibrationInProgress) return;
+        _bluetoothCalibrationInProgress = true;
+        try
+        {
+            await CalibrateBluetoothControlAsync();
+            if (!_bluetoothControlEnabled || !_bluetoothControl.IsConnected) return;
+            _bluetoothControlCalibrated = true;
+            AddUiLog(LocalizationService.Get("BluetoothControlConnected"));
+            AddDiagnosticLog(AppLog.Event("bluetooth_control_connected",
+                ("device", AppLog.Device(_bluetoothControlDeviceUdid))));
+            if (_bluetoothControlNoticePending && !_bluetoothControlInputEnabled &&
+                Application.Current?.MainWindow is { } owner)
+                BluetoothControlNoticeWindow.ShowConnected(owner);
+            else if (_bluetoothControlNoticePending)
+                AllowBluetoothControlInput();
+        }
+        catch (Exception error)
+        {
+            AddDiagnosticLog(AppLog.Event("bluetooth_control_calibration_failed",
+                ("error", AppLog.Error(error))));
+        }
+        finally
+        {
+            _bluetoothCalibrationInProgress = false;
+        }
+    }
+
+    private void NotifyBluetoothControlStateChanged()
+    {
+        OnPropertyChanged(nameof(IsBluetoothControlEnabled));
+        OnPropertyChanged(nameof(BluetoothControlIsConnected));
+        OnPropertyChanged(nameof(BluetoothControlIsInputEnabled));
+        OnPropertyChanged(nameof(CanStartBluetoothControl));
+        OnPropertyChanged(nameof(CanStopBluetoothControl));
+        OnPropertyChanged(nameof(CanToggleBluetoothControl));
+        OnPropertyChanged(nameof(BluetoothControlActionText));
+        StartBluetoothControlCommand.NotifyCanExecuteChanged();
+        StopBluetoothControlCommand.NotifyCanExecuteChanged();
+        ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
+    }
+
+    private void OnBluetoothControlNoticeClosed(object? sender, EventArgs e)
+    {
+        void Update()
+        {
+            if (_disposed || !_bluetoothControlEnabled ||
+                !_bluetoothControlNoticePending) return;
+            AllowBluetoothControlInput();
+        }
+
+        if (Application.Current?.Dispatcher.CheckAccess() == true) Update();
+        else Application.Current?.Dispatcher.BeginInvoke(Update);
+    }
+
+    private void AllowBluetoothControlInput()
+    {
+        if (_bluetoothControlInputEnabled) return;
+        _bluetoothControlInputEnabled = true;
+        _bluetoothControlNoticePending = false;
+        AddDiagnosticLog(AppLog.Event("bluetooth_control_input_enabled",
+            ("device", AppLog.Device(_bluetoothControlDeviceUdid)),
+            ("connected", _bluetoothControlConnected)));
+        OnPropertyChanged(nameof(BluetoothControlIsInputEnabled));
+    }
+
+    private void ResetBluetoothControlInputState()
+    {
+        _bluetoothControlInputEnabled = false;
+        _bluetoothControlNoticePending = false;
+        _bluetoothControlDeviceUdid = null;
+    }
+
+    internal Task ToggleBluetoothControlAsync() =>
+        IsBluetoothControlEnabled
+            ? DisableBluetoothControlAsync()
+            : EnableBluetoothControlAsync();
+
+    private Task StopBluetoothControlAsync() => DisableBluetoothControlAsync();
+
     public async Task RefreshAsync(bool forceDeviceEnumeration = false)
     {
         if (_disposed) return;
+        if (!_sessions.AnySession)
+            Interlocked.Exchange(ref _activeSessionStatusPolls, 0);
+        // Device enumeration opens the USB/usbmux stack and takes roughly
+        // 250-300ms on a live wired session. Running it on the two-second UI
+        // timer produces the periodic preview hitch users perceive while
+        // moving the mouse. A live session already owns a stable handle, so
+        // poll only its status until the user explicitly refreshes devices.
+        if (!forceDeviceEnumeration && _sessions.AnySession)
+        {
+            await RefreshActiveSessionStatusAsync().ConfigureAwait(true);
+            var poll = Interlocked.Increment(ref _activeSessionStatusPolls);
+            if (poll % 5 != 0)
+            {
+                await PollBackgroundSessionErrorsAsync().ConfigureAwait(true);
+                return;
+            }
+            // Every fifth timer tick falls through to the normal inventory
+            // path so wireless additions/removals and independent sessions
+            // are reconciled without reopening USB on every tick.
+        }
         if (forceDeviceEnumeration && Interlocked.Exchange(ref _manualRefreshPending, 1) != 0)
             return;
 
@@ -786,6 +1331,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
             var enumerateWired = UsbDeviceRefreshPolicy.ShouldEnumerateWiredDevices(
                 managedUsbTransition, nativeWiredStates);
+            // A live wired session already owns a stable native handle. The
+            // periodic inventory pass still reconciles wireless devices, but
+            // must not reopen usbmux and introduce a visible preview hitch.
+            if (!forceDeviceEnumeration && wiredStates.Any(state => state.HasSession))
+                enumerateWired = false;
             var refreshWiredMetadata = UsbDeviceRefreshPolicy.ShouldRefreshMetadata(
                 forceDeviceEnumeration, wiredStates.Any(state => state.HasSession));
             var wirelessDevices = await Task.Run(_core.GetWirelessDevices);
@@ -930,6 +1480,23 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (gateHeld) _coreGate.Release();
             if (forceDeviceEnumeration) Interlocked.Exchange(ref _manualRefreshPending, 0);
         }
+    }
+
+    private async Task RefreshActiveSessionStatusAsync()
+    {
+        if (_disposed || IsMediaCastSelected) return;
+        NativeCaptureStatus status;
+        try
+        {
+            status = await Task.Run(GetSelectedCaptureStatus).ConfigureAwait(true);
+        }
+        catch (Exception error)
+        {
+            DiagnosticLogger.ExceptionOnce("active-session-status-refresh",
+                "capture", "active_session_status_refresh_failed", error);
+            return;
+        }
+        ApplyCaptureStatus(status);
     }
 
     private async Task SyncWirelessSessionsLockedAsync(IEnumerable<DeviceViewModel> connected)
@@ -1236,6 +1803,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             NotifySelectedDeviceProperties();
             StartCommand.NotifyCanExecuteChanged();
             StopCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(CanStartBluetoothControl));
+            OnPropertyChanged(nameof(CanStopBluetoothControl));
+            OnPropertyChanged(nameof(CanToggleBluetoothControl));
+            StartBluetoothControlCommand.NotifyCanExecuteChanged();
+            StopBluetoothControlCommand.NotifyCanExecuteChanged();
+            ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
             ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
             MoreImageSettingsCommand.NotifyCanExecuteChanged();
             return;
@@ -1276,6 +1849,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         NotifySelectedDeviceProperties();
         StartCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanStartBluetoothControl));
+        OnPropertyChanged(nameof(CanStopBluetoothControl));
+        OnPropertyChanged(nameof(CanToggleBluetoothControl));
+        StartBluetoothControlCommand.NotifyCanExecuteChanged();
+        StopBluetoothControlCommand.NotifyCanExecuteChanged();
+        ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
         ApplyVideoSettingsCommand.NotifyCanExecuteChanged();
         MoreImageSettingsCommand.NotifyCanExecuteChanged();
 
@@ -1318,6 +1897,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void NotifyCaptureSessionChanged()
     {
+        if (!_disposed && _bluetoothControlEnabled && !HasBluetoothControlTargetSession)
+            _ = StopBluetoothControlAsync();
         OnPropertyChanged(nameof(CurrentSessionHandle));
         OnPropertyChanged(nameof(HasCaptureSession));
         OnPropertyChanged(nameof(PreviewAndObsVisibility));
@@ -1328,6 +1909,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         NotifyMediaOutputStateChanged();
         StartCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanStartBluetoothControl));
+        OnPropertyChanged(nameof(CanStopBluetoothControl));
+        OnPropertyChanged(nameof(CanToggleBluetoothControl));
+        StartBluetoothControlCommand.NotifyCanExecuteChanged();
+        StopBluetoothControlCommand.NotifyCanExecuteChanged();
+        ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
         MediaOutputSettingsCommand.NotifyCanExecuteChanged();
     }
 
@@ -1449,6 +2036,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _sourceVideoHeight = 0;
         OnPropertyChanged(nameof(SourceVideoWidth));
         OnPropertyChanged(nameof(SourceVideoHeight));
+        OnPropertyChanged(nameof(BluetoothDeviceOrientationDisplay));
         Resolution = "—";
         FpsDisplay = "— fps";
         LatencyDisplay = "— ms";
@@ -1482,7 +2070,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             ("device", AppLog.Device(requestedDevice.Udid)),
             ("kind", requestedDevice.IsWireless ? "wireless" : "wired"),
             ("resolution", $"{SelectedResolutionPreset.Width}x{SelectedResolutionPreset.Height}"),
-            ("fps", SelectedFrameRate), ("audio", PlayAudio),
+            ("render_fps_limit", SelectedFrameRate), ("audio", PlayAudio),
             ("decoder", requestedState.DecoderPreference),
             ("brightness", requestedState.Brightness),
             ("contrast", requestedState.Contrast),
@@ -2223,6 +2811,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _sourceVideoHeight = _mediaCastHeight;
             OnPropertyChanged(nameof(SourceVideoWidth));
             OnPropertyChanged(nameof(SourceVideoHeight));
+            OnPropertyChanged(nameof(BluetoothDeviceOrientationDisplay));
         }
         FpsDisplay = LocalizationService.Format("MediaCastFpsDisplayFormat",
             _wireless.AppliedProfile.FrameRate);
@@ -2581,6 +3170,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _sourceVideoHeight = status.Height;
             OnPropertyChanged(nameof(SourceVideoWidth));
             OnPropertyChanged(nameof(SourceVideoHeight));
+            OnPropertyChanged(nameof(BluetoothDeviceOrientationDisplay));
         }
         if (status.Width != 0 && status.Height != 0 && SelectedDevice is { } selected)
             DeviceVideoSizeChanged?.Invoke(selected.Udid, status.Width, status.Height);
@@ -2611,6 +3201,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         // device handles or delay Windows shutdown.
         CaptureStatusNoticeWindow.ShowError(errorTitle, errorBody);
     }
+
 
     private void UpdateVideoOutputStatus()
     {
@@ -3101,6 +3692,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         foreach (var profile in WirelessDisplayProfiles) profile.NotifyLanguageChanged();
         foreach (var mode in UsbProjectionModes) mode.NotifyLanguageChanged();
         foreach (var preference in DecoderPreferences) preference.NotifyLanguageChanged();
+        foreach (var direction in BluetoothMouseDirections)
+            direction.NotifyLanguageChanged();
 
         foreach (var device in Devices) device.NotifyLanguageChanged();
 
@@ -3113,6 +3706,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(AudioDetailDisplay));
         OnPropertyChanged(nameof(VirtualCameraInstallActionText));
         OnPropertyChanged(nameof(AppliedWirelessProfileDisplay));
+        OnPropertyChanged(nameof(BluetoothControlActionText));
+        OnPropertyChanged(nameof(BluetoothDeviceOrientationDisplay));
         if (_lastEnvironment is { } environment) UpdateEnvironmentStatus(environment);
         else
         {
@@ -4033,6 +4628,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _disposed = true;
         _shutdownCancellation.Cancel();
         LocalizationService.LanguageChanged -= OnLanguageChanged;
+        BluetoothControlNoticeWindow.ActiveNoticeClosed -= OnBluetoothControlNoticeClosed;
+        await _bluetoothControl.DisposeAsync();
         _mediaOutput.StatusChanged -= OnMediaOutputStatusChanged;
         _virtualCamera.StatusChanged -= OnMediaOutputStatusChanged;
         try

@@ -43,6 +43,18 @@ internal static class PreviewAttachmentCoordinator
         }
     }
 
+    internal static void Deactivate(nint window)
+    {
+        if (window == 0) return;
+
+        lock (Gate)
+        {
+            var wasActive = Hosts.Count > 0 && Hosts[^1] == window;
+            Hosts.Remove(window);
+            if (wasActive) NativeCore.DetachPreviewWindow();
+        }
+    }
+
     internal static bool Refresh(nint window)
     {
         if (window == 0) return false;

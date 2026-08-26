@@ -118,6 +118,7 @@ geometry, not Apple-published industrial measurements.
 - H.264/CoreMedia and AirPlay media are decoded locally and presented through D3D11/DirectComposition.
 - Media does not pass through an iPhoneMirror cloud relay, and USB capture does not depend on the network.
 - Clean detached windows are ready for OBS, while screenshots read the decoded frame without application UI.
+- Optional BLE HID mouse/keyboard control through iOS AssistiveTouch, with no phone-side app or jailbreak required.
 
 ### Compared with common mirroring tools
 
@@ -131,9 +132,10 @@ geometry, not Apple-published industrial measurements.
 | Drivers | Separate per-device install, repair, removal and logs | Driver changes hidden inside the main application |
 | Data path | Local PC/LAN processing with no project cloud relay | Some products require accounts or online services |
 
-iPhoneMirror does not currently provide touch/remote control or an integrated
-video editor. Apple's private protocol and compatible AirPlay implementation
-may require updates for future iOS releases.
+iPhoneMirror's optional Bluetooth control uses BLE HID plus iOS AssistiveTouch;
+it is limited to pointer-style input and cannot inject multi-touch events. The
+project has no integrated video editor. Apple's private protocol and compatible
+AirPlay implementation may require updates for future iOS releases.
 
 ## Features
 
@@ -386,7 +388,7 @@ the [upgrade roadmap](docs/ROADMAP.md); roadmap items are not implemented featur
 - The external driver installation matrix needs broader testing.
 - Apple does not publish Screen Capture as a stable third-party API.
 - AirPlay compatibility is unofficial and can change with future iOS releases.
-- The project does not provide iPhone touch or remote control.
+- Bluetooth control depends on BLE peripheral mode and iOS AssistiveTouch, and is limited to pointer-style single-touch operations.
 
 ## Contributing and security
 

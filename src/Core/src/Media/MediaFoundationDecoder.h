@@ -115,6 +115,17 @@ struct DecodedFrame {
     // member name is retained for ABI-local consumers; pixel_format tells
     // whether each component occupies 8 bits (NV12) or 16 bits (P010).
     std::vector<std::uint8_t> nv12;
+    // Hardware decoders may publish a cross-device shared NV12/P010 texture.
+    // CPU consumers can materialize nv12 on demand; the preview renderer can
+    // import this handle directly and avoid a per-frame readback/upload.
+    struct SharedGpuFrame {
+        void* shared_handle{};
+        std::uint32_t width{};
+        std::uint32_t height{};
+        PixelFormat pixel_format{PixelFormat::Nv12};
+        ~SharedGpuFrame();
+    };
+    std::shared_ptr<const SharedGpuFrame> gpu_frame;
 };
 
 namespace detail {
@@ -125,6 +136,9 @@ namespace detail {
 [[nodiscard]] bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
     std::span<std::uint8_t> output, std::uint32_t output_width,
     std::uint32_t output_height) noexcept;
+// Materializes a shared hardware frame for CPU-only API consumers. This is
+// intentionally lazy so the normal D3D preview path remains GPU-only.
+[[nodiscard]] bool materialize_gpu_frame(DecodedFrame& frame) noexcept;
 
 } // namespace detail
 

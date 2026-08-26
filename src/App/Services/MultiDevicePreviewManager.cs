@@ -2,6 +2,7 @@ using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
+using IPhoneMirror.App.Controls;
 
 namespace IPhoneMirror.App.Services;
 
@@ -18,6 +19,11 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     private bool _disposing;
     private bool _disposed;
 
+    internal event Action<string, nint>? ReverseControlRequested;
+    internal event Action<string>? PreviewClosed;
+    internal event Action<string, PreviewPointerEventArgs>? PointerInput;
+    internal event Action<string, PreviewKeyboardEventArgs>? KeyboardInput;
+
     internal MultiDevicePreviewManager(MainViewModel viewModel)
     {
         this.viewModel = viewModel;
@@ -28,6 +34,26 @@ internal sealed class MultiDevicePreviewManager : IDisposable
 
     internal bool IsOpen(DeviceViewModel? device) => device is not null &&
         _windows.ContainsKey(device.Udid);
+    internal bool HasAnyOpen => _windows.Count != 0;
+
+    internal bool Activate(string? udid)
+    {
+        if (string.IsNullOrWhiteSpace(udid) ||
+            !_windows.TryGetValue(udid, out var window)) return false;
+        window.Activate();
+        return true;
+    }
+
+    internal bool TryGetControlGeometry(string? udid, out uint width,
+        out uint height, out int rotation)
+    {
+        width = height = 0;
+        rotation = 0;
+        if (string.IsNullOrWhiteSpace(udid) ||
+            !_windows.TryGetValue(udid, out var window)) return false;
+        (width, height, rotation) = window.ControlGeometry;
+        return width != 0 && height != 0;
+    }
 
     internal Task<(bool Success, string Message)> ShowAsync(DeviceViewModel device)
     {
@@ -110,7 +136,11 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  () => LogAudioResult(viewModel.MuteOtherDeviceSessions(device.Udid)),
                  ownerHwnd => viewModel.ShowImageSettings(device.Udid, ownerHwnd),
                  () => viewModel.ShowProjectionSettings(device.Udid),
-                 out var window, viewModel.AddDiagnosticLog) || window is null)
+                 out var window, viewModel.AddDiagnosticLog,
+                 () => viewModel.BluetoothControlIsInputEnabled,
+                 args => PointerInput?.Invoke(device.Udid, args),
+                 args => KeyboardInput?.Invoke(device.Udid, args),
+                 hwnd => ReverseControlRequested?.Invoke(device.Udid, hwnd)) || window is null)
         {
             if (started.Created)
                 await viewModel.StopDeviceSessionAsync(
@@ -130,6 +160,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             if (!_windows.TryGetValue(device.Udid, out var tracked) ||
                 !ReferenceEquals(tracked, window)) return;
             _windows.Remove(device.Udid);
+            PreviewClosed?.Invoke(device.Udid);
             viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_closed",
                 ("device", AppLog.Device(device.Udid)),
                 ("handle", AppLog.Handle(started.Handle)),
@@ -164,6 +195,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             window.SessionHandle == handle)
             return;
         _windows.Remove(udid);
+        PreviewClosed?.Invoke(udid);
         viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_handle_invalidated",
             ("device", AppLog.Device(udid)),
             ("old_handle", AppLog.Handle(window.SessionHandle)),

@@ -5,6 +5,120 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-26
+
+### Added
+
+- Add Bluetooth reverse control through a single BLE HID keyboard and mouse
+  service, including Boot Protocol compatibility for more iOS devices.
+- Add persistent Bluetooth mouse sensitivity, wheel sensitivity, separate
+  portrait and landscape directions, and horizontal/vertical reversal options.
+- Add complete iPhone and Windows Bluetooth pairing guidance and a clear main
+  preview state for devices opened in independent windows.
+- Add an installer location-selection page while preserving the previous
+  iPhoneMirror installation folder by default.
+
+### Changed
+
+- Detect phone orientation from live source frames and apply one mouse mapping
+  model to the main preview, independent windows, raw input, and manual rotation.
+- Refine the media-cast player controls, including compact overlay speed
+  selection, light-theme seek-button contrast, and a simplified preview toolbar.
+- Keep independent preview windows non-topmost by default; pinning remains an
+  explicit window-menu option.
+
+### Fixed
+
+- Recover a stalled landscape wired stream without releasing the iPhone, using
+  fast frame-rate-loss detection and a bounded QuickTime reconnect attempt.
+- Prevent stale main-preview frames, orientation transitions, and full-screen
+  light-theme edges from leaving an incorrect image or border on screen.
+- Keep Bluetooth input inactive while pairing guidance is visible, restore the
+  correct independent-window focus after it closes, and prevent input being
+  sent to a device that is no longer selected on the main preview.
+- Serialize Bluetooth start/stop transitions, refresh the control button state
+  after session, busy, and source changes, and remove excess height from the
+  connected notice.
+- Preserve existing Bluetooth sensitivity preferences during settings migration
+  instead of overwriting them with a new default.
+
+## [1.8.0-insider30] - 2026-08-26
+
+### Changed
+
+- Use white text for the -10 and +10 media seek controls in light theme.
+- Replace the media speed selector's system light control with a compact,
+  translucent player-overlay selector using white text and a matching popup.
+- Remove the redundant refresh button from the preview's top toolbar; the
+  refresh action remains available in the Mirroring panel.
+
+## [1.8.0-insider29] - 2026-08-26
+
+### Fixed
+
+- Fill all main full-screen preview surfaces with black independently of the
+  selected light or dark application theme.
+- Remove the rounded native-preview region while full screen is active,
+  preventing a light-theme edge from appearing beside the rendered image.
+- Restore themed preview backgrounds and rounded native clipping when leaving
+  full screen.
+
+## [1.8.0-insider28] - 2026-08-26
+
+### Changed
+
+- Set the default Bluetooth mouse sensitivity to 500% and wheel sensitivity to
+  1000%, with portrait-up and landscape-right directions and both reversals off.
+- Restore the Bluetooth connected notice to its original width and recalculate
+  only its height after the pairing checklist disappears.
+
+### Fixed
+
+- Remove the extra blank lower area from the connected Bluetooth notice without
+  narrowing the dialog.
+
+## [1.8.0-insider27] - 2026-08-26
+
+### Changed
+
+- Detect the active device orientation from the latest source frame dimensions
+  instead of assuming a single landscape rotation.
+- Add independent portrait and landscape mouse-direction selectors with
+  horizontal and vertical reversal checkboxes.
+- Apply the same orientation mapping to the main preview, independent windows,
+  raw mouse input, and manually rotated preview windows.
+
+### Fixed
+
+- Keep multi-device and independent-window reverse control aligned with the
+  actual controlled window's dimensions and rotation.
+- Migrate the previous four landscape rotation presets into the new direction
+  and axis-reversal settings without discarding user preferences.
+
+## [1.8.0-insider26] - 2026-08-26
+
+### Added
+
+- Add BLE HID Boot Protocol keyboard and mouse characteristics for broader iOS
+  compatibility, while retaining Report Protocol support.
+- Add persistent Bluetooth reverse-control mouse sensitivity, wheel sensitivity,
+  and landscape orientation settings.
+- Show a clear main-preview state when a device is open in an independent window.
+
+### Changed
+
+- Improve Bluetooth reverse-control pairing guidance with the complete iPhone and
+  Windows pairing sequence.
+- Keep media-cast volume and full-screen icons bound to the theme-aware button
+  foreground in dark mode.
+- Align native core and application metadata with `1.8.0-insider26`.
+
+### Fixed
+
+- Use the same Boot Mouse report conversion for reads and notifications,
+  including signed 8-bit movement clamping.
+- Remove documentation references to a deleted preview image.
+
 ## [1.7.1] - 2026-08-24
 
 ### Added

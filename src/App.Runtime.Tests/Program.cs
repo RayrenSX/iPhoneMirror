@@ -47,6 +47,14 @@ internal static class Program
         }
     }
 
+    private static void DrainDispatcher()
+    {
+        var frame = new DispatcherFrame();
+        _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,
+            new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
+    }
+
     private static int RunUiPreview(string themeName, string surface)
     {
         if (!Enum.TryParse<AppTheme>(themeName, ignoreCase: true, out var theme) ||
@@ -815,15 +823,158 @@ internal static class Program
             AssertThemeBrush(window, "SuccessBrush", Color.FromRgb(0x10, 0x7C, 0x41));
             AssertThemeBrush(window, "WarningBrush", Color.FromRgb(0x9A, 0x4B, 0x00));
             AssertCaptionIconForeground(window, Color.FromRgb(0x1D, 0x1D, 0x1F));
+            TestMainFullscreenPreviewSurfaces(window);
+            TestMediaCastOverlayControls(window);
             ApplyTheme(assembly, AppTheme.Dark);
             AssertThemeBrush(window, "AccentBrush", Color.FromRgb(0x69, 0xB1, 0xF8));
             AssertThemeBrush(window, "SuccessBrush", Color.FromRgb(0x6C, 0xCB, 0x8F));
             AssertCaptionIconForeground(window, Color.FromRgb(0xF5, 0xF5, 0xF7));
+            TestBluetoothControlNoticeWindow(window, assembly);
         }
         finally
         {
             window.Close();
         }
+    }
+
+    private static void TestMainFullscreenPreviewSurfaces(MainWindow window)
+    {
+        var setFullScreenBackground = RequireMethod(typeof(MainWindow),
+            "SetFullScreenPreviewBackground", BindingFlags.Instance | BindingFlags.NonPublic);
+        var panels = new[]
+        {
+            "AppShell", "RootLayout", "MainContentGrid", "CenterPanel",
+            "MediaCastSurface", "MediaCastPlayerHost", "MediaCastVideoHost",
+        }.Select(name => window.FindName(name) as System.Windows.Controls.Panel ??
+            throw new InvalidOperationException($"Full-screen panel was not found: {name}."))
+            .ToArray();
+        var previewPanel = window.FindName("PreviewPanel") as WpfBorder ??
+            throw new InvalidOperationException("Full-screen preview panel was not found.");
+        var navigation = window.FindName("RootNavigation") as System.Windows.Controls.Control ??
+            throw new InvalidOperationException("Full-screen navigation surface was not found.");
+        var host = window.FindName("MainPreviewHost") ??
+            throw new InvalidOperationException("Full-screen native preview host was not found.");
+        var hostProperty = host.GetType().GetProperty("IsFullScreenPresentation",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new MissingMemberException(host.GetType().FullName,
+                "IsFullScreenPresentation");
+
+        setFullScreenBackground.Invoke(window, [true]);
+        hostProperty.SetValue(host, true);
+        window.UpdateLayout();
+        if (window.Background is not SolidColorBrush windowBrush ||
+            windowBrush.Color != Colors.Black ||
+            previewPanel.Background is not SolidColorBrush previewBrush ||
+            previewBrush.Color != Colors.Black ||
+            navigation.Background is not SolidColorBrush navigationBrush ||
+            navigationBrush.Color != Colors.Black ||
+            panels.Any(panel => panel.Background is not SolidColorBrush brush ||
+                                brush.Color != Colors.Black) ||
+            hostProperty.GetValue(host) is not true)
+            throw new InvalidOperationException(
+                "Main full-screen preview did not apply black fill to every preview surface.");
+
+        setFullScreenBackground.Invoke(window, [false]);
+        hostProperty.SetValue(host, false);
+        window.UpdateLayout();
+        if (previewPanel.Background is not SolidColorBrush restoredPreview ||
+            restoredPreview.Color != Color.FromRgb(0xF1, 0xF1, 0xF3) ||
+            hostProperty.GetValue(host) is not false)
+            throw new InvalidOperationException(
+                "Main preview did not restore the light theme after leaving full screen.");
+    }
+
+    private static void TestMediaCastOverlayControls(MainWindow window)
+    {
+        foreach (var buttonName in new[]
+                 { "MediaCastSeekBackwardButton", "MediaCastSeekForwardButton" })
+        {
+            var button = window.FindName(buttonName) as WpfButton ??
+                throw new InvalidOperationException(
+                    $"Media control button was not found: {buttonName}.");
+            if (button.Foreground is not SolidColorBrush brush || brush.Color != Colors.White)
+                throw new InvalidOperationException(
+                    $"Media control button is not white: {buttonName}.");
+        }
+
+        var speed = window.FindName("MediaCastSpeedComboBox") as
+            System.Windows.Controls.ComboBox ??
+            throw new InvalidOperationException("Media speed selector was not found.");
+        if (speed.Foreground is not SolidColorBrush speedBrush ||
+            speedBrush.Color != Colors.White)
+            throw new InvalidOperationException(
+                "Media speed selector foreground is not white in light theme.");
+    }
+
+    private static void TestBluetoothControlNoticeWindow(Window owner,
+        Assembly assembly)
+    {
+        var noticeType = assembly.GetType(
+            "IPhoneMirror.App.Windows.BluetoothControlNoticeWindow",
+            throwOnError: true)!;
+        var showWaiting = RequireMethod(noticeType, "ShowWaiting",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        var showConnected = RequireMethod(noticeType, "ShowConnected",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        var close = RequireMethod(noticeType, "TryCloseActive",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        showWaiting.Invoke(null, [owner, "TEST-PC"]);
+        var notice = Application.Current.Windows.Cast<Window>().LastOrDefault(
+            candidate => candidate.GetType() == noticeType) ??
+            throw new InvalidOperationException(
+                "Bluetooth control waiting notice was not shown.");
+        notice.UpdateLayout();
+        if (!notice.IsVisible || !notice.Topmost || notice.Owner != owner)
+            throw new InvalidOperationException(
+                "Bluetooth control waiting notice must be visible, topmost, and owned.");
+        var waitingDetail = noticeType.GetProperty("DetailText")?.GetValue(notice) as string;
+        if (string.IsNullOrWhiteSpace(waitingDetail) ||
+            !waitingDetail.Contains("TEST-PC", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Bluetooth control waiting notice did not show the suggested device name.");
+        var waitingSteps = noticeType.GetProperty("WaitingStepsVisibility")?.GetValue(notice);
+        if (!Equals(waitingSteps, Visibility.Visible) ||
+            string.IsNullOrWhiteSpace(noticeType.GetProperty("PairStepOneText")?.GetValue(notice) as string) ||
+            string.IsNullOrWhiteSpace(noticeType.GetProperty("PairStepFiveText")?.GetValue(notice) as string) ||
+            !(noticeType.GetProperty("PairStepTwoText")?.GetValue(notice) as string ?? string.Empty)
+                .Contains("TEST-PC", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Bluetooth control waiting notice did not expose the complete pairing steps.");
+        var waitingHeight = notice.ActualHeight;
+
+        showConnected.Invoke(null, [owner]);
+        if (!notice.IsVisible ||
+            !string.Equals(noticeType.GetProperty("TitleText")?.GetValue(notice)
+                as string, owner.FindResource("BluetoothControlPromptTitle") as string,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Bluetooth control notice did not switch to its connected state.");
+        if (!Equals(noticeType.GetProperty("WaitingStepsVisibility")?.GetValue(notice),
+                Visibility.Collapsed))
+            throw new InvalidOperationException(
+                "Bluetooth control pairing steps remained visible after connection.");
+        DrainDispatcher();
+        notice.UpdateLayout();
+        if (Math.Abs(notice.Width - 500) > 0.5 ||
+            notice.ActualHeight >= waitingHeight)
+            throw new InvalidOperationException(
+                $"Bluetooth control confirmation did not retain its original width " +
+                $"and shrink its height (width={notice.Width}, actual={notice.ActualWidth}x{notice.ActualHeight}, " +
+                $"waitingHeight={waitingHeight}, max={notice.MaxWidth}).");
+        if (notice.Content is not FrameworkElement content)
+            throw new InvalidOperationException(
+                "Bluetooth control notice does not expose a measurable content surface.");
+        content.Measure(new Size(notice.Width, double.PositiveInfinity));
+        if (notice.ActualHeight - content.DesiredSize.Height > 12)
+            throw new InvalidOperationException(
+                "Bluetooth control confirmation retained excess space below its content.");
+        if (notice.IsVisible && close.Invoke(null, null) is not true)
+            throw new InvalidOperationException(
+                "Bluetooth control notice did not close through its shared close path.");
+        if (notice.IsVisible)
+            throw new InvalidOperationException(
+                "Bluetooth control notice remained visible after its close path.");
     }
 
     private static void AssertCaptionIconForeground(Window window, Color expectedColor)

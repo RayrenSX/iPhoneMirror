@@ -215,7 +215,7 @@ struct CaptureOptions {
     std::uint32_t api_version;
     std::uint32_t requested_width;
     std::uint32_t requested_height;
-    std::uint32_t target_fps;
+    std::uint32_t target_fps; // Local renderer cap; does not negotiate source FPS.
     std::int32_t play_audio;
     float audio_volume; // Linear gain in the inclusive range [0.0, 1.0].
     std::uint32_t reserved[5];

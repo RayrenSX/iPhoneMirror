@@ -245,6 +245,11 @@ std::size_t nv12_allocated_height(const iPhoneMirror::media::DecodedFrame& frame
 }
 
 bool nv12_to_bgra(const iPhoneMirror::media::DecodedFrame& frame, std::uint8_t* output) {
+    if (frame.nv12.empty() && frame.gpu_frame) {
+        auto materialized = frame;
+        if (!iPhoneMirror::media::detail::materialize_gpu_frame(materialized)) return false;
+        return nv12_to_bgra(materialized, output);
+    }
     if (!output || frame.width == 0 || frame.height == 0) return false;
     const auto source_stride = static_cast<std::size_t>(std::abs(frame.stride));
     const auto component_bytes = video_component_bytes(frame);
@@ -315,6 +320,11 @@ bool nv12_to_bgra(const iPhoneMirror::media::DecodedFrame& frame, std::uint8_t* 
 
 bool nv12_to_bgra_scaled(const iPhoneMirror::media::DecodedFrame& frame,
     std::uint8_t* output, std::uint32_t output_width, std::uint32_t output_height) {
+    if (frame.nv12.empty() && frame.gpu_frame) {
+        auto materialized = frame;
+        if (!iPhoneMirror::media::detail::materialize_gpu_frame(materialized)) return false;
+        return nv12_to_bgra_scaled(materialized, output, output_width, output_height);
+    }
     if (!output || frame.width == 0 || frame.height == 0 || output_width == 0 || output_height == 0) return false;
     const auto source_stride = static_cast<std::size_t>(std::abs(frame.stride));
     const auto component_bytes = video_component_bytes(frame);
@@ -463,7 +473,7 @@ std::int32_t start_capture_locked(const wchar_t* udid,
     try {
         const auto serial = narrow(udid);
         iPhoneMirror::logging::write(std::format(
-            "im_start_capture udid_fp={} render_limit={}x{} target_fps={} play_audio={} volume={:.3f}",
+            "im_start_capture udid_fp={} render_limit={}x{} render_fps_limit={} play_audio={} volume={:.3f}",
             iPhoneMirror::logging::fingerprint(serial),
             preferences.render_max_width, preferences.render_max_height,
             preferences.target_fps, preferences.play_audio, preferences.audio_volume));
@@ -1309,7 +1319,7 @@ std::int32_t IM_CALL im_set_video_preferences(std::uint32_t max_width,
         preview_renderer->set_max_fps(max_fps);
     }
     iPhoneMirror::logging::write(std::format(
-        "video preferences local_render_limit={}x{} target_fps={} usb_renegotiated=false",
+        "video preferences local_render_limit={}x{} render_fps_limit={} usb_renegotiated=false",
         capture_preferences.render_max_width, capture_preferences.render_max_height,
         max_fps));
     last_error.clear();
@@ -2058,10 +2068,9 @@ std::int32_t IM_CALL im_session_set_window_rotation(iPhoneMirror::SessionHandle 
     if (found == context->renderers.end())
         return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown preview window");
     const auto normalized = ((quarter_turns % 4) + 4) % 4;
-    if ((normalized & 1) != 0)
-        context->capture->request_display_orientation(true);
-    else if (normalized == 0)
-        context->capture->request_display_orientation(false);
+    // A rotation is a local preview preference. Reconfiguring the QuickTime
+    // display stream here sends HPD0/HPD1 over USB and can make iOS terminate
+    // an otherwise healthy mirroring session during a game orientation change.
     found->second->set_rotation(normalized == 2 ? 2 : 0);
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }

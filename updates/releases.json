@@ -1,421 +1,625 @@
 [
   {
-    "tag_name": "v1.7.1",
-    "name": "iPhoneMirror v1.7.1",
-    "body": "### Added\n\n- Add sustained black-video detection for wired capture after a normal-frame warm-up.\n- Add compact protected-video guidance for possible DRM / FairPlay restrictions,\n  including separate audio availability and automatic dismissal when normal video returns.\n- Add compact capture-status notices for ordinary mirroring errors, USB configuration failures,\n  and mirroring stopped from Control Center.\n- Expand Developer Tools with previews for capture errors, stopped sessions, USB configuration\n  errors, protected-video notices, and capture recovery.\n\n### Changed\n\n- Require an eight-second, multi-frame near-black and neutral-chroma signal before showing the\n  protected-video notice, reducing false positives from startup, short black scenes, and dark UI.\n- Use Windows/DWM outer corners for the capture recovery and status notices while retaining\n  compact internal status panels.\n- Keep error and stopped-session cleanup ordering explicit: failed sessions are released before\n  ordinary error notices, while stopped-session cleanup begins after the notice is shown.\n\n### Fixed\n\n- Replace unexplained black video surfaces with a clear, non-bypass warning that does not claim\n  DRM was definitively detected.\n- Prevent the protected-video notice from remaining open after normal frames return or after a\n  device switch.\n- Remove duplicate custom borders that produced bright rings around native window corners.",
-    "published_at": "2026-08-24T08:12:21Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.8.0",
+    "name":  "iPhoneMirror v1.8.0",
+    "body":  "### Added\n\n- Add Bluetooth reverse control through a single BLE HID keyboard and mouse\n  service, including Boot Protocol compatibility for more iOS devices.\n- Add persistent Bluetooth mouse sensitivity, wheel sensitivity, separate\n  portrait and landscape directions, and horizontal/vertical reversal options.\n- Add complete iPhone and Windows Bluetooth pairing guidance and a clear main\n  preview state for devices opened in independent windows.\n- Add an installer location-selection page while preserving the previous\n  iPhoneMirror installation folder by default.\n\n### Changed\n\n- Detect phone orientation from live source frames and apply one mouse mapping\n  model to the main preview, independent windows, raw input, and manual rotation.\n- Refine the media-cast player controls, including compact overlay speed\n  selection, light-theme seek-button contrast, and a simplified preview toolbar.\n- Keep independent preview windows non-topmost by default; pinning remains an\n  explicit window-menu option.\n\n### Fixed\n\n- Recover a stalled landscape wired stream without releasing the iPhone, using\n  fast frame-rate-loss detection and a bounded QuickTime reconnect attempt.\n- Prevent stale main-preview frames, orientation transitions, and full-screen\n  light-theme edges from leaving an incorrect image or border on screen.\n- Keep Bluetooth input inactive while pairing guidance is visible, restore the\n  correct independent-window focus after it closes, and prevent input being\n  sent to a device that is no longer selected on the main preview.\n- Serialize Bluetooth start/stop transitions, refresh the control button state\n  after session, busy, and source changes, and remove excess height from the\n  connected notice.\n- Preserve existing Bluetooth sensitivity preferences during settings migration\n  instead of overwriting them with a new default.",
+    "published_at":  "2026-08-26T11:33:17Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.7.1-x64.exe",
-        "size": 91879989,
-        "digest": "sha256:26a4d0d811e1b4def2ef762347f8b3bc5ef132ad3358987956109cbc2adfb4dc",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-Setup-v1.7.1-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.8.0-x64.exe",
+        "size":  91963660,
+        "digest":  "sha256:cc53a2472e2b1830957e48a075bd6f74898049da44d0d29426bbde73d91668ba",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0/iPhoneMirror-Setup-v1.8.0-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.7.1-win-x64.zip",
-        "size": 193948116,
-        "digest": "sha256:cc132f0297b1f6248eb106d84310bd7f8eb03b9df0479c753438c65a1467ee87",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-v1.7.1-win-x64.zip"
+        "name":  "iPhoneMirror-v1.8.0-win-x64.zip",
+        "size":  191750820,
+        "digest":  "sha256:d862401b3a86a8f638d6bdf357d3ab09dfbfd8bd2289ae44684847d966287400",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0/iPhoneMirror-v1.8.0-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.7.1-win-x64-sbom.spdx.json",
-        "size": 40426,
-        "digest": "sha256:5ecd84cbfbae0a08aacf518bce5a0f6e9d1f6c139861dc625c8297bf7e0607d9",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-v1.7.1-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.8.0-win-x64-sbom.spdx.json",
+        "size":  69929,
+        "digest":  "sha256:d56a56e6e4b9e859fa2dd404d6d5c40c29a39a242084ed66c0770696f91c5b93",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0/iPhoneMirror-v1.8.0-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:acdde020d3f8fe29718f561c6ea1cbe703edfcbbd721bcbdfb88caa4774a5f00",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:e2067c51ea40400bbf6fc5898a0daf005fa239bda4b2debfcb0ef290049a94b3",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.7.0",
-    "name": "iPhoneMirror v1.7.0",
-    "body": "### Changed\n\n- Replace legacy UI glyphs with packaged Fluent icons and keep button icons\n  readable across light and dark themes.\n- Bind AirPlay media sockets to the accepted control connection's interface,\n  preserving IPv4 and IPv6 routing for mirroring and media playback.\n- Remove one-pixel aspect-ratio rounding bars from independent native preview\n  windows without changing genuine letterboxing behavior.\n- Add WPF-UI license notices to portable and installer payload validation.",
-    "published_at": "2026-08-21T23:05:49Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.8.0-insider30",
+    "name":  "iPhoneMirror v1.8.0-insider30",
+    "body":  "### Changed\n\n- Use white text for the -10 and +10 media seek controls in light theme.\n- Replace the media speed selector\u0027s system light control with a compact,\n  translucent player-overlay selector using white text and a matching popup.\n- Remove the redundant refresh button from the preview\u0027s top toolbar; the\n  refresh action remains available in the Mirroring panel.",
+    "published_at":  "2026-08-26T09:48:18Z",
+    "draft":  false,
+    "prerelease":  true,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.7.0-x64.exe",
-        "size": 91958222,
-        "digest": "sha256:97ec353e9161431ac46cf087e7f6db7d0baa505f08b93c945968790840a5fec1",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-Setup-v1.7.0-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.8.0-insider30-x64.exe",
+        "size":  91943882,
+        "digest":  "sha256:922661a9a53ee4678d4ea0995b0b122423e17d842821f708a508c01198de8e44",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider30/iPhoneMirror-Setup-v1.8.0-insider30-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.7.0-win-x64.zip",
-        "size": 194055018,
-        "digest": "sha256:2fbb8c2bd830ca9c66732d61bca8d2b9172adb0354272682de92f701613b8af3",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-v1.7.0-win-x64.zip"
+        "name":  "iPhoneMirror-v1.8.0-insider30-win-x64.zip",
+        "size":  194005116,
+        "digest":  "sha256:e3249378ff38940c2b4f52a7c2c91bab78b0a71543e570dc8b36eaf5941cc727",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider30/iPhoneMirror-v1.8.0-insider30-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.7.0-win-x64-sbom.spdx.json",
-        "size": 40432,
-        "digest": "sha256:66b2b38614acea1c319fc093f22b3f49f33791b884d0f53f4b679de5dc505db9",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-v1.7.0-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.8.0-insider30-win-x64-sbom.spdx.json",
+        "size":  40466,
+        "digest":  "sha256:e7041b474c6499c6c7ba6ea7a14f6a60825dcdb9839be509d0435bee2961fd30",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider30/iPhoneMirror-v1.8.0-insider30-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:b0b037110271c5d24eca751e657e055ca4c6d05cf69f428e30aa5f1bbace2f00",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  337,
+        "digest":  "sha256:9ee49c023fee5c4ffbe06a2efeaba2d7a34e3c0df6ac95c41b92b6c4e62f6840",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider30/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.9",
-    "name": "iPhoneMirror v1.6.9",
-    "body": "### Added\n\n- Add a five-click version-button entry point for the independent Developer\n  Tools window. It can preview every workspace page and existing child window\n  without performing real network, device, update, or destructive operations.\n- Add a read-only runtime inspector for the current version, culture, theme,\n  DPI scale, open-window count, diagnostics, theme/language selection, opacity,\n  topmost state, and compact/default/maximized window presets.\n- Add conventional controls to AirPlay and DLNA video playback, including\n  pause/resume, seek, 10-second skip, volume, mute, time display, and keyboard\n  shortcuts, while disabling seek for live streams.\n- Unify cast-video playback controls into a responsive themed overlay with a\n  centered primary action, consistent Fluent icons, full-screen access, and\n  lightweight hover, press, state-change, and idle-fade feedback.\n- Add safe preview entry points for confirmation prompts, recovery guidance,\n  image settings, projection settings, media output, USB mode details, startup\n  errors, updates, instance conflicts, and the native independent preview.\n- Add native NV12 frame export from decoded sessions for recording and live\n  output, including aspect-preserving letterboxing and P010-to-NV12 conversion.\n- Let media-app casting use recording, live publishing, virtual camera, and an\n  independent preview window from the same toolbar as device mirroring.\n- Decode the media source audio track directly for recording and live output,\n  without capturing unrelated Windows system, notification, or microphone audio.\n\n### Changed\n\n- Standardize top-level window chrome, drag surfaces, close-button behavior,\n  theme resources, and light/dark contrast across the main window and child\n  windows.\n- Let Windows/DWM own the outer rounded corners of the Developer Tools and\n  instance-conflict windows; remove their duplicate hand-drawn outer corner\n  radius and border while retaining rounded internal cards and warning panels.\n- Keep the Developer Tools window independent, draggable, non-topmost, and\n  coverable by the main window, matching the requested multi-window workflow.\n- Keep WPF on its hardware-first composition path and flush the local HLS bridge\n  immediately, improving high-resolution media-cast frame pacing and smoothness.\n- Remove the root-page opacity transition that could leave a newly selected\n  page transparent, and keep page content visible through navigation changes.\n- Apply final work-area size and centered position to an independent preview\n  while its HWND is hidden, then show it in one operation to prevent the first\n  frame from flashing at the default origin or jumping during aspect fitting.\n- Add stable aspect-ratio sizing for portrait, landscape, rotated, mixed-DPI,\n  and high-DPI native previews, with work-area and minimum-size constraints.\n- Keep native preview windows independently manageable per device, with\n  fullscreen, rotation, audio, fixed-size, corner, display, and context-menu\n  controls isolated from the main preview.\n- Improve AirPlay/DLNA playback state handling around buffering, live streams,\n  pending seeks, volume/mute commands, and Play/Stop command boundaries.\n- Prefer an available hardware H.264 encoder (NVENC, AMF, QSV, or Media\n  Foundation) after probing the requested output size, while retaining libx264\n  fallback behavior.\n\n### Fixed\n\n- Keep a localized loading card visible until cast video playback advances or\n  buffering ends, and remove the redundant close button from the preview.\n- Make direct clicks on the cast-video progress track seek deterministically\n  and keep the selected position stable while the media backend catches up.\n- Match Platinum/i4AirPlayer AVTransport behavior for video-app casting by\n  advertising and accepting `Next`/`Previous`, preserving current and queued\n  media metadata, and promoting a queued next URI without returning an action\n  error that prevents iQIYI from automatically playing the next episode.\n- Prevent Windows MediaElement's short HLS segment duration from being exposed\n  as the programme duration, preserving playback state and progress across\n  segment changes instead of restarting or advancing after a few seconds.\n- Route HLS cast URLs through the bundled FFmpeg demuxer and a continuous local\n  MPEG-TS stream so playlist refresh, encryption keys, discontinuities,\n  reconnects, seeks, and genuine end-of-stream are coordinated in one pipeline.\n- Keep mouse and mobile seeks stable while a replacement HLS stream opens, and\n  prevent the progress thumb from jumping through transient segment timestamps.\n- Prevent the elevated update PowerShell host from creating a console window\n  by launching it through Windows ShellExecuteEx no-console mode.\n- Reject elevated portable updates when the current user can replace any\n  installation path component, including through topology-only ACL rights.\n- Restrict the virtual-camera frame channel to the current user and Windows\n  Frame Server identities instead of every packaged application.\n- Copy hash-verified virtual-camera installer payloads into an administrator-only\n  directory before launching the elevated helper, preventing DLL side-loading\n  from a user-writable staging path.\n- Run recording and live-output frame, pipe, and audio pumps outside the WPF\n  dispatcher so encoding backpressure cannot freeze the application UI.\n- Feed recording and live-output FFmpeg directly with native letterboxed NV12\n  frames, eliminating redundant BGRA conversion and high-resolution frame copies.\n- Prefer a working hardware H.264 encoder (NVENC, AMF, QSV, or Media Foundation),\n  probe the requested output size, and retain libx264 as an automatic fallback.\n- Bound repeated-frame catch-up after prolonged FFmpeg stalls while preserving\n  normal short-delay compensation and resynchronizing future output to current\n  wall-clock time.\n- Keep media-volume coalescing within the current Play/Stop command boundary\n  so an earlier cast cannot change a later cast's mute state.\n- Prevent header drag handling from intercepting close buttons and other\n  interactive controls, restoring reliable close behavior for every child\n  window.\n- Make Developer Tools confirmation and cancellation previews close safely\n  without triggering a process crash, and keep read-only preview actions\n  isolated from real application operations.\n- Restore the close button on all existing child windows, including settings,\n  update, recovery, prompt, and instance-conflict surfaces.\n- Prevent duplicate outer borders and corner artifacts from reappearing after\n  opening a child window, dragging a window, changing DPI, or switching pages.\n- Keep the main window and every native preview hidden immediately during\n  shutdown before bounded background cleanup begins.\n- Match Apple USB parent devices by exact VID/PID/topology identity, record the\n  active USB configuration, and avoid treating interface nodes or stale device\n  matches as the selected phone.\n- Restore QuickTime/Apple USB configuration only when the active configuration\n  is known to require it, reducing unnecessary reconfiguration during capture\n  start, failure, cancellation, and teardown.\n- Add deterministic native Media Foundation decoder and NV12/P010 frame-copy\n  validation for malformed dimensions, strides, buffers, and odd output sizes.\n- Keep virtual-camera frame exchange scoped to the current user and Windows\n  Frame Server identities, rejecting unauthorized mapping attempts.\n- Bound FFmpeg catch-up after prolonged stalls and resynchronize future output\n  to wall-clock time instead of emitting an unbounded burst of repeated frames.\n- Move recording/live-output frame, pipe, and audio pumps off the WPF dispatcher\n  so encoder backpressure cannot freeze the application UI.\n\n### Security\n\n- Revalidate portable update path ownership at the elevation boundary,\n  including topology-only ACL rights that could permit replacement of a parent\n  directory or file.\n- Copy hash-verified virtual-camera installer payloads into an\n  administrator-only staging directory before launching the elevated helper,\n  preventing DLL side-loading from user-writable paths.\n- Lock the current driver-manager executable across its elevation boundary and\n  reject unsafe replacement paths before privileged operations begin.\n- Launch elevated update helpers through a no-console ShellExecuteEx path and\n  preserve the required UAC boundary without exposing an extra console window.\n\n### Tests\n\n- Add runtime coverage for the five-click Developer Tools entry point, all\n  read-only preview surfaces, drag behavior, independent/non-topmost state,\n  outer-corner ownership, and safe confirmation actions.\n- Add logic and native coverage for media command ordering, volume/mute state,\n  NV12/P010 frame export, DLNA control handling, USB identity/configuration,\n  update boundaries, and driver elevation-path locking.",
-    "published_at": "2026-08-20T06:03:06Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.8.0-insider29",
+    "name":  "iPhoneMirror v1.8.0-insider29",
+    "body":  "### Fixed\n\n- Fill all main full-screen preview surfaces with black independently of the\n  selected light or dark application theme.\n- Remove the rounded native-preview region while full screen is active,\n  preventing a light-theme edge from appearing beside the rendered image.\n- Restore themed preview backgrounds and rounded native clipping when leaving\n  full screen.",
+    "published_at":  "2026-08-26T09:24:51Z",
+    "draft":  false,
+    "prerelease":  true,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.9-x64.exe",
-        "size": 91959614,
-        "digest": "sha256:47b5758591c161232c430245f70ed6bcb7d61e9a4e5f72a47b440e54ebe82257",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.9/iPhoneMirror-Setup-v1.6.9-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.8.0-insider29-x64.exe",
+        "size":  91944220,
+        "digest":  "sha256:e9231b65cbc4b6646d2e7c27897b38314003564060a3ce6fe2f19547dcb74a50",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider29/iPhoneMirror-Setup-v1.8.0-insider29-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.9-win-x64.zip",
-        "size": 191577800,
-        "digest": "sha256:e2c22efaf804444c0b69853925814cff25f34e0a16ba1e897414d0cc2d4c662a",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.9/iPhoneMirror-v1.6.9-win-x64.zip"
+        "name":  "iPhoneMirror-v1.8.0-insider29-win-x64.zip",
+        "size":  194003193,
+        "digest":  "sha256:7656e13a095f7e7ca55f7d3190ddf4acff8a174238ee97d145770d35c8e56e31",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider29/iPhoneMirror-v1.8.0-insider29-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.9-win-x64-sbom.spdx.json",
-        "size": 38969,
-        "digest": "sha256:dd3913cae707bf161ef54c0e43b49b5080c6ec5bd0d9220b5aa550f705926d9a",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.9/iPhoneMirror-v1.6.9-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.8.0-insider29-win-x64-sbom.spdx.json",
+        "size":  40466,
+        "digest":  "sha256:97802cc7a706ca549729dfd380923910405d8d5e06c36ece8f58830ff0f92ed0",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider29/iPhoneMirror-v1.8.0-insider29-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:7531ef340b2c550aba08ca13407f64117d85516b0ed8d313baa7e6e8d370c4ed",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.9/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  337,
+        "digest":  "sha256:abe9d276f70f70c3fbd2ac4f9ee532e593086ca9d3efd2aecb185e8da78c24b2",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider29/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.8",
-    "name": "iPhoneMirror v1.6.8",
-    "body": "### Added\n\n- Add AirPlay audio-only reception for music playback, including automatic\n  source creation when a RAOP sender omits the generic connection callback.\n- Show a dedicated music state for audio-only sessions and disable video-only\n  preview tools until the sender starts delivering video.\n\n### Changed\n\n- Use a bounded network-jitter playback mode for AirPlay music, with deeper\n  startup and high-water buffers sized for RAOP retransmission bursts.\n\n### Fixed\n\n- Decode audio-only AirPlay ALAC frames and recover smoothly from missing or\n  delayed Wi-Fi packets instead of producing silence or repeated underruns.\n- Keep recording duration and playback speed aligned with elapsed wall-clock\n  time, including when FFmpeg encoding briefly falls behind and catches up.\n- Hide the main window, child windows, and native preview windows immediately\n  after a close request, then finish bounded media and USB cleanup in the\n  background before the process exits.",
-    "published_at": "2026-08-17T02:22:32Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.8.0-insider28",
+    "name":  "iPhoneMirror v1.8.0-insider28",
+    "body":  "### Changed\n\n- Set the default Bluetooth mouse sensitivity to 500% and wheel sensitivity to\n  1000%, with portrait-up and landscape-right directions and both reversals off.\n- Restore the Bluetooth connected notice to its original width and recalculate\n  only its height after the pairing checklist disappears.\n\n### Fixed\n\n- Remove the extra blank lower area from the connected Bluetooth notice without\n  narrowing the dialog.",
+    "published_at":  "2026-08-26T08:55:51Z",
+    "draft":  false,
+    "prerelease":  true,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.8-x64.exe",
-        "size": 91847003,
-        "digest": "sha256:e12720341bb47400c108e52c3cd7351ac1540fc1232b4398dac59f16ed15435e",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-Setup-v1.6.8-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.8.0-insider28-x64.exe",
+        "size":  91931889,
+        "digest":  "sha256:ec9db9eafadcd8cc6d55a99c9c7484b2934747dc7d8d54c64228f32acbf79b3f",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider28/iPhoneMirror-Setup-v1.8.0-insider28-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.8-win-x64.zip",
-        "size": 191250605,
-        "digest": "sha256:4cf0ab64d313330b6b816ca8791c94667dff901844d2c709148e2995d1f87e81",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-v1.6.8-win-x64.zip"
+        "name":  "iPhoneMirror-v1.8.0-insider28-win-x64.zip",
+        "size":  194002844,
+        "digest":  "sha256:d21d6bb40853e1a63e37aa7640ea6d3a2f2018dabe62484d6364cfa0f1742d8c",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider28/iPhoneMirror-v1.8.0-insider28-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.8-win-x64-sbom.spdx.json",
-        "size": 38969,
-        "digest": "sha256:a44008f96968cb5816b7c0d49619aab309f6e0f858764b0bde0fe5a59f24aaf5",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-v1.6.8-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.8.0-insider28-win-x64-sbom.spdx.json",
+        "size":  40466,
+        "digest":  "sha256:2ec56bbbb94aeb2950b4370a449570b9fc8570fa41394729d8aa8c8fbfe0ba26",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider28/iPhoneMirror-v1.8.0-insider28-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:963a5b33579f1ee6e3e3ae56d5694149fa62a29c3e41fd7e215629fd1b27bdf0",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  337,
+        "digest":  "sha256:1e62fd9153bce3cfa23d581576febb8a8280057de7941ca5d4b15c8889b82fc1",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider28/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.7",
-    "name": "iPhoneMirror v1.6.7",
-    "body": "### Fixed\n\n- Keep the elevated PowerShell host hidden while verified installer and\n  portable ZIP updates are applied, without suppressing the required UAC prompt.",
-    "published_at": "2026-08-15T02:50:17Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.8.0-insider27",
+    "name":  "iPhoneMirror v1.8.0-insider27",
+    "body":  "### Changed\n\n- Detect the active device orientation from the latest source frame dimensions\n  instead of assuming a single landscape rotation.\n- Add independent portrait and landscape mouse-direction selectors with\n  horizontal and vertical reversal checkboxes.\n- Apply the same orientation mapping to the main preview, independent windows,\n  raw mouse input, and manually rotated preview windows.\n\n### Fixed\n\n- Keep multi-device and independent-window reverse control aligned with the\n  actual controlled window\u0027s dimensions and rotation.\n- Migrate the previous four landscape rotation presets into the new direction\n  and axis-reversal settings without discarding user preferences.",
+    "published_at":  "2026-08-26T08:26:44Z",
+    "draft":  false,
+    "prerelease":  true,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.7-x64.exe",
-        "size": 91873324,
-        "digest": "sha256:d1acc9a5248b6cf4484e20102687936bb97c83077acb23e73c5a899bcba99bb1",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-Setup-v1.6.7-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.8.0-insider27-x64.exe",
+        "size":  91954385,
+        "digest":  "sha256:38d716abc4080ef8fb966079e02791df30201677b33af9957f1a6f4bfc0ade2b",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider27/iPhoneMirror-Setup-v1.8.0-insider27-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.7-win-x64.zip",
-        "size": 191245100,
-        "digest": "sha256:3b5a5677caca6d79b2b093e26245c806389a1cf1b131f945ba1c33e9bd517711",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-v1.6.7-win-x64.zip"
+        "name":  "iPhoneMirror-v1.8.0-insider27-win-x64.zip",
+        "size":  194002478,
+        "digest":  "sha256:7dd9b702293470f617b5ea467f3d10142ef4e5ea6ea6c1ca25143fa5e5f51d06",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider27/iPhoneMirror-v1.8.0-insider27-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.7-win-x64-sbom.spdx.json",
-        "size": 38969,
-        "digest": "sha256:57988241efc15aeda87eddc4fe51a8e48b5004f4e460b61c91ad34ae9e4f51f4",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-v1.6.7-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.8.0-insider27-win-x64-sbom.spdx.json",
+        "size":  40466,
+        "digest":  "sha256:b286e92bde4e38a8ddb3e632a36330a2d89fb6f0c1c5ae67d01261a85f3c5410",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider27/iPhoneMirror-v1.8.0-insider27-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:9f848c55183d5b3a4d5614c3418207b1ed3dafe979f0419916b19655cd37f2eb",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  337,
+        "digest":  "sha256:bc4e680564e884f9ecd203236bac87977e0cdfa7b669c4098b444d096c776c1f",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider27/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.6",
-    "name": "iPhoneMirror v1.6.6",
-    "body": "### Changed\n\n- Speed up update downloads on constrained GitHub routes by testing GitHub and\n  all 115 mirrors listed by MoreTools, measuring a 256 KB sample only from\n  reachable routes, and failing over through the resulting throughput ranking.",
-    "published_at": "2026-08-15T02:23:32Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.8.0-insider26",
+    "name":  "iPhoneMirror v1.8.0-insider26",
+    "body":  "### Added\n\n- Add BLE HID Boot Protocol keyboard and mouse characteristics for broader iOS\n  compatibility, while retaining Report Protocol support.\n- Add persistent Bluetooth reverse-control mouse sensitivity, wheel sensitivity,\n  and landscape orientation settings.\n- Show a clear main-preview state when a device is open in an independent window.\n\n### Changed\n\n- Improve Bluetooth reverse-control pairing guidance with the complete iPhone and\n  Windows pairing sequence.\n- Keep media-cast volume and full-screen icons bound to the theme-aware button\n  foreground in dark mode.\n- Align native core and application metadata with `1.8.0-insider26`.\n\n### Fixed\n\n- Use the same Boot Mouse report conversion for reads and notifications,\n  including signed 8-bit movement clamping.\n- Remove documentation references to a deleted preview image.",
+    "published_at":  "2026-08-26T07:16:20Z",
+    "draft":  false,
+    "prerelease":  true,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.6-x64.exe",
-        "size": 91881976,
-        "digest": "sha256:0885a3c6eaa26cc77465edb78d9e95cfb7ee64a6781c9e2f10449881c567b8b0",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-Setup-v1.6.6-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.8.0-insider26-x64.exe",
+        "size":  91926430,
+        "digest":  "sha256:2de4bbd96cf0b0a4793033cbc10f1450a9b5ca5165a46205440a6f4d463b0cac",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider26/iPhoneMirror-Setup-v1.8.0-insider26-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.6-win-x64.zip",
-        "size": 191244971,
-        "digest": "sha256:d9c973e73dba0636d9b0ca40039cc69d9ee6b5a6117cb2961b946679e9b877d3",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-v1.6.6-win-x64.zip"
+        "name":  "iPhoneMirror-v1.8.0-insider26-win-x64.zip",
+        "size":  193999337,
+        "digest":  "sha256:76d2d7538e7bb311f8490cd267e612ba465686d53036f1e9cd188806ebf3ed5f",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider26/iPhoneMirror-v1.8.0-insider26-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.6-win-x64-sbom.spdx.json",
-        "size": 38969,
-        "digest": "sha256:f5cdf2c7d92727c4dc0f595869575f94788b39d3e2b900c5e88642808dbd52a8",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-v1.6.6-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.8.0-insider26-win-x64-sbom.spdx.json",
+        "size":  40466,
+        "digest":  "sha256:f76f5d1af4a0487d1a8c25687804cb18dc9d62ce29ea526d4a8f55be74b2e126",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider26/iPhoneMirror-v1.8.0-insider26-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:196dd4d64b4330a45b154687013e714d3a64860bec0b713fb8f13bdfaf45f9df",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  337,
+        "digest":  "sha256:faf6f420f58fd79bc759a803036890fa614a9f6b8598c8432bc235562e1b2eae",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.0-insider26/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.5",
-    "name": "iPhoneMirror v1.6.5",
-    "body": "### Added\n\n- Add structured capture failure kind, stage, and error-code reporting across\n  the native API, managed UI, diagnostic logs, and USB lifecycle probe.\n- Add an isolated USB configuration switch helper and include it in installed\n  and portable release packages.\n- Add localized recovery guidance for USB connection, driver, stream, decoder,\n  timeout, duplicate-session, device-disconnect, and phone-closed failures.\n\n### Changed\n\n- Serialize start and stop work per device, queue requests behind in-progress\n  teardown, and revoke session handles before native cleanup begins.\n- Suspend wired enumeration and Lockdown metadata refresh while USB devices are\n  switching configurations, then require stable exact-device evidence before\n  treating a restored device as ready.\n- Keep wired capture available for Apple/libusb0 stacked filter installations\n  through a conservative open, activation, and teardown path.\n- Hide preview-only controls while the selected device is not actively\n  mirroring and show explicit queued and cleanup states during transitions.\n- Disable real-device USB stress probes in default builds unless explicitly\n  enabled with the dangerous-tools build option.\n\n### Fixed\n\n- Restore the normal Apple USB configuration more reliably after stopping,\n  including repeated start/stop cycles and multi-device sessions.\n- Avoid stale or cross-device USB matches by correlating exact serial,\n  topology, PnP interface transitions, descriptor state, and usbmux presence.\n- Prevent concurrent stop callers, background error cleanup, and window-close\n  shutdown from destroying or reusing the same native session twice.\n- Distinguish user-initiated mirroring stops from cable disconnects and provide\n  the correct recovery action without exposing raw diagnostics in prompts.\n- Bound socket shutdown waits and tighten QuickTime control-channel cleanup so\n  teardown cannot hang indefinitely on a stalled peer.",
-    "published_at": "2026-08-14T09:01:14Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.7.1",
+    "name":  "iPhoneMirror v1.7.1",
+    "body":  "### Added\n\n- Add sustained black-video detection for wired capture after a normal-frame warm-up.\n- Add compact protected-video guidance for possible DRM / FairPlay restrictions,\n  including separate audio availability and automatic dismissal when normal video returns.\n- Add compact capture-status notices for ordinary mirroring errors, USB configuration failures,\n  and mirroring stopped from Control Center.\n- Expand Developer Tools with previews for capture errors, stopped sessions, USB configuration\n  errors, protected-video notices, and capture recovery.\n\n### Changed\n\n- Require an eight-second, multi-frame near-black and neutral-chroma signal before showing the\n  protected-video notice, reducing false positives from startup, short black scenes, and dark UI.\n- Use Windows/DWM outer corners for the capture recovery and status notices while retaining\n  compact internal status panels.\n- Keep error and stopped-session cleanup ordering explicit: failed sessions are released before\n  ordinary error notices, while stopped-session cleanup begins after the notice is shown.\n\n### Fixed\n\n- Replace unexplained black video surfaces with a clear, non-bypass warning that does not claim\n  DRM was definitively detected.\n- Prevent the protected-video notice from remaining open after normal frames return or after a\n  device switch.\n- Remove duplicate custom borders that produced bright rings around native window corners.",
+    "published_at":  "2026-08-24T08:12:21Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.5-x64.exe",
-        "size": 91776061,
-        "digest": "sha256:2e26462423a1e7c6d5b6fe37513ad0eaa8e144a9e1d65b1a5a7f98bf0636f174",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-Setup-v1.6.5-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.7.1-x64.exe",
+        "size":  91984448,
+        "digest":  "sha256:738ebdb51a6c05fa18175e72ab8fd824b4ea8b82b71fb3e219814a01f437df07",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-Setup-v1.7.1-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.5-win-x64.zip",
-        "size": 191113339,
-        "digest": "sha256:a58cd945dfddb0d50c3c7de9aa64e2bdc6ba7b36a0171025fef8e36e6c404ecb",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-v1.6.5-win-x64.zip"
+        "name":  "iPhoneMirror-v1.7.1-win-x64.zip",
+        "size":  194074893,
+        "digest":  "sha256:53064a479654d5c438d2c4cc18d981a123dafb8151cc0afbdf0e337bfe983f8f",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-v1.7.1-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.5-win-x64-sbom.spdx.json",
-        "size": 38963,
-        "digest": "sha256:5b521e7d40ba9ddf6ff8e693ef8fdfa8f7b560ebfae2667acbab07e96ce1f224",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-v1.6.5-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.7.1-win-x64-sbom.spdx.json",
+        "size":  40432,
+        "digest":  "sha256:808b4c4126726fa8b3473b6598888d69990522b526910232ca365209c9ebcb95",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/iPhoneMirror-v1.7.1-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:25703931fbbb5864ff0693180781aae2b0855461d61cadb2ef4b41a9bc4bf2e6",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:a21de4f0c402c3e54a620c06c625128970d08257304ea5e03acf10f4c94bc297",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.1/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.3",
-    "name": "iPhoneMirror v1.6.3",
-    "body": "### Changed\n\n- Show the complete tagged release document in the updater, include the release\n  title, and provide a trusted link to the corresponding GitHub Release page.\n- Stream release metadata, release notes, and checksum manifests through\n  explicit size limits instead of buffering unbounded responses.\n\n### Fixed\n\n- Make installed and portable updates revalidate the downloaded package at the\n  elevation boundary, and execute only the verified installer or embedded ZIP\n  helper from access-controlled staging directories.\n- Make portable updates transactional: reject unsafe or oversized archives,\n  avoid reparse-point traversal, verify every copied file, and roll back\n  replaced or removed files when an update cannot complete.\n- Restrict update-cache cleanup and single-instance process discovery to their\n  intended directories and executable paths.\n- Compare arbitrarily large numeric prerelease identifiers without integer\n  overflow.\n- Clean up FFmpeg processes, named pipes, and recording staging files after\n  every partial startup failure.\n- Reject malformed decoder, virtual-camera pipe, registry, frame-size, and\n  bitrate inputs instead of accepting truncated data or entering stalled paths.\n- Dispose timed-out Apple device metadata connections deterministically.",
-    "published_at": "2026-08-13T01:31:47Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.7.0",
+    "name":  "iPhoneMirror v1.7.0",
+    "body":  "### Changed\n\n- Replace legacy UI glyphs with packaged Fluent icons and keep button icons\n  readable across light and dark themes.\n- Bind AirPlay media sockets to the accepted control connection\u0027s interface,\n  preserving IPv4 and IPv6 routing for mirroring and media playback.\n- Remove one-pixel aspect-ratio rounding bars from independent native preview\n  windows without changing genuine letterboxing behavior.\n- Add WPF-UI license notices to portable and installer payload validation.",
+    "published_at":  "2026-08-21T23:05:49Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.3-x64.exe",
-        "size": 91770304,
-        "digest": "sha256:b4699ecb31c3306ba2bf4d16ede68eda4cc0dc9645f8999b44b05374766b8859",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-Setup-v1.6.3-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.7.0-x64.exe",
+        "size":  91958222,
+        "digest":  "sha256:97ec353e9161431ac46cf087e7f6db7d0baa505f08b93c945968790840a5fec1",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-Setup-v1.7.0-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.3-win-x64.zip",
-        "size": 190954900,
-        "digest": "sha256:d9e04316b8fb3cea3dc4177fd8f08121b3fb9141efd0c8f74b4bbb0cfab339b5",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-v1.6.3-win-x64.zip"
+        "name":  "iPhoneMirror-v1.7.0-win-x64.zip",
+        "size":  194055018,
+        "digest":  "sha256:2fbb8c2bd830ca9c66732d61bca8d2b9172adb0354272682de92f701613b8af3",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-v1.7.0-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.3-win-x64-sbom.spdx.json",
-        "size": 38215,
-        "digest": "sha256:0214dd4fd62c1db7ef21b86c54c96f26781b7adad817e477b04786bc8c3a59da",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-v1.6.3-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.7.0-win-x64-sbom.spdx.json",
+        "size":  40432,
+        "digest":  "sha256:66b2b38614acea1c319fc093f22b3f49f33791b884d0f53f4b679de5dc505db9",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/iPhoneMirror-v1.7.0-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:733c89142a201a0a8afe2914d0d78cf19d5a0a2b7b5e3b8dfdbd02869f6e89be",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:b0b037110271c5d24eca751e657e055ca4c6d05cf69f428e30aa5f1bbace2f00",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.7.0/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.2",
-    "name": "iPhoneMirror v1.6.2",
-    "body": "### Added\n\n- Add fully localized Traditional Chinese (Hong Kong) resources for the main\n  application and driver manager, including automatic `zh-HK` system-language\n  selection, Hong Kong terminology, and the Microsoft JhengHei UI font.\n\n### Fixed\n\n- Keep the running version open until Setup is ready to replace its files, so\n  cancelled or early-failing updates no longer look like the app uninstalled\n  itself.",
-    "published_at": "2026-08-12T09:04:43Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.6.9",
+    "name":  "iPhoneMirror v1.6.9",
+    "body":  "### Added\n\n- Add a five-click version-button entry point for the independent Developer\n  Tools window. It can preview every workspace page and existing child window\n  without performing real network, device, update, or destructive operations.\n- Add a read-only runtime inspector for the current version, culture, theme,\n  DPI scale, open-window count, diagnostics, theme/language selection, opacity,\n  topmost state, and compact/default/maximized window presets.\n- Add conventional controls to AirPlay and DLNA video playback, including\n  pause/resume, seek, 10-second skip, volume, mute, time display, and keyboard\n  shortcuts, while disabling seek for live streams.\n- Unify cast-video playback controls into a responsive themed overlay with a\n  centered primary action, consistent Fluent icons, full-screen access, and\n  lightweight hover, press, state-change, and idle-fade feedback.\n- Add safe preview entry points for confirmation prompts, recovery guidance,\n  image settings, projection settings, media output, USB mode details, startup\n  errors, updates, instance conflicts, and the native independent preview.\n- Add native NV12 frame export from decoded sessions for recording and live\n  output, including aspect-preserving letterboxing and P010-to-NV12 conversion.\n- Let media-app casting use recording, live publishing, virtual camera, and an\n  independent preview window from the same toolbar as device mirroring.\n- Decode the media source audio track directly for recording and live output,\n  without capturing unrelated Windows system, notification, or microphone audio.\n\n### Changed\n\n- Standardize top-level window chrome, drag surfaces, close-button behavior,\n  theme resources, and light/dark contrast across the main window and child\n  windows.\n- Let Windows/DWM own the outer rounded corners of the Developer Tools and\n  instance-conflict windows; remove their duplicate hand-drawn outer corner\n  radius and border while retaining rounded internal cards and warning panels.\n- Keep the Developer Tools window independent, draggable, non-topmost, and\n  coverable by the main window, matching the requested multi-window workflow.\n- Keep WPF on its hardware-first composition path and flush the local HLS bridge\n  immediately, improving high-resolution media-cast frame pacing and smoothness.\n- Remove the root-page opacity transition that could leave a newly selected\n  page transparent, and keep page content visible through navigation changes.\n- Apply final work-area size and centered position to an independent preview\n  while its HWND is hidden, then show it in one operation to prevent the first\n  frame from flashing at the default origin or jumping during aspect fitting.\n- Add stable aspect-ratio sizing for portrait, landscape, rotated, mixed-DPI,\n  and high-DPI native previews, with work-area and minimum-size constraints.\n- Keep native preview windows independently manageable per device, with\n  fullscreen, rotation, audio, fixed-size, corner, display, and context-menu\n  controls isolated from the main preview.\n- Improve AirPlay/DLNA playback state handling around buffering, live streams,\n  pending seeks, volume/mute commands, and Play/Stop command boundaries.\n- Prefer an available hardware H.264 encoder (NVENC, AMF, QSV, or Media\n  Foundation) after probing the requested output size, while retaining libx264\n  fallback behavior.\n\n### Fixed\n\n- Keep a localized loading card visible until cast video playback advances or\n  buffering ends, and remove the redundant close button from the preview.\n- Make direct clicks on the cast-video progress track seek deterministically\n  and keep the selected position stable while the media backend catches up.\n- Match Platinum/i4AirPlayer AVTransport behavior for video-app casting by\n  advertising and accepting `Next`/`Previous`, preserving current and queued\n  media metadata, and promoting a queued next URI without returning an action\n  error that prevents iQIYI from automatically playing the next episode.\n- Prevent Windows MediaElement\u0027s short HLS segment duration from being exposed\n  as the programme duration, preserving playback state and progress across\n  segment changes instead of restarting or advancing after a few seconds.\n- Route HLS cast URLs through the bundled FFmpeg demuxer and a continuous local\n  MPEG-TS stream so playlist refresh, encryption keys, discontinuities,\n  reconnects, seeks, and genuine end-of-stream are coordinated in one pipeline.\n- Keep mouse and mobile seeks stable while a replacement HLS stream opens, and\n  prevent the progress thumb from jumping through transient segment timestamps.\n- Prevent the elevated update PowerShell host from creating a console window\n  by launching it through Windows ShellExecuteEx no-console mode.\n- Reject elevated portable updates when the current user can replace any\n  installation path component, including through topology-only ACL rights.\n- Restrict the virtual-camera frame channel to the current user and Windows\n  Frame Server identities instead of every packaged application.\n- Copy hash-verified virtual-camera installer payloads into an administrator-only\n  directory before launching the elevated helper, preventing DLL side-loading\n  from a user-writable staging path.\n- Run recording and live-output frame, pipe, and audio pumps outside the WPF\n  dispatcher so encoding backpressure cannot freeze the application UI.\n- Feed recording and live-output FFmpeg directly with native letterboxed NV12\n  frames, eliminating redundant BGRA conversion and high-resolution frame copies.\n- Prefer a working hardware H.264 encoder (NVENC, AMF, QSV, or Media Foundation),\n  probe the requested output size, and retain libx264 as an automatic fallback.\n- Bound repeated-frame catch-up after prolonged FFmpeg stalls while preserving\n  normal short-delay compensation and resynchronizing future output to current\n  wall-clock time.\n- Keep media-volume coalescing within the current Play/Stop command boundary\n  so an earlier cast cannot change a later cast\u0027s mute state.\n- Prevent header drag handling from intercepting close buttons and other\n  interactive controls, restoring reliable close behavior for every child\n  window.\n- Make Developer Tools confirmation and cancellation previews close safely\n  without triggering a process crash, and keep read-only preview actions\n  isolated from real application operations.\n- Restore the close button on all existing child windows, including settings,\n  update, recovery, prompt, and instance-conflict surfaces.\n- Prevent duplicate outer borders and corner artifacts from reappearing after\n  opening a child window, dragging a window, changing DPI, or switching pages.\n- Keep the main window and every native preview hidden immediately during\n  shutdown before bounded background cleanup begins.\n- Match Apple USB parent devices by exact VID/PID/topology identity, record the\n  active USB configuration, and avoid treating interface nodes or stale device\n  matches as the selected phone.\n- Restore QuickTime/Apple USB configuration only when the active configuration\n  is known to require it, reducing unnecessary reconfiguration during capture\n  start, failure, cancellation, and teardown.\n- Add deterministic native Media Foundation decoder and NV12/P010 frame-copy\n  validation for malformed dimensions, strides, buffers, and odd output sizes.\n- Keep virtual-camera frame exchange scoped to the current user and Windows\n  Frame Server identities, rejecting unauthorized mapping attempts.\n- Bound FFmpeg catch-up after prolonged stalls and resynchronize future output\n  to wall-clock time instead of emitting an unbounded burst of repeated frames.\n- Move recording/live-output frame, pipe, and audio pumps off the WPF dispatcher\n  so encoder backpressure cannot freeze the application UI.\n\n### Security\n\n- Revalidate portable update path ownership at the elevation boundary,\n  including topology-only ACL rights that could permit replacement of a parent\n  directory or file.\n- Copy hash-verified virtual-camera installer payloads into an\n  administrator-only staging directory before launching the elevated helper,\n  preventing DLL side-loading from user-writable paths.\n- Lock the current driver-manager executable across its elevation boundary and\n  reject unsafe replacement paths before privileged operations begin.\n- Launch elevated update helpers through a no-console ShellExecuteEx path and\n  preserve the required UAC boundary without exposing an extra console window.\n\n### Tests\n\n- Add runtime coverage for the five-click Developer Tools entry point, all\n  read-only preview surfaces, drag behavior, independent/non-topmost state,\n  outer-corner ownership, and safe confirmation actions.\n- Add logic and native coverage for media command ordering, volume/mute state,\n  NV12/P010 frame export, DLNA control handling, USB identity/configuration,\n  update boundaries, and driver elevation-path locking.",
+    "published_at":  "2026-08-20T06:03:06Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.2-x64.exe",
-        "size": 91769101,
-        "digest": "sha256:581c2be11c9a27a5605a145e8070d31be161bc1bd04f4f4e3f9d349b7104422a",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.2/iPhoneMirror-Setup-v1.6.2-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.6.9-x64.exe",
+        "size":  91959614,
+        "digest":  "sha256:47b5758591c161232c430245f70ed6bcb7d61e9a4e5f72a47b440e54ebe82257",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.9/iPhoneMirror-Setup-v1.6.9-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.2-win-x64.zip",
-        "size": 190935010,
-        "digest": "sha256:f66e8cef2b6efb640a6ff345e6b30335320df823047c9b290b61ba53f4b5f302",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.2/iPhoneMirror-v1.6.2-win-x64.zip"
+        "name":  "iPhoneMirror-v1.6.9-win-x64.zip",
+        "size":  191577800,
+        "digest":  "sha256:e2c22efaf804444c0b69853925814cff25f34e0a16ba1e897414d0cc2d4c662a",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.9/iPhoneMirror-v1.6.9-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.2-win-x64-sbom.spdx.json",
-        "size": 38215,
-        "digest": "sha256:38b445ddb27d7ac4e75c6b6a93ba082993acb6af46ab4b5556565cca52e9ab73",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.2/iPhoneMirror-v1.6.2-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.6.9-win-x64-sbom.spdx.json",
+        "size":  38969,
+        "digest":  "sha256:dd3913cae707bf161ef54c0e43b49b5080c6ec5bd0d9220b5aa550f705926d9a",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.9/iPhoneMirror-v1.6.9-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:8b1cfee5f1a799cfb5071aa41589eb99de40ad27d1e1c81afff5c726d8ce5f14",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.2/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:7531ef340b2c550aba08ca13407f64117d85516b0ed8d313baa7e6e8d370c4ed",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.9/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.1",
-    "name": "iPhoneMirror v1.6.1",
-    "body": "### Changed\n\n- Upgrade the bundled AirPlay receiver to v1.1.2 and keep its source,\n  licensing, patch and SHA-256 records synchronized.\n- Publish version-tagged Windows releases directly from the GitHub Actions\n  build runner, keeping failed uploads in draft state instead of transferring\n  large packages through an intermediate workflow artifact.\n- Stop producing and uploading the duplicate `-latest.zip` alias; portable\n  updates already prefer the versioned `win-x64.zip` asset.\n\n### Fixed\n\n- Restore wireless iPad screen mirroring by upgrading the AirPlay receiver to\n  v1.1.2 and keeping Bonjour, server-info, and `/info` capability negotiation\n  and receiver identity on the same mode-specific, upstream-compatible profile.",
-    "published_at": "2026-08-11T15:11:48Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.6.8",
+    "name":  "iPhoneMirror v1.6.8",
+    "body":  "### Added\n\n- Add AirPlay audio-only reception for music playback, including automatic\n  source creation when a RAOP sender omits the generic connection callback.\n- Show a dedicated music state for audio-only sessions and disable video-only\n  preview tools until the sender starts delivering video.\n\n### Changed\n\n- Use a bounded network-jitter playback mode for AirPlay music, with deeper\n  startup and high-water buffers sized for RAOP retransmission bursts.\n\n### Fixed\n\n- Decode audio-only AirPlay ALAC frames and recover smoothly from missing or\n  delayed Wi-Fi packets instead of producing silence or repeated underruns.\n- Keep recording duration and playback speed aligned with elapsed wall-clock\n  time, including when FFmpeg encoding briefly falls behind and catches up.\n- Hide the main window, child windows, and native preview windows immediately\n  after a close request, then finish bounded media and USB cleanup in the\n  background before the process exits.",
+    "published_at":  "2026-08-17T02:22:32Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.1-x64.exe",
-        "size": 91654582,
-        "digest": "sha256:79697ba0c77ade13349a51a64022e6d57aa2e5fd3ca13a084c7445901c391d52",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-Setup-v1.6.1-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.6.8-x64.exe",
+        "size":  91847003,
+        "digest":  "sha256:e12720341bb47400c108e52c3cd7351ac1540fc1232b4398dac59f16ed15435e",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-Setup-v1.6.8-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.1-win-x64.zip",
-        "size": 190379204,
-        "digest": "sha256:12513b15ed4abebfb95450775e9f6f263ce788d7a5c205b89cab8d3865adf917",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-v1.6.1-win-x64.zip"
+        "name":  "iPhoneMirror-v1.6.8-win-x64.zip",
+        "size":  191250605,
+        "digest":  "sha256:4cf0ab64d313330b6b816ca8791c94667dff901844d2c709148e2995d1f87e81",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-v1.6.8-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.1-win-x64-sbom.spdx.json",
-        "size": 38215,
-        "digest": "sha256:249010383fe9dbdb15de57a8b678e7807f489d35395070cc0ff38b0eb377fa45",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-v1.6.1-win-x64-sbom.spdx.json"
+        "name":  "iPhoneMirror-v1.6.8-win-x64-sbom.spdx.json",
+        "size":  38969,
+        "digest":  "sha256:a44008f96968cb5816b7c0d49619aab309f6e0f858764b0bde0fe5a59f24aaf5",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/iPhoneMirror-v1.6.8-win-x64-sbom.spdx.json"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 307,
-        "digest": "sha256:9a065a6debaee483fb8977aac84454c046713a486eb3ec702132a163077793af",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:963a5b33579f1ee6e3e3ae56d5694149fa62a29c3e41fd7e215629fd1b27bdf0",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.8/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.6.0",
-    "name": "iPhoneMirror v1.6.0",
-    "body": "v1.6.0 将安装版改为主程序与驱动管理器共享外置 .NET DLL，便携版继续内置运行时和 FFmpeg，并修复安装与便携更新、旧 FFmpeg 清理、外部 FFmpeg 发现及发布校验问题。",
-    "published_at": "2026-08-10T00:00:00Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.6.7",
+    "name":  "iPhoneMirror v1.6.7",
+    "body":  "### Fixed\n\n- Keep the elevated PowerShell host hidden while verified installer and\n  portable ZIP updates are applied, without suppressing the required UAC prompt.",
+    "published_at":  "2026-08-15T02:50:17Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.6.0-x64.exe",
-        "size": 91617302,
-        "digest": "sha256:f49966784a932f40a53a335a619abcc3367b8bf69e2f08a4c0310c8cb81dabd4",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-Setup-v1.6.0-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.6.7-x64.exe",
+        "size":  91873324,
+        "digest":  "sha256:d1acc9a5248b6cf4484e20102687936bb97c83077acb23e73c5a899bcba99bb1",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-Setup-v1.6.7-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.6.0-win-x64.zip",
-        "size": 188032255,
-        "digest": "sha256:ec02a61b9bfb5e496d318bf69fab3f7ddb277da780fd7f1ff90dedd7a32c61be",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64.zip"
+        "name":  "iPhoneMirror-v1.6.7-win-x64.zip",
+        "size":  191245100,
+        "digest":  "sha256:3b5a5677caca6d79b2b093e26245c806389a1cf1b131f945ba1c33e9bd517711",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-v1.6.7-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.6.0-win-x64-latest.zip",
-        "size": 188032255,
-        "digest": "sha256:ec02a61b9bfb5e496d318bf69fab3f7ddb277da780fd7f1ff90dedd7a32c61be",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64-latest.zip"
+        "name":  "iPhoneMirror-v1.6.7-win-x64-sbom.spdx.json",
+        "size":  38969,
+        "digest":  "sha256:57988241efc15aeda87eddc4fe51a8e48b5004f4e460b61c91ad34ae9e4f51f4",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/iPhoneMirror-v1.6.7-win-x64-sbom.spdx.json"
       },
       {
-        "name": "iPhoneMirror-v1.6.0-win-x64-sbom.spdx.json",
-        "size": 66086,
-        "digest": "sha256:c7e84dc097622188d195407adb2b850b4d4100d4b7ec7b2dfac6ec433302eee6",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64-sbom.spdx.json"
-      },
-      {
-        "name": "SHA256SUMS.txt",
-        "size": 412,
-        "digest": "sha256:469c8b7e43874c36b7b078edeb2d55fbd9ddda2b88f5a355084e75bc7d406aa6",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/SHA256SUMS.txt"
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:9f848c55183d5b3a4d5614c3418207b1ed3dafe979f0419916b19655cd37f2eb",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.7/SHA256SUMS.txt"
       }
     ]
   },
   {
-    "tag_name": "v1.5.11",
-    "name": "iPhoneMirror v1.5.11",
-    "body": "v1.5.11 修复有线投屏间歇性断音和多设备 USB 媒体饥饿，并完善 QuickTime USB 配置退出、重枚举与关闭恢复流程。",
-    "published_at": "2026-08-05T08:19:38Z",
-    "draft": false,
-    "prerelease": false,
-    "assets": [
+    "tag_name":  "v1.6.6",
+    "name":  "iPhoneMirror v1.6.6",
+    "body":  "### Changed\n\n- Speed up update downloads on constrained GitHub routes by testing GitHub and\n  all 115 mirrors listed by MoreTools, measuring a 256 KB sample only from\n  reachable routes, and failing over through the resulting throughput ranking.",
+    "published_at":  "2026-08-15T02:23:32Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
       {
-        "name": "iPhoneMirror-Setup-v1.5.11-x64.exe",
-        "size": 167328873,
-        "digest": "sha256:b5dc32d02d95b2781b2e4da4abb82b4ecac82f90131aa12cd64cdb2026459ebb",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-Setup-v1.5.11-x64.exe"
+        "name":  "iPhoneMirror-Setup-v1.6.6-x64.exe",
+        "size":  91881976,
+        "digest":  "sha256:0885a3c6eaa26cc77465edb78d9e95cfb7ee64a6781c9e2f10449881c567b8b0",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-Setup-v1.6.6-x64.exe"
       },
       {
-        "name": "iPhoneMirror-v1.5.11-win-x64.zip",
-        "size": 188024206,
-        "digest": "sha256:27935d2abfda464c497d0ce5c4ec3547a7f737b7f14fd88a9e05269c601ea6b4",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64.zip"
+        "name":  "iPhoneMirror-v1.6.6-win-x64.zip",
+        "size":  191244971,
+        "digest":  "sha256:d9c973e73dba0636d9b0ca40039cc69d9ee6b5a6117cb2961b946679e9b877d3",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-v1.6.6-win-x64.zip"
       },
       {
-        "name": "iPhoneMirror-v1.5.11-win-x64-latest.zip",
-        "size": 188024206,
-        "digest": "sha256:27935d2abfda464c497d0ce5c4ec3547a7f737b7f14fd88a9e05269c601ea6b4",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64-latest.zip"
+        "name":  "iPhoneMirror-v1.6.6-win-x64-sbom.spdx.json",
+        "size":  38969,
+        "digest":  "sha256:f5cdf2c7d92727c4dc0f595869575f94788b39d3e2b900c5e88642808dbd52a8",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/iPhoneMirror-v1.6.6-win-x64-sbom.spdx.json"
       },
       {
-        "name": "iPhoneMirror-v1.5.11-win-x64-sbom.spdx.json",
-        "size": 67535,
-        "digest": "sha256:983311941c885dba7d47f1c8e62a7178cbcab10787c7a7d059ff7a28452fce19",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64-sbom.spdx.json"
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:196dd4d64b4330a45b154687013e714d3a64860bec0b713fb8f13bdfaf45f9df",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.6/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name":  "v1.6.5",
+    "name":  "iPhoneMirror v1.6.5",
+    "body":  "### Added\n\n- Add structured capture failure kind, stage, and error-code reporting across\n  the native API, managed UI, diagnostic logs, and USB lifecycle probe.\n- Add an isolated USB configuration switch helper and include it in installed\n  and portable release packages.\n- Add localized recovery guidance for USB connection, driver, stream, decoder,\n  timeout, duplicate-session, device-disconnect, and phone-closed failures.\n\n### Changed\n\n- Serialize start and stop work per device, queue requests behind in-progress\n  teardown, and revoke session handles before native cleanup begins.\n- Suspend wired enumeration and Lockdown metadata refresh while USB devices are\n  switching configurations, then require stable exact-device evidence before\n  treating a restored device as ready.\n- Keep wired capture available for Apple/libusb0 stacked filter installations\n  through a conservative open, activation, and teardown path.\n- Hide preview-only controls while the selected device is not actively\n  mirroring and show explicit queued and cleanup states during transitions.\n- Disable real-device USB stress probes in default builds unless explicitly\n  enabled with the dangerous-tools build option.\n\n### Fixed\n\n- Restore the normal Apple USB configuration more reliably after stopping,\n  including repeated start/stop cycles and multi-device sessions.\n- Avoid stale or cross-device USB matches by correlating exact serial,\n  topology, PnP interface transitions, descriptor state, and usbmux presence.\n- Prevent concurrent stop callers, background error cleanup, and window-close\n  shutdown from destroying or reusing the same native session twice.\n- Distinguish user-initiated mirroring stops from cable disconnects and provide\n  the correct recovery action without exposing raw diagnostics in prompts.\n- Bound socket shutdown waits and tighten QuickTime control-channel cleanup so\n  teardown cannot hang indefinitely on a stalled peer.",
+    "published_at":  "2026-08-14T09:01:14Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
+      {
+        "name":  "iPhoneMirror-Setup-v1.6.5-x64.exe",
+        "size":  91776061,
+        "digest":  "sha256:2e26462423a1e7c6d5b6fe37513ad0eaa8e144a9e1d65b1a5a7f98bf0636f174",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-Setup-v1.6.5-x64.exe"
       },
       {
-        "name": "SHA256SUMS.txt",
-        "size": 416,
-        "digest": "sha256:43f7fc5e1dee475031345a804c00688fe230c465ae6082f9914267c9c326ccc8",
-        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/SHA256SUMS.txt"
+        "name":  "iPhoneMirror-v1.6.5-win-x64.zip",
+        "size":  191113339,
+        "digest":  "sha256:a58cd945dfddb0d50c3c7de9aa64e2bdc6ba7b36a0171025fef8e36e6c404ecb",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-v1.6.5-win-x64.zip"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.5-win-x64-sbom.spdx.json",
+        "size":  38963,
+        "digest":  "sha256:5b521e7d40ba9ddf6ff8e693ef8fdfa8f7b560ebfae2667acbab07e96ce1f224",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/iPhoneMirror-v1.6.5-win-x64-sbom.spdx.json"
+      },
+      {
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:25703931fbbb5864ff0693180781aae2b0855461d61cadb2ef4b41a9bc4bf2e6",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.5/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name":  "v1.6.3",
+    "name":  "iPhoneMirror v1.6.3",
+    "body":  "### Changed\n\n- Show the complete tagged release document in the updater, include the release\n  title, and provide a trusted link to the corresponding GitHub Release page.\n- Stream release metadata, release notes, and checksum manifests through\n  explicit size limits instead of buffering unbounded responses.\n\n### Fixed\n\n- Make installed and portable updates revalidate the downloaded package at the\n  elevation boundary, and execute only the verified installer or embedded ZIP\n  helper from access-controlled staging directories.\n- Make portable updates transactional: reject unsafe or oversized archives,\n  avoid reparse-point traversal, verify every copied file, and roll back\n  replaced or removed files when an update cannot complete.\n- Restrict update-cache cleanup and single-instance process discovery to their\n  intended directories and executable paths.\n- Compare arbitrarily large numeric prerelease identifiers without integer\n  overflow.\n- Clean up FFmpeg processes, named pipes, and recording staging files after\n  every partial startup failure.\n- Reject malformed decoder, virtual-camera pipe, registry, frame-size, and\n  bitrate inputs instead of accepting truncated data or entering stalled paths.\n- Dispose timed-out Apple device metadata connections deterministically.",
+    "published_at":  "2026-08-13T01:31:47Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
+      {
+        "name":  "iPhoneMirror-Setup-v1.6.3-x64.exe",
+        "size":  91770304,
+        "digest":  "sha256:b4699ecb31c3306ba2bf4d16ede68eda4cc0dc9645f8999b44b05374766b8859",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-Setup-v1.6.3-x64.exe"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.3-win-x64.zip",
+        "size":  190954900,
+        "digest":  "sha256:d9e04316b8fb3cea3dc4177fd8f08121b3fb9141efd0c8f74b4bbb0cfab339b5",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-v1.6.3-win-x64.zip"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.3-win-x64-sbom.spdx.json",
+        "size":  38215,
+        "digest":  "sha256:0214dd4fd62c1db7ef21b86c54c96f26781b7adad817e477b04786bc8c3a59da",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/iPhoneMirror-v1.6.3-win-x64-sbom.spdx.json"
+      },
+      {
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:733c89142a201a0a8afe2914d0d78cf19d5a0a2b7b5e3b8dfdbd02869f6e89be",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.3/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name":  "v1.6.2",
+    "name":  "iPhoneMirror v1.6.2",
+    "body":  "### Added\n\n- Add fully localized Traditional Chinese (Hong Kong) resources for the main\n  application and driver manager, including automatic `zh-HK` system-language\n  selection, Hong Kong terminology, and the Microsoft JhengHei UI font.\n\n### Fixed\n\n- Keep the running version open until Setup is ready to replace its files, so\n  cancelled or early-failing updates no longer look like the app uninstalled\n  itself.",
+    "published_at":  "2026-08-12T09:04:43Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
+      {
+        "name":  "iPhoneMirror-Setup-v1.6.2-x64.exe",
+        "size":  91769101,
+        "digest":  "sha256:581c2be11c9a27a5605a145e8070d31be161bc1bd04f4f4e3f9d349b7104422a",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.2/iPhoneMirror-Setup-v1.6.2-x64.exe"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.2-win-x64.zip",
+        "size":  190935010,
+        "digest":  "sha256:f66e8cef2b6efb640a6ff345e6b30335320df823047c9b290b61ba53f4b5f302",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.2/iPhoneMirror-v1.6.2-win-x64.zip"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.2-win-x64-sbom.spdx.json",
+        "size":  38215,
+        "digest":  "sha256:38b445ddb27d7ac4e75c6b6a93ba082993acb6af46ab4b5556565cca52e9ab73",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.2/iPhoneMirror-v1.6.2-win-x64-sbom.spdx.json"
+      },
+      {
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:8b1cfee5f1a799cfb5071aa41589eb99de40ad27d1e1c81afff5c726d8ce5f14",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.2/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name":  "v1.6.1",
+    "name":  "iPhoneMirror v1.6.1",
+    "body":  "### Changed\n\n- Upgrade the bundled AirPlay receiver to v1.1.2 and keep its source,\n  licensing, patch and SHA-256 records synchronized.\n- Publish version-tagged Windows releases directly from the GitHub Actions\n  build runner, keeping failed uploads in draft state instead of transferring\n  large packages through an intermediate workflow artifact.\n- Stop producing and uploading the duplicate `-latest.zip` alias; portable\n  updates already prefer the versioned `win-x64.zip` asset.\n\n### Fixed\n\n- Restore wireless iPad screen mirroring by upgrading the AirPlay receiver to\n  v1.1.2 and keeping Bonjour, server-info, and `/info` capability negotiation\n  and receiver identity on the same mode-specific, upstream-compatible profile.",
+    "published_at":  "2026-08-11T15:11:48Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
+      {
+        "name":  "iPhoneMirror-Setup-v1.6.1-x64.exe",
+        "size":  91654582,
+        "digest":  "sha256:79697ba0c77ade13349a51a64022e6d57aa2e5fd3ca13a084c7445901c391d52",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-Setup-v1.6.1-x64.exe"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.1-win-x64.zip",
+        "size":  190379204,
+        "digest":  "sha256:12513b15ed4abebfb95450775e9f6f263ce788d7a5c205b89cab8d3865adf917",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-v1.6.1-win-x64.zip"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.1-win-x64-sbom.spdx.json",
+        "size":  38215,
+        "digest":  "sha256:249010383fe9dbdb15de57a8b678e7807f489d35395070cc0ff38b0eb377fa45",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/iPhoneMirror-v1.6.1-win-x64-sbom.spdx.json"
+      },
+      {
+        "name":  "SHA256SUMS.txt",
+        "size":  307,
+        "digest":  "sha256:9a065a6debaee483fb8977aac84454c046713a486eb3ec702132a163077793af",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.1/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name":  "v1.6.0",
+    "name":  "iPhoneMirror v1.6.0",
+    "body":  "v1.6.0 将安装版改为主程序与驱动管理器共享外置 .NET DLL，便携版继续内置运行时和 FFmpeg，并修复安装与便携更新、旧 FFmpeg 清理、外部 FFmpeg 发现及发布校验问题。",
+    "published_at":  "2026-08-10T00:00:00Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
+      {
+        "name":  "iPhoneMirror-Setup-v1.6.0-x64.exe",
+        "size":  91617302,
+        "digest":  "sha256:f49966784a932f40a53a335a619abcc3367b8bf69e2f08a4c0310c8cb81dabd4",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-Setup-v1.6.0-x64.exe"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.0-win-x64.zip",
+        "size":  188032255,
+        "digest":  "sha256:ec02a61b9bfb5e496d318bf69fab3f7ddb277da780fd7f1ff90dedd7a32c61be",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64.zip"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.0-win-x64-latest.zip",
+        "size":  188032255,
+        "digest":  "sha256:ec02a61b9bfb5e496d318bf69fab3f7ddb277da780fd7f1ff90dedd7a32c61be",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64-latest.zip"
+      },
+      {
+        "name":  "iPhoneMirror-v1.6.0-win-x64-sbom.spdx.json",
+        "size":  66086,
+        "digest":  "sha256:c7e84dc097622188d195407adb2b850b4d4100d4b7ec7b2dfac6ec433302eee6",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/iPhoneMirror-v1.6.0-win-x64-sbom.spdx.json"
+      },
+      {
+        "name":  "SHA256SUMS.txt",
+        "size":  412,
+        "digest":  "sha256:469c8b7e43874c36b7b078edeb2d55fbd9ddda2b88f5a355084e75bc7d406aa6",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.6.0/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name":  "v1.5.11",
+    "name":  "iPhoneMirror v1.5.11",
+    "body":  "v1.5.11 修复有线投屏间歇性断音和多设备 USB 媒体饥饿，并完善 QuickTime USB 配置退出、重枚举与关闭恢复流程。",
+    "published_at":  "2026-08-05T08:19:38Z",
+    "draft":  false,
+    "prerelease":  false,
+    "assets":  [
+      {
+        "name":  "iPhoneMirror-Setup-v1.5.11-x64.exe",
+        "size":  167328873,
+        "digest":  "sha256:b5dc32d02d95b2781b2e4da4abb82b4ecac82f90131aa12cd64cdb2026459ebb",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-Setup-v1.5.11-x64.exe"
+      },
+      {
+        "name":  "iPhoneMirror-v1.5.11-win-x64.zip",
+        "size":  188024206,
+        "digest":  "sha256:27935d2abfda464c497d0ce5c4ec3547a7f737b7f14fd88a9e05269c601ea6b4",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64.zip"
+      },
+      {
+        "name":  "iPhoneMirror-v1.5.11-win-x64-latest.zip",
+        "size":  188024206,
+        "digest":  "sha256:27935d2abfda464c497d0ce5c4ec3547a7f737b7f14fd88a9e05269c601ea6b4",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64-latest.zip"
+      },
+      {
+        "name":  "iPhoneMirror-v1.5.11-win-x64-sbom.spdx.json",
+        "size":  67535,
+        "digest":  "sha256:983311941c885dba7d47f1c8e62a7178cbcab10787c7a7d059ff7a28452fce19",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/iPhoneMirror-v1.5.11-win-x64-sbom.spdx.json"
+      },
+      {
+        "name":  "SHA256SUMS.txt",
+        "size":  416,
+        "digest":  "sha256:43f7fc5e1dee475031345a804c00688fe230c465ae6082f9914267c9c326ccc8",
+        "browser_download_url":  "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.5.11/SHA256SUMS.txt"
       }
     ]
   }

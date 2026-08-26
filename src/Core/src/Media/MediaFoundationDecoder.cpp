@@ -6,6 +6,8 @@
 #include <codecapi.h>
 #include <d3d10_1.h>
 #include <d3d11.h>
+#include <d3d11_1.h>
+#include <dxgi1_2.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -291,10 +293,12 @@ std::vector<DecoderCandidate> decoder_candidates(coremedia::VideoCodec codec,
     constexpr auto Software = static_cast<UINT32>(MFT_ENUM_FLAG_SYNCMFT) |
         static_cast<UINT32>(MFT_ENUM_FLAG_ASYNCMFT) |
         static_cast<UINT32>(MFT_ENUM_FLAG_LOCALMFT) | Sorted;
-    if (preference == DecoderPreference::Auto) {
-        append_candidates(candidates, enumerate_pass(subtype,
-            static_cast<UINT32>(MFT_ENUM_FLAG_ALL) | Sorted));
-    } else if (preference == DecoderPreference::HardwarePreferred) {
+    if (preference == DecoderPreference::Auto ||
+        preference == DecoderPreference::HardwarePreferred) {
+        // Hardware decode keeps high-bitrate landscape games within the
+        // device's real-time budget. The output is copied to CPU memory (not
+        // shared through a keyed cross-device texture), and capture never
+        // waits for the decoder queue, so this path cannot block USB replies.
         append_candidates(candidates, enumerate_pass(subtype,
             static_cast<UINT32>(MFT_ENUM_FLAG_HARDWARE) | Sorted, true));
         // Microsoft's inbox decoder is registered as a software MFT but can
@@ -391,6 +395,12 @@ std::optional<std::uint32_t> checked_nv12_buffer_size(
 bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
     std::span<std::uint8_t> output, std::uint32_t output_width,
     std::uint32_t output_height) noexcept {
+    if (frame.nv12.empty() && frame.gpu_frame) {
+        auto materialized = frame;
+        if (!materialize_gpu_frame(materialized)) return false;
+        return copy_nv12_frame_letterboxed(materialized, output,
+            output_width, output_height);
+    }
     if (frame.width == 0 || frame.height == 0 || output_width == 0 ||
         output_height == 0 || (output_width & 1U) != 0 ||
         (output_height & 1U) != 0) {
@@ -539,6 +549,75 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
         }
     }
     return true;
+}
+
+bool materialize_gpu_frame(DecodedFrame& frame) noexcept {
+    if (!frame.nv12.empty()) return true;
+    if (!frame.gpu_frame || !frame.gpu_frame->shared_handle) return false;
+    ComPtr<IDXGIKeyedMutex> keyed_mutex;
+    bool keyed_acquired = false;
+    try {
+        static std::mutex materialize_mutex;
+        static ComPtr<ID3D11Device> device;
+        static ComPtr<ID3D11Device1> device1;
+        static ComPtr<ID3D11DeviceContext> context;
+        std::scoped_lock lock(materialize_mutex);
+        if (!device) {
+            constexpr D3D_FEATURE_LEVEL levels[] = {
+                D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
+            check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                D3D11_CREATE_DEVICE_VIDEO_SUPPORT, levels,
+                static_cast<UINT>(std::size(levels)), D3D11_SDK_VERSION,
+                &device, nullptr, &context), "create CPU materialize D3D device");
+            check(device.As(&device1), "query CPU materialize D3D device 1");
+        }
+        ComPtr<ID3D11Texture2D> shared_texture;
+        check(device1->OpenSharedResource1(
+            static_cast<HANDLE>(frame.gpu_frame->shared_handle),
+            IID_PPV_ARGS(&shared_texture)), "open CPU materialize shared texture");
+        check(shared_texture.As(&keyed_mutex), "query CPU materialize keyed mutex");
+        const auto acquire = keyed_mutex->AcquireSync(1, 1000);
+        if (acquire != WAIT_OBJECT_0)
+            throw std::runtime_error("CPU materialize shared texture acquire timed out");
+        keyed_acquired = true;
+
+        D3D11_TEXTURE2D_DESC source_description{};
+        shared_texture->GetDesc(&source_description);
+        auto staging = source_description;
+        staging.Usage = D3D11_USAGE_STAGING;
+        staging.BindFlags = 0;
+        staging.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        staging.MiscFlags = 0;
+        ComPtr<ID3D11Texture2D> staging_texture;
+        check(device->CreateTexture2D(&staging, nullptr, &staging_texture),
+            "create CPU materialize staging texture");
+        context->CopyResource(staging_texture.Get(), shared_texture.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        check(context->Map(staging_texture.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+            "map CPU materialize staging texture");
+        const auto stride = static_cast<std::size_t>(mapped.RowPitch);
+        const auto y_bytes = stride * frame.height;
+        const auto uv_bytes = stride * ((static_cast<std::size_t>(frame.height) + 1U) / 2U);
+        if (!mapped.pData || stride == 0 || y_bytes + uv_bytes >
+            detail::MaxDxgiReadbackBytes)
+        {
+            context->Unmap(staging_texture.Get(), 0);
+            (void)keyed_mutex->ReleaseSync(1);
+            keyed_acquired = false;
+            return false;
+        }
+        frame.nv12.resize(y_bytes + uv_bytes);
+        const auto* source = static_cast<const std::uint8_t*>(mapped.pData);
+        std::memcpy(frame.nv12.data(), source, frame.nv12.size());
+        frame.stride = static_cast<std::int32_t>(stride);
+        context->Unmap(staging_texture.Get(), 0);
+        (void)keyed_mutex->ReleaseSync(1);
+        keyed_acquired = false;
+        return true;
+    } catch (...) {
+        if (keyed_acquired && keyed_mutex) (void)keyed_mutex->ReleaseSync(1);
+        return false;
+    }
 }
 
 DecoderAcceleration classify_dxva_mode(std::int32_t mode) noexcept {
@@ -781,6 +860,13 @@ SdrRgb convert_yuv_to_sdr(double y, double cb, double cr,
 
 } // namespace detail
 
+DecodedFrame::SharedGpuFrame::~SharedGpuFrame() {
+    if (shared_handle) {
+        CloseHandle(static_cast<HANDLE>(shared_handle));
+        shared_handle = nullptr;
+    }
+}
+
 struct MediaFoundationVideoDecoder::Impl {
     DecoderPreference preference{DecoderPreference::Auto};
     ComPtr<IMFTransform> transform;
@@ -790,6 +876,17 @@ struct MediaFoundationVideoDecoder::Impl {
     ComPtr<IMFDXGIDeviceManager> d3d_manager;
     ComPtr<ID3D11Device> d3d_device;
     ComPtr<ID3D11DeviceContext> d3d_context;
+    struct SharedTextureSlot {
+        ComPtr<ID3D11Texture2D> texture;
+        ComPtr<IDXGIKeyedMutex> mutex;
+        std::shared_ptr<DecodedFrame::SharedGpuFrame> frame;
+    };
+    // The renderer, latest-frame mailbox, analysis probe, and transient
+    // resize/screenshot consumers can retain several GPU frames at once.
+    // Four slots caused constant CPU fallback under normal 60 fps rendering.
+    std::array<SharedTextureSlot, 16> shared_texture_slots;
+    std::chrono::steady_clock::time_point last_pool_exhausted_log{};
+    std::chrono::steady_clock::time_point last_shared_frame_log{};
     ComPtr<ID3D11Texture2D> readback_texture;
     DXGI_FORMAT readback_format{DXGI_FORMAT_UNKNOWN};
     UINT readback_width{};
@@ -831,6 +928,11 @@ struct MediaFoundationVideoDecoder::Impl {
         d3d_manager.Reset();
         d3d_context.Reset();
         d3d_device.Reset();
+        for (auto& slot : shared_texture_slots) {
+            slot.frame.reset();
+            slot.mutex.Reset();
+            slot.texture.Reset();
+        }
         readback_texture.Reset();
         readback_format = DXGI_FORMAT_UNKNOWN;
         readback_width = readback_height = 0;
@@ -1173,6 +1275,99 @@ struct MediaFoundationVideoDecoder::Impl {
                 acceleration_query_exhausted ? "exhausted" : "retry"));
     }
 
+    bool try_share_dxgi_output(ID3D11Texture2D* source, UINT source_subresource,
+        const D3D11_TEXTURE2D_DESC& source_description, DecodedFrame& frame) {
+        if (!source || !d3d_device || !d3d_context || format.width == 0 ||
+            format.height == 0 || source_description.Width < format.width ||
+            source_description.Height < format.height)
+            return false;
+        SharedTextureSlot* selected_slot = nullptr;
+        for (auto& slot : shared_texture_slots) {
+            if (slot.frame && slot.frame.use_count() != 1) continue;
+            if (slot.frame && slot.frame->width == format.width &&
+                slot.frame->height == format.height &&
+                slot.frame->pixel_format == output_format) {
+                selected_slot = &slot;
+                break;
+            }
+            if (!selected_slot) selected_slot = &slot;
+        }
+        if (!selected_slot) {
+            const auto now = std::chrono::steady_clock::now();
+            if (last_pool_exhausted_log.time_since_epoch().count() == 0 ||
+                now - last_pool_exhausted_log >= std::chrono::seconds(1)) {
+                last_pool_exhausted_log = now;
+                logging::write("mf_decoder dxgi_zero_copy_pool_exhausted fallback=cpu");
+            }
+            return false;
+        }
+        if (selected_slot->frame &&
+            (selected_slot->frame->width != format.width ||
+             selected_slot->frame->height != format.height ||
+             selected_slot->frame->pixel_format != output_format)) {
+            selected_slot->frame.reset();
+            selected_slot->mutex.Reset();
+            selected_slot->texture.Reset();
+        }
+
+        D3D11_TEXTURE2D_DESC shared_description{};
+        shared_description.Width = format.width;
+        shared_description.Height = format.height;
+        shared_description.MipLevels = 1;
+        shared_description.ArraySize = 1;
+        shared_description.Format = output_format == PixelFormat::P010
+            ? DXGI_FORMAT_P010 : DXGI_FORMAT_NV12;
+        shared_description.SampleDesc.Count = 1;
+        shared_description.Usage = D3D11_USAGE_DEFAULT;
+        shared_description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        shared_description.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
+            D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+
+        if (!selected_slot->texture) {
+            if (FAILED(d3d_device->CreateTexture2D(&shared_description, nullptr,
+                    &selected_slot->texture))) return false;
+            if (FAILED(selected_slot->texture.As(&selected_slot->mutex))) {
+                selected_slot->texture.Reset();
+                return false;
+            }
+        }
+        const auto acquire_key = selected_slot->frame ? 1U : 0U;
+        if (selected_slot->mutex->AcquireSync(acquire_key, 1000) != WAIT_OBJECT_0)
+            return false;
+        const D3D11_BOX visible_box{0, 0, 0, format.width, format.height, 1};
+        d3d_context->CopySubresourceRegion(selected_slot->texture.Get(), 0, 0, 0, 0,
+            source, source_subresource, &visible_box);
+        if (FAILED(selected_slot->mutex->ReleaseSync(1))) return false;
+
+        if (!selected_slot->frame) {
+            ComPtr<IDXGIResource1> resource;
+            if (FAILED(selected_slot->texture.As(&resource))) return false;
+            HANDLE shared_handle{};
+            const auto handle_result = resource->CreateSharedHandle(nullptr,
+                DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr,
+                &shared_handle);
+            if (FAILED(handle_result) || !shared_handle) return false;
+            selected_slot->frame = std::make_shared<DecodedFrame::SharedGpuFrame>();
+            selected_slot->frame->shared_handle = shared_handle;
+            selected_slot->frame->width = format.width;
+            selected_slot->frame->height = format.height;
+            selected_slot->frame->pixel_format = output_format;
+        }
+        frame.gpu_frame = selected_slot->frame;
+        frame.stride = static_cast<std::int32_t>(format.width *
+            (output_format == PixelFormat::P010 ? 2U : 1U));
+        const auto now = std::chrono::steady_clock::now();
+        if (last_shared_frame_log.time_since_epoch().count() == 0 ||
+            now - last_shared_frame_log >= std::chrono::seconds(1)) {
+            last_shared_frame_log = now;
+            logging::write(std::format(
+                "mf_decoder dxgi_zero_copy_shared size={}x{} format={} source={}x{}",
+                format.width, format.height, pixel_format_name(output_format),
+                source_description.Width, source_description.Height));
+        }
+        return true;
+    }
+
     bool copy_dxgi_output(IMFSample* sample, DecodedFrame& frame) {
         if (!sample || !d3d_context) return false;
         ComPtr<IMFMediaBuffer> buffer;
@@ -1201,6 +1396,13 @@ struct MediaFoundationVideoDecoder::Impl {
                 description.MipLevels, description.ArraySize, source_subresource,
                 description.SampleDesc.Count));
         }
+        // Keep decoded frames private to the decoder device. Sharing the NV12
+        // texture through a keyed mutex with each preview device looked
+        // efficient, but an iOS portrait-to-landscape format change can leave
+        // the consumer keyed mutex behind a pending Present. That stalls the
+        // decoder/USB receive path until iOS ends mirroring. The DXVA decoder
+        // remains enabled; only the final frame hand-off uses the established
+        // CPU copy path, which has no cross-device synchronization.
         const auto component_bytes = output_format == PixelFormat::P010 ? 2ULL : 1ULL;
         const auto minimum_pitch_64 =
             (static_cast<std::uint64_t>(description.Width) +
