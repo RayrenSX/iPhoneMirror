@@ -893,7 +893,8 @@ void test_media_foundation_decoder() {
     check(!frames.empty(), "Media Foundation decodes captured H264 IDR");
     if (!frames.empty()) {
         check(frames.back().width == 1126 && frames.back().height == 2436, "decoded NV12 dimensions match format");
-        check(!frames.back().nv12.empty(), "decoded NV12 frame contains pixels");
+        check(!frames.back().nv12.empty() || frames.back().gpu_frame,
+            "decoded NV12 frame contains CPU pixels or a shared GPU frame");
     }
 
     iPhoneMirror::media::MediaFoundationH264Decoder software_decoder(

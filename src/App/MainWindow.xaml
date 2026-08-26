@@ -354,6 +354,129 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="MediaPlayerSpeedComboBoxItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource MediaOverlayTextBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="SpeedItemRoot"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SpeedItemRoot" Property="Background"
+                                        Value="{DynamicResource MediaPlayerControlHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="SpeedItemRoot" Property="Background"
+                                        Value="{DynamicResource MediaPlayerControlPressedBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="MediaPlayerSpeedComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="Width" Value="68"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Foreground" Value="{DynamicResource MediaOverlayTextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource MediaPlayerControlFillBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource MediaPlayerTrackBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="ItemContainerStyle"
+                    Value="{StaticResource MediaPlayerSpeedComboBoxItemStyle}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid SnapsToDevicePixels="True">
+                            <ToggleButton x:Name="ToggleButton"
+                                          Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}"
+                                          BorderThickness="{TemplateBinding BorderThickness}"
+                                          Padding="{TemplateBinding Padding}"
+                                          Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay,
+                                              RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="SpeedSelectorRoot"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="14"/>
+                                                </Grid.ColumnDefinitions>
+                                                <ContentPresenter Content="{Binding SelectionBoxItem,
+                                                    RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                                  ContentTemplate="{Binding SelectionBoxItemTemplate,
+                                                    RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                                  VerticalAlignment="Center"
+                                                                  TextElement.Foreground="{Binding Foreground,
+                                                    RelativeSource={RelativeSource AncestorType=ComboBox}}"/>
+                                                <Path Grid.Column="1" Data="M0,0 L5,5 L10,0"
+                                                      Stroke="{Binding Foreground,
+                                                    RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                      StrokeThickness="1.5" StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="SpeedSelectorRoot" Property="Background"
+                                                        Value="{DynamicResource MediaPlayerControlHoverBrush}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter TargetName="SpeedSelectorRoot" Property="Background"
+                                                        Value="{DynamicResource MediaPlayerControlPressedBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True"
+                                   PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Fade">
+                                <Border x:Name="SpeedDropDown"
+                                        MinWidth="{Binding ActualWidth,
+                                            RelativeSource={RelativeSource TemplatedParent}}"
+                                        Margin="0,4,0,0" Padding="3"
+                                        Background="{DynamicResource MediaOverlayBrush}"
+                                        BorderBrush="{DynamicResource MediaPlayerTrackBrush}"
+                                        BorderThickness="1" CornerRadius="8">
+                                    <ScrollViewer MaxHeight="240" CanContentScroll="True"
+                                                  Background="Transparent" BorderThickness="0">
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.38"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="MediaPlayerTimeTextStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource MediaPlayerSecondaryTextBrush}"/>
             <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
@@ -1050,6 +1173,16 @@
                         <StackPanel x:Name="PreviewQuickActions" Grid.Column="1"
                                     Orientation="Horizontal" VerticalAlignment="Center"
                                     Visibility="{Binding PreviewAndObsVisibility}">
+                            <Button Command="{Binding ToggleBluetoothControlCommand}"
+                                    IsEnabled="{Binding CanToggleBluetoothControl}"
+                                    Style="{StaticResource PreviewToolButton}"
+                                    ToolTip="{Binding BluetoothControlActionText}"
+                                    AutomationProperties.AutomationId="BluetoothControlButton">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Cursor20" FontSize="15"/>
+                                    <TextBlock Text="{Binding BluetoothControlActionText}" Margin="6,0,0,0"/>
+                                </StackPanel>
+                            </Button>
                             <Button x:Name="QuickMediaOutputButton"
                                     Click="OnMediaOutputToolbarClick"
                                     Style="{StaticResource PreviewToolButton}"
@@ -1086,13 +1219,6 @@
                                     ToolTip="{DynamicResource Screenshot}"
                                     AutomationProperties.AutomationId="QuickScreenshotButton">
                                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Screenshot20" FontSize="15"/>
-                            </Button>
-                            <Button x:Name="QuickRefreshPreviewButton" Click="OnRefreshPreviewClick"
-                                    Style="{StaticResource PreviewToolButton}"
-                                    IsEnabled="{Binding CanUseVisualPreviewTools}"
-                                    ToolTip="{DynamicResource RefreshFrame}"
-                                    AutomationProperties.AutomationId="QuickRefreshPreviewButton">
-                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ArrowClockwise20" FontSize="15"/>
                             </Button>
                             <Button x:Name="QuickFullScreenButton" Click="OnFullScreenClick"
                                     Style="{StaticResource PreviewToolButton}"
@@ -1195,17 +1321,20 @@
                                          from idle layout entirely instead of shrinking it through an
                                          intermediate native surface that DWM can expose for a frame. -->
                                     <Setter Property="Visibility" Value="Collapsed"/>
-                                    <Setter Property="IsHitTestVisible" Value="False"/>
-                                    <Style.Triggers>
+                                     <Setter Property="IsHitTestVisible" Value="False"/>
+                                     <Style.Triggers>
                                         <MultiDataTrigger>
                                             <MultiDataTrigger.Conditions>
                                                 <Condition Binding="{Binding IsCapturing}" Value="True"/>
                                                 <Condition Binding="{Binding IsAudioOnlyAirPlay}" Value="False"/>
                                                 <Condition Binding="{Binding IsVideoProtected}" Value="False"/>
                                             </MultiDataTrigger.Conditions>
-                                            <Setter Property="Visibility" Value="Visible"/>
-                                        </MultiDataTrigger>
-                                    </Style.Triggers>
+                                             <Setter Property="Visibility" Value="Visible"/>
+                                         </MultiDataTrigger>
+                                         <DataTrigger Binding="{Binding IsBluetoothControlEnabled}" Value="True">
+                                             <Setter Property="IsHitTestVisible" Value="True"/>
+                                         </DataTrigger>
+                                     </Style.Triggers>
                                 </Style>
                             </controls:NativePreviewHost.Style>
                         </controls:NativePreviewHost>
@@ -1296,6 +1425,31 @@
                                 </Border>
                             </StackPanel>
                         </Grid>
+                        <Grid x:Name="IndependentPreviewSurface"
+                              AutomationProperties.AutomationId="IndependentPreviewSurface"
+                              Background="{DynamicResource PreviewChromeBrush}"
+                              Panel.ZIndex="3" IsHitTestVisible="False"
+                              Visibility="Collapsed">
+                            <StackPanel HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" MaxWidth="440">
+                                <Border Width="84" Height="84" CornerRadius="42"
+                                        Background="{DynamicResource PreviewPanelAltBrush}"
+                                        BorderBrush="{DynamicResource PreviewBorderBrush}"
+                                        BorderThickness="1"
+                                        HorizontalAlignment="Center">
+                                    <ui:SymbolIcon Symbol="WindowNew20"
+                                                   Foreground="{DynamicResource PreviewTextBrush}"
+                                                   FontSize="34"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                </Border>
+                                <TextBlock Text="{DynamicResource IndependentPreviewOpened}"
+                                           Foreground="{DynamicResource PreviewTextBrush}"
+                                           FontSize="21" FontWeight="SemiBold"
+                                           TextAlignment="Center" TextWrapping="Wrap"
+                                           Margin="0,20,0,0"/>
+                            </StackPanel>
+                        </Grid>
                         <Grid x:Name="MediaCastSurface" Visibility="Collapsed"
                               AutomationProperties.AutomationId="MediaCastSurface"
                               Background="{DynamicResource PreviewChromeBrush}" Panel.ZIndex="2">
@@ -1375,6 +1529,7 @@
                                                         ToolTip="{DynamicResource MediaCastSeekBackward}"
                                                         AutomationProperties.AutomationId="MediaCastSeekBackwardButton">
                                                     <TextBlock Text="−10" FontFamily="Segoe UI Variable Text, Segoe UI"
+                                                               Foreground="{DynamicResource MediaOverlayTextBrush}"
                                                                FontSize="11" FontWeight="SemiBold"/>
                                                 </Button>
                                                 <Button x:Name="MediaCastPlayPauseButton"
@@ -1396,15 +1551,15 @@
                                                         ToolTip="{DynamicResource MediaCastSeekForward}"
                                                         AutomationProperties.AutomationId="MediaCastSeekForwardButton">
                                                     <TextBlock Text="+10" FontFamily="Segoe UI Variable Text, Segoe UI"
+                                                               Foreground="{DynamicResource MediaOverlayTextBrush}"
                                                                FontSize="11" FontWeight="SemiBold"/>
                                                 </Button>
                                             </StackPanel>
                                             <StackPanel Grid.Column="2" Orientation="Horizontal"
                                                         HorizontalAlignment="Right" VerticalAlignment="Center">
                                                 <ComboBox x:Name="MediaCastSpeedComboBox"
-                                                          Width="66" Height="30" Margin="0,0,6,0"
-                                                          Padding="6,0"
-                                                          VerticalContentAlignment="Center"
+                                                          Style="{StaticResource MediaPlayerSpeedComboBoxStyle}"
+                                                          Margin="0,0,6,0"
                                                           SelectedIndex="2"
                                                           SelectionChanged="OnMediaCastSpeedSelectionChanged"
                                                           ToolTip="{DynamicResource PlaybackSpeed}"
@@ -1422,8 +1577,8 @@
                                                         ToolTip="{DynamicResource MediaCastMute}"
                                                         AutomationProperties.AutomationId="MediaCastMuteButton">
                                                     <ui:SymbolIcon x:Name="MediaCastVolumeIcon"
+                                                                   Style="{StaticResource ButtonSymbolIcon}"
                                                                    Symbol="Speaker220"
-                                                                   Foreground="{DynamicResource MediaOverlayTextBrush}"
                                                                    FontSize="15"/>
                                                 </Button>
                                                 <Slider x:Name="MediaCastVolumeSlider"
@@ -1440,8 +1595,8 @@
                                                         ToolTip="{DynamicResource FullScreenPreview}"
                                                         AutomationProperties.AutomationId="MediaCastFullScreenButton">
                                                     <ui:SymbolIcon x:Name="MediaCastFullScreenIcon"
+                                                                   Style="{StaticResource ButtonSymbolIcon}"
                                                                    Symbol="FullScreenMaximize20"
-                                                                   Foreground="{DynamicResource MediaOverlayTextBrush}"
                                                                    FontSize="16"/>
                                                 </Button>
                                             </StackPanel>
@@ -1723,6 +1878,86 @@
                                         Minimum="0" Maximum="100"
                                         Value="{Binding PlaybackVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                         Margin="0,4,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource ControlSectionCard}"
+                                Visibility="{Binding VideoSettingsVisibility}">
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource BluetoothMouseSettingsTitle}"
+                                           Style="{StaticResource ControlSectionTitle}"/>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{DynamicResource BluetoothMouseSensitivity}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               FontSize="10" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding BluetoothMouseSensitivity, StringFormat={}{0:F0}%}"
+                                               Width="42" TextAlignment="Right"
+                                               Foreground="{DynamicResource AccentHoverBrush}"
+                                               FontSize="10" FontWeight="SemiBold"/>
+                                </Grid>
+                                <Slider Minimum="10" Maximum="1000" SmallChange="1" LargeChange="50"
+                                        Value="{Binding BluetoothMouseSensitivity, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        Margin="0,4,0,0" VerticalAlignment="Center"/>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{DynamicResource BluetoothWheelSensitivity}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               FontSize="10" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding BluetoothWheelSensitivity, StringFormat={}{0:F0}%}"
+                                               Width="42" TextAlignment="Right"
+                                               Foreground="{DynamicResource AccentHoverBrush}"
+                                               FontSize="10" FontWeight="SemiBold"/>
+                                </Grid>
+                                <Slider Minimum="10" Maximum="1000" SmallChange="1" LargeChange="50"
+                                        Value="{Binding BluetoothWheelSensitivity, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        Margin="0,4,0,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding BluetoothDeviceOrientationDisplay}"
+                                           Foreground="{DynamicResource MutedTextBrush}"
+                                           FontSize="10" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                <TextBlock Text="{DynamicResource BluetoothMouseDirectionHelp}"
+                                           Foreground="{DynamicResource MutedTextBrush}"
+                                           FontSize="9" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="{DynamicResource BluetoothPortraitMouseDirection}"
+                                                   Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
+                                        <ComboBox ItemsSource="{Binding BluetoothMouseDirections}"
+                                                  DisplayMemberPath="Label"
+                                                  SelectedItem="{Binding SelectedBluetoothPortraitMouseDirection, Mode=TwoWay}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="{DynamicResource BluetoothLandscapeMouseDirection}"
+                                                   Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
+                                        <ComboBox ItemsSource="{Binding BluetoothMouseDirections}"
+                                                  DisplayMemberPath="Label"
+                                                  SelectedItem="{Binding SelectedBluetoothLandscapeMouseDirection, Mode=TwoWay}"/>
+                                    </StackPanel>
+                                </Grid>
+                                <WrapPanel Margin="0,10,0,0">
+                                    <CheckBox Content="{DynamicResource BluetoothReverseHorizontal}"
+                                              IsChecked="{Binding BluetoothMouseReverseHorizontal, Mode=TwoWay}"/>
+                                    <CheckBox Content="{DynamicResource BluetoothReverseVertical}"
+                                              IsChecked="{Binding BluetoothMouseReverseVertical, Mode=TwoWay}"
+                                              Margin="18,0,0,0"/>
+                                </WrapPanel>
+                                <Button Content="{DynamicResource ApplyBluetoothMouseSettings}"
+                                        Command="{Binding ApplyBluetoothMouseSettingsCommand}"
+                                        Style="{StaticResource ToolButton}" Margin="0,12,0,0"
+                                        AutomationProperties.AutomationId="ApplyBluetoothMouseSettingsButton"/>
                             </StackPanel>
                         </Border>
 

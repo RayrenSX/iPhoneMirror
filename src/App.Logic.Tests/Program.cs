@@ -324,8 +324,7 @@ Equal(false, mainWindow.Descendants().Any(element =>
 foreach (var automationId in new[]
          {
              "QuickImageSettingsButton", "QuickPreviewWindowButton",
-             "QuickScreenshotButton", "QuickRefreshPreviewButton",
-             "QuickFullScreenButton",
+             "QuickScreenshotButton", "QuickFullScreenButton",
          })
 {
     Equal(true, mainWindow.Descendants().Any(element =>
@@ -333,6 +332,10 @@ foreach (var automationId in new[]
                 automationId, StringComparison.Ordinal)),
         $"preview quick actions contain {automationId}");
 }
+Equal(false, mainWindow.Descendants().Any(element =>
+        string.Equals((string?)element.Attribute("AutomationProperties.AutomationId"),
+            "QuickRefreshPreviewButton", StringComparison.Ordinal)),
+    "preview quick actions omit the redundant refresh button");
 
 var sourceDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", ".."));
@@ -344,6 +347,31 @@ var previewWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "NativePreviewWindow.cs"));
 var multiDevicePreviewSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "MultiDevicePreviewManager.cs"));
+var nativePreviewHostSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Controls", "NativePreviewHost.cs"));
+var previewAttachmentCoordinatorSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Controls", "PreviewAttachmentCoordinator.cs"));
+Equal(true, mainWindowSource.Contains("MainPreviewHost.Deactivate();",
+        StringComparison.Ordinal) &&
+    nativePreviewHostSource.Contains(
+        "PreviewAttachmentCoordinator.Deactivate(_window);",
+        StringComparison.Ordinal) &&
+    previewAttachmentCoordinatorSource.Contains(
+        "if (wasActive) NativeCore.DetachPreviewWindow();",
+        StringComparison.Ordinal),
+    "hidden main preview detaches its native renderer and can later reactivate");
+Equal(true,
+    mainWindowSource.Contains("SetFullScreenPreviewBackground(true)",
+        StringComparison.Ordinal) &&
+    mainWindowSource.Contains("MediaCastVideoHost.Background = Brushes.Black;",
+        StringComparison.Ordinal) &&
+    mainWindowSource.Contains("MainPreviewHost.IsFullScreenPresentation = _isFullScreen;",
+        StringComparison.Ordinal) &&
+    nativePreviewHostSource.Contains("internal bool IsFullScreenPresentation",
+        StringComparison.Ordinal) &&
+    nativePreviewHostSource.Contains("SetWindowRgn(_window, 0, true)",
+        StringComparison.Ordinal),
+    "full-screen previews use black WPF fill and a rectangular native surface");
 Equal(true, WindowsAutoPlayGuard.ShouldCancel(
         WindowsAutoPlayGuard.QueryCancelAutoPlayMessage, captureActive: true),
     "active capture cancels Windows AutoPlay device claims");
@@ -1042,6 +1070,32 @@ Equal(true, mainWindowText.Contains("x:Key=\"MediaPlayerIconButtonStyle\"",
             mainWindowText.Contains("OnMediaCastPlayerSizeChanged",
                 StringComparison.Ordinal),
     "cast playback controls share one themed, responsive interaction system");
+Equal(true,
+    mainWindowText.Contains("x:Key=\"MediaPlayerSpeedComboBoxStyle\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("x:Key=\"MediaPlayerSpeedComboBoxItemStyle\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("x:Name=\"PART_Popup\"", StringComparison.Ordinal) &&
+    mainWindowText.Contains("PlacementTarget=\"{Binding RelativeSource={RelativeSource TemplatedParent}}\"",
+        StringComparison.Ordinal) &&
+    mainWindowText.Contains("MediaCastSeekBackwardButton", StringComparison.Ordinal) &&
+    mainWindowText.Contains("MediaCastSeekForwardButton", StringComparison.Ordinal) &&
+    mainWindowText.Contains("Foreground=\"{DynamicResource MediaOverlayTextBrush}\"",
+        StringComparison.Ordinal),
+    "cast skip controls and speed selector keep white overlay text in light theme");
+foreach (var iconName in new[] { "MediaCastVolumeIcon", "MediaCastFullScreenIcon" })
+{
+    var iconStart = mainWindowText.IndexOf($"x:Name=\"{iconName}\"",
+        StringComparison.Ordinal);
+    var iconEnd = iconStart >= 0
+        ? mainWindowText.IndexOf("/>", iconStart, StringComparison.Ordinal)
+        : -1;
+    Equal(true, iconStart >= 0 && iconEnd > iconStart &&
+                mainWindowText[iconStart..iconEnd].Contains(
+                    "Style=\"{StaticResource ButtonSymbolIcon}\"",
+                    StringComparison.Ordinal),
+        $"{iconName} inherits the themed media button foreground");
+}
 var mediaPlayerButtonStyleStart = mainWindowText.IndexOf(
     "<Style x:Key=\"MediaPlayerIconButtonStyle\"", StringComparison.Ordinal);
 var mediaPlayerButtonStyleEnd = mainWindowText.IndexOf("</Style>",
@@ -1062,6 +1116,18 @@ Equal(false, mainWindowText.Contains("CloseMediaCastButton",
 
 var mainWindowCodePath = Path.Combine(sourceDirectory, "App", "MainWindow.xaml.cs");
 var mainWindowCode = File.ReadAllText(mainWindowCodePath);
+var bluetoothHidCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "BluetoothHidMouseService.cs"));
+Equal(true,
+    bluetoothHidCode.Contains("00002a22-0000-1000-8000-00805f9b34fb",
+        StringComparison.OrdinalIgnoreCase) &&
+    bluetoothHidCode.Contains("00002a33-0000-1000-8000-00805f9b34fb",
+        StringComparison.OrdinalIgnoreCase) &&
+    bluetoothHidCode.Contains("_protocolMode == 0 && HasSubscribers(_bootMouseInput)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("_protocolMode == 0 && HasSubscribers(_bootKeyboardInput)",
+        StringComparison.Ordinal),
+    "Bluetooth HID exposes and routes Boot Protocol keyboard and mouse reports");
 Equal(true, mainWindowCode.Contains("_mediaControlsHideTimer",
                 StringComparison.Ordinal) &&
             mainWindowCode.Contains("SetMediaCastControlsVisible",
@@ -1166,6 +1232,48 @@ Equal(true,
     !nativePreviewWindowCode.Contains("ShowWindow(candidate._handle, SwShow)",
         StringComparison.Ordinal),
     "native previews apply final bounds while hidden and become visible in one step");
+Equal(true,
+    nativePreviewWindowCode.Contains("private bool _isTopMost;",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains("SetWindowPos(_handle, HwndNoTopMost",
+        StringComparison.Ordinal) &&
+    !nativePreviewWindowCode.Contains("_isTopMost = SetWindowPos(_handle, HwndTopMost",
+        StringComparison.Ordinal),
+    "independent previews start non-topmost while retaining the manual pin command");
+Equal(true,
+    mainViewModelSource.Contains("private bool _bluetoothControlStopping;",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("if (_bluetoothControlStopping ||",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("IsBluetoothControlTarget(_viewModel.SelectedDevice?.Udid)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_secondaryMirrors.Activate(_activeControlUdid)",
+        StringComparison.Ordinal) &&
+    multiPreviewManagerCode.Contains("internal bool Activate(string? udid)",
+        StringComparison.Ordinal),
+    "Bluetooth control serializes stop/start, keeps the main target aligned, and restores independent focus");
+var busyStateStart = mainViewModelSource.IndexOf("public bool IsBusy", StringComparison.Ordinal);
+var busyStateEnd = busyStateStart >= 0
+    ? mainViewModelSource.IndexOf("private bool IsSettingsInteractionBlocked", busyStateStart,
+        StringComparison.Ordinal)
+    : -1;
+var busyStateCode = busyStateStart >= 0 && busyStateEnd > busyStateStart
+    ? mainViewModelSource[busyStateStart..busyStateEnd] : string.Empty;
+var mediaSelectionStart = mainViewModelSource.IndexOf(
+    "if (value?.IsMediaCast == true)", StringComparison.Ordinal);
+var mediaSelectionEnd = mediaSelectionStart >= 0
+    ? mainViewModelSource.IndexOf("return;", mediaSelectionStart,
+        StringComparison.Ordinal)
+    : -1;
+var mediaSelectionCode = mediaSelectionStart >= 0 && mediaSelectionEnd > mediaSelectionStart
+    ? mainViewModelSource[mediaSelectionStart..mediaSelectionEnd] : string.Empty;
+Equal(true,
+    busyStateCode.Contains("OnPropertyChanged(nameof(CanToggleBluetoothControl));",
+        StringComparison.Ordinal) &&
+    mediaSelectionCode.Contains("OnPropertyChanged(nameof(CanToggleBluetoothControl));",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("private void NotifyCaptureSessionChanged()", StringComparison.Ordinal),
+    "Bluetooth action availability refreshes for busy, media-source, and capture-session changes");
 Equal(true,
     previewRendererCode.Contains("horizontal_gap >= 0.0F && horizontal_gap < 1.0F",
         StringComparison.Ordinal) &&
@@ -1791,6 +1899,18 @@ try
         NotifyPrereleaseReleases = true,
         Language = "zh-CN",
         Theme = AppTheme.Light,
+        BluetoothMouseSensitivity = 135,
+        BluetoothMouseSensitivitySchema = 1,
+        BluetoothLandscapeMouseOrientationTurns = 3,
+        BluetoothMouseOrientationSchema = 1,
+        BluetoothWheelSensitivity = 180,
+        BluetoothLandscapeMouseMode = 4,
+        BluetoothMouseSettingsSchema = 1,
+        BluetoothPortraitMouseDirection = 2,
+        BluetoothLandscapeMouseDirection = 3,
+        BluetoothMouseReverseHorizontal = true,
+        BluetoothMouseReverseVertical = false,
+        BluetoothMouseDirectionSchema = 1,
     };
     settingsStore.Save(savedSettings);
     var loadedSettings = settingsStore.Load();
@@ -1804,6 +1924,22 @@ try
         "update settings preserve theme preference");
     Equal("zh-CN", loadedSettings.Language,
         "update settings preserve language preference");
+    Equal(135d, loadedSettings.BluetoothMouseSensitivity,
+        "update settings preserve Bluetooth mouse sensitivity");
+    Equal(3, loadedSettings.BluetoothLandscapeMouseOrientationTurns,
+        "update settings preserve Bluetooth landscape mouse orientation");
+    Equal(180d, loadedSettings.BluetoothWheelSensitivity,
+        "update settings preserve Bluetooth wheel sensitivity");
+    Equal(4, loadedSettings.BluetoothLandscapeMouseMode,
+        "update settings preserve Bluetooth landscape mouse mode");
+    Equal(2, loadedSettings.BluetoothPortraitMouseDirection,
+        "update settings preserve portrait mouse direction");
+    Equal(3, loadedSettings.BluetoothLandscapeMouseDirection,
+        "update settings preserve landscape mouse direction");
+    Equal(true, loadedSettings.BluetoothMouseReverseHorizontal,
+        "update settings preserve horizontal reversal");
+    Equal(false, loadedSettings.BluetoothMouseReverseVertical,
+        "update settings preserve vertical reversal");
     settingsStore.Update(settings => settings.Language = "en-US");
     var languageUpdatedSettings = settingsStore.Load();
     Equal(true, languageUpdatedSettings.AutoDownload,
@@ -1818,6 +1954,71 @@ finally
     if (Directory.Exists(updateSettingsRoot))
         Directory.Delete(updateSettingsRoot, recursive: true);
 }
+
+var defaultSettingsRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-default-settings-{Guid.NewGuid():N}");
+try
+{
+    var defaults = new UpdateSettingsStore(
+        Path.Combine(defaultSettingsRoot, "settings.json")).Load();
+    Equal(500d, defaults.BluetoothMouseSensitivity,
+        "Bluetooth mouse sensitivity defaults to 500 percent");
+    Equal(1000d, defaults.BluetoothWheelSensitivity,
+        "Bluetooth wheel sensitivity defaults to 1000 percent");
+    Equal(0, defaults.BluetoothPortraitMouseDirection,
+        "Bluetooth portrait direction defaults to up");
+    Equal(1, defaults.BluetoothLandscapeMouseDirection,
+        "Bluetooth landscape direction defaults to right");
+    Equal(false, defaults.BluetoothMouseReverseHorizontal,
+        "Bluetooth horizontal reversal defaults off");
+    Equal(false, defaults.BluetoothMouseReverseVertical,
+        "Bluetooth vertical reversal defaults off");
+
+    var legacyPath = Path.Combine(defaultSettingsRoot, "legacy.json");
+    Directory.CreateDirectory(defaultSettingsRoot);
+    File.WriteAllText(legacyPath, "{\"BluetoothMouseSensitivity\":1000,\"BluetoothMouseSensitivitySchema\":1,\"BluetoothWheelSensitivity\":100,\"BluetoothMouseSettingsSchema\":1}");
+    var migrated = new UpdateSettingsStore(legacyPath).Load();
+    Equal(1000d, migrated.BluetoothMouseSensitivity,
+        "legacy Bluetooth mouse sensitivity is never overwritten by a new default");
+    Equal(100d, migrated.BluetoothWheelSensitivity,
+        "legacy Bluetooth wheel sensitivity is never overwritten by a new default");
+}
+finally
+{
+    if (Directory.Exists(defaultSettingsRoot))
+        Directory.Delete(defaultSettingsRoot, recursive: true);
+}
+
+Equal(BluetoothDeviceOrientation.Portrait,
+    BluetoothMouseOrientationMapper.Detect(1206, 2622),
+    "Bluetooth orientation detects portrait source frames");
+Equal(BluetoothDeviceOrientation.Landscape,
+    BluetoothMouseOrientationMapper.Detect(2622, 1206),
+    "Bluetooth orientation detects landscape source frames");
+Equal(BluetoothDeviceOrientation.Unknown,
+    BluetoothMouseOrientationMapper.Detect(0, 0),
+    "Bluetooth orientation remains unknown before the first frame");
+var bluetoothNoticePolicy = new BluetoothControlNoticePolicy();
+Equal(true, bluetoothNoticePolicy.ShouldShowForDevice("00008101-TEST-A"),
+    "Bluetooth guidance is shown for the first device use in this application run");
+Equal(false, bluetoothNoticePolicy.ShouldShowForDevice("00008101-test-a"),
+    "Bluetooth guidance is not repeated for the same device in one application run");
+Equal(true, bluetoothNoticePolicy.ShouldShowForDevice("00008101-TEST-B"),
+    "Bluetooth guidance remains available for a different device");
+Equal(false, bluetoothNoticePolicy.ShouldShowForDevice("  "),
+    "Bluetooth guidance requires a stable device identifier");
+var rightFromUp = BluetoothMouseOrientationMapper.Map(0, -10, 1206, 2622, 0,
+    BluetoothMouseDirection.Up, BluetoothMouseDirection.Right, false, false);
+Equal((0d, -10d), rightFromUp,
+    "portrait up direction keeps upward movement unchanged");
+var landscapeRightFromUp = BluetoothMouseOrientationMapper.Map(0, -10, 2622, 1206, 0,
+    BluetoothMouseDirection.Up, BluetoothMouseDirection.Right, false, false);
+Equal((10d, 0d), landscapeRightFromUp,
+    "landscape right direction maps upward movement to the right");
+var reversed = BluetoothMouseOrientationMapper.Map(3, -4, 1206, 2622, 0,
+    BluetoothMouseDirection.Up, BluetoothMouseDirection.Up, true, true);
+Equal((-3d, 4d), reversed,
+    "Bluetooth axis reversal applies after direction mapping");
 
 var updateNetworkRoot = Path.Combine(Path.GetTempPath(),
     $"iphone-mirror-update-network-{Guid.NewGuid():N}");

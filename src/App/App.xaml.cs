@@ -193,12 +193,17 @@ public partial class App : Application
         window.Show();
     }
 
-    internal void SaveUpdateSettings()
+    internal bool SaveUpdateSettings()
     {
-        try { _settingsStore.Save(UpdateSettings); }
+        try
+        {
+            _settingsStore.Save(UpdateSettings);
+            return true;
+        }
         catch (Exception error)
         {
             DiagnosticLogger.Exception("settings", "save_failed", error);
+            return false;
         }
     }
 
@@ -211,7 +216,7 @@ public partial class App : Application
             return;
         }
 
-        SaveUpdateSettings();
+        _ = SaveUpdateSettings();
         ThemeService.Shutdown();
         try { _releaseClient.Dispose(); }
         catch (Exception error)

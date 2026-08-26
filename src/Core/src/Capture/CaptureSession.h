@@ -76,6 +76,8 @@ public:
     static constexpr auto SilenceLimit = std::chrono::seconds(10);
 
     void observe_media(Clock::time_point now) noexcept { last_media_at_ = now; }
+    void reset() noexcept { last_media_at_.reset(); }
+    void arm(Clock::time_point now) noexcept { last_media_at_ = now; }
 
     [[nodiscard]] bool expired(Clock::time_point now) const noexcept {
         return last_media_at_ && now >= *last_media_at_ &&
@@ -157,6 +159,7 @@ public:
         std::size_t pending_bytes, std::size_t incoming_bytes,
         bool keyframe) noexcept;
     [[nodiscard]] bool awaiting_keyframe() const noexcept;
+    void reset() noexcept;
 
 private:
     bool awaiting_keyframe_{};
@@ -210,10 +213,6 @@ private:
     mutable std::mutex mutex_;
     Snapshot snapshot_;
     std::shared_ptr<const media::DecodedFrame> latest_frame_;
-    std::deque<std::shared_ptr<const media::DecodedFrame>> render_queue_;
-    std::size_t render_queue_bytes_{};
-    std::uint64_t stale_render_frames_{};
-    std::uint64_t selected_render_frames_{};
     std::jthread worker_;
     mutable std::mutex active_usb_mutex_;
     std::function<void()> active_usb_cancel_;
@@ -234,7 +233,6 @@ private:
     // keep the capture session alive and let the UI explain the limitation.
     std::atomic_bool protected_video_detected_{};
     detail::DecoderSwitchCoordinator decoder_switch_;
-    std::atomic_int requested_display_orientation_{};
     std::atomic_uint64_t native_probe_size_{};
     mutable std::mutex audio_mutex_;
     std::unique_ptr<audio::WasapiRenderer> audio_renderer_;

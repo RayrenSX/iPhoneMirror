@@ -704,6 +704,12 @@ bool VideoQueueBudget::awaiting_keyframe() const noexcept {
     return awaiting_keyframe_;
 }
 
+void VideoQueueBudget::reset() noexcept {
+    awaiting_keyframe_ = false;
+    dropped_samples_ = 0;
+    dropped_bytes_ = 0;
+}
+
 } // namespace detail
 
 UsbDisplayConfiguration make_usb_display_configuration(UsbProjectionMode mode,
@@ -941,8 +947,6 @@ void CaptureSession::stop() noexcept {
     // subsequent selection change.
     {
         std::scoped_lock lock(mutex_);
-        render_queue_.clear();
-        render_queue_bytes_ = 0;
         latest_frame_.reset();
     }
     release_usb_transition_gate();
@@ -966,7 +970,7 @@ void CaptureSession::set_audio_volume(float volume) noexcept {
 
 void CaptureSession::set_target_fps(std::uint32_t target_fps) noexcept {
     target_fps_.store(target_fps, std::memory_order_relaxed);
-    logging::write(std::format("video target_fps={}", target_fps));
+    logging::write(std::format("video render_fps_limit={}", target_fps));
 }
 
 std::uint32_t CaptureSession::target_fps() const noexcept {
@@ -988,8 +992,9 @@ DecoderSwitchStatus CaptureSession::decoder_switch_status() const noexcept {
 }
 
 void CaptureSession::request_display_orientation(bool landscape) noexcept {
-    if (preferences_.usb_projection_mode != UsbProjectionMode::AirPlay) return;
-    requested_display_orientation_.store(landscape ? 2 : 1, std::memory_order_release);
+    // Display orientation is negotiated by iOS as part of the active stream.
+    // Restarting QuickTime from a preview rotation can terminate mirroring.
+    (void)landscape;
 }
 
 void CaptureSession::stop_audio_renderer() noexcept {
@@ -1018,52 +1023,11 @@ std::shared_ptr<const media::DecodedFrame> CaptureSession::latest_frame() const 
 }
 
 std::shared_ptr<const media::DecodedFrame> CaptureSession::next_render_frame() {
-    std::size_t dropped{};
-    std::size_t depth{};
-    std::uint64_t selected{};
-    std::uint64_t stale_total{};
-    std::shared_ptr<const media::DecodedFrame> frame;
-    double pipeline_ms{};
-    {
-        std::scoped_lock lock(mutex_);
-        if (render_queue_.empty()) return nullptr;
-
-        depth = render_queue_.size();
-        // Encoded H.264 input must remain FIFO because pictures reference one
-        // another. Decoded pictures do not have that restriction. If the MFT
-        // releases a burst, or the window stalls briefly, presenting every
-        // stale output makes the preview permanently trail the phone. Keep a
-        // tiny two-frame jitter allowance, then jump to the newest complete
-        // picture (mailbox semantics), exactly where dropping is safe.
-        if (depth > 2) {
-            dropped = depth - 1;
-            frame = std::move(render_queue_.back());
-            render_queue_.clear();
-            render_queue_bytes_ = 0;
-            stale_render_frames_ += dropped;
-        } else {
-            frame = std::move(render_queue_.front());
-            render_queue_.pop_front();
-            render_queue_bytes_ -= frame->nv12.size();
-        }
-        selected = ++selected_render_frames_;
-        stale_total = stale_render_frames_;
-        if (frame && frame->received_at.time_since_epoch().count() != 0) {
-            pipeline_ms = std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - frame->received_at).count();
-            snapshot_.latency_ms = std::max(0.0, pipeline_ms);
-        }
-    }
-    // A deliberate 24/30 fps presentation cap drops decoded source frames on
-    // nearly every selection. Sample that expected mailbox activity instead
-    // of turning the real-time log itself into a capture-thread workload.
-    if (selected <= 3 || selected % 300 == 0 ||
-        (dropped != 0 && selected % 60 == 0)) {
-        logging::write(std::format(
-            "render_select n={} depth={} dropped={} stale_total={} pipeline_ms={:.3f}",
-            selected, depth, dropped, stale_total, pipeline_ms));
-    }
-    return frame;
+    // All preview windows read the same immutable latest-frame mailbox. A
+    // destructive FIFO here leaves multi-window renderers with stale GPU
+    // references, eventually exhausting the shared-texture pool.
+    std::scoped_lock lock(mutex_);
+    return latest_frame_;
 }
 
 std::shared_ptr<const AudioPacket> CaptureSession::next_audio_packet(
@@ -1120,7 +1084,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         product_type_ascii.push_back(ch <= 0x7f ? static_cast<char>(ch) : '?');
     const auto device_fp = logging::fingerprint(serial_);
     logging::write(std::format(
-        "capture_run begin device_fp={} backend={} product_type={} usb_display_size={}x{} target_fps={} audio={} volume={:.3f} decoder_policy={} color_policy={}", device_fp,
+        "capture_run begin device_fp={} backend={} product_type={} usb_display_size={}x{} render_fps_limit={} audio={} volume={:.3f} decoder_policy={} color_policy={}", device_fp,
         usb_backend_ == UsbBackend::LibUsb0 ? "libusb0" :
         usb_backend_ == UsbBackend::UsbDk ? "usbdk" : "libusb1",
         product_type_ascii,
@@ -1596,6 +1560,9 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 native_portrait_size_.load(std::memory_order_acquire));
         };
         std::atomic<std::int64_t> last_audio_activity_ns{};
+        std::atomic_bool fast_stream_reconnect_requested{};
+        std::atomic_bool landscape_video_stream{};
+        std::atomic_uint32_t decoder_reconnect_generation{};
         // The queue preserves normal H.264 reference order. Sustained decoder
         // overload is handled by the producer as a bounded GOP reset: discard
         // through the next IDR, then rebuild the decoder from that keyframe.
@@ -1614,21 +1581,26 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             std::uint64_t preference_switch_wait_samples{};
             std::uint64_t video_decode_count{};
             std::uint64_t video_output_count{};
-            int orientation_candidate{};
-            int orientation_stability{};
-            int last_orientation_request{};
-            std::optional<std::chrono::steady_clock::time_point> low_portrait_since;
-            auto low_portrait_retry_after = std::chrono::steady_clock::time_point::min();
             detail::ProtectedVideoDetector protected_video_detector;
-            std::optional<std::chrono::steady_clock::time_point> black_with_audio_since;
-            auto black_landscape_retry_after = std::chrono::steady_clock::time_point::min();
             bool native_probe_published{};
-            std::optional<std::chrono::steady_clock::time_point> portrait_after_landscape_since;
-            bool saw_landscape_source{};
             bool reordered_timing_reported{};
+            std::uint32_t applied_reconnect_generation{};
             std::deque<std::pair<std::int64_t, std::chrono::steady_clock::time_point>> input_times;
             const auto decoder_started = std::chrono::steady_clock::now();
             while (!worker_token.stop_requested()) {
+                const auto reconnect_generation = decoder_reconnect_generation.load(
+                    std::memory_order_acquire);
+                if (reconnect_generation != applied_reconnect_generation) {
+                    video_decoder.reset();
+                    current_format.reset();
+                    configured_format.reset();
+                    input_times.clear();
+                    applied_reconnect_generation = reconnect_generation;
+                    decoder_switch_.set_applied_runtime_mode(
+                        {active_decoder_preference, applied_decoder_generation},
+                        DecoderRuntimeMode::Unknown);
+                    logging::write("video_worker decoder_reset reason=quicktime_fast_reconnect");
+                }
                 PendingVideoSample pending;
                 {
                     std::unique_lock lock(video_queue_mutex);
@@ -1663,6 +1635,14 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 const auto& format = *current_format;
                 if (!video_decoder || !configured_format ||
                     !same_video_decoder_configuration(*configured_format, format)) {
+                    if (configured_format) {
+                        std::scoped_lock lock(mutex_);
+                        latest_frame_.reset();
+                        logging::write(std::format(
+                            "video_worker preview_frames_cleared format_change={}x{}_to_{}x{}",
+                            configured_format->width, configured_format->height,
+                            format.width, format.height));
+                    }
                     video_decoder = std::make_unique<media::MediaFoundationVideoDecoder>(
                         active_decoder_preference);
                     video_decoder->configure(format, 60, 1);
@@ -1672,6 +1652,8 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         {active_decoder_preference, applied_decoder_generation},
                         active_decoder_runtime_mode);
                     configured_format = format;
+                    landscape_video_stream.store(format.width > format.height,
+                        std::memory_order_release);
                 }
                 auto& sample = pending.sample;
                 std::size_t sample_offset{};
@@ -1881,25 +1863,12 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         ++video_output_count;
                         std::scoped_lock lock(mutex_);
                         latest_frame_ = published;
-                        render_queue_.push_back(published);
-                        render_queue_bytes_ += published->nv12.size();
-                        constexpr std::size_t MaxRenderQueue = 32;
-                        constexpr std::size_t MaxRenderQueueBytes = 128U * 1024U * 1024U;
-                        while (render_queue_.size() > 1 &&
-                            (render_queue_.size() > MaxRenderQueue ||
-                             render_queue_bytes_ > MaxRenderQueueBytes)) {
-                            render_queue_bytes_ -= render_queue_.front()->nv12.size();
-                            render_queue_.pop_front();
-                            ++stale_render_frames_;
-                        }
                     }
                     {
                         std::scoped_lock lock(mutex_);
                         // The renderer replaces this with receive-to-display
-                        // latency. Keep decode time only until the first frame
-                        // is selected, so headless diagnostics still have a
-                        // useful value.
-                        if (selected_render_frames_ == 0) snapshot_.latency_ms = decode_ms;
+                        // latency. Keep decode time for headless diagnostics.
+                        snapshot_.latency_ms = decode_ms;
                     }
                     if (published && report_decode) {
                         logging::write(std::format(
@@ -1907,21 +1876,21 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                             video_decode_count, published->width, published->height,
                             published->stride, published->nv12.size(), published->timestamp_100ns));
                     }
+                    // Keep shared GPU frames on the GPU path. The protected-content
+                    // and letterbox heuristics accept unavailable CPU pixels, while
+                    // readback during a live format transition can race driver-owned
+                    // NV12 surfaces and destabilize the capture process.
+                    std::shared_ptr<const media::DecodedFrame> analysis_frame = published;
                     if (published) {
-                        protected_video_detector.observe(
-                            frame_is_protected_black_candidate(*published),
-                            std::chrono::steady_clock::now());
+                        if (!analysis_frame->nv12.empty())
+                            protected_video_detector.observe(
+                                frame_is_protected_black_candidate(*analysis_frame),
+                                std::chrono::steady_clock::now());
                         protected_video_detected_.store(
                             protected_video_detector.detected(),
                             std::memory_order_release);
                     }
                     if (published && video_output_count % 15 == 0) {
-                        const auto detected = padded_content_orientation(*published);
-                        const bool ios_low_portrait_tier =
-                            published->width >= 880 && published->width <= 890 &&
-                            published->height >= 1918 && published->height <= 1922;
-                        const auto orientation_now = std::chrono::steady_clock::now();
-                        const auto native_size = read_native_portrait_size();
                         if (adaptive_display && !native_probe_published &&
                             preferences_.usb_requested_width == 0 &&
                             preferences_.usb_requested_height == 0 &&
@@ -1932,99 +1901,6 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                             native_probe_size_.store(packed, std::memory_order_release);
                             logging::write(std::format(
                                 "display valeria_probe source={}x{} captured=true",
-                                published->width, published->height));
-                        }
-                        if (published->width > published->height) {
-                            saw_landscape_source = true;
-                            portrait_after_landscape_since.reset();
-                        } else if (saw_landscape_source && (!detected || !*detected)) {
-                            if (!portrait_after_landscape_since)
-                                portrait_after_landscape_since = orientation_now;
-                            if (orientation_now - *portrait_after_landscape_since >=
-                                std::chrono::seconds(2)) {
-                                requested_display_orientation_.store(1, std::memory_order_release);
-                                saw_landscape_source = false;
-                                portrait_after_landscape_since.reset();
-                                logging::write(std::format(
-                                    "display stable_axis_transition=landscape_to_portrait source={}x{} request=probed_native",
-                                    published->width, published->height));
-                            }
-                        } else if (saw_landscape_source) {
-                            portrait_after_landscape_since.reset();
-                        }
-                        const auto orientation_now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            orientation_now.time_since_epoch()).count();
-                        const auto audio_age_ns = orientation_now_ns -
-                            last_audio_activity_ns.load(std::memory_order_acquire);
-                        const bool audio_active = audio_age_ns >= 0 &&
-                            audio_age_ns <= std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                std::chrono::seconds(1)).count();
-                        const bool nearly_black = frame_is_nearly_black(*published);
-                        // Orientation recovery is deliberately narrower than
-                        // the protected-content hint: it needs recent audio so
-                        // a normal all-black UI does not trigger renegotiation.
-                        if (audio_active && nearly_black) {
-                            if (!black_with_audio_since) black_with_audio_since = orientation_now;
-                            if (orientation_now >= black_landscape_retry_after &&
-                                orientation_now - *black_with_audio_since >= std::chrono::seconds(1)) {
-                                requested_display_orientation_.store(2, std::memory_order_release);
-                                last_orientation_request = 2;
-                                orientation_candidate = 0;
-                                orientation_stability = 0;
-                                black_with_audio_since.reset();
-                                black_landscape_retry_after = orientation_now + std::chrono::seconds(15);
-                                logging::write(std::format(
-                                    "display black_with_audio stable_seconds=1 source={}x{} request=landscape target={}x{}",
-                                    published->width, published->height,
-                                    native_size.height, native_size.width));
-                            }
-                        } else {
-                            black_with_audio_since.reset();
-                        }
-                        if (ios_low_portrait_tier) {
-                            if (!low_portrait_since) low_portrait_since = orientation_now;
-                            if (orientation_now >= low_portrait_retry_after &&
-                                orientation_now - *low_portrait_since >= std::chrono::seconds(10)) {
-                                requested_display_orientation_.store(1, std::memory_order_release);
-                                last_orientation_request = 1;
-                                orientation_candidate = 0;
-                                orientation_stability = 0;
-                                low_portrait_since.reset();
-                                low_portrait_retry_after = orientation_now + std::chrono::seconds(30);
-                                logging::write(std::format(
-                                    "display low_portrait_tier={}x{} stable_seconds=10 request=native_portrait target={}x{}",
-                                    published->width, published->height,
-                                    native_size.width, native_size.height));
-                            }
-                        } else {
-                            low_portrait_since.reset();
-                        }
-                        // Keep a confirmed landscape request latched. Recent
-                        // iOS versions may briefly alternate 1920x1080 with a
-                        // portrait carrier while the phone is still sideways;
-                        // clearing here would repeatedly restart the encoder.
-                        if (last_orientation_request == 1 && published->height > published->width) {
-                            last_orientation_request = 0;
-                            orientation_candidate = 0;
-                            orientation_stability = 0;
-                        }
-                        const int candidate = detected ? (*detected ? 2 : 1) : 0;
-                        if (candidate != 0 && candidate == orientation_candidate)
-                            ++orientation_stability;
-                        else {
-                            orientation_candidate = candidate;
-                            orientation_stability = candidate == 0 ? 0 : 1;
-                        }
-                        const bool request_pending = last_orientation_request != 0 &&
-                            ((last_orientation_request == 2 && published->height > published->width) ||
-                             (last_orientation_request == 1 && published->width > published->height));
-                        if (!request_pending && orientation_stability >= 3 &&
-                            candidate != last_orientation_request) {
-                            requested_display_orientation_.store(candidate, std::memory_order_release);
-                            last_orientation_request = candidate;
-                            logging::write(std::format(
-                                "display auto_orientation={} source={}x{}",
-                                candidate == 2 ? "landscape" : "portrait",
                                 published->width, published->height));
                         }
                     }
@@ -2048,12 +1924,31 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         bool display_release_seen{};
         bool display_reconfigure_landscape{};
         auto display_release_deadline = started;
-        const auto ping_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+        auto ping_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
         std::optional<std::chrono::steady_clock::time_point>
             first_video_wait_started;
-        const auto ping_recovery_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        auto ping_recovery_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
         bool ping_recovery_attempted{};
+        bool fast_stream_reconnect_attempted{};
         detail::StreamingSilenceWatchdog media_silence_watchdog;
+        detail::StreamingSilenceWatchdog video_silence_watchdog;
+        const auto request_fast_reconnect_for_missing_frame_rate = [&] {
+            if (fast_stream_reconnect_attempted ||
+                !landscape_video_stream.load(std::memory_order_acquire)) return;
+            const auto now = std::chrono::steady_clock::now();
+            if (video_silence_watchdog.silence_duration(now) <
+                std::chrono::milliseconds(2500)) return;
+            fast_stream_reconnect_requested.store(true, std::memory_order_release);
+            {
+                std::scoped_lock lock(mutex_);
+                snapshot_.fps = 0;
+                snapshot_.message = L"画面帧率不可用，正在重新连接投屏";
+                snapshot_.state = State::Handshaking;
+            }
+            logging::write(
+                "quicktime_fast_reconnect requested=frame_rate_unavailable "
+                "video_silence_intervals=10 usb_configuration=retained");
+        };
         const auto detect_streaming_media_silence = [&] {
             const auto now = std::chrono::steady_clock::now();
             if (!media_silence_watchdog.expired(now)) return;
@@ -2089,6 +1984,40 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         };
         while (!stop_token.stop_requested()) {
             video_worker_failure.rethrow_if_set();
+            if (!fast_stream_reconnect_attempted &&
+                fast_stream_reconnect_requested.exchange(false, std::memory_order_acq_rel)) {
+                fast_stream_reconnect_attempted = true;
+                try {
+                    {
+                        std::scoped_lock lock(video_queue_mutex);
+                        video_queue.clear();
+                        video_queue_bytes = 0;
+                        video_queue_budget.reset();
+                    }
+                    video_queue_cv.notify_all();
+                    decoder_reconnect_generation.fetch_add(1, std::memory_order_acq_rel);
+                    stop_audio_renderer();
+                    usb->clear_io_cancellation();
+                    decoder.reset();
+                    protocol.reset();
+                    usb->recover_handshake();
+                    usb->write(quicktime::make_ping(), 1000);
+                    media_silence_watchdog.arm(std::chrono::steady_clock::now());
+                    video_silence_watchdog.arm(std::chrono::steady_clock::now());
+                    first_video_wait_started.reset();
+                    ping_recovery_attempted = true;
+                    ping_deadline = std::chrono::steady_clock::now() +
+                        std::chrono::seconds(8);
+                    ping_recovery_deadline = std::chrono::steady_clock::now() +
+                        std::chrono::seconds(1);
+                    logging::write(
+                        "quicktime_fast_reconnect sent=true usb_configuration=retained");
+                } catch (const std::exception& error) {
+                    logging::write(logging::Level::Warning, "usb", std::format(
+                        "quicktime_fast_reconnect send_failed={} usb_configuration=retained",
+                        error.what()));
+                }
+            }
             const auto count = usb->read(read_buffer, 250);
             video_worker_failure.rethrow_if_set();
             if (protocol.state() != quicktime::SessionState::WaitingForPing &&
@@ -2104,6 +2033,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 }
             }
             if (count == 0) {
+                request_fast_reconnect_for_missing_frame_rate();
                 detect_streaming_media_silence();
                 if (display_reconfigure_pending &&
                     std::chrono::steady_clock::now() >= display_release_deadline) {
@@ -2189,16 +2119,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     bool was_recovering{};
                     {
                         std::unique_lock lock(video_queue_mutex);
-                        if (!video_queue_budget.awaiting_keyframe() &&
-                            !video_queue_budget.has_capacity(video_queue.size(),
-                                video_queue_bytes, incoming_bytes)) {
-                            video_queue_cv.wait_for(lock, std::chrono::milliseconds(20), [&] {
-                                return stop_token.stop_requested() ||
-                                    video_worker_failure.failed() ||
-                                    video_queue_budget.has_capacity(video_queue.size(),
-                                        video_queue_bytes, incoming_bytes);
-                            });
-                        }
+                        // This is the USB receive thread. Never wait for the
+                        // decoder here: high-bitrate landscape frames can
+                        // arrive faster than a format-switching decoder
+                        // drains them, and even a 20ms wait delays NEED/clock
+                        // replies enough for some iOS versions to end the
+                        // QuickTime stream. The admission policy below drops
+                        // safely through the next IDR and resets the decoder.
                         queue_cancelled = stop_token.stop_requested() ||
                             video_worker_failure.failed();
                         if (!queue_cancelled) {
@@ -2298,6 +2225,8 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 if (event.video_sample || event.audio_sample) {
                     const auto media_received_at = std::chrono::steady_clock::now();
                     media_silence_watchdog.observe_media(media_received_at);
+                    if (event.video_sample)
+                        video_silence_watchdog.observe_media(media_received_at);
                     // Keep all wired preflight, activation, re-enumeration,
                     // claim and handshake work serialized. A second wired
                     // session may begin only after this one proves a stable
@@ -2358,6 +2287,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     }
                 }
             }
+            request_fast_reconnect_for_missing_frame_rate();
             detect_streaming_media_silence();
             const auto probed_size = display_reconfigure_pending ? 0 :
                 native_probe_size_.exchange(0, std::memory_order_acq_rel);
@@ -2382,26 +2312,6 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     "display valeria_probe disable target={}x{} probed_native={}x{} recovery_fallback={}",
                     activation_width, activation_height, probed_width, probed_height,
                     quicktime_open_recovered));
-            }
-            const auto requested_orientation = display_reconfigure_pending ? 0 :
-                requested_display_orientation_.exchange(0, std::memory_order_acq_rel);
-            if (adaptive_display && requested_orientation != 0 && !display_reconfigure_pending) {
-                const bool landscape = requested_orientation == 2;
-                const auto native_size = read_native_portrait_size();
-                const auto requests = protocol.begin_display_reconfigure(
-                    landscape ? native_size.height : native_size.width,
-                    landscape ? native_size.width : native_size.height);
-                for (const auto& request : requests) usb->write(request, 1000);
-                display_reconfigure_pending = true;
-                display_release_seen = false;
-                display_reconfigure_landscape = landscape;
-                display_release_deadline = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(1200);
-                logging::write(std::format(
-                    "display reconfigure stop orientation={} target={}x{}",
-                    landscape ? "landscape" : "portrait",
-                    landscape ? native_size.height : native_size.width,
-                    landscape ? native_size.width : native_size.height));
             }
             if (display_reconfigure_pending && display_release_seen) {
                 const auto native_size = read_native_portrait_size();

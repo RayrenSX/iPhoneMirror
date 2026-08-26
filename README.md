@@ -40,7 +40,7 @@ QQ群号：**1050045279**
 
 ## 项目描述
 
-iPhoneMirror 是一个面向 Windows 10/11 x64 的本地 iPhone/iPad 投屏工具，目标是
+iPhoneMirror 是一个面向 Windows 10/11 x64 的本地 iPhone/iPad 投屏与蓝牙反向控制工具，目标是
 在不依赖云端中转的情况下，将 USB 有线采集和局域网 AirPlay 接收统一到同一套
 预览、音频、截图、独立窗口、OBS 和多设备会话能力中。
 
@@ -75,12 +75,11 @@ iPhoneMirror 不给所有设备套用同一个通用圆角。程序会根据 App
 - H.264/CoreMedia 与 AirPlay 媒体在本机解码，通过 D3D11/DirectComposition 原生显示；
 - 媒体不经过 iPhoneMirror 云端中转，USB 场景不依赖网络；
 - 干净的独立窗口可直接用于 OBS，截图直接读取解码帧，不包含软件 UI。
+- 可选 BLE HID 鼠标/键盘控制：配合 iOS 辅助触控，无需在手机安装 App 或越狱；
 
 ## 界面预览
 
 ![主界面与投屏设置](docs/images/user-guide/settings-workspace1.png)
-
-![双设备独立窗口与设备圆角](docs/images/user-guide/双设备独立窗口，圆弧.png)
 
 ### 与常见投屏方案的区别
 
@@ -94,8 +93,8 @@ iPhoneMirror 不给所有设备套用同一个通用圆角。程序会根据 App
 | 驱动 | 独立管理器按设备检查、修复和卸载 | 驱动操作常混在主程序内，诊断信息较少 |
 | 数据路径 | 本机/局域网处理，无项目云端中继 | 部分方案要求登录、联网或云服务 |
 
-iPhoneMirror 当前不提供手机触控或远程控制，也没有内建视频编辑器。Apple 私有协议和
-兼容 AirPlay 实现可能随未来 iOS 更新而需要适配。
+iPhoneMirror 的蓝牙控制受 iOS 辅助触控和 Windows 蓝牙外设模式限制，不能注入多指触控；
+项目也没有内建视频编辑器。Apple 私有协议和兼容 AirPlay 实现可能随未来 iOS 更新而需要适配。
 
 ## 下载
 
@@ -383,7 +382,7 @@ iPhone/iPad
 - 外部采集驱动的干净 Win10/Win11 安装矩阵仍需更广泛验证。
 - QuickTime Screen Capture 并非 Apple 公开、稳定的第三方 API。
 - AirPlay 兼容实现并非 Apple 官方接口，未来 iOS 更新可能需要适配。
-- 本项目不提供对 iPhone 的触控或远程控制。
+- 蓝牙反向控制依赖适配器的 BLE 外设模式和 iOS 辅助触控，只提供指针级单指操作。
 
 ## 参与项目
 

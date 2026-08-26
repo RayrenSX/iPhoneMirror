@@ -4,6 +4,7 @@
 #include "Logging.h"
 
 #include <d3d11.h>
+#include <d3d11_1.h>
 #include <d3dcompiler.h>
 #include <dcomp.h>
 #include <dxgi1_3.h>
@@ -429,6 +430,12 @@ struct D3D11PreviewRenderer::Impl {
     ComPtr<ID3D11Texture2D> uv_texture;
     ComPtr<ID3D11ShaderResourceView> y_view;
     ComPtr<ID3D11ShaderResourceView> uv_view;
+    ComPtr<ID3D11Texture2D> shared_gpu_texture;
+    ComPtr<ID3D11ShaderResourceView> shared_gpu_y_view;
+    ComPtr<ID3D11ShaderResourceView> shared_gpu_uv_view;
+    ComPtr<IDXGIKeyedMutex> shared_gpu_mutex;
+    std::shared_ptr<const media::DecodedFrame::SharedGpuFrame> shared_gpu_frame;
+    bool shared_gpu_acquired{};
     ComPtr<ID3D11Texture2D> render_texture;
     ComPtr<ID3D11RenderTargetView> render_target;
     ComPtr<ID3D11ShaderResourceView> render_view;
@@ -447,6 +454,10 @@ struct D3D11PreviewRenderer::Impl {
     std::shared_ptr<const media::DecodedFrame> last_frame;
     std::uint64_t rendered_frames{};
     std::chrono::steady_clock::time_point first_presented_at{};
+    std::uint32_t last_sync_refresh_count{};
+    std::chrono::steady_clock::time_point last_sync_sample_at{};
+    double display_fps{};
+    bool display_statistics_valid{};
     std::atomic_bool refresh_requested{true};
     std::atomic_bool clear_requested{};
     std::atomic_uint32_t max_fps{60};
@@ -655,11 +666,12 @@ struct D3D11PreviewRenderer::Impl {
     void release_device_resources() noexcept {
         if (context) {
             context->ClearState();
-            context->Flush();
+            if (context) context->Flush();
         }
         if (composition_visual) (void)composition_visual->SetContent(nullptr);
         if (composition_device) (void)composition_device->Commit();
 
+        release_shared_gpu_frame();
         target.Reset();
         render_view.Reset();
         render_target.Reset();
@@ -1042,6 +1054,62 @@ struct D3D11PreviewRenderer::Impl {
         return true;
     }
 
+    void release_shared_gpu_frame() noexcept {
+        if (shared_gpu_acquired && shared_gpu_mutex) {
+            if (context) context->Flush();
+            // Shared frames can have several read-only consumers. Return the
+            // consumer key after this renderer has submitted its sampling work.
+            (void)shared_gpu_mutex->ReleaseSync(1);
+        }
+        shared_gpu_acquired = false;
+        shared_gpu_mutex.Reset();
+        shared_gpu_y_view.Reset();
+        shared_gpu_uv_view.Reset();
+        shared_gpu_texture.Reset();
+        shared_gpu_frame.reset();
+    }
+
+    bool prepare_shared_gpu_frame(const media::DecodedFrame& frame) {
+        const auto& gpu_frame = frame.gpu_frame;
+        if (!gpu_frame || !gpu_frame->shared_handle || gpu_frame->width == 0 ||
+            gpu_frame->height == 0) return false;
+        if (shared_gpu_frame != gpu_frame) {
+            release_shared_gpu_frame();
+            ComPtr<ID3D11Device1> device1;
+            check(device.As(&device1), "query D3D11 device 1");
+            check(device1->OpenSharedResource1(
+                static_cast<HANDLE>(gpu_frame->shared_handle),
+                IID_PPV_ARGS(&shared_gpu_texture)), "open shared decoder texture");
+            check(shared_gpu_texture.As(&shared_gpu_mutex),
+                "query shared decoder keyed mutex");
+
+            D3D11_SHADER_RESOURCE_VIEW_DESC y_description{};
+            y_description.Format = gpu_frame->pixel_format == media::PixelFormat::P010
+                ? DXGI_FORMAT_R16_UNORM : DXGI_FORMAT_R8_UNORM;
+            y_description.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            y_description.Texture2D.MipLevels = 1;
+            check(device->CreateShaderResourceView(shared_gpu_texture.Get(),
+                &y_description, &shared_gpu_y_view), "create shared decoder Y view");
+
+            D3D11_SHADER_RESOURCE_VIEW_DESC uv_description{};
+            uv_description.Format = gpu_frame->pixel_format == media::PixelFormat::P010
+                ? DXGI_FORMAT_R16G16_UNORM : DXGI_FORMAT_R8G8_UNORM;
+            uv_description.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            uv_description.Texture2D.MipLevels = 1;
+            check(device->CreateShaderResourceView(shared_gpu_texture.Get(),
+                &uv_description, &shared_gpu_uv_view), "create shared decoder UV view");
+            shared_gpu_frame = gpu_frame;
+
+        }
+        const auto wait_result = shared_gpu_mutex->AcquireSync(1, 1000);
+        if (wait_result != WAIT_OBJECT_0)
+            throw std::runtime_error(std::format(
+                "acquire shared decoder texture failed: 0x{:08X}",
+                static_cast<unsigned>(wait_result)));
+        shared_gpu_acquired = true;
+        return true;
+    }
+
     void recreate_video_textures(const media::DecodedFrame& frame) {
         frame_width = frame.width;
         frame_height = frame.height;
@@ -1134,7 +1202,7 @@ struct D3D11PreviewRenderer::Impl {
             static_cast<std::uint32_t>(packed & 0xFFFFFFFFU), target_width, target_height));
     }
 
-    void upload(const media::DecodedFrame& frame) {
+    bool upload_cpu(const media::DecodedFrame& frame) {
         if (!y_texture || frame.width != frame_width || frame.height != frame_height ||
             frame.pixel_format != texture_pixel_format) {
             recreate_video_textures(frame);
@@ -1200,11 +1268,36 @@ struct D3D11PreviewRenderer::Impl {
             }
         }
         context->Unmap(uv_texture.Get(), 0);
+        return true;
+    }
+
+    bool upload(const media::DecodedFrame& frame) {
+        if (frame.gpu_frame) {
+            try {
+                if (prepare_shared_gpu_frame(frame)) {
+                    frame_width = frame.width;
+                    frame_height = frame.height;
+                    texture_pixel_format = frame.pixel_format;
+                    return true;
+                }
+            } catch (const std::exception& error) {
+                logging::write(std::format(
+                    "d3d_preview shared_frame_import_failed reason={}", error.what()));
+            }
+            if (frame.nv12.empty() && frame.gpu_frame) {
+                auto materialized = frame;
+                if (media::detail::materialize_gpu_frame(materialized))
+                    return upload_cpu(materialized);
+                return false;
+            }
+        }
+        release_shared_gpu_frame();
+        return upload_cpu(frame);
     }
 
     void render(const media::DecodedFrame& frame) {
         if (target_width == 0 || target_height == 0) return;
-        upload(frame);
+        if (!upload(frame)) return;
 
         const auto signature =
             (static_cast<std::uint64_t>(frame.pixel_format) << 32U) |
@@ -1311,7 +1404,9 @@ struct D3D11PreviewRenderer::Impl {
             context->VSSetShader(vertex_shader.Get(), nullptr, 0);
             context->PSSetShader(pixel_shader.Get(), nullptr, 0);
             update_shape_constants(output_width, output_height, apply_corner, rotation, &frame);
-            ID3D11ShaderResourceView* nv12_views[] = {y_view.Get(), uv_view.Get()};
+            ID3D11ShaderResourceView* nv12_views[] = {
+                shared_gpu_frame ? shared_gpu_y_view.Get() : y_view.Get(),
+                shared_gpu_frame ? shared_gpu_uv_view.Get() : uv_view.Get()};
             context->PSSetShaderResources(0, 2, nv12_views);
             context->PSSetSamplers(0, 1, sampler.GetAddressOf());
             context->Draw(3, 0);
@@ -1349,20 +1444,53 @@ struct D3D11PreviewRenderer::Impl {
             context->Draw(3, 0);
             context->PSSetShaderResources(0, 3, empty);
         }
-        check(swap_chain->Present(1, 0), "Present");
+        // The render loop applies the requested frame-rate cap. A nonblocking
+        // flip presentation must not hold up the newest landscape frame when
+        // DWM is late with a vblank; skip that presentation and keep capture
+        // and decode independent of desktop composition.
+        const auto present_result = swap_chain->Present(0, DXGI_PRESENT_DO_NOT_WAIT);
+        if (present_result != DXGI_ERROR_WAS_STILL_DRAWING)
+            check(present_result, "Present");
+        release_shared_gpu_frame();
         ++rendered_frames;
         if (rendered_frames == 1) first_presented_at = std::chrono::steady_clock::now();
+        DXGI_FRAME_STATISTICS frame_statistics{};
+        const auto statistics_result = swap_chain->GetFrameStatistics(&frame_statistics);
+        if (SUCCEEDED(statistics_result) && frame_statistics.SyncRefreshCount != 0) {
+            const auto now = std::chrono::steady_clock::now();
+            if (display_statistics_valid &&
+                frame_statistics.SyncRefreshCount > last_sync_refresh_count &&
+                last_sync_sample_at.time_since_epoch().count() != 0) {
+                const auto elapsed = std::chrono::duration<double>(
+                    now - last_sync_sample_at).count();
+                if (elapsed > 0.05)
+                    display_fps = static_cast<double>(
+                        frame_statistics.SyncRefreshCount - last_sync_refresh_count) / elapsed;
+            }
+            last_sync_refresh_count = frame_statistics.SyncRefreshCount;
+            last_sync_sample_at = now;
+            display_statistics_valid = true;
+        } else if (FAILED(statistics_result)) {
+            display_statistics_valid = false;
+            last_sync_refresh_count = 0;
+            last_sync_sample_at = {};
+        }
         if (rendered_frames <= 3 || rendered_frames % 300 == 0) {
             const auto elapsed = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - first_presented_at).count();
             const auto present_fps = elapsed > 0.0
                 ? static_cast<double>(rendered_frames - 1U) / elapsed
                 : 0.0;
+            const std::string display_fps_text = display_statistics_valid
+                ? std::format("{:.2f}", display_fps) : "unavailable";
             logging::write(std::format(
-                "d3d_preview render={} timestamp={} present_fps={:.2f} fps_cap={} render={}x{}",
+                "d3d_preview render={} timestamp={} submit_fps={:.2f} display_fps={} "
+                "fps_cap={} render={}x{} stats_hr=0x{:08X}",
                 rendered_frames, frame.timestamp_100ns, present_fps,
+                display_fps_text,
                 max_fps.load(std::memory_order_relaxed),
-                local_render_width, local_render_height));
+                local_render_width, local_render_height,
+                static_cast<unsigned>(statistics_result)));
         }
     }
 
