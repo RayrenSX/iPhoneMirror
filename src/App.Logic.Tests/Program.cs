@@ -1123,11 +1123,11 @@ Equal(true,
         StringComparison.OrdinalIgnoreCase) &&
     bluetoothHidCode.Contains("00002a33-0000-1000-8000-00805f9b34fb",
         StringComparison.OrdinalIgnoreCase) &&
-    bluetoothHidCode.Contains("_protocolMode == 0 && HasSubscribers(_bootMouseInput)",
+    bluetoothHidCode.Contains("HasTargetSubscriber(_bootMouseInput)",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("_protocolMode == 0 && HasSubscribers(_bootKeyboardInput)",
+    bluetoothHidCode.Contains("HasTargetSubscriber(_bootKeyboardInput)",
         StringComparison.Ordinal),
-    "Bluetooth HID exposes and routes Boot Protocol keyboard and mouse reports");
+    "Bluetooth HID exposes and targets Boot Protocol keyboard and mouse reports");
 Equal(true, mainWindowCode.Contains("_mediaControlsHideTimer",
                 StringComparison.Ordinal) &&
             mainWindowCode.Contains("SetMediaCastControlsVisible",
@@ -1247,11 +1247,19 @@ Equal(true,
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("IsBluetoothControlTarget(_viewModel.SelectedDevice?.Udid)",
         StringComparison.Ordinal) &&
+    mainWindowCode.Contains("private readonly SemaphoreSlim _bluetoothRouteGate",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("IsBluetoothControlActiveFor(string? udid)",
+        StringComparison.Ordinal) &&
     mainWindowCode.Contains("_secondaryMirrors.Activate(_activeControlUdid)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("NotifyValueAsync(buffer, targetClient)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("BluetoothSubscribedClientSelector.Select",
         StringComparison.Ordinal) &&
     multiPreviewManagerCode.Contains("internal bool Activate(string? udid)",
         StringComparison.Ordinal),
-    "Bluetooth control serializes stop/start, keeps the main target aligned, and restores independent focus");
+    "Bluetooth control serializes routing and targets only the selected mirrored device and GATT client");
 var busyStateStart = mainViewModelSource.IndexOf("public bool IsBusy", StringComparison.Ordinal);
 var busyStateEnd = busyStateStart >= 0
     ? mainViewModelSource.IndexOf("private bool IsSettingsInteractionBlocked", busyStateStart,
@@ -2007,6 +2015,21 @@ Equal(true, bluetoothNoticePolicy.ShouldShowForDevice("00008101-TEST-B"),
     "Bluetooth guidance remains available for a different device");
 Equal(false, bluetoothNoticePolicy.ShouldShowForDevice("  "),
     "Bluetooth guidance requires a stable device identifier");
+Equal("client-a", BluetoothSubscribedClientSelector.Select(null,
+    [("client-a", "Unknown device")]),
+    "a single Bluetooth client is selected only when the mirrored name is unavailable");
+Equal<string?>(null, BluetoothSubscribedClientSelector.Select("Ray's iPhone",
+    [("client-a", "Work iPhone")]),
+    "a lone Bluetooth client with the wrong name is rejected");
+Equal("client-b", BluetoothSubscribedClientSelector.Select("Ray's iPhone",
+    [("client-a", "Work iPhone"), ("client-b", "Ray's iPhone")]),
+    "multiple Bluetooth clients are matched to the selected mirrored device name");
+Equal<string?>(null, BluetoothSubscribedClientSelector.Select("Ray's iPhone",
+    [("client-a", "iPhone"), ("client-b", "iPhone")]),
+    "ambiguous Bluetooth clients are rejected instead of receiving broadcast input");
+Equal<string?>(null, BluetoothSubscribedClientSelector.Select("Ray's iPhone",
+    [("client-a", "Work iPhone"), ("client-b", "Travel iPhone")]),
+    "unmatched Bluetooth clients are rejected instead of controlling another device");
 var rightFromUp = BluetoothMouseOrientationMapper.Map(0, -10, 1206, 2622, 0,
     BluetoothMouseDirection.Up, BluetoothMouseDirection.Right, false, false);
 Equal((0d, -10d), rightFromUp,

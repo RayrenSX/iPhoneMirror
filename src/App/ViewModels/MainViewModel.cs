@@ -275,6 +275,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand ToggleBluetoothControlCommand { get; }
     public string BluetoothControlStatus => _bluetoothControlStatus;
     public bool IsBluetoothControlEnabled => _bluetoothControlEnabled;
+    internal string? BluetoothControlTargetUdid => _bluetoothControlDeviceUdid;
     public bool BluetoothControlIsInputEnabled => _bluetoothControlEnabled &&
         _bluetoothControlConnected && _bluetoothControlInputEnabled;
     public bool CanStartBluetoothControl => CanEnableBluetoothControlFor(
@@ -1059,10 +1060,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
         try
         {
+            var controlDeviceName = Devices.FirstOrDefault(device =>
+                DeviceViewModel.UdidEquals(device.Udid, controlDeviceUdid))?.Name;
+            if (string.Equals(controlDeviceName, "iPhone",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(controlDeviceName, "iPad",
+                    StringComparison.OrdinalIgnoreCase))
+                controlDeviceName = null;
             AddDiagnosticLog(AppLog.Event("bluetooth_control_start_begin",
                 ("device", AppLog.Device(controlDeviceUdid)),
+                ("device_name_available", !string.IsNullOrWhiteSpace(controlDeviceName)),
                 ("show_notice", _bluetoothControlNoticePending)));
-            var started = await _bluetoothControl.StartAsync(_shutdownCancellation.Token);
+            var started = await _bluetoothControl.StartAsync(controlDeviceName,
+                _shutdownCancellation.Token);
             if (!started)
             {
                 var showFailureNotice = _bluetoothControlNoticePending;
@@ -1198,6 +1208,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsBluetoothControlEnabled));
         OnPropertyChanged(nameof(BluetoothControlIsConnected));
         OnPropertyChanged(nameof(BluetoothControlIsInputEnabled));
+        OnPropertyChanged(nameof(BluetoothControlTargetUdid));
         OnPropertyChanged(nameof(CanStartBluetoothControl));
         OnPropertyChanged(nameof(CanStopBluetoothControl));
         OnPropertyChanged(nameof(CanToggleBluetoothControl));

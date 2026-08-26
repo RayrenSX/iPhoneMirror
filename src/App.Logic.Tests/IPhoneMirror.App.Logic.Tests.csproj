@@ -43,6 +43,7 @@
     <Compile Include="..\App\Services\MediaCastAudioDecoder.cs" Link="MediaCastAudioDecoder.cs" />
     <Compile Include="..\App\Services\MediaRecoveryBackoff.cs" Link="MediaRecoveryBackoff.cs" />
     <Compile Include="..\App\Services\BluetoothControlNoticePolicy.cs" Link="BluetoothControlNoticePolicy.cs" />
+    <Compile Include="..\App\Services\BluetoothSubscribedClientSelector.cs" Link="BluetoothSubscribedClientSelector.cs" />
     <Compile Include="..\App\Services\BluetoothMouseOrientationMapper.cs" Link="BluetoothMouseOrientationMapper.cs" />
     <Compile Include="..\App\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />
     <Compile Include="..\App\Services\MediaOutputService.cs" Link="MediaOutputService.cs" />

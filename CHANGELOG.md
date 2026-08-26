@@ -5,6 +5,12 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Bind Bluetooth HID reports to the uniquely matched GATT client for the
+  selected mirrored device instead of broadcasting input to every subscribed
+  iPhone/iPad, and serialize multi-window control-route changes.
+
 ## [1.8.0] - 2026-08-26
 
 ### Added

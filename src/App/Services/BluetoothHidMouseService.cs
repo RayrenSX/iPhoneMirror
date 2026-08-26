@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
+using Windows.Devices.Enumeration;
 using Windows.Security.Cryptography;
 using Windows.Storage.Streams;
 
@@ -46,6 +47,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _notifyGate = new(1, 1);
+    private readonly SemaphoreSlim _targetClientGate = new(1, 1);
     private readonly object _mousePumpSync = new();
     private readonly ConcurrentDictionary<byte, byte[]> _lastReports = new();
     private GattServiceProvider? _provider;
@@ -71,15 +73,20 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     private int _disposed;
     private byte _protocolMode = 0x01;
     private byte _wheelResolutionMultiplier = 1;
+    private string? _targetDeviceName;
+    private string? _targetClientId;
+    private string? _lastTargetClientId;
+    private int _targetBindingGeneration;
 
     public bool IsAdvertising => _provider?.AdvertisementStatus is
         GattServiceProviderAdvertisementStatus.Started or
         GattServiceProviderAdvertisementStatus.StartedWithoutAllAdvertisementData;
     public bool IsConnected => Volatile.Read(ref _transportFailed) == 0 && IsMouseConnected;
     public int WheelResolutionMultiplier => Volatile.Read(ref _wheelResolutionMultiplier);
-    private bool IsMouseConnected => HasSubscribers(_mouseReport) ||
-        HasSubscribers(_bootMouseInput);
-    private bool HasAnySubscriber => IsMouseConnected || HasSubscribers(_keyboardReport) ||
+    private bool IsMouseConnected => HasTargetSubscriber(_mouseReport) ||
+        HasTargetSubscriber(_bootMouseInput);
+    private bool HasAnySubscriber => HasSubscribers(_mouseReport) ||
+        HasSubscribers(_bootMouseInput) || HasSubscribers(_keyboardReport) ||
         HasSubscribers(_bootKeyboardInput);
     public string SuggestedDeviceName { get; } = Environment.MachineName;
     public string Status { get; private set; } = "Bluetooth control is off";
@@ -111,13 +118,27 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         }
     }
 
-    public async Task<bool> StartAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> StartAsync(string? targetDeviceName,
+        CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (IsAdvertising && Volatile.Read(ref _advertisingStopRequested) == 0) return true;
-            if (IsAdvertising) StopAndClearProviderState();
+            var requestedTargetDeviceName = targetDeviceName?.Trim();
+            Interlocked.Increment(ref _targetBindingGeneration);
+            _targetDeviceName = requestedTargetDeviceName;
+            Volatile.Write(ref _targetClientId, null);
+            _lastTargetClientId = null;
+            if (IsAdvertising && Volatile.Read(ref _advertisingStopRequested) == 0)
+            {
+                await RefreshTargetClientAsync().ConfigureAwait(false);
+                return true;
+            }
+            if (IsAdvertising)
+            {
+                StopAndClearProviderState();
+                _targetDeviceName = requestedTargetDeviceName;
+            }
             var adapter = await BluetoothAdapter.GetDefaultAsync();
             if (adapter is null || !adapter.IsLowEnergySupported ||
                 !adapter.IsPeripheralRoleSupported)
@@ -166,6 +187,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             }
             SetStatus($"Bluetooth HID control is advertising ({_provider.AdvertisementStatus}).",
                 null);
+            await RefreshTargetClientAsync().ConfigureAwait(false);
             return true;
         }
         catch (Exception error)
@@ -430,36 +452,38 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         _lastReports[reportId] = report;
         if (reportId == 2)
         {
-            if (_protocolMode == 0 && HasSubscribers(_bootMouseInput))
+            if (HasTargetSubscriber(_mouseReport))
+            {
+                await NotifyReportAsync(_mouseReport, report).ConfigureAwait(false);
+            }
+            else if (HasTargetSubscriber(_bootMouseInput))
             {
                 await NotifyReportAsync(_bootMouseInput,
                     ToBootMouseReport(report)).ConfigureAwait(false);
             }
-            else
-            {
-                await NotifyReportAsync(_mouseReport, report).ConfigureAwait(false);
-            }
         }
-        else if (_protocolMode == 0 && HasSubscribers(_bootKeyboardInput))
-        {
-            await NotifyReportAsync(_bootKeyboardInput, report).ConfigureAwait(false);
-        }
-        else
+        else if (HasTargetSubscriber(_keyboardReport))
         {
             await NotifyReportAsync(_keyboardReport, report).ConfigureAwait(false);
+        }
+        else if (HasTargetSubscriber(_bootKeyboardInput))
+        {
+            await NotifyReportAsync(_bootKeyboardInput, report).ConfigureAwait(false);
         }
     }
 
     private async Task NotifyReportAsync(GattLocalCharacteristic? characteristic, byte[] report)
     {
-        if (characteristic is null || !HasSubscribers(characteristic)) return;
+        var targetClient = FindTargetSubscriber(characteristic);
+        if (characteristic is null || targetClient is null) return;
         try
         {
             var buffer = CryptographicBuffer.CreateFromByteArray(report);
             await _notifyGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await characteristic.NotifyValueAsync(buffer).AsTask().ConfigureAwait(false);
+                await characteristic.NotifyValueAsync(buffer, targetClient)
+                    .AsTask().ConfigureAwait(false);
             }
             finally
             {
@@ -504,6 +528,10 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         _bootKeyboardInput = null;
         _protocolModeCharacteristic = null;
         _wheelResolutionCharacteristic = null;
+        _targetDeviceName = null;
+        Interlocked.Increment(ref _targetBindingGeneration);
+        Volatile.Write(ref _targetClientId, null);
+        _lastTargetClientId = null;
         Volatile.Write(ref _wheelResolutionMultiplier, (byte)1);
     }
 
@@ -534,6 +562,10 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         _clientConnected?.TrySetResult(false);
         _clientConnected = null;
         _protocolMode = 0x01;
+        _targetDeviceName = null;
+        Interlocked.Increment(ref _targetBindingGeneration);
+        Volatile.Write(ref _targetClientId, null);
+        _lastTargetClientId = null;
         Volatile.Write(ref _wheelResolutionMultiplier, (byte)1);
         Interlocked.Exchange(ref _transportFailed, 0);
         _lastReports.Clear();
@@ -573,22 +605,146 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         }
     }
 
-    private void OnSubscribedClientsChanged(GattLocalCharacteristic sender, object args)
+    private async void OnSubscribedClientsChanged(GattLocalCharacteristic sender, object args)
     {
-        if ((ReferenceEquals(sender, _mouseReport) ||
-             ReferenceEquals(sender, _bootMouseInput)) && HasSubscribers(sender))
-            Interlocked.Exchange(ref _transportFailed, 0);
-        var connected = IsConnected;
-        if (IsMouseConnected) _clientConnected?.TrySetResult(true);
-        SetStatus(connected ? $"iPhone/iPad subscribed to the {GetReportName(sender)}." :
-            HasAnySubscriber
-                ? "A Bluetooth client subscribed; waiting for the HID mouse report."
-                : "Bluetooth HID control is advertising; waiting for a client.", null);
-        if (HasAnySubscriber) _ = SendInitialReportsAsync();
+        if (!IsCurrentCharacteristic(sender)) return;
+        try
+        {
+            await RefreshTargetClientAsync().ConfigureAwait(false);
+            if (!IsCurrentCharacteristic(sender)) return;
+            if ((ReferenceEquals(sender, _mouseReport) ||
+                 ReferenceEquals(sender, _bootMouseInput)) &&
+                HasTargetSubscriber(sender))
+                Interlocked.Exchange(ref _transportFailed, 0);
+            var connected = IsConnected;
+            if (IsMouseConnected) _clientConnected?.TrySetResult(true);
+            SetStatus(connected
+                    ? $"Selected iPhone/iPad subscribed to the {GetReportName(sender)}."
+                    : HasAnySubscriber
+                        ? Volatile.Read(ref _targetClientId) is null
+                            ? "Multiple Bluetooth clients are connected; waiting for the selected iPhone/iPad."
+                            : "The selected Bluetooth client is connected; waiting for its HID mouse report."
+                        : "Bluetooth HID control is advertising; waiting for a client.",
+                null);
+            if (Volatile.Read(ref _targetClientId) is not null)
+                await SendInitialReportsAsync().ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            SetStatus("Could not identify the selected Bluetooth client.", error.Message);
+        }
     }
 
     private static bool HasSubscribers(GattLocalCharacteristic? characteristic) =>
         characteristic?.SubscribedClients?.Count > 0;
+
+    private bool IsCurrentCharacteristic(GattLocalCharacteristic characteristic) =>
+        ReferenceEquals(characteristic, _mouseReport) ||
+        ReferenceEquals(characteristic, _keyboardReport) ||
+        ReferenceEquals(characteristic, _bootMouseInput) ||
+        ReferenceEquals(characteristic, _bootKeyboardInput);
+
+    private bool HasTargetSubscriber(GattLocalCharacteristic? characteristic) =>
+        FindTargetSubscriber(characteristic) is not null;
+
+    private GattSubscribedClient? FindTargetSubscriber(
+        GattLocalCharacteristic? characteristic)
+    {
+        var targetClientId = Volatile.Read(ref _targetClientId);
+        if (characteristic is null || string.IsNullOrWhiteSpace(targetClientId))
+            return null;
+        return characteristic.SubscribedClients.FirstOrDefault(client =>
+            string.Equals(client.Session.DeviceId.Id, targetClientId,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task RefreshTargetClientAsync()
+    {
+        await _targetClientGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var generation = Volatile.Read(ref _targetBindingGeneration);
+            var clients = EnumerateSubscribedClients()
+                .GroupBy(client => client.Session.DeviceId.Id,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+            if (generation != Volatile.Read(ref _targetBindingGeneration)) return;
+            var boundClientId = Volatile.Read(ref _targetClientId);
+            if (!string.IsNullOrWhiteSpace(boundClientId))
+            {
+                if (clients.Any(client => string.Equals(client.Session.DeviceId.Id,
+                        boundClientId, StringComparison.OrdinalIgnoreCase)))
+                    return;
+                // Do not retarget an active session to another phone when the
+                // original client disconnects, even if both phones share a
+                // friendly name. The same DeviceId may rebind when it returns;
+                // another device requires an explicit restart.
+                Volatile.Write(ref _targetClientId, null);
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(_lastTargetClientId) &&
+                clients.Any(client => string.Equals(client.Session.DeviceId.Id,
+                    _lastTargetClientId, StringComparison.OrdinalIgnoreCase)))
+            {
+                Volatile.Write(ref _targetClientId, _lastTargetClientId);
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(_lastTargetClientId)) return;
+            var candidates = new List<(string Id, string Name)>(clients.Length);
+            foreach (var client in clients)
+            {
+                var id = client.Session.DeviceId.Id;
+                string name;
+                try
+                {
+                    using var bluetoothDevice = await BluetoothLEDevice.FromIdAsync(id);
+                    if (!string.IsNullOrWhiteSpace(bluetoothDevice?.Name))
+                    {
+                        name = bluetoothDevice.Name;
+                    }
+                    else
+                    {
+                        var information = await DeviceInformation.CreateFromIdAsync(id);
+                        name = information?.Name ?? string.Empty;
+                    }
+                }
+                catch
+                {
+                    try
+                    {
+                        var information = await DeviceInformation.CreateFromIdAsync(id);
+                        name = information?.Name ?? string.Empty;
+                    }
+                    catch
+                    {
+                        name = string.Empty;
+                    }
+                }
+                candidates.Add((id, name));
+            }
+            if (generation != Volatile.Read(ref _targetBindingGeneration)) return;
+            var selected = BluetoothSubscribedClientSelector.Select(_targetDeviceName,
+                candidates);
+            Volatile.Write(ref _targetClientId, selected);
+            if (!string.IsNullOrWhiteSpace(selected)) _lastTargetClientId = selected;
+        }
+        finally
+        {
+            _targetClientGate.Release();
+        }
+    }
+
+    private IEnumerable<GattSubscribedClient> EnumerateSubscribedClients()
+    {
+        foreach (var characteristic in new[]
+                 { _mouseReport, _keyboardReport, _bootMouseInput, _bootKeyboardInput })
+        {
+            if (characteristic is null) continue;
+            foreach (var client in characteristic.SubscribedClients)
+                yield return client;
+        }
+    }
 
     private string GetReportName(GattLocalCharacteristic characteristic) =>
         ReferenceEquals(characteristic, _mouseReport) ? "HID mouse report" :
