@@ -118,7 +118,7 @@
     <system:String x:Key="BluetoothControlConnected">iPhone/iPad 已連接藍牙反向控制</system:String>
     <system:String x:Key="BluetoothControlWaitingTitle">正在等待藍牙控制連接</system:String>
     <system:String x:Key="BluetoothControlWaitingBody">請依序完成 iPhone 與 Windows 的系統配對。</system:String>
-    <system:String x:Key="BluetoothControlWaitingTargetFormat">裝置列表中通常顯示為：{0}</system:String>
+    <system:String x:Key="BluetoothControlWaitingTargetFormat">裝置清單中通常顯示為：{0}</system:String>
     <system:String x:Key="BluetoothControlWaitingDetail">Windows 無法向應用程式回報每一步是否完成，請依序自行操作。HID 就緒後會自動顯示「已連接」；等待期間滑鼠不會被隱藏或限制。</system:String>
     <system:String x:Key="BluetoothControlPairStepOneFormat">iPhone：開啟「設定 → 輔助使用 → 觸控 → 輔助觸控」，開啟「輔助觸控」。</system:String>
     <system:String x:Key="BluetoothControlPairStepTwo">iPhone：開啟「設定 → 藍牙」，連接「{0}」，然後點選「配對」。</system:String>
