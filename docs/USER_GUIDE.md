@@ -310,6 +310,17 @@ iPhone 控制中心重新选择新的接收端名称。修改名称后，手机�
 无线设备选中时，设置侧栏会把无线选项移到最上方；有线专用的本地分辨率/FPS 上限和 A/B/C
 模式不会显示。无线连接的清晰度必须在连接前通过 AirPlay 广播规格声明，修改后需要重新连接。
 
+如果 iPhone/iPad 能看见接收端名称、但点选后立即显示“无法连接”，请先确认两台设备位于同一个
+非访客 Wi-Fi，关闭 VPN/代理，并在路由器设置中关闭“AP/客户端隔离”。安装版会自动放行
+`iPhoneMirror.WirelessHost.exe` 的本地子网入站连接，包括 TCP `5001`、`7001`、`7100`、`8090`
+和 UDP `1900`；请升级或重新运行安装包以
+修复旧版本。ZIP 便携版请以管理员身份打开终端并执行：
+
+```powershell
+netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in action=allow program="C:\path\to\iPhoneMirror\Wireless\iPhoneMirror.WirelessHost.exe" enable=yes profile=private,public remoteip=localsubnet protocol=TCP localport=5001,7001,7100,8090
+netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in action=allow program="C:\path\to\iPhoneMirror\Wireless\iPhoneMirror.WirelessHost.exe" enable=yes profile=private,public remoteip=localsubnet protocol=UDP localport=1900
+```
+
 连接后仍可使用窗口顶部“停止投屏”结束当前无线会话。接收服务本身保持运行，等待下一次连接。
 
 ## AirPlay 音乐投放

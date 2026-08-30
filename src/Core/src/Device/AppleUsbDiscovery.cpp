@@ -95,7 +95,7 @@ std::vector<PhysicalAppleDevice> discover_physical_apple_usb_devices() {
             continue;
         }
         const auto id = instance_id(raw, data);
-        if (!is_apple_usb_parent_instance_id(id)) continue;
+        if (!is_apple_mobile_capture_parent_instance_id(id)) continue;
         const std::wstring hardware = property(raw, data, SPDRP_HARDWAREID);
         const std::wstring upper_hardware = uppercase(hardware);
         if (upper_hardware.find(L"USB\\VID_05AC") == std::wstring::npos) continue;
@@ -122,6 +122,27 @@ bool is_apple_usb_parent_instance_id(
         return std::all_of(upper.begin() + static_cast<std::ptrdiff_t>(prefix.size()),
             upper.begin() + static_cast<std::ptrdiff_t>(separator),
             [](wchar_t character) { return std::iswxdigit(character) != 0; });
+    } catch (...) {
+        return false;
+    }
+}
+
+bool is_apple_mobile_capture_parent_instance_id(
+    std::wstring_view instance_id) noexcept {
+    try {
+        const auto upper = uppercase(std::wstring(instance_id));
+        if (!is_apple_usb_parent_instance_id(upper)) return false;
+        constexpr std::wstring_view marker = L"&PID_";
+        const auto marker_position = upper.find(marker);
+        if (marker_position == std::wstring_view::npos ||
+            marker_position + marker.size() + 4 > upper.size())
+            return false;
+        const std::wstring_view product_text(
+            upper.data() + marker_position + marker.size(), 4);
+        return std::all_of(product_text.begin(), product_text.end(),
+                   [](wchar_t character) { return std::iswxdigit(character) != 0; }) &&
+            is_apple_mobile_capture_product_id(static_cast<std::uint32_t>(
+                std::wcstoul(std::wstring(product_text).c_str(), nullptr, 16)));
     } catch (...) {
         return false;
     }

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Controls;
 using IPhoneMirror.DriverInstaller.Models;
 using IPhoneMirror.DriverInstaller.Services;
 using IPhoneMirror.DriverInstaller.Windows;
@@ -35,8 +36,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             OnPropertyChanged();
         }
     }
-    public IEnumerable<AppleDeviceRecord> ConnectedDevices =>
-        Devices.Where(device => device.IsPresent);
+    public ObservableCollection<AppleDeviceRecord> ConnectedDevices { get; } = [];
     public AppleDeviceRecord? SelectedDevice
     {
         get => _selectedDevice;
@@ -124,6 +124,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void OnRefreshClick(object sender, RoutedEventArgs e) => await RefreshAsync();
 
+    private void OnConnectedDeviceSelectionChanged(object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (e.AddedItems.OfType<AppleDeviceRecord>().FirstOrDefault() is { } device)
+            SelectedDevice = device;
+    }
+
+    private void OnConnectedDevicePreviewMouseLeftButtonDown(object sender,
+        System.Windows.Input.MouseButtonEventArgs e)
+    {
+        ToggleComboBoxDropDown(sender, e);
+    }
+
+    private void OnThemePreviewMouseLeftButtonDown(object sender,
+        System.Windows.Input.MouseButtonEventArgs e) => ToggleComboBoxDropDown(sender, e);
+
+    private static void ToggleComboBoxDropDown(object sender,
+        System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not ComboBox combo || !combo.IsEnabled) return;
+        combo.Focus();
+        combo.IsDropDownOpen = !combo.IsDropDownOpen;
+        e.Handled = true;
+    }
+
     private void OnMinimizeClick(object sender, RoutedEventArgs e) =>
         WindowState = WindowState.Minimized;
 
@@ -155,6 +180,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (Exception error)
         {
             PromptWindow.Inform(this, L("CannotOpenLogs"), error.Message);
+        }
+    }
+
+    private void OnForceDriverCleanupClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            DriverCleanupHost.LaunchElevated();
+            DriverLogger.Write(
+                "Trusted driver cleanup host launched from advanced mode.");
+        }
+        catch (Exception error)
+        {
+            DriverLogger.WriteException("ui", "driver_cleanup_script_start_failed", error);
+            PromptWindow.Inform(this, L("DriverCleanupTitle"),
+                F("DriverCleanupScriptStartFailed", error.Message));
         }
     }
 
@@ -529,12 +570,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         OnPropertyChanged(nameof(AppleStatusText));
         OnPropertyChanged(nameof(LibUsbStatusText));
         Devices.Clear();
-        foreach (var device in result.Item1) Devices.Add(device);
-        OnPropertyChanged(nameof(ConnectedDevices));
-        SelectedDevice = Devices.FirstOrDefault(device =>
-            string.Equals(device.InstanceId, previous, StringComparison.OrdinalIgnoreCase))
-            ?? Devices.FirstOrDefault(device => device.IsPresent)
-            ?? Devices.FirstOrDefault();
+        ConnectedDevices.Clear();
+        foreach (var device in result.Item1)
+        {
+            Devices.Add(device);
+            if (device.IsPresent) ConnectedDevices.Add(device);
+        }
+        var previousDevice = Devices.FirstOrDefault(device =>
+            string.Equals(device.InstanceId, previous, StringComparison.OrdinalIgnoreCase));
+        SelectedDevice = IsAdvancedMode
+            ? previousDevice ?? Devices.FirstOrDefault(device => device.IsPresent)
+                ?? Devices.FirstOrDefault()
+            : previousDevice is { IsPresent: true }
+                ? previousDevice
+                : Devices.FirstOrDefault(device => device.IsPresent);
         if (!IsAdvancedMode)
         {
             var connected = Devices.Count(device => device.IsPresent);

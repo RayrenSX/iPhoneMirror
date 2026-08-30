@@ -20,6 +20,8 @@ namespace IPhoneMirror.App.Windows;
 internal sealed class NativePreviewWindow : IDisposable
 {
     internal const string StableTitle = "iPhoneMirror OBS Preview";
+    private static readonly HashSet<NativePreviewWindow> OpenWindows = [];
+    private static int BossKeyHidden;
 
     private const int WmNcCalcSize = 0x0083;
     private const int WmNcHitTest = 0x0084;
@@ -48,11 +50,12 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int WmKeyUp = 0x0101;
     private const int WmSysKeyDown = 0x0104;
     private const int WmSysKeyUp = 0x0105;
-    private const int VkF9 = 0x78;
     private const int WmDpiChanged = 0x02E0;
     private const int VkEscape = 0x1B;
     private const int VkReturn = 0x0D;
     private const int VkF11 = 0x7A;
+    private const int VkShift = 0x10;
+    private const int VkControl = 0x11;
     private const int VkMenu = 0x12;
     private const int HtClient = 1;
     private const int HtCaption = 2;
@@ -86,6 +89,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private const uint SwpFrameChanged = 0x0020;
     private const uint SwpShowWindow = 0x0040;
     private const uint MonitorDefaultToNearest = 2;
+    private const uint CursorShowing = 0x00000001;
     private static readonly nint HwndTopMost = new(-1);
     private static readonly nint HwndNoTopMost = new(-2);
 
@@ -123,7 +127,8 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly Action? _muteOtherWindows;
     private readonly Action<nint>? _showImageSettings;
     private readonly Action? _showProjectionSettings;
-    private readonly Func<bool>? _isReverseControlEnabled;
+    private readonly Func<nint, bool>? _isReverseControlEnabled;
+    private readonly Func<bool>? _isReverseControlHotkeyRegistered;
     private readonly Action<PreviewPointerEventArgs>? _pointerInput;
     private readonly Action<PreviewKeyboardEventArgs>? _keyboardInput;
     private readonly Action<nint>? _requestReverseControl;
@@ -162,11 +167,12 @@ internal sealed class NativePreviewWindow : IDisposable
          Func<bool>? isAudioEnabled = null, Func<int>? connectedDeviceCount = null,
          Action<bool>? setAudioEnabled = null, Action? muteOtherWindows = null,
           Action<nint>? showImageSettings = null, Action? showProjectionSettings = null,
-          Func<bool>? isReverseControlEnabled = null,
-          Action<PreviewPointerEventArgs>? pointerInput = null,
-          Action<PreviewKeyboardEventArgs>? keyboardInput = null,
-          Action<nint>? requestReverseControl = null,
-          FrameworkElement? managedContent = null, Action? managedContentDetached = null,
+           Func<nint, bool>? isReverseControlEnabled = null,
+           Action<PreviewPointerEventArgs>? pointerInput = null,
+           Action<PreviewKeyboardEventArgs>? keyboardInput = null,
+           Action<nint>? requestReverseControl = null,
+           Func<bool>? isReverseControlHotkeyRegistered = null,
+           FrameworkElement? managedContent = null, Action? managedContentDetached = null,
          Action<string>? logDiagnostic = null)
     {
         _attachPreview = attachPreview;
@@ -182,6 +188,7 @@ internal sealed class NativePreviewWindow : IDisposable
         _showImageSettings = showImageSettings;
         _showProjectionSettings = showProjectionSettings;
         _isReverseControlEnabled = isReverseControlEnabled;
+        _isReverseControlHotkeyRegistered = isReverseControlHotkeyRegistered;
         _pointerInput = pointerInput;
         _keyboardInput = keyboardInput;
         _requestReverseControl = requestReverseControl;
@@ -320,6 +327,7 @@ internal sealed class NativePreviewWindow : IDisposable
         // Install the instance hook only after every callback dependency is
         // initialized; HwndSource construction itself dispatches messages.
         _source.AddHook(WindowProcedure);
+        OpenWindows.Add(this);
         if (managedContent is null)
         {
             // Preserve the original borderless DirectComposition window for
@@ -362,10 +370,11 @@ internal sealed class NativePreviewWindow : IDisposable
         Action<bool> setAudioEnabled, Action muteOtherWindows,
         Action<nint> showImageSettings, Action showProjectionSettings,
         out NativePreviewWindow? window, Action<string>? logDiagnostic = null,
-        Func<bool>? isReverseControlEnabled = null,
+        Func<nint, bool>? isReverseControlEnabled = null,
         Action<PreviewPointerEventArgs>? pointerInput = null,
         Action<PreviewKeyboardEventArgs>? keyboardInput = null,
-        Action<nint>? requestReverseControl = null)
+        Action<nint>? requestReverseControl = null,
+        Func<bool>? isReverseControlHotkeyRegistered = null)
     {
         window = null;
         NativePreviewWindow? candidate = null;
@@ -377,9 +386,10 @@ internal sealed class NativePreviewWindow : IDisposable
                 hwnd => NativeCore.AttachDevicePreview(handle, hwnd),
                  handle, cornerRadius, cornerExponent, isAudioEnabled,
                  connectedDeviceCount, setAudioEnabled, muteOtherWindows,
-                 showImageSettings, showProjectionSettings,
-                 isReverseControlEnabled, pointerInput, keyboardInput, requestReverseControl,
-                 logDiagnostic: logDiagnostic);
+                  showImageSettings, showProjectionSettings,
+                  isReverseControlEnabled, pointerInput, keyboardInput, requestReverseControl,
+                  isReverseControlHotkeyRegistered,
+                  logDiagnostic: logDiagnostic);
             if (!candidate._attachPreview(candidate._handle))
             {
                 logDiagnostic?.Invoke(AppLog.Event("independent_window_attach_failed",
@@ -389,7 +399,10 @@ internal sealed class NativePreviewWindow : IDisposable
             }
             candidate._attached = true;
             candidate.ShowInitially();
-            _ = SetForegroundWindow(candidate._handle);
+            if (Volatile.Read(ref BossKeyHidden) != 0)
+                candidate.SetBossKeyHidden(true);
+            else
+                _ = SetForegroundWindow(candidate._handle);
             window = candidate;
             logDiagnostic?.Invoke(AppLog.Event("independent_window_shown",
                 ("mode", "device"), ("handle", AppLog.Handle(handle))));
@@ -427,7 +440,10 @@ internal sealed class NativePreviewWindow : IDisposable
                  logDiagnostic: logDiagnostic);
             candidate._attached = true;
             candidate.ShowInitially();
-            _ = SetForegroundWindow(candidate._handle);
+            if (Volatile.Read(ref BossKeyHidden) != 0)
+                candidate.SetBossKeyHidden(true);
+            else
+                _ = SetForegroundWindow(candidate._handle);
             window = candidate;
             logDiagnostic?.Invoke(AppLog.Event("independent_window_shown",
                 ("mode", "media_cast"), ("handle", AppLog.Handle(0))));
@@ -488,6 +504,27 @@ internal sealed class NativePreviewWindow : IDisposable
         _contextMenu.IsOpen = false;
         _contextMenu.PlacementTarget = null;
         _ = ShowWindow(_handle, SwHide);
+    }
+
+    internal void SetBossKeyHidden(bool hidden)
+    {
+        if (_disposed || _handle == 0) return;
+        if (hidden)
+        {
+            _contextMenu.IsOpen = false;
+            _contextMenu.PlacementTarget = null;
+            _ = ShowWindow(_handle, SwHide);
+            return;
+        }
+
+        _ = ShowWindow(_handle, SwShow);
+    }
+
+    internal static void SetAllBossKeyHidden(bool hidden)
+    {
+        Volatile.Write(ref BossKeyHidden, hidden ? 1 : 0);
+        foreach (var window in OpenWindows.ToArray())
+            window.SetBossKeyHidden(hidden);
     }
 
     internal bool RefreshPreview()
@@ -613,12 +650,14 @@ internal sealed class NativePreviewWindow : IDisposable
                 DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 1, 0);
                 handled = true;
                 return 0;
-            case WmRightButtonDown when IsReverseControlActive:
-                DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 2, 0);
+            case WmRightButtonDown when IsReverseControlEnabledForWindow:
+                if (IsReverseControlActive)
+                    DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 2, 0);
                 handled = true;
                 return 0;
-            case WmRightButtonUp when IsReverseControlActive:
-                DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 2, 0);
+            case WmRightButtonUp when IsReverseControlEnabledForWindow:
+                if (IsReverseControlActive)
+                    DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 2, 0);
                 handled = true;
                 return 0;
             case WmMiddleButtonDown when IsReverseControlActive:
@@ -635,26 +674,30 @@ internal sealed class NativePreviewWindow : IDisposable
                 handled = true;
                 return 0;
             case WmSetCursor when IsReverseControlActive:
+                HideSystemCursor();
                 SetCursor(0);
                 handled = true;
                 return 1;
-            case WmKeyDown when IsReverseControlActive:
-                if (wParam.ToInt32() == VkF9)
+            case WmKeyDown or WmSysKeyDown when IsReverseControlHotkey(wParam.ToInt32()):
+                // The global registration is owned by MainWindow. Consume the
+                // local message so the shortcut cannot become iPhone input or
+                // toggle the same session twice when WM_HOTKEY arrives.
+                if (!(_isReverseControlHotkeyRegistered?.Invoke() ?? false))
                 {
-                    // F9 is registered as a process hotkey on MainWindow.
-                    // Consume the native key message here so it cannot toggle
-                    // the same session a second time when WM_HOTKEY arrives.
-                    handled = true;
-                    return 0;
+                    EnsureFixedWindow();
+                    _requestReverseControl?.Invoke(_handle);
                 }
+                handled = true;
+                return 0;
+            case WmKeyDown or WmSysKeyDown when IsBossKeyHotkey(wParam.ToInt32()):
+                // Boss key is process-global. Keep it out of the iPhone HID
+                // stream while the main window receives WM_HOTKEY.
+                handled = true;
+                return 0;
+            case WmKeyDown when IsReverseControlActive:
                 _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
                     PreviewKeyboardKind.Down, wParam.ToInt32(),
                     (int)((lParam.ToInt64() >> 16) & 0x1FF)));
-                handled = true;
-                return 0;
-            case WmKeyDown when wParam.ToInt32() == VkF9:
-                if (!IsReverseControlActive) EnsureFixedWindow();
-                _requestReverseControl?.Invoke(_handle);
                 handled = true;
                 return 0;
             case WmSysKeyDown when IsReverseControlActive:
@@ -670,7 +713,9 @@ internal sealed class NativePreviewWindow : IDisposable
                     (int)((lParam.ToInt64() >> 16) & 0x1FF)));
                 handled = true;
                 return 0;
-            case WmContextMenu when IsReverseControlActive:
+            case WmContextMenu when IsReverseControlEnabledForWindow:
+            case WmNcRightButtonDown when IsReverseControlEnabledForWindow:
+            case WmNcRightButtonUp when IsReverseControlEnabledForWindow:
                 handled = true;
                 return 0;
             case WmNcCalcSize when _managedContent is null:
@@ -801,9 +846,8 @@ internal sealed class NativePreviewWindow : IDisposable
         {
             _reverseControlItem.Header = LocalizationService.Get(
                 "IndependentWindowReverseControl");
-            // The same menu command toggles control on and off. F9 remains
-            // the keyboard escape hatch, but the context menu must not become
-            // permanently disabled after activation.
+            // The same menu command toggles control on and off. The configured
+            // global shortcut remains the keyboard escape hatch.
             _reverseControlItem.IsEnabled = !_isFullScreen;
         }
         if (_cornerItem is not null)
@@ -890,10 +934,10 @@ internal sealed class NativePreviewWindow : IDisposable
     }
 
     private bool IsReverseControlActive => _pointerInput is not null &&
-        (_isReverseControlEnabled?.Invoke() ?? false) &&
+        (_isReverseControlEnabled?.Invoke(_handle) ?? false) &&
         GetForegroundWindow() == _handle;
     private bool IsReverseControlEnabledForWindow => _pointerInput is not null &&
-        (_isReverseControlEnabled?.Invoke() ?? false);
+        (_isReverseControlEnabled?.Invoke(_handle) ?? false);
 
     private void EnableReverseControl()
     {
@@ -901,6 +945,47 @@ internal sealed class NativePreviewWindow : IDisposable
         EnsureFixedWindow();
         _requestReverseControl?.Invoke(_handle);
         UpdateContextMenuLabels();
+    }
+
+    private static bool IsReverseControlHotkey(int virtualKey) =>
+        GetConfiguredShortcut(BluetoothShortcutAction.ReverseControl)
+            .MatchesVirtualKey(virtualKey,
+            IsKeyDown(VkControl), IsKeyDown(VkMenu), IsKeyDown(VkShift));
+
+    private static bool IsBossKeyHotkey(int virtualKey) =>
+        GetConfiguredShortcut(BluetoothShortcutAction.BossKey)
+            .MatchesVirtualKey(virtualKey,
+                IsKeyDown(VkControl), IsKeyDown(VkMenu), IsKeyDown(VkShift));
+
+    private static KeyboardShortcut GetConfiguredShortcut(
+        BluetoothShortcutAction action) =>
+        Application.Current is App app
+            ? KeyboardShortcut.FromSettings(app.UpdateSettings, action)
+            : KeyboardShortcut.DefaultFor(action);
+
+    private static bool IsKeyDown(int virtualKey) => GetKeyState(virtualKey) < 0;
+
+    private void HideSystemCursor()
+    {
+        // ShowCursor uses one process-wide display counter. Other native
+        // windows or overlays can increment it after control is enabled, so
+        // assert hidden state whenever this independent HWND owns the cursor.
+        var cursor = new CursorInfo
+        {
+            Size = (uint)Marshal.SizeOf<CursorInfo>(),
+        };
+        if (!GetCursorInfo(ref cursor))
+        {
+            Log("independent_cursor_query_failed",
+                ("win32_error", Marshal.GetLastWin32Error()));
+            // WM_SETCURSOR below still sets the current cursor to null. Do
+            // not change ShowCursor's display count when it cannot be queried:
+            // repeated cursor messages would otherwise leave it hidden after
+            // reverse control has been turned off.
+            return;
+        }
+        if ((cursor.Flags & CursorShowing) != 0)
+            while (ShowCursor(false) >= 0) { }
     }
 
     private void EnsureFixedWindow()
@@ -963,6 +1048,7 @@ internal sealed class NativePreviewWindow : IDisposable
             ("mode", WindowMode), ("attached", _attached),
             ("full_screen", _isFullScreen));
         _disposed = true;
+        OpenWindows.Remove(this);
         _protectedOverlay?.Close();
         _protectedOverlay = null;
         _contextMenu.IsOpen = false;
@@ -1019,6 +1105,16 @@ internal sealed class NativePreviewWindow : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct CursorInfo
+    {
+        internal uint Size;
+        internal uint Flags;
+        internal nint Cursor;
+        internal int X;
+        internal int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct MonitorInfo
     {
         internal uint Size;
@@ -1059,6 +1155,13 @@ internal sealed class NativePreviewWindow : IDisposable
 
     [DllImport("user32.dll")]
     private static extern nint SetCursor(nint cursor);
+
+    [DllImport("user32.dll")]
+    private static extern int ShowCursor([MarshalAs(UnmanagedType.Bool)] bool show);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorInfo(ref CursorInfo cursorInfo);
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();

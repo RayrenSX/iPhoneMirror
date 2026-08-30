@@ -37,7 +37,7 @@ internal sealed class DeviceCatalog
             foreach (var instanceName in hardware.GetSubKeyNames())
             {
                 var instanceId = $@"USB\{hardwareName}\{instanceName}";
-                if (!DriverConstants.IsAllowedAppleParent(instanceId)) continue;
+                if (!DriverConstants.IsAppleMobileCaptureParent(instanceId)) continue;
                 using var instance = hardware.OpenSubKey(instanceName, writable: false);
                 if (instance is null) continue;
 
@@ -124,30 +124,47 @@ internal sealed class DeviceCatalog
         !serviceInstalled ? "AppleServiceMissing" :
         serviceRunning ? "AppleServiceRunning" : "AppleServiceStopped";
 
-    internal static string? FindAppleUsbDriverPackage(string? driverStoreRoot = null)
+    internal static string? FindAppleUsbDriverPackage(string? driverStoreRoot = null,
+        string? legacyDriverDirectory = null)
     {
         driverStoreRoot ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Windows),
             "System32", "DriverStore", "FileRepository");
-        if (!Directory.Exists(driverStoreRoot)) return null;
 
         // Apple Devices uses appleusb.inf. Desktop iTunes releases use
         // usbaapl64.inf (or usbaapl.inf on older packages).
-        foreach (var infName in new[] { "appleusb.inf", "usbaapl64.inf", "usbaapl.inf" })
+        var infNames = new[] { "appleusb.inf", "usbaapl64.inf", "usbaapl.inf" };
+        if (Directory.Exists(driverStoreRoot))
         {
-            try
+            foreach (var infName in infNames)
             {
-                foreach (var directory in Directory.EnumerateDirectories(driverStoreRoot,
-                             infName + "_*", SearchOption.TopDirectoryOnly))
+                try
                 {
-                    if (File.Exists(Path.Combine(directory, infName))) return infName;
+                    foreach (var directory in Directory.EnumerateDirectories(driverStoreRoot,
+                                 infName + "_*", SearchOption.TopDirectoryOnly))
+                    {
+                        if (File.Exists(Path.Combine(directory, infName))) return infName;
+                    }
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    DriverLogger.WriteException("device-catalog",
+                        "apple_driver_store_inspection_failed", error,
+                        ("driver_inf", infName));
                 }
             }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        }
+
+        legacyDriverDirectory ??= Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "Common Files", "Apple", "Mobile Device Support", "Drivers");
+        foreach (var infName in infNames)
+        {
+            if (File.Exists(Path.Combine(legacyDriverDirectory, infName)))
             {
-                DriverLogger.WriteException("device-catalog",
-                    "apple_driver_store_inspection_failed", error,
+                DriverLogger.WriteEvent("device-catalog", "apple_driver_directory_detected",
                     ("driver_inf", infName));
+                return infName;
             }
         }
         return null;

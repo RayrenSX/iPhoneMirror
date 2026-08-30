@@ -1,0 +1,26 @@
+# Canonical Apple iPhone/iPad capture USB product IDs.
+# Keep managed, native, and cleanup-script representations aligned with this file.
+1290
+1291
+1292
+1293
+1294
+1297
+1299
+129A
+129C
+129D
+129E
+129F
+12A0
+12A1
+12A2
+12A3
+12A4
+12A5
+12A6
+12A8
+12A9
+12AA
+12AB
+12AC

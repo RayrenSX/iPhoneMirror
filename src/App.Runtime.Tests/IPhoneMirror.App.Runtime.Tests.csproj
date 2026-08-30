@@ -12,5 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\App\iPhoneMirror.App.csproj" />
+    <Content Include="..\App\Assets\iPhoneMirror.ico" Link="Assets\iPhoneMirror.ico"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

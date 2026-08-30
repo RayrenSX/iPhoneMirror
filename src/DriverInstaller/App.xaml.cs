@@ -35,6 +35,14 @@ public partial class App : Application
                 args.Exception);
             args.SetObserved();
         };
+        if (DriverCleanupHost.IsRequested(e.Args))
+        {
+            _elevatedHost = true;
+            _elevatedOperation = "cleanup";
+            var exitCode = DriverCleanupHost.Run(e.Args);
+            Shutdown(exitCode);
+            return;
+        }
         if (ElevatedDriverHost.IsRequested(e.Args))
         {
             _elevatedHost = true;

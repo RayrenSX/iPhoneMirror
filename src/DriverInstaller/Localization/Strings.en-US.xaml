@@ -4,6 +4,7 @@
     <system:String x:Key="AppTitle">iPhoneMirror Driver Manager</system:String>
     <system:String x:Key="AppSubtitle">Apple USB environment and per-device capture filter</system:String>
     <system:String x:Key="OpenLogs">Open logs</system:String>
+    <system:String x:Key="ForceDriverCleanup">Force remove all drivers</system:String>
     <system:String x:Key="Refresh">Refresh</system:String>
     <system:String x:Key="AppleUsbEnvironment">Apple USB environment</system:String>
     <system:String x:Key="CaptureFilterDriver">Capture filter driver</system:String>
@@ -56,6 +57,11 @@
     <system:String x:Key="AisiTitle">Prepare the driver with Aisi Screen Mirroring</system:String>
     <system:String x:Key="AisiBody">Download Aisi Screen Mirroring, complete one normal wired mirroring session, then return and check again.</system:String>
     <system:String x:Key="OpenWebsite">Open website</system:String>
+    <system:String x:Key="DriverCleanupTitle">Run remove-all-drivers script</system:String>
+    <system:String x:Key="DriverCleanupBody">Choose a device in a separate console to remove all of its associated device nodes and driver packages, including Apple drivers. The script requires confirmation before changing the system.</system:String>
+    <system:String x:Key="RunDriverCleanup">Remove all drivers</system:String>
+    <system:String x:Key="DriverCleanupScriptMissing">The remove-all-drivers script was not found: {0}</system:String>
+    <system:String x:Key="DriverCleanupScriptStartFailed">Could not start the remove-all-drivers script: {0}</system:String>
     <system:String x:Key="Close">Close</system:String>
     <system:String x:Key="Minimize">Minimize</system:String>
     <system:String x:Key="Maximize">Maximize or restore</system:String>

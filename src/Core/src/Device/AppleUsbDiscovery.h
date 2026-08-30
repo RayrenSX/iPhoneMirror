@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -54,6 +55,27 @@ struct AppleUsbFilterSafetyResult {
 [[nodiscard]] ServiceState apple_mobile_device_service_state() noexcept;
 [[nodiscard]] std::vector<PhysicalAppleDevice> discover_physical_apple_usb_devices();
 [[nodiscard]] bool is_apple_usb_parent_instance_id(
+    std::wstring_view instance_id) noexcept;
+// Apple USB-C to 3.5mm Headphone Jack Adapter (05AC:110A) is surfaced by
+// Apple USB services but is not an iPhone/iPad capture device.
+[[nodiscard]] constexpr bool is_apple_audio_adapter_product_id(
+    std::uint32_t product_id) noexcept {
+    return product_id == 0x110A;
+}
+// Apple accessories share Apple's vendor ID. This explicit table follows
+// config/apple-mobile-capture-pids.txt and Apple's iPhone USB driver entries;
+// keep it in sync with DriverConstants.cs and remove_selected_iphone_drivers.ps1.
+// Apple TV, Watch, and HomePod must not become capture targets.
+[[nodiscard]] constexpr bool is_apple_mobile_capture_product_id(
+    std::uint32_t product_id) noexcept {
+    constexpr std::array<std::uint32_t, 24> mobile_capture_product_ids{
+        0x1290, 0x1291, 0x1292, 0x1293, 0x1294, 0x1297, 0x1299, 0x129A, 0x129C, 0x129D, 0x129E, 0x129F, 0x12A0, 0x12A1, 0x12A2, 0x12A3, 0x12A4, 0x12A5, 0x12A6, 0x12A8, 0x12A9, 0x12AA, 0x12AB, 0x12AC};
+    for (const auto allowed_product_id : mobile_capture_product_ids) {
+        if (product_id == allowed_product_id) return true;
+    }
+    return false;
+}
+[[nodiscard]] bool is_apple_mobile_capture_parent_instance_id(
     std::wstring_view instance_id) noexcept;
 [[nodiscard]] bool apple_usb_parent_instance_matches_serial(
     std::wstring_view instance_id, std::string_view serial) noexcept;

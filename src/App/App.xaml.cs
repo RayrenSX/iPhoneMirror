@@ -36,7 +36,10 @@ public partial class App : Application
         // available; the native DirectComposition preview remains unaffected.
         StartupDiagnostics.Initialize();
         DispatcherUnhandledException += (_, args) =>
+        {
             StartupDiagnostics.Write("WPF dispatcher", args.Exception);
+            args.Handled = true;
+        };
         try
         {
             DiagnosticLogger.Info("lifecycle", "startup_begin",
@@ -46,7 +49,12 @@ public partial class App : Application
             UpdateSettings = _settingsStore.Load();
             ThemeService.Apply(UpdateSettings.Theme);
             EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
-                new RoutedEventHandler((sender, _) => ThemeService.Attach((Window)sender)));
+                new RoutedEventHandler((sender, _) =>
+                {
+                    var window = (Window)sender;
+                    ThemeService.Attach(window);
+                    BossKeyWindowVisibility.Apply(window);
+                }));
             WindowWorkAreaController.EnableForApplication();
             base.OnStartup(e);
 

@@ -10,6 +10,7 @@ using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.Windows;
 
 namespace IPhoneMirror.App.ViewModels;
@@ -181,6 +182,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private bool _bluetoothCalibrationInProgress;
     private bool _bluetoothControlInputEnabled;
     private bool _bluetoothControlNoticePending;
+    private int _bluetoothBindingPromptInFlight;
+    private readonly HashSet<string> _bluetoothBindingPromptedTargets =
+        new(StringComparer.OrdinalIgnoreCase);
     private string? _bluetoothControlDeviceUdid;
     private double _bluetoothMouseSensitivity = 500;
     private double _bluetoothWheelSensitivity = 1000;
@@ -287,6 +291,33 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         (_bluetoothControlEnabled || CanEnableBluetoothControlFor(SelectedDevice?.Udid));
     public string BluetoothControlActionText => LocalizationService.Get(
         _bluetoothControlEnabled ? "StopBluetoothControl" : "StartBluetoothControl");
+
+    public ApplicationDisplayMode SelectedApplicationDisplayMode
+    {
+        get => Application.Current is App app
+            ? app.UpdateSettings.ApplicationDisplayMode
+            : ApplicationDisplayMode.Complete;
+        set
+        {
+            if (Application.Current is not App app ||
+                app.UpdateSettings.ApplicationDisplayMode == value) return;
+            var previous = app.UpdateSettings.ApplicationDisplayMode;
+            app.UpdateSettings.ApplicationDisplayMode = value;
+            if (!app.SaveUpdateSettings())
+            {
+                app.UpdateSettings.ApplicationDisplayMode = previous;
+                OnPropertyChanged(nameof(SelectedApplicationDisplayMode));
+                return;
+            }
+            OnPropertyChanged(nameof(SelectedApplicationDisplayMode));
+            OnPropertyChanged(nameof(IsLightweightApplicationMode));
+            AddDiagnosticLog(AppLog.Event("application_display_mode_changed",
+                ("mode", value.ToString())));
+        }
+    }
+
+    public bool IsLightweightApplicationMode =>
+        SelectedApplicationDisplayMode == ApplicationDisplayMode.Lightweight;
 
     private bool CanEnableBluetoothControlFor(string? deviceUdid) =>
         !_bluetoothControlEnabled && !_bluetoothControlStarting &&
@@ -1001,8 +1032,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 StartBluetoothControlCommand.NotifyCanExecuteChanged();
                 StopBluetoothControlCommand.NotifyCanExecuteChanged();
                 ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
-                if (connected && _bluetoothControlEnabled)
-                    _ = CompleteBluetoothConnectionAsync();
+                if (_bluetoothControlEnabled)
+                    _ = EnsureBluetoothControlBindingAsync();
             }
             if (Application.Current?.Dispatcher.CheckAccess() == true) Update();
             else Application.Current?.Dispatcher.BeginInvoke(Update);
@@ -1029,27 +1060,38 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     internal Task SendBluetoothKeyboardAsync(byte modifiers, IReadOnlyCollection<byte> usages) =>
         _bluetoothControl.SendKeyboardAsync(modifiers, usages);
 
-    internal async Task CalibrateBluetoothControlAsync()
+    internal Task SendBluetoothSystemShortcutAsync(byte keyboardUsage) =>
+        _bluetoothControl.SendIphoneSystemShortcutAsync(keyboardUsage);
+
+    internal Task SendBluetoothAppSwitcherAsync() =>
+        _bluetoothControl.SendIphoneAppSwitcherAsync();
+
+    internal Task ReleaseBluetoothControlInputAsync() =>
+        _bluetoothControl.ReleaseAllAsync();
+
+    internal async Task<bool> CalibrateBluetoothControlAsync()
     {
-        // Relative HID reports have no absolute position. Repeated large
-        // negative reports reliably clamp the iOS pointer to the top-left
-        // edge, giving preview-to-device mapping a known origin.
-        for (var i = 0; i < 4; i++)
-        {
-            await _bluetoothControl.SendMouseAsync(short.MinValue + 1,
-                short.MinValue + 1);
-            await Task.Delay(8);
-        }
+        var target = _bluetoothControlDeviceUdid;
+        if (string.IsNullOrWhiteSpace(target)) return false;
+        // Relative HID reports have no absolute position. Keep calibration in
+        // the HID service so it shares the target route and generation checks.
+        return await _bluetoothControl.CalibrateAsync(target,
+            _shutdownCancellation.Token);
     }
 
-    internal async Task EnableBluetoothControlAsync(string? targetDeviceUdid = null)
+    internal async Task EnableBluetoothControlAsync(string? targetDeviceUdid = null,
+        bool preserveExistingBinding = false)
     {
         var controlDeviceUdid = targetDeviceUdid ?? SelectedDevice?.Udid;
-        if (!CanEnableBluetoothControlFor(controlDeviceUdid)) return;
+        if (string.IsNullOrWhiteSpace(controlDeviceUdid) ||
+            !CanEnableBluetoothControlFor(controlDeviceUdid)) return;
+        if (!AcknowledgeBluetoothHidReportMapChange()) return;
         _bluetoothControlDeviceUdid = controlDeviceUdid;
+        var savedBinding = GetBluetoothControlBinding(controlDeviceUdid);
         _bluetoothControlNoticePending = _bluetoothNoticePolicy.ShouldShowForDevice(
             controlDeviceUdid);
-        _bluetoothControlInputEnabled = !_bluetoothControlNoticePending;
+        _bluetoothControlInputEnabled = savedBinding is not null &&
+            !_bluetoothControlNoticePending;
         _bluetoothControlStarting = true;
         OnPropertyChanged(nameof(CanStartBluetoothControl));
         OnPropertyChanged(nameof(CanStopBluetoothControl));
@@ -1060,18 +1102,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
         try
         {
-            var controlDeviceName = Devices.FirstOrDefault(device =>
-                DeviceViewModel.UdidEquals(device.Udid, controlDeviceUdid))?.Name;
-            if (string.Equals(controlDeviceName, "iPhone",
-                    StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(controlDeviceName, "iPad",
-                    StringComparison.OrdinalIgnoreCase))
-                controlDeviceName = null;
             AddDiagnosticLog(AppLog.Event("bluetooth_control_start_begin",
                 ("device", AppLog.Device(controlDeviceUdid)),
-                ("device_name_available", !string.IsNullOrWhiteSpace(controlDeviceName)),
                 ("show_notice", _bluetoothControlNoticePending)));
-            var started = await _bluetoothControl.StartAsync(controlDeviceName,
+            var targetDeviceName = Devices.FirstOrDefault(device =>
+                DeviceViewModel.UdidEquals(device.Udid, controlDeviceUdid))?.Name;
+            var started = await _bluetoothControl.StartAsync(controlDeviceUdid,
+                targetDeviceName, preserveExistingBinding, savedBinding,
                 _shutdownCancellation.Token);
             if (!started)
             {
@@ -1106,8 +1143,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             AddDiagnosticLog(AppLog.Event("bluetooth_control_start_complete",
                 ("success", true), ("advertising", _bluetoothControl.IsAdvertising),
                 ("connected", _bluetoothControlConnected)));
-            if (_bluetoothControlConnected)
-                await CompleteBluetoothConnectionAsync();
+            await EnsureBluetoothControlBindingAsync();
         }
         catch (OperationCanceledException)
         {
@@ -1140,6 +1176,213 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    private bool AcknowledgeBluetoothHidReportMapChange()
+    {
+        if (Application.Current is not App app ||
+            app.UpdateSettings.BluetoothHidReportMapAcknowledgedVersion >=
+                BluetoothHidProtocol.ReportMapVersion)
+            return true;
+        if (Application.Current.MainWindow is not { } owner) return false;
+        BluetoothControlNoticeWindow.ShowReportMapChanged(owner,
+            _bluetoothControl.SuggestedDeviceName, () =>
+            {
+                app.UpdateSettings.BluetoothHidReportMapAcknowledgedVersion =
+                    BluetoothHidProtocol.ReportMapVersion;
+                if (!app.SaveUpdateSettings())
+                    AddDiagnosticLog(AppLog.Event("bluetooth_hid_report_map_ack_save_failed"));
+            });
+        AddDiagnosticLog(AppLog.Event("bluetooth_hid_report_map_repair_required",
+            ("version", BluetoothHidProtocol.ReportMapVersion)));
+        return false;
+    }
+
+    private string? GetBluetoothControlBinding(string udid) =>
+        Application.Current is App app &&
+        app.UpdateSettings.BluetoothControlDeviceBindings.TryGetValue(udid,
+            out var clientId) && !string.IsNullOrWhiteSpace(clientId)
+            ? clientId : null;
+
+    private bool SaveBluetoothControlBinding(string udid, string clientId)
+    {
+        if (Application.Current is not App app) return false;
+        var bindings = app.UpdateSettings.BluetoothControlDeviceBindings;
+        if (bindings.Any(pair =>
+                !string.Equals(pair.Key, udid, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(pair.Value, clientId, StringComparison.OrdinalIgnoreCase)))
+            return false;
+        var hadPrevious = bindings.TryGetValue(udid, out var previous);
+        bindings[udid] = clientId;
+        if (app.SaveUpdateSettings()) return true;
+        if (hadPrevious) bindings[udid] = previous!;
+        else bindings.Remove(udid);
+        return false;
+    }
+
+    private async Task EnsureBluetoothControlBindingAsync()
+    {
+        if (!_bluetoothControlEnabled ||
+            Interlocked.Exchange(ref _bluetoothBindingPromptInFlight, 1) != 0)
+            return;
+        try
+        {
+            var targetUdid = _bluetoothControlDeviceUdid;
+            if (string.IsNullOrWhiteSpace(targetUdid)) return;
+            var savedBinding = GetBluetoothControlBinding(targetUdid);
+            if (savedBinding is not null && string.Equals(savedBinding,
+                    _bluetoothControl.TargetClientId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                if (_bluetoothControl.IsTargetClientConnected)
+                    await CompleteBluetoothConnectionAsync();
+                return;
+            }
+
+            IReadOnlyList<BluetoothClientInfo> clients;
+            do
+            {
+                clients = await _bluetoothControl.GetSubscribedClientInfosAsync();
+                if (clients.Count != 0) break;
+                await Task.Delay(500);
+            }
+            while (_bluetoothControlEnabled &&
+                DeviceViewModel.UdidEquals(_bluetoothControlDeviceUdid, targetUdid));
+            if (clients.Count == 0) return;
+            if (savedBinding is not null && clients.Any(client =>
+                    string.Equals(client.Id, savedBinding,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                // The GATT subscription event can arrive before the route
+                // refresh publishes TargetClientId. Restore the persisted
+                // client directly instead of asking the user to bind again.
+                if (await _bluetoothControl.BindTargetClientAsync(savedBinding))
+                {
+                    _bluetoothControlConnected =
+                        _bluetoothControl.IsTargetClientConnected;
+                    _bluetoothControlInputEnabled = !_bluetoothControlNoticePending;
+                    NotifyBluetoothControlStateChanged();
+                    if (_bluetoothControlConnected)
+                        await CompleteBluetoothConnectionAsync();
+                }
+                return;
+            }
+            clients = clients.Select(MarkBluetoothClientBinding).ToArray();
+            var owner = Application.Current?.MainWindow;
+            if (owner is null) return;
+            var targetName = Devices.FirstOrDefault(device =>
+                DeviceViewModel.UdidEquals(device.Udid, targetUdid))?.DisplayName ?? targetUdid;
+            if (!_bluetoothBindingPromptedTargets.Add(targetUdid)) return;
+            BluetoothControlNoticeWindow.TryCloseActive();
+            var selected = await owner.Dispatcher.InvokeAsync(() =>
+                BluetoothClientBindingWindow.Show(owner, targetName, clients,
+                    _bluetoothControl.TargetClientId,
+                    RefreshBluetoothBindingClientsAsync,
+                    UnbindBluetoothControlBinding));
+            if (string.IsNullOrWhiteSpace(selected) ||
+                !await _bluetoothControl.BindTargetClientAsync(selected)) return;
+            if (!SaveBluetoothControlBinding(targetUdid, selected))
+            {
+                AddDiagnosticLog(AppLog.Event("bluetooth_control_binding_save_failed",
+                    ("device", AppLog.Device(targetUdid))));
+                return;
+            }
+            _bluetoothControlConnected = _bluetoothControl.IsTargetClientConnected;
+            _bluetoothControlInputEnabled = !_bluetoothControlNoticePending;
+            NotifyBluetoothControlStateChanged();
+            if (_bluetoothControlConnected)
+                await CompleteBluetoothConnectionAsync();
+        }
+        finally
+        {
+            Volatile.Write(ref _bluetoothBindingPromptInFlight, 0);
+        }
+    }
+
+    private BluetoothClientInfo MarkBluetoothClientBinding(BluetoothClientInfo client)
+    {
+        if (Application.Current is not App app) return client;
+        var binding = app.UpdateSettings.BluetoothControlDeviceBindings
+            .FirstOrDefault(pair => string.Equals(pair.Value, client.Id,
+                StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(binding.Key)) return client;
+        var deviceName = Devices.FirstOrDefault(device =>
+            DeviceViewModel.UdidEquals(device.Udid, binding.Key))?.DisplayName;
+        return client with { BoundDeviceName = deviceName ?? binding.Key };
+    }
+
+    private async Task<IReadOnlyList<BluetoothClientInfo>>
+        RefreshBluetoothBindingClientsAsync()
+    {
+        var clients = await _bluetoothControl.GetSubscribedClientInfosAsync();
+        return clients.Select(MarkBluetoothClientBinding).ToArray();
+    }
+
+    internal bool UnbindBluetoothControlBinding(string clientId)
+    {
+        if (Application.Current is not App app || string.IsNullOrWhiteSpace(clientId))
+            return false;
+        var binding = app.UpdateSettings.BluetoothControlDeviceBindings
+            .FirstOrDefault(pair => string.Equals(pair.Value, clientId,
+                StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(binding.Key)) return false;
+
+        var bindings = app.UpdateSettings.BluetoothControlDeviceBindings;
+        bindings.Remove(binding.Key);
+        if (!app.SaveUpdateSettings())
+        {
+            bindings[binding.Key] = binding.Value;
+            return false;
+        }
+
+        _bluetoothBindingPromptedTargets.Remove(binding.Key);
+        if (_bluetoothControlEnabled && DeviceViewModel.UdidEquals(
+                _bluetoothControlDeviceUdid, binding.Key))
+            _ = DisableBluetoothControlAsync();
+        AddDiagnosticLog(AppLog.Event("bluetooth_control_binding_removed",
+            ("device", AppLog.Device(binding.Key))));
+        return true;
+    }
+
+    internal async Task<bool> ClearBluetoothControlBindingsAsync()
+    {
+        if (Application.Current is not App app) return false;
+        var bindings = app.UpdateSettings.BluetoothControlDeviceBindings;
+        if (bindings.Count == 0)
+        {
+            if (_bluetoothControlEnabled) await DisableBluetoothControlAsync();
+            return true;
+        }
+        var previous = new Dictionary<string, string>(bindings,
+            StringComparer.OrdinalIgnoreCase);
+        bindings.Clear();
+        if (!app.SaveUpdateSettings())
+        {
+            foreach (var pair in previous) bindings[pair.Key] = pair.Value;
+            return false;
+        }
+        _bluetoothBindingPromptedTargets.Clear();
+        if (_bluetoothControlEnabled) await DisableBluetoothControlAsync();
+        return true;
+    }
+
+    internal async Task SwitchBluetoothControlTargetAsync(string? targetDeviceUdid)
+    {
+        if (!_bluetoothControlEnabled || _bluetoothControlStopping ||
+            _bluetoothControlStarting || DeviceViewModel.UdidEquals(
+                _bluetoothControlDeviceUdid, targetDeviceUdid))
+            return;
+
+        AddDiagnosticLog(AppLog.Event("bluetooth_control_target_switch_begin",
+            ("from", AppLog.Device(_bluetoothControlDeviceUdid)),
+            ("to", AppLog.Device(targetDeviceUdid))));
+        await DisableBluetoothControlAsync();
+        if (!string.IsNullOrWhiteSpace(targetDeviceUdid))
+            await EnableBluetoothControlAsync(targetDeviceUdid,
+                preserveExistingBinding: true);
+        AddDiagnosticLog(AppLog.Event("bluetooth_control_target_switch_complete",
+            ("target", AppLog.Device(_bluetoothControlDeviceUdid)),
+            ("enabled", _bluetoothControlEnabled)));
+    }
+
     internal async Task DisableBluetoothControlAsync()
     {
         if (_bluetoothControlStopping ||
@@ -1157,6 +1400,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             ResetBluetoothControlInputState();
             NotifyBluetoothControlStateChanged();
             BluetoothControlNoticeWindow.TryCloseActive();
+            if (!string.IsNullOrWhiteSpace(controlDeviceUdid))
+                _bluetoothBindingPromptedTargets.Remove(controlDeviceUdid);
             await _bluetoothControl.ReleaseAllAsync();
             await _bluetoothControl.StopAsync();
             AddDiagnosticLog(AppLog.Event("bluetooth_control_stop_complete"));
@@ -1180,8 +1425,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _bluetoothCalibrationInProgress = true;
         try
         {
-            await CalibrateBluetoothControlAsync();
-            if (!_bluetoothControlEnabled || !_bluetoothControl.IsConnected) return;
+            var calibrated = await CalibrateBluetoothControlAsync();
+            if (!_bluetoothControlEnabled || !_bluetoothControl.IsConnected ||
+                !calibrated) return;
             _bluetoothControlCalibrated = true;
             AddUiLog(LocalizationService.Get("BluetoothControlConnected"));
             AddDiagnosticLog(AppLog.Event("bluetooth_control_connected",
@@ -1224,7 +1470,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             if (_disposed || !_bluetoothControlEnabled ||
                 !_bluetoothControlNoticePending) return;
-            AllowBluetoothControlInput();
+            if (GetBluetoothControlBinding(_bluetoothControlDeviceUdid ?? string.Empty)
+                is not null)
+                AllowBluetoothControlInput();
         }
 
         if (Application.Current?.Dispatcher.CheckAccess() == true) Update();

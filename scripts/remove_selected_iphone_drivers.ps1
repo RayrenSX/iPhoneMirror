@@ -1,432 +1,2274 @@
 ﻿[CmdletBinding()]
 param(
     [switch]$ListOnly,
-    [switch]$PreviewOnly
+    [switch]$PreviewOnly,
+    [switch]$NoPause,
+    [int]$ExcludeProcessId = 0,
+    [int]$ExcludeParentProcessId = 0
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$PnpUtil = Join-Path ([Environment]::SystemDirectory) 'pnputil.exe'
-$AppleUsbRoot = 'HKLM:\SYSTEM\CurrentControlSet\Enum\USB'
-$AppleMobileProductPattern = '^VID_05AC&PID_(12A8|12AB)$'
-$AppleParentPattern = '^USB\\VID_05AC&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9][A-Za-z0-9-]{7,39}$'
+# ============================================================
+# Configuration
+# ============================================================
 
-function Test-Administrator {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$PnpUtil = Join-Path $env:windir 'System32\pnputil.exe'
+
+$LogRoot = Join-Path `
+    $env:ProgramData `
+    'iPhoneMirror.Driver\DeviceCleanup'
+
+# Apple USB VID
+$AppleVid = '05AC'
+
+# This is the same explicit iPhone/iPad capture PID table used by the native
+# discovery and driver-manager paths. Keep this list aligned with
+# config/apple-mobile-capture-pids.txt. Apple TV (12A7), Watch (12AF), HomePod
+# (12B0), and other Apple USB products remain outside this cleanup scope.
+$AppleMobileCaptureProductIds =
+    [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
+
+foreach ($productId in @(
+    '1290'
+    '1291'
+    '1292'
+    '1293'
+    '1294'
+    '1297'
+    '1299'
+    '129A'
+    '129C'
+    '129D'
+    '129E'
+    '129F'
+    '12A0'
+    '12A1'
+    '12A2'
+    '12A3'
+    '12A4'
+    '12A5'
+    '12A6'
+    '12A8'
+    '12A9'
+    '12AA'
+    '12AB'
+    '12AC'
+)) {
+    [void]$AppleMobileCaptureProductIds.Add($productId)
 }
 
-function Start-ElevatedCopy {
-    $quotedScript = '"' + $PSCommandPath.Replace('"', '\"') + '"'
-    $arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $quotedScript"
+# ============================================================
+# Runtime state
+# ============================================================
+
+$script:DeviceCache = @{}
+$script:ContainerCache = @{}
+$script:DriverInventory = @{}
+$script:DriverInventoryInitialized = $false
+$script:Failures = [System.Collections.Generic.List[string]]::new()
+$script:RestartRequired = $false
+$script:RestartPendingNodes =
+    [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
+$script:RestartPendingDrivers =
+    [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
+
+$script:CurrentLogPath = ''
+
+# ============================================================
+# Console / logging
+# ============================================================
+
+function Write-Log {
+    param(
+        [AllowEmptyString()]
+        [string]$Message = ''
+    )
+
+    if ($null -eq $Message) {
+        $Message = ''
+    }
+
+    if ($Message.Length -eq 0) {
+        Write-Host ''
+        return
+    }
+
+    $time = Get-Date -Format 'HH:mm:ss.fff'
+
+    Write-Host "[$time] $Message"
+}
+
+function Write-OK {
+    param(
+        [AllowEmptyString()]
+        [string]$Message = ''
+    )
+
+    if ([string]::IsNullOrEmpty($Message)) {
+        Write-Host ''
+        return
+    }
+
+    Write-Host "  [OK] $Message" -ForegroundColor Green
+}
+
+function Write-Warn {
+    param(
+        [AllowEmptyString()]
+        [string]$Message = ''
+    )
+
+    if ([string]::IsNullOrEmpty($Message)) {
+        Write-Host ''
+        return
+    }
+
+    Write-Host "  [WARN] $Message" -ForegroundColor Yellow
+}
+
+function Write-Err {
+    param(
+        [AllowEmptyString()]
+        [string]$Message = ''
+    )
+
+    if ([string]::IsNullOrEmpty($Message)) {
+        Write-Host ''
+        return
+    }
+
+    Write-Host "  [ERROR] $Message" -ForegroundColor Red
+}
+
+function Add-Failure {
+    param(
+        [string]$Message
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        $script:Failures.Add($Message)
+    }
+}
+
+function Stop-Cleanup {
+    param(
+        [int]$ExitCode = 0
+    )
+
+    if (-not $NoPause) {
+        Write-Host ''
+
+        try {
+            [void](Read-Host '按 Enter 键关闭窗口')
+        }
+        catch {
+        }
+    }
+
+    exit $ExitCode
+}
+
+# ============================================================
+# PnPUtil
+# ============================================================
+
+function Invoke-PnpUtil {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
+    )
+
     try {
-        $process = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') `
-            -Verb RunAs -ArgumentList $arguments -Wait -PassThru
-        exit $process.ExitCode
+
+        $output = @(
+            & $PnpUtil @Arguments 2>&1 |
+                ForEach-Object {
+                    $_.ToString()
+                }
+        )
+
+        return [PSCustomObject]@{
+            ExitCode = $LASTEXITCODE
+            Output   = $output
+            Text     = ($output -join [Environment]::NewLine)
+        }
     }
     catch {
-        Write-Host '未获得管理员权限，操作已取消。' -ForegroundColor Red
-        exit 5
-    }
-}
 
-function Resolve-DisplayText([object]$Value, [string]$Fallback) {
-    $text = [string]$Value
-    if ([string]::IsNullOrWhiteSpace($text)) { return $Fallback }
-    $separator = $text.LastIndexOf(';')
-    if ($separator -ge 0 -and $separator + 1 -lt $text.Length) {
-        $text = $text.Substring($separator + 1)
-    }
-    if ([string]::IsNullOrWhiteSpace($text)) { return $Fallback }
-    return $text.Trim()
-}
-
-function Get-ObjectPropertyValue([object]$Object, [string]$Name) {
-    $property = $Object.PSObject.Properties[$Name]
-    if ($null -eq $property) { return $null }
-    return $property.Value
-}
-
-function Invoke-PnpUtil([string[]]$Arguments) {
-    $output = @(& $PnpUtil @Arguments 2>&1 | ForEach-Object { $_.ToString() })
-    return [PSCustomObject]@{
-        ExitCode = $LASTEXITCODE
-        Output = $output
-        Text = $output -join [Environment]::NewLine
-    }
-}
-
-function Convert-PnpCsv([string[]]$Lines) {
-    if ($Lines.Count -lt 2) { return @() }
-    $headerIndex = -1
-    for ($index = 0; $index -lt $Lines.Count; $index++) {
-        if ($Lines[$index] -match ',') {
-            $headerIndex = $index
-            break
+        return [PSCustomObject]@{
+            ExitCode = -1
+            Output   = @($_.Exception.Message)
+            Text     = $_.Exception.Message
         }
     }
-    if ($headerIndex -lt 0 -or $headerIndex + 1 -ge $Lines.Count) { return @() }
-    $headers = 0..63 | ForEach-Object { "C$_" }
-    return @(($Lines | Select-Object -Skip ($headerIndex + 1)) |
-        ConvertFrom-Csv -Header $headers)
 }
 
-function Get-AppleDeviceGroups {
-    if (-not (Test-Path -LiteralPath $AppleUsbRoot)) { return @() }
-    $parents = @()
-    foreach ($hardwareKey in @(Get-ChildItem -LiteralPath $AppleUsbRoot -ErrorAction SilentlyContinue)) {
-        $hardwareName = $hardwareKey.PSChildName
-        if ($hardwareName -notmatch '^VID_05AC&PID_[0-9A-Fa-f]{4}$') { continue }
-        foreach ($instanceKey in @(Get-ChildItem -LiteralPath $hardwareKey.PSPath -ErrorAction SilentlyContinue)) {
-            $instanceId = "USB\$hardwareName\$($instanceKey.PSChildName)"
-            if ($instanceId -notmatch $AppleParentPattern) { continue }
-            $properties = Get-ItemProperty -LiteralPath $instanceKey.PSPath -ErrorAction SilentlyContinue
-            if ($null -eq $properties) { continue }
-            $fallback = 'Apple 移动设备'
-            $name = Resolve-DisplayText (Get-ObjectPropertyValue $properties 'FriendlyName') ''
-            if ([string]::IsNullOrWhiteSpace($name)) {
-                $name = Resolve-DisplayText `
-                    (Get-ObjectPropertyValue $properties 'DeviceDesc') $fallback
+# ============================================================
+# BTHLE filtering
+# ============================================================
+
+function Test-IsBthle {
+    param(
+        [AllowEmptyString()]
+        [string]$InstanceId = '',
+
+        [AllowEmptyString()]
+        [string]$Name = '',
+
+        [AllowEmptyString()]
+        [string]$Class = ''
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($InstanceId)) {
+
+        if ($InstanceId -match '(?i)^BTHLE\\') {
+            return $true
+        }
+
+        if ($InstanceId -match '(?i)BTHLEDevice') {
+            return $true
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Name)) {
+
+        if ($Name -match '(?i)Bluetooth.*LE') {
+            return $true
+        }
+
+        if ($Name -match '(?i)Bluetooth Low Energy') {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# ============================================================
+# Apple USB detection
+# ============================================================
+
+function Test-IsAppleUsb {
+    param(
+        [AllowEmptyString()]
+        [string]$InstanceId = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($InstanceId)) {
+        return $false
+    }
+
+    if ($InstanceId -notmatch
+        '(?i)^USB\\VID_05AC&PID_([0-9A-F]{4})' +
+        '(?:&(?:MI_[0-9A-F]{2}|REV_[0-9A-F]{4}|RESTORE_MODE))*\\') {
+        return $false
+    }
+
+    return $AppleMobileCaptureProductIds.Contains($Matches[1])
+}
+
+# ============================================================
+# Get safe property
+# ============================================================
+
+function Get-SafeProperty {
+    param(
+        [object]$Object,
+
+        [string]$Name,
+
+        [AllowEmptyString()]
+        [string]$Default = ''
+    )
+
+    if ($null -eq $Object) {
+        return $Default
+    }
+
+    try {
+
+        $property =
+            $Object.PSObject.Properties[$Name]
+
+        if ($null -eq $property) {
+            return $Default
+        }
+
+        $value =
+            $property.Value
+
+        if ($null -eq $value) {
+            return $Default
+        }
+
+        return [string]$value
+    }
+    catch {
+
+        return $Default
+    }
+}
+
+# ============================================================
+# Get Container ID
+# ============================================================
+
+function Get-DeviceContainerId {
+    param(
+        [string]$InstanceId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($InstanceId)) {
+        return ''
+    }
+
+    if ($script:ContainerCache.ContainsKey($InstanceId)) {
+        return [string]$script:ContainerCache[$InstanceId]
+    }
+
+    $containerId = ''
+
+    try {
+
+        if (
+            $null -ne (
+                Get-Command `
+                    Get-PnpDeviceProperty `
+                    -ErrorAction SilentlyContinue
+            )
+        ) {
+
+            $property =
+                Get-PnpDeviceProperty `
+                    -InstanceId $InstanceId `
+                    -KeyName 'DEVPKEY_Device_ContainerId' `
+                    -ErrorAction Stop
+
+            if ($null -ne $property) {
+
+                $value =
+                    $property.Data
+
+                if ($null -ne $value) {
+
+                    $containerId =
+                        [string]$value
+                }
             }
-            $looksLikeMobileDevice = $hardwareName -match $AppleMobileProductPattern -or
-                $name -match '(?i)Apple (Mobile Device|iPhone|iPad)'
-            if (-not $looksLikeMobileDevice) { continue }
-            $containerId = [string](Get-ObjectPropertyValue $properties 'ContainerID')
-            $parents += [PSCustomObject]@{
-                Serial = $instanceKey.PSChildName.ToUpperInvariant()
-                Name = $name
-                InstanceId = $instanceId
-                ContainerId = $containerId
-                Service = [string](Get-ObjectPropertyValue $properties 'Service')
+        }
+    }
+    catch {
+
+        # A single failed property lookup must never
+        # abort the complete device scan.
+        $containerId = ''
+    }
+
+    $script:ContainerCache[$InstanceId] =
+        $containerId
+
+    return $containerId
+}
+
+# ============================================================
+# Normalize USB physical identity
+# ============================================================
+
+function Get-NormalizedUsbIdentity {
+    param(
+        [string]$InstanceId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($InstanceId)) {
+        return ''
+    }
+
+    $id =
+        $InstanceId.ToUpperInvariant()
+
+    # USB interface:
+    #
+    # USB\VID_05AC&PID_12A8&MI_00\XXXXXXXX
+    #
+    # USB\VID_05AC&PID_12A8\XXXXXXXX
+
+    $id =
+        $id -replace `
+            '(?i)&MI_[0-9A-F]{2}(?=\\)', ''
+
+    # Remove known USB interface class fragments.
+
+    $id =
+        $id -replace `
+            '(?i)&REV_[0-9A-F]{4}', ''
+
+    return $id
+}
+
+# Read a value from either an XML attribute or a child element. pnputil has
+# used both forms across Windows releases and localized output must not be
+# parsed by looking for translated labels.
+function Get-XmlValue {
+    param(
+        [System.Xml.XmlNode]$Node,
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    if ($null -eq $Node) {
+        return ''
+    }
+
+    try {
+        if ($null -ne $Node.Attributes) {
+            $attribute = $Node.Attributes.GetNamedItem($Name)
+            if ($null -ne $attribute -and
+                -not [string]::IsNullOrWhiteSpace($attribute.Value)) {
+                return [string]$attribute.Value
             }
         }
+
+        $child = $Node.SelectSingleNode(
+            "./*[local-name()='$Name']"
+        )
+        if ($null -ne $child) {
+            return [string]$child.InnerText
+        }
+    }
+    catch {
+        return ''
     }
 
-    $groups = foreach ($group in @($parents | Group-Object Serial)) {
-        $roots = @($group.Group)
+    return ''
+}
+
+# ============================================================
+# Initialize PnP cache
+# ============================================================
+
+function Initialize-DeviceCache {
+
+    $script:DeviceCache.Clear()
+    $script:ContainerCache.Clear()
+
+    Write-Log '扫描当前 PnP 设备...'
+
+    $getPnpDevice =
+        Get-Command `
+            Get-PnpDevice `
+            -ErrorAction SilentlyContinue
+
+    if ($null -ne $getPnpDevice) {
+
+        try {
+
+            $devices =
+                @(
+                    Get-PnpDevice `
+                        -PresentOnly `
+                        -ErrorAction Stop
+                )
+
+            foreach ($device in $devices) {
+
+                $instanceId =
+                    Get-SafeProperty `
+                        $device `
+                        'InstanceId'
+
+                if ([string]::IsNullOrWhiteSpace($instanceId)) {
+                    continue
+                }
+
+                $friendlyName =
+                    Get-SafeProperty `
+                        $device `
+                        'FriendlyName'
+
+                $class =
+                    Get-SafeProperty `
+                        $device `
+                        'Class'
+
+                if (
+                    Test-IsBthle `
+                        $instanceId `
+                        $friendlyName `
+                        $class
+                ) {
+                    continue
+                }
+
+                $script:DeviceCache[$instanceId] =
+                    $device
+            }
+
+            Write-OK (
+                "PnP 缓存完成：$($script:DeviceCache.Count) 个设备"
+            )
+
+            return
+        }
+        catch {
+
+            Write-Warn (
+                'Get-PnpDevice 扫描失败，切换到 pnputil：' +
+                $_.Exception.Message
+            )
+        }
+    }
+
+    # ========================================================
+    # pnputil fallback
+    # ========================================================
+
+    $result =
+        Invoke-PnpUtil @(
+            '/enum-containers'
+            '/connected'
+            '/devices'
+            '/format'
+            'xml'
+        )
+
+    if ($result.ExitCode -ne 0) {
+
+        throw (
+            "无法枚举 PnP 设备，pnputil ExitCode=$($result.ExitCode)"
+        )
+    }
+
+    if ([string]::IsNullOrWhiteSpace($result.Text)) {
+        throw 'pnputil PnP XML 为空，无法枚举设备。'
+    }
+
+    try {
+        [xml]$xml = $result.Text
+    }
+    catch {
+        throw (
+            'pnputil PnP XML 解析失败：' +
+            $_.Exception.Message
+        )
+    }
+
+    $containerNodes =
+        @($xml.SelectNodes('//*[local-name()="Container"]'))
+
+    if ($containerNodes.Count -eq 0) {
+        Write-Warn 'pnputil PnP XML 中没有当前连接的设备。'
+        Write-OK 'pnputil PnP 缓存完成：0 个设备'
+        return
+    }
+
+    foreach ($containerNode in $containerNodes) {
+        $containerId = Get-XmlValue $containerNode 'ContainerId'
+        foreach ($deviceNode in @(
+            $containerNode.SelectNodes(
+                './*[local-name()="Devices"]/*[local-name()="Device"]'
+            )
+        )) {
+            $instanceId = Get-XmlValue $deviceNode 'InstanceId'
+            if ([string]::IsNullOrWhiteSpace($instanceId)) {
+                continue
+            }
+
+            $friendlyName = Get-XmlValue $deviceNode 'DeviceDescription'
+            if ([string]::IsNullOrWhiteSpace($friendlyName)) {
+                $friendlyName = Get-XmlValue $deviceNode 'FriendlyName'
+            }
+
+            if (Test-IsBthle $instanceId $friendlyName '') {
+                continue
+            }
+
+            $script:DeviceCache[$instanceId] =
+                [PSCustomObject]@{
+                    InstanceId   = $instanceId
+                    FriendlyName = $friendlyName
+                    Class        = ''
+                    ContainerId  = $containerId
+                }
+        }
+    }
+
+    if ($script:DeviceCache.Count -eq 0) {
+        Write-Warn 'pnputil PnP XML 中没有可用设备。'
+    }
+
+    Write-OK (
+        "pnputil PnP 缓存完成：$($script:DeviceCache.Count) 个设备"
+    )
+}
+
+# ============================================================
+# Get Apple candidate nodes
+# ============================================================
+
+function Get-AppleCandidateNodes {
+
+    $result =
+        [System.Collections.Generic.List[object]]::new()
+
+    foreach ($instanceId in @($script:DeviceCache.Keys)) {
+
+        $device =
+            $script:DeviceCache[$instanceId]
+
+        if (
+            Test-IsBthle `
+                $instanceId `
+                (Get-SafeProperty $device 'FriendlyName') `
+                (Get-SafeProperty $device 'Class')
+        ) {
+            continue
+        }
+
+        if (-not (Test-IsAppleUsb $instanceId)) {
+            continue
+        }
+
+        $containerId =
+            Get-SafeProperty $device 'ContainerId'
+
+        if ([string]::IsNullOrWhiteSpace($containerId)) {
+            $containerId =
+                Get-DeviceContainerId $instanceId
+        }
+
+        $normalizedUsb =
+            Get-NormalizedUsbIdentity $instanceId
+
+        $result.Add(
+            [PSCustomObject]@{
+                InstanceId   = $instanceId
+                Device        = $device
+                FriendlyName = Get-SafeProperty `
+                    $device `
+                    'FriendlyName'
+                Class         = Get-SafeProperty `
+                    $device `
+                    'Class'
+                ContainerId   = $containerId
+                UsbIdentity   = $normalizedUsb
+            }
+        )
+    }
+
+    return @($result)
+}
+
+# ============================================================
+# Merge physical devices
+# ============================================================
+
+function Get-ApplePhysicalDevices {
+
+    $nodes =
+        @(Get-AppleCandidateNodes)
+
+    if ($nodes.Count -eq 0) {
+        return @()
+    }
+
+    # --------------------------------------------------------
+    # Union-Find style grouping.
+    #
+    # Nodes sharing the same ContainerId OR normalized USB
+    # identity are considered the same physical device.
+    # --------------------------------------------------------
+
+    $groups = @{}
+
+    foreach ($node in $nodes) {
+
+        $keys =
+            [System.Collections.Generic.List[string]]::new()
+
+        if (-not [string]::IsNullOrWhiteSpace($node.ContainerId)) {
+
+            $keys.Add(
+                'C:' +
+                $node.ContainerId.ToUpperInvariant()
+            )
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($node.UsbIdentity)) {
+
+            $keys.Add(
+                'U:' +
+                $node.UsbIdentity.ToUpperInvariant()
+            )
+        }
+
+        if ($keys.Count -eq 0) {
+            continue
+        }
+
+        $existingGroup = $null
+
+        foreach ($key in $keys) {
+
+            if ($groups.ContainsKey($key)) {
+
+                $candidateGroup =
+                    $groups[$key]
+
+                if ($null -eq $existingGroup) {
+
+                    $existingGroup =
+                        $candidateGroup
+
+                    continue
+                }
+
+                if ([object]::ReferenceEquals(
+                    $existingGroup,
+                    $candidateGroup
+                )) {
+                    continue
+                }
+
+                # A node can connect two existing groups through its
+                # container and USB identities. Merge them before adding it.
+                foreach ($member in $candidateGroup) {
+                    $existingGroup.Add($member)
+                }
+
+                foreach ($groupKey in @($groups.Keys)) {
+                    if ([object]::ReferenceEquals(
+                        $groups[$groupKey],
+                        $candidateGroup
+                    )) {
+                        $groups[$groupKey] = $existingGroup
+                    }
+                }
+            }
+        }
+
+        if ($null -eq $existingGroup) {
+
+            $existingGroup =
+                [System.Collections.Generic.List[object]]::new()
+        }
+
+        $existingGroup.Add($node)
+
+        foreach ($key in $keys) {
+            $groups[$key] =
+                $existingGroup
+        }
+    }
+
+    # --------------------------------------------------------
+    # Deduplicate group objects.
+    # --------------------------------------------------------
+
+    $uniqueGroups =
+        [System.Collections.Generic.List[object]]::new()
+
+    $seenGroupObjects =
+        [System.Collections.Generic.HashSet[int]]::new()
+
+    foreach ($key in $groups.Keys) {
+
+        $group =
+            $groups[$key]
+
+        $hash =
+            [System.Runtime.CompilerServices.RuntimeHelpers]::GetHashCode(
+                $group
+            )
+
+        if ($seenGroupObjects.Add($hash)) {
+
+            $uniqueGroups.Add($group)
+        }
+    }
+
+    # --------------------------------------------------------
+    # Create final immutable-ish objects.
+    #
+    # IMPORTANT:
+    # Drivers is created HERE.
+    # This avoids the previous StrictMode crash.
+    # --------------------------------------------------------
+
+    $physicalDevices =
+        [System.Collections.Generic.List[object]]::new()
+
+    foreach ($group in $uniqueGroups) {
+
+        $allNodes =
+            @(
+                $group |
+                    Sort-Object InstanceId -Unique
+            )
+
+        if ($allNodes.Count -eq 0) {
+            continue
+        }
+
+        $parent =
+            $allNodes |
+                Where-Object {
+                    $_.InstanceId -notmatch `
+                        '(?i)&MI_[0-9A-F]{2}\\'
+                } |
+                Select-Object -First 1
+
+        if ($null -eq $parent) {
+            $parent = $allNodes[0]
+        }
+
+        $name =
+            [string]$parent.FriendlyName
+
+        if ([string]::IsNullOrWhiteSpace($name)) {
+
+            $name =
+                'Apple iPhone/iPad'
+        }
+
+        # More useful name normalization.
+
+        if (
+            $name -match '(?i)iPhone'
+        ) {
+
+            $displayName = 'Apple iPhone'
+        }
+        elseif (
+            $name -match '(?i)iPad'
+        ) {
+
+            $displayName = 'Apple iPad'
+        }
+        else {
+
+            $displayName =
+                $name
+        }
+
+        $instanceIds =
+            @(
+                $allNodes |
+                    ForEach-Object {
+                        [string]$_.InstanceId
+                    } |
+                    Where-Object {
+                        -not (Test-IsBthle $_)
+                    } |
+                    Sort-Object -Unique
+            )
+
+        $containerIds =
+            @(
+                $allNodes |
+                    ForEach-Object {
+                        [string]$_.ContainerId
+                    } |
+                    Where-Object {
+                        -not [string]::IsNullOrWhiteSpace($_)
+                    } |
+                    Sort-Object -Unique
+            )
+
+        $usbIdentities =
+            @(
+                $allNodes |
+                    ForEach-Object {
+                        [string]$_.UsbIdentity
+                    } |
+                    Where-Object {
+                        -not [string]::IsNullOrWhiteSpace($_)
+                    } |
+                    Sort-Object -Unique
+            )
+
+        $physicalKey = ''
+
+        if ($containerIds.Count -gt 0) {
+
+            $physicalKey =
+                'CONTAINER:' +
+                $containerIds[0]
+        }
+        elseif ($usbIdentities.Count -gt 0) {
+
+            $physicalKey =
+                'USB:' +
+                $usbIdentities[0]
+        }
+        else {
+
+            $physicalKey =
+                'NODE:' +
+                $instanceIds[0]
+        }
+
+        $physicalDevices.Add(
+            [PSCustomObject]@{
+                Key           = $physicalKey
+                Name          = $displayName
+                Parent        = $parent
+                Nodes         = @($allNodes)
+                InstanceIds   = $instanceIds
+                ContainerIds  = $containerIds
+                UsbIdentities = $usbIdentities
+                Drivers       = @()
+            }
+        )
+    }
+
+    return @(
+        $physicalDevices |
+            Sort-Object Name, Key
+    )
+}
+
+# ============================================================
+# Driver Store inventory
+# ============================================================
+
+function Get-DriverStoreInventory {
+
+    if ($script:DriverInventoryInitialized) {
+
+        return @(
+            $script:DriverInventory.Values
+        )
+    }
+
+    Write-Log '建立 Driver Store 驱动索引...'
+
+    $result =
+        Invoke-PnpUtil @(
+            '/enum-drivers'
+            '/devices'
+            '/format'
+            'xml'
+        )
+
+    if ($result.ExitCode -ne 0) {
+
+        Write-Warn (
+            "无法使用 Driver Store XML，ExitCode=$($result.ExitCode)"
+        )
+
+        throw (
+            "pnputil Driver Store 枚举失败，ExitCode=$($result.ExitCode)；" +
+            '已停止清理以避免遗漏驱动包。'
+        )
+    }
+
+    $xmlText =
+        $result.Text
+
+    if ([string]::IsNullOrWhiteSpace($xmlText)) {
+
+        Write-Warn 'Driver Store XML 为空。'
+
+        throw 'Driver Store XML 为空，已停止清理以避免遗漏驱动包。'
+    }
+
+    try {
+
+        [xml]$xml =
+            $xmlText
+    }
+    catch {
+
+        Write-Warn (
+            'Driver Store XML 解析失败：' +
+            $_.Exception.Message
+        )
+
+        throw (
+            'Driver Store XML 解析失败，已停止清理：' +
+            $_.Exception.Message
+        )
+    }
+
+    # Each Driver node owns its Devices collection. Never scan
+    # the complete XML for IDs, or unrelated packages could be
+    # associated with the selected Apple device.
+    $driverNodes =
+        @($xml.SelectNodes('//*[local-name()="Driver"]'))
+
+    if ($driverNodes.Count -eq 0) {
+        throw 'Driver Store XML 中没有 Driver 节点，已停止清理以避免遗漏驱动包。'
+    }
+
+    foreach ($driverNode in $driverNodes) {
+
+        $infName =
+            [string]$driverNode.GetAttribute('DriverName')
+
+        if ($infName -notmatch '(?i)^oem\d+\.inf$') {
+            continue
+        }
+
+        $deviceIds =
+            [System.Collections.Generic.HashSet[string]]::new(
+                [StringComparer]::OrdinalIgnoreCase
+            )
+
+        foreach (
+            $deviceNode in @(
+                $driverNode.SelectNodes(
+                    './/*[local-name()="Device"]'
+                )
+            )
+        ) {
+
+            $id =
+                [string]$deviceNode.GetAttribute('InstanceId')
+
+            if (
+                [string]::IsNullOrWhiteSpace($id) -or
+                (Test-IsBthle $id)
+            ) {
+                continue
+            }
+
+            [void]$deviceIds.Add($id)
+        }
+
+        $originalNameNode =
+            $driverNode.SelectSingleNode(
+                './*[local-name()="OriginalName"]'
+            )
+
+        $providerNode =
+            $driverNode.SelectSingleNode(
+                './*[local-name()="ProviderName"]'
+            )
+
+        $originalName = ''
+        $provider = ''
+
+        if ($null -ne $originalNameNode) {
+            $originalName = [string]$originalNameNode.InnerText
+        }
+
+        if ($null -ne $providerNode) {
+            $provider = [string]$providerNode.InnerText
+        }
+
+        $record =
+            [PSCustomObject]@{
+                InfName      = $infName
+                OriginalName = $originalName
+                Provider     = $provider
+                Devices      = @($deviceIds)
+            }
+
+        $script:DriverInventory[
+            $infName.ToUpperInvariant()
+        ] = $record
+    }
+
+    $script:DriverInventoryInitialized = $true
+
+    Write-OK (
+        "Driver Store 索引完成：$($script:DriverInventory.Count) 个 OEM INF"
+    )
+
+    return @(
+        $script:DriverInventory.Values
+    )
+}
+
+# ============================================================
+# Find drivers for one physical device
+# ============================================================
+
+function Get-DriversForPhysicalDevice {
+    param(
+        [object]$PhysicalDevice
+    )
+
+    $inventory =
+        @(Get-DriverStoreInventory)
+
+    if ($inventory.Count -eq 0) {
+        return @()
+    }
+
+    $targetIds =
+        [System.Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+
+    foreach ($id in $PhysicalDevice.InstanceIds) {
+
+        if (
+            -not (Test-IsBthle $id) -and
+            -not [string]::IsNullOrWhiteSpace($id)
+        ) {
+
+            [void]$targetIds.Add($id)
+        }
+    }
+
+    $matched =
+        [System.Collections.Generic.List[object]]::new()
+
+    foreach ($driver in $inventory) {
+
+        $isMatch = $false
+
+        foreach ($driverDeviceId in $driver.Devices) {
+
+            if (Test-IsBthle $driverDeviceId) {
+                continue
+            }
+
+            if ($targetIds.Contains($driverDeviceId)) {
+
+                $isMatch = $true
+                break
+            }
+
+            # Normalize interface IDs.
+
+            $normalizedDriverId =
+                Get-NormalizedUsbIdentity `
+                    $driverDeviceId
+
+            if (-not [string]::IsNullOrWhiteSpace($normalizedDriverId)) {
+
+                foreach ($targetId in $targetIds) {
+
+                    $normalizedTargetId =
+                        Get-NormalizedUsbIdentity `
+                            $targetId
+
+                    if (
+                        -not [string]::IsNullOrWhiteSpace($normalizedTargetId) -and
+                        $normalizedDriverId -ieq
+                        $normalizedTargetId
+                    ) {
+
+                        $isMatch = $true
+                        break
+                    }
+                }
+            }
+
+            if ($isMatch) {
+                break
+            }
+        }
+
+        if ($isMatch) {
+
+            $matched.Add($driver)
+        }
+    }
+
+    return @(
+        $matched |
+            Sort-Object InfName -Unique
+    )
+}
+
+# ============================================================
+# Stop iPhoneMirror
+# ============================================================
+
+function Stop-iPhoneMirrorProcesses {
+
+    $processNames = @(
+        'iPhoneMirror'
+        'iPhoneMirror.Driver'
+    )
+
+    $processes =
+        @(
+            Get-Process `
+                -Name $processNames `
+                -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.Id -ne $ExcludeProcessId -and
+                    $_.Id -ne $ExcludeParentProcessId
+                }
+        )
+
+    if ($processes.Count -eq 0) {
+        return
+    }
+
+    Write-Log '关闭 iPhoneMirror 相关进程...'
+
+    foreach ($process in $processes) {
+
+        try {
+
+            Stop-Process `
+                -Id $process.Id `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+        catch {
+        }
+    }
+
+    Start-Sleep -Milliseconds 1000
+}
+
+# ============================================================
+# Remove device node
+# ============================================================
+
+function Remove-DeviceNode {
+    param(
+        [string]$InstanceId
+    )
+
+    if (Test-IsBthle $InstanceId) {
+
+        Write-Warn (
+            "安全过滤 BTHLE：$InstanceId"
+        )
+
+        return $true
+    }
+
+    $result =
+        Invoke-PnpUtil @(
+            '/remove-device'
+            $InstanceId
+            '/subtree'
+            '/force'
+        )
+
+    if ($result.ExitCode -eq 0) {
+
+        Write-OK (
+            "设备节点：$InstanceId"
+        )
+
+        return $true
+    }
+
+    if ($result.ExitCode -eq 3010) {
+
+        $script:RestartRequired = $true
+        [void]$script:RestartPendingNodes.Add($InstanceId)
+
+        Write-OK (
+            "设备节点已移除，重启后完成：$InstanceId"
+        )
+
+        return $true
+    }
+
+    Write-Err (
+        "设备节点删除失败：$InstanceId " +
+        "(ExitCode=$($result.ExitCode))"
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($result.Text)) {
+
+        Write-Host $result.Text `
+            -ForegroundColor DarkGray
+    }
+
+    Add-Failure (
+        "设备节点删除失败：$InstanceId"
+    )
+
+    return $false
+}
+
+# ============================================================
+# Remove driver package
+# ============================================================
+
+function Remove-DriverPackage {
+    param(
+        [string]$InfName
+    )
+
+    if (
+        [string]::IsNullOrWhiteSpace($InfName) -or
+        $InfName -notmatch '(?i)^oem\d+\.inf$'
+    ) {
+
+        return $false
+    }
+
+    $result =
+        Invoke-PnpUtil @(
+            '/delete-driver'
+            $InfName
+            '/uninstall'
+            '/force'
+        )
+
+    if ($result.ExitCode -eq 0) {
+
+        Write-OK (
+            "驱动包：$InfName"
+        )
+
+        return $true
+    }
+
+    if ($result.ExitCode -eq 3010) {
+
+        $script:RestartRequired = $true
+        [void]$script:RestartPendingDrivers.Add($InfName)
+
+        Write-OK (
+            "驱动包已删除，重启后完成：$InfName"
+        )
+
+        return $true
+    }
+
+    Write-Err (
+        "驱动包删除失败：$InfName " +
+        "(ExitCode=$($result.ExitCode))"
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($result.Text)) {
+
+        Write-Host $result.Text `
+            -ForegroundColor DarkGray
+    }
+
+    Add-Failure (
+        "驱动包删除失败：$InfName"
+    )
+
+    return $false
+}
+
+# ============================================================
+# Verify target device is connected
+# ============================================================
+
+function Test-PhysicalDeviceConnected {
+    param(
+        [object]$PhysicalDevice
+    )
+
+    foreach ($id in $PhysicalDevice.InstanceIds) {
+
+        if (Test-IsBthle $id) {
+            continue
+        }
+
+        if ($script:DeviceCache.ContainsKey($id)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# ============================================================
+# Create manifest
+# ============================================================
+
+function Save-Manifest {
+    param(
+        [string]$Path,
+
+        [object]$Device,
+
+        [string[]]$DeviceIds,
+
+        [object[]]$Drivers
+    )
+
+    try {
+
         [PSCustomObject]@{
-            Serial = $group.Name
-            Name = $roots[0].Name
-            Roots = $roots
-            Present = @($roots | Where-Object { Test-DevicePresent $_.InstanceId }).Count -ne 0
-        }
+            CreatedAt      = [DateTimeOffset]::Now
+            DeviceName     = $Device.Name
+            PhysicalKey    = $Device.Key
+            ContainerIds   = @($Device.ContainerIds)
+            UsbIdentities  = @($Device.UsbIdentities)
+            DeviceIds      = @($DeviceIds)
+            DriverPackages = @(
+                $Drivers |
+                    ForEach-Object {
+                        $_.InfName
+                    }
+            )
+        } |
+            ConvertTo-Json -Depth 12 |
+            Set-Content `
+                -LiteralPath $Path `
+                -Encoding UTF8
     }
-    return @($groups | Sort-Object @{ Expression = 'Present'; Descending = $true }, Name, Serial)
-}
+    catch {
 
-function Test-DevicePresent([string]$InstanceId) {
-    $result = Invoke-PnpUtil @('/enum-devices', '/connected', '/instanceid', $InstanceId,
-        '/format', 'csv')
-    if ($result.ExitCode -ne 0) { return $false }
-    $rows = @(Convert-PnpCsv $result.Output)
-    return @($rows | Where-Object { $_.C0 -eq $InstanceId }).Count -ne 0
-}
-
-function Get-ContainerDeviceIds([string]$ContainerId) {
-    if ([string]::IsNullOrWhiteSpace($ContainerId)) { return @() }
-    $result = Invoke-PnpUtil @('/enum-containers', '/containerid', $ContainerId,
-        '/devices', '/format', 'csv')
-    if ($result.ExitCode -ne 0) { return @() }
-    $rows = @(Convert-PnpCsv $result.Output)
-    return @($rows | ForEach-Object { [string]$_.C7 } |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-}
-
-function Get-MatchingOemInfs([string]$InstanceId) {
-    $result = Invoke-PnpUtil @('/enum-devices', '/instanceid', $InstanceId,
-        '/drivers', '/format', 'csv')
-    if ($result.ExitCode -ne 0) { return @() }
-    $matches = [Collections.Generic.HashSet[string]]::new(
-        [StringComparer]::OrdinalIgnoreCase)
-    foreach ($line in $result.Output) {
-        foreach ($match in [regex]::Matches($line, '(?i)\boem\d+\.inf\b')) {
-            [void]$matches.Add($match.Value.ToLowerInvariant())
-        }
+        Write-Warn (
+            '无法写入 manifest：' +
+            $_.Exception.Message
+        )
     }
-    return @($matches | Sort-Object)
 }
 
-function Get-DriverPackageInventory([string[]]$InfNames, [string[]]$TargetDeviceIds) {
-    if ($InfNames.Count -eq 0) { return @() }
-    $result = Invoke-PnpUtil @('/enum-drivers', '/devices', '/format', 'csv')
-    $rows = if ($result.ExitCode -eq 0) { @(Convert-PnpCsv $result.Output) } else { @() }
-    $targetSet = [Collections.Generic.HashSet[string]]::new(
-        [StringComparer]::OrdinalIgnoreCase)
-    foreach ($deviceId in $TargetDeviceIds) { [void]$targetSet.Add($deviceId) }
+# ============================================================
+# MAIN
+# ============================================================
 
-    $inventory = foreach ($infName in $InfNames) {
-        $packageRows = @($rows | Where-Object { $_.C0 -eq $infName })
-        $metadata = $packageRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.C1) } |
-            Select-Object -First 1
-        $otherDevices = @($packageRows | ForEach-Object { [string]$_.C11 } |
-            Where-Object {
-                -not [string]::IsNullOrWhiteSpace($_) -and -not $targetSet.Contains($_)
-            } | Sort-Object -Unique)
-        [PSCustomObject]@{
-            InfName = $infName
-            OriginalName = if ($null -ne $metadata) { [string]$metadata.C1 } else { '' }
-            Provider = if ($null -ne $metadata) { [string]$metadata.C2 } else { '' }
-            OtherDevices = $otherDevices
-        }
+if (-not $ListOnly -and -not $PreviewOnly) {
+
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Err '请通过 iPhoneMirror.Driver.exe 或发布包中的清理入口运行此工具，以获得受保护的管理员权限。'
+        Stop-Cleanup 5
     }
-    return @($inventory)
 }
 
-function Get-DeviceIdsForGroup([object]$Device) {
-    $deviceIds = [Collections.Generic.HashSet[string]]::new(
-        [StringComparer]::OrdinalIgnoreCase)
-    foreach ($root in $Device.Roots) {
-        [void]$deviceIds.Add($root.InstanceId)
-        foreach ($deviceId in @(Get-ContainerDeviceIds $root.ContainerId)) {
-            [void]$deviceIds.Add($deviceId)
-        }
-    }
-    return @($deviceIds | Sort-Object)
-}
-
-function Get-ConnectedDeviceBySerial([string]$Serial) {
-    return Get-AppleDeviceGroups | Where-Object {
-        $_.Present -and $_.Serial -eq $Serial
-    } | Select-Object -First 1
-}
-
-if (-not $ListOnly -and -not $PreviewOnly -and -not (Test-Administrator)) {
-    Start-ElevatedCopy
-}
 if (-not (Test-Path -LiteralPath $PnpUtil -PathType Leaf)) {
-    throw "找不到 Windows 驱动工具：$PnpUtil"
+
+    Write-Err (
+        "找不到 pnputil.exe：$PnpUtil"
+    )
+
+    Stop-Cleanup 10
 }
 
 try {
-    [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
-    [Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
+
+    [Console]::OutputEncoding =
+        New-Object System.Text.UTF8Encoding($false)
+
+    [Console]::InputEncoding =
+        New-Object System.Text.UTF8Encoding($false)
 }
-catch { }
+catch {
+}
 
 Clear-Host
-Write-Host 'iPhone/iPad 设备驱动彻底卸载' -ForegroundColor Cyan
-Write-Host '--------------------------------'
-Write-Host '只有当前通过 USB 连接的 iPhone/iPad 才能执行卸载。' -ForegroundColor Yellow
-Write-Host '会删除所选设备的 PnP 节点，以及所有匹配到的第三方 oem*.inf 驱动包。'
-Write-Host 'Apple 驱动包通常由多台 Apple 设备共用，删除后其他 iPhone/iPad 也可能需要重装驱动。' `
+
+Write-Host '========================================' `
+    -ForegroundColor Cyan
+
+Write-Host ' iPhone/iPad Remove All Drivers' `
+    -ForegroundColor Cyan
+
+Write-Host '========================================' `
+    -ForegroundColor Cyan
+
+Write-Host ''
+Write-Host '将清除所选设备关联的所有设备节点和驱动包，包括 Apple 官方驱动。' `
     -ForegroundColor Yellow
-Write-Host 'Windows 自带驱动文件、Apple Devices/iTunes 和 Apple Mobile Device Service 不会被删除。'
+Write-Host '完成后可重新安装 Apple Devices 或 iTunes 以恢复所需驱动。' `
+    -ForegroundColor Yellow
 Write-Host ''
 
-$devices = @(Get-AppleDeviceGroups | Where-Object { $_.Present })
-if ($devices.Count -eq 0) {
-    Write-Host '没有找到当前已连接的 iPhone/iPad。请连接、解锁设备后重新运行。' `
-        -ForegroundColor Yellow
-    exit 2
-}
-
-for ($index = 0; $index -lt $devices.Count; $index++) {
-    $device = $devices[$index]
-    Write-Host ('[{0}] {1}  当前已连接' -f ($index + 1), $device.Name) `
-        -ForegroundColor White
-    Write-Host ('    序列号：{0}' -f $device.Serial) -ForegroundColor DarkGray
-}
-
-if ($ListOnly) { exit 0 }
-
-$selectedIndex = -1
-while ($selectedIndex -lt 0) {
-    $answer = Read-Host '请输入要清除的设备序号；输入 Q 取消'
-    if ($answer -match '^(?i)q$') { exit 0 }
-    $number = 0
-    if ([int]::TryParse($answer, [ref]$number) -and
-        $number -ge 1 -and $number -le $devices.Count) {
-        $selectedIndex = $number - 1
-    }
-    else {
-        Write-Host '序号无效，请重新输入。' -ForegroundColor Yellow
-    }
-}
-
-$selected = $devices[$selectedIndex]
-$targetDeviceIds = @(Get-DeviceIdsForGroup $selected)
-
-$infSet = [Collections.Generic.HashSet[string]]::new(
-    [StringComparer]::OrdinalIgnoreCase)
-foreach ($deviceId in $targetDeviceIds) {
-    foreach ($infName in @(Get-MatchingOemInfs $deviceId)) { [void]$infSet.Add($infName) }
-}
-$infNames = @($infSet | Sort-Object)
-$packages = @(Get-DriverPackageInventory $infNames $targetDeviceIds)
-
-Write-Host ''
-Write-Host ('已选择：{0} / {1}' -f $selected.Name, $selected.Serial) -ForegroundColor Cyan
-Write-Host ('将移除设备节点：{0} 个' -f $targetDeviceIds.Count)
-foreach ($deviceId in $targetDeviceIds) { Write-Host "  $deviceId" -ForegroundColor DarkGray }
-Write-Host ('将删除第三方驱动包：{0} 个' -f $packages.Count)
-foreach ($package in $packages) {
-    $description = @($package.OriginalName, $package.Provider) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-    Write-Host ('  {0}  {1}' -f $package.InfName, ($description -join ' / '))
-    if ($package.OtherDevices.Count -ne 0) {
-        Write-Warning ("    该 INF 还用于其他 {0} 个设备，删除会同时卸载它们的这个驱动。" -f `
-            $package.OtherDevices.Count)
-    }
-}
-if ($packages.Count -eq 0) {
-    Write-Host '  未发现可从 Driver Store 删除的第三方 INF；仍会清除设备节点和绑定。' `
-        -ForegroundColor DarkGray
-}
-
-if ($PreviewOnly) {
-    Write-Host ''
-    Write-Host '仅预览：未做任何系统更改。' -ForegroundColor Green
-    exit 0
-}
-
-$tailLength = [Math]::Min(8, $selected.Serial.Length)
-$serialTail = $selected.Serial.Substring($selected.Serial.Length - $tailLength)
-$confirmation = "DELETE-$serialTail"
-Write-Host ''
-Write-Host '这是不可撤销操作。请保持手机连接；Windows 可能在卸载后把它显示为未知设备。' `
-    -ForegroundColor Red
-$typed = Read-Host "请输入 $confirmation 确认"
-if ($typed -cne $confirmation) {
-    Write-Host '确认文字不匹配，未做任何更改。' -ForegroundColor Yellow
-    exit 0
-}
-
-$connectedSelection = Get-ConnectedDeviceBySerial $selected.Serial
-if ($null -eq $connectedSelection) {
-    Write-Host '所选手机已断开。只有手机保持连接时才允许卸载，未做任何更改。' `
-        -ForegroundColor Yellow
-    exit 3
-}
-$selected = $connectedSelection
-$targetDeviceIds = @(Get-DeviceIdsForGroup $selected)
-
-$running = @(Get-Process -Name 'iPhoneMirror', 'iPhoneMirror.Driver' `
-    -ErrorAction SilentlyContinue)
-if ($running.Count -ne 0) {
-    Write-Host '正在关闭 iPhoneMirror 驱动相关进程...'
-    $running | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
-}
-
-$logRoot = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) `
-    'iPhoneMirror.Driver\DeviceCleanup'
-$operationRoot = Join-Path $logRoot (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
-New-Item -ItemType Directory -Path $operationRoot -Force | Out-Null
-$manifestPath = Join-Path $operationRoot 'manifest.json'
-$logPath = Join-Path $operationRoot 'cleanup.log'
-[PSCustomObject]@{
-    CreatedAt = [DateTimeOffset]::Now
-    DeviceName = $selected.Name
-    Serial = $selected.Serial
-    RootDevices = $selected.Roots
-    DeviceIds = $targetDeviceIds
-    DriverPackages = $packages
-} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-
-$transcriptStarted = $false
-$failures = [Collections.Generic.List[string]]::new()
-$restartRequired = $false
-$restartPendingPackages = [Collections.Generic.HashSet[string]]::new(
-    [StringComparer]::OrdinalIgnoreCase)
 try {
-    Start-Transcript -LiteralPath $logPath -Force | Out-Null
-    $transcriptStarted = $true
+
+    # ========================================================
+    # Scan
+    # ========================================================
+
+    Write-Log '开始设备扫描...'
+
+    Initialize-DeviceCache
+
+    Write-Log '建立 Apple 设备关系...'
+
+    $physicalDevices =
+        @(Get-ApplePhysicalDevices)
+
+    Write-OK (
+        "Apple 物理设备分组完成：$($physicalDevices.Count) 台"
+    )
+
+    if ($physicalDevices.Count -eq 0) {
+
+        Write-Host ''
+        Write-Warn '没有找到当前连接的 iPhone/iPad。'
+        Write-Host ''
+        Write-Host '请确认：'
+        Write-Host '  1. iPhone/iPad 已通过 USB 连接'
+        Write-Host '  2. 设备已解锁'
+        Write-Host '  3. 已点击“信任此电脑”'
+        Write-Host '  4. 数据线支持数据传输'
+        Write-Host ''
+        Write-Host 'BTHLE / Bluetooth LE 设备不会显示。' `
+            -ForegroundColor DarkGray
+
+        Stop-Cleanup 2
+    }
+
+    # ========================================================
+    # Driver inventory
+    # ========================================================
+
+    Write-Log '建立驱动关系...'
+
+    $initialDriverInventory =
+        @(Get-DriverStoreInventory)
+
+    # ========================================================
+    # IMPORTANT:
+    # Do NOT dynamically assign a missing property.
+    #
+    # Build a completely new object instead.
+    # ========================================================
+
+    $devicesWithDrivers =
+        [System.Collections.Generic.List[object]]::new()
+
+    foreach ($device in $physicalDevices) {
+
+        $drivers =
+            @(
+                Get-DriversForPhysicalDevice `
+                    $device
+            )
+
+        $devicesWithDrivers.Add(
+            [PSCustomObject]@{
+                Key           = $device.Key
+                Name          = $device.Name
+                Parent        = $device.Parent
+                Nodes         = @($device.Nodes)
+                InstanceIds   = @($device.InstanceIds)
+                ContainerIds  = @($device.ContainerIds)
+                UsbIdentities = @($device.UsbIdentities)
+                Drivers       = @($drivers)
+            }
+        )
+    }
+
+    $physicalDevices =
+        @($devicesWithDrivers)
+
+    Write-OK '设备关系建立完成。'
+
+    # ========================================================
+    # Display
+    # ========================================================
+
     Write-Host ''
-    Write-Host '开始移除设备节点...'
-    foreach ($deviceId in @($targetDeviceIds | Sort-Object Length -Descending)) {
-        $result = Invoke-PnpUtil @('/remove-device', $deviceId, '/subtree', '/force')
-        if ($result.ExitCode -in @(0, 3010)) {
-            if ($result.ExitCode -eq 3010) {
-                $restartRequired = $true
-                Write-Host "  已移除（重启后完成）：$deviceId" -ForegroundColor Green
-            }
-            else {
-                Write-Host "  已移除：$deviceId" -ForegroundColor Green
-            }
+    Write-Host '检测到以下物理 Apple 设备：' `
+        -ForegroundColor Cyan
+
+    Write-Host ''
+
+    for ($i = 0; $i -lt $physicalDevices.Count; $i++) {
+
+        $device =
+            $physicalDevices[$i]
+
+        Write-Host (
+            '[{0}] {1}' -f
+            ($i + 1),
+            $device.Name
+        ) -ForegroundColor White
+
+        Write-Host (
+            '    PnP 节点：{0}' -f
+            $device.InstanceIds.Count
+        ) -ForegroundColor DarkGray
+
+        Write-Host (
+            '    Driver Store 驱动包：{0}' -f
+            $device.Drivers.Count
+        ) -ForegroundColor DarkGray
+
+        if ($device.ContainerIds.Count -gt 0) {
+
+            Write-Host (
+                '    Container：{0}' -f
+                $device.ContainerIds[0]
+            ) -ForegroundColor DarkGray
+        }
+
+        Write-Host ''
+    }
+
+    if ($ListOnly) {
+
+        Write-OK '仅列表模式，未修改系统。'
+
+        Stop-Cleanup 0
+    }
+
+    # ========================================================
+    # Select
+    # ========================================================
+
+    $selectedIndex = -1
+
+    while ($selectedIndex -lt 0) {
+
+        $answer =
+            Read-Host '请输入设备序号；输入 Q 取消'
+
+        if ($answer -match '^(?i)q$') {
+            Stop-Cleanup 0
+        }
+
+        $number = 0
+
+        if (
+            [int]::TryParse(
+                $answer,
+                [ref]$number
+            ) -and
+            $number -ge 1 -and
+            $number -le $physicalDevices.Count
+        ) {
+
+            $selectedIndex =
+                $number - 1
         }
         else {
-            $message = "设备节点移除失败：$deviceId (代码 $($result.ExitCode))"
-            $failures.Add($message)
-            Write-Warning $message
-            if (-not [string]::IsNullOrWhiteSpace($result.Text)) { Write-Host $result.Text }
+
+            Write-Warn '设备序号无效。'
         }
     }
 
-    Write-Host '开始删除 Driver Store 中的第三方驱动包...'
-    foreach ($package in $packages) {
-        $result = Invoke-PnpUtil @('/delete-driver', $package.InfName,
-            '/uninstall', '/force')
-        if ($result.ExitCode -in @(0, 3010)) {
-            if ($result.ExitCode -eq 3010) {
-                $restartRequired = $true
-                [void]$restartPendingPackages.Add($package.InfName)
-                Write-Host "  已删除（重启后完成）：$($package.InfName)" `
-                    -ForegroundColor Green
-            }
-            else {
-                Write-Host "  已删除：$($package.InfName)" -ForegroundColor Green
-            }
-        }
-        else {
-            $message = "驱动包删除失败：$($package.InfName) (代码 $($result.ExitCode))"
-            $failures.Add($message)
-            Write-Warning $message
-            if (-not [string]::IsNullOrWhiteSpace($result.Text)) { Write-Host $result.Text }
+    $selected =
+        $physicalDevices[$selectedIndex]
+
+    # ========================================================
+    # Target nodes
+    # ========================================================
+
+    $targetNodes =
+        [System.Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+
+    foreach ($id in $selected.InstanceIds) {
+
+        if (
+            -not [string]::IsNullOrWhiteSpace($id) -and
+            -not (Test-IsBthle $id)
+        ) {
+
+            [void]$targetNodes.Add($id)
         }
     }
 
-    Start-Sleep -Seconds 2
-    $reenumerated = Get-ConnectedDeviceBySerial $selected.Serial
-    if ($null -ne $reenumerated) {
-        $reenumeratedIds = @(Get-DeviceIdsForGroup $reenumerated)
-        if ($reenumeratedIds.Count -ne 0) {
-            Write-Host '手机仍连接，正在清理 Windows 重新枚举出的设备节点...'
-            foreach ($deviceId in @($reenumeratedIds | Sort-Object Length -Descending)) {
-                $result = Invoke-PnpUtil @('/remove-device', $deviceId, '/subtree', '/force')
-                if ($result.ExitCode -in @(0, 3010)) {
-                    if ($result.ExitCode -eq 3010) {
-                        $restartRequired = $true
-                        Write-Host "  已再次移除（重启后完成）：$deviceId" `
-                            -ForegroundColor Green
-                    }
-                    else {
-                        Write-Host "  已再次移除：$deviceId" -ForegroundColor Green
-                    }
-                }
-                else {
-                    Write-Warning "重新枚举节点未能移除：$deviceId (代码 $($result.ExitCode))"
-                }
-            }
+    $targetNodeArray =
+        @(
+            $targetNodes |
+                Sort-Object Length -Descending
+        )
+
+    $targetUsbIdentities =
+        [System.Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+
+    foreach ($identity in $selected.UsbIdentities) {
+        if (-not [string]::IsNullOrWhiteSpace($identity)) {
+            [void]$targetUsbIdentities.Add($identity)
         }
     }
 
-    foreach ($package in $packages) {
-        if (-not $restartPendingPackages.Contains($package.InfName) -and
-            (Test-Path -LiteralPath (Join-Path $env:windir "INF\$($package.InfName)"))) {
-            $failures.Add("驱动包仍存在：$($package.InfName)")
+    $targetContainerIds =
+        [System.Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+
+    foreach ($containerId in $selected.ContainerIds) {
+        if (-not [string]::IsNullOrWhiteSpace($containerId)) {
+            [void]$targetContainerIds.Add($containerId)
         }
     }
+
+    $targetDrivers =
+        @(
+            $selected.Drivers |
+                Sort-Object InfName -Unique
+        )
+
+    # ========================================================
+    # Summary
+    # ========================================================
 
     Write-Host ''
-    if ($failures.Count -eq 0) {
-        Write-Host '完成：所选设备使用的第三方驱动包均已清除。' -ForegroundColor Green
-        Write-Host '手机保持连接时，Windows 仍可能显示无驱动或未知设备节点，这是正常现象。'
-        if ($restartRequired) {
-            Write-Host 'Windows 报告操作成功，但需要重启才能完成。请现在重启电脑。' `
-                -ForegroundColor Yellow
+    Write-Host '========================================' `
+        -ForegroundColor Cyan
+
+    Write-Host ' 清理计划' `
+        -ForegroundColor Cyan
+
+    Write-Host '========================================' `
+        -ForegroundColor Cyan
+
+    Write-Host ''
+
+    Write-Host (
+        '设备：{0}' -f
+        $selected.Name
+    )
+
+    Write-Host (
+        '物理设备：1 台'
+    ) -ForegroundColor Green
+
+    Write-Host (
+        '关联 PnP 节点：{0}' -f
+        $targetNodeArray.Count
+    ) -ForegroundColor Green
+
+    Write-Host (
+        '关联全部驱动包：{0}' -f
+        $targetDrivers.Count
+    ) -ForegroundColor Green
+
+    Write-Host ''
+
+    foreach ($driver in $targetDrivers) {
+
+        $text =
+            $driver.InfName
+
+        if (
+            -not [string]::IsNullOrWhiteSpace(
+                $driver.OriginalName
+            )
+        ) {
+
+            $text +=
+                " / $($driver.OriginalName)"
         }
-        Write-Host "日志：$logPath" -ForegroundColor DarkGray
-        exit 0
+
+        if (
+            -not [string]::IsNullOrWhiteSpace(
+                $driver.Provider
+            )
+        ) {
+
+            $text +=
+                " / $($driver.Provider)"
+        }
+
+        Write-Host (
+            "  $text"
+        )
     }
 
-    Write-Host ('操作结束，但有 {0} 项未完全清除：' -f $failures.Count) -ForegroundColor Red
-    foreach ($failure in $failures) { Write-Host "  $failure" -ForegroundColor Red }
-    Write-Host '请重启 Windows 后再次运行本脚本。'
-    Write-Host "日志：$logPath" -ForegroundColor DarkGray
-    exit 1
+    if ($PreviewOnly) {
+
+        Write-Host ''
+        Write-Host '========================================' `
+            -ForegroundColor Green
+
+        Write-Host ' Preview only - 未修改系统' `
+            -ForegroundColor Green
+
+        Write-Host '========================================' `
+            -ForegroundColor Green
+
+        Stop-Cleanup 0
+    }
+
+    # ========================================================
+    # Confirmation
+    # ========================================================
+
+    if ($targetNodeArray.Count -eq 0) {
+
+        Write-Err '没有可删除的目标 PnP 节点。'
+        Stop-Cleanup 1
+    }
+
+    $baseId =
+        $targetNodeArray[0]
+
+    $tailLength =
+        [Math]::Min(
+            8,
+            $baseId.Length
+        )
+
+    $confirmation =
+        'DELETE-' +
+        $baseId.Substring(
+            $baseId.Length - $tailLength
+        )
+
+    Write-Host ''
+    Write-Host '这是不可撤销的操作。' `
+        -ForegroundColor Red
+
+    Write-Host (
+        '请输入 {0} 确认：' -f
+        $confirmation
+    ) -ForegroundColor Yellow
+
+    $typed =
+        Read-Host
+
+    if ($typed -cne $confirmation) {
+
+        Write-Warn '确认文字不匹配，未做任何修改。'
+
+        Stop-Cleanup 0
+    }
+
+    # ========================================================
+    # Re-scan before deletion
+    # ========================================================
+
+    Write-Log '执行删除前最终设备确认...'
+
+    Initialize-DeviceCache
+
+    if (-not (Test-PhysicalDeviceConnected $selected)) {
+
+        Write-Warn '所选 iPhone 已断开。'
+
+        Stop-Cleanup 3
+    }
+
+    # ========================================================
+    # Log
+    # ========================================================
+
+    New-Item `
+        -ItemType Directory `
+        -Path $LogRoot `
+        -Force |
+        Out-Null
+
+    $operationRoot =
+        Join-Path `
+            $LogRoot `
+            (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
+
+    New-Item `
+        -ItemType Directory `
+        -Path $operationRoot `
+        -Force |
+        Out-Null
+
+    $manifestPath =
+        Join-Path `
+            $operationRoot `
+            'manifest.json'
+
+    $logPath =
+        Join-Path `
+            $operationRoot `
+            'cleanup.log'
+
+    $script:CurrentLogPath =
+        $logPath
+
+    Save-Manifest `
+        -Path $manifestPath `
+        -Device $selected `
+        -DeviceIds $targetNodeArray `
+        -Drivers $targetDrivers
+
+    $transcriptStarted = $false
+
+    try {
+
+        try {
+
+            Start-Transcript `
+                -LiteralPath $logPath `
+                -Force |
+                Out-Null
+
+            $transcriptStarted = $true
+        }
+        catch {
+        }
+
+        Stop-iPhoneMirrorProcesses
+
+        # ====================================================
+        # Remove PnP nodes
+        # ====================================================
+
+        Write-Host ''
+        Write-Host '========================================' `
+            -ForegroundColor Cyan
+
+        Write-Host ' 卸载设备节点' `
+            -ForegroundColor Cyan
+
+        Write-Host '========================================' `
+            -ForegroundColor Cyan
+
+        foreach ($id in $targetNodeArray) {
+
+            if (Test-IsBthle $id) {
+                continue
+            }
+
+            Remove-DeviceNode $id |
+                Out-Null
+        }
+
+        # ====================================================
+        # Remove Driver Store
+        # ====================================================
+
+        Write-Host ''
+        Write-Host '========================================' `
+            -ForegroundColor Cyan
+
+        Write-Host ' 删除 Driver Store 驱动包' `
+            -ForegroundColor Cyan
+
+        Write-Host '========================================' `
+            -ForegroundColor Cyan
+
+        foreach ($driver in $targetDrivers) {
+
+            Remove-DriverPackage `
+                $driver.InfName |
+                Out-Null
+        }
+
+        # ====================================================
+        # Re-enumerate
+        # ====================================================
+
+        Write-Host ''
+
+        Write-Log '等待 Windows 更新设备状态...'
+
+        Start-Sleep -Milliseconds 1500
+
+        try {
+
+            Invoke-PnpUtil @(
+                '/scan-devices'
+            ) | Out-Null
+        }
+        catch {
+        }
+
+        Start-Sleep -Milliseconds 1000
+
+        # A surviving physical device can be re-enumerated with new interface
+        # instance IDs. Remove those nodes too before declaring the cleanup done.
+        Initialize-DeviceCache
+        $reappeared = @(
+            Get-ApplePhysicalDevices | Where-Object {
+                @($_.ContainerIds | Where-Object {
+                    $targetContainerIds.Contains($_)
+                }).Count -gt 0 -or
+                @($_.UsbIdentities | Where-Object {
+                    $targetUsbIdentities.Contains($_)
+                }).Count -gt 0
+            }
+        )
+        foreach ($device in $reappeared) {
+            foreach ($id in $device.InstanceIds) {
+                if ($targetNodes.Add($id)) {
+                    Remove-DeviceNode $id | Out-Null
+                }
+            }
+        }
+        $targetNodeArray = @($targetNodes | Sort-Object Length -Descending)
+
+        # ====================================================
+        # Final verification
+        # ====================================================
+
+        Write-Log '执行最终验证...'
+
+        Initialize-DeviceCache
+
+        $remainingNodes =
+            [System.Collections.Generic.List[string]]::new()
+
+        foreach ($id in $targetNodeArray) {
+
+            if (Test-IsBthle $id) {
+                continue
+            }
+
+            if ($script:DeviceCache.ContainsKey($id)) {
+
+                $remainingNodes.Add($id)
+            }
+        }
+
+        # ----------------------------------------------------
+        # Driver verification
+        # ----------------------------------------------------
+
+        $remainingDrivers =
+            [System.Collections.Generic.List[string]]::new()
+
+        foreach ($driver in $targetDrivers) {
+
+            $infPath =
+                Join-Path `
+                    $env:windir `
+                    "INF\$($driver.InfName)"
+
+            if (Test-Path -LiteralPath $infPath) {
+
+                if (-not $script:RestartPendingDrivers.Contains($driver.InfName)) {
+
+                    $remainingDrivers.Add(
+                        $driver.InfName
+                    )
+                }
+            }
+        }
+
+        # ====================================================
+        # Result
+        # ====================================================
+
+        Write-Host ''
+        Write-Host '========================================' `
+            -ForegroundColor Cyan
+
+        Write-Host ' 清理结果' `
+            -ForegroundColor Cyan
+
+        Write-Host '========================================' `
+            -ForegroundColor Cyan
+
+        Write-Host ''
+
+        if ($remainingNodes.Count -eq 0) {
+
+            Write-OK '目标 PnP 节点已清理。'
+        }
+        else {
+            $unresolvedNodes = @(
+                $remainingNodes | Where-Object {
+                    -not $script:RestartPendingNodes.Contains($_)
+                }
+            )
+            if ($unresolvedNodes.Count -gt 0) {
+                Add-Failure "仍存在 $($unresolvedNodes.Count) 个目标 PnP 节点。"
+            }
+
+            Write-Warn (
+                "仍存在 $($remainingNodes.Count) 个目标节点。"
+            )
+
+            foreach ($id in $remainingNodes) {
+
+                Write-Host (
+                    "  $id"
+                ) -ForegroundColor Yellow
+            }
+        }
+
+        if ($remainingDrivers.Count -eq 0) {
+
+            Write-OK '目标 Driver Store 驱动包已处理。'
+        }
+        else {
+            $unresolvedDrivers = @(
+                $remainingDrivers | Where-Object {
+                    -not $script:RestartPendingDrivers.Contains($_)
+                }
+            )
+            if ($unresolvedDrivers.Count -gt 0) {
+                Add-Failure "仍存在 $($unresolvedDrivers.Count) 个目标 Driver Store 驱动包。"
+            }
+
+            Write-Warn (
+                "仍存在 $($remainingDrivers.Count) 个驱动包。"
+            )
+
+            foreach ($inf in $remainingDrivers) {
+
+                Write-Host (
+                    "  $inf"
+                ) -ForegroundColor Yellow
+            }
+        }
+
+        Write-Host ''
+
+        if ($script:Failures.Count -eq 0) {
+
+            Write-Host '========================================' `
+                -ForegroundColor Green
+
+            Write-Host ' Cleanup completed successfully.' `
+                -ForegroundColor Green
+
+            Write-Host '========================================' `
+                -ForegroundColor Green
+
+            if ($script:RestartRequired) {
+
+                Write-Host ''
+                Write-Warn (
+                    'Windows 报告部分操作需要重启。'
+                )
+            }
+
+            Write-Host ''
+            Write-Host (
+                "日志：$logPath"
+            ) -ForegroundColor DarkGray
+
+            Stop-Cleanup 0
+        }
+
+        Write-Host '========================================' `
+            -ForegroundColor Red
+
+        Write-Host (
+            ' Cleanup finished with errors. Count: {0}' -f
+            $script:Failures.Count
+        ) -ForegroundColor Red
+
+        Write-Host '========================================' `
+            -ForegroundColor Red
+
+        foreach ($failure in $script:Failures) {
+
+            Write-Host (
+                "  $failure"
+            ) -ForegroundColor Red
+        }
+
+        Write-Host ''
+        Write-Host (
+            "日志：$logPath"
+        ) -ForegroundColor DarkGray
+
+        Stop-Cleanup 1
+    }
+    finally {
+
+        if ($transcriptStarted) {
+
+            try {
+
+                Stop-Transcript |
+                    Out-Null
+            }
+            catch {
+            }
+        }
+    }
 }
-finally {
-    if ($transcriptStarted) { Stop-Transcript | Out-Null }
+catch {
+
+    # ========================================================
+    # NEVER hide the actual exception anymore.
+    # ========================================================
+
+    Write-Host ''
+    Write-Host '========================================' `
+        -ForegroundColor Red
+
+    Write-Host ' CLEANUP INTERNAL ERROR' `
+        -ForegroundColor Red
+
+    Write-Host '========================================' `
+        -ForegroundColor Red
+
+    Write-Host ''
+
+    Write-Host (
+        '错误：{0}' -f
+        $_.Exception.Message
+    ) -ForegroundColor Red
+
+    Write-Host ''
+
+    if (
+        -not [string]::IsNullOrWhiteSpace(
+            $_.InvocationInfo.PositionMessage
+        )
+    ) {
+
+        Write-Host '位置：' `
+            -ForegroundColor Yellow
+
+        Write-Host (
+            $_.InvocationInfo.PositionMessage
+        ) -ForegroundColor DarkGray
+    }
+
+    Write-Host ''
+
+    if (
+        -not [string]::IsNullOrWhiteSpace(
+            $_.ScriptStackTrace
+        )
+    ) {
+
+        Write-Host '调用栈：' `
+            -ForegroundColor Yellow
+
+        Write-Host (
+            $_.ScriptStackTrace
+        ) -ForegroundColor DarkGray
+    }
+
+    Write-Host ''
+
+    # --------------------------------------------------------
+    # Emergency log
+    # --------------------------------------------------------
+
+    try {
+
+        New-Item `
+            -ItemType Directory `
+            -Path $LogRoot `
+            -Force |
+            Out-Null
+
+        $errorLog =
+            Join-Path `
+                $LogRoot `
+                (
+                    'fatal-' +
+                    (Get-Date -Format 'yyyyMMdd-HHmmss-fff') +
+                    '.log'
+                )
+
+        @(
+            'iPhoneMirror Driver Cleanup Fatal Error'
+            ''
+            ('Time: ' + (Get-Date))
+            ('Message: ' + $_.Exception.Message)
+            ''
+            'Position:'
+            $_.InvocationInfo.PositionMessage
+            ''
+            'Stack:'
+            $_.ScriptStackTrace
+        ) |
+            Set-Content `
+                -LiteralPath $errorLog `
+                -Encoding UTF8
+
+        Write-Host (
+            "错误日志：$errorLog"
+        ) -ForegroundColor DarkGray
+    }
+    catch {
+    }
+
+    Stop-Cleanup 1
 }

@@ -95,6 +95,33 @@ private:
     std::optional<Clock::time_point> last_media_at_;
 };
 
+// A video-stream reconnect remains in flight until the source produces a
+// video frame again. This blocks a tight retry loop but permits a later
+// independent stream stall to recover within the same capture session.
+class FastStreamReconnectGate final {
+public:
+    [[nodiscard]] bool request() noexcept {
+        if (awaiting_video_frame_) return false;
+        awaiting_video_frame_ = true;
+        ++attempt_count_;
+        return true;
+    }
+
+    [[nodiscard]] bool observe_video_frame() noexcept {
+        if (!awaiting_video_frame_) return false;
+        awaiting_video_frame_ = false;
+        return true;
+    }
+
+    [[nodiscard]] std::uint32_t attempt_count() const noexcept {
+        return attempt_count_;
+    }
+
+private:
+    bool awaiting_video_frame_{};
+    std::uint32_t attempt_count_{};
+};
+
 class ProtectedVideoDetector final {
 public:
     using Clock = std::chrono::steady_clock;

@@ -16,6 +16,9 @@ internal sealed class NativePreviewHost : HwndHost
     private const int SsBlackRect = 0x00000004;
     private const int SwHide = 0;
     private const int SwShowNoActivate = 4;
+    // PreviewPanel has a 16 DIP outer radius and a 1 DIP border. The native
+    // child occupies the inner rectangle, so its clipping radius is 15 DIP.
+    private const double MainPreviewInnerCornerRadius = 15.0;
     private nint _window;
     private bool _presentationVisible;
     private bool _isFullScreenPresentation;
@@ -97,10 +100,7 @@ internal sealed class NativePreviewHost : HwndHost
     protected override void OnWindowPositionChanged(System.Windows.Rect rcBoundingBox)
     {
         base.OnWindowPositionChanged(rcBoundingBox);
-        if (_window == 0) return;
-        var width = Math.Max(1, (int)Math.Round(rcBoundingBox.Width));
-        var height = Math.Max(1, (int)Math.Round(rcBoundingBox.Height));
-        ApplyWindowRegion(width, height);
+        UpdateWindowRegion();
     }
 
     private void UpdateWindowRegion()
@@ -122,8 +122,10 @@ internal sealed class NativePreviewHost : HwndHost
             return;
         }
         var dpi = GetDpiForWindow(_window);
-        var radius = Math.Max(2, (int)Math.Round(10.0 * (dpi == 0 ? 1.0 : dpi / 96.0)));
-        var region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
+        var radius = Math.Max(2, (int)Math.Round(MainPreviewInnerCornerRadius *
+            (dpi == 0 ? 1.0 : dpi / 96.0)));
+        var region = CreateRoundRectRgn(0, 0, width, height,
+            radius * 2, radius * 2);
         if (region == 0) return;
         // SetWindowRgn owns the region after success.
         if (SetWindowRgn(_window, region, true) == 0) _ = DeleteObject(region);

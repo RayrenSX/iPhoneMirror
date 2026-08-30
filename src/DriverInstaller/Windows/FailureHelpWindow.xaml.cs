@@ -37,6 +37,21 @@ public partial class FailureHelpWindow : Window
             { UseShellExecute = true });
     }
 
+    private void OnRunDriverCleanupClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            DriverCleanupHost.LaunchElevated();
+            DriverLogger.Write("Trusted driver cleanup host launched from failure help.");
+        }
+        catch (Exception error)
+        {
+            DriverLogger.WriteException("ui", "driver_cleanup_script_start_failed", error);
+            PromptWindow.Inform(this, DriverLocalization.Get("DriverCleanupTitle"),
+                DriverLocalization.Format("DriverCleanupScriptStartFailed", error.Message));
+        }
+    }
+
     private void OnRetryClick(object sender, RoutedEventArgs e) => DialogResult = true;
     private void OnCloseClick(object sender, RoutedEventArgs e) => DialogResult = false;
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

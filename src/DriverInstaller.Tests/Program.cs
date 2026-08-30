@@ -3,6 +3,7 @@ using IPhoneMirror.DriverInstaller.Services;
 using IPhoneMirror.Shared.Security;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text;
 
 [assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
 
@@ -20,6 +21,40 @@ Run("localized culture mapping", () =>
         DriverLocalization.ResolveCultureName("zh-SG"));
     Equal(DriverLocalization.English,
         DriverLocalization.ResolveCultureName("de-DE"));
+});
+
+Run("advanced mode exposes forced driver cleanup", () =>
+{
+    var sourceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+        "..", "..", "..", "..", ".."));
+    var xaml = File.ReadAllText(Path.Combine(sourceRoot,
+        "src", "DriverInstaller", "MainWindow.xaml"));
+    var code = File.ReadAllText(Path.Combine(sourceRoot,
+        "src", "DriverInstaller", "MainWindow.xaml.cs"));
+    var cleanupHost = File.ReadAllText(Path.Combine(sourceRoot,
+        "src", "DriverInstaller", "Services", "DriverCleanupHost.cs"));
+    var project = File.ReadAllText(Path.Combine(sourceRoot,
+        "src", "DriverInstaller", "iPhoneMirror.DriverInstaller.csproj"));
+    var cleanupScript = File.ReadAllText(Path.Combine(sourceRoot,
+        "scripts", "remove_selected_iphone_drivers.ps1"));
+    var cleanupLauncher = File.ReadAllText(Path.Combine(sourceRoot,
+        "Remove-Selected-iPhone-Drivers.cmd"));
+    True(xaml.Contains("ForceDriverCleanup", StringComparison.Ordinal));
+    True(xaml.Contains("OnForceDriverCleanupClick", StringComparison.Ordinal));
+    True(xaml.Contains("OnThemePreviewMouseLeftButtonDown", StringComparison.Ordinal));
+    True(code.Contains("DriverCleanupHost.LaunchElevated", StringComparison.Ordinal));
+    False(code.Contains("Remove-Selected-iPhone-Drivers.cmd", StringComparison.Ordinal));
+    True(code.Contains("ToggleComboBoxDropDown", StringComparison.Ordinal));
+    True(cleanupHost.Contains("EnsureElevationBoundary", StringComparison.Ordinal));
+    True(cleanupHost.Contains("Verb = \"runas\"", StringComparison.Ordinal));
+    True(cleanupHost.Contains("start.ArgumentList.Add(Switch)", StringComparison.Ordinal));
+    True(cleanupHost.Contains("ExcludeProcessId", StringComparison.Ordinal));
+    True(cleanupHost.Contains("ParentProcessIdSwitch", StringComparison.Ordinal));
+    False(cleanupScript.Contains("Verb RunAs", StringComparison.Ordinal));
+    True(cleanupLauncher.Contains("--run-driver-cleanup", StringComparison.Ordinal));
+    False(cleanupLauncher.Contains("powershell.exe", StringComparison.OrdinalIgnoreCase));
+    False(project.Contains("tools\\driver-cleanup", StringComparison.Ordinal));
+    True(cleanupScript.Contains("'1290'", StringComparison.Ordinal));
 });
 
 Run("serial normalization", () =>
@@ -46,12 +81,79 @@ Run("Apple parent allowlist", () =>
         @"USB\VID_1234&PID_12A8\0000810100044D600A22001E"));
     False(DriverConstants.IsAllowedAppleParent(
         @"USB\VID_05AC&PID_12A8\..\Services\libusb0"));
+    True(DriverConstants.IsAppleMobileCaptureParent(
+        @"USB\VID_05AC&PID_1290\0000810100044D600A22001E"));
+    True(DriverConstants.IsAppleMobileCaptureParent(
+        @"USB\VID_05AC&PID_12A8\0000810100044D600A22001E"));
+    False(DriverConstants.IsAppleMobileCaptureParent(
+        @"USB\VID_05AC&PID_12A7\0000000000000000"));
+    False(DriverConstants.IsAppleMobileCaptureParent(
+        @"USB\VID_05AC&PID_1200\0000000000000000"));
+    False(DriverConstants.IsAppleMobileCaptureParent(
+        @"USB\VID_05AC&PID_110A\0000000000000000"));
+    False(DriverConstants.IsAppleMobileCaptureParent(
+        @"USB\VID_05AC&PID_200E\0000000000000000"));
+});
+
+Run("Apple capture PID sources stay aligned", () =>
+{
+    var sourceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+        "..", "..", "..", "..", ".."));
+    var manifest = File.ReadLines(Path.Combine(sourceRoot, "config",
+            "apple-mobile-capture-pids.txt"))
+        .Select(line => line.Split('#', 2)[0].Trim())
+        .Where(value => value.Length != 0)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var managed = ExtractPidsInSection(File.ReadAllText(Path.Combine(sourceRoot, "src",
+        "DriverInstaller", "Services", "DriverConstants.cs")),
+        "AppleMobileCaptureProductIds =", "];", "0x");
+    var native = ExtractPidsInSection(File.ReadAllText(Path.Combine(sourceRoot, "src", "Core",
+        "src", "Device", "AppleUsbDiscovery.h")),
+        "mobile_capture_product_ids{", "};", "0x");
+    var scriptText = File.ReadAllText(Path.Combine(sourceRoot, "scripts",
+        "remove_selected_iphone_drivers.ps1"));
+    var script = ExtractPidsInSection(scriptText, "foreach ($productId in @(",
+        ")) {", "'");
+    Equal(string.Join(',', manifest.Order()), string.Join(',', managed.Order()));
+    Equal(string.Join(',', manifest.Order()), string.Join(',', native.Order()));
+    Equal(string.Join(',', manifest.Order()), string.Join(',', script.Order()));
 });
 
 Run("operation IDs", () =>
 {
     True(DriverConstants.IsValidOperationId(Guid.NewGuid().ToString("N")));
     False(DriverConstants.IsValidOperationId("not-an-operation"));
+});
+
+Run("embedded driver cleanup script is trusted", () =>
+{
+    using var stream = typeof(DriverCleanupHost).Assembly.GetManifestResourceStream(
+        "DriverCleanup.Script.ps1") ?? throw new InvalidOperationException(
+        "The cleanup script resource is missing.");
+    using var sourceBytes = new MemoryStream();
+    stream.CopyTo(sourceBytes);
+    var sourceText = new UTF8Encoding(false, true).GetString(sourceBytes.ToArray());
+    if (sourceText.Length > 0 && sourceText[0] == (char)0xFEFF)
+        sourceText = sourceText[1..];
+    sourceText = sourceText.Replace("\r\n", "\n", StringComparison.Ordinal)
+        .Replace('\r', '\n');
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(root);
+        var lfScript = Path.Combine(root, "cleanup-lf.ps1");
+        var crlfScript = Path.Combine(root, "cleanup-crlf.ps1");
+        File.WriteAllText(lfScript, sourceText, new UTF8Encoding(false));
+        File.WriteAllText(crlfScript, sourceText.Replace("\n", "\r\n",
+            StringComparison.Ordinal), new UTF8Encoding(true));
+        True(DriverCleanupHost.IsTrustedScript(lfScript));
+        True(DriverCleanupHost.IsTrustedScript(crlfScript));
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
 });
 
 Run("Apple package cache is per-user", () =>
@@ -119,6 +221,61 @@ Run("verified file lock blocks replacement", () =>
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
     }
+});
+
+Run("system file replacement is transactional", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(root);
+        var source = Path.Combine(root, "trusted.dll");
+        var destination = Path.Combine(root, "system.dll");
+        var backup = Path.Combine(root, "system.dll.bak");
+        File.WriteAllText(source, "trusted payload");
+        File.WriteAllText(destination, "stale payload");
+        File.Copy(destination, backup);
+
+        var replace = typeof(ElevatedDriverHost).GetMethod("ReplaceSystemFile",
+            System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.Static)
+            ?? throw new InvalidOperationException(
+                "ReplaceSystemFile method was not found.");
+        replace.Invoke(null, [source, destination]);
+        Equal("trusted payload", File.ReadAllText(destination));
+
+        var backupType = typeof(ElevatedDriverHost).GetNestedType(
+            "SystemFileBackup", System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException(
+                "SystemFileBackup type was not found.");
+        var backupConstructor = backupType.GetConstructor(
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.Public |
+            System.Reflection.BindingFlags.NonPublic,
+            binder: null, [typeof(string), typeof(string)], modifiers: null)
+            ?? throw new InvalidOperationException(
+                "SystemFileBackup constructor was not found.");
+        var restore = typeof(ElevatedDriverHost).GetMethod("RestoreSystemFile",
+            System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.Static)
+            ?? throw new InvalidOperationException(
+                "RestoreSystemFile method was not found.");
+        var backupRecord = backupConstructor.Invoke([destination, backup]);
+        restore.Invoke(null, [backupRecord]);
+        Equal("stale payload", File.ReadAllText(destination));
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+});
+
+Run("rollback retains deployed files when a new service remains", () =>
+{
+    True(ElevatedDriverHost.CanRemoveDeployedSystemFilesAfterRollback(null, false));
+    True(ElevatedDriverHost.CanRemoveDeployedSystemFilesAfterRollback(false, true));
+    False(ElevatedDriverHost.CanRemoveDeployedSystemFilesAfterRollback(false, false));
 });
 
 Run("elevation path lock blocks file and directory replacement", () =>
@@ -495,21 +652,27 @@ Run("Apple USB driver package detection", () =>
     try
     {
         Directory.CreateDirectory(root);
+        var legacy = Path.Combine(root, "Apple", "Mobile Device Support", "Drivers");
         var recoveryOnly = Path.Combine(root, "applekis.inf_amd64_test");
         Directory.CreateDirectory(recoveryOnly);
         File.WriteAllText(Path.Combine(recoveryOnly, "applekis.inf"), string.Empty);
-        Equal<string?>(null, DeviceCatalog.FindAppleUsbDriverPackage(root));
+        Equal<string?>(null, DeviceCatalog.FindAppleUsbDriverPackage(root, legacy));
+
+        Directory.CreateDirectory(legacy);
+        File.WriteAllText(Path.Combine(legacy, "usbaapl64.inf"), string.Empty);
+        Equal("usbaapl64.inf", DeviceCatalog.FindAppleUsbDriverPackage(root, legacy));
+        File.Delete(Path.Combine(legacy, "usbaapl64.inf"));
 
         var modern = Path.Combine(root, "appleusb.inf_amd64_test");
         Directory.CreateDirectory(modern);
         File.WriteAllText(Path.Combine(modern, "appleusb.inf"), string.Empty);
-        Equal("appleusb.inf", DeviceCatalog.FindAppleUsbDriverPackage(root));
+        Equal("appleusb.inf", DeviceCatalog.FindAppleUsbDriverPackage(root, legacy));
 
         Directory.Delete(modern, recursive: true);
         var desktop = Path.Combine(root, "usbaapl64.inf_amd64_test");
         Directory.CreateDirectory(desktop);
         File.WriteAllText(Path.Combine(desktop, "usbaapl64.inf"), string.Empty);
-        Equal("usbaapl64.inf", DeviceCatalog.FindAppleUsbDriverPackage(root));
+        Equal("usbaapl64.inf", DeviceCatalog.FindAppleUsbDriverPackage(root, legacy));
     }
     finally
     {
@@ -577,4 +740,22 @@ static void Throws<T>(Action action) where T : Exception
     try { action(); }
     catch (T) { return; }
     throw new InvalidOperationException($"Expected {typeof(T).Name}.");
+}
+
+static HashSet<string> ExtractPids(string source, string prefix)
+{
+    var pattern = prefix == "0x" ? @"0x([0-9A-Fa-f]{4})" : @"'([0-9A-Fa-f]{4})'";
+    return System.Text.RegularExpressions.Regex.Matches(source, pattern)
+        .Select(match => match.Groups[1].Value.ToUpperInvariant())
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+}
+
+static HashSet<string> ExtractPidsInSection(string source, string marker,
+    string terminator, string prefix)
+{
+    var start = source.IndexOf(marker, StringComparison.Ordinal);
+    if (start < 0) throw new InvalidOperationException($"PID marker is missing: {marker}");
+    var end = source.IndexOf(terminator, start, StringComparison.Ordinal);
+    if (end < 0) throw new InvalidOperationException($"PID terminator is missing: {terminator}");
+    return ExtractPids(source[start..(end + terminator.Length)], prefix);
 }

@@ -43,8 +43,11 @@
     <Compile Include="..\App\Services\MediaCastAudioDecoder.cs" Link="MediaCastAudioDecoder.cs" />
     <Compile Include="..\App\Services\MediaRecoveryBackoff.cs" Link="MediaRecoveryBackoff.cs" />
     <Compile Include="..\App\Services\BluetoothControlNoticePolicy.cs" Link="BluetoothControlNoticePolicy.cs" />
-    <Compile Include="..\App\Services\BluetoothSubscribedClientSelector.cs" Link="BluetoothSubscribedClientSelector.cs" />
+    <Compile Include="..\App\Services\BluetoothHidProtocol.cs" Link="BluetoothHidProtocol.cs" />
+    <Compile Include="..\App\Services\BluetoothClientRouteTable.cs" Link="BluetoothClientRouteTable.cs" />
+    <Compile Include="..\App\Services\KeyboardShortcut.cs" Link="KeyboardShortcut.cs" />
     <Compile Include="..\App\Services\BluetoothMouseOrientationMapper.cs" Link="BluetoothMouseOrientationMapper.cs" />
+    <Compile Include="..\App\Services\BluetoothMouseReportCoalescer.cs" Link="BluetoothMouseReportCoalescer.cs" />
     <Compile Include="..\App\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />
     <Compile Include="..\App\Services\MediaOutputService.cs" Link="MediaOutputService.cs" />
     <Compile Include="..\App\Services\RuntimeBinaryIntegrity.cs" Link="RuntimeBinaryIntegrity.cs" />

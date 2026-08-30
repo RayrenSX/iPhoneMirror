@@ -10,6 +10,8 @@ namespace IPhoneMirror.App.Services;
 internal sealed class MultiDevicePreviewManager : IDisposable
 {
     private readonly MainViewModel viewModel;
+    private readonly Func<bool> _isReverseControlHotkeyRegistered;
+    private readonly Func<string, nint, bool> _isReverseControlEnabledForWindow;
     private readonly Dictionary<string, NativePreviewWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Task<(bool Success, string Message)>> _opening =
@@ -24,9 +26,15 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal event Action<string, PreviewPointerEventArgs>? PointerInput;
     internal event Action<string, PreviewKeyboardEventArgs>? KeyboardInput;
 
-    internal MultiDevicePreviewManager(MainViewModel viewModel)
+    internal MultiDevicePreviewManager(MainViewModel viewModel,
+        Func<bool>? isReverseControlHotkeyRegistered = null,
+        Func<string, nint, bool>? isReverseControlEnabledForWindow = null)
     {
         this.viewModel = viewModel;
+        _isReverseControlHotkeyRegistered = isReverseControlHotkeyRegistered ?? (() => false);
+        _isReverseControlEnabledForWindow = isReverseControlEnabledForWindow ??
+            ((udid, _) => viewModel.BluetoothControlIsInputEnabled &&
+                viewModel.IsBluetoothControlTarget(udid));
         viewModel.DeviceSessionHandleChanged += OnDeviceSessionHandleChanged;
         viewModel.DeviceProtectionStateChanged += OnDeviceProtectionStateChanged;
         LocalizationService.LanguageChanged += OnLanguageChanged;
@@ -137,10 +145,14 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  ownerHwnd => viewModel.ShowImageSettings(device.Udid, ownerHwnd),
                  () => viewModel.ShowProjectionSettings(device.Udid),
                  out var window, viewModel.AddDiagnosticLog,
-                 () => viewModel.BluetoothControlIsInputEnabled,
+                 // A process can have Bluetooth reverse control enabled for a
+                 // different preview. Only the active independent control
+                 // window may capture input or hide the system cursor.
+                 hwnd => _isReverseControlEnabledForWindow(device.Udid, hwnd),
                  args => PointerInput?.Invoke(device.Udid, args),
                  args => KeyboardInput?.Invoke(device.Udid, args),
-                 hwnd => ReverseControlRequested?.Invoke(device.Udid, hwnd)) || window is null)
+                 hwnd => ReverseControlRequested?.Invoke(device.Udid, hwnd),
+                 _isReverseControlHotkeyRegistered) || window is null)
         {
             if (started.Created)
                 await viewModel.StopDeviceSessionAsync(

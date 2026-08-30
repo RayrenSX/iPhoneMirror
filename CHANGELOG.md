@@ -5,11 +5,22 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Add a mirroring-settings shortcut window for configuring the reverse-control
+  hotkey, with conflict detection and live updates to control guidance.
+
+## [1.8.1] - 2026-08-30
+
 ### Fixed
 
 - Bind Bluetooth HID reports to the uniquely matched GATT client for the
   selected mirrored device instead of broadcasting input to every subscribed
   iPhone/iPad, and serialize multi-window control-route changes.
+
+- Repair mismatched `libusb0.dll` system files during driver installation and
+  restore the original files if the operation fails.
+- Add transactional system-file replacement coverage to the driver installer tests.
 
 ## [1.8.0] - 2026-08-26
 

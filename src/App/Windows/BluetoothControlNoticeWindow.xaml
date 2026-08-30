@@ -133,9 +133,18 @@
                         </StackPanel>
                     </Border>
                 </WrapPanel>
-                <Button Grid.Column="1" Content="{DynamicResource Close}"
-                        Click="OnCloseClick" MinWidth="80" Height="36" Margin="12,0,0,0"
-                        Style="{StaticResource PrimaryButton}"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="{DynamicResource BluetoothControlReportMapChangedConfirm}"
+                            Click="OnReportMapAcknowledgedClick" MinWidth="150" Height="36"
+                            Margin="12,0,8,0" Style="{StaticResource PrimaryButton}"
+                            Visibility="{Binding ReportMapAcknowledgementVisibility}"/>
+                    <Button Content="{DynamicResource Close}"
+                            Click="OnCloseClick" MinWidth="80" Height="36"
+                            Background="{DynamicResource ControlFillBrush}"
+                            BorderBrush="{DynamicResource BorderSoftBrush}"
+                            Foreground="{DynamicResource TextBrush}"
+                            BorderThickness="1"/>
+                </StackPanel>
             </Grid>
         </Grid>
     </Border>

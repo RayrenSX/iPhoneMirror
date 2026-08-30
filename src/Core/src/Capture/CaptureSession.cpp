@@ -1561,7 +1561,6 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         };
         std::atomic<std::int64_t> last_audio_activity_ns{};
         std::atomic_bool fast_stream_reconnect_requested{};
-        std::atomic_bool landscape_video_stream{};
         std::atomic_uint32_t decoder_reconnect_generation{};
         // The queue preserves normal H.264 reference order. Sustained decoder
         // overload is handled by the producer as a bounded GOP reset: discard
@@ -1652,8 +1651,6 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         {active_decoder_preference, applied_decoder_generation},
                         active_decoder_runtime_mode);
                     configured_format = format;
-                    landscape_video_stream.store(format.width > format.height,
-                        std::memory_order_release);
                 }
                 auto& sample = pending.sample;
                 std::size_t sample_offset{};
@@ -1929,15 +1926,14 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             first_video_wait_started;
         auto ping_recovery_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
         bool ping_recovery_attempted{};
-        bool fast_stream_reconnect_attempted{};
+        detail::FastStreamReconnectGate fast_stream_reconnect_gate;
         detail::StreamingSilenceWatchdog media_silence_watchdog;
         detail::StreamingSilenceWatchdog video_silence_watchdog;
         const auto request_fast_reconnect_for_missing_frame_rate = [&] {
-            if (fast_stream_reconnect_attempted ||
-                !landscape_video_stream.load(std::memory_order_acquire)) return;
             const auto now = std::chrono::steady_clock::now();
             if (video_silence_watchdog.silence_duration(now) <
                 std::chrono::milliseconds(2500)) return;
+            if (!fast_stream_reconnect_gate.request()) return;
             fast_stream_reconnect_requested.store(true, std::memory_order_release);
             {
                 std::scoped_lock lock(mutex_);
@@ -1946,8 +1942,9 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 snapshot_.state = State::Handshaking;
             }
             logging::write(
-                "quicktime_fast_reconnect requested=frame_rate_unavailable "
-                "video_silence_intervals=10 usb_configuration=retained");
+                std::format("quicktime_fast_reconnect requested=frame_rate_unavailable "
+                    "attempt={} video_silence_intervals=10 usb_configuration=retained",
+                    fast_stream_reconnect_gate.attempt_count()));
         };
         const auto detect_streaming_media_silence = [&] {
             const auto now = std::chrono::steady_clock::now();
@@ -1984,9 +1981,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         };
         while (!stop_token.stop_requested()) {
             video_worker_failure.rethrow_if_set();
-            if (!fast_stream_reconnect_attempted &&
-                fast_stream_reconnect_requested.exchange(false, std::memory_order_acq_rel)) {
-                fast_stream_reconnect_attempted = true;
+            if (fast_stream_reconnect_requested.exchange(false, std::memory_order_acq_rel)) {
                 try {
                     {
                         std::scoped_lock lock(video_queue_mutex);
@@ -2225,8 +2220,14 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 if (event.video_sample || event.audio_sample) {
                     const auto media_received_at = std::chrono::steady_clock::now();
                     media_silence_watchdog.observe_media(media_received_at);
-                    if (event.video_sample)
+                    if (event.video_sample) {
                         video_silence_watchdog.observe_media(media_received_at);
+                        if (fast_stream_reconnect_gate.observe_video_frame())
+                            logging::write(std::format(
+                                "quicktime_fast_reconnect recovered=true attempt={} "
+                                "usb_configuration=retained",
+                                fast_stream_reconnect_gate.attempt_count()));
+                    }
                     // Keep all wired preflight, activation, re-enumeration,
                     // claim and handshake work serialized. A second wired
                     // session may begin only after this one proves a stable

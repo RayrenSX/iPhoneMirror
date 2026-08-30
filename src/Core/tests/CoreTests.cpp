@@ -570,6 +570,9 @@ void test_apple_usb_filter_safety() {
     using iPhoneMirror::device::apple_usb_parent_instance_matches_serial;
     using iPhoneMirror::device::libusb0_apple_interface_path_matches;
     using iPhoneMirror::device::is_apple_usb_parent_instance_id;
+    using iPhoneMirror::device::is_apple_audio_adapter_product_id;
+    using iPhoneMirror::device::is_apple_mobile_capture_product_id;
+    using iPhoneMirror::device::is_apple_mobile_capture_parent_instance_id;
     using iPhoneMirror::device::AppleNormalUsbStackEvidence;
     using iPhoneMirror::device::is_complete_apple_normal_usb_stack;
     const std::vector<std::wstring> libusb0{L"libusb0"};
@@ -618,6 +621,23 @@ void test_apple_usb_filter_safety() {
             !is_apple_usb_parent_instance_id(
               L"USB\\VID_1234&PID_12A8\\0000810100044D600A22001E"),
         "physical Apple USB discovery counts a composite parent once and rejects children");
+
+    check(is_apple_audio_adapter_product_id(0x110A) &&
+            !is_apple_audio_adapter_product_id(0x12A8),
+        "Apple USB-C audio adapter is excluded without excluding an iPhone product");
+    check(is_apple_mobile_capture_product_id(0x1290) &&
+            is_apple_mobile_capture_product_id(0x12A8) &&
+            !is_apple_mobile_capture_product_id(0x12A7) &&
+            !is_apple_mobile_capture_product_id(0x1200) &&
+            !is_apple_mobile_capture_product_id(0x110A) &&
+            !is_apple_mobile_capture_product_id(0x200E) &&
+            is_apple_mobile_capture_parent_instance_id(
+                L"USB\\VID_05AC&PID_12A8\\0000810100044D600A22001E") &&
+            is_apple_mobile_capture_parent_instance_id(
+                L"usb\\vid_05ac&pid_12a8\\0000810100044d600a22001e") &&
+            !is_apple_mobile_capture_parent_instance_id(
+                L"USB\\VID_05AC&PID_110A\\0000000000000000"),
+        "only Apple mobile USB parents can become capture targets regardless of case");
 
     constexpr auto interface_path =
         LR"(\\?\USB#VID_05AC&PID_12A8#0000810100044D600A22001E#{f9f3ff14-ae21-48a0-8a25-8011a7a931d9})";
@@ -1078,6 +1098,7 @@ void test_wireless_decoder_status() {
 
 void test_capture_media_safety_helpers() {
     using iPhoneMirror::capture::detail::ProtectedVideoDetector;
+    using iPhoneMirror::capture::detail::FastStreamReconnectGate;
     using iPhoneMirror::capture::detail::StreamingSilenceWatchdog;
     using iPhoneMirror::capture::detail::VideoQueueAction;
     using iPhoneMirror::capture::detail::VideoQueueBudget;
@@ -1389,6 +1410,12 @@ void test_capture_media_safety_helpers() {
     check(!silence_watchdog.expired(media_started + std::chrono::seconds(18)) &&
         silence_watchdog.expired(media_started + std::chrono::seconds(19)),
         "new video or audio media resets the streaming silence deadline");
+
+    FastStreamReconnectGate reconnect_gate;
+    check(reconnect_gate.request() && !reconnect_gate.request() &&
+        reconnect_gate.attempt_count() == 1 && reconnect_gate.observe_video_frame() &&
+        reconnect_gate.request() && reconnect_gate.attempt_count() == 2,
+        "a recovered video stream permits a later fast reconnect attempt");
 
     ProtectedVideoDetector protected_video;
     static_assert(ProtectedVideoDetector::HoldLimit == std::chrono::seconds(8));

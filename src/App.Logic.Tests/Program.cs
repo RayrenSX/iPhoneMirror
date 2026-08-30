@@ -5,7 +5,9 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
+using System.Windows.Input;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Services;
@@ -544,6 +546,20 @@ Equal(true, installerScript.Contains(
         "CloseApplicationsFilter=iPhoneMirror.exe,iPhoneMirror.Driver.exe",
         StringComparison.Ordinal),
     "installer closes the main app and shared-runtime driver manager");
+Equal(true, installerScript.Contains(
+        "WirelessFirewallRuleName = 'iPhoneMirror Wireless AirPlay'",
+        StringComparison.Ordinal) &&
+        installerScript.Contains(
+            "localport=5001,7001,7100,8090",
+            StringComparison.Ordinal) &&
+        installerScript.Contains("protocol=UDP", StringComparison.Ordinal) &&
+        installerScript.Contains("localport=1900", StringComparison.Ordinal) &&
+        installerScript.Contains("remoteip=localsubnet", StringComparison.Ordinal) &&
+        installerScript.Contains("AddTcpArguments", StringComparison.Ordinal) &&
+        installerScript.Contains("AddUdpArguments", StringComparison.Ordinal) &&
+        installerScript.Contains("ConfigureWirelessFirewall", StringComparison.Ordinal) &&
+        installerScript.Contains("RemoveWirelessFirewall", StringComparison.Ordinal),
+    "installer manages a dedicated inbound firewall rule for the wireless host");
 Equal(false, installerScript.Split('\n').Any(line =>
         line.TrimStart().StartsWith("Flags:", StringComparison.OrdinalIgnoreCase) &&
         line.Contains("restartreplace", StringComparison.OrdinalIgnoreCase)),
@@ -1116,8 +1132,14 @@ Equal(false, mainWindowText.Contains("CloseMediaCastButton",
 
 var mainWindowCodePath = Path.Combine(sourceDirectory, "App", "MainWindow.xaml.cs");
 var mainWindowCode = File.ReadAllText(mainWindowCodePath);
+var appProjectText = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "iPhoneMirror.App.csproj"));
 var bluetoothHidCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "BluetoothHidMouseService.cs"));
+var bluetoothRoutesSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "BluetoothClientRouteTable.cs"));
+var bossKeyWindowVisibilityCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "BossKeyWindowVisibility.cs"));
 Equal(true,
     bluetoothHidCode.Contains("00002a22-0000-1000-8000-00805f9b34fb",
         StringComparison.OrdinalIgnoreCase) &&
@@ -1128,6 +1150,80 @@ Equal(true,
     bluetoothHidCode.Contains("HasTargetSubscriber(_bootKeyboardInput)",
         StringComparison.Ordinal),
     "Bluetooth HID exposes and targets Boot Protocol keyboard and mouse reports");
+Equal(true,
+    bluetoothHidCode.Contains("MergePendingMotion(_pendingMouseReport, report)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains(
+        "MouseReportInterval = TimeSpan.FromMilliseconds(8)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains(
+        "await Task.Delay(MouseReportInterval).ConfigureAwait(false)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("QueuePendingMotionBeforePriorityReport();",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_controlPointerTimer.Change(1, 4)",
+        StringComparison.Ordinal),
+    "Bluetooth motion preserves queued travel before input-state changes, samples input every four milliseconds, and paces BLE reports at 125 Hz");
+Equal(true,
+    bluetoothHidCode.Contains("RunGattCallbackAsync", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("gatt_callback_failed", StringComparison.Ordinal) &&
+    !bluetoothHidCode.Contains("private async void OnProtocolModeWriteRequested",
+        StringComparison.Ordinal) &&
+    !bluetoothHidCode.Contains("private async void OnWheelResolutionWriteRequested",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("ExceptionDispatchInfo.Capture(failure).Throw()",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("var keyReleased = SendKeyboardAsync(0, []);",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("var modifierReleased = SendConsumerAsync(0);",
+        StringComparison.Ordinal),
+    "Bluetooth GATT callbacks contain disconnect exceptions and system shortcuts always attempt key releases");
+Equal(true,
+    mainWindowCode.Contains("await _viewModel.SendBluetoothAppSwitcherAsync()",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("0x0A, 0x9D, 0x02, 0x81, 0x02", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("0x85, 0x05", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("0x0A, 0x24, 0x02, 0x09, 0x40", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("SendIphoneAppSwitcherAsync", StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("BluetoothShortcutAction.Back", StringComparison.Ordinal) &&
+    !bluetoothHidCode.Contains("SendIphoneBackAsync", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("AppSwitcherDoublePressInterval", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("Task.WhenAll(modifierPressed, keyPressed)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("Task.WhenAll(keyReleased, modifierReleased)",
+        StringComparison.Ordinal),
+    "Bluetooth app switching uses the dedicated iOS Consumer Control usage while Back remains unavailable");
+Equal(true,
+    mainWindowCode.Contains("if (_bossKeyHidden ||",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("ApplyBluetoothControlInputState",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("await _viewModel.ReleaseBluetoothControlInputAsync()",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("ReleaseBluetoothControlInputAsync",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("boss_key_input_release_failed",
+        StringComparison.Ordinal),
+    "boss key suspends process-wide reverse-control input and releases remote HID state before remaining hidden");
+var bossToggleIndex = mainWindowCode.IndexOf(
+    "private async Task ToggleBossKeyWindowsAsync", StringComparison.Ordinal);
+var bossLocalSuspendIndex = mainWindowCode.IndexOf(
+    "ApplyBluetoothControlInputState(activateIndependentWindow: false);",
+    bossToggleIndex, StringComparison.Ordinal);
+var bossWindowHideIndex = mainWindowCode.IndexOf(
+    "BossKeyWindowVisibility.HideAll();", bossLocalSuspendIndex,
+    StringComparison.Ordinal);
+var bossRouteWaitIndex = mainWindowCode.IndexOf(
+    "await _bluetoothRouteGate.WaitAsync();", bossWindowHideIndex,
+    StringComparison.Ordinal);
+Equal(true, bossToggleIndex >= 0 && bossLocalSuspendIndex > bossToggleIndex &&
+            bossWindowHideIndex > bossLocalSuspendIndex &&
+            bossRouteWaitIndex > bossWindowHideIndex &&
+            bossKeyWindowVisibilityCode.Contains("if (!_hidden || !window.IsVisible) return;",
+                StringComparison.Ordinal) &&
+            bossKeyWindowVisibilityCode.Contains("HiddenWindows.Add(window);",
+                StringComparison.Ordinal),
+    "boss key hides existing and newly created WPF windows before waiting on a blocked BLE route");
 Equal(true, mainWindowCode.Contains("_mediaControlsHideTimer",
                 StringComparison.Ordinal) &&
             mainWindowCode.Contains("SetMediaCastControlsVisible",
@@ -1205,6 +1301,144 @@ Equal(true, closeMethodIndex >= 0 &&
     "window close hides every UI surface before background cleanup and exits explicitly");
 var nativePreviewWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "NativePreviewWindow.cs"));
+var nativePreviewHostCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Controls", "NativePreviewHost.cs"));
+Equal(true,
+    mainWindowCode.Contains("SetWindowsCursorHidden(true);", StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("if (_windowsCursorHidden == hidden) return;",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains("HideSystemCursor();", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("IsSystemCursorVisible(out", StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains("GetCursorInfo(ref cursor)",
+        StringComparison.Ordinal),
+    "independent reverse control continuously reasserts the process-wide hidden cursor state");
+Equal(true,
+    appProjectText.Contains("Assets\\iPhoneMirror.ico", StringComparison.Ordinal) &&
+    appProjectText.Contains("<ExcludeFromSingleFile>true</ExcludeFromSingleFile>",
+        StringComparison.Ordinal),
+    "published single-file builds retain the site-of-origin application icon");
+Equal(true,
+    mainWindowCode.Contains("ApplyApplicationDisplayMode", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("SizeToContent = SizeToContent.Manual", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("EnvironmentPanel.Visibility = Visibility.Collapsed", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("StatsPanel.Visibility = Visibility.Collapsed", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.SetResourceReference", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.HorizontalAlignment = HorizontalAlignment.Stretch", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.Background = Brushes.Black", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("HasLightweightVideoPresentation", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("LightweightDefaultPreviewAspect", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("LightweightMinimumWindowWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("GetLightweightMaximumWindowWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("var width = Math.Min(preferredPreviewWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_lightweightWidthNeedsFit", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("currentWindowWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("CenterColumn.ActualWidth <= 0", StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("ActualWidth - CenterPanel.ActualWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_lightweightWorkspaceSurfaceAnimationActive) return;",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("RequestLightweightWindowFit", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("AnimateLightweightWindowForWorkspace", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("FitLightweightWorkspaceImmediately", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("DispatcherPriority.ContextIdle", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("GetLightweightFixedChromeWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("TryGetLightweightContentPreviewWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("HasLightweightVideoPresentation", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("HasLightweightContentDimensions", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("SetLightweightWindowWidthImmediately", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("WM_SIZE burst", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_viewModel.SourceVideoWidth /", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_viewModel.SourceVideoHeight", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("hasContentPreviewWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("CenterColumn.Width = new GridLength(", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("GridUnitType.Star", StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("CenterColumn.ClearValue(WidthProperty)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.Width = double.NaN", StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("centerInsets", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("targetSideWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_lightweightLeftGapTargetWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_lightweightCenterTargetWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.ActualWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("targetPreviewWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_lightweightTargetMinWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("HasLightweightWorkspacePanels", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("!HasLightweightWorkspacePanels", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("ApplyLightweightPreviewFramePolicy", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("canUseNormalPortraitFrame", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("LightweightNormalPortraitPreviewWidth = 340", StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("targetUsesPortraitFrame", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.MaxWidth = LightweightNormalPortraitPreviewWidth",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.ClearValue(MaxWidthProperty)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("CenterColumn.Width = new GridLength", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_lightweightWindowTargetX", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("bounds.Right - plannedWindowPixels", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("A left-only transition must never move the right edge.",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("LockLightweightCenterWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("ReleaseLightweightCenterWidth", StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("SizeChanged += OnMainWindowSizeChanged", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("AnimateLightweightWindowWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("OnLightweightWindowRendering", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("ApplyLightweightWindowAnimationFrame", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("SynchronizeLightweightWindowPosition", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("DispatcherPriority.Render", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("TryGetLightweightWorkArea", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("SetWindowPos(handle, 0, x, _lightweightWindowTopPixels, width",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_isWindowMaximized)", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.ClearValue(WidthProperty);", StringComparison.Ordinal) &&
+    File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+        "ProjectionSettingsWindow.xaml")).Contains(
+        "SelectedApplicationDisplayMode", StringComparison.Ordinal) &&
+    File.ReadAllText(Path.Combine(sourceDirectory, "App", "MainWindow.xaml")).Contains(
+        "ApplicationDisplayModeComboBox", StringComparison.Ordinal),
+    "lightweight application mode hides preview chrome and fits the main preview to its source aspect");
+Equal(true,
+    File.ReadAllText(Path.Combine(sourceDirectory, "App", "Services",
+        "MultiDevicePreviewManager.cs")).Contains(
+        "Func<string, nint, bool> _isReverseControlEnabledForWindow",
+        StringComparison.Ordinal) &&
+    File.ReadAllText(Path.Combine(sourceDirectory, "App", "Services",
+        "MultiDevicePreviewManager.cs")).Contains(
+        "hwnd => _isReverseControlEnabledForWindow(device.Udid, hwnd)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains(
+        "(udid, window) => _activeControlWindow == window &&",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains(
+        "_isReverseControlEnabled?.Invoke(_handle)", StringComparison.Ordinal) &&
+    !nativePreviewWindowCode.Contains("ShowCursor(false);\r\n            return;",
+        StringComparison.Ordinal) &&
+    !nativePreviewWindowCode.Contains("ShowCursor(false);\n            return;",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains(
+        "case WmRightButtonDown when IsReverseControlEnabledForWindow:",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains(
+        "case WmNcRightButtonDown when IsReverseControlEnabledForWindow:",
+        StringComparison.Ordinal),
+    "only the active independent control window hides the cursor and consumes right-click input");
+Equal(true,
+    nativePreviewHostCode.Contains("MainPreviewInnerCornerRadius = 15.0",
+        StringComparison.Ordinal) &&
+    nativePreviewHostCode.Contains("UpdateWindowRegion();", StringComparison.Ordinal) &&
+    nativePreviewHostCode.Contains("CreateRoundRectRgn(0, 0, width, height,",
+        StringComparison.Ordinal) &&
+    !nativePreviewHostCode.Contains("width + 1, height + 1", StringComparison.Ordinal),
+    "main preview native child uses the same inner radius as the WPF frame without extending past its bounds");
+var noticeWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Windows", "BluetoothControlNoticeWindow.xaml.cs"));
+Equal(true,
+    noticeWindowCode.Contains("OnReportMapAcknowledgedClick", StringComparison.Ordinal) &&
+    !noticeWindowCode.Contains(
+        "if (_state == NoticeState.ReportMapChanged)\r\n                _reportMapAcknowledged?.Invoke();",
+        StringComparison.Ordinal) &&
+    !noticeWindowCode.Contains(
+        "if (_state == NoticeState.ReportMapChanged)\n                _reportMapAcknowledged?.Invoke();",
+        StringComparison.Ordinal),
+    "pairing refresh acknowledgement requires the explicit confirmation action");
 var aspectRatioControllerCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Services", "AspectRatioWindowController.cs"));
 var previewRendererCode = File.ReadAllText(Path.Combine(sourceDirectory,
@@ -1233,6 +1467,12 @@ Equal(true,
         StringComparison.Ordinal),
     "native previews apply final bounds while hidden and become visible in one step");
 Equal(true,
+    nativePreviewWindowCode.Contains("Volatile.Write(ref BossKeyHidden, hidden ? 1 : 0)",
+        StringComparison.Ordinal) &&
+    nativePreviewWindowCode.Contains("candidate.SetBossKeyHidden(true);",
+        StringComparison.Ordinal),
+    "native previews created while the boss key is active inherit the hidden state");
+Equal(true,
     nativePreviewWindowCode.Contains("private bool _isTopMost;",
         StringComparison.Ordinal) &&
     nativePreviewWindowCode.Contains("SetWindowPos(_handle, HwndNoTopMost",
@@ -1245,7 +1485,19 @@ Equal(true,
         StringComparison.Ordinal) &&
     mainViewModelSource.Contains("if (_bluetoothControlStopping ||",
         StringComparison.Ordinal) &&
-    mainWindowCode.Contains("IsBluetoothControlTarget(_viewModel.SelectedDevice?.Udid)",
+    mainWindowCode.Contains("SwitchBluetoothControlForSelectionChangeAsync()",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("SwitchBluetoothControlTargetAsync",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("preserveExistingBinding",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("GetClientNameAsync",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("_clientRoutes.Refresh(clients, targetName, _preferredClientId)",
+        StringComparison.Ordinal) &&
+    bluetoothRoutesSource.Contains("IsMeaningfulName",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("preserveExistingBinding: true",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("private readonly SemaphoreSlim _bluetoothRouteGate",
         StringComparison.Ordinal) &&
@@ -1255,7 +1507,36 @@ Equal(true,
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("NotifyValueAsync(buffer, targetClient)",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("BluetoothSubscribedClientSelector.Select",
+    bluetoothHidCode.Contains("WaitAsync(NotificationTimeout,",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("timeout.CancelAfter(NotificationTimeout);",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains(".AsTask(timeout.Token)", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("BluetoothClientRouteTable",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("BeginTargetRouteAsync",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("args.Session?.DeviceId?.Id",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("GetWheelResolutionValue(args)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("CalibrateAsync(string targetDeviceUdid",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("IsCurrentRoute(targetDeviceUdid, generation)",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("public bool IsConnected => Volatile.Read(ref _transportFailed) == 0 &&",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("IsMouseConnected;",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("var calibrated = await CalibrateBluetoothControlAsync();",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("!calibrated) return;",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("_bluetoothControlCalibrated = true;",
+        StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("GattServiceProviderAdvertisementStatus.Stopped or",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("fromRawInput: true",
         StringComparison.Ordinal) &&
     multiPreviewManagerCode.Contains("internal bool Activate(string? udid)",
         StringComparison.Ordinal),
@@ -1399,13 +1680,94 @@ Equal(true, modernControlsText.Contains("FocusVisualStyle", StringComparison.Ord
     "shared icon controls replace the default rectangular focus adorner");
 var driverMainWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
     "DriverInstaller", "MainWindow.xaml"));
+var driverMainWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
+    "DriverInstaller", "MainWindow.xaml.cs"));
 Equal(true, driverMainWindowText.Contains("x:Name=\"DriverWindowChrome\"",
         StringComparison.Ordinal),
     "driver manager names its shared window chrome for maximize frame policy");
 Equal(true, driverMainWindowText.Contains(
-        "Background=\"{DynamicResource WindowBackgroundBrush}\"",
+    "Background=\"{DynamicResource WindowBackgroundBrush}\"",
         StringComparison.Ordinal),
     "driver manager uses an opaque themed background in light mode");
+Equal(true, driverMainWindowCode.Contains(
+        "previousDevice is { IsPresent: true }",
+        StringComparison.Ordinal) &&
+    driverMainWindowCode.Contains(
+        "Devices.FirstOrDefault(device => device.IsPresent);",
+        StringComparison.Ordinal),
+    "simple driver-manager refresh keeps only a connected device selected");
+var mainWindowXaml = File.ReadAllText(Path.Combine(sourceDirectory, "App", "MainWindow.xaml"));
+var shortcutSettingsText = File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+    "ShortcutSettingsWindow.xaml"));
+var shortcutSettingsCode = File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+    "ShortcutSettingsWindow.xaml.cs"));
+Equal(true, mainWindowXaml.Contains("OpenShortcutSettingsButton",
+        StringComparison.Ordinal) &&
+    mainWindowXaml.Contains("ClearBluetoothBindingsButton",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("OnClearBluetoothBindingsClick",
+        StringComparison.Ordinal) &&
+    shortcutSettingsText.Contains("PreviewKeyDown=\"OnShortcutPreviewKeyDown\"",
+        StringComparison.Ordinal) &&
+    shortcutSettingsCode.Contains("KeyboardShortcut.TryCreate",
+        StringComparison.Ordinal) &&
+     mainWindowCode.Contains("ApplyBluetoothShortcuts",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("RegisterBluetoothControlHotkey",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("SendBluetoothSystemShortcutAsync",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("TryGetShortcutActionByHotKeyId",
+         StringComparison.Ordinal) &&
+     shortcutSettingsCode.Contains("BluetoothShortcutAction.ControlCenter",
+         StringComparison.Ordinal) &&
+     shortcutSettingsCode.Contains("BluetoothShortcutAction.NotificationCenter",
+         StringComparison.Ordinal) &&
+     shortcutSettingsCode.Contains("BluetoothShortcutAction.AppSwitcher",
+         StringComparison.Ordinal) &&
+     shortcutSettingsCode.Contains("BluetoothShortcutAction.Home",
+         StringComparison.Ordinal) &&
+     !shortcutSettingsCode.Contains("BluetoothShortcutAction.Back",
+         StringComparison.Ordinal) &&
+     shortcutSettingsCode.Contains("BluetoothShortcutAction.BossKey",
+         StringComparison.Ordinal) &&
+     shortcutSettingsCode.Contains("BluetoothShortcutAction.Siri",
+         StringComparison.Ordinal) &&
+     shortcutSettingsText.Contains("ShortcutClearButton",
+         StringComparison.Ordinal) &&
+     shortcutSettingsText.Contains("Delete20",
+         StringComparison.Ordinal) &&
+     shortcutSettingsCode.Contains("ShortcutBindingCategory.Navigation",
+         StringComparison.Ordinal) &&
+     !mainWindowCode.Contains("BluetoothShortcutAction.QuickNote",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("KeyboardShortcut.HaveUniqueBoundValues",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("ToggleBossKeyWindows",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("BluetoothBossKeyHotKeyId",
+         StringComparison.Ordinal) &&
+     File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+         "NativePreviewWindow.cs")).Contains("IsBossKeyHotkey",
+             StringComparison.Ordinal) &&
+     File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+         "NativePreviewWindow.cs")).Contains("SetAllBossKeyHidden",
+             StringComparison.Ordinal) &&
+     File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+         "BluetoothClientBindingWindow.xaml")).Contains(
+             "BluetoothClientBindingUnbind", StringComparison.Ordinal) &&
+      File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+          "BluetoothClientBindingWindow.xaml")).Contains(
+             "BluetoothClientBindingRefresh", StringComparison.Ordinal) &&
+      File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+          "BluetoothClientBindingWindow.xaml.cs")).Contains(
+              "OnUnbindClick", StringComparison.Ordinal) &&
+      File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
+          "BluetoothClientBindingWindow.xaml.cs")).Contains(
+              "OnRefreshClick", StringComparison.Ordinal) &&
+      mainViewModelSource.Contains("RefreshBluetoothBindingClientsAsync",
+          StringComparison.Ordinal),
+    "main mirroring settings expose shortcut and Bluetooth-binding reset controls");
 var driverThemeServiceText = File.ReadAllText(Path.Combine(sourceDirectory,
     "DriverInstaller", "Services", "DriverThemeService.cs"));
 Equal(true, driverThemeServiceText.Contains("DwmBorderColor", StringComparison.Ordinal) &&
@@ -1907,6 +2269,7 @@ try
         NotifyPrereleaseReleases = true,
         Language = "zh-CN",
         Theme = AppTheme.Light,
+        ApplicationDisplayMode = ApplicationDisplayMode.Lightweight,
         BluetoothMouseSensitivity = 135,
         BluetoothMouseSensitivitySchema = 1,
         BluetoothLandscapeMouseOrientationTurns = 3,
@@ -1919,6 +2282,18 @@ try
         BluetoothMouseReverseHorizontal = true,
         BluetoothMouseReverseVertical = false,
         BluetoothMouseDirectionSchema = 1,
+        BluetoothControlShortcutVirtualKey = KeyInterop.VirtualKeyFromKey(Key.F8),
+        BluetoothControlShortcutModifiers = 0x0002,
+        BluetoothControlShortcutSchema = 1,
+        BluetoothBossShortcutVirtualKey = KeyInterop.VirtualKeyFromKey(Key.P),
+        BluetoothBossShortcutModifiers = 0x0006,
+        BluetoothBackShortcutVirtualKey = KeyInterop.VirtualKeyFromKey(Key.F7),
+        BluetoothBackShortcutModifiers = 0x0002,
+        BluetoothShortcutSchema = 5,
+        BluetoothControlDeviceBindings = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["00008101-TEST-DEVICE"] = "BluetoothLE#TEST-CLIENT",
+        },
     };
     settingsStore.Save(savedSettings);
     var loadedSettings = settingsStore.Load();
@@ -1930,6 +2305,8 @@ try
         "update settings preserve mirror fallback preference");
     Equal(AppTheme.Light, loadedSettings.Theme,
         "update settings preserve theme preference");
+    Equal(ApplicationDisplayMode.Lightweight, loadedSettings.ApplicationDisplayMode,
+        "update settings preserve lightweight application mode");
     Equal("zh-CN", loadedSettings.Language,
         "update settings preserve language preference");
     Equal(135d, loadedSettings.BluetoothMouseSensitivity,
@@ -1948,6 +2325,56 @@ try
         "update settings preserve horizontal reversal");
     Equal(false, loadedSettings.BluetoothMouseReverseVertical,
         "update settings preserve vertical reversal");
+    Equal(KeyInterop.VirtualKeyFromKey(Key.F8),
+        loadedSettings.BluetoothControlShortcutVirtualKey,
+        "update settings preserve Bluetooth control shortcut key");
+    Equal(0x0002, loadedSettings.BluetoothControlShortcutModifiers,
+        "update settings preserve Bluetooth control shortcut modifiers");
+    Equal(KeyInterop.VirtualKeyFromKey(Key.P), loadedSettings.BluetoothBossShortcutVirtualKey,
+        "update settings preserve boss key shortcut key");
+    Equal(0x0006, loadedSettings.BluetoothBossShortcutModifiers,
+        "update settings preserve boss key shortcut modifiers");
+    Equal(0, loadedSettings.BluetoothBackShortcutVirtualKey,
+        "unsupported Back shortcut is cleared during migration");
+    Equal(0, loadedSettings.BluetoothBackShortcutModifiers,
+        "unsupported Back shortcut modifiers are cleared during migration");
+Equal("BluetoothLE#TEST-CLIENT",
+        loadedSettings.BluetoothControlDeviceBindings["00008101-TEST-DEVICE"],
+        "update settings preserve Bluetooth client binding");
+    Equal("BluetoothLE#TEST-CLIENT",
+        loadedSettings.BluetoothControlDeviceBindings["00008101-test-device"],
+        "loaded Bluetooth device bindings remain case-insensitive");
+    Equal(BluetoothHidProtocol.ReportMapVersion,
+        loadedSettings.BluetoothHidReportMapVersion,
+        "Bluetooth HID report-map upgrades are recorded");
+    Equal(0, loadedSettings.BluetoothHidReportMapAcknowledgedVersion,
+        "Bluetooth HID report-map upgrades require explicit re-pair acknowledgement");
+    var persistedMigration = JsonSerializer.Deserialize<UpdateSettings>(
+        File.ReadAllText(Path.Combine(updateSettingsRoot, "settings.json")))
+        ?? throw new InvalidOperationException("migrated settings were not persisted");
+    Equal(BluetoothHidProtocol.ReportMapVersion,
+        persistedMigration.BluetoothHidReportMapVersion,
+        "Bluetooth HID report-map migration persists immediately");
+    Equal(6, persistedMigration.BluetoothShortcutSchema,
+        "Back shortcut migration persists immediately");
+    var staleSchemaSixStore = new UpdateSettingsStore(
+        Path.Combine(updateSettingsRoot, "stale-schema-six.json"));
+    staleSchemaSixStore.Save(new UpdateSettings
+    {
+        BluetoothShortcutSchema = 6,
+        BluetoothBackShortcutVirtualKey = KeyInterop.VirtualKeyFromKey(Key.F7),
+        BluetoothBackShortcutModifiers = 0x0002,
+    });
+    var staleSchemaSix = staleSchemaSixStore.Load();
+    Equal(0, staleSchemaSix.BluetoothBackShortcutVirtualKey,
+        "schema 6 clears stale Back shortcut key values");
+    Equal(0, staleSchemaSix.BluetoothBackShortcutModifiers,
+        "schema 6 clears stale Back shortcut modifiers");
+    var staleSchemaSixPersisted = JsonSerializer.Deserialize<UpdateSettings>(
+        File.ReadAllText(Path.Combine(updateSettingsRoot, "stale-schema-six.json")))
+        ?? throw new InvalidOperationException("stale schema migration was not persisted");
+    Equal(0, staleSchemaSixPersisted.BluetoothBackShortcutVirtualKey,
+        "schema 6 stale Back shortcut key cleanup is persisted");
     settingsStore.Update(settings => settings.Language = "en-US");
     var languageUpdatedSettings = settingsStore.Load();
     Equal(true, languageUpdatedSettings.AutoDownload,
@@ -1973,6 +2400,8 @@ try
         "Bluetooth mouse sensitivity defaults to 500 percent");
     Equal(1000d, defaults.BluetoothWheelSensitivity,
         "Bluetooth wheel sensitivity defaults to 1000 percent");
+    Equal(ApplicationDisplayMode.Complete, defaults.ApplicationDisplayMode,
+        "application display mode defaults to complete");
     Equal(0, defaults.BluetoothPortraitMouseDirection,
         "Bluetooth portrait direction defaults to up");
     Equal(1, defaults.BluetoothLandscapeMouseDirection,
@@ -1981,6 +2410,22 @@ try
         "Bluetooth horizontal reversal defaults off");
     Equal(false, defaults.BluetoothMouseReverseVertical,
         "Bluetooth vertical reversal defaults off");
+    Equal(KeyInterop.VirtualKeyFromKey(Key.F9),
+        defaults.BluetoothControlShortcutVirtualKey,
+        "Bluetooth control shortcut defaults to F9");
+    Equal(0, defaults.BluetoothControlShortcutModifiers,
+        "Bluetooth control shortcut defaults without modifiers");
+    Equal(true, KeyboardShortcut.FromSettings(defaults,
+        BluetoothShortcutAction.BossKey).Equals(KeyboardShortcut.BossKeyDefault),
+        "boss key defaults to Ctrl+Alt+B");
+    Equal(6, defaults.BluetoothShortcutSchema,
+        "Bluetooth shortcut settings retire the unsupported Back action");
+    Equal(BluetoothHidProtocol.ReportMapVersion,
+        defaults.BluetoothHidReportMapVersion,
+        "new settings start at the current Bluetooth HID report-map version");
+    Equal(BluetoothHidProtocol.ReportMapVersion,
+        defaults.BluetoothHidReportMapAcknowledgedVersion,
+        "new settings do not prompt for a pairing refresh");
 
     var legacyPath = Path.Combine(defaultSettingsRoot, "legacy.json");
     Directory.CreateDirectory(defaultSettingsRoot);
@@ -1990,12 +2435,57 @@ try
         "legacy Bluetooth mouse sensitivity is never overwritten by a new default");
     Equal(100d, migrated.BluetoothWheelSensitivity,
         "legacy Bluetooth wheel sensitivity is never overwritten by a new default");
+    Equal(KeyInterop.VirtualKeyFromKey(Key.F9), migrated.BluetoothControlShortcutVirtualKey,
+        "legacy settings receive the default Bluetooth control shortcut");
+    Equal(true, KeyboardShortcut.FromSettings(migrated,
+        BluetoothShortcutAction.BossKey).Equals(KeyboardShortcut.BossKeyDefault),
+        "legacy settings receive the default boss key shortcut");
 }
 finally
 {
     if (Directory.Exists(defaultSettingsRoot))
         Directory.Delete(defaultSettingsRoot, recursive: true);
 }
+
+Equal(true, KeyboardShortcut.TryCreate(Key.F8,
+    ModifierKeys.Control | ModifierKeys.Shift, out var controlShortcut),
+    "shortcut accepts a modifier combination");
+Equal(true, controlShortcut.Matches(Key.F8,
+    ModifierKeys.Control | ModifierKeys.Shift),
+    "shortcut matching keeps all configured modifiers");
+Equal(false, controlShortcut.Matches(Key.F8, ModifierKeys.Control),
+    "shortcut matching rejects incomplete modifiers");
+Equal(false, KeyboardShortcut.TryCreate(Key.F12, ModifierKeys.None, out _),
+    "shortcut rejects F12");
+Equal(false, KeyboardShortcut.TryCreate(Key.A, ModifierKeys.None, out _),
+    "shortcut requires a modifier for regular keys");
+Equal(true, KeyboardShortcut.TryCreate(Key.F9, ModifierKeys.None, out _),
+    "shortcut permits unmodified function keys");
+Equal(false, KeyboardShortcut.IsValid((int)KeyboardShortcut.Control,
+    KeyInterop.VirtualKeyFromKey(Key.F12)), "shortcut settings reject F12");
+Equal(true, KeyboardShortcut.HaveUniqueBoundValues([
+    KeyboardShortcut.Unbound, KeyboardShortcut.Unbound, KeyboardShortcut.Default]),
+    "multiple unbound shortcuts are allowed");
+Equal(false, KeyboardShortcut.HaveUniqueBoundValues([
+    KeyboardShortcut.Default, KeyboardShortcut.Default]),
+    "duplicate bound shortcuts are rejected");
+
+var mergedMouseReport = BluetoothMouseReportCoalescer.MergePendingMotion(
+    [0, 10, 0, 0, 0, 0], [0, 20, 0, 0xFB, 0xFF, 0]);
+Equal((byte)30, mergedMouseReport[1],
+    "pending Bluetooth mouse motion retains the horizontal travel");
+Equal((byte)0xFB, mergedMouseReport[3],
+    "pending Bluetooth mouse motion retains the vertical travel");
+var saturatedMouseReport = BluetoothMouseReportCoalescer.MergePendingMotion(
+    [0, 0xFF, 0x7F, 0, 0, 0], [0, 1, 0, 0, 0, 0]);
+Equal((byte)0xFF, saturatedMouseReport[1],
+    "pending Bluetooth mouse motion clamps instead of wrapping");
+Equal((byte)0x7F, saturatedMouseReport[2],
+    "pending Bluetooth mouse motion keeps the maximum signed range");
+var wheelMouseReport = BluetoothMouseReportCoalescer.MergePendingMotion(
+    [0, 10, 0, 0, 0, 0], [0, 20, 0, 0, 0, 1]);
+Equal((byte)20, wheelMouseReport[1],
+    "wheel reports remain discrete instead of merging into motion");
 
 Equal(BluetoothDeviceOrientation.Portrait,
     BluetoothMouseOrientationMapper.Detect(1206, 2622),
@@ -2015,21 +2505,51 @@ Equal(true, bluetoothNoticePolicy.ShouldShowForDevice("00008101-TEST-B"),
     "Bluetooth guidance remains available for a different device");
 Equal(false, bluetoothNoticePolicy.ShouldShowForDevice("  "),
     "Bluetooth guidance requires a stable device identifier");
-Equal("client-a", BluetoothSubscribedClientSelector.Select(null,
-    [("client-a", "Unknown device")]),
-    "a single Bluetooth client is selected only when the mirrored name is unavailable");
-Equal<string?>(null, BluetoothSubscribedClientSelector.Select("Ray's iPhone",
-    [("client-a", "Work iPhone")]),
-    "a lone Bluetooth client with the wrong name is rejected");
-Equal("client-b", BluetoothSubscribedClientSelector.Select("Ray's iPhone",
-    [("client-a", "Work iPhone"), ("client-b", "Ray's iPhone")]),
-    "multiple Bluetooth clients are matched to the selected mirrored device name");
-Equal<string?>(null, BluetoothSubscribedClientSelector.Select("Ray's iPhone",
-    [("client-a", "iPhone"), ("client-b", "iPhone")]),
-    "ambiguous Bluetooth clients are rejected instead of receiving broadcast input");
-Equal<string?>(null, BluetoothSubscribedClientSelector.Select("Ray's iPhone",
-    [("client-a", "Work iPhone"), ("client-b", "Travel iPhone")]),
-    "unmatched Bluetooth clients are rejected instead of controlling another device");
+var bluetoothRoutes = new BluetoothClientRouteTable();
+bluetoothRoutes.BeginTarget("00008101-DEVICE-A", []);
+Equal("client-a", bluetoothRoutes.Refresh(["client-a"]),
+    "the first explicitly paired client binds to the selected mirrored device");
+bluetoothRoutes.EndTarget();
+bluetoothRoutes.BeginTarget("00008101-DEVICE-A", []);
+Equal<string?>(null, bluetoothRoutes.Refresh([]),
+    "a disconnected client does not retarget the selected mirrored device");
+Equal("client-a", bluetoothRoutes.Refresh(["client-a"]),
+    "a known client reconnects to its existing mirrored-device binding");
+bluetoothRoutes.EndTarget();
+bluetoothRoutes.BeginTarget("00008101-DEVICE-B", ["client-a"]);
+Equal<string?>(null, bluetoothRoutes.Refresh(["client-a"]),
+    "a client already bound to another mirrored device is never reused");
+bluetoothRoutes.BeginTarget("00008101-DEVICE-A", ["client-a"]);
+Equal<string?>(null, bluetoothRoutes.Refresh(["client-b"]),
+    "a disconnected bound client never hands control to another phone");
+bluetoothRoutes.EndTarget();
+bluetoothRoutes.BeginTarget("00008101-DEVICE-B", ["client-a"]);
+Equal("client-b", bluetoothRoutes.Refresh(["client-a", "client-b"]),
+    "a newly subscribed unassigned client binds to the selected mirrored device");
+bluetoothRoutes.EndTarget();
+bluetoothRoutes.BeginTarget("00008101-DEVICE-C", ["client-a", "client-b"]);
+Equal<string?>(null, bluetoothRoutes.Refresh(["client-a", "client-b"]),
+    "multiple existing clients remain unbound instead of being guessed by name");
+Equal("client-c", bluetoothRoutes.Refresh(["client-a", "client-b", "client-c"]),
+    "a later unambiguous subscription binds the waiting mirrored device");
+bluetoothRoutes.EndTarget();
+bluetoothRoutes.BeginTarget("00008101-DEVICE-D", ["client-d"]);
+Equal<string?>(null, bluetoothRoutes.Refresh(["client-d"]),
+    "an already subscribed client is not guessed for a newly selected device");
+Equal("client-e", bluetoothRoutes.Refresh(["client-d", "client-e"]),
+    "a single fresh subscription binds after explicit setup");
+bluetoothRoutes.EndTarget();
+var namedRoutes = new BluetoothClientRouteTable();
+namedRoutes.BeginTarget("00008101-NAMED", ["client-a", "client-b"]);
+Equal("client-b", namedRoutes.Refresh(
+        [("client-a", "iPhone"), ("client-b", "Ray's iPhone")],
+        "Ray's iPhone"),
+    "a unique mirrored device name selects the matching Bluetooth client");
+namedRoutes.EndTarget();
+bluetoothRoutes.BeginTarget("00008101-DEVICE-D", ["client-f"],
+    clearPreviousBinding: true);
+Equal("client-g", bluetoothRoutes.Refresh(["client-f", "client-g"]),
+    "explicitly restarting control clears the selected device's stale client binding");
 var rightFromUp = BluetoothMouseOrientationMapper.Map(0, -10, 1206, 2622, 0,
     BluetoothMouseDirection.Up, BluetoothMouseDirection.Right, false, false);
 Equal((0d, -10d), rightFromUp,

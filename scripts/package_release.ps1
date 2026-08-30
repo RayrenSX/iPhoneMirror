@@ -85,6 +85,7 @@ $RequiredArtifacts = @(
     'THIRD_PARTY_NOTICES.md',
     'CHANGELOG.md',
     'DRIVER_DEPENDENCIES.md',
+    'Assets\iPhoneMirror.ico',
     'licenses\WPF-UI-LICENSE.md',
     'licenses\WPF-UI-ThirdPartyNotices.txt',
     'tools\updater\Apply-ZipUpdate.ps1',

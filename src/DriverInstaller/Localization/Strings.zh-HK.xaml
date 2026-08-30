@@ -4,6 +4,7 @@
     <system:String x:Key="AppTitle">iPhoneMirror 驅動程式管理員</system:String>
     <system:String x:Key="AppSubtitle">Apple USB 環境與按裝置擷取過濾驅動程式</system:String>
     <system:String x:Key="OpenLogs">開啟記錄檔</system:String>
+    <system:String x:Key="ForceDriverCleanup">強制清除所有驅動程式</system:String>
     <system:String x:Key="Refresh">重新整理</system:String>
     <system:String x:Key="AppleUsbEnvironment">Apple USB 環境</system:String>
     <system:String x:Key="CaptureFilterDriver">擷取過濾驅動程式</system:String>
@@ -56,6 +57,11 @@
     <system:String x:Key="AisiTitle">使用愛思螢幕鏡像完成驅動程式準備</system:String>
     <system:String x:Key="AisiBody">從愛思官網下載並完成一次正常有線螢幕鏡像，然後返回重新偵測。</system:String>
     <system:String x:Key="OpenWebsite">開啟官網</system:String>
+    <system:String x:Key="DriverCleanupTitle">執行清除所有驅動程式指令碼</system:String>
+    <system:String x:Key="DriverCleanupBody">在獨立視窗中選擇裝置，清除其關聯的所有裝置節點和驅動程式套件，包括 Apple 官方驅動程式。指令碼會在修改系統前要求確認。</system:String>
+    <system:String x:Key="RunDriverCleanup">清除所有驅動程式</system:String>
+    <system:String x:Key="DriverCleanupScriptMissing">找不到清除所有驅動程式指令碼：{0}</system:String>
+    <system:String x:Key="DriverCleanupScriptStartFailed">無法啟動清除所有驅動程式指令碼：{0}</system:String>
     <system:String x:Key="Close">關閉</system:String>
     <system:String x:Key="Minimize">最小化</system:String>
     <system:String x:Key="Maximize">最大化或還原</system:String>

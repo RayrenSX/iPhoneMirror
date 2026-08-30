@@ -4,6 +4,11 @@ namespace IPhoneMirror.DriverInstaller.Services;
 
 internal static partial class DriverConstants
 {
+    private static readonly int[] AppleMobileCaptureProductIds =
+        [
+        0x1290, 0x1291, 0x1292, 0x1293, 0x1294, 0x1297, 0x1299, 0x129A, 0x129C, 0x129D, 0x129E, 0x129F, 0x12A0, 0x12A1, 0x12A2, 0x12A3, 0x12A4, 0x12A5, 0x12A6, 0x12A8, 0x12A9, 0x12AA, 0x12AB, 0x12AC
+    ];
+
     internal const string ElevatedSwitch = "--elevated-driver-operation";
     internal const string AppleStoreProductId = "9NP83LWLPZ9K";
     internal const string AppleStoreSource = "msstore";
@@ -42,6 +47,20 @@ internal static partial class DriverConstants
         !string.IsNullOrWhiteSpace(instanceId) &&
         !instanceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase) &&
         AppleParentPattern().IsMatch(instanceId);
+
+    // This explicit table follows config/apple-mobile-capture-pids.txt and Apple's iPhone USB driver entries,
+    // including older iPhone and iPad product IDs while excluding Apple TV,
+    // Watch, HomePod, and other Apple USB devices.
+    internal static bool IsAppleMobileCaptureParent(string instanceId)
+    {
+        if (!IsAllowedAppleParent(instanceId)) return false;
+        var marker = instanceId.IndexOf("PID_", StringComparison.OrdinalIgnoreCase);
+        if (marker < 0 || marker + 8 > instanceId.Length) return false;
+        return int.TryParse(instanceId.AsSpan(marker + 4, 4),
+            System.Globalization.NumberStyles.AllowHexSpecifier,
+            System.Globalization.CultureInfo.InvariantCulture, out var productId) &&
+            Array.IndexOf(AppleMobileCaptureProductIds, productId) >= 0;
+    }
 
     internal static bool IsValidOperationId(string value) =>
         Guid.TryParseExact(value, "N", out _);

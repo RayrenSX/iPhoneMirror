@@ -391,6 +391,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
+                        <Border Background="Transparent">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
@@ -418,6 +419,7 @@
                                               RecognizesAccessKey="True"
                                               TextElement.Foreground="{TemplateBinding Foreground}"/>
                         </Grid>
+                        </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="CheckRoot" Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}"/>

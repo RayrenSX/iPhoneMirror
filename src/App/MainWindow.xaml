@@ -5,11 +5,12 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:IPhoneMirror.App.Controls"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        xmlns:updater="clr-namespace:IPhoneMirror.App.Updater"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         mc:Ignorable="d"
         Title="{DynamicResource WindowTitleConnectivity}"
-        Icon="pack://application:,,,/iPhoneMirror;component/Assets/iPhoneMirror.ico"
+        Icon="pack://siteoforigin:,,,/Assets/iPhoneMirror.ico"
         Width="1540" Height="900" MinWidth="1280" MinHeight="700"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
@@ -914,7 +915,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="DeviceColumn" Width="Auto"/>
                 <ColumnDefinition x:Name="LeftGapColumn" Width="18"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition x:Name="CenterColumn" Width="*"/>
                 <ColumnDefinition x:Name="RightGapColumn" Width="0"/>
                 <ColumnDefinition x:Name="ControlColumn" Width="Auto"/>
             </Grid.ColumnDefinitions>
@@ -1710,6 +1711,21 @@
                             </Button>
                         </Grid>
 
+                        <Border Style="{StaticResource ControlSectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource ApplicationModeLabel}"
+                                           Style="{StaticResource ControlSectionTitle}"/>
+                                <ComboBox SelectedValue="{Binding SelectedApplicationDisplayMode, Mode=TwoWay}"
+                                          SelectedValuePath="Tag" Margin="0,10,0,0"
+                                          AutomationProperties.AutomationId="ApplicationDisplayModeComboBox">
+                                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Lightweight}"
+                                                  Content="{DynamicResource ApplicationModeLightweight}"/>
+                                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Complete}"
+                                                  Content="{DynamicResource ApplicationModeComplete}"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </Border>
+
                         <Border Style="{StaticResource ControlSectionCard}"
                                 Visibility="{Binding WirelessTopSettingsVisibility}">
                             <StackPanel>
@@ -1886,6 +1902,17 @@
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource BluetoothMouseSettingsTitle}"
                                            Style="{StaticResource ControlSectionTitle}"/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Content="{DynamicResource OpenShortcutSettings}"
+                                            Click="OnShortcutSettingsClick"
+                                            Style="{StaticResource ToolButton}" MinWidth="104"
+                                            Margin="0,0,8,0"
+                                            AutomationProperties.AutomationId="OpenShortcutSettingsButton"/>
+                                    <Button Content="{DynamicResource ClearBluetoothBindings}"
+                                            Click="OnClearBluetoothBindingsClick"
+                                            Style="{StaticResource ToolButton}"
+                                            AutomationProperties.AutomationId="ClearBluetoothBindingsButton"/>
+                                </WrapPanel>
                                 <Grid Margin="0,10,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>

@@ -183,6 +183,13 @@ try {
         }
     }
 
+    $PidGenerator = Join-Path $Root 'scripts\generate_apple_mobile_capture_pids.ps1'
+    if (-not (Test-Path -LiteralPath $PidGenerator -PathType Leaf)) {
+        throw "Apple mobile capture PID generator is missing: $PidGenerator"
+    }
+    & $PidGenerator -Root $Root
+    if (-not $?) { throw 'Apple mobile capture PID generation failed.' }
+
     & $CMake --preset windows-x64
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
 
@@ -424,7 +431,9 @@ try {
                 $_.Name -notin $expectedDriverTopLevelFiles
             })
         $unexpectedDriverDirectories = @(Get-ChildItem -LiteralPath `
-            $DriverPublishRoot -Directory | Where-Object { $_.Name -ne 'licenses' })
+            $DriverPublishRoot -Directory | Where-Object {
+                $_.Name -notin @('licenses', 'tools')
+            })
         $driverLicenseDirectory = Join-Path $DriverPublishRoot 'licenses'
         $expectedDriverLicenseFiles = @(
             'WPF-UI-LICENSE.md',
@@ -488,7 +497,7 @@ try {
             $_.Name -notin $allowedTopLevelFiles
         })
         $unexpectedDirectories = @(Get-ChildItem -LiteralPath $MainPublishRoot -Directory |
-            Where-Object { $_.Name -notin @('Wireless', 'licenses', 'tools') })
+            Where-Object { $_.Name -notin @('Assets', 'Wireless', 'licenses', 'tools') })
         if ($unexpectedFiles.Count -ne 0 -or $unexpectedDirectories.Count -ne 0) {
             $unexpected = @($unexpectedFiles.Name) + @($unexpectedDirectories.Name)
             throw "Unexpected files in compact application output: $($unexpected -join ', ')"

@@ -3,13 +3,15 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Windows;
 
 public sealed partial class BluetoothControlNoticeWindow :
     Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
 {
-    private enum NoticeState { Waiting, Connected, Failed }
+    private enum NoticeState { Waiting, Connected, Failed, ReportMapChanged }
 
     private static BluetoothControlNoticeWindow? _active;
     private const double WaitingWidth = 500;
@@ -17,35 +19,45 @@ public sealed partial class BluetoothControlNoticeWindow :
     private NoticeState _state = NoticeState.Waiting;
     private string? _failureDetail;
     private string? _suggestedDeviceName;
+    private Action? _reportMapAcknowledged;
     private int _remainingSeconds = 5;
 
     public string TitleText => LocalizationService.Get(_state switch
     {
         NoticeState.Waiting => "BluetoothControlWaitingTitle",
         NoticeState.Failed => "BluetoothControlFailedTitle",
+        NoticeState.ReportMapChanged => "BluetoothControlReportMapChangedTitle",
         _ => "BluetoothControlPromptTitle",
     });
-    public string BodyText => LocalizationService.Get(_state switch
-    {
-        NoticeState.Waiting => "BluetoothControlWaitingBody",
-        NoticeState.Failed => "BluetoothControlFailedBody",
-        _ => "BluetoothControlPromptBody",
-    });
+    public string BodyText => _state == NoticeState.Connected
+        ? LocalizationService.Format("BluetoothControlPromptBodyFormat",
+            GetConfiguredShortcut().DisplayText)
+        : LocalizationService.Get(_state switch
+        {
+            NoticeState.Waiting => "BluetoothControlWaitingBody",
+            NoticeState.ReportMapChanged => "BluetoothControlReportMapChangedBody",
+            _ => "BluetoothControlFailedBody",
+        });
     public string DetailText
     {
         get
         {
             if (_state == NoticeState.Failed && !string.IsNullOrWhiteSpace(_failureDetail))
                 return _failureDetail;
-            var detail = LocalizationService.Get(_state == NoticeState.Waiting
-                ? "BluetoothControlWaitingDetail"
-                : "BluetoothControlPromptDetail");
-            return _state == NoticeState.Waiting && !string.IsNullOrWhiteSpace(_suggestedDeviceName)
+            var detail = LocalizationService.Get(_state switch
+            {
+                NoticeState.Waiting => "BluetoothControlWaitingDetail",
+                NoticeState.ReportMapChanged => "BluetoothControlReportMapChangedDetail",
+                _ => "BluetoothControlPromptDetail",
+            });
+            return (_state is NoticeState.Waiting or NoticeState.ReportMapChanged) &&
+                !string.IsNullOrWhiteSpace(_suggestedDeviceName)
                 ? $"{LocalizationService.Format("BluetoothControlWaitingTargetFormat", _suggestedDeviceName)}\n{detail}"
                 : detail;
         }
     }
-    public string ShortcutText => LocalizationService.Get("BluetoothControlPromptShortcut");
+    public string ShortcutText => LocalizationService.Format(
+        "BluetoothControlPromptShortcutFormat", GetConfiguredShortcut().DisplayText);
     public string PairStepOneText => LocalizationService.Get("BluetoothControlPairStepOneFormat");
     public string PairStepTwoText => LocalizationService.Format(
         "BluetoothControlPairStepTwo", _suggestedDeviceName ?? Environment.MachineName);
@@ -56,13 +68,16 @@ public sealed partial class BluetoothControlNoticeWindow :
     {
         NoticeState.Waiting => LocalizationService.Get("BluetoothControlWaitingStatus"),
         NoticeState.Failed => LocalizationService.Get("BluetoothControlFailedStatus"),
+        NoticeState.ReportMapChanged => LocalizationService.Get("BluetoothControlReportMapChangedStatus"),
         _ => LocalizationService.Format(
             "BluetoothControlPromptAutoCloseFormat", _remainingSeconds),
     };
     public Visibility ShortcutVisibility => _state == NoticeState.Connected
         ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility WaitingStepsVisibility => _state == NoticeState.Waiting
+    public Visibility WaitingStepsVisibility => _state is NoticeState.Waiting or NoticeState.ReportMapChanged
         ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ReportMapAcknowledgementVisibility =>
+        _state == NoticeState.ReportMapChanged ? Visibility.Visible : Visibility.Collapsed;
 
     internal static event EventHandler? ActiveNoticeClosed;
 
@@ -121,6 +136,21 @@ public sealed partial class BluetoothControlNoticeWindow :
         window.Activate();
     }
 
+    internal static void ShowReportMapChanged(Window owner, string? suggestedDeviceName,
+        Action acknowledged)
+    {
+        _active?.Close();
+        var window = new BluetoothControlNoticeWindow(owner)
+        {
+            _suggestedDeviceName = suggestedDeviceName,
+            _reportMapAcknowledged = acknowledged,
+        };
+        _active = window;
+        window.Show();
+        window.SetState(NoticeState.ReportMapChanged);
+        window.Activate();
+    }
+
     internal static bool TryCloseActive()
     {
         if (_active is null) return false;
@@ -128,7 +158,38 @@ public sealed partial class BluetoothControlNoticeWindow :
         return true;
     }
 
+    internal static void NotifyShortcutChanged()
+    {
+        var window = _active;
+        if (window is null) return;
+        if (window.Dispatcher.CheckAccess())
+            window.RefreshShortcutText();
+        else
+            window.Dispatcher.BeginInvoke(window.RefreshShortcutText);
+    }
+
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    private void OnReportMapAcknowledgedClick(object sender, RoutedEventArgs e)
+    {
+        if (_state != NoticeState.ReportMapChanged) return;
+        var acknowledged = _reportMapAcknowledged;
+        _reportMapAcknowledged = null;
+        acknowledged?.Invoke();
+        Close();
+    }
+
+    private static KeyboardShortcut GetConfiguredShortcut() =>
+        Application.Current is App app
+            ? KeyboardShortcut.FromSettings(app.UpdateSettings)
+            : KeyboardShortcut.Default;
+
+    private void RefreshShortcutText()
+    {
+        OnPropertyChanged(nameof(BodyText));
+        OnPropertyChanged(nameof(ShortcutText));
+        ReflowToContent();
+    }
 
     private void OnCloseTimerTick(object? sender, EventArgs e)
     {
@@ -166,6 +227,7 @@ public sealed partial class BluetoothControlNoticeWindow :
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(ShortcutVisibility));
         OnPropertyChanged(nameof(WaitingStepsVisibility));
+        OnPropertyChanged(nameof(ReportMapAcknowledgementVisibility));
         PairingStepsPanel.Visibility = WaitingStepsVisibility;
         ShortcutBadge.Visibility = ShortcutVisibility;
         ReflowToContent();

@@ -133,6 +133,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private readonly MediaCastAudioDecoder _mediaCastAudioDecoder = new();
     private NativePreviewWindow? _mediaCastPreviewWindow;
     private ProjectionSettingsWindow? _projectionSettingsWindow;
+    private ShortcutSettingsWindow? _shortcutSettingsWindow;
     private ProtectedContentNoticeWindow? _protectedContentNoticeWindow;
     private string? _protectedContentNoticeUdid;
     private MediaOutputSettingsWindow? _mediaOutputSettingsWindow;
@@ -145,6 +146,34 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool _workspaceControlsReady;
     private bool _themeControlReady;
     private int _workspaceTransitionRevision;
+    private bool _lightweightModeApplied;
+    private bool _lightweightPreviewWidthQueued;
+    private bool _lightweightInitialWorkspaceFitQueued;
+    private bool _lightweightWidthNeedsFit;
+    private bool _lightweightWindowRendering;
+    private TimeSpan _lightweightWindowLastRenderTime;
+    private double _lightweightWindowAnimationProgress;
+    private int _lightweightWindowWidthStartPixels;
+    private int _lightweightWindowWidthTargetPixels;
+    private int _lightweightWindowHeightPixels;
+    private double _lightweightWindowWidthTargetDips;
+    private int _lightweightWindowStartX;
+    private int _lightweightWindowTargetX;
+    private int _lightweightWindowTopPixels;
+    private bool _lightweightCenterWidthLocked;
+    private bool _lightweightWorkspaceSurfaceAnimationActive;
+    private double _lightweightLeftSurfaceStartWidth;
+    private double _lightweightLeftSurfaceTargetWidth;
+    private double _lightweightRightSurfaceStartWidth;
+    private double _lightweightRightSurfaceTargetWidth;
+    private double _lightweightLeftGapStartWidth;
+    private double _lightweightLeftGapTargetWidth;
+    private double _lightweightRightGapStartWidth;
+    private double _lightweightRightGapTargetWidth;
+    private double _lightweightCenterStartWidth;
+    private double _lightweightCenterTargetWidth;
+    private double _lightweightTargetMinWidth;
+    private double _completeModeWidth;
     private long _mediaCastOutputTimestamp;
     private HwndSource? _windowSource;
     private int _lastControlSourceX;
@@ -181,6 +210,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private nint _rawInputBuffer;
     private int _rawInputBufferSize;
     private bool _hotKeyRegistered;
+    private KeyboardShortcut _bluetoothControlShortcut = KeyboardShortcut.Default;
+    private readonly Dictionary<BluetoothShortcutAction, KeyboardShortcut> _bluetoothShortcuts = [];
+    private readonly HashSet<int> _registeredHotKeyIds = [];
+    private bool _bossKeyHidden;
+    private int _bossKeyChanging;
     private nint _keyboardHook;
     private readonly LowLevelKeyboardProc _keyboardHookProc;
 
@@ -193,6 +227,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private const int WmCancelMode = 0x001F;
     private const int WmCaptureChanged = 0x0215;
     private const int BluetoothControlHotKeyId = 0x4981;
+    private const int BluetoothControlCenterHotKeyId = 0x4982;
+    private const int BluetoothNotificationCenterHotKeyId = 0x4983;
+    private const int BluetoothAppSwitcherHotKeyId = 0x4984;
+    private const int BluetoothHomeHotKeyId = 0x4985;
+    private const int BluetoothBossKeyHotKeyId = 0x4987;
+    private const int BluetoothDockHotKeyId = 0x4988;
+    private const int BluetoothSiriHotKeyId = 0x4990;
     private const uint RidInput = 0x10000003;
     private const uint RimTypeMouse = 0;
     private const uint RimTypeKeyboard = 1;
@@ -206,13 +247,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private const ushort RawMouseMiddleDown = 0x0010;
     private const ushort RawMouseMiddleUp = 0x0020;
     private const ushort RawMouseWheel = 0x0400;
+    private const uint CursorShowing = 0x00000001;
+    private const double LightweightDefaultPreviewAspect = 1206d / 2622d;
+    private const double LightweightMinimumPreviewWidth = 320;
+    private const double LightweightNormalPortraitPreviewWidth = 340;
+    private const double LightweightMinimumWindowWidth = 640;
+    private const double LightweightWorkAreaInset = 24;
 
     private bool IsBluetoothControlActive => IsBluetoothControlActiveFor(
         _activeControlWindow != 0 ? _activeControlUdid : _viewModel.SelectedDevice?.Udid);
 
     private bool IsBluetoothControlActiveFor(string? udid)
     {
-        if (!_viewModel.BluetoothControlIsInputEnabled ||
+        if (_bossKeyHidden || !_viewModel.BluetoothControlIsInputEnabled ||
             string.IsNullOrWhiteSpace(udid) ||
             !_viewModel.IsBluetoothControlTarget(udid)) return false;
         return _activeControlWindow != 0
@@ -246,7 +293,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             new KeyEventHandler(OnMediaCastSeekKeyUp),
             handledEventsToo: true);
         if (Application.Current is App app)
+        {
             ThemeComboBox.SelectedValue = app.UpdateSettings.Theme.ToString();
+            foreach (var action in Enum.GetValues<BluetoothShortcutAction>())
+                _bluetoothShortcuts[action] = KeyboardShortcut.FromSettings(
+                    app.UpdateSettings, action);
+            _bluetoothControlShortcut = _bluetoothShortcuts[
+                BluetoothShortcutAction.ReverseControl];
+        }
         _themeControlReady = true;
         _workspaceControlsReady = true;
         _viewModel = new MainViewModel();
@@ -255,7 +309,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.SetMediaCastOutputProviders(
             CaptureMediaCastNv12Frame, CaptureMediaCastVideoFrame,
             afterSequence => _mediaCastAudioDecoder.GetPacket(afterSequence));
-        _secondaryMirrors = new MultiDevicePreviewManager(_viewModel);
+        _secondaryMirrors = new MultiDevicePreviewManager(_viewModel,
+            () => _hotKeyRegistered,
+            (udid, window) => _activeControlWindow == window &&
+                IsBluetoothControlActiveFor(udid));
         _secondaryMirrors.ReverseControlRequested += OnIndependentReverseControlRequested;
         _secondaryMirrors.PreviewClosed += OnIndependentPreviewClosed;
         _secondaryMirrors.PointerInput += OnIndependentPointerInput;
@@ -300,9 +357,164 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         _windowSource = (HwndSource?)PresentationSource.FromVisual(this);
         _windowSource?.AddHook(WindowMessageHook);
+        RegisterBluetoothControlHotkey();
+    }
+
+    private void RegisterBluetoothControlHotkey()
+    {
+        if (_windowSource is null) return;
+        if (!TryRegisterShortcutSet(GetConfiguredShortcuts(), out var failedAction))
+            _viewModel.AddDiagnosticLog(AppLog.Event("bluetooth_hotkey_register_failed",
+                ("shortcut", GetConfiguredShortcuts()[failedAction].DisplayText),
+                ("error", Marshal.GetLastWin32Error())));
+    }
+
+    private IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>
+        GetConfiguredShortcuts()
+    {
+        if (_bluetoothShortcuts.Count == 0)
+            foreach (var action in Enum.GetValues<BluetoothShortcutAction>())
+                _bluetoothShortcuts[action] = KeyboardShortcut.DefaultFor(action);
+        return new Dictionary<BluetoothShortcutAction, KeyboardShortcut>(_bluetoothShortcuts);
+    }
+
+    private static int HotKeyId(BluetoothShortcutAction action) => action switch
+    {
+        BluetoothShortcutAction.ReverseControl => BluetoothControlHotKeyId,
+        BluetoothShortcutAction.ControlCenter => BluetoothControlCenterHotKeyId,
+        BluetoothShortcutAction.NotificationCenter => BluetoothNotificationCenterHotKeyId,
+        BluetoothShortcutAction.AppSwitcher => BluetoothAppSwitcherHotKeyId,
+        BluetoothShortcutAction.Home => BluetoothHomeHotKeyId,
+        BluetoothShortcutAction.BossKey => BluetoothBossKeyHotKeyId,
+        BluetoothShortcutAction.Dock => BluetoothDockHotKeyId,
+        BluetoothShortcutAction.Siri => BluetoothSiriHotKeyId,
+        _ => 0,
+    };
+
+    private void UnregisterConfiguredHotkeys()
+    {
         if (_windowSource is not null)
-            _hotKeyRegistered = RegisterHotKey(_windowSource.Handle,
-                BluetoothControlHotKeyId, 0, 0x78);
+            foreach (var action in Enum.GetValues<BluetoothShortcutAction>())
+                UnregisterHotKey(_windowSource.Handle, HotKeyId(action));
+        _registeredHotKeyIds.Clear();
+        _hotKeyRegistered = false;
+    }
+
+    private bool TryRegisterShortcutSet(
+        IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
+        out BluetoothShortcutAction failedAction)
+    {
+        failedAction = BluetoothShortcutAction.ReverseControl;
+        if (!KeyboardShortcut.HaveUniqueBoundValues(shortcuts.Values))
+            return false;
+        UnregisterConfiguredHotkeys();
+        if (_windowSource is null) return true;
+        foreach (var action in Enum.GetValues<BluetoothShortcutAction>())
+        {
+            failedAction = action;
+            var shortcut = shortcuts[action];
+            if (!shortcut.IsBound) continue;
+            if (!RegisterHotKey(_windowSource.Handle, HotKeyId(action),
+                    shortcut.RegistrationModifiers, shortcut.VirtualKey))
+            {
+                UnregisterConfiguredHotkeys();
+                return false;
+            }
+            _registeredHotKeyIds.Add(HotKeyId(action));
+        }
+        _hotKeyRegistered = _registeredHotKeyIds.Contains(BluetoothControlHotKeyId);
+        return true;
+    }
+
+    private void ShowShortcutSettings()
+    {
+        if (_shortcutSettingsWindow is not null)
+        {
+            _shortcutSettingsWindow.Activate();
+            _shortcutSettingsWindow.Focus();
+            return;
+        }
+
+        var window = new ShortcutSettingsWindow(GetConfiguredShortcuts(),
+            ApplyBluetoothShortcuts)
+        {
+            Owner = this,
+        };
+        _shortcutSettingsWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_shortcutSettingsWindow, window))
+                _shortcutSettingsWindow = null;
+        };
+        window.Show();
+    }
+
+    private string? ApplyBluetoothShortcuts(
+        IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts)
+    {
+        var previous = GetConfiguredShortcuts();
+        if (!TryRegisterShortcutSet(shortcuts, out var failedAction))
+        {
+            _ = TryRegisterShortcutSet(previous, out _);
+            return LocalizationService.Format("ShortcutRegistrationFailedFormat",
+                shortcuts.TryGetValue(failedAction, out var failed)
+                    ? failed.DisplayText : failedAction.ToString());
+        }
+        if (Application.Current is App app)
+        {
+            var snapshot = app.UpdateSettings.Clone();
+            app.UpdateSettings.BluetoothControlShortcutVirtualKey =
+                (int)shortcuts[BluetoothShortcutAction.ReverseControl].VirtualKey;
+            app.UpdateSettings.BluetoothControlShortcutModifiers =
+                (int)shortcuts[BluetoothShortcutAction.ReverseControl].Modifiers;
+            app.UpdateSettings.BluetoothControlShortcutSchema = 1;
+            app.UpdateSettings.BluetoothControlCenterShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.ControlCenter].VirtualKey;
+            app.UpdateSettings.BluetoothControlCenterShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.ControlCenter].Modifiers;
+            app.UpdateSettings.BluetoothNotificationCenterShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.NotificationCenter].VirtualKey;
+            app.UpdateSettings.BluetoothNotificationCenterShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.NotificationCenter].Modifiers;
+            app.UpdateSettings.BluetoothAppSwitcherShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.AppSwitcher].VirtualKey;
+            app.UpdateSettings.BluetoothAppSwitcherShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.AppSwitcher].Modifiers;
+            app.UpdateSettings.BluetoothHomeShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.Home].VirtualKey;
+            app.UpdateSettings.BluetoothHomeShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.Home].Modifiers;
+            app.UpdateSettings.BluetoothBossShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.BossKey].VirtualKey;
+            app.UpdateSettings.BluetoothBossShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.BossKey].Modifiers;
+            app.UpdateSettings.BluetoothDockShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.Dock].VirtualKey;
+            app.UpdateSettings.BluetoothDockShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.Dock].Modifiers;
+            app.UpdateSettings.BluetoothSiriShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.Siri].VirtualKey;
+            app.UpdateSettings.BluetoothSiriShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.Siri].Modifiers;
+            app.UpdateSettings.BluetoothShortcutSchema = 5;
+            if (!app.SaveUpdateSettings())
+            {
+                app.UpdateSettings.BluetoothControlShortcutVirtualKey = snapshot.BluetoothControlShortcutVirtualKey;
+                app.UpdateSettings.BluetoothControlShortcutModifiers = snapshot.BluetoothControlShortcutModifiers;
+                app.UpdateSettings.BluetoothControlShortcutSchema = snapshot.BluetoothControlShortcutSchema;
+                app.UpdateSettings.BluetoothControlCenterShortcutVirtualKey = snapshot.BluetoothControlCenterShortcutVirtualKey;
+                app.UpdateSettings.BluetoothControlCenterShortcutModifiers = snapshot.BluetoothControlCenterShortcutModifiers;
+                app.UpdateSettings.BluetoothNotificationCenterShortcutVirtualKey = snapshot.BluetoothNotificationCenterShortcutVirtualKey;
+                app.UpdateSettings.BluetoothNotificationCenterShortcutModifiers = snapshot.BluetoothNotificationCenterShortcutModifiers;
+                app.UpdateSettings.BluetoothAppSwitcherShortcutVirtualKey = snapshot.BluetoothAppSwitcherShortcutVirtualKey;
+                app.UpdateSettings.BluetoothAppSwitcherShortcutModifiers = snapshot.BluetoothAppSwitcherShortcutModifiers;
+                app.UpdateSettings.BluetoothHomeShortcutVirtualKey = snapshot.BluetoothHomeShortcutVirtualKey;
+                app.UpdateSettings.BluetoothHomeShortcutModifiers = snapshot.BluetoothHomeShortcutModifiers;
+                app.UpdateSettings.BluetoothBossShortcutVirtualKey = snapshot.BluetoothBossShortcutVirtualKey;
+                app.UpdateSettings.BluetoothBossShortcutModifiers = snapshot.BluetoothBossShortcutModifiers;
+                app.UpdateSettings.BluetoothDockShortcutVirtualKey = snapshot.BluetoothDockShortcutVirtualKey;
+                app.UpdateSettings.BluetoothDockShortcutModifiers = snapshot.BluetoothDockShortcutModifiers;
+                app.UpdateSettings.BluetoothSiriShortcutVirtualKey = snapshot.BluetoothSiriShortcutVirtualKey;
+                app.UpdateSettings.BluetoothSiriShortcutModifiers = snapshot.BluetoothSiriShortcutModifiers;
+                app.UpdateSettings.BluetoothShortcutSchema = snapshot.BluetoothShortcutSchema;
+                _ = TryRegisterShortcutSet(previous, out _);
+                return LocalizationService.Get("ShortcutSettingsSaveFailed");
+            }
+        }
+
+        _bluetoothShortcuts.Clear();
+        foreach (var pair in shortcuts) _bluetoothShortcuts[pair.Key] = pair.Value;
+        _bluetoothControlShortcut = shortcuts[BluetoothShortcutAction.ReverseControl];
+        BluetoothControlNoticeWindow.NotifyShortcutChanged();
+        _viewModel.AddDiagnosticLog(AppLog.Event("bluetooth_hotkey_updated",
+            ("shortcut", _bluetoothControlShortcut.DisplayText)));
+        return null;
     }
 
     private void OnControlPointerInput(object? sender,
@@ -446,7 +658,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // motion can otherwise create an immediate callback storm and starve
         // both WPF and the BLE notification pump.
         if (Interlocked.Exchange(ref _controlPointerTimerArmed, 1) == 0)
-            _controlPointerTimer.Change(1, 8);
+            _controlPointerTimer.Change(1, 4);
     }
 
     private void StopControlPointerTimer()
@@ -539,9 +751,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         await _bluetoothRouteGate.WaitAsync();
         try
         {
+            if (!DeviceViewModel.UdidEquals(_activeControlUdid, udid)) return;
             ResetControlRouteState();
             QueueMainPreviewHostSync();
-            if (!DeviceViewModel.UdidEquals(_activeControlUdid, udid)) return;
             _activeControlWindow = 0;
             _activeControlUdid = null;
             ClipCursor(IntPtr.Zero);
@@ -588,7 +800,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 }
             }
             if (IsBluetoothControlActiveFor(udid))
+            {
+                // Independent HWNDs can receive focus before the asynchronous
+                // view-model notification reaches the main window. Assert the
+                // process-wide cursor state on this route as well.
+                SetWindowsCursorHidden(true);
                 ClipCursorToWindow(window);
+            }
             else
                 ClipCursor(IntPtr.Zero);
             _controlPointerInitialized = true;
@@ -663,7 +881,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     private async void HandleControlKeyboardInput(
-        Controls.PreviewKeyboardEventArgs e, string? sourceUdid = null)
+        Controls.PreviewKeyboardEventArgs e, string? sourceUdid = null,
+        bool fromRawInput = false)
     {
         await _bluetoothRouteGate.WaitAsync();
         try
@@ -681,7 +900,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 await _viewModel.SendBluetoothKeyboardAsync(0, []);
                 return;
             }
-            if (_rawKeyboardInputEnabled) return;
+            if (_rawKeyboardInputEnabled && !fromRawInput) return;
             if (!TryMapVirtualKey(e.VirtualKey, out var usage, out var modifier)) return;
             if (e.Kind == Controls.PreviewKeyboardKind.Down)
             {
@@ -698,6 +917,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _controlKeyboardModifiers = ModifierMask(_controlModifierKeys);
             await _viewModel.SendBluetoothKeyboardAsync(_controlKeyboardModifiers,
                 _controlKeyboardUsages.ToArray());
+        }
+        catch (Exception error)
+        {
+            _viewModel.AddDiagnosticLog(AppLog.Event(
+                "bluetooth_keyboard_input_failed",
+                ("device", AppLog.Device(sourceUdid)),
+                ("error", AppLog.Error(error))));
         }
         finally
         {
@@ -745,16 +971,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        CancelLightweightWindowWidthAnimation();
         SetSystemKeySuppression(false);
         ClipCursor(IntPtr.Zero);
         StopControlPointerTimer();
         _controlPointerTimer.Dispose();
         RegisterRawMouseInput(false);
-        if (_windowSource?.Handle is nint hwnd && hwnd != 0)
-        {
-            if (_hotKeyRegistered) UnregisterHotKey(hwnd, BluetoothControlHotKeyId);
-            _hotKeyRegistered = false;
-        }
+        UnregisterConfiguredHotkeys();
         SetWindowsCursorHidden(false);
         if (_rawInputBuffer != 0)
         {
@@ -784,10 +1007,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             handled = true;
             return 0;
         }
-        if (message == WmHotKey && wParam.ToInt32() == BluetoothControlHotKeyId)
+        if (message == WmHotKey &&
+            TryGetShortcutActionByHotKeyId(wParam.ToInt32(), out var hotkeyAction))
         {
-            BluetoothControlNoticeWindow.TryCloseActive();
-            _ = _viewModel.ToggleBluetoothControlAsync();
+            HandleConfiguredShortcut(hotkeyAction);
             handled = true;
             return 0;
         }
@@ -962,7 +1185,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var virtualKey = keyboard.VirtualKey;
         if (virtualKey is 0x5B or 0x5C or 0x5D or 0x5F)
             return;
-        if (virtualKey == 0x78)
+        if (IsBluetoothControlHotkeyPressed(virtualKey))
         {
             if (!isKeyUp)
             {
@@ -972,21 +1195,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             }
             return;
         }
-        if (!TryMapVirtualKey(virtualKey, out var usage, out var modifier)) return;
-        var modifierIdentity = RawModifierKeyIdentity(keyboard, virtualKey);
-        if (isKeyUp)
+        if (TryGetShortcutAction(virtualKey, out var shortcutAction))
         {
-            if (modifier != 0) _controlModifierKeys.Remove(modifierIdentity);
-            else if (usage != 0) _controlKeyboardUsages.Remove(usage);
+            if (!isKeyUp && !_registeredHotKeyIds.Contains(HotKeyId(shortcutAction)))
+                HandleConfiguredShortcut(shortcutAction);
+            return;
         }
-        else
-        {
-            if (modifier != 0) _controlModifierKeys.Add(modifierIdentity);
-            else if (usage != 0) _controlKeyboardUsages.Add(usage);
-        }
-        _controlKeyboardModifiers = ModifierMask(_controlModifierKeys);
-        _ = _viewModel.SendBluetoothKeyboardAsync(_controlKeyboardModifiers,
-            _controlKeyboardUsages.ToArray());
+        HandleControlKeyboardInput(new Controls.PreviewKeyboardEventArgs(
+                isKeyUp ? Controls.PreviewKeyboardKind.Up :
+                    Controls.PreviewKeyboardKind.Down,
+                virtualKey, keyboard.MakeCode | ((keyboard.Flags & 0x02) != 0 ? 0x100 : 0)),
+            _activeControlWindow != 0 ? _activeControlUdid :
+                _viewModel.SelectedDevice?.Udid,
+            fromRawInput: true);
     }
 
     private static int ModifierKeyIdentity(int virtualKey, int scanCode = 0) => virtualKey switch
@@ -1000,13 +1221,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _ => virtualKey,
     };
 
-    private static int RawModifierKeyIdentity(RawKeyboard keyboard, int virtualKey)
-    {
-        if (virtualKey == 0x10) return keyboard.MakeCode == 0x36 ? 0xA1 : 0xA0;
-        if (virtualKey == 0x11) return (keyboard.Flags & 0x02) != 0 ? 0xA3 : 0xA2;
-        if (virtualKey == 0x12) return (keyboard.Flags & 0x02) != 0 ? 0xA5 : 0xA4;
-        return ModifierKeyIdentity(virtualKey);
-    }
+    private bool IsBluetoothControlHotkeyPressed(int virtualKey) =>
+        _bluetoothControlShortcut.MatchesVirtualKey(virtualKey,
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Alt),
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
 
     private static byte ModifierMask(IEnumerable<int> keys)
     {
@@ -1056,6 +1275,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _refreshTimer.Start();
         _mediaCastTimer.Start();
         ApplyWorkspacePanelState();
+        ApplyApplicationDisplayMode();
+        QueueInitialLightweightWorkspaceFit();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_loaded",
             ("width", ActualWidth.ToString("F0")),
             ("height", ActualHeight.ToString("F0"))));
@@ -1176,10 +1397,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var showDevices = _leftWorkspacePanel == LeftWorkspacePanel.Devices;
         var showSettings = _isSettingsPanelVisible;
         var showLeftPanel = showMirroring || showDevices;
-        DeviceColumn.Width = GridLength.Auto;
-        ControlColumn.Width = GridLength.Auto;
-        LeftGapColumn.Width = showLeftPanel ? new GridLength(18) : new GridLength(0);
-        RightGapColumn.Width = showSettings ? new GridLength(18) : new GridLength(0);
+        ApplyLightweightPreviewFramePolicy();
         _isSynchronizingWorkspacePanelControls = true;
         try
         {
@@ -1194,14 +1412,47 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         if (!animate)
         {
+            DeviceColumn.Width = GridLength.Auto;
+            ControlColumn.Width = GridLength.Auto;
+            LeftGapColumn.Width = showLeftPanel ? new GridLength(18) : new GridLength(0);
+            RightGapColumn.Width = showSettings ? new GridLength(18) : new GridLength(0);
             ++_workspaceTransitionRevision;
             SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, 300);
             SetWorkspacePageImmediate(DevicePanel, showDevices);
             SetWorkspacePageImmediate(MirroringPanel, showMirroring);
             SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, 336);
+            if (_viewModel.IsLightweightApplicationMode)
+                QueueInitialLightweightWorkspaceFit();
+            else
+                RequestLightweightWindowFit();
             return;
         }
 
+        if (_viewModel.IsLightweightApplicationMode)
+        {
+            var lightweightRevision = ++_workspaceTransitionRevision;
+            AnimateLightweightWindowForWorkspace(showLeftPanel, showSettings);
+            if (animateLeft)
+            {
+                AnimateWorkspacePage(DevicePanel, showDevices, fromLeft: true,
+                    lightweightRevision);
+                AnimateWorkspacePage(MirroringPanel, showMirroring, fromLeft: true,
+                    lightweightRevision);
+            }
+            else
+            {
+                SetWorkspacePageImmediate(DevicePanel, showDevices);
+                SetWorkspacePageImmediate(MirroringPanel, showMirroring);
+            }
+            AnimateWorkspacePage(ControlPanel, showSettings, fromLeft: false,
+                lightweightRevision);
+            return;
+        }
+
+        DeviceColumn.Width = GridLength.Auto;
+        ControlColumn.Width = GridLength.Auto;
+        LeftGapColumn.Width = showLeftPanel ? new GridLength(18) : new GridLength(0);
+        RightGapColumn.Width = showSettings ? new GridLength(18) : new GridLength(0);
         var revision = ++_workspaceTransitionRevision;
         if (animateLeft)
         {
@@ -1222,6 +1473,277 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 fromLeft: false, revision);
         else
             SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, 336);
+    }
+
+    private void AnimateLightweightWindowForWorkspace(bool showLeftPanel,
+        bool showSettings)
+    {
+        if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
+            _isWindowMaximized || CenterColumn.ActualWidth <= 0)
+            return;
+
+        CancelLightweightWindowWidthAnimation(preserveLayout: true);
+        DeviceColumn.Width = GridLength.Auto;
+        ControlColumn.Width = GridLength.Auto;
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == 0 || !GetWindowRect(handle, out var bounds)) return;
+        var dpi = GetDpiForWindow(handle);
+        var scale = (dpi == 0 ? 96d : dpi) / 96d;
+        var currentWindowWidth = Math.Max(1, bounds.Right - bounds.Left) / scale;
+        var currentLeftWidth = GetLightweightElementWidth(LeftPanelHost);
+        var currentRightWidth = GetLightweightElementWidth(ControlPanel);
+        var currentLeftGap = GetLightweightColumnWidth(LeftGapColumn);
+        var currentRightGap = GetLightweightColumnWidth(RightGapColumn);
+        var currentCenterWidth = Math.Max(1, CenterColumn.ActualWidth);
+        var currentPreviewWidth = PreviewPanel.ActualWidth > 0
+            ? PreviewPanel.ActualWidth
+            : currentCenterWidth;
+
+        _lightweightLeftSurfaceStartWidth = currentLeftWidth;
+        _lightweightLeftSurfaceTargetWidth = showLeftPanel ? 300 : 0;
+        _lightweightRightSurfaceStartWidth = currentRightWidth;
+        _lightweightRightSurfaceTargetWidth = showSettings ? 336 : 0;
+        _lightweightLeftGapStartWidth = currentLeftGap;
+        _lightweightLeftGapTargetWidth = showLeftPanel ? 18 : 0;
+        _lightweightRightGapStartWidth = currentRightGap;
+        _lightweightRightGapTargetWidth = showSettings ? 18 : 0;
+        _lightweightCenterStartWidth = currentCenterWidth;
+        var baseChromeWidth = GetLightweightFixedChromeWidth(currentWindowWidth);
+        var targetSideWidth = _lightweightLeftSurfaceTargetWidth +
+            _lightweightLeftGapTargetWidth + _lightweightRightGapTargetWidth +
+            _lightweightRightSurfaceTargetWidth;
+        var maximumWindowWidth = GetLightweightMaximumWindowWidth();
+        var hasTargetPanels = showLeftPanel || showSettings;
+        var maximumPreviewWidth = Math.Max(1, maximumWindowWidth -
+            baseChromeWidth - targetSideWidth);
+        var hasContentPreviewWidth = TryGetLightweightContentPreviewWidth(
+            maximumPreviewWidth, out var contentPreviewWidth);
+        var canUseNormalPortraitFrame = !hasContentPreviewWidth && hasTargetPanels &&
+            maximumPreviewWidth >= LightweightNormalPortraitPreviewWidth;
+        ApplyLightweightPreviewFramePolicy(canUseNormalPortraitFrame,
+            hasContentPreviewWidth ? contentPreviewWidth : null);
+        var targetPreviewWidth = hasContentPreviewWidth
+            ? contentPreviewWidth
+            : canUseNormalPortraitFrame
+            ? LightweightNormalPortraitPreviewWidth
+            : Math.Min(currentPreviewWidth, maximumPreviewWidth);
+        var requiredPreviewWidth = hasContentPreviewWidth
+            ? contentPreviewWidth
+            : canUseNormalPortraitFrame
+            ? LightweightNormalPortraitPreviewWidth
+            : LightweightMinimumPreviewWidth;
+        var minimumWindowWidth = Math.Max(LightweightMinimumWindowWidth,
+            baseChromeWidth + targetSideWidth + requiredPreviewWidth);
+        _lightweightTargetMinWidth = Math.Min(minimumWindowWidth, maximumWindowWidth);
+        if (MinWidth > _lightweightTargetMinWidth || ActualWidth >= _lightweightTargetMinWidth)
+            MinWidth = _lightweightTargetMinWidth;
+        _lightweightWidthNeedsFit = false;
+        _lightweightCenterTargetWidth = targetPreviewWidth;
+        var targetWindowWidth = Math.Min(maximumWindowWidth, baseChromeWidth +
+            targetSideWidth + _lightweightCenterTargetWidth);
+        // Keep the center column star-sized. Its rendered preview width then
+        // follows the current HWND width on every frame while the side panels
+        // and their gaps advance in lockstep with the outer window.
+        _lightweightWorkspaceSurfaceAnimationActive = true;
+        ReserveLightweightWorkspaceSurface(LeftPanelHost,
+            currentLeftWidth);
+        ReserveLightweightWorkspaceSurface(ControlPanel,
+            currentRightWidth);
+        if (_lightweightLeftSurfaceTargetWidth > 0)
+            LeftPanelHost.Visibility = Visibility.Visible;
+        if (_lightweightRightSurfaceTargetWidth > 0)
+            ControlPanel.Visibility = Visibility.Visible;
+        LeftGapColumn.Width = new GridLength(currentLeftGap);
+        RightGapColumn.Width = new GridLength(currentRightGap);
+        SetLightweightCenterColumnFill();
+        var plannedWindowWidth = Math.Clamp(targetWindowWidth,
+            _lightweightTargetMinWidth, maximumWindowWidth);
+        var plannedWindowPixels = Math.Max(1,
+            (int)Math.Round(plannedWindowWidth * scale));
+        var leftExtent = currentLeftWidth + currentLeftGap;
+        var targetLeftExtent = _lightweightLeftSurfaceTargetWidth +
+            _lightweightLeftGapTargetWidth;
+        var rightChanged = Math.Abs(currentRightWidth + currentRightGap -
+            (_lightweightRightSurfaceTargetWidth +
+             _lightweightRightGapTargetWidth)) > 0.5;
+        var leftChanged = Math.Abs(leftExtent - targetLeftExtent) > 0.5;
+        _lightweightWindowStartX = bounds.Left;
+        _lightweightWindowTargetX = leftChanged && !rightChanged
+            // A left-only transition must never move the right edge.
+            ? bounds.Right - plannedWindowPixels
+            : !leftChanged
+            // A right-only transition keeps the left edge fixed.
+            ? bounds.Left
+            // With both panels changing, keep the preview's left edge fixed.
+            : bounds.Left + (int)Math.Round((leftExtent - targetLeftExtent) * scale);
+        if (TryGetLightweightWorkArea(out var workArea, out _))
+        {
+            _lightweightWindowTargetX = Math.Clamp(_lightweightWindowTargetX,
+                workArea.Left, Math.Max(workArea.Left,
+                    workArea.Right - plannedWindowPixels));
+        }
+        AnimateLightweightWindowWidth(plannedWindowWidth, preserveCenterWidth: true);
+    }
+
+    private static double GetLightweightElementWidth(FrameworkElement element) =>
+        double.IsFinite(element.Width) ? Math.Max(0, element.Width) :
+            Math.Max(0, element.ActualWidth);
+
+    private static double GetLightweightColumnWidth(ColumnDefinition column) =>
+        column.Width.IsAbsolute ? Math.Max(0, column.Width.Value) :
+            Math.Max(0, column.ActualWidth);
+
+    private static void ReserveLightweightWorkspaceSurface(FrameworkElement element,
+        double width)
+    {
+        element.BeginAnimation(WidthProperty, null);
+        if (width > 0) element.Visibility = Visibility.Visible;
+        element.Width = width;
+    }
+
+    private void RequestLightweightWindowFit()
+    {
+        if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
+            _isWindowMaximized || _lightweightWorkspaceSurfaceAnimationActive) return;
+        _lightweightWidthNeedsFit = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Render, QueueLightweightPreviewWidth);
+    }
+
+    private void SetLightweightWindowWidthImmediately(double targetWidth)
+    {
+        if (!double.IsFinite(targetWidth) || targetWidth <= 0) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (!IsLoaded || handle == 0 || !GetWindowRect(handle, out var bounds))
+        {
+            Width = targetWidth;
+            return;
+        }
+
+        var dpi = GetDpiForWindow(handle);
+        var scale = (dpi == 0 ? 96d : dpi) / 96d;
+        var targetPixels = Math.Max(1, (int)Math.Round(targetWidth * scale));
+        if (Math.Abs((bounds.Right - bounds.Left) - targetPixels) <= 1)
+        {
+            Width = targetWidth;
+            return;
+        }
+
+        // A wired QuickTime session can start presenting while WPF processes
+        // its first source-size update. Resize the HWND once instead of
+        // generating a 280 ms WM_SIZE burst that churns the D3D swap chain.
+        _ = SetWindowPos(handle, 0, bounds.Left, bounds.Top, targetPixels,
+            Math.Max(1, bounds.Bottom - bounds.Top), SwpNoZOrder | SwpNoActivate);
+        Width = targetWidth;
+    }
+
+    private void QueueInitialLightweightWorkspaceFit()
+    {
+        if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
+            _isWindowMaximized) return;
+        if (_lightweightInitialWorkspaceFitQueued) return;
+        _lightweightInitialWorkspaceFitQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () =>
+        {
+            _lightweightInitialWorkspaceFitQueued = false;
+            if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
+                _isWindowMaximized) return;
+            MainContentGrid.UpdateLayout();
+            FitLightweightWorkspaceImmediately();
+        });
+    }
+
+    // The first WPF layout can contain a large star-column remainder from the
+    // complete-mode startup width. It is content slack, not window chrome.
+    // Commit a final lightweight geometry only after that layout is available.
+    private void FitLightweightWorkspaceImmediately()
+    {
+        if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
+            _isWindowMaximized) return;
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == 0 || !GetWindowRect(handle, out var bounds)) return;
+
+        CancelLightweightWindowWidthAnimation(preserveLayout: true);
+        var showLeftPanel = _leftWorkspacePanel != LeftWorkspacePanel.None;
+        var showSettings = _isSettingsPanelVisible;
+        var hasPanels = showLeftPanel || showSettings;
+        DeviceColumn.Width = GridLength.Auto;
+        ControlColumn.Width = GridLength.Auto;
+        SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, 300);
+        SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, 336);
+        LeftGapColumn.Width = new GridLength(showLeftPanel ? 18 : 0);
+        RightGapColumn.Width = new GridLength(showSettings ? 18 : 0);
+        SetLightweightCenterColumnFill();
+        MainContentGrid.UpdateLayout();
+
+        var dpi = GetDpiForWindow(handle);
+        var scale = (dpi == 0 ? 96d : dpi) / 96d;
+        var currentWindowWidth = Math.Max(1, bounds.Right - bounds.Left) / scale;
+        var chromeWidth = GetLightweightFixedChromeWidth(currentWindowWidth);
+        var sideWidth = (showLeftPanel ? 318 : 0) +
+            (showSettings ? 354 : 0);
+        var maximumWindowWidth = GetLightweightMaximumWindowWidth();
+        var maximumPreviewWidth = Math.Max(1, maximumWindowWidth - chromeWidth -
+            sideWidth);
+        var hasContentPreviewWidth = TryGetLightweightContentPreviewWidth(
+            maximumPreviewWidth, out var contentPreviewWidth);
+        var useNormalPortraitFrame = !hasContentPreviewWidth && hasPanels &&
+            maximumPreviewWidth >= LightweightNormalPortraitPreviewWidth;
+        var minimumPreviewWidth = hasContentPreviewWidth
+            ? contentPreviewWidth
+            : hasPanels
+            ? LightweightMinimumPreviewWidth
+            : Math.Min(LightweightMinimumPreviewWidth, maximumPreviewWidth);
+        var minimumWindowWidth = Math.Max(LightweightMinimumWindowWidth,
+            chromeWidth + sideWidth + minimumPreviewWidth);
+        _lightweightTargetMinWidth = Math.Min(minimumWindowWidth,
+            maximumWindowWidth);
+        MinWidth = _lightweightTargetMinWidth;
+
+        var targetPreviewWidth = hasContentPreviewWidth
+            ? contentPreviewWidth
+            : useNormalPortraitFrame
+            ? LightweightNormalPortraitPreviewWidth
+            : hasPanels
+                ? maximumPreviewWidth
+                : GetInitialLightweightPreviewWidth(maximumPreviewWidth);
+        var targetWindowWidth = Math.Clamp(chromeWidth + sideWidth +
+            targetPreviewWidth, _lightweightTargetMinWidth, maximumWindowWidth);
+        ApplyLightweightPreviewFramePolicy(useNormalPortraitFrame,
+            hasContentPreviewWidth ? targetPreviewWidth : null);
+        var windowUsesTargetPreviewWidth = targetWindowWidth <= chromeWidth +
+            sideWidth + targetPreviewWidth + 0.5;
+        if (useNormalPortraitFrame ||
+            (hasContentPreviewWidth && windowUsesTargetPreviewWidth))
+            CenterColumn.Width = new GridLength(
+                targetPreviewWidth);
+        else
+            SetLightweightCenterColumnFill();
+
+        var targetPixels = Math.Max(1, (int)Math.Round(targetWindowWidth * scale));
+        var targetX = bounds.Left;
+        if (TryGetLightweightWorkArea(out var workArea, out _))
+            targetX = Math.Clamp(targetX, workArea.Left, Math.Max(workArea.Left,
+                workArea.Right - targetPixels));
+        _ = SetWindowPos(handle, 0, targetX, bounds.Top, targetPixels,
+            Math.Max(1, bounds.Bottom - bounds.Top), SwpNoZOrder | SwpNoActivate);
+        Left = targetX / scale;
+        Top = bounds.Top / scale;
+        Width = targetWindowWidth;
+        _lightweightWidthNeedsFit = false;
+        MainContentGrid.UpdateLayout();
+    }
+
+    private double GetInitialLightweightPreviewWidth(double maximumPreviewWidth)
+    {
+        var aspect = _viewModel.SourceVideoWidth != 0 &&
+            _viewModel.SourceVideoHeight != 0
+            ? (double)_viewModel.SourceVideoWidth / _viewModel.SourceVideoHeight
+            : LightweightDefaultPreviewAspect;
+        var preferredWidth = Math.Max(LightweightMinimumPreviewWidth,
+            Math.Round(Math.Max(520, PreviewPanel.ActualHeight) * aspect));
+        return Math.Min(preferredWidth, maximumPreviewWidth);
     }
 
     private static void SetWorkspacePageImmediate(FrameworkElement element, bool visible)
@@ -1251,6 +1773,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void AnimateWorkspaceSurface(FrameworkElement element, bool visible,
         double width, bool fromLeft, int revision)
     {
+        if (_lightweightWorkspaceSurfaceAnimationActive) return;
         var currentWidth = element.Visibility == Visibility.Visible
             ? Math.Max(0, element.ActualWidth)
             : 0;
@@ -1348,6 +1871,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void MaximizeWindow(Rect? restoreBounds = null)
     {
         if (_isFullScreen) return;
+        if (_viewModel.IsLightweightApplicationMode)
+        {
+            CancelLightweightWindowWidthAnimation();
+            SizeToContent = SizeToContent.Manual;
+            PreviewPanel.ClearValue(WidthProperty);
+        }
         if (!_isWindowMaximized)
         {
             _windowMaximizeRestoreBounds = restoreBounds ?? new Rect(
@@ -1382,6 +1911,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Top = _windowMaximizeRestoreBounds.Top;
         Width = _windowMaximizeRestoreBounds.Width;
         Height = _windowMaximizeRestoreBounds.Height;
+        ApplyApplicationDisplayMode();
     }
 
     private void OnCloseWindowClick(object sender, RoutedEventArgs e) => Close();
@@ -4279,6 +4809,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(MainViewModel.IsLightweightApplicationMode) or
+            nameof(MainViewModel.IsCapturing) or
+            nameof(MainViewModel.IsMediaCasting) or
+            nameof(MainViewModel.IsMediaCastSelected) or
+            nameof(MainViewModel.SourceVideoWidth) or
+            nameof(MainViewModel.SourceVideoHeight))
+        {
+            if (e.PropertyName != nameof(MainViewModel.IsLightweightApplicationMode) &&
+                !HasLightweightWorkspacePanels)
+                _lightweightWidthNeedsFit = true;
+            ApplyApplicationDisplayMode();
+        }
         if (e.PropertyName == nameof(MainViewModel.SelectedDevice) &&
             _activeControlWindow == 0 && _viewModel.IsBluetoothControlEnabled &&
             !_viewModel.IsBluetoothControlTarget(_viewModel.SelectedDevice?.Udid))
@@ -4286,7 +4828,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // The HID peripheral remains connected to the device that enabled
             // control. Never keep sending it mouse input from a newly selected
             // main preview; independent-window control owns its own target.
-            _ = DisableBluetoothControlForSelectionChangeAsync();
+            _ = SwitchBluetoothControlForSelectionChangeAsync();
         }
         if (e.PropertyName is nameof(MainViewModel.IsBluetoothControlEnabled) or
             nameof(MainViewModel.BluetoothControlIsConnected) or
@@ -4306,46 +4848,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 _activeControlUdid = null;
                 if (IsLoaded) _refreshTimer.Start();
             }
-            var controlActive = IsBluetoothControlActive;
-            MainPreviewHost.CapturePointerInput =
-                controlActive && _activeControlWindow == 0;
-            SetWindowsCursorHidden(controlActive);
-            SetSystemKeySuppression(controlActive);
-            RegisterRawMouseInput(controlActive &&
-                _activeControlWindow == 0);
-            if (controlActive && _activeControlWindow != 0)
-            {
-                // The pairing guidance is owned by the main window. Restore
-                // the independent preview to the foreground when it closes,
-                // otherwise its foreground-only native input path stays idle.
-                if (e.PropertyName != nameof(MainViewModel.SelectedDevice))
-                    _secondaryMirrors.Activate(_activeControlUdid);
-                ClipCursorToWindow(_activeControlWindow);
-            }
-            else if (!controlActive)
-            {
-                // Always release a process-wide cursor clip on disable,
-                // disconnect, startup failure, or while waiting for HID
-                // subscription. ShowWindow/focus changes do not clear it.
-                ClipCursor(IntPtr.Zero);
-                _controlButtons = 0;
-                lock (_controlQueueSync)
-                {
-                    _pendingControlButtons = 0;
-                    _pendingControlDx = 0;
-                    _pendingControlDy = 0;
-                    _pendingControlWheel = 0;
-                    _pendingControlStateDirty = false;
-                }
-                _controlRemainderX = 0;
-                _controlRemainderY = 0;
-                _controlWheelRemainder = 0;
-                _controlKeyboardUsages.Clear();
-                _controlModifierKeys.Clear();
-                _controlKeyboardModifiers = 0;
-                StopControlPointerTimer();
-                _controlPointerInitialized = false;
-            }
+            ApplyBluetoothControlInputState(
+                e.PropertyName != nameof(MainViewModel.SelectedDevice));
         }
         if (e.PropertyName == nameof(MainViewModel.AdvancedSettingsVisibility) &&
             _viewModel.AdvancedSettingsVisibility == Visibility.Visible)
@@ -4402,15 +4906,507 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             QueueMainPreviewHostSync();
     }
 
-    private async Task DisableBluetoothControlForSelectionChangeAsync()
+    private void ApplyBluetoothControlInputState(
+        bool activateIndependentWindow = true)
+    {
+        var controlActive = IsBluetoothControlActive;
+        MainPreviewHost.CapturePointerInput =
+            controlActive && _activeControlWindow == 0;
+        SetWindowsCursorHidden(controlActive);
+        SetSystemKeySuppression(controlActive);
+        RegisterRawMouseInput(controlActive && _activeControlWindow == 0);
+        if (controlActive && _activeControlWindow != 0)
+        {
+            // Native independent previews only forward input while foreground.
+            if (activateIndependentWindow)
+                _secondaryMirrors.Activate(_activeControlUdid);
+            ClipCursorToWindow(_activeControlWindow);
+        }
+        else if (!controlActive)
+        {
+            // ShowWindow and focus changes do not release process-wide input state.
+            ClipCursor(IntPtr.Zero);
+            ResetControlRouteState();
+        }
+    }
+
+    private void ApplyApplicationDisplayMode()
+    {
+        if (_isFullScreen)
+        {
+            PreviewPanel.ClearValue(WidthProperty);
+            return;
+        }
+
+        if (!_viewModel.IsLightweightApplicationMode)
+        {
+            CancelLightweightWindowWidthAnimation();
+            EnvironmentPanel.ClearValue(VisibilityProperty);
+            StatsPanel.ClearValue(VisibilityProperty);
+            StatsGapRow.Height = new GridLength(14);
+            PreviewPanel.ClearValue(WidthProperty);
+            PreviewPanel.ClearValue(MinWidthProperty);
+            PreviewPanel.ClearValue(MaxWidthProperty);
+            PreviewPanel.ClearValue(HorizontalAlignmentProperty);
+            PreviewPanel.SetResourceReference(Panel.BackgroundProperty,
+                "PreviewChromeBrush");
+            MinWidth = 1280;
+            if (_lightweightModeApplied && !_isWindowMaximized)
+            {
+                SizeToContent = SizeToContent.Manual;
+                if (_completeModeWidth >= MinWidth) Width = _completeModeWidth;
+            }
+            _lightweightModeApplied = false;
+            _lightweightWidthNeedsFit = false;
+            return;
+        }
+
+        if (!_lightweightModeApplied)
+        {
+            _completeModeWidth = ActualWidth > 0 ? ActualWidth : Width;
+            _lightweightModeApplied = true;
+            _lightweightWidthNeedsFit = true;
+        }
+        EnvironmentPanel.Visibility = Visibility.Collapsed;
+        StatsPanel.Visibility = Visibility.Collapsed;
+        StatsGapRow.Height = new GridLength(0);
+        PreviewPanel.MinWidth = 0;
+        PreviewPanel.ClearValue(WidthProperty);
+        if (HasLightweightVideoPresentation)
+            PreviewPanel.Background = Brushes.Black;
+        else
+            PreviewPanel.SetResourceReference(Panel.BackgroundProperty,
+                "PreviewChromeBrush");
+        ApplyLightweightPreviewFramePolicy();
+        if (_isWindowMaximized)
+            return;
+        SizeToContent = SizeToContent.Manual;
+        if (HasLightweightVideoPresentation && !HasLightweightContentDimensions)
+        {
+            // Keep the stable pre-capture geometry until the decoder has a
+            // real source size. The first QuickTime frames are sensitive to
+            // repeated host HWND resizes during USB re-enumeration.
+            _lightweightWidthNeedsFit = true;
+            return;
+        }
+        if (HasLightweightWorkspacePanels)
+        {
+            _lightweightWidthNeedsFit = false;
+            QueueInitialLightweightWorkspaceFit();
+        }
+        else
+            QueueLightweightPreviewWidth();
+    }
+
+    private void QueueLightweightPreviewWidth()
+    {
+        if (HasLightweightWorkspacePanels)
+        {
+            _lightweightWidthNeedsFit = false;
+            return;
+        }
+        if (_lightweightWorkspaceSurfaceAnimationActive) return;
+        if (_lightweightPreviewWidthQueued) return;
+        _lightweightPreviewWidthQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Render, () =>
+        {
+            _lightweightPreviewWidthQueued = false;
+            if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
+                _isWindowMaximized)
+            {
+                PreviewPanel.ClearValue(WidthProperty);
+                return;
+            }
+            if (CenterColumn.ActualWidth <= 0)
+            {
+                _lightweightWidthNeedsFit = true;
+                return;
+            }
+
+            // CenterPanel is the resizable grid column. Subtracting the preview
+            // itself would count unused center whitespace as chrome and raise
+            // MinWidth to the current window width.
+            var currentWindowWidth = GetLightweightCurrentWindowWidth();
+            var chromeWidth = Math.Max(0, currentWindowWidth - CenterColumn.ActualWidth);
+            var maximumWindowWidth = GetLightweightMaximumWindowWidth();
+            var maximumPreviewWidth = Math.Max(1, maximumWindowWidth -
+                chromeWidth);
+            var hasContentPreviewWidth = TryGetLightweightContentPreviewWidth(
+                maximumPreviewWidth, out var contentPreviewWidth);
+            var aspect = _viewModel.SourceVideoWidth != 0 &&
+                _viewModel.SourceVideoHeight != 0
+                ? (double)_viewModel.SourceVideoWidth / _viewModel.SourceVideoHeight
+                : LightweightDefaultPreviewAspect;
+            var previewHeight = Math.Max(520, PreviewPanel.ActualHeight);
+            var preferredPreviewWidth = hasContentPreviewWidth
+                ? contentPreviewWidth
+                : Math.Max(LightweightMinimumPreviewWidth,
+                    Math.Round(previewHeight * aspect));
+            var width = Math.Min(preferredPreviewWidth,
+                maximumPreviewWidth);
+            var minimumWindowWidth = Math.Max(LightweightMinimumWindowWidth,
+                chromeWidth + (hasContentPreviewWidth
+                    ? contentPreviewWidth
+                    : LightweightMinimumPreviewWidth));
+            var targetMinimumWindowWidth = Math.Min(minimumWindowWidth,
+                maximumWindowWidth);
+            _lightweightTargetMinWidth = targetMinimumWindowWidth;
+            if (MinWidth > targetMinimumWindowWidth ||
+                ActualWidth >= targetMinimumWindowWidth)
+                MinWidth = targetMinimumWindowWidth;
+            ApplyLightweightPreviewFramePolicy(useNormalPortraitFrame: false,
+                hasContentPreviewWidth ? width : null);
+            if (_lightweightWidthNeedsFit)
+            {
+                _lightweightWidthNeedsFit = false;
+                var targetWindowWidth = Math.Clamp(chromeWidth + width,
+                    targetMinimumWindowWidth, maximumWindowWidth);
+                if (hasContentPreviewWidth)
+                    SetLightweightWindowWidthImmediately(targetWindowWidth);
+                else
+                    AnimateLightweightWindowWidth(targetWindowWidth);
+            }
+        });
+    }
+
+    private void ApplyLightweightPreviewFramePolicy(
+        bool? useNormalPortraitFrame = null, double? contentPreviewWidth = null)
+    {
+        if (!_viewModel.IsLightweightApplicationMode) return;
+        double requestedContentPreviewWidth;
+        if (contentPreviewWidth is { } explicitContentPreviewWidth)
+            requestedContentPreviewWidth = explicitContentPreviewWidth;
+        else if (!TryGetLightweightContentPreviewWidth(double.PositiveInfinity,
+            out requestedContentPreviewWidth))
+            requestedContentPreviewWidth = 0;
+        if (requestedContentPreviewWidth > 0)
+        {
+            PreviewPanel.BeginAnimation(WidthProperty, null);
+            PreviewPanel.Width = requestedContentPreviewWidth;
+            PreviewPanel.MinWidth = requestedContentPreviewWidth;
+            PreviewPanel.MaxWidth = requestedContentPreviewWidth;
+            PreviewPanel.HorizontalAlignment = HorizontalAlignment.Center;
+            return;
+        }
+        var canUseNormalPortraitFrame = useNormalPortraitFrame ??
+            CanUseNormalPortraitPreviewFrame();
+        // Preview chrome owns the complete center column unless the current
+        // workspace can fit the requested 340 DIP portrait frame.
+        if (!canUseNormalPortraitFrame)
+        {
+            PreviewPanel.BeginAnimation(WidthProperty, null);
+            PreviewPanel.Width = double.NaN;
+            PreviewPanel.MinWidth = 0;
+            PreviewPanel.MaxWidth = double.PositiveInfinity;
+            PreviewPanel.ClearValue(WidthProperty);
+            PreviewPanel.ClearValue(MinWidthProperty);
+            PreviewPanel.ClearValue(MaxWidthProperty);
+            PreviewPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            return;
+        }
+
+        PreviewPanel.Width = LightweightNormalPortraitPreviewWidth;
+        PreviewPanel.MinWidth = LightweightNormalPortraitPreviewWidth;
+        PreviewPanel.MaxWidth = LightweightNormalPortraitPreviewWidth;
+        PreviewPanel.HorizontalAlignment = HorizontalAlignment.Center;
+    }
+
+    private bool TryGetLightweightContentPreviewWidth(double maximumWidth,
+        out double previewWidth)
+    {
+        previewWidth = 0;
+        if (!HasLightweightVideoPresentation || _viewModel.SourceVideoWidth == 0 ||
+            _viewModel.SourceVideoHeight == 0 || maximumWidth <= 0) return false;
+        var aspect = (double)_viewModel.SourceVideoWidth /
+            _viewModel.SourceVideoHeight;
+        var previewHeight = PreviewPanel.ActualHeight > 0
+            ? PreviewPanel.ActualHeight
+            : Math.Max(520, ActualHeight);
+        if (!double.IsFinite(aspect) || aspect <= 0 ||
+            !double.IsFinite(previewHeight) || previewHeight <= 0) return false;
+        previewWidth = Math.Min(maximumWidth,
+            Math.Max(1, Math.Round(previewHeight * aspect)));
+        return true;
+    }
+
+    private bool CanUseNormalPortraitPreviewFrame()
+    {
+        var showLeftPanel = _leftWorkspacePanel != LeftWorkspacePanel.None;
+        var showSettings = _isSettingsPanelVisible;
+        if (!showLeftPanel && !showSettings) return false;
+        var targetSideWidth = (showLeftPanel ? 318 : 0) +
+            (showSettings ? 354 : 0);
+        var chromeWidth = GetLightweightFixedChromeWidth(
+            GetLightweightCurrentWindowWidth());
+        return GetLightweightMaximumWindowWidth() >= chromeWidth +
+            targetSideWidth + LightweightNormalPortraitPreviewWidth;
+    }
+
+    private void AnimateLightweightWindowWidth(double targetWidth,
+        bool preserveCenterWidth = false)
+    {
+        if (!double.IsFinite(targetWidth) || targetWidth <= 0) return;
+        if (!preserveCenterWidth) ReleaseLightweightCenterWidth();
+        var handle = new WindowInteropHelper(this).Handle;
+        if (!IsLoaded || handle == 0 || !GetWindowRect(handle, out var bounds))
+        {
+            Width = targetWidth;
+            CompleteLightweightWorkspaceSurfaceAnimation();
+            if (preserveCenterWidth) ReleaseLightweightCenterWidth();
+            return;
+        }
+
+        var dpi = GetDpiForWindow(handle);
+        var scale = (dpi == 0 ? 96d : dpi) / 96d;
+        var targetPixels = Math.Max(1, (int)Math.Round(targetWidth * scale));
+        var currentPixels = Math.Max(1, bounds.Right - bounds.Left);
+        if (!preserveCenterWidth)
+        {
+            _lightweightWindowStartX = bounds.Left;
+            _lightweightWindowTargetX = bounds.Left;
+        }
+        _lightweightWindowTopPixels = bounds.Top;
+        if (Math.Abs(currentPixels - targetPixels) <= 1 &&
+            _lightweightWindowStartX == _lightweightWindowTargetX &&
+            !_lightweightWorkspaceSurfaceAnimationActive)
+        {
+            Width = targetWidth;
+            CompleteLightweightWorkspaceSurfaceAnimation();
+            if (preserveCenterWidth) ReleaseLightweightCenterWidth();
+            return;
+        }
+
+        _lightweightWindowWidthStartPixels = currentPixels;
+        _lightweightWindowWidthTargetPixels = targetPixels;
+        _lightweightWindowHeightPixels = Math.Max(1, bounds.Bottom - bounds.Top);
+        _lightweightWindowWidthTargetDips = targetWidth;
+        if (preserveCenterWidth) _lightweightCenterWidthLocked = true;
+        _lightweightWindowAnimationProgress = 0;
+        _lightweightWindowLastRenderTime = TimeSpan.Zero;
+        if (!_lightweightWindowRendering)
+        {
+            _lightweightWindowRendering = true;
+            CompositionTarget.Rendering += OnLightweightWindowRendering;
+        }
+    }
+
+    private void OnLightweightWindowRendering(object? sender, EventArgs e)
+    {
+        if (e is not RenderingEventArgs rendering) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == 0)
+        {
+            StopLightweightWindowRendering();
+            return;
+        }
+
+        if (_lightweightWindowLastRenderTime == TimeSpan.Zero)
+        {
+            _lightweightWindowLastRenderTime = rendering.RenderingTime;
+            return;
+        }
+        var elapsed = rendering.RenderingTime - _lightweightWindowLastRenderTime;
+        _lightweightWindowLastRenderTime = rendering.RenderingTime;
+        var boundedSeconds = Math.Clamp(elapsed.TotalSeconds, 0, 1.0 / 30.0);
+        _lightweightWindowAnimationProgress = Math.Min(1,
+            _lightweightWindowAnimationProgress +
+            boundedSeconds / WorkspaceTransitionDuration.TotalSeconds);
+        ApplyLightweightWindowAnimationFrame(handle,
+            _lightweightWindowAnimationProgress);
+        if (_lightweightWindowAnimationProgress < 1) return;
+
+        StopLightweightWindowRendering();
+        SynchronizeLightweightWindowPosition();
+        Width = _lightweightWindowWidthTargetDips;
+        CompleteLightweightWorkspaceSurfaceAnimation();
+        ReleaseLightweightCenterWidth();
+    }
+
+    private void CancelLightweightWindowWidthAnimation(bool preserveLayout = false)
+    {
+        if (_lightweightWorkspaceSurfaceAnimationActive)
+            CommitLightweightWorkspaceSurface(_lightweightWindowAnimationProgress);
+        StopLightweightWindowRendering();
+        _lightweightWorkspaceSurfaceAnimationActive = false;
+        if (!preserveLayout)
+        {
+            SetLightweightCenterColumnFill();
+            ReleaseLightweightCenterWidth();
+        }
+    }
+
+    private void StopLightweightWindowRendering()
+    {
+        if (!_lightweightWindowRendering) return;
+        CompositionTarget.Rendering -= OnLightweightWindowRendering;
+        _lightweightWindowRendering = false;
+        _lightweightWindowLastRenderTime = TimeSpan.Zero;
+    }
+
+    private void ApplyLightweightWindowAnimationFrame(nint handle, double progress)
+    {
+        var eased = progress * progress * (3 - 2 * progress);
+        var width = (int)Math.Round(_lightweightWindowWidthStartPixels +
+            (_lightweightWindowWidthTargetPixels - _lightweightWindowWidthStartPixels) * eased);
+        ApplyLightweightWorkspaceSurfaceWidths(eased);
+        var x = (int)Math.Round(_lightweightWindowStartX +
+            (_lightweightWindowTargetX - _lightweightWindowStartX) * eased);
+        if (handle != 0)
+            _ = SetWindowPos(handle, 0, x, _lightweightWindowTopPixels, width,
+                _lightweightWindowHeightPixels, SwpNoZOrder | SwpNoActivate);
+    }
+
+    private void SynchronizeLightweightWindowPosition()
+    {
+        if (_lightweightWindowStartX == _lightweightWindowTargetX) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        var dpi = handle == 0 ? 96u : GetDpiForWindow(handle);
+        var scale = (dpi == 0 ? 96d : dpi) / 96d;
+        Left = _lightweightWindowTargetX / scale;
+        Top = _lightweightWindowTopPixels / scale;
+    }
+
+    private void ApplyLightweightWorkspaceSurfaceWidths(double progress)
+    {
+        if (!_lightweightWorkspaceSurfaceAnimationActive) return;
+        LeftPanelHost.Width = Interpolate(_lightweightLeftSurfaceStartWidth,
+            _lightweightLeftSurfaceTargetWidth, progress);
+        ControlPanel.Width = Interpolate(_lightweightRightSurfaceStartWidth,
+            _lightweightRightSurfaceTargetWidth, progress);
+        LeftGapColumn.Width = new GridLength(Interpolate(_lightweightLeftGapStartWidth,
+            _lightweightLeftGapTargetWidth, progress));
+        RightGapColumn.Width = new GridLength(Interpolate(_lightweightRightGapStartWidth,
+            _lightweightRightGapTargetWidth, progress));
+        // CenterColumn stays star-sized so PreviewPanel.ActualWidth tracks the
+        // current window width rather than an animation-time cached width.
+        SetLightweightCenterColumnFill();
+    }
+
+    private void CompleteLightweightWorkspaceSurfaceAnimation()
+    {
+        if (!_lightweightWorkspaceSurfaceAnimationActive) return;
+        CommitLightweightWorkspaceSurface(1);
+        SetLightweightCenterColumnFill();
+        if (_lightweightTargetMinWidth > 0)
+            MinWidth = _lightweightTargetMinWidth;
+        _lightweightWorkspaceSurfaceAnimationActive = false;
+        ApplyLightweightPreviewFramePolicy();
+        if (_lightweightWidthNeedsFit)
+            RequestLightweightWindowFit();
+    }
+
+    private void CommitLightweightWorkspaceSurface(double progress)
+    {
+        var eased = progress * progress * (3 - 2 * progress);
+        var leftWidth = Interpolate(_lightweightLeftSurfaceStartWidth,
+            _lightweightLeftSurfaceTargetWidth, eased);
+        var rightWidth = Interpolate(_lightweightRightSurfaceStartWidth,
+            _lightweightRightSurfaceTargetWidth, eased);
+        LeftPanelHost.Width = leftWidth;
+        ControlPanel.Width = rightWidth;
+        LeftGapColumn.Width = new GridLength(Interpolate(_lightweightLeftGapStartWidth,
+            _lightweightLeftGapTargetWidth, eased));
+        RightGapColumn.Width = new GridLength(Interpolate(_lightweightRightGapStartWidth,
+            _lightweightRightGapTargetWidth, eased));
+        SetLightweightCenterColumnFill();
+        if (leftWidth <= 0) LeftPanelHost.Visibility = Visibility.Collapsed;
+        if (rightWidth <= 0) ControlPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private static double Interpolate(double from, double to, double progress) =>
+        from + (to - from) * progress;
+
+    private void LockLightweightCenterWidth()
+    {
+        if (CenterColumn.ActualWidth <= 0) return;
+        CenterColumn.Width = new GridLength(CenterColumn.ActualWidth);
+        _lightweightCenterWidthLocked = true;
+    }
+
+    private void ReleaseLightweightCenterWidth()
+    {
+        if (!_lightweightCenterWidthLocked) return;
+        SetLightweightCenterColumnFill();
+        _lightweightCenterWidthLocked = false;
+    }
+
+    private void SetLightweightCenterColumnFill() =>
+        CenterColumn.Width = new GridLength(1, GridUnitType.Star);
+
+    private bool HasLightweightVideoPresentation => _viewModel.IsCapturing ||
+        (_mediaCastActive && _viewModel.IsMediaCastSelected);
+
+    private bool HasLightweightContentDimensions =>
+        _viewModel.SourceVideoWidth != 0 && _viewModel.SourceVideoHeight != 0;
+
+    private bool HasLightweightWorkspacePanels =>
+        _leftWorkspacePanel != LeftWorkspacePanel.None || _isSettingsPanelVisible;
+
+    private double GetLightweightFixedChromeWidth(double currentWindowWidth)
+    {
+        if (MainContentGrid.ActualWidth > 0)
+            return Math.Max(0, currentWindowWidth - MainContentGrid.ActualWidth);
+
+        var contentWidth = GetLightweightElementWidth(LeftPanelHost) +
+            GetLightweightColumnWidth(LeftGapColumn) +
+            Math.Max(0, CenterColumn.ActualWidth) +
+            GetLightweightColumnWidth(RightGapColumn) +
+            GetLightweightElementWidth(ControlPanel);
+        return Math.Max(0, currentWindowWidth - contentWidth);
+    }
+
+    private double GetLightweightMaximumWindowWidth()
+    {
+        if (!TryGetLightweightWorkArea(out var workArea, out var scale))
+            return double.PositiveInfinity;
+        var workWidth = workArea.Right - workArea.Left;
+        return Math.Max(1, workWidth / scale - LightweightWorkAreaInset);
+    }
+
+    private bool TryGetLightweightWorkArea(out NativeRect workArea,
+        out double scale)
+    {
+        workArea = default;
+        var handle = new WindowInteropHelper(this).Handle;
+        var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
+        var monitorInfo = new MonitorInfo
+        {
+            Size = (uint)Marshal.SizeOf<MonitorInfo>(),
+        };
+        if (monitor == 0 || !GetMonitorInfoW(monitor, ref monitorInfo))
+        {
+            scale = 1;
+            return false;
+        }
+        var dpi = GetDpiForWindow(handle);
+        scale = (dpi == 0 ? 96d : dpi) / 96d;
+        workArea = monitorInfo.WorkArea;
+        return true;
+    }
+
+    private double GetLightweightCurrentWindowWidth()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != 0 && GetWindowRect(handle, out var bounds))
+        {
+            var dpi = GetDpiForWindow(handle);
+            var scale = (dpi == 0 ? 96d : dpi) / 96d;
+            return Math.Max(1, bounds.Right - bounds.Left) / scale;
+        }
+        return Math.Max(1, ActualWidth);
+    }
+
+    private async Task SwitchBluetoothControlForSelectionChangeAsync()
     {
         Interlocked.Exchange(ref _bluetoothRouteChanging, 1);
         await _bluetoothRouteGate.WaitAsync();
         try
         {
+            var targetUdid = _viewModel.SelectedDevice?.Udid;
             if (_activeControlWindow == 0 && _viewModel.IsBluetoothControlEnabled &&
-                !_viewModel.IsBluetoothControlTarget(_viewModel.SelectedDevice?.Udid))
-                await _viewModel.DisableBluetoothControlAsync();
+                !DeviceViewModel.UdidEquals(_viewModel.BluetoothControlTargetUdid,
+                    targetUdid))
+                await _viewModel.SwitchBluetoothControlTargetAsync(targetUdid);
         }
         finally
         {
@@ -4586,6 +5582,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (monitor == 0 || !GetMonitorInfoW(monitor, ref monitorInfo))
                 throw new InvalidOperationException("Unable to resolve the current display bounds.");
             RootNavigation.IsPaneOpen = false;
+            CancelLightweightWindowWidthAnimation();
+            SizeToContent = SizeToContent.Manual;
+            PreviewPanel.ClearValue(WidthProperty);
             SetNavigationPaneVisible(false);
             ++_workspaceTransitionRevision;
             SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: 300);
@@ -4621,6 +5620,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         if (!_viewModel.IsMediaCastSelected) MainPreviewHost.Activate();
         MainPreviewHost.IsFullScreenPresentation = _isFullScreen;
+        ApplyApplicationDisplayMode();
         UpdateMediaCastFullScreenButton();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_fullscreen_state",
             ("enabled", _isFullScreen)));
@@ -4925,10 +5925,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F9 && Keyboard.Modifiers == ModifierKeys.None)
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (TryGetShortcutAction(KeyInterop.VirtualKeyFromKey(key),
+                out var configuredAction))
         {
-            BluetoothControlNoticeWindow.TryCloseActive();
-            _ = _viewModel.ToggleBluetoothControlAsync();
+            if (!_registeredHotKeyIds.Contains(HotKeyId(configuredAction)))
+                HandleConfiguredShortcut(configuredAction);
+            e.Handled = true;
+            return;
+        }
+        if (_bluetoothControlShortcut.Matches(key, Keyboard.Modifiers))
+        {
+            if (!_hotKeyRegistered)
+                ToggleBluetoothControlFromHotkey();
             e.Handled = true;
             return;
         }
@@ -4975,18 +5984,205 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         e.Handled = true;
     }
 
+    private void OnShortcutSettingsClick(object sender, RoutedEventArgs e) =>
+        ShowShortcutSettings();
+
+    private async void OnClearBluetoothBindingsClick(object sender, RoutedEventArgs e)
+    {
+        if (!AppPromptWindow.Confirm(
+                LocalizationService.Get("ClearBluetoothBindingsTitle"),
+                LocalizationService.Get("ClearBluetoothBindingsBody")))
+            return;
+        if (!await _viewModel.ClearBluetoothControlBindingsAsync())
+            AppPromptWindow.Inform(
+                LocalizationService.Get("ClearBluetoothBindingsTitle"),
+                LocalizationService.Get("ClearBluetoothBindingsFailed"));
+    }
+
+    private void ToggleBluetoothControlFromHotkey()
+    {
+        BluetoothControlNoticeWindow.TryCloseActive();
+        _ = _viewModel.ToggleBluetoothControlAsync();
+    }
+
+    private void HandleConfiguredShortcut(BluetoothShortcutAction action)
+    {
+        if (action == BluetoothShortcutAction.BossKey)
+        {
+            _ = ToggleBossKeyWindowsAsync();
+            return;
+        }
+        if (action == BluetoothShortcutAction.ReverseControl)
+            ToggleBluetoothControlFromHotkey();
+        else
+            _ = SendBluetoothSystemShortcutAsync(action);
+    }
+
+    private async Task ToggleBossKeyWindowsAsync()
+    {
+        if (Interlocked.Exchange(ref _bossKeyChanging, 1) != 0) return;
+        var restoring = _bossKeyHidden;
+        var routeHeld = false;
+        Interlocked.Exchange(ref _bluetoothRouteChanging, 1);
+        try
+        {
+            if (restoring)
+            {
+                BossKeyWindowVisibility.RestoreAll();
+                NativePreviewWindow.SetAllBossKeyHidden(false);
+            }
+            else
+            {
+                _bossKeyHidden = true;
+                ApplyBluetoothControlInputState(activateIndependentWindow: false);
+                BossKeyWindowVisibility.HideAll();
+                NativePreviewWindow.SetAllBossKeyHidden(true);
+            }
+
+            await _bluetoothRouteGate.WaitAsync();
+            routeHeld = true;
+            if (restoring)
+            {
+                _bossKeyHidden = false;
+                ApplyBluetoothControlInputState();
+            }
+            else if (_viewModel.IsBluetoothControlEnabled)
+            {
+                try { await _viewModel.ReleaseBluetoothControlInputAsync(); }
+                catch (Exception error)
+                {
+                    _viewModel.AddDiagnosticLog(AppLog.Event(
+                        "boss_key_input_release_failed",
+                        ("error", AppLog.Error(error))));
+                }
+            }
+            _viewModel.AddDiagnosticLog(AppLog.Event("boss_key_toggled",
+                ("hidden", _bossKeyHidden),
+                ("wpf_windows", BossKeyWindowVisibility.HiddenWindowCount),
+                ("reverse_control", IsBluetoothControlActive)));
+        }
+        catch (Exception error)
+        {
+            _viewModel.AddDiagnosticLog(AppLog.Event("boss_key_toggle_failed",
+                ("hidden", _bossKeyHidden), ("error", AppLog.Error(error))));
+        }
+        finally
+        {
+            if (routeHeld) _bluetoothRouteGate.Release();
+            Volatile.Write(ref _bluetoothRouteChanging, 0);
+            Volatile.Write(ref _bossKeyChanging, 0);
+        }
+    }
+
+    private bool TryGetShortcutAction(int virtualKey,
+        out BluetoothShortcutAction action)
+    {
+        var modifiers = Keyboard.Modifiers;
+        foreach (var candidate in Enum.GetValues<BluetoothShortcutAction>())
+        {
+            if (_bluetoothShortcuts.TryGetValue(candidate, out var shortcut) &&
+                shortcut.MatchesVirtualKey(virtualKey,
+                    modifiers.HasFlag(ModifierKeys.Control),
+                    modifiers.HasFlag(ModifierKeys.Alt),
+                    modifiers.HasFlag(ModifierKeys.Shift)))
+            {
+                action = candidate;
+                return true;
+            }
+        }
+        action = default;
+        return false;
+    }
+
+    private static bool TryGetShortcutActionByHotKeyId(int hotKeyId,
+        out BluetoothShortcutAction action)
+    {
+        foreach (var candidate in Enum.GetValues<BluetoothShortcutAction>())
+        {
+            if (HotKeyId(candidate) == hotKeyId)
+            {
+                action = candidate;
+                return true;
+            }
+        }
+        action = default;
+        return false;
+    }
+
+    private async Task SendBluetoothSystemShortcutAsync(
+        BluetoothShortcutAction action)
+    {
+        var target = _activeControlWindow != 0 ? _activeControlUdid :
+            _viewModel.SelectedDevice?.Udid;
+        if (action == BluetoothShortcutAction.ReverseControl ||
+            !_viewModel.BluetoothControlIsConnected ||
+            !_viewModel.IsBluetoothControlTarget(target)) return;
+        var usage = action switch
+        {
+            BluetoothShortcutAction.ControlCenter => (byte)0x06, // C
+            BluetoothShortcutAction.NotificationCenter => (byte)0x11, // N
+            BluetoothShortcutAction.AppSwitcher => (byte)0,
+            BluetoothShortcutAction.Home => (byte)0x0B, // H
+            BluetoothShortcutAction.Dock => (byte)0x04, // A
+            BluetoothShortcutAction.Siri => (byte)0x16, // S
+            _ => (byte)0,
+        };
+        try
+        {
+            if (action == BluetoothShortcutAction.AppSwitcher)
+                await _viewModel.SendBluetoothAppSwitcherAsync();
+            else if (usage != 0)
+                await _viewModel.SendBluetoothSystemShortcutAsync(usage);
+            else
+                return;
+            _viewModel.AddDiagnosticLog(AppLog.Event("bluetooth_system_shortcut_sent",
+                ("action", action.ToString()), ("device", AppLog.Device(target))));
+        }
+        catch (Exception error)
+        {
+            _viewModel.AddDiagnosticLog(AppLog.Event(
+                "bluetooth_system_shortcut_failed",
+                ("action", action.ToString()), ("device", AppLog.Device(target)),
+                ("error", AppLog.Error(error))));
+        }
+    }
+
     private void SetWindowsCursorHidden(bool hidden)
     {
-        if (_windowsCursorHidden == hidden) return;
-        _windowsCursorHidden = hidden;
         if (hidden)
         {
-            while (ShowCursor(false) >= 0) { }
+            if (IsSystemCursorVisible(out var queryFailed))
+                while (ShowCursor(false) >= 0) { }
+            else if (queryFailed && !_windowsCursorHidden)
+                ShowCursor(false);
+            _windowsCursorHidden = true;
         }
         else
         {
-            while (ShowCursor(true) < 0) { }
+            if (!IsSystemCursorVisible(out var queryFailed))
+            {
+                if (queryFailed && _windowsCursorHidden) ShowCursor(true);
+                else while (ShowCursor(true) < 0) { }
+            }
+            _windowsCursorHidden = false;
         }
+    }
+
+    private bool IsSystemCursorVisible(out bool queryFailed)
+    {
+        var cursor = new CursorInfo
+        {
+            Size = (uint)Marshal.SizeOf<CursorInfo>(),
+        };
+        if (!GetCursorInfo(ref cursor))
+        {
+            queryFailed = true;
+            _viewModel.AddDiagnosticLog(AppLog.Event("windows_cursor_query_failed",
+                ("win32_error", Marshal.GetLastWin32Error())));
+            return false;
+        }
+        queryFailed = false;
+        return (cursor.Flags & CursorShowing) != 0;
     }
 
     private void SetSystemKeySuppression(bool enabled)
@@ -5021,7 +6217,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     private const uint MonitorDefaultToNearest = 2;
+    private const uint SwpNoMove = 0x0002;
     private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
     private const uint SwpFrameChanged = 0x0020;
     private const uint SwpShowWindow = 0x0040;
     private static readonly nint HwndTopMost = new(-1);
@@ -5105,11 +6303,25 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         internal uint ExtraInformation;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorInfo
+    {
+        internal uint Size;
+        internal uint Flags;
+        internal nint Cursor;
+        internal int X;
+        internal int Y;
+    }
+
     [DllImport("user32.dll")]
     private static extern nint MonitorFromWindow(nint window, uint flags);
 
     [DllImport("user32.dll")]
     private static extern int ShowCursor([MarshalAs(UnmanagedType.Bool)] bool show);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorInfo(ref CursorInfo cursorInfo);
 
     [DllImport("user32.dll")]
     private static extern nint SetCursor(nint cursor);
@@ -5165,6 +6377,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(nint window, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint window);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -7,7 +7,9 @@ using System.Windows.Automation;
 using System.Windows.Threading;
 using System.Windows.Media;
 using IPhoneMirror.App;
+using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
+using IPhoneMirror.App.Windows;
 using Wpf.Ui.Controls;
 using WpfBorder = System.Windows.Controls.Border;
 using WpfButton = System.Windows.Controls.Button;
@@ -829,7 +831,77 @@ internal static class Program
             AssertThemeBrush(window, "AccentBrush", Color.FromRgb(0x69, 0xB1, 0xF8));
             AssertThemeBrush(window, "SuccessBrush", Color.FromRgb(0x6C, 0xCB, 0x8F));
             AssertCaptionIconForeground(window, Color.FromRgb(0xF5, 0xF5, 0xF7));
+            TestShortcutSettingsWindow(window, assembly);
+            TestBluetoothClientBindingWindow(window);
             TestBluetoothControlNoticeWindow(window, assembly);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    private static void TestShortcutSettingsWindow(MainWindow owner, Assembly assembly)
+    {
+        var open = RequireMethod(typeof(MainWindow), "OnShortcutSettingsClick",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        open.Invoke(owner, [owner, new RoutedEventArgs()]);
+        var shortcutWindowType = assembly.GetType(
+            "IPhoneMirror.App.Windows.ShortcutSettingsWindow", throwOnError: true)!;
+        var shortcutWindow = Application.Current.Windows.Cast<Window>().LastOrDefault(
+            candidate => candidate.GetType() == shortcutWindowType) ??
+            throw new InvalidOperationException("Shortcut settings window was not shown.");
+        try
+        {
+            shortcutWindow.UpdateLayout();
+            var captureBox = FindVisualDescendants<System.Windows.Controls.TextBox>(shortcutWindow)
+                .FirstOrDefault();
+            if (!shortcutWindow.IsVisible || shortcutWindow.Owner != owner ||
+                captureBox is null || !captureBox.IsReadOnly ||
+                string.IsNullOrWhiteSpace(captureBox.Text))
+            {
+                throw new InvalidOperationException(
+                    "Shortcut settings window did not open with a readable capture field.");
+            }
+        }
+        finally
+        {
+            shortcutWindow.Close();
+        }
+    }
+
+    private static void TestBluetoothClientBindingWindow(Window owner)
+    {
+        var clients = new[]
+        {
+            new BluetoothClientInfo("client-a", "iPhone", "705FAB69D098",
+                DateTimeOffset.Now),
+            new BluetoothClientInfo("client-b", "iPhone", "601DA78CB5A9",
+                DateTimeOffset.Now, "Other iPhone"),
+        };
+        var window = Activator.CreateInstance(
+            typeof(BluetoothClientBindingWindow),
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null, [owner, "iPhone A", clients, "client-a",
+                (Func<Task<IReadOnlyList<BluetoothClientInfo>>>)(() =>
+                    Task.FromResult<IReadOnlyList<BluetoothClientInfo>>(clients)),
+                (Func<string, bool>)(_ => true)], culture: null)
+            as BluetoothClientBindingWindow ??
+            throw new InvalidOperationException(
+                "Bluetooth binding window was not constructed.");
+        window.Show();
+        try
+        {
+            window.UpdateLayout();
+            if (!window.IsVisible || window.Clients.Count != 2 ||
+                window.SelectedClient?.Id != "client-a" || !window.CanConfirm ||
+                window.Clients[1].CanBind ||
+                FindVisualDescendants<WpfButton>(window).All(button =>
+                    button.Content is not string content ||
+                    (!content.Contains("解除", StringComparison.Ordinal) &&
+                     !content.Contains("Unbind", StringComparison.Ordinal))))
+                throw new InvalidOperationException(
+                    "Bluetooth binding window did not preserve selection and bound state.");
         }
         finally
         {
@@ -975,6 +1047,7 @@ internal static class Program
         if (notice.IsVisible)
             throw new InvalidOperationException(
                 "Bluetooth control notice remained visible after its close path.");
+
     }
 
     private static void AssertCaptionIconForeground(Window window, Color expectedColor)

@@ -78,9 +78,18 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                         shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                <ComboBox ItemsSource="{Binding ThemeChoices}" DisplayMemberPath="Label"
+                <ComboBox x:Name="ThemeComboBox"
+                          ItemsSource="{Binding ThemeChoices}" DisplayMemberPath="Label"
                           SelectedValuePath="Value" SelectedValue="{Binding SelectedTheme}"
-                          Width="154" Margin="0,0,10,0" ToolTip="{DynamicResource Appearance}"/>
+                          Width="154" Margin="0,0,10,0" ToolTip="{DynamicResource Appearance}"
+                          PreviewMouseLeftButtonDown="OnThemePreviewMouseLeftButtonDown"/>
+                <Button Content="{DynamicResource ForceDriverCleanup}"
+                        Click="OnForceDriverCleanupClick"
+                        IsEnabled="{Binding CanInteract}"
+                        Visibility="{Binding AdvancedVisibility}"
+                        Style="{StaticResource DangerButton}"
+                        MinWidth="146" MinHeight="32" Padding="10,5"
+                        FontSize="11" Margin="0,0,8,0"/>
                 <Button Style="{StaticResource IconButton}"
                         Click="OnOpenLogsClick" IsEnabled="{Binding CanInteract}"
                         ToolTip="{DynamicResource OpenLogs}"
@@ -152,7 +161,9 @@
                           SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
                           DisplayMemberPath="SelectionText"
                           MinWidth="320" Height="38" Margin="0,0,0,12"
-                          IsEnabled="{Binding CanInteract}"/>
+                          IsEnabled="{Binding CanInteract}"
+                          PreviewMouseLeftButtonDown="OnConnectedDevicePreviewMouseLeftButtonDown"
+                          SelectionChanged="OnConnectedDeviceSelectionChanged"/>
                 <Button Content="{DynamicResource InstallAll}" Style="{StaticResource PrimaryButton}"
                         Click="OnQuickInstallClick" IsEnabled="{Binding CanQuickInstall}"
                         Height="54" MinWidth="250" FontSize="16" HorizontalAlignment="Center"/>

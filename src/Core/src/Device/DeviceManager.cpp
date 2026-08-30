@@ -83,6 +83,8 @@ void enrich_from_lockdown(transport::Socket& socket, DeviceRecord& record) {
     std::map<std::string, DeviceRecord, std::less<>>& devices) {
     transport::UsbMuxClient mux(port);
     for (const auto& mux_device : mux.list_devices()) {
+        if (!is_apple_mobile_capture_product_id(mux_device.product_id))
+            continue;
         if (!mux_device.connection_type.empty() &&
             _stricmp(mux_device.connection_type.c_str(), "USB") != 0)
             continue;
@@ -148,6 +150,8 @@ void list_devices_from_port(std::uint16_t port,
     std::map<std::string, MuxDeviceRecord, std::less<>>& devices) {
     transport::UsbMuxClient mux(port);
     for (const auto& mux_device : mux.list_devices()) {
+        if (!is_apple_mobile_capture_product_id(mux_device.product_id))
+            continue;
         if (!mux_device.connection_type.empty() &&
             _stricmp(mux_device.connection_type.c_str(), "USB") != 0)
             continue;

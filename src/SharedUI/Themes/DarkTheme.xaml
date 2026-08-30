@@ -55,6 +55,7 @@
     <SolidColorBrush x:Key="ControlPressedBrush" Color="#2AFFFFFF"/>
     <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#1FFFFFFF"/>
     <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="ShortcutClearIconBrush" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="SelectionBrush" Color="#24FFFFFF"/>
     <SolidColorBrush x:Key="TextSelectionBrush" Color="#805CAFFB"/>
     <SolidColorBrush x:Key="ControlDividerBrush" Color="#26FFFFFF"/>

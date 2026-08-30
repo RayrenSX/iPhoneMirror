@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror.Driver</AssemblyName>
     <RootNamespace>IPhoneMirror.DriverInstaller</RootNamespace>
-    <Version>1.8.0</Version>
-    <AssemblyVersion>1.8.0.0</AssemblyVersion>
-    <FileVersion>1.8.0.0</FileVersion>
+    <Version>1.8.1</Version>
+    <AssemblyVersion>1.8.1.0</AssemblyVersion>
+    <FileVersion>1.8.1.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror Driver Manager</Product>
     <Description>Standalone Apple USB and per-device capture driver manager for iPhoneMirror.</Description>
@@ -65,6 +65,8 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
+    <EmbeddedResource Include="..\..\scripts\remove_selected_iphone_drivers.ps1"
+                      LogicalName="DriverCleanup.Script.ps1" />
     <Content Include="$(NuGetPackageRoot)wpf-ui\4.3.0\LICENSE.md"
              Condition="Exists('$(NuGetPackageRoot)wpf-ui\4.3.0\LICENSE.md')">
       <Link>licenses\WPF-UI-LICENSE.md</Link>

@@ -65,6 +65,7 @@ internal static class ElevatedDriverHost
             ("instance", DriverLogger.Sanitize(instanceId)));
         FilterSnapshot[]? snapshot = null;
         var createdSystemFiles = new List<string>();
+        var replacedSystemFiles = new List<SystemFileBackup>();
         string? backupPath = null;
         bool? serviceExistedBefore = null;
         var parentRemovalStarted = false;
@@ -133,7 +134,8 @@ internal static class ElevatedDriverHost
                 if (kind is DriverOperationKind.Install or DriverOperationKind.Repair)
                 {
                     log.WriteEvent("filter_install_start", ("operation_kind", kind));
-                    EnsureSystemFiles(payloadRoot, createdSystemFiles, log);
+                    EnsureSystemFiles(payloadRoot, createdSystemFiles,
+                        replacedSystemFiles, paths.Directory, log);
                     RunFilterTool(payloadRoot, "i", "-di=" + instanceId, log);
                     var healthy = WaitForHealthyTarget(instanceId, TimeSpan.FromSeconds(20));
                     log.WriteEvent("target_health_checked", ("healthy", healthy));
@@ -179,10 +181,12 @@ internal static class ElevatedDriverHost
                 ("elapsed_ms", timer.ElapsedMilliseconds),
                 ("parent_removal_started", parentRemovalStarted));
             log.WriteEvent("rollback_start", ("snapshot_entries", snapshot?.Length ?? 0),
-                ("created_system_files", createdSystemFiles.Count));
+                ("created_system_files", createdSystemFiles.Count),
+                ("replaced_system_files", replacedSystemFiles.Count));
             var rollbackComplete = kind == DriverOperationKind.ParentRepair
                 ? !parentRemovalStarted
-                : RollBack(snapshot, serviceExistedBefore, createdSystemFiles, log);
+                : RollBack(snapshot, serviceExistedBefore, createdSystemFiles,
+                    replacedSystemFiles, log);
             log.WriteEvent("rollback_completed", ("complete", rollbackComplete),
                 ("elapsed_ms", timer.ElapsedMilliseconds));
             var message = kind == DriverOperationKind.ParentRepair
@@ -267,6 +271,7 @@ internal static class ElevatedDriverHost
     }
 
     private static void EnsureSystemFiles(string payloadRoot, List<string> createdFiles,
+        List<SystemFileBackup> replacedFiles, string operationDirectory,
         OperationLog log)
     {
         var windows = Path.GetDirectoryName(Environment.SystemDirectory)!;
@@ -290,22 +295,79 @@ internal static class ElevatedDriverHost
                 ("sha256", DriverLogger.HashTag(item.Hash)));
             if (File.Exists(item.Destination))
             {
-                DriverPayload.ValidateHash(item.Destination, item.Hash);
-                log.WriteEvent("system_file_verified", ("file", Path.GetFileName(item.Destination)),
-                    ("action", "existing"), ("sha256", DriverLogger.HashTag(item.Hash)));
+                try
+                {
+                    DriverPayload.ValidateHash(item.Destination, item.Hash);
+                    log.WriteEvent("system_file_verified",
+                        ("file", Path.GetFileName(item.Destination)),
+                        ("action", "existing"),
+                        ("sha256", DriverLogger.HashTag(item.Hash)));
+                }
+                catch (InvalidOperationException)
+                {
+                    var backup = Path.Combine(operationDirectory, "system-backup",
+                        GetSystemBackupName(item.Destination));
+                    DriverPayload.CreateProtectedSystemDirectory(
+                        Path.GetDirectoryName(backup)!);
+                    DriverPayload.EnsureNoReparsePoints(item.Destination);
+                    DriverPayload.EnsureNoReparsePoints(backup);
+                    File.Copy(item.Destination, backup, overwrite: false);
+                    replacedFiles.Add(new SystemFileBackup(item.Destination, backup));
+                    ReplaceSystemFile(item.Source, item.Destination);
+                    DriverPayload.ValidateHash(item.Destination, item.Hash);
+                    log.WriteEvent("system_file_repaired",
+                        ("file", Path.GetFileName(item.Destination)),
+                        ("backup", DriverLogger.DescribePath(backup)),
+                        ("sha256", DriverLogger.HashTag(item.Hash)));
+                }
                 continue;
             }
-            using (var destination = new FileStream(item.Destination, FileMode.CreateNew,
-                       FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.WriteThrough))
-            {
-                sourceLock.CopyTo(destination);
-                destination.Flush(flushToDisk: true);
-            }
+            ReplaceSystemFile(item.Source, item.Destination);
             createdFiles.Add(item.Destination);
             DriverPayload.ValidateHash(item.Destination, item.Hash);
             log.WriteEvent("system_file_deployed", ("file", Path.GetFileName(item.Destination)),
                 ("action", "created"), ("sha256", DriverLogger.HashTag(item.Hash)));
         }
+    }
+
+    private static string GetSystemBackupName(string destination)
+    {
+        var fullPath = Path.GetFullPath(destination);
+        var name = new string(fullPath.Select(character =>
+            char.IsAsciiLetterOrDigit(character) ? character : '_').ToArray());
+        return name.Trim('_') + ".bak";
+    }
+
+    private static void ReplaceSystemFile(string source, string destination)
+    {
+        var temporary = destination + ".iPhoneMirror.tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using (var sourceStream = new FileStream(source, FileMode.Open,
+                       FileAccess.Read, FileShare.Read, 64 * 1024,
+                       FileOptions.SequentialScan))
+            using (var destinationStream = new FileStream(temporary, FileMode.CreateNew,
+                       FileAccess.Write, FileShare.None, 64 * 1024,
+                       FileOptions.WriteThrough))
+            {
+                sourceStream.CopyTo(destinationStream);
+                destinationStream.Flush(flushToDisk: true);
+            }
+
+            if (File.Exists(destination))
+                File.Replace(temporary, destination, null, ignoreMetadataErrors: true);
+            else
+                File.Move(temporary, destination);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    private static void RestoreSystemFile(SystemFileBackup backup)
+    {
+        ReplaceSystemFile(backup.Backup, backup.Destination);
     }
 
     private static void ValidateInstalledServiceDefinition()
@@ -413,8 +475,11 @@ internal static class ElevatedDriverHost
         }
     }
 
+    private sealed record SystemFileBackup(string Destination, string Backup);
+
     private static bool RollBack(FilterSnapshot[]? snapshot, bool? serviceExistedBefore,
-        IReadOnlyList<string> createdFiles, OperationLog log)
+        IReadOnlyList<string> createdFiles,
+        IReadOnlyList<SystemFileBackup> replacedFiles, OperationLog log)
     {
         var complete = true;
         if (snapshot is not null)
@@ -431,28 +496,52 @@ internal static class ElevatedDriverHost
             }
         }
 
-        if (serviceExistedBefore is false)
+        var newServiceRemoved = serviceExistedBefore is not false || TryRemoveNewService(log);
+        if (!CanRemoveDeployedSystemFilesAfterRollback(serviceExistedBefore,
+                newServiceRemoved))
         {
-            if (TryRemoveNewService(log))
+            // The service may still have the files open or reference them on reboot.
+            // Leave this operation's deployed files intact rather than break it.
+            log.WriteWarning("system_file_cleanup_deferred",
+                ("reason", "new_service_removal_failed"));
+            return false;
+        }
+
+        foreach (var item in replacedFiles.Reverse())
+        {
+            try
             {
-                foreach (var path in createdFiles)
-                {
-                    try
-                    {
-                        if (File.Exists(path)) File.Delete(path);
-                    }
-                    catch (Exception error)
-                    {
-                        complete = false;
-                        log.WriteException("created_file_cleanup_failed", error,
-                            ("file", Path.GetFileName(path)));
-                    }
-                }
+                RestoreSystemFile(item);
+                log.WriteEvent("system_file_restored",
+                    ("file", Path.GetFileName(item.Destination)));
             }
-            else complete = false;
+            catch (Exception error)
+            {
+                complete = false;
+                log.WriteException("system_file_restore_failed", error,
+                    ("file", Path.GetFileName(item.Destination)));
+            }
+        }
+
+        foreach (var path in createdFiles.Reverse())
+        {
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch (Exception error)
+            {
+                complete = false;
+                log.WriteException("created_file_cleanup_failed", error,
+                    ("file", Path.GetFileName(path)));
+            }
         }
         return complete;
     }
+
+    internal static bool CanRemoveDeployedSystemFilesAfterRollback(
+        bool? serviceExistedBefore, bool newServiceRemoved) =>
+        serviceExistedBefore is not false || newServiceRemoved;
 
     private static void RestoreSnapshot(FilterSnapshot snapshot)
     {

@@ -23,6 +23,9 @@
     <Compile Include="..\DriverInstaller\Services\AppleSoftwareUpdateCatalog.cs" Link="AppleSoftwareUpdateCatalog.cs" />
     <Compile Include="..\DriverInstaller\Services\AppleSupportInstaller.cs" Link="AppleSupportInstaller.cs" />
     <Compile Include="..\DriverInstaller\Services\ElevatedDriverHost.cs" Link="ElevatedDriverHost.cs" />
+    <Compile Include="..\DriverInstaller\Services\DriverCleanupHost.cs" Link="DriverCleanupHost.cs" />
+    <EmbeddedResource Include="..\..\scripts\remove_selected_iphone_drivers.ps1"
+                      LogicalName="DriverCleanup.Script.ps1" />
     <EmbeddedResource Include="..\DriverInstaller\Assets\libusb-win32-1.2.6.0\amd64\install-filter.exe"
                       LogicalName="DriverPayload.amd64.install-filter.exe" />
     <EmbeddedResource Include="..\DriverInstaller\Assets\libusb-win32-1.2.6.0\amd64\libusb0.sys"

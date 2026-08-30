@@ -193,8 +193,62 @@ Root: HKA; Subkey: "Software\Classes\AppUserModelId\{#MyAppUserModelId}"; ValueT
 Filename: "{app}\iPhoneMirror.exe"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+const
+  WirelessFirewallRuleName = 'iPhoneMirror Wireless AirPlay';
+
 var
   DeleteUserData: Boolean;
+
+procedure ConfigureWirelessFirewall();
+var
+  ResultCode: Integer;
+  HostPath: String;
+  DeleteArguments: String;
+  AddTcpArguments: String;
+  AddUdpArguments: String;
+begin
+  if not IsAdminInstallMode then
+    Exit;
+
+  HostPath := ExpandConstant('{app}\Wireless\iPhoneMirror.WirelessHost.exe');
+  DeleteArguments := 'advfirewall firewall delete rule name="' +
+    WirelessFirewallRuleName + '"';
+  AddTcpArguments := 'advfirewall firewall add rule name="' +
+    WirelessFirewallRuleName + '" dir=in action=allow program="' + HostPath +
+    '" enable=yes profile=private,public remoteip=localsubnet protocol=TCP ' +
+    'localport=5001,7001,7100,8090';
+  AddUdpArguments := 'advfirewall firewall add rule name="' +
+    WirelessFirewallRuleName + '" dir=in action=allow program="' + HostPath +
+    '" enable=yes profile=private,public remoteip=localsubnet protocol=UDP ' +
+    'localport=1900';
+  Exec(ExpandConstant('{sys}\netsh.exe'), DeleteArguments, '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode);
+  if not Exec(ExpandConstant('{sys}\netsh.exe'), AddTcpArguments, '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) then
+    Log('Could not start netsh to add the wireless TCP firewall rule.')
+  else if ResultCode <> 0 then
+    Log(Format('Could not add the wireless TCP firewall rule: %d.', [ResultCode]));
+  if not Exec(ExpandConstant('{sys}\netsh.exe'), AddUdpArguments, '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) then
+    Log('Could not start netsh to add the wireless SSDP firewall rule.')
+  else if ResultCode <> 0 then
+    Log(Format('Could not add the wireless SSDP firewall rule: %d.', [ResultCode]));
+end;
+
+procedure RemoveWirelessFirewall();
+var
+  ResultCode: Integer;
+begin
+  if not IsAdminInstallMode then
+    Exit;
+
+  if not Exec(ExpandConstant('{sys}\netsh.exe'),
+      'advfirewall firewall delete rule name="' + WirelessFirewallRuleName + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Log('Could not start netsh to remove the wireless AirPlay firewall rule.')
+  else if ResultCode <> 0 then
+    Log(Format('Could not remove the wireless AirPlay firewall rule: %d.', [ResultCode]));
+end;
 
 function UserDataDirectory(Param: String): String;
 begin
@@ -220,6 +274,9 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then
+    RemoveWirelessFirewall();
+
   if (CurUninstallStep = usPostUninstall) and DeleteUserData then
     DelTree(UserDataDirectory(''), True, True, True);
 end;
@@ -236,6 +293,9 @@ begin
     DelTree(ExpandConstant('{userprograms}\{#MyAppName}'), True, True, True);
     DeleteFile(ExpandConstant('{userdesktop}\{#MyAppName}.lnk'));
   end;
+
+  if CurStep = ssPostInstall then
+    ConfigureWirelessFirewall();
 
   if (CurStep = ssDone) and
      (ExpandConstant('{param:STARTAPP|0}') = '1') then

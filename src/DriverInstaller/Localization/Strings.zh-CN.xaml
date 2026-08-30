@@ -4,6 +4,7 @@
     <system:String x:Key="AppTitle">iPhoneMirror 驱动管理器</system:String>
     <system:String x:Key="AppSubtitle">Apple USB 环境与按设备采集过滤驱动</system:String>
     <system:String x:Key="OpenLogs">打开日志</system:String>
+    <system:String x:Key="ForceDriverCleanup">强制清除所有驱动</system:String>
     <system:String x:Key="Refresh">刷新</system:String>
     <system:String x:Key="AppleUsbEnvironment">Apple USB 环境</system:String>
     <system:String x:Key="CaptureFilterDriver">采集过滤驱动</system:String>
@@ -56,6 +57,11 @@
     <system:String x:Key="AisiTitle">使用爱思投屏完成驱动准备</system:String>
     <system:String x:Key="AisiBody">从爱思官网下载并完成一次正常有线投屏，然后返回重新检测。</system:String>
     <system:String x:Key="OpenWebsite">打开官网</system:String>
+    <system:String x:Key="DriverCleanupTitle">运行清除所有驱动脚本</system:String>
+    <system:String x:Key="DriverCleanupBody">在独立窗口中选择设备，清除其关联的所有设备节点和驱动包，包括 Apple 官方驱动。脚本会要求确认后才会修改系统。</system:String>
+    <system:String x:Key="RunDriverCleanup">清除所有驱动</system:String>
+    <system:String x:Key="DriverCleanupScriptMissing">找不到清除所有驱动脚本：{0}</system:String>
+    <system:String x:Key="DriverCleanupScriptStartFailed">无法启动清除所有驱动脚本：{0}</system:String>
     <system:String x:Key="Close">关闭</system:String>
     <system:String x:Key="Minimize">最小化</system:String>
     <system:String x:Key="Maximize">最大化或还原</system:String>

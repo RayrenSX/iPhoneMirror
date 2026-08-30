@@ -9,9 +9,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.8.0</Version>
-    <AssemblyVersion>1.8.0.0</AssemblyVersion>
-    <FileVersion>1.8.0.0</FileVersion>
+    <Version>1.8.1</Version>
+    <AssemblyVersion>1.8.1.0</AssemblyVersion>
+    <FileVersion>1.8.1.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>
@@ -78,7 +78,12 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Resource Include="Assets\iPhoneMirror.ico" />
+    <Content Include="Assets\iPhoneMirror.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <!-- MainWindow resolves this icon through a site-of-origin URI. -->
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
     <Resource Include="Assets\iPhoneMirror.png" />
     <Content Include="native\iPhoneMirror.Core.dll" Condition="Exists('native\iPhoneMirror.Core.dll')">
       <Link>iPhoneMirror.Core.dll</Link>
