@@ -39,6 +39,12 @@ function Resolve-MsysRoot {
     if (-not [string]::IsNullOrWhiteSpace($env:IPHONE_MIRROR_MSYS2_ROOT)) {
         $candidates += $env:IPHONE_MIRROR_MSYS2_ROOT
     }
+    # msys2/setup-msys2 exposes its installation through PATH rather than a
+    # stable environment variable. Recover the root from the selected bash.
+    $bash = Get-Command bash.exe -ErrorAction SilentlyContinue
+    if ($null -ne $bash -and $bash.Source -match '\\usr\\bin\\bash\.exe$') {
+        $candidates += Split-Path (Split-Path $bash.Source -Parent) -Parent
+    }
     $candidates += @(
         'C:\msys64',
         (Join-Path $Root 'work\dependencies\msys2-20260611\root\msys64'))
