@@ -328,6 +328,8 @@ Windows 工作流使用 GitHub 托管的 `windows-latest` runner。构建时会�
 
 Actions 失败时，在日志中搜索 `Cloning USB touch bridge`、`USB touch bridge build failed`
 或 `USB touch bridge runtime`，可分别定位下载、编译和运行时载荷校验阶段。
+如果失败发生在 `Set up MSYS2 UCRT64 for UxPlay` 且提示 `Operation too slow`，通常是
+MSYS2 镜像临时超时；工作流已关闭全量更新，只安装构建所需包，重新运行即可。
 
 要求：
 

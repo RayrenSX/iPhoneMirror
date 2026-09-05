@@ -43,7 +43,10 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
-          update: true
+          # Avoid a full MSYS2 mirror upgrade on every run. The action still
+          # installs the pinned build dependencies below, while avoiding
+          # unrelated mirror timeouts during database refresh.
+          update: false
           install: >-
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
