@@ -54,6 +54,12 @@ function Resolve-MsysRoot {
         if ($null -ne $runnerBash) {
             $candidates += Split-Path (Split-Path $runnerBash.FullName -Parent) -Parent
         }
+        $msysCommand = Get-Command msys2.cmd -ErrorAction SilentlyContinue
+        if ($null -ne $msysCommand) {
+            $candidates += Split-Path $msysCommand.Source -Parent
+            $candidates += Join-Path (Split-Path $msysCommand.Source -Parent) 'msys64'
+            $candidates += Join-Path (Split-Path (Split-Path $msysCommand.Source -Parent) -Parent) 'msys64'
+        }
     }
     $candidates += @(
         'C:\msys64',
