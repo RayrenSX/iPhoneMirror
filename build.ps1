@@ -390,6 +390,8 @@ try {
         & $CTest --test-dir build/native -C $Configuration --output-on-failure
         if ($LASTEXITCODE -ne 0) { throw "Native tests failed: $LASTEXITCODE" }
 
+        $libUsbDirectory = Join-Path $Root 'third_party\libusb\bin\x64'
+        $env:PATH = "$libUsbDirectory$([IO.Path]::PathSeparator)$env:PATH"
         & $UsbControlPython -m unittest tests\usb_touch_logic_test.py
         if ($LASTEXITCODE -ne 0) { throw "USB touch bridge tests failed: $LASTEXITCODE" }
 

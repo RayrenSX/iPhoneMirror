@@ -530,7 +530,7 @@ def _valid_personalized_ddi_bundle(root: Path) -> Optional[tuple[Path, Path, Pat
 
 def _ddi_source_headers(source: PersonalizedDdiDownloadSource) -> dict[str, str]:
     headers = {
-        'User-Agent': 'iPhoneMirror-UsbTouchBridge/1.0',
+        'User-Agent': 'iUsbBridge/1.0',
         'Accept-Encoding': 'identity',
     }
     if source.kind == 'api':
