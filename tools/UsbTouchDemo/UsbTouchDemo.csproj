@@ -12,9 +12,9 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>
-    <Content Include="..\..\dist\UsbTouchBridge.exe"
-             Condition="Exists('..\..\dist\UsbTouchBridge.exe')">
-      <Link>UsbTouchBridge.exe</Link>
+    <Content Include="..\..\dist\iUsbBridge.exe"
+             Condition="Exists('..\..\dist\iUsbBridge.exe')">
+      <Link>iUsbBridge.exe</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>

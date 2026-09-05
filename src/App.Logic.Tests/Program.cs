@@ -1961,7 +1961,7 @@ try
     var bridgeRuntimeInternal = Path.Combine(bridgeRuntimeTestRoot, "_internal");
     Directory.CreateDirectory(bridgeRuntimeInternal);
     var bridgeRuntimeExecutable = Path.Combine(bridgeRuntimeTestRoot,
-        "UsbTouchBridge.exe");
+        "iUsbBridge.exe");
     var bridgeRuntimeDependency = Path.Combine(bridgeRuntimeInternal, "dependency.bin");
     File.WriteAllText(bridgeRuntimeExecutable, "bridge");
     File.WriteAllText(bridgeRuntimeDependency, "dependency");
@@ -1969,7 +1969,7 @@ try
     {
         new
         {
-            path = "UsbTouchBridge.exe",
+            path = "iUsbBridge.exe",
             sha256 = Convert.ToHexString(SHA256.HashData(
                 File.ReadAllBytes(bridgeRuntimeExecutable))).ToLowerInvariant(),
         },
@@ -1981,7 +1981,7 @@ try
         },
     };
     File.WriteAllText(Path.Combine(bridgeRuntimeTestRoot,
-        "UsbTouchBridge.runtime.json"), JsonSerializer.Serialize(new
+        "iUsbBridge.runtime.json"), JsonSerializer.Serialize(new
     {
         schema = 1,
         files = bridgeRuntimeFiles,
@@ -2001,7 +2001,7 @@ try
         "USB touch bridge runtime reports dependency hash mismatches");
 
     File.WriteAllText(Path.Combine(bridgeRuntimeTestRoot,
-        "UsbTouchBridge.runtime.json"), JsonSerializer.Serialize(new
+        "iUsbBridge.runtime.json"), JsonSerializer.Serialize(new
     {
         schema = 1,
         files = new[]

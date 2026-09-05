@@ -1864,7 +1864,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             _usbControlStatus = "正在连接无线反控桥接器";
             NotifyUsbControlStateChanged();
-            var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "UsbTouchBridge.exe");
+            var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
             // The bridge owns Network usbmux/mDNS discovery. Do not gate this
             // path on the optional system Bonjour service or launch repair UI.
             await _lockdownHandshakeGate.WaitAsync(_shutdownCancellation.Token);
@@ -2025,7 +2025,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private static string GetUsbDirectControlBridgePath()
     {
-        return Path.Combine(AppContext.BaseDirectory, "tools", "UsbTouchBridge.exe");
+        return Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
     }
 
     private static string GetUsbControlFailureMessage(Exception error,
@@ -2591,7 +2591,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task EnableWifiSyncForDetectedDevicesAsync(IEnumerable<string> udids)
     {
-        var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "UsbTouchBridge.exe");
+            var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
         if (!File.Exists(bridgePath)) return;
         foreach (var udid in udids)
         {

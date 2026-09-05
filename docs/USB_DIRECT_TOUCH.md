@@ -1,6 +1,6 @@
 # USB 直连触控
 
-本项目的 `UsbTouchBridge.exe` 是自研独立实现，通过 USB、CoreDevice 隧道、RSD 和 Universal HID 服务向 iPhone 发送触控报告。
+本项目的 `iUsbBridge.exe` 是自研独立实现，通过 USB、CoreDevice 隧道、RSD 和 Universal HID 服务向 iPhone 发送触控报告。
 
 它实现 USB 设备发现、4 字节 little-endian 长度前缀 JSON 输入、五点触控状态机及 58 字节触控报告编码，不需要蓝牙或其他外部控制程序。应用层消息使用本项目定义的 `iphoneMirror.touch.v2` schema。
 

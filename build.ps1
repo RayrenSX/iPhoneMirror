@@ -50,8 +50,8 @@ $UsbControlRoot = if ([string]::IsNullOrWhiteSpace($env:IPHONE_MIRROR_USB_BRIDGE
 }
 $UsbControlBuild = Join-Path $UsbControlRoot 'build.ps1'
 $UsbControlSource = Join-Path $UsbControlRoot 'src\usb_touch_bridge.py'
-$UsbTouchBridgeOutput = Join-Path $Root 'dist\UsbTouchBridge.exe'
-$UsbTouchBridgeRuntimeManifest = Join-Path $Root 'dist\UsbTouchBridge.runtime.json'
+$UsbTouchBridgeOutput = Join-Path $Root 'dist\iUsbBridge.exe'
+$UsbTouchBridgeRuntimeManifest = Join-Path $Root 'dist\iUsbBridge.runtime.json'
 $UsbTouchBridgeRuntimeTools = Join-Path $Root 'scripts\UsbTouchBridgeRuntime.ps1'
 $UsbControlEnvironment = Join-Path $UsbControlRoot 'work\usb-touch-bridge-python'
 $UsbControlPython = Join-Path $UsbControlEnvironment 'Scripts\python.exe'
@@ -92,23 +92,6 @@ function Build-UsbTouchBridge {
         -EnvironmentPath $UsbControlEnvironment
     if ($LASTEXITCODE -ne 0) {
         throw "USB touch bridge build failed: $LASTEXITCODE"
-    }
-    # iUsbBridge names its executable and manifest after the upstream project.
-    # Normalize only the copied integration payload so iPhoneMirror keeps its
-    # stable UsbTouchBridge contract without modifying the upstream checkout.
-    $upstreamManifest = Join-Path (Split-Path -Parent $UsbTouchBridgeOutput) `
-        'iUsbBridge.runtime.json'
-    if (Test-Path -LiteralPath $upstreamManifest -PathType Leaf) {
-        $manifest = Get-Content -LiteralPath $upstreamManifest -Raw |
-            ConvertFrom-Json
-        foreach ($entry in @($manifest.files)) {
-            if ($entry.path -eq 'iUsbBridge.exe') { $entry.path = 'UsbTouchBridge.exe' }
-        }
-        $normalizedManifest = Join-Path (Split-Path -Parent $UsbTouchBridgeOutput) `
-            'UsbTouchBridge.runtime.json'
-        $manifest | ConvertTo-Json -Depth 8 |
-            Set-Content -LiteralPath $normalizedManifest -Encoding utf8NoBOM
-        Remove-Item -LiteralPath $upstreamManifest -Force
     }
     if (-not (Test-Path -LiteralPath $UsbTouchBridgeOutput -PathType Leaf) -or
         -not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeManifest -PathType Leaf) -or
@@ -496,7 +479,7 @@ try {
             'THIRD_PARTY_NOTICES.md',
             'CHANGELOG.md',
             'DRIVER_DEPENDENCIES.md',
-            'tools\UsbTouchBridge.exe',
+            'tools\iUsbBridge.exe',
             'tools\updater\Apply-ZipUpdate.ps1',
             'licenses\libusb-COPYING.txt',
             'licenses\libusb-win32-COPYING-LGPL.txt',

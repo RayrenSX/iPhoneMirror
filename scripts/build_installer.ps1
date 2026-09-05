@@ -103,7 +103,7 @@ try {
     }
     $requiredPayload = @('CHANGELOG.md', 'DRIVER_DEPENDENCIES.md', 'LICENSE',
             'THIRD_PARTY_NOTICES.md',
-            'tools\UsbTouchBridge.exe', 'tools\UsbTouchBridge.runtime.json',
+            'tools\iUsbBridge.exe', 'tools\iUsbBridge.runtime.json',
             'tools\updater\Apply-ZipUpdate.ps1',
             'libusb0.dll', 'msvcp140.dll',
             'vcruntime140.dll', 'vcruntime140_1.dll',

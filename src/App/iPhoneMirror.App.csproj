@@ -34,9 +34,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="..\..\dist\UsbTouchBridge.exe">
-      <Link>tools\UsbTouchBridge.exe</Link>
-      <TargetPath>tools\UsbTouchBridge.exe</TargetPath>
+    <Content Include="..\..\dist\iUsbBridge.exe">
+      <Link>tools\iUsbBridge.exe</Link>
+      <TargetPath>tools\iUsbBridge.exe</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
@@ -48,9 +48,9 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Content Include="..\..\dist\UsbTouchBridge.runtime.json">
-      <Link>tools\UsbTouchBridge.runtime.json</Link>
-      <TargetPath>tools\UsbTouchBridge.runtime.json</TargetPath>
+    <Content Include="..\..\dist\iUsbBridge.runtime.json">
+      <Link>tools\iUsbBridge.runtime.json</Link>
+      <TargetPath>tools\iUsbBridge.runtime.json</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
@@ -60,12 +60,12 @@
   </ItemGroup>
 
   <Target Name="ValidateUsbTouchBridgePayload" BeforeTargets="PrepareForBuild">
-    <Error Condition="!Exists('..\..\dist\UsbTouchBridge.exe')"
-           Text="UsbTouchBridge.exe is missing. Run build.ps1 so the self-developed USB bridge is built first." />
+    <Error Condition="!Exists('..\..\dist\iUsbBridge.exe')"
+           Text="iUsbBridge.exe is missing. Run build.ps1 so the self-developed USB bridge is built first." />
     <Error Condition="!Exists('..\..\dist\_internal')"
            Text="UsbTouchBridge runtime directory is missing. Run build.ps1 so the self-developed USB bridge is built first." />
-    <Error Condition="!Exists('..\..\dist\UsbTouchBridge.runtime.json')"
-           Text="UsbTouchBridge runtime manifest is missing. Run build.ps1 so the self-developed USB bridge is built first." />
+    <Error Condition="!Exists('..\..\dist\iUsbBridge.runtime.json')"
+           Text="iUsbBridge runtime manifest is missing. Run build.ps1 so the self-developed USB bridge is built first." />
   </Target>
 
   <ItemGroup>

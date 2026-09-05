@@ -44,7 +44,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--bridge",
-        default=str(Path(__file__).resolve().parents[1] / "dist" / "UsbTouchBridge.exe"),
+        default=str(Path(__file__).resolve().parents[1] / "dist" / "iUsbBridge.exe"),
     )
     parser.add_argument("--udid")
     parser.add_argument("--rate-hz", type=int, default=120)

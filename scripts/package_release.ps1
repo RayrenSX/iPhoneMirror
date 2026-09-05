@@ -108,8 +108,8 @@ $RequiredArtifacts = @(
     'Assets\iPhoneMirror.ico',
     'licenses\WPF-UI-LICENSE.md',
     'licenses\WPF-UI-ThirdPartyNotices.txt',
-    'tools\UsbTouchBridge.exe',
-    'tools\UsbTouchBridge.runtime.json',
+    'tools\iUsbBridge.exe',
+    'tools\iUsbBridge.runtime.json',
     'tools\updater\Apply-ZipUpdate.ps1',
     'licenses\libusb-COPYING.txt',
     'licenses\libusb-win32-COPYING-LGPL.txt',
@@ -561,7 +561,7 @@ try {
         'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
-        'tools\UsbTouchBridge.exe', 'tools\UsbTouchBridge.runtime.json'
+        'tools\iUsbBridge.exe', 'tools\iUsbBridge.runtime.json'
     )
     if ($UseMediaOutputRuntime) {
         $installerRequiredArtifacts += @(

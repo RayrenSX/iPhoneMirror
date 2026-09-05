@@ -126,7 +126,7 @@ try {
     $sourceRequiredArtifacts = @(
         'iPhoneMirror.dll', 'iPhoneMirror.Core.dll',
         'iPhoneMirror.UsbConfigurationSwitch.exe', 'iPhoneMirror.Driver.exe',
-        'tools\UsbTouchBridge.exe', 'tools\UsbTouchBridge.runtime.json',
+        'tools\iUsbBridge.exe', 'tools\iUsbBridge.runtime.json',
         'iPhoneMirror.Driver.dll', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll'
@@ -180,7 +180,7 @@ try {
         'libusb0.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
         'iPhoneMirror.dll', 'iPhoneMirror.Core.dll',
         'iPhoneMirror.UsbConfigurationSwitch.exe', 'iPhoneMirror.Driver.exe',
-        'tools\UsbTouchBridge.exe', 'tools\UsbTouchBridge.runtime.json',
+        'tools\iUsbBridge.exe', 'tools\iUsbBridge.runtime.json',
         'iPhoneMirror.Driver.dll', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',

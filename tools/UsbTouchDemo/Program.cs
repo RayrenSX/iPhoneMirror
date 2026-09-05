@@ -19,10 +19,10 @@ internal static class Program
     private static string ResolveBridge(string[] args)
     {
         if (args.Length > 0 && File.Exists(args[0])) return Path.GetFullPath(args[0]);
-        var beside = Path.Combine(AppContext.BaseDirectory, "UsbTouchBridge.exe");
+        var beside = Path.Combine(AppContext.BaseDirectory, "iUsbBridge.exe");
         if (File.Exists(beside)) return beside;
         throw new FileNotFoundException(
-            "Put UsbTouchBridge.exe beside UsbTouchDemo.exe, or pass its path as the first argument.",
+            "Put iUsbBridge.exe beside UsbTouchDemo.exe, or pass its path as the first argument.",
             beside);
     }
 }

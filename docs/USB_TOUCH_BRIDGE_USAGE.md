@@ -1,6 +1,6 @@
-# UsbTouchBridge.exe 调用文档
+# iUsbBridge.exe 调用文档
 
-`UsbTouchBridge.exe` 是 iPhoneMirror 的输入桥接进程。它通过 Apple
+`iUsbBridge.exe` 是 iPhoneMirror 的输入桥接进程。它通过 Apple
 usbmuxd 建立 CoreDevice 隧道，再向 Universal HID 服务发送触控和键盘报告。
 程序本身不提供交互式命令行输入；启动后通过标准输入接收二进制长度前缀的
 JSON 消息，通过标准输出发送 JSON Lines 状态事件。
@@ -8,19 +8,19 @@ JSON 消息，通过标准输出发送 JSON Lines 状态事件。
 ## 1. 基本位置
 
 ```text
-C:\Users\Ray\Documents\iphoneMirror\dist\UsbTouchBridge.exe
+C:\Users\Ray\Documents\iphoneMirror\dist\iUsbBridge.exe
 ```
 
 查看参数：
 
 ```powershell
-.\dist\UsbTouchBridge.exe --help
+.\dist\iUsbBridge.exe --help
 ```
 
 ## 2. 启动参数
 
 ```text
-UsbTouchBridge.exe [--usb | --wireless] [--udid UDID] [--rate-hz HZ] [--ddi-dir DIRECTORY]
+iUsbBridge.exe [--usb | --wireless] [--udid UDID] [--rate-hz HZ] [--ddi-dir DIRECTORY]
 ```
 
 参数说明：
@@ -38,8 +38,8 @@ UsbTouchBridge.exe [--usb | --wireless] [--udid UDID] [--rate-hz HZ] [--ddi-dir 
 ### USB 模式
 
 ```powershell
-.\dist\UsbTouchBridge.exe --usb
-.\dist\UsbTouchBridge.exe --usb --udid 00008150-001903580A9B401C
+.\dist\iUsbBridge.exe --usb
+.\dist\iUsbBridge.exe --usb --udid 00008150-001903580A9B401C
 ```
 
 USB 模式要求 iPhone 通过数据线连接、已解锁并信任此电脑。
@@ -47,8 +47,8 @@ USB 模式要求 iPhone 通过数据线连接、已解锁并信任此电脑。
 ### 无线模式
 
 ```powershell
-.\dist\UsbTouchBridge.exe --wireless
-.\dist\UsbTouchBridge.exe --wireless --udid 00008150-001903580A9B401C
+.\dist\iUsbBridge.exe --wireless
+.\dist\iUsbBridge.exe --wireless --udid 00008150-001903580A9B401C
 ```
 
 无线模式使用 Apple 的 usbmux `Network` 设备记录或 CoreDevice 的 RemotePairing
@@ -173,7 +173,7 @@ import json
 import struct
 import subprocess
 
-exe = r"C:\Users\Ray\Documents\iphoneMirror\dist\UsbTouchBridge.exe"
+exe = r"C:\Users\Ray\Documents\iphoneMirror\dist\iUsbBridge.exe"
 p = subprocess.Popen(
     [exe, "--usb"],
     stdin=subprocess.PIPE,

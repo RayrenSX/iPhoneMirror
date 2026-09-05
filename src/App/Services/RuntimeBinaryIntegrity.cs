@@ -64,14 +64,14 @@ internal static class RuntimeBinaryIntegrity
             var directory = Path.GetDirectoryName(executablePath);
             if (string.IsNullOrWhiteSpace(directory) || !File.Exists(executablePath))
             {
-                failure = "UsbTouchBridge.exe is missing";
+                failure = "iUsbBridge.exe is missing";
                 return false;
             }
 
-            var manifestPath = Path.Combine(directory, "UsbTouchBridge.runtime.json");
+            var manifestPath = Path.Combine(directory, "iUsbBridge.runtime.json");
             if (!File.Exists(manifestPath))
             {
-                failure = "UsbTouchBridge.runtime.json is missing";
+                failure = "iUsbBridge.runtime.json is missing";
                 return false;
             }
 
@@ -115,7 +115,7 @@ internal static class RuntimeBinaryIntegrity
                     return false;
                 }
 
-                if (string.Equals(normalized, "UsbTouchBridge.exe",
+                if (string.Equals(normalized, "iUsbBridge.exe",
                         StringComparison.OrdinalIgnoreCase))
                     hasExecutable = true;
                 if (normalized.StartsWith("_internal\\", StringComparison.OrdinalIgnoreCase))

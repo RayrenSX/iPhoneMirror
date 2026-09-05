@@ -8,7 +8,7 @@ function Get-UsbTouchBridgeRuntimeManifestEntries {
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
         throw "$Label directory is missing: $Directory"
     }
-    $manifestPath = Join-Path $Directory 'UsbTouchBridge.runtime.json'
+    $manifestPath = Join-Path $Directory 'iUsbBridge.runtime.json'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         throw "$Label manifest is missing: $manifestPath"
     }
@@ -23,7 +23,7 @@ function Get-UsbTouchBridgeRuntimeManifestEntries {
     }
     $entries = @($manifest.files)
     if ($entries.Count -eq 0 -or
-        @($entries | Where-Object { $_.path -eq 'UsbTouchBridge.exe' }).Count -ne 1 -or
+        @($entries | Where-Object { $_.path -eq 'iUsbBridge.exe' }).Count -ne 1 -or
         @($entries | Where-Object { $_.path -like '_internal/*' }).Count -eq 0) {
         throw "$Label manifest does not describe a complete onedir bridge."
     }
@@ -39,7 +39,7 @@ function Get-UsbTouchBridgeRuntimeManifestEntries {
             @($segments | Where-Object {
                 [string]::IsNullOrWhiteSpace($_) -or $_ -in @('.', '..')
             }).Count -ne 0 -or
-            ($relative -ne 'UsbTouchBridge.exe' -and
+            ($relative -ne 'iUsbBridge.exe' -and
                 -not $relative.StartsWith('_internal/', [StringComparison]::Ordinal)) -or
             $expectedHash -notmatch '^[0-9a-fA-F]{64}$' -or
             -not $seen.Add($relative)) {
@@ -70,7 +70,7 @@ function Assert-UsbTouchBridgeRuntime {
     $expected = @($entries | ForEach-Object {
         ([string]$_.path).Replace('/', [IO.Path]::DirectorySeparatorChar)
     })
-    $actual = @('UsbTouchBridge.exe') + @(Get-ChildItem -LiteralPath $runtimeDirectory `
+    $actual = @('iUsbBridge.exe') + @(Get-ChildItem -LiteralPath $runtimeDirectory `
         -Recurse -File | ForEach-Object {
             $_.FullName.Substring($Directory.Length + 1)
         })
@@ -100,7 +100,7 @@ function Get-UsbTouchBridgeRuntimePayloadFiles {
     )
 
     $entries = @(Get-UsbTouchBridgeRuntimeManifestEntries $Directory 'USB touch bridge runtime')
-    return @((Join-Path $TargetDirectory 'UsbTouchBridge.runtime.json')) + @(
+    return @((Join-Path $TargetDirectory 'iUsbBridge.runtime.json')) + @(
         $entries | ForEach-Object {
             Join-Path $TargetDirectory (([string]$_.path).Replace('/', [IO.Path]::DirectorySeparatorChar))
         })

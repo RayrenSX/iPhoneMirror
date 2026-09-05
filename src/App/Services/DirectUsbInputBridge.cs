@@ -66,7 +66,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         AuthMode = null;
         _requestedUdid = udid;
         _requestedWireless = wireless;
-        bridgeScript ??= Path.Combine(AppContext.BaseDirectory, "tools", "UsbTouchBridge.exe");
+        bridgeScript ??= Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
         var usePackagedBridge = string.Equals(Path.GetExtension(bridgeScript), ".exe",
             StringComparison.OrdinalIgnoreCase);
         if (usePackagedBridge &&
