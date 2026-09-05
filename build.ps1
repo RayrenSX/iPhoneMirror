@@ -109,6 +109,7 @@ function Build-UsbTouchBridge {
     # redirection so runner console encoding cannot affect the smoke test.
     $helpOutput = Join-Path $Root 'work\iUsbBridge-help.txt'
     $helpError = Join-Path $Root 'work\iUsbBridge-help.err.txt'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $helpOutput) | Out-Null
     $previousPythonIoEncoding = $env:PYTHONIOENCODING
     try {
         $env:PYTHONIOENCODING = 'utf-8'
