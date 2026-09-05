@@ -93,6 +93,23 @@ function Build-UsbTouchBridge {
     if ($LASTEXITCODE -ne 0) {
         throw "USB touch bridge build failed: $LASTEXITCODE"
     }
+    # iUsbBridge names its executable and manifest after the upstream project.
+    # Normalize only the copied integration payload so iPhoneMirror keeps its
+    # stable UsbTouchBridge contract without modifying the upstream checkout.
+    $upstreamManifest = Join-Path (Split-Path -Parent $UsbTouchBridgeOutput) `
+        'iUsbBridge.runtime.json'
+    if (Test-Path -LiteralPath $upstreamManifest -PathType Leaf) {
+        $manifest = Get-Content -LiteralPath $upstreamManifest -Raw |
+            ConvertFrom-Json
+        foreach ($entry in @($manifest.files)) {
+            if ($entry.path -eq 'iUsbBridge.exe') { $entry.path = 'UsbTouchBridge.exe' }
+        }
+        $normalizedManifest = Join-Path (Split-Path -Parent $UsbTouchBridgeOutput) `
+            'UsbTouchBridge.runtime.json'
+        $manifest | ConvertTo-Json -Depth 8 |
+            Set-Content -LiteralPath $normalizedManifest -Encoding utf8NoBOM
+        Remove-Item -LiteralPath $upstreamManifest -Force
+    }
     if (-not (Test-Path -LiteralPath $UsbTouchBridgeOutput -PathType Leaf) -or
         -not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeManifest -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $Root 'dist\_internal') -PathType Container)) {
