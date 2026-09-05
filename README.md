@@ -320,10 +320,19 @@ OBS 30.1+ 还可以通过“应用程序音频捕获”选择 `iPhoneMirror.exe`
 
 ## 从源码构建
 
+### GitHub Actions 与 USB 桥接器
+
+Windows 工作流使用 GitHub 托管的 `windows-latest` runner。构建时会自动拉取并构建
+[RayrenSX/iUsbBridge](https://github.com/RayrenSX/iUsbBridge)，不要求 runner 预先存在
+本地兄弟目录。若本地已有工作副本，可设置 `IPHONE_MIRROR_USB_BRIDGE_ROOT` 覆盖默认路径。
+
+Actions 失败时，在日志中搜索 `Cloning USB touch bridge`、`USB touch bridge build failed`
+或 `USB touch bridge runtime`，可分别定位下载、编译和运行时载荷校验阶段。
+
 要求：
 
 - Windows 10/11 x64
-- Visual Studio 2026 Build Tools：MSVC、Windows SDK、CMake
+- Visual Studio Build Tools（含 MSVC、Windows SDK、CMake）
 - .NET 10 SDK 与 Windows Desktop 工作负载
 - MSYS2 UCRT64：CMake、Ninja、UCRT64 工具链、GStreamer（base、good、bad、libav）、
   libplist 和 OpenSSL，用于构建随包提供的 UxPlay 备用接收端

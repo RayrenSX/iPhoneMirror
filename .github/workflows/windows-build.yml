@@ -20,20 +20,22 @@ concurrency:
 jobs:
   build-test:
     name: build-test
-    runs-on: windows-2025-vs2026
-    timeout-minutes: 45
+    # Keep this on a public GitHub-hosted label. build.ps1 discovers the
+    # installed Visual Studio and CMake instead of relying on a custom label.
+    runs-on: windows-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up .NET 10 SDK
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
       - name: Set up Python for USB touch bridge
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 

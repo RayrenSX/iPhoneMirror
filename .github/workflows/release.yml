@@ -31,8 +31,8 @@ concurrency:
 jobs:
   release:
     name: Build and publish Windows x64 release
-    runs-on: windows-2025-vs2026
-    timeout-minutes: 75
+    runs-on: windows-latest
+    timeout-minutes: 90
 
     steps:
       - name: Resolve release tag
@@ -51,7 +51,7 @@ jobs:
           "version=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
 
       - name: Checkout release tag
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           ref: ${{ steps.version.outputs.tag }}
           fetch-depth: 0
@@ -79,12 +79,12 @@ jobs:
           "sha=$releaseSha" >> $env:GITHUB_OUTPUT
 
       - name: Set up .NET 10 SDK
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
       - name: Set up Python for USB touch bridge
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
