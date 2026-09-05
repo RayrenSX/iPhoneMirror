@@ -10,6 +10,43 @@ All notable changes to iPhoneMirror are documented here. The project follows
 - Add a mirroring-settings shortcut window for configuring the reverse-control
   hotkey, with conflict detection and live updates to control guidance.
 
+### Fixed
+
+- Retry the active wired-mirroring usbmux interface when its device-side
+  VERSION handshake times out, then fall back to Apple usbmuxd without
+  interrupting the wired mirror.
+- Give volume up, volume down, and lock-screen reverse-control shortcuts
+  independent global-hotkey registrations, route hardware button reports to
+  the selected wired/wireless bridge, and hold the lock-side-button report
+  long enough for iOS to accept it.
+- Pass the selected wireless resolution and frame rate to the UxPlay AirPlay
+  negotiation, and reset partial Y4M state whenever its raw video pipe
+  reconnects so a truncated session cannot corrupt the first frame of the next
+  connection. Reinsert H.264 parameter sets at IDR frames and make the bundled
+  software decoder discard corrupted output until the next sync point instead
+  of leaving a persistent green preview. Runtime preflight now also requires
+  and loads the Y4M bridge plugin plus its transitive DLL dependencies before
+  the UxPlay backend is reported available. Runtime preparation now builds into
+  a validated staging directory and restores the previous bundle if packaging
+  is interrupted or fails.
+- Allow the AirPlay wireless host's per-session TCP and UDP media ports through
+  the process-scoped local-subnet firewall rule; previously only fixed control
+  ports were opened, leaving some devices connected with a black screen before
+  the sender timed out.
+- Port upstream AirPlayServer connection-compatibility and mirror-stream
+  recovery fixes while keeping the reproducible v1.1.2 source pin; this
+  preserves HTTP/RTSP request handling, case-insensitive headers, two-stage
+  pair verification, bounded mirror reads, and TCP keepalive.
+- Preserve full-range BT.709 metadata for SDR USB/AirPlay frames across D3D11
+  preview, NV12 output, recordings, live streams and the virtual camera, so
+  light interface grays are not expanded a second time and clipped to white.
+- Keep HDR frame range metadata intact while normalizing non-HDR wired frames;
+  add regression coverage for gray-level conversion and full-range wireless I420.
+- Bound queued Bluetooth motion reports and discard stale movement after a
+  notification stall while preserving button, wheel and keyboard transitions.
+- Treat the GATT notification status as the delivery result, avoiding false
+  disconnects when an adapter reports an optional byte count of zero.
+
 ## [1.8.1] - 2026-08-30
 
 ### Fixed
@@ -1438,7 +1475,15 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.0...v1.8.1
+[1.8.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.1...v1.8.0
+[1.8.0-insider30]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v1.8.0-insider30
+[1.8.0-insider29]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v1.8.0-insider29
+[1.8.0-insider28]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v1.8.0-insider28
+[1.8.0-insider27]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v1.8.0-insider27
+[1.8.0-insider26]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v1.8.0-insider26
+[1.6.9]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.8...v1.6.9
 [1.7.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.9...v1.7.0
 [1.6.8]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.6.7...v1.6.8

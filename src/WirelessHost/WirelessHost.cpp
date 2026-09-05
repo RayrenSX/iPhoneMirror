@@ -162,6 +162,14 @@ std::optional<DeviceMetadata> parse_device_metadata(std::string_view message) {
     };
 }
 
+float airplay_decibels_to_linear_gain(float decibels) noexcept {
+    // The bundled AirPlay SDK reports RAOP volume in dB: 0 is full scale and
+    // -144 is mute. iPhone/iPad use -30..0 dB as the volume slider range,
+    // while the IPC contract and WASAPI renderer use a 0..1 slider value.
+    if (!std::isfinite(decibels) || decibels <= -30.0F) return 0.0F;
+    return std::clamp((decibels + 30.0F) / 30.0F, 0.0F, 1.0F);
+}
+
 bool write_all(HANDLE pipe, const void* source, std::size_t size,
     DWORD* failure_reason = nullptr) noexcept {
     const auto* bytes = static_cast<const std::uint8_t*>(source);
@@ -222,6 +230,33 @@ public:
             }
 
             if (header.type == iPhoneMirror::wireless::MessageType::Video) {
+                // Original-quality AirPlay frames are commonly 5-8 MB.  If
+                // the pipe writer is still busy with the previous frame, do
+                // not copy another identical frame into the queue: that copy
+                // happens on AirPlay's decoder callback thread and can stall
+                // the sender long enough to look like an orientation freeze.
+                // A geometry change is always retained so a rotation can
+                // replace the old frame as soon as it arrives.
+                const auto same_device = [&header](const QueuedMessage& queued) {
+                    return queued.header.type ==
+                            iPhoneMirror::wireless::MessageType::Video &&
+                        std::strncmp(queued.header.device_id, header.device_id,
+                            iPhoneMirror::wireless::DeviceIdBytes) == 0;
+                };
+                const auto queued_video = std::ranges::find_if(queue_, same_device);
+                const auto writing_same_device =
+                    writing_video_device_ == std::string_view(header.device_id);
+                const auto writing_same_geometry = writing_same_device &&
+                    writing_video_width_ == header.width &&
+                    writing_video_height_ == header.height;
+                const auto queued_same_geometry = queued_video != queue_.end() &&
+                    queued_video->header.width == header.width &&
+                    queued_video->header.height == header.height;
+                if ((queued_same_geometry || writing_same_geometry) &&
+                    (queued_video != queue_.end() || writing_same_device)) {
+                    dropped_video_.fetch_add(1, std::memory_order_relaxed);
+                    return true;
+                }
                 for (auto position = queue_.begin(); position != queue_.end();) {
                     if (position->header.type == iPhoneMirror::wireless::MessageType::Video &&
                         std::strncmp(position->header.device_id, header.device_id,
@@ -397,6 +432,40 @@ private:
                 }
                 message = std::move(queue_.front());
                 queue_.pop_front();
+                if (message.header.type ==
+                    iPhoneMirror::wireless::MessageType::Video)
+                {
+                    writing_video_device_ = message.header.device_id;
+                    writing_video_width_ = message.header.width;
+                    writing_video_height_ = message.header.height;
+                } else {
+                    writing_video_device_.clear();
+                    writing_video_width_ = writing_video_height_ = 0;
+                }
+            }
+
+            // A large original-quality frame may still be in the writer's
+            // local buffer when iOS rotates. If a newer frame for the same
+            // device is already queued, discard this stale frame before
+            // entering WriteFile so rotation is not hidden behind an old
+            // multi-megabyte payload.
+            if (message.header.type == iPhoneMirror::wireless::MessageType::Video) {
+                std::scoped_lock lock(mutex_);
+                const auto newer = std::ranges::any_of(queue_,
+                    [&message](const QueuedMessage& queued) {
+                        return queued.header.type ==
+                                iPhoneMirror::wireless::MessageType::Video &&
+                            std::strncmp(queued.header.device_id,
+                                message.header.device_id,
+                                iPhoneMirror::wireless::DeviceIdBytes) == 0 &&
+                            queued.header.sequence > message.header.sequence;
+                    });
+                if (newer) {
+                    buffered_bytes_ -= message.size();
+                    --buffered_messages_;
+                    dropped_video_.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
             }
 
             DWORD write_error = ERROR_SUCCESS;
@@ -408,6 +477,11 @@ private:
             std::scoped_lock lock(mutex_);
             buffered_bytes_ -= message.size();
             --buffered_messages_;
+            if (message.header.type == iPhoneMirror::wireless::MessageType::Video)
+            {
+                writing_video_device_.clear();
+                writing_video_width_ = writing_video_height_ = 0;
+            }
             if (!written) {
                 write_failures_.fetch_add(1, std::memory_order_relaxed);
                 last_write_error_.store(write_error, std::memory_order_relaxed);
@@ -430,6 +504,9 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     std::deque<QueuedMessage> queue_;
+    std::string writing_video_device_;
+    std::uint32_t writing_video_width_{};
+    std::uint32_t writing_video_height_{};
     std::size_t buffered_bytes_{};
     std::size_t buffered_messages_{};
     std::uint64_t sequence_{};
@@ -691,7 +768,8 @@ public:
     void setVolume(float volume, const char* remote_name,
         const char* remote_device_id) override {
         const auto valid = std::isfinite(volume);
-        const auto normalized = valid ? std::clamp(volume, 0.0F, 1.0F) : 0.0F;
+        const auto normalized = valid
+            ? airplay_decibels_to_linear_gain(volume) : 0.0F;
         iPhoneMirror::wireless::MessageHeader header;
         header.type = iPhoneMirror::wireless::MessageType::MediaVolume;
         header.reserved = static_cast<std::uint32_t>(
@@ -708,11 +786,11 @@ public:
         if (valid && has_device && !sent)
             media_send_failures_.fetch_add(1, std::memory_order_relaxed);
         diagnostic(std::format(
-            "callback volume remote_fp={} device_fp={} value={:.3f} "
+            "callback volume remote_fp={} device_fp={} db={:.3f} gain={:.3f} "
             "valid={} has_device={} sent={}",
             anonymous_label(safe_text(remote_name)),
             anonymous_label(safe_text(remote_device_id)),
-            normalized, valid, has_device, sent));
+            volume, normalized, valid, has_device, sent));
     }
 
     void mediaVolume(double volume,
@@ -965,10 +1043,15 @@ unsigned int argument_uint(int argc, wchar_t** argv, std::wstring_view name,
 
 bool supported_capability(unsigned int width, unsigned int height,
     unsigned int fps) noexcept {
-    return (width == 5120 && height == 2880 && fps == 60) ||
-        (width == 1920 && height == 1080 && fps == 60) ||
-        (width == 1280 && height == 720 && fps == 30) ||
-        (width == 960 && height == 540 && fps == 30);
+    const auto matches = [width, height](unsigned int long_edge,
+        unsigned int short_edge) {
+        return (width == long_edge && height == short_edge) ||
+            (width == short_edge && height == long_edge);
+    };
+    return (matches(5120, 2880) && fps == 60) ||
+        (matches(1920, 1080) && fps == 60) ||
+        (matches(1280, 720) && fps == 30) ||
+        (matches(960, 540) && fps == 30);
 }
 
 std::string utf8(std::wstring_view value) {

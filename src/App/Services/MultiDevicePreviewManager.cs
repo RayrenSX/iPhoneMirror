@@ -22,6 +22,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     private bool _disposed;
 
     internal event Action<string, nint>? ReverseControlRequested;
+    internal event Action<string, nint>? UsbControlRequested;
+    internal event Action<string, nint>? WirelessControlRequested;
     internal event Action<string>? PreviewClosed;
     internal event Action<string, PreviewPointerEventArgs>? PointerInput;
     internal event Action<string, PreviewKeyboardEventArgs>? KeyboardInput;
@@ -49,6 +51,14 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         if (string.IsNullOrWhiteSpace(udid) ||
             !_windows.TryGetValue(udid, out var window)) return false;
         window.Activate();
+        return true;
+    }
+
+    internal bool PrepareUsbControlWindow(string? udid)
+    {
+        if (string.IsNullOrWhiteSpace(udid) ||
+            !_windows.TryGetValue(udid, out var window)) return false;
+        window.PrepareForUsbControl();
         return true;
     }
 
@@ -152,7 +162,10 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  args => PointerInput?.Invoke(device.Udid, args),
                  args => KeyboardInput?.Invoke(device.Udid, args),
                  hwnd => ReverseControlRequested?.Invoke(device.Udid, hwnd),
-                 _isReverseControlHotkeyRegistered) || window is null)
+                 _isReverseControlHotkeyRegistered,
+                 () => viewModel.IsUsbControlTarget(device.Udid),
+                 hwnd => UsbControlRequested?.Invoke(device.Udid, hwnd),
+                 hwnd => WirelessControlRequested?.Invoke(device.Udid, hwnd)) || window is null)
         {
             if (started.Created)
                 await viewModel.StopDeviceSessionAsync(

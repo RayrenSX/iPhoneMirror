@@ -718,11 +718,16 @@ std::int32_t IM_CALL im_wireless_receiver_start_ex(const wchar_t* receiver_name,
         receiver = wireless_receiver;
     }
     try {
+        const auto matches = [width, height](std::uint32_t long_edge,
+            std::uint32_t short_edge) {
+            return (width == long_edge && height == short_edge) ||
+                (width == short_edge && height == long_edge);
+        };
         const auto supported =
-            (width == 5120 && height == 2880 && frame_rate == 60) ||
-            (width == 1920 && height == 1080 && frame_rate == 60) ||
-            (width == 1280 && height == 720 && frame_rate == 30) ||
-            (width == 960 && height == 540 && frame_rate == 30);
+            (matches(5120, 2880) && frame_rate == 60) ||
+            (matches(1920, 1080) && frame_rate == 60) ||
+            (matches(1280, 720) && frame_rate == 30) ||
+            (matches(960, 540) && frame_rate == 30);
         if (!supported)
             return fail(iPhoneMirror::Result::InvalidArgument,
                 L"Unsupported AirPlay display capability profile");
@@ -1980,7 +1985,7 @@ std::int32_t IM_CALL im_session_copy_latest_video_frame_nv12(
     *buffer_size = *required;
     if (!buffer || capacity < *required)
         return static_cast<std::int32_t>(iPhoneMirror::Result::BufferTooSmall);
-    return iPhoneMirror::media::detail::copy_nv12_frame_letterboxed(
+    return iPhoneMirror::media::detail::copy_nv12_frame_letterboxed_sdr(
         *frame, std::span<std::uint8_t>(buffer, *required), output_width,
         output_height)
         ? static_cast<std::int32_t>(iPhoneMirror::Result::Ok)

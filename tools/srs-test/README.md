@@ -1,9 +1,13 @@
-# Local SRS Media-Output Test Environment
+# Local SRS Media-Output Test Environment (legacy Docker backend)
 
 This directory provides a local SRS server and a browser test page for the
 iPhoneMirror recording and live-video output feature. It does not install
 Docker, WSL, drivers, or a virtual camera. Docker Desktop must already be
 installed and running.
+
+For new protocol and virtual-camera validation, prefer the backend-selecting
+[`tools/srs-lab`](../srs-lab/README.md). This folder remains useful when a fixed
+Docker SRS topology is required.
 
 ## Start
 
@@ -45,9 +49,11 @@ Use one publishing session at a time, then open the browser page and press
 The SRS configuration bridges RTMP and SRT into WebRTC and bridges WHIP into
 RTMP, so the same WHEP browser player verifies all three ingestion paths.
 
-The current iPhoneMirror media-output pipeline is video-only. It deliberately
-starts FFmpeg with `-an`; this environment verifies video delivery and must not
-be used to claim recorded or streamed iPhone audio support.
+The current iPhoneMirror media-output pipeline can include source PCM audio when
+it is available. This legacy browser page focuses on video delivery and does not
+assert audio synchronization; use the app's output status and a receiving client
+when validating audio. It must not be used as a substitute for the broader
+`tools/srs-lab` protocol checks.
 
 ## Browser Page
 

@@ -45,6 +45,9 @@ struct VideoDimensions {
     std::uint32_t height{};
 };
 
+void normalize_wired_screen_mirroring_color(
+    media::DecodedFrame& frame) noexcept;
+
 [[nodiscard]] constexpr std::uint64_t pack_video_dimensions(
     std::uint32_t width, std::uint32_t height) noexcept {
     return (static_cast<std::uint64_t>(width) << 32U) | height;

@@ -1,4 +1,4 @@
-# Device-aware preview corners
+# Device-aware preview corners (v1.8.1)
 
 The detached/OBS preview uses a device-family display outline instead of one
 hard-coded iPhone radius. `DeviceCornerProfileResolver` selects the curve from
@@ -37,7 +37,9 @@ claimed Apple hardware/CAD measurements. No Apple artwork is redistributed.
 Unknown future `iPhoneN,M` and `iPadN,M` identifiers inherit their modern
 family profile. A stream with no ProductType uses conservative phone/tablet
 aspect windows; ambiguous geometry remains rectangular to avoid clipping
-content.
+content. Video-app casting has no physical device ProductType, so its normal
+captioned playback window uses the Windows/DWM default corners rather than a
+phone mask.
 
 Run the resolver smoke tests with:
 

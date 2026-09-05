@@ -775,7 +775,10 @@ internal sealed class MediaOutputService : IAsyncDisposable
         args.AddRange([
             "-f", "rawvideo", "-pixel_format", "nv12",
             "-video_size", $"{request.Width}x{request.Height}",
-            "-framerate", request.FrameRate.ToString(), "-i", "pipe:0",
+            "-framerate", request.FrameRate.ToString(),
+            "-color_range", "pc", "-colorspace", "bt709",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
+            "-i", "pipe:0",
         ]);
         if (includeAudio)
         {
@@ -791,6 +794,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
         args.AddRange(["-c:v", capabilities.PreferredH264Encoder]);
         AddEncoderOptions(args, capabilities.PreferredH264Encoder, request.Kind);
         args.AddRange([
+            "-color_range", "pc", "-colorspace", "bt709",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
             "-pix_fmt", EncoderPixelFormat(capabilities.PreferredH264Encoder),
             "-g", (request.FrameRate * 2).ToString(),
             "-b:v", $"{request.BitrateKbps}k", "-maxrate", $"{request.BitrateKbps}k",
@@ -918,10 +923,14 @@ internal sealed class MediaOutputService : IAsyncDisposable
             "-hide_banner", "-loglevel", "error", "-nostdin",
             "-f", "rawvideo", "-pixel_format", "nv12",
             "-video_size", $"{width}x{height}", "-framerate", "30",
+            "-color_range", "pc", "-colorspace", "bt709",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
             "-i", "pipe:0", "-frames:v", "1", "-an", "-c:v", encoder,
         };
         AddEncoderOptions(arguments, encoder, MediaOutputKind.Recording);
         arguments.AddRange([
+            "-color_range", "pc", "-colorspace", "bt709",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
             "-pix_fmt", EncoderPixelFormat(encoder), "-f", "null", "-",
         ]);
         foreach (var argument in arguments) start.ArgumentList.Add(argument);

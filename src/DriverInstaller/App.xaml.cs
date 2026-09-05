@@ -15,7 +15,7 @@ public partial class App : Application
     private DriverOperationKind? _elevatedKind;
     private string? _elevatedOperation;
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         DispatcherUnhandledException += (_, args) =>
             DriverLogger.WriteException("runtime", "dispatcher_unhandled_exception",
@@ -35,6 +35,24 @@ public partial class App : Application
                 args.Exception);
             args.SetObserved();
         };
+        if (e.Args.Contains(DriverConstants.RepairBonjourSwitch,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            base.OnStartup(e);
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            try
+            {
+                var result = await new AppleSupportInstaller(new DeviceCatalog())
+                    .RepairBonjourAsync();
+                Shutdown(result.Success ? 0 : 1);
+            }
+            catch (Exception error)
+            {
+                DriverLogger.WriteException("bonjour", "repair_failed", error);
+                Shutdown(1);
+            }
+            return;
+        }
         if (DriverCleanupHost.IsRequested(e.Args))
         {
             _elevatedHost = true;

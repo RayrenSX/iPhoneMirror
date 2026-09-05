@@ -8,6 +8,25 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$UsbTouchBridgeRuntimeScript = Join-Path $Root 'scripts\UsbTouchBridgeRuntime.ps1'
+if (-not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeScript -PathType Leaf)) {
+    throw "USB touch bridge runtime validator is missing: $UsbTouchBridgeRuntimeScript"
+}
+. $UsbTouchBridgeRuntimeScript
+$UxPlayRuntimeManifestPath = Join-Path $Root 'scripts\uxplay-runtime-manifest.psd1'
+if (-not (Test-Path -LiteralPath $UxPlayRuntimeManifestPath -PathType Leaf)) {
+    throw "UxPlay runtime manifest is missing: $UxPlayRuntimeManifestPath"
+}
+$UxPlayRuntimeManifest = Import-PowerShellDataFile -LiteralPath $UxPlayRuntimeManifestPath
+$UxPlayRuntimeFiles = @($UxPlayRuntimeManifest.Files)
+if ($UxPlayRuntimeFiles.Count -eq 0 -or
+    @($UxPlayRuntimeFiles | Select-Object -Unique).Count -ne $UxPlayRuntimeFiles.Count -or
+    @($UxPlayRuntimeFiles | Where-Object {
+        [string]::IsNullOrWhiteSpace($_) -or [IO.Path]::IsPathRooted($_) -or
+        $_.Split([IO.Path]::DirectorySeparatorChar) -contains '..'
+    }).Count -ne 0) {
+    throw 'UxPlay runtime manifest is invalid.'
+}
 $WorkRoot = Join-Path $Root ('work\installer-test-' + [Guid]::NewGuid().ToString('N'))
 $InstallDirectory = Join-Path $WorkRoot 'installed'
 $OutputDirectory = Join-Path $WorkRoot 'setups'
@@ -107,6 +126,7 @@ try {
     $sourceRequiredArtifacts = @(
         'iPhoneMirror.dll', 'iPhoneMirror.Core.dll',
         'iPhoneMirror.UsbConfigurationSwitch.exe', 'iPhoneMirror.Driver.exe',
+        'tools\UsbTouchBridge.exe', 'tools\UsbTouchBridge.runtime.json',
         'iPhoneMirror.Driver.dll', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll'
@@ -116,12 +136,17 @@ try {
             -PathType Leaf) {
         $sourceRequiredArtifacts += $publishedFfmpeg
     }
+    $sourceRequiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
+        Join-Path 'Wireless\UxPlay' $_
+    })
     foreach ($required in $sourceRequiredArtifacts) {
         if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory $required) `
                 -PathType Leaf)) {
             throw "Shared installer runtime is missing: $required"
         }
     }
+    Assert-UsbTouchBridgeRuntime (Join-Path $SourceDirectory 'tools') `
+        'Shared installer USB touch bridge runtime'
     $sourceVersionedDac = @(Get-ChildItem -LiteralPath $SourceDirectory `
         -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
     if ($sourceVersionedDac.Count -ne 1) {
@@ -155,6 +180,7 @@ try {
         'libusb0.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
         'iPhoneMirror.dll', 'iPhoneMirror.Core.dll',
         'iPhoneMirror.UsbConfigurationSwitch.exe', 'iPhoneMirror.Driver.exe',
+        'tools\UsbTouchBridge.exe', 'tools\UsbTouchBridge.runtime.json',
         'iPhoneMirror.Driver.dll', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
@@ -164,12 +190,17 @@ try {
     if ($publishedFfmpeg -in $sourceRequiredArtifacts) {
         $installedRequiredArtifacts += $publishedFfmpeg
     }
+    $installedRequiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
+        Join-Path 'Wireless\UxPlay' $_
+    })
     foreach ($relative in $installedRequiredArtifacts) {
         if (-not (Test-Path -LiteralPath (Join-Path $InstallDirectory $relative) `
                 -PathType Leaf)) {
             throw "Upgrade did not install required native runtime: $relative"
         }
     }
+    Assert-UsbTouchBridgeRuntime (Join-Path $InstallDirectory 'tools') `
+        'Installed USB touch bridge runtime'
     $installedVersionedDac = @(Get-ChildItem -LiteralPath $InstallDirectory `
         -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
     if ($installedVersionedDac.Count -ne 1) {

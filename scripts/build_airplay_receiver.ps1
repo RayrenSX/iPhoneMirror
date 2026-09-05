@@ -62,8 +62,44 @@ $SourceRoot = (Resolve-Path -LiteralPath $BuildSourceRoot).Path
     -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-NetworkRoutePatch.ps1') `
     -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AirPlayCompatibilityPatch.ps1') `
+    -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AirPlayMirrorRecoveryPatch.ps1') `
+    -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AirPlayOrientationAccessUnitPatch.ps1') `
+    -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-AudioCodecPatch.ps1') `
     -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AirPlayAudioNegotiationPatch.ps1') `
+    -SourceRoot $SourceRoot
+
+$CompatibilityMarkers = @(
+    @{ Path = 'AirPlayServerLib\lib\http_parser.c';
+       Marker = 'IPHONE_MIRROR_AIRPLAY_PROTOCOL_COMPATIBILITY' },
+    @{ Path = 'AirPlayServerLib\lib\http_request.c';
+       Marker = 'IPHONE_MIRROR_AIRPLAY_HEADER_CASE' },
+    @{ Path = 'AirPlayServerLib\lib\pairing.c';
+       Marker = 'IPHONE_MIRROR_AIRPLAY_PAIR_VERIFY_TWO_STAGE' },
+    @{ Path = 'AirPlayServerLib\lib\raop_rtp_mirror.c';
+       Marker = 'IPHONE_MIRROR_AIRPLAY_MIRROR_RECOVERY' },
+    @{ Path = 'AirPlayServerLib\lib\raop_rtp.c';
+       Marker = 'IPHONE_MIRROR_AUDIO_CODEC_NEGOTIATION' },
+    @{ Path = 'AirPlayServerLib\lib\raop_rtp_mirror.c';
+       Marker = 'IPHONE_MIRROR_MIRROR_NAL_BOUNDS' },
+    @{ Path = 'AirPlayServerLib\lib\raop_rtp_mirror.c';
+       Marker = 'IPHONE_MIRROR_ORIENTATION_ACCESS_UNIT' },
+    @{ Path = 'AirPlayServerLib\lib\raop.c';
+       Marker = 'IPHONE_MIRROR_MIRROR_FLAG_OPTIONAL' },
+    @{ Path = 'AirPlayServerLib\lib\httpd.c';
+       Marker = 'IPHONE_MIRROR_AIRPLAY_RECV_ERROR' },
+    @{ Path = 'airplay2dll\FgAirplayChannel.cpp';
+       Marker = 'IPHONE_MIRROR_H264_DECODER_RECOVERY' })
+foreach ($Entry in $CompatibilityMarkers) {
+    $PatchedPath = Join-Path $SourceRoot $Entry.Path
+    if (-not ([IO.File]::ReadAllText($PatchedPath).Contains($Entry.Marker))) {
+        throw "AirPlay compatibility marker is missing: $($Entry.Marker)"
+    }
+}
 
 $VsWhere = Join-Path ${env:ProgramFiles(x86)} `
     'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -142,10 +178,15 @@ foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIG
         'IPHONE_MIRROR_AIRPLAY_PAIRING_SEED',
         'IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY',
         'IPHONE_MIRROR_ALAC_AUDIO_DECODE',
+        'IPHONE_MIRROR_AUDIO_CODEC_NEGOTIATION',
+        'IPHONE_MIRROR_H264_DECODER_RECOVERY',
+        'IPHONE_MIRROR_H264_ROTATION_RECOVERY',
+        'IPHONE_MIRROR_ORIENTATION_ACCESS_UNIT',
         'IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC',
         'IPHONE_MIRROR_RUNTIME_DEVICE_ID',
         'IPHONE_MIRROR_BOUND_MEDIA_SOCKETS',
         'IPHONE_MIRROR_PRESERVE_IPV6_MEDIA',
+        'Mirror TCP read timed out after %d ms',
         'iphonemirror://pause',
         'iphonemirror://resume',
         'iphonemirror://seek',

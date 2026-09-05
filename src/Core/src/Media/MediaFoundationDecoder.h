@@ -135,6 +135,12 @@ namespace detail {
 // are filled with range-correct black and neutral chroma.
 [[nodiscard]] bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
     std::span<std::uint8_t> output, std::uint32_t output_width,
+    std::uint32_t output_height, bool canonicalize_sdr = false) noexcept;
+// Copies a frame for encoded/streamed output. The result is always 8-bit
+// full-range BT.709 SDR NV12; HDR and non-BT.709 inputs are tone-mapped and
+// converted before being written.
+[[nodiscard]] bool copy_nv12_frame_letterboxed_sdr(const DecodedFrame& frame,
+    std::span<std::uint8_t> output, std::uint32_t output_width,
     std::uint32_t output_height) noexcept;
 // Materializes a shared hardware frame for CPU-only API consumers. This is
 // intentionally lazy so the normal D3D preview path remains GPU-only.

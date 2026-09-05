@@ -1,4 +1,4 @@
-# QuickTime iOS Screen Capture 协议分析
+# QuickTime iOS Screen Capture 协议分析（H.264/HEVC）
 
 ## 1. 结论摘要
 
@@ -158,23 +158,27 @@ bitsPerChannel   16
 ```
 
 因此 QuickTime 系统音频通常不是 AAC，而是未压缩的 48 kHz 双声道 16-bit PCM。输出 WAV
-只需要写 WAV 头；送 OBS 可通过 WASAPI/共享内存音频源，送 RTMP 时再编码 AAC。
+只需要写 WAV 头；OBS 可捕获 iPhoneMirror 的 WASAPI 应用音频，MP4/RTMP/SRT/WHIP 则由
+输出进程通过有界管道读取源 PCM 并编码为 AAC/Opus。
 
-## 7. H264 流
+## 7. H.264/HEVC 流
 
-视频 `sdat` 使用 AVCC：每个 NALU 前是大端长度（通常 4 字节），不是 Annex-B start code。
+视频 `sdat` 对 H.264 使用 AVCC、对 HEVC 使用 HVCC：每个 NALU 前是大端长度（通常 4 字节），
+不是 Annex-B start code。
 解码流程：
 
-1. 从 fdsc/AVCDecoderConfigurationRecord 提取 SPS/PPS 和 NAL 长度宽度；
+1. 从 fdsc/AVCDecoderConfigurationRecord 或 HEVCDecoderConfigurationRecord 提取参数集和 NAL 长度宽度；
 2. 将 sample 中的长度前缀逐个验证；
-3. Windows H264 MFT 要求 Annex-B；序列头中的 SPS/PPS 和每个 sample 的 NALU 都必须
-   改成带 `00 00 00 01` 起始码的形式，不能直接传 AVCDecoderConfigurationRecord；
+3. Windows Media Foundation H.264/HEVC MFT 要求 Annex-B；序列头中的 SPS/PPS（HEVC
+   还包括 VPS）和每个 sample 的 NALU 都必须改成带 `00 00 00 01` 起始码的形式，不能
+   直接传 AVCDecoderConfigurationRecord 或 HEVCDecoderConfigurationRecord；
 4. UDP/文件等 Annex-B 消费者使用相同转换；
-5. NAL type 5 是 IDR，可用于关键帧/重连检测。
+5. H.264 NAL type 5 或 HEVC IRAP NAL types 可用于关键帧/重连检测。
 
 HPD1 `DisplaySize` 是 QuickTime 主机能力/显示参数，不是可靠的 USB 编码分辨率控制。
-设备给出的真实 vdim 和 timing 才是最终源流分辨率/帧率；上游抓包示例为
-1126×2436、Duration=1/60。本项目 GUI 的 1080p/720p/540p 只限制 Windows 本地
+设备给出的真实 vdim 和 timing 才是最终源流分辨率/帧率；上游测试夹具示例为
+1126×2436、Duration=1/60，实机也可能报告 1206×2622 等其他尺寸。本项目 GUI 的
+1080p/720p/540p 只限制 Windows 本地
 D3D11 渲染，不再改写 HPD1，也不会为切换档位重连 USB。
 
 有线会话将 HPD1 明确分为三种按设备保存的模式：
@@ -203,9 +207,17 @@ iPhoneMirror 的设计：
 - 单独的 QtUsbTransport 负责 control request 和 `0x2A` bulk 端点，具体驱动后端可替换；
 - 每设备独立 CaptureSession 和取消令牌；
 - 所有长度、乘法、偏移在读取前验证，并设置包上限；
-- H264 当前交给 Media Foundation 解码为 NV12，再按需转 BGRA 给 WPF；D3D11 共享纹理是后续优化；
+- H.264（以及格式描述声明为 HEVC 时）交给 Media Foundation 解码为 NV12/P010。`Auto`
+  和“硬件优先”会依次尝试硬件 MFT、DXVA 能力和软件 MFT；“软件兼容”会明确关闭视频
+  解码加速。硬件 MFT 的 DXGI 输出当前会先安全回读为 CPU NV12/P010，再交给 D3D11
+  纹理和 shader，避免跨设备 keyed-mutex 在横竖屏切换时阻塞 USB；共享纹理接口保留为
+  后续低拷贝优化，不应把它描述成当前所有机器都端到端零拷贝。
+- D3D11/DirectComposition 是当前生产预览路径，WPF 不再逐帧创建或更新
+  `WriteableBitmap`。截图、录制、推流和虚拟摄像头通过有界的 CPU 帧导出接口按需回读；
+  编码/摄像头导出会把 SDR 画面规范化为 full-range BT.709，不影响 USB 接收线程。
 - 音频保留 PCM，输出层按需 WAV/AAC；
-- OBS 第一期使用稳定窗口，之后再做 Media Foundation Virtual Camera。
+- OBS 当前既可使用按设备命名的干净独立窗口，也可使用 Windows 11 Media Foundation
+  Virtual Camera；后者首次注册需要管理员权限，运行时只输出视频。
 
 普通 WinUSB/libusbK 不能作为最终答案：libusb 官方 Windows 文档明确列出，WinUSB 和
 libusbK 无法把设备切换到非第一个 configuration，而 QuickTime 正依赖动态增加的后续
@@ -214,16 +226,27 @@ configuration。已知可行的 libusb0 过滤模式也被官方标为问题较�
 
 参考：https://github.com/libusb/libusb/wiki/Windows
 
-## 9. 兼容性风险
+## 9. 色彩范围与输出元数据
+
+屏幕镜像的 SDR NV12/I420 按 full-range BT.709 处理：无线 I420 帧标记为 Full，有线
+非 HDR 帧在发布前归一化为 Full，HDR 帧保留解码器提供的名义范围。D3D11 shader 与
+截图/输出转换使用同一套 primaries/transfer/matrix/range 描述；PNG 截图保存最终 RGB，
+而编码输出和虚拟摄像头媒体类型会显式写出对应元数据；
+FFmpeg 原始视频输入和编码输出显式写入 `-color_range pc`、`-colorspace bt709`、
+`-color_primaries bt709` 和 `-color_trc bt709`。这样浅色界面灰阶不会被播放器再次按
+video-range 扩展而剪切成白色。
+
+## 10. 兼容性风险
 
 协议是逆向结果，不是 Apple 公共 API。Apple 可以在任意 iOS 版本更改 vendor request、
-USB descriptor、消息字段或编码格式。原项目发布说明主要停留在 2020 年，Windows 仓库
-虽在 2025 年发布，但没有公开的 iPhone 15/16/17 + iOS 17/18/26 自动化矩阵。
+USB descriptor、消息字段或编码格式。当前项目虽已验证少数组合（例如 iPhone18,3/iOS
+26.5.2 与 iPhone13,1/iOS 18.7.8），仍没有覆盖 iPhone 15/16/17、iPad 和不同 iOS
+版本的完整自动化矩阵。
 
 因此每个目标系统必须做真机回归：连接/重枚举、锁屏/解锁、横竖屏、60fps、来电/音频
 路由、应用 DRM、长时间运行、拔线重连、多设备与睡眠恢复。
 
-## 10. 一手资料
+## 11. 一手资料
 
 - 原始实现与测试夹具：https://github.com/danielpaulus/quicktime_video_hack
 - 作者技术文档：https://github.com/danielpaulus/quicktime_video_hack/blob/main/doc/technical_documentation.md

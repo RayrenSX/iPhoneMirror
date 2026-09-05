@@ -427,9 +427,10 @@ IM_API std::int32_t IM_CALL im_session_copy_latest_video_frame(
     iPhoneMirror::SessionHandle handle, iPhoneMirror::VideoFrameInfo* info,
     std::uint8_t* buffer, std::uint32_t* buffer_size,
     std::uint32_t max_width, std::uint32_t max_height);
-// Copies the latest frame into an exact-size, tightly packed 8-bit NV12 canvas.
-// The source is downscaled if needed, aspect ratio is preserved, and unused
-// canvas pixels are filled with YUV black. P010 sources are reduced to 8-bit.
+// Copies the latest frame into an exact-size, tightly packed 8-bit full-range
+// BT.709 SDR NV12 canvas. The source is downscaled if needed, aspect ratio is
+// preserved, and unused canvas pixels are filled with full-range YUV black.
+// P010/HDR and non-BT.709 sources are converted before being reduced to 8-bit.
 IM_API std::int32_t IM_CALL im_session_copy_latest_video_frame_nv12(
     iPhoneMirror::SessionHandle handle, iPhoneMirror::VideoFrameInfo* info,
     std::uint8_t* buffer, std::uint32_t* buffer_size,

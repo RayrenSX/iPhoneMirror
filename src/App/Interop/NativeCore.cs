@@ -418,6 +418,9 @@ internal sealed class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_force_preview_refresh(ulong handle);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_get_latest_video_timestamp(ulong handle,
+        out long timestamp100Ns);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_set_window_corner_profile(ulong handle, nint hwnd,
         float radius, float exponent);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -512,6 +515,19 @@ internal sealed class NativeCore : IDisposable
         {
             DiagnosticLogger.ExceptionOnce("native-force-refresh", "native",
                 "force_refresh_entrypoint_missing", error);
+            return false;
+        }
+    }
+
+    internal static bool ForceDevicePreviewRefresh(ulong handle)
+    {
+        if (handle == 0) return false;
+        try { return im_session_force_preview_refresh(handle) == 0; }
+        catch (Exception error) when (error is EntryPointNotFoundException or
+                                      DllNotFoundException)
+        {
+            DiagnosticLogger.ExceptionOnce("native-session-force-refresh", "native",
+                "session_force_refresh_unavailable", error);
             return false;
         }
     }
@@ -813,6 +829,23 @@ internal sealed class NativeCore : IDisposable
         if (result != 0) throw new InvalidOperationException(GetLastError(
             LocalizationService.Get("ReadCaptureStatusFailed")));
         return status;
+    }
+
+    public long GetDeviceSessionLatestFrameTimestamp(ulong handle)
+    {
+        if (handle == 0) return 0;
+        try
+        {
+            return im_session_get_latest_video_timestamp(handle,
+                out var timestamp) == 0 ? timestamp : 0;
+        }
+        catch (Exception error) when (error is EntryPointNotFoundException or
+                                      DllNotFoundException)
+        {
+            DiagnosticLogger.ExceptionOnce("native-session-frame-timestamp", "native",
+                "session_frame_timestamp_unavailable", error);
+            return 0;
+        }
     }
 
     public bool TryGetDeviceVideoOutputStatus(ulong handle,

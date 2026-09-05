@@ -21,7 +21,8 @@ public partial class ShortcutSettingsWindow : Wpf.Ui.Controls.FluentWindow,
         Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, string?> apply)
     {
         _apply = apply;
-        foreach (var action in Enum.GetValues<BluetoothShortcutAction>())
+        foreach (var action in Enum.GetValues<BluetoothShortcutAction>().Where(
+            action => action != BluetoothShortcutAction.ReverseControl))
         {
             var row = new ShortcutBindingRow(action,
                 shortcuts.TryGetValue(action, out var shortcut)
@@ -79,6 +80,23 @@ public partial class ShortcutSettingsWindow : Wpf.Ui.Controls.FluentWindow,
         e.Handled = true;
     }
 
+    private void OnShortcutPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ShortcutBindingRow row) return;
+        var button = e.ChangedButton switch
+        {
+            MouseButton.Right => ShortcutMouseButton.Right,
+            MouseButton.Middle => ShortcutMouseButton.Middle,
+            _ => ShortcutMouseButton.None,
+        };
+        if (!KeyboardShortcut.TryCreateMouse(button, Keyboard.Modifiers,
+                out var shortcut))
+            return;
+        row.Shortcut = shortcut;
+        StatusText = string.Empty;
+        e.Handled = true;
+    }
+
     private void OnResetRowClick(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not ShortcutBindingRow row) return;
@@ -119,7 +137,12 @@ public partial class ShortcutSettingsWindow : Wpf.Ui.Controls.FluentWindow,
     private static ShortcutBindingCategory GetCategory(BluetoothShortcutAction action) =>
         action switch
         {
-            BluetoothShortcutAction.ReverseControl => ShortcutBindingCategory.Control,
+            BluetoothShortcutAction.BluetoothControl or
+            BluetoothShortcutAction.WirelessControl or
+            BluetoothShortcutAction.WiredControl or
+            BluetoothShortcutAction.VolumeUp or
+            BluetoothShortcutAction.VolumeDown or
+            BluetoothShortcutAction.LockScreen => ShortcutBindingCategory.Control,
             BluetoothShortcutAction.BossKey => ShortcutBindingCategory.Control,
             BluetoothShortcutAction.Siri => ShortcutBindingCategory.Assistant,
             _ => ShortcutBindingCategory.Navigation,
@@ -190,7 +213,9 @@ public sealed class ShortcutBindingRow : INotifyPropertyChanged
     {
         Label = LocalizationService.Get(Action switch
         {
-            BluetoothShortcutAction.ReverseControl => "ShortcutSettingsReverseControl",
+            BluetoothShortcutAction.BluetoothControl => "ShortcutSettingsBluetoothControl",
+            BluetoothShortcutAction.WirelessControl => "ShortcutSettingsWirelessControl",
+            BluetoothShortcutAction.WiredControl => "ShortcutSettingsWiredControl",
             BluetoothShortcutAction.ControlCenter => "ShortcutSettingsControlCenter",
             BluetoothShortcutAction.NotificationCenter => "ShortcutSettingsNotificationCenter",
             BluetoothShortcutAction.AppSwitcher => "ShortcutSettingsAppSwitcher",
@@ -198,7 +223,10 @@ public sealed class ShortcutBindingRow : INotifyPropertyChanged
             BluetoothShortcutAction.BossKey => "ShortcutSettingsBossKey",
             BluetoothShortcutAction.Dock => "ShortcutSettingsDock",
             BluetoothShortcutAction.Siri => "ShortcutSettingsSiri",
-            _ => "ShortcutSettingsReverseControl",
+            BluetoothShortcutAction.VolumeUp => "ShortcutSettingsVolumeUp",
+            BluetoothShortcutAction.VolumeDown => "ShortcutSettingsVolumeDown",
+            BluetoothShortcutAction.LockScreen => "ShortcutSettingsLockScreen",
+            _ => "ShortcutSettingsBluetoothControl",
         });
         OnPropertyChanged(nameof(Label));
     }

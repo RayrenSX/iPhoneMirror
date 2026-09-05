@@ -27,6 +27,10 @@ internal sealed class UpdateSettings
     public AppTheme Theme { get; set; } = AppTheme.System;
     public ApplicationDisplayMode ApplicationDisplayMode { get; set; } =
         ApplicationDisplayMode.Complete;
+    public WirelessReceiverBackend WirelessReceiverBackend { get; set; } =
+        WirelessReceiverBackend.Original;
+    public string WirelessDisplayProfileId { get; set; } = "1080p";
+    public string WirelessReceiverName { get; set; } = WirelessReceiverConfiguration.DefaultReceiverName;
     public string Language { get; set; } = "system";
     public double BluetoothMouseSensitivity { get; set; } = 500;
     public int BluetoothMouseSensitivitySchema { get; set; }
@@ -43,6 +47,16 @@ internal sealed class UpdateSettings
     public int BluetoothControlShortcutVirtualKey { get; set; } = 0x78;
     public int BluetoothControlShortcutModifiers { get; set; }
     public int BluetoothControlShortcutSchema { get; set; }
+    public int BluetoothModeShortcutVirtualKey { get; set; }
+    public int BluetoothModeShortcutModifiers { get; set; }
+    public int WirelessModeShortcutVirtualKey { get; set; }
+    public int WirelessModeShortcutModifiers { get; set; }
+    public int WiredModeShortcutVirtualKey { get; set; }
+    public int WiredModeShortcutModifiers { get; set; }
+    public int BluetoothVolumeUpShortcutVirtualKey { get; set; }
+    public int BluetoothVolumeUpShortcutModifiers { get; set; }
+    public int BluetoothVolumeDownShortcutVirtualKey { get; set; }
+    public int BluetoothVolumeDownShortcutModifiers { get; set; }
     public int BluetoothControlCenterShortcutVirtualKey { get; set; }
     public int BluetoothControlCenterShortcutModifiers { get; set; }
     public int BluetoothNotificationCenterShortcutVirtualKey { get; set; }
@@ -90,6 +104,9 @@ internal sealed class UpdateSettings
         NotifyPrereleaseReleases = NotifyPrereleaseReleases,
         Theme = Theme,
         ApplicationDisplayMode = ApplicationDisplayMode,
+        WirelessReceiverBackend = WirelessReceiverBackend,
+        WirelessDisplayProfileId = WirelessDisplayProfileId,
+        WirelessReceiverName = WirelessReceiverName,
         Language = Language,
         BluetoothMouseSensitivity = BluetoothMouseSensitivity,
         BluetoothMouseSensitivitySchema = BluetoothMouseSensitivitySchema,
@@ -106,6 +123,16 @@ internal sealed class UpdateSettings
         BluetoothControlShortcutVirtualKey = BluetoothControlShortcutVirtualKey,
         BluetoothControlShortcutModifiers = BluetoothControlShortcutModifiers,
         BluetoothControlShortcutSchema = BluetoothControlShortcutSchema,
+        BluetoothModeShortcutVirtualKey = BluetoothModeShortcutVirtualKey,
+        BluetoothModeShortcutModifiers = BluetoothModeShortcutModifiers,
+        WirelessModeShortcutVirtualKey = WirelessModeShortcutVirtualKey,
+        WirelessModeShortcutModifiers = WirelessModeShortcutModifiers,
+        WiredModeShortcutVirtualKey = WiredModeShortcutVirtualKey,
+        WiredModeShortcutModifiers = WiredModeShortcutModifiers,
+        BluetoothVolumeUpShortcutVirtualKey = BluetoothVolumeUpShortcutVirtualKey,
+        BluetoothVolumeUpShortcutModifiers = BluetoothVolumeUpShortcutModifiers,
+        BluetoothVolumeDownShortcutVirtualKey = BluetoothVolumeDownShortcutVirtualKey,
+        BluetoothVolumeDownShortcutModifiers = BluetoothVolumeDownShortcutModifiers,
         BluetoothControlCenterShortcutVirtualKey = BluetoothControlCenterShortcutVirtualKey,
         BluetoothControlCenterShortcutModifiers = BluetoothControlCenterShortcutModifiers,
         BluetoothNotificationCenterShortcutVirtualKey = BluetoothNotificationCenterShortcutVirtualKey,
@@ -185,6 +212,32 @@ internal sealed class UpdateSettingsStore
             if (!Enum.IsDefined(settings.ApplicationDisplayMode))
             {
                 settings.ApplicationDisplayMode = ApplicationDisplayMode.Complete;
+                migrationChanged = true;
+            }
+            if (!Enum.IsDefined(settings.WirelessReceiverBackend))
+            {
+                settings.WirelessReceiverBackend = WirelessReceiverBackend.Original;
+                migrationChanged = true;
+            }
+            var normalizedProfileId = settings.WirelessDisplayProfileId?.Trim().ToLowerInvariant();
+            if (!WirelessReceiverConfiguration.DisplayProfiles.Any(profile =>
+                    string.Equals(profile.Id, normalizedProfileId, StringComparison.OrdinalIgnoreCase)))
+            {
+                settings.WirelessDisplayProfileId = "1080p";
+                migrationChanged = true;
+            }
+            else if (!string.Equals(settings.WirelessDisplayProfileId, normalizedProfileId,
+                StringComparison.Ordinal))
+            {
+                settings.WirelessDisplayProfileId = normalizedProfileId!;
+                migrationChanged = true;
+            }
+            var normalizedReceiverName = WirelessReceiverConfiguration.SanitizeReceiverName(
+                settings.WirelessReceiverName);
+            if (!string.Equals(settings.WirelessReceiverName, normalizedReceiverName,
+                StringComparison.Ordinal))
+            {
+                settings.WirelessReceiverName = normalizedReceiverName;
                 migrationChanged = true;
             }
             settings.BluetoothControlDeviceBindings = NormalizeBluetoothBindings(

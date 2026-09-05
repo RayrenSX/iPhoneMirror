@@ -1,6 +1,6 @@
 # iPhoneMirror 完整使用教程
 
-本文按 iPhoneMirror v1.6.8 更新，覆盖驱动安装、USB 有线投屏、AirPlay 无线屏幕镜像、
+本文按 iPhoneMirror v1.8.1（2026-08-30）更新，覆盖驱动安装、USB 有线投屏、AirPlay 无线屏幕镜像、
 AirPlay 音乐投放、视频应用投屏、多设备、独立窗口、音频、截图、录制与推流、虚拟摄像头、
 实时日志和高级 USB 设置。
 
@@ -72,7 +72,7 @@ USB 适合低延迟、高稳定性和高画质；AirPlay 适合免插线和临�
 
 ### 4. 本地原生低延迟渲染
 
-USB H.264/CoreMedia 和无线媒体帧在本地解码，通过 D3D11/DirectComposition 原生显示，
+USB H.264/CoreMedia 和无线屏幕镜像帧在本地解码，通过 D3D11/DirectComposition 原生显示，
 不经过云端中转。主预览、独立窗口和全屏使用原生渲染目标，减少 WPF 位图复制、缩放损失和撕裂。
 
 ### 5. 驱动操作与投屏进程隔离
@@ -107,7 +107,7 @@ Apple 私有协议在所有未来 iOS 版本上永久兼容。
 
 iPhoneMirror 的控制链路与投屏链路分开：电脑蓝牙会以标准 BLE HID 鼠标/键盘外设身份
 广播，iPhone/iPad 通过系统“辅助触控”接收鼠标指针和键盘报告。手机端不需要安装 App，
-也不需要越狱。该方案与 Wormhole（虫洞）的非越狱控制方式相同。
+也不需要越狱。控制输入只作用于当前绑定的镜像设备，不会广播给其他已连接手机。
 
 使用前请确认：
 
@@ -116,13 +116,16 @@ iPhoneMirror 的控制链路与投屏链路分开：电脑蓝牙会以标准 BLE
 2. 在 iPhone/iPad 打开“设置 → 辅助功能 → 触控 → 辅助触控”，开启辅助触控，并在
    “设备”中配对电脑显示的 HID 设备。
 3. 选择设备后打开左侧“投屏”面板，点击“启用蓝牙反向控制”。可以在开始投屏前完成蓝牙
-   广播和配对；投屏开始后，主预览中的鼠标移动、单击、拖拽、滚轮和常用键盘按键会发送到设备。
-   反向控制开启后会隐藏 Windows 本机光标，按 `F9` 可随时开启或关闭；滚轮方向按手机
-   触控习惯反转。iPhone 控制位移会按屏幕像素密度自动降低灵敏度；打开独立预览窗口时，
-   主窗口反向控制会自动关闭。
+   广播和配对；首次连接时，在蓝牙客户端绑定窗口中确认与当前手机对应的客户端。绑定完成后，
+   主预览中的鼠标移动、单击、拖拽、滚轮和常用键盘按键会发送到该设备。
+4. 反向控制开启后会隐藏 Windows 本机光标；默认按 `F9` 可释放鼠标并关闭控制，也可以在
+   “设置快捷键”窗口中改为其他全局快捷键。该窗口还可配置控制中心、通知中心、App 切换器、
+   主屏幕、Boss 键、Dock 和 Siri。滚轮方向和鼠标灵敏度可按竖屏/横屏分别设置，打开独立
+   预览窗口时，主窗口反向控制会自动关闭。
 
 控制能力受 iOS 系统鼠标模型限制：主要是单指指针操作，不能注入真正的多指触控或游戏
-触摸事件。停止投屏时控制广播会自动关闭；也可以在同一面板手动关闭。
+触摸事件。停止投屏时控制广播会自动关闭；也可以在同一面板手动关闭。客户端断开后不会
+自动转移到另一台手机，原客户端重新连接后才会恢复；可在设置中解除单个绑定或清除全部绑定。
 
 ## 安装、更新与卸载
 
@@ -131,7 +134,8 @@ iPhoneMirror 的控制链路与投屏链路分开：电脑蓝牙会以标准 BLE
 1. 从 [GitHub Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 下载最新的
    `iPhoneMirror-Setup-v*-x64.exe`。
 2. 可使用同一 Release 的 `SHA256SUMS.txt` 校验文件完整性。
-3. 双击运行安装向导。默认目录为 `C:\Program Files\iPhoneMirror`，也可自定义；
+3. 双击运行安装向导。管理员安装默认目录为 `C:\Program Files\iPhoneMirror`，也可自定义；
+   按当前用户安装时会使用 Windows 用户级程序目录；
    开始菜单快捷方式会自动创建，桌面快捷方式可以选择是否创建。
 4. Windows 显示 SmartScreen 时，确认文件来自项目官方 Release，再选择“更多信息”并继续。
 5. 安装完成后从开始菜单启动。界面语言默认“跟随系统”，可在左侧“设置”中的“应用设置”切换为
@@ -225,7 +229,7 @@ Apple USB 支持缺失且本地没有可用安装包时，驱动管理器优先�
 高级页面用于定位问题，不建议在正常投屏时反复操作：
 
 - **刷新**：重新枚举 Apple 设备和驱动状态；
-- **安装 Apple Devices**：补齐缺失的 Apple 官方 USB 支持；
+- **安装 Apple USB 支持**：按本地受信 MSI、Apple Software Update Catalog、官方 iTunes 回退顺序补齐 Apple 官方 USB 支持；
 - **安装/已安装**：为当前设备添加采集过滤驱动；
 - **修复**：清理损坏或不完整的过滤配置后重新安装；
 - **卸载**：移除 iPhoneMirror 使用的采集过滤驱动；
@@ -275,6 +279,8 @@ Apple USB 支持缺失且本地没有可用安装包时，驱动管理器优先�
 - **原生**：不限制本地渲染尺寸，优先保留细节；
 - **1080p / 720p / 540p**：限制本地呈现尺寸，降低 GPU 压力；
 - **本地渲染帧率上限**：只限制 Windows 本地呈现节奏，不会强制 iPhone/iPad 以固定帧率输出；iOS 可能根据画面活动度自动降低来源帧率；
+- **解码器**：`自动（推荐）` 会按系统能力选择硬件/DXVA 或软件 MFT；`硬件优先` 优先尝试硬件路径；`软件兼容` 明确关闭视频解码加速，但 D3D11 预览仍使用 GPU。切换可能在下一关键帧生效，必要时会提示重新连接设备；预览下方会显示实际运行模式。
+- **更多设置**：可调节亮度、对比度、饱和度和伽马。这些调节只影响本地 D3D11 预览，不会改变录制、推流、截图或虚拟摄像头画面。
 - **应用画面设置**：立即更新当前设备的渲染限制，不重新协商 USB 源画质。
 
 这些选项只影响本地呈现，不会让 iPhone 重新上传一条低清 USB 视频流。
@@ -287,13 +293,16 @@ AirPlay 接收服务随主程序自动启动，不需要先点击“开始投屏
 ### 连接前设置接收端
 
 1. 将电脑和 iPhone/iPad 连接到同一个可信局域网。
-2. 点击左侧“设置”，在“无线 AirPlay”区域设置接收端名称和连接分辨率。
+2. 点击左侧“设置”，在“无线 AirPlay”区域选择“原始方案”或“UxPlay（备用）”，并设置接收端名称和连接分辨率。
+   “原始方案”是默认实现；UxPlay 适合原始接收端在特定设备或网络上无法建立连接时使用。切换方案会重启广播并断开现有无线会话。
 3. 根据网络质量选择：
    - **最高画质**：最高声明 5120×2880、60 fps，适合高性能电脑和稳定高速网络；
    - **1080p（推荐）**：1920×1080、60 fps，默认平衡方案；
    - **720p（流畅）**：1280×720、30 fps；
    - **540p（弱网）**：960×540、30 fps。
-4. 点击“应用”。名称和分辨率会在同一个确认窗口中汇总。
+4. 点击“应用”。接收方案、名称和分辨率会在同一个确认窗口中汇总。
+
+UxPlay 备用方案使用同一个 iPhoneMirror 预览、录制和音频路径。发布包包含 UxPlay 运行时的版本会在设置状态中显示；如果状态提示缺少组件，请使用包含 UxPlay 运行时的构建包，或设置 `IPHONE_MIRROR_UXPLAY_EXECUTABLE` 指向本机的 `uxplay.exe`。UxPlay 方案不提供“视频应用投屏”（URL/HLS/DLNA）功能，该功能需要切回“原始方案”。
 
 应用设置会重启 AirPlay 广播。若已经有无线设备连接，所有无线会话会断开；按弹窗提示在
 iPhone 控制中心重新选择新的接收端名称。修改名称后，手机端需要等待旧的 DNS-SD 缓存消失，
@@ -304,22 +313,36 @@ iPhone 控制中心重新选择新的接收端名称。修改名称后，手机�
 1. 打开“控制中心”。
 2. 点击“屏幕镜像”。
 3. 选择设置好的接收端名称，默认是 `iPhoneMirror AirPlay`。
-4. 首次连接时，如 Windows 防火墙询问网络访问，只允许可信的专用网络。
+4. 首次连接时，如 Windows 防火墙询问网络访问，建议只允许可信的专用网络。管理员安装版
+   会创建限定 `remoteip=localsubnet` 的 AirPlay 规则；便携版需要手动添加。
 5. 连接成功后，无线设备出现在“投屏来源”侧栏并自动选中一次。
 
 无线设备选中时，设置侧栏会把无线选项移到最上方；有线专用的本地分辨率/FPS 上限和 A/B/C
 模式不会显示。无线连接的清晰度必须在连接前通过 AirPlay 广播规格声明，修改后需要重新连接。
 
 如果 iPhone/iPad 能看见接收端名称、但点选后立即显示“无法连接”，请先确认两台设备位于同一个
-非访客 Wi-Fi，关闭 VPN/代理，并在路由器设置中关闭“AP/客户端隔离”。安装版会自动放行
-`iPhoneMirror.WirelessHost.exe` 的本地子网入站连接，包括 TCP `5001`、`7001`、`7100`、`8090`
-和 UDP `1900`；请升级或重新运行安装包以
-修复旧版本。ZIP 便携版请以管理员身份打开终端并执行：
+非访客 Wi-Fi，关闭 VPN/代理，并在路由器设置中关闭“AP/客户端隔离”。管理员安装版会自动放行
+限定到 `iPhoneMirror.WirelessHost.exe` 和本地子网的 TCP/UDP 入站连接，包括 AirPlay `SETUP`
+动态协商的镜像与 RAOP 媒体端口；请升级到包含此修复的新版安装包，或重新运行该安装包
+以迁移旧规则。ZIP 便携版请以管理员身份打开终端并执行：
 
 ```powershell
-netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in action=allow program="C:\path\to\iPhoneMirror\Wireless\iPhoneMirror.WirelessHost.exe" enable=yes profile=private,public remoteip=localsubnet protocol=TCP localport=5001,7001,7100,8090
-netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in action=allow program="C:\path\to\iPhoneMirror\Wireless\iPhoneMirror.WirelessHost.exe" enable=yes profile=private,public remoteip=localsubnet protocol=UDP localport=1900
+netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in action=allow program="C:\path\to\iPhoneMirror\Wireless\iPhoneMirror.WirelessHost.exe" enable=yes profile=private,public remoteip=localsubnet protocol=TCP localport=any
+netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in action=allow program="C:\path\to\iPhoneMirror\Wireless\iPhoneMirror.WirelessHost.exe" enable=yes profile=private,public remoteip=localsubnet protocol=UDP localport=any
 ```
+
+如果连接后先出现黑屏，约 10 秒内自动断开，且实时日志一直停留在
+`Handshaking`、`0x0`、`0 fps`、`0` 帧，请优先检查防火墙规则的 TCP 和 UDP
+`LocalPort` 是否为 `Any`，以及规则中的程序路径是否指向当前版本的
+`Wireless\iPhoneMirror.WirelessHost.exe`。这类现象表示控制连接成功，但手机无法访问
+AirPlay `SETUP` 返回的动态镜像端口。可用以下命令查看规则：
+
+```powershell
+netsh advfirewall firewall show rule name="iPhoneMirror Wireless AirPlay" verbose
+```
+
+规则正确且日志已出现 `Accepting client` 但仍无画面时，再提交设备型号、iOS 版本和完整
+AirPlay 日志，以便排查具体协议兼容性。
 
 连接后仍可使用窗口顶部“停止投屏”结束当前无线会话。接收服务本身保持运行，等待下一次连接。
 
@@ -404,16 +427,22 @@ netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in 
 - 推送到 RTMP、SRT 或 WebRTC/WHIP 端点；
 - 安装并启动 `iPhoneMirror Virtual Camera`，供 OBS、会议软件和浏览器选择。
 
+选择 WHIP 时，在“服务器地址或 WHIP 端点”填入完整 URL；如果服务端需要鉴权，再填写
+可选的 Bearer 令牌。令牌只用于当前输出任务，请勿把它粘贴到日志或问题报告中。
+
 ![输出设置](images/user-guide/output-recording1.png)
 
 录制、推流和虚拟摄像头默认使用当前预览的实际输出分辨率；需要时可在对应选项卡中
-手动改为其他尺寸。
+手动改为其他尺寸。媒体输出尺寸范围为 160–3840 × 160–2160 且必须为偶数，帧率支持
+10–60，码率支持 500–50000 kbps。
 
 点击“开始录制”后会立即录制到临时文件；点击“停止输出”并完成 MP4 封装后，再选择
 保存位置和文件名。取消保存不会删除录制，重新打开窗口或重启应用后仍会再次提示。
-投屏音频可用时会一并输出；MP4、RTMP 和 SRT 使用 AAC，WHIP 使用 Opus。音频暂不可用
-不会阻止纯视频录制或推流。虚拟摄像头只提供视频，需要声音时 OBS 30.1+ 可添加
-“应用程序音频捕获”并选择 `iPhoneMirror.exe`。独立窗口采集仍是无需安装虚拟摄像头的
+投屏源的 PCM 音频和对应编码器可用时会一并输出；MP4、RTMP 和 SRT 使用 AAC，WHIP 使用
+Opus。音频或编码器暂不可用不会阻止纯视频录制或推流。视频应用投屏的输出音频来自媒体 URL 的音轨，不会
+回采 Windows 通知声或麦克风。虚拟摄像头只提供视频，需要声音时 OBS 30.1+ 可添加
+“应用程序音频捕获”并选择 `iPhoneMirror.exe`。首次安装、更新或卸载虚拟摄像头媒体源
+需要管理员权限，安装完成后普通用户即可启动。独立窗口采集仍是无需安装虚拟摄像头的
 稳定回退方式：
 
 1. 在 iPhoneMirror 中为目标设备打开“独立窗口”。
@@ -425,6 +454,9 @@ netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in 
 如果 OBS 已经捕获桌面音频，不要再重复捕获同一个 iPhoneMirror 输出，否则会产生回声。
 多 GPU 笔记本应让 OBS 与 iPhoneMirror 使用同一块 GPU。详细说明见
 [OBS 输出文档](OBS_OUTPUT.md)。
+
+SDR 录制、推流和虚拟摄像头输出统一使用 full-range BT.709 色彩标记；这与本地预览的
+色彩转换保持一致。HDR 源会保留其 HDR 元数据，具体效果仍取决于接收端和显示器。
 
 ## 截图与实时日志
 
@@ -481,6 +513,11 @@ netsh advfirewall firewall add rule name="iPhoneMirror Wireless AirPlay" dir=in 
 | `Ctrl+L` | 显示/隐藏实时日志 |
 | `Ctrl+M` | 静音/恢复当前设备 |
 | `Ctrl+S` | 截图 |
+
+蓝牙反向控制相关快捷键不固定在上表中。请在“设置 → 设置快捷键”中查看或修改；每个动作
+必须使用不同的组合键，按 `Backspace` 或 `Delete` 可解除绑定。默认反向控制为 `F9`，默认
+Boss 键为 `Ctrl+Alt+B`。升级后若出现“需要刷新配对”提示，请在 iPhone/iPad 忽略旧的
+`iPhoneMirror` 蓝牙设备并重新配对。
 
 ## 常见问题
 

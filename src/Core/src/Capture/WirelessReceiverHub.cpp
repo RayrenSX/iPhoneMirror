@@ -321,16 +321,36 @@ bool WirelessClientStream::connected() const {
 }
 
 void WirelessClientStream::attach(CapturePreferences preferences) {
+    bool reset_video{};
     {
         std::scoped_lock lock(mutex_);
+        reset_video = attachments_ == 0;
         ++attachments_;
         snapshot_.state = connected_ ? State::Handshaking : State::WaitingForDevice;
         snapshot_.message = connected_ ? L"AirPlay connected: " + name_
                                        : L"Waiting for AirPlay device";
     }
+    if (reset_video) reset_video_for_attach();
     set_target_fps(preferences.target_fps);
     set_audio_volume(preferences.audio_volume);
     set_audio_enabled(preferences.play_audio);
+}
+
+void WirelessClientStream::reset_video_for_attach() noexcept {
+    std::scoped_lock lock(mutex_);
+    // A capture restart reuses the discovered AirPlay stream object. Drop all
+    // frames and counters from the previous capture so the renderer and stall
+    // detector cannot mistake an old portrait frame for the new session's
+    // first frame after an orientation change.
+    latest_frame_.reset();
+    render_queue_.clear();
+    snapshot_.width = snapshot_.height = 0;
+    snapshot_.fps = snapshot_.latency_ms = 0;
+    snapshot_.video_frames = snapshot_.audio_packets = 0;
+    snapshot_.audio_sample_rate = snapshot_.audio_channels = 0;
+    started_at_ = std::chrono::steady_clock::now();
+    fps_sample_time_ = started_at_;
+    fps_sample_frames_ = 0;
 }
 
 void WirelessClientStream::detach() noexcept {
@@ -431,7 +451,9 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     frame->color.primaries = coremedia::ColorPrimaries::Bt709;
     frame->color.transfer = coremedia::TransferFunction::Bt709;
     frame->color.matrix = coremedia::MatrixCoefficients::Bt709;
-    frame->color.range = coremedia::ColorRange::Limited;
+    // AirPlay screen mirroring publishes full-range I420. Treating these
+    // samples as video-range expands light UI grays (for example 243) to 255.
+    frame->color.range = coremedia::ColorRange::Full;
     frame->timestamp_100ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         received_at - started_at_).count() / 100;
     frame->received_at = received_at;
@@ -441,9 +463,30 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     // Re-check the connection while holding the stream lock so a late frame
     // cannot repopulate a device that was just cleared.
     if (!connected_) return;
+    const bool format_changed = snapshot_.width != 0 && snapshot_.height != 0 &&
+        (snapshot_.width != header.width || snapshot_.height != header.height);
+    if (format_changed) {
+        // A rotation is delivered by AirPlay as a new SPS/PPS and therefore a
+        // new frame geometry. Do not let frames from the previous orientation
+        // survive the switch: at original quality they can retain tens of MB
+        // of NV12 data and the renderer may otherwise consume a stale-sized
+        // frame after its output buffers have been resized.
+        render_queue_.clear();
+        // Do not let the renderer hold on to a frame from the previous
+        // orientation while the new decoder geometry is being uploaded. This
+        // matters most for the maximum/original profile where a rotated frame
+        // can be several megabytes and texture recreation is asynchronous.
+        latest_frame_.reset();
+        fps_sample_frames_ = snapshot_.video_frames;
+        fps_sample_time_ = received_at;
+        logging::write(std::format(
+            "wireless_video format_changed device_fp={} from={}x{} to={}x{} queue_reset=true",
+            anonymous_label(id_), snapshot_.width, snapshot_.height,
+            header.width, header.height));
+    }
     latest_frame_ = frame;
     render_queue_.push_back(frame);
-    const auto queue_limit = attachments_ == 0 ? 1U : 4U;
+    const auto queue_limit = attachments_ == 0 ? 1U : 2U;
     while (render_queue_.size() > queue_limit) render_queue_.pop_front();
     snapshot_.state = State::Streaming;
     snapshot_.message = L"Wireless mirroring";

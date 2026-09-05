@@ -6,7 +6,7 @@ using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Models;
 
-internal sealed class DeviceViewModel : INotifyPropertyChanged
+public sealed class DeviceViewModel : INotifyPropertyChanged
 {
     internal const string WirelessUdidPrefix = "airplay://";
     internal const string MediaCastUdid = "media-cast://active";
@@ -36,7 +36,7 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
     public string OsVersion => _osVersion;
     public string ConnectionType => _connectionType;
     public string Status => _status;
-    public ConnectionState State => _state;
+    internal ConnectionState State => _state;
     public bool IsWireless => IsWirelessUdid(Udid);
     public bool IsMediaCast => IsMediaCastUdid(Udid);
     public string AutomationId => IsMediaCast ? "MediaCastDeviceCard" : "DeviceCard";
@@ -114,6 +114,12 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
     internal static bool IsWirelessUdid(string? udid) => udid?.StartsWith(
         WirelessUdidPrefix, StringComparison.OrdinalIgnoreCase) == true;
 
+    internal static string? GetUsbUdid(string? udid)
+    {
+        if (string.IsNullOrWhiteSpace(udid)) return null;
+        return IsWirelessUdid(udid) ? udid[WirelessUdidPrefix.Length..] : udid;
+    }
+
     internal static bool IsMediaCastUdid(string? udid) => string.Equals(
         udid, MediaCastUdid, StringComparison.OrdinalIgnoreCase);
 
@@ -126,7 +132,7 @@ internal sealed class DeviceViewModel : INotifyPropertyChanged
         string.Empty,
         ConnectionState.Ready);
 
-    public static DeviceViewModel FromNative(NativeDeviceInfo info) => new(
+    internal static DeviceViewModel FromNative(NativeDeviceInfo info) => new(
         info.Udid ?? string.Empty,
         info.Name ?? "iPhone",
         info.ProductType ?? string.Empty,

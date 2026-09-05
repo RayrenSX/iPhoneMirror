@@ -12,8 +12,10 @@
 .dotnet/
 packages/
 build/
+dist/
 out/
 outputs/
+artifacts/
 release/
 work/
 src/**/bin/

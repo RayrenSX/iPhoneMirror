@@ -186,9 +186,12 @@ internal sealed class SingleInstanceCoordinator : IDisposable
         var matches = new List<Process>();
         foreach (var process in Process.GetProcessesByName(_currentProcessName))
         {
+            // Development and installed builds share the same executable name
+            // and BLE identity but live in different directories. Treat them
+            // as one application so both copies cannot advertise the same
+            // Bluetooth HID device at once.
             if (process.Id != _currentProcessId &&
-                TryGetSessionId(process) == _currentSessionId &&
-                IsSameExecutable(_currentExecutablePath, TryGetExecutablePath(process)))
+                TryGetSessionId(process) == _currentSessionId)
             {
                 matches.Add(process);
             }

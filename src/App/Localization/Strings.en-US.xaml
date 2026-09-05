@@ -26,6 +26,7 @@
     <system:String x:Key="DeviceSessionClosedWarningTitleFormat">Mirroring stopped — {0}</system:String>
     <system:String x:Key="DeviceSessionClosedWarningBody">You stopped mirroring from Control Center. Restart the iPhone or iPad before using wired mirroring with this device again.</system:String>
     <system:String x:Key="CaptureNoticeErrorBadge">Mirroring could not continue</system:String>
+    <system:String x:Key="ReverseControlNoticeErrorBadge">Reverse control could not continue</system:String>
     <system:String x:Key="CaptureNoticeErrorHint">Check the device and connection, then retry</system:String>
     <system:String x:Key="CaptureNoticeUsbBadge">USB mirroring setup incomplete</system:String>
     <system:String x:Key="CaptureNoticeUsbHint">Reconnect the cable, then retry</system:String>
@@ -132,6 +133,23 @@
     <system:String x:Key="BluetoothControlFailedTitle">Bluetooth control could not start</system:String>
     <system:String x:Key="BluetoothControlFailedBody">Windows could not start the BLE HID peripheral service. Check whether the Bluetooth adapter and driver support peripheral mode.</system:String>
     <system:String x:Key="BluetoothControlFailedStatus">Startup failed</system:String>
+    <system:String x:Key="ReverseControlErrorTitle">Reverse control error</system:String>
+    <system:String x:Key="ReverseControlErrorBodyFormat">{0} reverse control encountered an error: {1}</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteStatus">Confirm the prerequisites before continuing</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteWiredTitle">Before enabling wired control</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteWiredBody">1. Turn on Developer Mode and restart the device.
+2. Connect by USB, unlock it, and tap “Trust This Computer”.
+3. The matching DDI downloads from GitHub on first use.
+4. No input is sent until setup is ready.
+
+Click Continue when ready, or Cancel.</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteWirelessTitle">Before enabling wireless control</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteWirelessBody">1. Turn on Developer Mode and restart the device.
+2. Complete trust and wireless pairing once over USB.
+3. Keep the device unlocked on the same local network.
+4. Allow iPhoneMirror through Windows Firewall.
+
+Click Continue when ready, or Cancel.</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedTitle">Bluetooth control needs pairing refresh</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedBody">This update changes the Bluetooth HID controls. On the iPhone/iPad, forget the existing iPhoneMirror device, then pair it again before enabling control.</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedDetail">Close this message after the old pairing has been removed. Enable Bluetooth control again after completing the new pairing.</system:String>
@@ -143,6 +161,9 @@
     <system:String x:Key="BluetoothControlPromptShortcutFormat">Press {0} to release</system:String>
     <system:String x:Key="BluetoothControlPromptAutoCloseFormat">Closes automatically in {0} seconds</system:String>
     <system:String x:Key="IndependentWindowReverseControl">Reverse control</system:String>
+    <system:String x:Key="IndependentWindowBluetoothControl">Bluetooth control</system:String>
+    <system:String x:Key="IndependentWindowWirelessProjection">Wireless projection</system:String>
+    <system:String x:Key="IndependentWindowWiredProjection">Wired projection</system:String>
     <system:String x:Key="ShortcutSettings">Keyboard shortcuts</system:String>
     <system:String x:Key="ShortcutSettingsTitle">Keyboard shortcuts</system:String>
     <system:String x:Key="ShortcutSettingsDescription">Configure shortcuts for mirroring tools.</system:String>
@@ -151,12 +172,17 @@
     <system:String x:Key="ShortcutSettingsCategoryAssistant">Assistant</system:String>
     <system:String x:Key="OpenShortcutSettings">Configure shortcuts</system:String>
     <system:String x:Key="ShortcutSettingsReverseControl">Reverse control</system:String>
+    <system:String x:Key="ShortcutSettingsBluetoothControl">Bluetooth control</system:String>
+    <system:String x:Key="ShortcutSettingsWirelessControl">Wireless mirroring</system:String>
+    <system:String x:Key="ShortcutSettingsWiredControl">Wired mirroring</system:String>
     <system:String x:Key="ShortcutSettingsControlCenter">Open Control Center</system:String>
     <system:String x:Key="ShortcutSettingsNotificationCenter">Open Notification Center</system:String>
     <system:String x:Key="ShortcutSettingsAppSwitcher">Open App Switcher</system:String>
     <system:String x:Key="ShortcutSettingsHome">Go to Home Screen</system:String>
     <system:String x:Key="ShortcutSettingsBossKey">Boss key (hide / show windows)</system:String>
     <system:String x:Key="ShortcutSettingsLockScreen">Lock Screen</system:String>
+    <system:String x:Key="ShortcutSettingsVolumeUp">Volume up</system:String>
+    <system:String x:Key="ShortcutSettingsVolumeDown">Volume down</system:String>
     <system:String x:Key="ShortcutSettingsDock">Show Dock</system:String>
     <system:String x:Key="ShortcutSettingsSearch">Open Search</system:String>
     <system:String x:Key="ShortcutSettingsKeyboardShortcuts">Show Keyboard Shortcuts</system:String>
@@ -168,7 +194,9 @@
     <system:String x:Key="ShortcutSettingsSiri">Start Siri</system:String>
     <system:String x:Key="ShortcutSettingsUnbound">Unbound</system:String>
     <system:String x:Key="ShortcutSettingsDuplicate">Each action must use a different shortcut.</system:String>
-    <system:String x:Key="ShortcutSettingsCaptureHint">Focus the field, then press a shortcut. Press Backspace or Delete to unbind; F1-F11 can also be used alone.</system:String>
+    <system:String x:Key="ShortcutSettingsCaptureHint">Focus the field, then press a shortcut. Backspace or Delete unbinds it; F1-F11, right mouse, and middle mouse can be used alone.</system:String>
+    <system:String x:Key="ShortcutMouseRight">Right mouse button</system:String>
+    <system:String x:Key="ShortcutMouseMiddle">Middle mouse button</system:String>
     <system:String x:Key="ShortcutSettingsReset">Restore default</system:String>
     <system:String x:Key="ShortcutSettingsInvalid">Choose a valid shortcut. F12, Windows-key shortcuts, and modifier-only keys are unavailable.</system:String>
     <system:String x:Key="ShortcutRegistrationFailedFormat">Windows could not register {0}; it may already be in use.</system:String>
@@ -187,10 +215,18 @@
     <system:String x:Key="BluetoothClientAddressFormat">Device ID: {0}</system:String>
     <system:String x:Key="BluetoothClientConnectionTimeFormat">Connected: {0}</system:String>
     <system:String x:Key="BluetoothClientBoundToFormat">Bound to: {0}</system:String>
+    <system:String x:Key="DeviceProfileGuidanceWiredTitle">First connection for this wired device</system:String>
+    <system:String x:Key="DeviceProfileGuidanceWiredBody">A new wired iPhone/iPad was detected. Create a device profile now so wired mirroring, wireless mirroring, and reverse control always resolve to the same physical device.
+
+Keep the device unlocked and complete the “Trust This Computer” prompt. Click Continue to open the device binder and confirm or manage this profile; click Cancel to open it later from the Reverse control menu.</system:String>
+    <system:String x:Key="DeviceProfileGuidanceWirelessTitle">First connection for this wireless device</system:String>
+    <system:String x:Key="DeviceProfileGuidanceWirelessBody">A new AirPlay device was detected. Create a device profile now so wireless mirroring can match its wired identity and reverse control can target the correct device.
+
+Make sure the phone and computer are on the same local network and keep the device name recognizable. Click Continue to open the device binder and bind this AirPlay device; click Cancel to open it later from the Reverse control menu.</system:String>
     <system:String x:Key="ClearBluetoothBindings">Clear all Bluetooth bindings</system:String>
     <system:String x:Key="ClearBluetoothBindingsTitle">Clear Bluetooth bindings</system:String>
-    <system:String x:Key="ClearBluetoothBindingsBody">This removes every mirrored-device to Bluetooth-phone binding. The next reverse-control session will ask you to confirm the phone again.</system:String>
-    <system:String x:Key="ClearBluetoothBindingsFailed">Could not save the Bluetooth binding data.</system:String>
+    <system:String x:Key="ClearBluetoothBindingsBody">This removes the Bluetooth identity from every device profile. Other USB and AirPlay identities remain bound.</system:String>
+    <system:String x:Key="ClearBluetoothBindingsFailed">Could not update the device binding profiles.</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">Checking the Apple USB environment…</system:String>
     <system:String x:Key="StatusWaitingDevice">Waiting for a device</system:String>
@@ -426,6 +462,15 @@
     <system:String x:Key="AppSubtitleConnectivity">Low-latency USB and wireless AirPlay mirroring for Windows</system:String>
     <system:String x:Key="WirelessReceiverTitle">Wireless AirPlay</system:String>
     <system:String x:Key="WirelessReceiverNameLabel">Receiver name</system:String>
+    <system:String x:Key="WirelessBackendLabel">Receiver implementation</system:String>
+    <system:String x:Key="WirelessBackendOriginal">Original</system:String>
+    <system:String x:Key="WirelessBackendUxPlay">UxPlay (fallback)</system:String>
+    <system:String x:Key="WirelessBackendChangeFormat">Receiver implementation: {0} → {1}</system:String>
+    <system:String x:Key="WirelessBackendAppliedFormat">Receiver implementation in use: {0}</system:String>
+    <system:String x:Key="WirelessRunningWithBackendFormat">{0} wireless receiver active: {1}</system:String>
+    <system:String x:Key="WirelessBackendUnavailableFormat">The {0} wireless receiver component is missing. Rebuild the release package.</system:String>
+    <system:String x:Key="WirelessBackendSettingsSaveFailed">The selected wireless receiver implementation could not be saved.</system:String>
+    <system:String x:Key="WirelessUxPlayStartupFailed">UxPlay stopped immediately after startup. Repair the UxPlay runtime, then apply the wireless settings again.</system:String>
     <system:String x:Key="ApplyReceiverName">Apply</system:String>
     <system:String x:Key="WirelessResolutionTitle">Wireless mirroring quality</system:String>
     <system:String x:Key="WirelessSettingsTitle">Apply wireless AirPlay settings</system:String>
@@ -476,6 +521,7 @@
     <system:String x:Key="MediaCastReady">Video casting receiver ready</system:String>
     <system:String x:Key="MediaCastStarting">Starting the video casting receiver...</system:String>
     <system:String x:Key="MediaCastReceiverMissing">The video casting component is missing. Rebuild the release package.</system:String>
+    <system:String x:Key="MediaCastRequiresOriginalBackend">Video app casting is available only with the Original wireless receiver implementation.</system:String>
     <system:String x:Key="MediaCastWindowTitle">iPhoneMirror Video App Casting</system:String>
     <system:String x:Key="MediaCastWaitingVideo">Waiting for a video app to cast content...</system:String>
     <system:String x:Key="MediaCastLoadingVideo">Loading the cast video...</system:String>
@@ -682,6 +728,12 @@
     <system:String x:Key="DeveloperAdvancedSettingsDescription">Resolution input validation</system:String>
     <system:String x:Key="DeveloperPrompt">Confirmation prompt</system:String>
     <system:String x:Key="DeveloperPromptDescription">Standard confirmation and info layout</system:String>
+    <system:String x:Key="DeveloperReverseControlWiredPrerequisite">Wired control prerequisites</system:String>
+    <system:String x:Key="DeveloperReverseControlWiredPrerequisiteDescription">Developer Mode, USB trust, and DDI guidance</system:String>
+    <system:String x:Key="DeveloperReverseControlWirelessPrerequisite">Wireless control prerequisites</system:String>
+    <system:String x:Key="DeveloperReverseControlWirelessPrerequisiteDescription">Developer Mode, pairing, and local network guidance</system:String>
+    <system:String x:Key="DeveloperReverseControlError">Reverse control error prompt</system:String>
+    <system:String x:Key="DeveloperReverseControlErrorDescription">Error shown when the reverse-control bridge fails</system:String>
     <system:String x:Key="DeveloperCaptureError">Mirroring error prompt</system:String>
     <system:String x:Key="DeveloperCaptureErrorDescription">Error shown after a video-stream failure</system:String>
     <system:String x:Key="DeveloperSessionClosed">Mirroring stopped prompt</system:String>

@@ -290,7 +290,10 @@ int wmain(int argc, wchar_t** argv) {
     bool callback_connected{};
     bool callback_video{};
     bool callback_audio{};
-    bool callback_volume{};
+    bool callback_volume_muted{};
+    bool callback_volume_recovered{};
+    bool callback_volume_minimum{};
+    bool callback_volume_maximum{};
     bool second_connected{};
     bool second_video{};
     bool second_audio{};
@@ -385,12 +388,21 @@ int wmain(int argc, wchar_t** argv) {
                     device_id == "00:11:22:33:44:55" &&
                     header.sample_rate == 48000 && header.channels == 2 &&
                     header.bits_per_sample == 16 && payload.size() == 8);
-            callback_volume = callback_volume ||
-                (header.type == iPhoneMirror::wireless::MessageType::MediaVolume &&
-                    device_id == "00:11:22:33:44:55" &&
-                    header.reserved == static_cast<std::uint32_t>(
-                        iPhoneMirror::wireless::MediaVolumeTarget::MirroredStream) &&
-                    std::abs(header.media_volume - 0.4) < 0.001);
+            const auto mirrored_stream_volume =
+                header.type == iPhoneMirror::wireless::MessageType::MediaVolume &&
+                device_id == "00:11:22:33:44:55" &&
+                header.reserved == static_cast<std::uint32_t>(
+                    iPhoneMirror::wireless::MediaVolumeTarget::MirroredStream);
+            callback_volume_muted = callback_volume_muted ||
+                (mirrored_stream_volume && std::abs(header.media_volume) < 0.001);
+            callback_volume_recovered = callback_volume_recovered ||
+                (mirrored_stream_volume &&
+                    std::abs(header.media_volume - 0.5) < 0.001);
+            callback_volume_minimum = callback_volume_minimum ||
+                (mirrored_stream_volume && std::abs(header.media_volume) < 0.001 &&
+                    callback_volume_muted);
+            callback_volume_maximum = callback_volume_maximum ||
+                (mirrored_stream_volume && std::abs(header.media_volume - 1.0) < 0.001);
             second_connected = second_connected ||
                 (header.type == iPhoneMirror::wireless::MessageType::Connected &&
                     device_id == "66:77:88:99:AA:BB" && device_name == "Second iPhone");
@@ -924,7 +936,9 @@ int wmain(int argc, wchar_t** argv) {
         !wait_end_log || !ipc_summary_log || !callback_summary_log || !dlna_http_log ||
         !dlna_soap_log || raw_sensitive_log || !callback_metadata ||
         !callback_connected ||
-        !callback_video || !callback_audio || !callback_volume ||
+        !callback_video || !callback_audio || !callback_volume_muted ||
+        !callback_volume_recovered || !callback_volume_minimum ||
+        !callback_volume_maximum ||
         !second_connected || !second_video ||
         !second_audio || !second_disconnected || !media_play ||
         !invalid_media_values_normalized || !dlna_media_play ||
@@ -962,7 +976,10 @@ int wmain(int argc, wchar_t** argv) {
             << " callback_connected=" << callback_connected
             << " callback_video=" << callback_video
             << " callback_audio=" << callback_audio
-            << " callback_volume=" << callback_volume
+            << " callback_volume_muted=" << callback_volume_muted
+            << " callback_volume_recovered=" << callback_volume_recovered
+            << " callback_volume_minimum=" << callback_volume_minimum
+            << " callback_volume_maximum=" << callback_volume_maximum
             << " second_connected=" << second_connected
             << " second_video=" << second_video
             << " second_audio=" << second_audio

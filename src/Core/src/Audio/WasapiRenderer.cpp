@@ -538,10 +538,11 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
                 const auto wait = WaitForMultipleObjects(2, render_events, FALSE, 1000);
                 if (wait == WAIT_OBJECT_0) break;
                 if (wait == WAIT_OBJECT_0 + 1) {
-                    if (write_available(true)) {
-                        needs_rebuffer = true;
-                        break;
-                    }
+                    // A network source can briefly arrive just below one
+                    // endpoint buffer. write_available() already fills the
+                    // remainder with silence; restarting WASAPI here causes
+                    // an audible click and a stop/start storm under jitter.
+                    (void)write_available(true);
                 } else if (wait == WAIT_TIMEOUT) {
                     throw std::runtime_error("WASAPI render event timed out");
                 } else {

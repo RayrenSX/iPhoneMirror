@@ -111,7 +111,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly MenuItem _displayMenuItem;
     private readonly MenuItem _topMostItem;
     private readonly MenuItem _fixedItem;
-    private readonly MenuItem? _reverseControlItem;
+    private readonly MenuItem? _reverseControlMenuItem;
+    private readonly MenuItem? _bluetoothControlItem;
+    private readonly MenuItem? _usbControlItem;
+    private readonly MenuItem? _wirelessControlItem;
     private readonly MenuItem? _cornerItem;
     private readonly MenuItem _muteMenuItem;
     private readonly MenuItem _muteThisItem;
@@ -132,6 +135,9 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly Action<PreviewPointerEventArgs>? _pointerInput;
     private readonly Action<PreviewKeyboardEventArgs>? _keyboardInput;
     private readonly Action<nint>? _requestReverseControl;
+    private readonly Func<bool>? _isUsbControlEnabled;
+    private readonly Action<nint>? _requestUsbControl;
+    private readonly Action<nint>? _requestWirelessControl;
     private readonly Action<string>? _logDiagnostic;
     private readonly ulong _sessionHandle;
     private readonly double _cornerRadius;
@@ -151,6 +157,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool _isFixed;
     private bool _cornersEnabled = true;
     private int _rotation;
+    private byte _capturedMouseButtons;
     private nint _largeIcon;
     private nint _smallIcon;
     private ProtectedContentOverlayWindow? _protectedOverlay;
@@ -172,6 +179,9 @@ internal sealed class NativePreviewWindow : IDisposable
            Action<PreviewKeyboardEventArgs>? keyboardInput = null,
            Action<nint>? requestReverseControl = null,
            Func<bool>? isReverseControlHotkeyRegistered = null,
+           Func<bool>? isUsbControlEnabled = null,
+           Action<nint>? requestUsbControl = null,
+           Action<nint>? requestWirelessControl = null,
            FrameworkElement? managedContent = null, Action? managedContentDetached = null,
          Action<string>? logDiagnostic = null)
     {
@@ -192,6 +202,9 @@ internal sealed class NativePreviewWindow : IDisposable
         _pointerInput = pointerInput;
         _keyboardInput = keyboardInput;
         _requestReverseControl = requestReverseControl;
+        _isUsbControlEnabled = isUsbControlEnabled;
+        _requestUsbControl = requestUsbControl;
+        _requestWirelessControl = requestWirelessControl;
         _logDiagnostic = logDiagnostic;
         _managedContent = managedContent;
         _managedContentOriginalLayoutTransform = managedContent?.LayoutTransform;
@@ -214,8 +227,22 @@ internal sealed class NativePreviewWindow : IDisposable
         _fixedItem.Click += (_, _) => ToggleFixedWindow();
         if (_requestReverseControl is not null)
         {
-            _reverseControlItem = new MenuItem { Style = itemStyle };
-            _reverseControlItem.Click += (_, _) => EnableReverseControl();
+            _reverseControlMenuItem = new MenuItem { Style = submenuStyle };
+            _bluetoothControlItem = new MenuItem { Style = itemStyle };
+            _bluetoothControlItem.Click += (_, _) => EnableReverseControl();
+            _reverseControlMenuItem.Items.Add(_bluetoothControlItem);
+        }
+        if (_requestUsbControl is not null)
+        {
+            _usbControlItem = new MenuItem { Style = itemStyle };
+            _usbControlItem.Click += (_, _) => _requestUsbControl(_handle);
+            _reverseControlMenuItem?.Items.Add(_usbControlItem);
+        }
+        if (_requestWirelessControl is not null)
+        {
+            _wirelessControlItem = new MenuItem { Style = itemStyle };
+            _wirelessControlItem.Click += (_, _) => _requestWirelessControl(_handle);
+            _reverseControlMenuItem?.Items.Add(_wirelessControlItem);
         }
         _windowMenuItem.Items.Add(_topMostItem);
         _windowMenuItem.Items.Add(_fixedItem);
@@ -255,7 +282,7 @@ internal sealed class NativePreviewWindow : IDisposable
         _contextMenu.Items.Add(_fullScreenItem);
         _contextMenu.Items.Add(_windowMenuItem);
         _contextMenu.Items.Add(_displayMenuItem);
-        if (_reverseControlItem is not null) _contextMenu.Items.Add(_reverseControlItem);
+        if (_reverseControlMenuItem is not null) _contextMenu.Items.Add(_reverseControlMenuItem);
         if (_setAudioEnabled is not null) _contextMenu.Items.Add(_muteMenuItem);
         if (_projectionSettingsItem is not null) _contextMenu.Items.Add(_projectionSettingsItem);
         _contextMenu.Items.Add(new Separator
@@ -374,7 +401,10 @@ internal sealed class NativePreviewWindow : IDisposable
         Action<PreviewPointerEventArgs>? pointerInput = null,
         Action<PreviewKeyboardEventArgs>? keyboardInput = null,
         Action<nint>? requestReverseControl = null,
-        Func<bool>? isReverseControlHotkeyRegistered = null)
+        Func<bool>? isReverseControlHotkeyRegistered = null,
+        Func<bool>? isUsbControlEnabled = null,
+        Action<nint>? requestUsbControl = null,
+        Action<nint>? requestWirelessControl = null)
     {
         window = null;
         NativePreviewWindow? candidate = null;
@@ -388,7 +418,8 @@ internal sealed class NativePreviewWindow : IDisposable
                  connectedDeviceCount, setAudioEnabled, muteOtherWindows,
                   showImageSettings, showProjectionSettings,
                   isReverseControlEnabled, pointerInput, keyboardInput, requestReverseControl,
-                  isReverseControlHotkeyRegistered,
+                  isReverseControlHotkeyRegistered, isUsbControlEnabled, requestUsbControl,
+                  requestWirelessControl,
                   logDiagnostic: logDiagnostic);
             if (!candidate._attachPreview(candidate._handle))
             {
@@ -624,11 +655,16 @@ internal sealed class NativePreviewWindow : IDisposable
             Log("autoplay_cancelled", ("message", "WM_QUERYCANCELAUTOPLAY"));
             return 1;
         }
-        if (IsReverseControlEnabledForWindow &&
+        if (IsPointerInputEnabledForWindow &&
             (message == WmKillFocus || message == WmCancelMode ||
              message == WmCaptureChanged ||
              (message == WmActivateApp && wParam == 0)))
         {
+            if (_capturedMouseButtons != 0)
+            {
+                _capturedMouseButtons = 0;
+                _ = ReleaseCapture();
+            }
             _pointerInput?.Invoke(new PreviewPointerEventArgs(
                 PreviewPointerKind.Reset, 0, 0, 0, 0));
             _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
@@ -638,76 +674,82 @@ internal sealed class NativePreviewWindow : IDisposable
         }
         switch (message)
         {
-            case WmMouseMove when IsReverseControlActive:
+            case WmMouseMove when IsPointerInputActive:
                 DispatchPointer(PreviewPointerKind.Move, lParam, 0, 0);
                 handled = true;
                 return 0;
-            case WmLeftButtonDown when IsReverseControlActive:
+            case WmLeftButtonDown when IsPointerInputActive:
+                _capturedMouseButtons |= 1;
+                _ = SetCapture(hwnd);
                 DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 1, 0);
                 handled = true;
                 return 0;
-            case WmLeftButtonUp when IsReverseControlActive:
+            case WmLeftButtonUp when IsPointerInputActive:
+                _capturedMouseButtons = (byte)(_capturedMouseButtons & ~1);
                 DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 1, 0);
+                if (_capturedMouseButtons == 0) _ = ReleaseCapture();
                 handled = true;
                 return 0;
             case WmRightButtonDown when IsReverseControlEnabledForWindow:
+                if (IsUsbControlEnabledForWindow) break;
                 if (IsReverseControlActive)
                     DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 2, 0);
                 handled = true;
                 return 0;
             case WmRightButtonUp when IsReverseControlEnabledForWindow:
+                if (IsUsbControlEnabledForWindow) break;
                 if (IsReverseControlActive)
                     DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 2, 0);
                 handled = true;
                 return 0;
-            case WmMiddleButtonDown when IsReverseControlActive:
+            case WmMiddleButtonDown when IsPointerInputActive:
+                _capturedMouseButtons |= 4;
+                _ = SetCapture(hwnd);
                 DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 4, 0);
                 handled = true;
                 return 0;
-            case WmMiddleButtonUp when IsReverseControlActive:
+            case WmMiddleButtonUp when IsPointerInputActive:
+                _capturedMouseButtons = (byte)(_capturedMouseButtons & ~4);
                 DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 4, 0);
+                if (_capturedMouseButtons == 0) _ = ReleaseCapture();
                 handled = true;
                 return 0;
-            case WmMouseWheel when IsReverseControlActive:
+            case WmMouseWheel when IsPointerInputActive:
                 DispatchPointer(PreviewPointerKind.Wheel, lParam, 0,
                     unchecked((short)(wParam.ToInt64() >> 16)));
                 handled = true;
                 return 0;
-            case WmSetCursor when IsReverseControlActive:
-                HideSystemCursor();
-                SetCursor(0);
+            case WmSetCursor when IsUsbControlEnabledForWindow:
+                // USB touch control never captures the Windows pointer. A
+                // previous reverse-control route may have left the process
+                // cursor hidden, so reassert visibility on every cursor
+                // negotiation for this independent HWND.
+                ShowSystemCursor();
                 handled = true;
                 return 1;
-            case WmKeyDown or WmSysKeyDown when IsReverseControlHotkey(wParam.ToInt32()):
-                // The global registration is owned by MainWindow. Consume the
-                // local message so the shortcut cannot become iPhone input or
-                // toggle the same session twice when WM_HOTKEY arrives.
-                if (!(_isReverseControlHotkeyRegistered?.Invoke() ?? false))
-                {
-                    EnsureFixedWindow();
-                    _requestReverseControl?.Invoke(_handle);
-                }
+            case WmSetCursor when IsReverseControlActive:
+                HideSystemCursor();
                 handled = true;
-                return 0;
+                return 1;
             case WmKeyDown or WmSysKeyDown when IsBossKeyHotkey(wParam.ToInt32()):
                 // Boss key is process-global. Keep it out of the iPhone HID
                 // stream while the main window receives WM_HOTKEY.
                 handled = true;
                 return 0;
-            case WmKeyDown when IsReverseControlActive:
+            case WmKeyDown when IsPointerInputActive:
                 _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
                     PreviewKeyboardKind.Down, wParam.ToInt32(),
                     (int)((lParam.ToInt64() >> 16) & 0x1FF)));
                 handled = true;
                 return 0;
-            case WmSysKeyDown when IsReverseControlActive:
+            case WmSysKeyDown when IsPointerInputActive:
                 _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
                     PreviewKeyboardKind.Down, wParam.ToInt32(),
                     (int)((lParam.ToInt64() >> 16) & 0x1FF)));
                 handled = true;
                 return 0;
-            case WmKeyUp when IsReverseControlActive:
-            case WmSysKeyUp when IsReverseControlActive:
+            case WmKeyUp when IsPointerInputActive:
+            case WmSysKeyUp when IsPointerInputActive:
                 _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
                     PreviewKeyboardKind.Up, wParam.ToInt32(),
                     (int)((lParam.ToInt64() >> 16) & 0x1FF)));
@@ -842,13 +884,29 @@ internal sealed class NativePreviewWindow : IDisposable
         _fixedItem.Header = LocalizationService.Get(
             _isFixed ? "IndependentWindowUnfix" : "IndependentWindowFix");
         _fixedItem.IsEnabled = !_isFullScreen;
-        if (_reverseControlItem is not null)
+        if (_reverseControlMenuItem is not null)
         {
-            _reverseControlItem.Header = LocalizationService.Get(
+            _reverseControlMenuItem.Header = LocalizationService.Get(
                 "IndependentWindowReverseControl");
-            // The same menu command toggles control on and off. The configured
-            // global shortcut remains the keyboard escape hatch.
-            _reverseControlItem.IsEnabled = !_isFullScreen;
+            _reverseControlMenuItem.IsEnabled = !_isFullScreen;
+        }
+        if (_bluetoothControlItem is not null)
+        {
+            _bluetoothControlItem.Header = LocalizationService.Get(
+                "IndependentWindowBluetoothControl");
+            _bluetoothControlItem.IsEnabled = !_isFullScreen;
+        }
+        if (_usbControlItem is not null)
+        {
+            _usbControlItem.Header = LocalizationService.Get(
+                "IndependentWindowWiredProjection");
+            _usbControlItem.IsEnabled = !_isFullScreen;
+        }
+        if (_wirelessControlItem is not null)
+        {
+            _wirelessControlItem.Header = LocalizationService.Get(
+                "IndependentWindowWirelessProjection");
+            _wirelessControlItem.IsEnabled = !_isFullScreen;
         }
         if (_cornerItem is not null)
             _cornerItem.Header = LocalizationService.Get(
@@ -938,6 +996,13 @@ internal sealed class NativePreviewWindow : IDisposable
         GetForegroundWindow() == _handle;
     private bool IsReverseControlEnabledForWindow => _pointerInput is not null &&
         (_isReverseControlEnabled?.Invoke(_handle) ?? false);
+    private bool IsUsbControlEnabledForWindow => _pointerInput is not null &&
+        (_isUsbControlEnabled?.Invoke() ?? false);
+    private bool IsPointerInputEnabledForWindow =>
+        IsReverseControlEnabledForWindow || IsUsbControlEnabledForWindow;
+    private bool IsPointerInputActive =>
+        IsReverseControlActive || (IsUsbControlEnabledForWindow &&
+            GetForegroundWindow() == _handle);
 
     private void EnableReverseControl()
     {
@@ -946,11 +1011,6 @@ internal sealed class NativePreviewWindow : IDisposable
         _requestReverseControl?.Invoke(_handle);
         UpdateContextMenuLabels();
     }
-
-    private static bool IsReverseControlHotkey(int virtualKey) =>
-        GetConfiguredShortcut(BluetoothShortcutAction.ReverseControl)
-            .MatchesVirtualKey(virtualKey,
-            IsKeyDown(VkControl), IsKeyDown(VkMenu), IsKeyDown(VkShift));
 
     private static bool IsBossKeyHotkey(int virtualKey) =>
         GetConfiguredShortcut(BluetoothShortcutAction.BossKey)
@@ -978,20 +1038,45 @@ internal sealed class NativePreviewWindow : IDisposable
         {
             Log("independent_cursor_query_failed",
                 ("win32_error", Marshal.GetLastWin32Error()));
-            // WM_SETCURSOR below still sets the current cursor to null. Do
-            // not change ShowCursor's display count when it cannot be queried:
-            // repeated cursor messages would otherwise leave it hidden after
-            // reverse control has been turned off.
+            // The caller still consumes WM_SETCURSOR. Do not change
+            // ShowCursor's display count when it cannot be queried: repeated
+            // cursor messages would otherwise leave it hidden after reverse
+            // control has been turned off.
             return;
         }
         if ((cursor.Flags & CursorShowing) != 0)
             while (ShowCursor(false) >= 0) { }
     }
 
+    private void ShowSystemCursor()
+    {
+        var cursor = new CursorInfo
+        {
+            Size = (uint)Marshal.SizeOf<CursorInfo>(),
+        };
+        if (!GetCursorInfo(ref cursor))
+        {
+            Log("independent_cursor_query_failed",
+                ("win32_error", Marshal.GetLastWin32Error()));
+            return;
+        }
+        if ((cursor.Flags & CursorShowing) == 0)
+            while (ShowCursor(true) < 0) { }
+    }
+
     private void EnsureFixedWindow()
     {
         if (_isFixed) return;
         ToggleFixedWindow();
+    }
+
+    internal void PrepareForUsbControl()
+    {
+        if (_disposed || _handle == 0) return;
+        if (!_isFixed) ToggleFixedWindow();
+        if (!_isTopMost) ToggleTopMost();
+        _ = SetForegroundWindow(_handle);
+        UpdateContextMenuLabels();
     }
 
     private void DispatchPointer(PreviewPointerKind kind, nint lParam,
@@ -1154,9 +1239,6 @@ internal sealed class NativePreviewWindow : IDisposable
     private static extern bool SetForegroundWindow(nint window);
 
     [DllImport("user32.dll")]
-    private static extern nint SetCursor(nint cursor);
-
-    [DllImport("user32.dll")]
     private static extern int ShowCursor([MarshalAs(UnmanagedType.Bool)] bool show);
 
     [DllImport("user32.dll")]
@@ -1168,6 +1250,13 @@ internal sealed class NativePreviewWindow : IDisposable
 
     [DllImport("user32.dll")]
     private static extern nint SetFocus(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetCapture(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -30,6 +30,99 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
 {
     private static readonly HttpClient Http = CreateHttpClient();
 
+    internal async Task<AppleSupportInstallResult> RepairBonjourAsync()
+    {
+        var operationId = Guid.NewGuid().ToString("N");
+        if (IsBonjourRunning())
+            return new(true, false, "Bonjour service is already running.");
+
+        var serviceStart = await StartNamedServiceElevatedAsync(
+            "Bonjour Service", operationId, configureAutomatic: true);
+        if (serviceStart == ServiceStartOutcome.Started && IsBonjourRunning())
+            return new(true, false, "Bonjour service was started.");
+
+        DriverPayload.CreateSafeDirectory(DriverConstants.PackagesRoot);
+        string setup;
+        try
+        {
+            setup = FindLocalItunesSetup() ??
+                await DownloadOfficialItunesAsync(operationId, progress: null);
+        }
+        catch (Exception error)
+        {
+            DriverLogger.WriteException("bonjour", "package_acquisition_failed", error,
+                ("operation", operationId));
+            return new(false, false, error.Message);
+        }
+
+        var extractionRoot = Path.Combine(DriverConstants.PackagesRoot,
+            "bonjour-extract-" + Guid.NewGuid().ToString("N"));
+        DriverPayload.CreateSafeDirectory(extractionRoot);
+        try
+        {
+            var setupHash = DriverPayload.ComputeHash(setup);
+            ProcessResult extraction;
+            using (DriverPayload.LockAndValidateApplePackage(setup, setupHash))
+            {
+                extraction = await RunCapturedProcessAsync(setup, ["/extract"],
+                    TimeSpan.FromMinutes(5), extractionRoot);
+            }
+            if (!IsInstallerSuccess(extraction.ExitCode))
+                return new(false, false,
+                    $"Apple installer extraction failed ({extraction.ExitCode}).");
+
+            DriverPayload.EnsureNoReparsePoints(extractionRoot);
+            var bonjourMsi = DriverPayload.GetSafeChildPath(extractionRoot,
+                DriverConstants.BonjourMsiFileName);
+            if (!IsTrustedAppleMsi(bonjourMsi))
+                return new(false, false, "The Apple Bonjour package is missing or untrusted.");
+
+            var packageHash = DriverPayload.ComputeHash(bonjourMsi);
+            var packageLog = Path.Combine(DriverConstants.PackagesRoot,
+                "bonjour-install.log");
+            var install = await RunMsiAsync(bonjourMsi, packageHash,
+                packageLog, operationId);
+            if (!IsInstallerSuccess(install.ExitCode))
+                return new(false, false, $"Bonjour installation failed ({install.ExitCode}).");
+
+            for (var attempt = 0; attempt < 20 && !IsBonjourRunning(); attempt++)
+                await Task.Delay(250);
+            if (IsBonjourRunning())
+                return new(true, false, "Bonjour was installed and started.");
+
+            serviceStart = await StartNamedServiceElevatedAsync(
+                "Bonjour Service", operationId, configureAutomatic: true);
+            for (var attempt = 0; attempt < 20 && !IsBonjourRunning(); attempt++)
+                await Task.Delay(250);
+            return IsBonjourRunning()
+                ? new(true, false, "Bonjour was installed and started.")
+                : new(false, false, $"Bonjour was installed but could not be started ({serviceStart}).");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(extractionRoot))
+                {
+                    DriverPayload.EnsureNoReparsePoints(extractionRoot);
+                    Directory.Delete(extractionRoot, recursive: true);
+                }
+            }
+            catch (Exception error)
+            {
+                DriverLogger.WriteException("bonjour", "extract_cleanup_failed", error,
+                    ("operation", operationId));
+            }
+        }
+    }
+
+    private static bool IsBonjourRunning()
+    {
+        var processes = Process.GetProcessesByName("mDNSResponder");
+        try { return processes.Length != 0; }
+        finally { foreach (var process in processes) process.Dispose(); }
+    }
+
     internal async Task<AppleSupportInstallResult> InstallAsync(
         IProgress<string>? progress = null)
     {
@@ -741,6 +834,25 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 ("elapsed_ms", timer.ElapsedMilliseconds));
             return ServiceStartOutcome.Failed;
         }
+    }
+
+    private static async Task<ServiceStartOutcome> StartNamedServiceElevatedAsync(
+        string serviceName, string operationId, bool configureAutomatic)
+    {
+        var sc = Path.Combine(Environment.SystemDirectory, "sc.exe");
+        if (configureAutomatic)
+        {
+            var configure = await RunElevatedAsync(sc,
+                ["config", serviceName, "start=", "auto"], TimeSpan.FromSeconds(30),
+                operationId, "sc-config-service");
+            if (IsUserCancellation(configure.ExitCode)) return ServiceStartOutcome.Cancelled;
+        }
+        var start = await RunElevatedAsync(sc, ["start", serviceName],
+            TimeSpan.FromSeconds(30), operationId, "sc-start-service");
+        return start.ExitCode is 0 or 1056
+            ? ServiceStartOutcome.Started
+            : IsUserCancellation(start.ExitCode)
+                ? ServiceStartOutcome.Cancelled : ServiceStartOutcome.Failed;
     }
 
     private static async Task<ProcessResult> RunElevatedAsync(string executable,

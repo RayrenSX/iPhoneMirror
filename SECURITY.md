@@ -2,8 +2,9 @@
 
 ## Supported versions
 
-iPhoneMirror is currently a public preview. Security fixes are provided only
-for the latest release and the current `main` branch.
+iPhoneMirror is currently a public preview. As of 2026-08-31, the latest
+release is `v1.8.1`. Security fixes are provided only for the latest release
+and the current `main` branch.
 
 | Version | Supported |
 |---|---|
@@ -19,6 +20,7 @@ Do not open a public issue for vulnerabilities involving:
 - unsafe external-driver detection or accidental registry mutation;
 - privilege escalation or unsafe file handling;
 - memory safety in USB, protocol, decoder or renderer code;
+- wireless-host, AirPlay/DLNA, named-pipe or virtual-camera isolation;
 - exposure of UDIDs, pairing data, logs, screen content or audio;
 - crafted USB/CoreMedia/H.264 data that crashes or compromises the host.
 

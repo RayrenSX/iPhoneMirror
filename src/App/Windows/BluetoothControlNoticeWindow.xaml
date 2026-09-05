@@ -52,6 +52,7 @@
                                    FontSize="14" FontWeight="SemiBold"
                                    TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding DetailText}"
+                                   Visibility="{Binding DetailVisibility}"
                                    Foreground="{DynamicResource MutedTextBrush}"
                                    FontSize="12" Margin="0,4,0,0"
                                    TextWrapping="Wrap"/>
@@ -138,7 +139,12 @@
                             Click="OnReportMapAcknowledgedClick" MinWidth="150" Height="36"
                             Margin="12,0,8,0" Style="{StaticResource PrimaryButton}"
                             Visibility="{Binding ReportMapAcknowledgementVisibility}"/>
-                    <Button Content="{DynamicResource Close}"
+                    <Button x:Name="PrerequisiteConfirmButton"
+                            Content="{DynamicResource Continue}"
+                            Click="OnPrerequisiteConfirmClick" MinWidth="100" Height="36"
+                            Margin="12,0,8,0" Style="{StaticResource PrimaryButton}"
+                            Visibility="{Binding PrerequisiteActionsVisibility}"/>
+                    <Button Content="{Binding CloseButtonText}"
                             Click="OnCloseClick" MinWidth="80" Height="36"
                             Background="{DynamicResource ControlFillBrush}"
                             BorderBrush="{DynamicResource BorderSoftBrush}"

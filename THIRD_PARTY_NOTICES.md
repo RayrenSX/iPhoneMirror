@@ -1,7 +1,8 @@
 # Third-party notices
 
 This file describes third-party material intentionally included in the source
-tree or release package. Each component remains under its upstream license.
+tree or release package for the current `v1.8.1` baseline. Each component
+remains under its upstream license.
 The root GNU General Public License v3.0 only applies to original iPhoneMirror
 material and does not replace, narrow or relicense any component listed below.
 
@@ -46,9 +47,10 @@ remaining signed runtime and kernel-driver payload under
 
 The driver manager does not copy proprietary Aisi binaries. Apple USB support
 is installed from a signed offline AppleMobileDeviceSupport MSI when available,
-from the Apple Devices Microsoft Store product through Windows Package Manager,
-or from Apple's official HTTPS iTunes installer as a compatibility fallback.
-Apple software is not redistributed in this repository or its release assets.
+from Apple's Software Update catalog as a standalone MSI, or from Apple's
+official HTTPS iTunes installer as a compatibility fallback. Apple Devices
+from Microsoft Store remains a supported manual installation path. Apple
+software is not redistributed in this repository or its release assets.
 
 ## Microsoft Visual C++ runtime
 
@@ -67,7 +69,8 @@ directory after validating their Microsoft Authenticode signatures.
 ## AirPlayServer 1.1.2 wireless receiver
 
 `third_party/airplay-server/` contains a pinned runtime subset of the
-AirPlayServer x64 release with local compatibility patches. The GPL-licensed
+AirPlayServer x64 release with local compatibility patches and selected fixes
+from upstream commits `c788d6fe` and `37d7fd0f`. The GPL-licensed
 `iPhoneMirror.WirelessHost.exe` process loads its protocol/decoder DLL and sends
 decoded I420 video and PCM audio to the GPL-3.0-only application over a named
 pipe. The application and native capture core do not link to the receiver DLL.
@@ -80,6 +83,16 @@ pipe. The application and native capture core do not link to the receiver DLL.
 - Fraunhofer FDK AAC: Fraunhofer FDK AAC license
 - Exact hashes, source links and license files:
   `third_party/airplay-server/SOURCE.md`
+
+## FDH2/UxPlay wireless fallback
+
+The optional `Wireless/UxPlay` fallback is built on demand from the FDH2/UxPlay
+source tree by `scripts/prepare_uxplay.ps1`. The adapter keeps UxPlay's
+GStreamer-rendered raw I420/PCM output on the existing iPhoneMirror named-pipe
+capture path. UxPlay is GPLv3 software; its pinned source and build details are
+recorded in `third_party/uxplay/SOURCE.md`. The fallback is disabled for the
+application's URL-video/DLNA media-cast path because UxPlay does not implement
+the iPhoneMirror media-control IPC contract.
 
 ## FFmpeg 8.1.2 media-output runtime
 

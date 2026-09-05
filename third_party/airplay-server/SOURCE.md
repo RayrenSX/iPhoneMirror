@@ -1,9 +1,12 @@
 # AirPlay receiver source and licenses
 
 The files in `bin/x64` are a pinned runtime subset of AirPlayServer v1.1.2,
-with the wrapper patched for native Windows FFmpeg loading, per-client IPC
-identity, AirPlay SETUP device metadata extraction, and runtime-selectable
-AirPlay display capability responses with a 5120x2880@60 fallback. One combined
+with selected upstream fixes from `c788d6fe` (AirPlay connection compatibility)
+and `37d7fd0f` (mirror stream recovery), plus a wrapper patched for native
+Windows FFmpeg loading, per-client IPC identity, AirPlay SETUP device metadata
+extraction, runtime-selectable AirPlay display capability responses with a
+5120x2880@60 fallback, and H.264 decoder recovery across orientation changes.
+One combined
 receiver process publishes matching `_raop._tcp` and `_airplay._tcp` records
 with one stable device ID. This follows UxPlay's receiver model and prevents
 iOS from hiding a route whose service identity, `/info` identity, or pairing
@@ -40,6 +43,10 @@ compiled DLL contains the runtime width, height and frame-rate capability
 markers before installation. The host only accepts the predefined maximum,
 1080p, 720p and 540p profiles exposed by the application, and forwards the
 configured receiver name into both DNS-SD registration and the `/info` plist.
+iPhoneMirror keeps the v1.1.2 source pin so its custom IPC and capability patches
+remain reproducible; the two upstream fixes above are reapplied as source
+patches during every receiver build rather than replacing the bundled DLL with
+an upstream release artifact.
 iPhoneMirror starts its own GPL-licensed `iPhoneMirror.WirelessHost.exe`
 process, which loads `airplay2dll.dll`; the GPL-3.0-only application and native
 capture core exchange decoded frames with that process over a named pipe.

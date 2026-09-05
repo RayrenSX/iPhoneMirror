@@ -26,6 +26,7 @@
     <system:String x:Key="DeviceSessionClosedWarningTitleFormat">{0} 螢幕鏡像已停止</system:String>
     <system:String x:Key="DeviceSessionClosedWarningBody">偵測到您已在控制中心點擊停止螢幕鏡像，下次使用此裝置進行有線螢幕鏡像前需重新啟動 iPhone/iPad</system:String>
     <system:String x:Key="CaptureNoticeErrorBadge">螢幕鏡像未能繼續</system:String>
+    <system:String x:Key="ReverseControlNoticeErrorBadge">反控未能繼續</system:String>
     <system:String x:Key="CaptureNoticeErrorHint">請檢查裝置和連線後重試</system:String>
     <system:String x:Key="CaptureNoticeUsbBadge">USB 螢幕鏡像設定未完成</system:String>
     <system:String x:Key="CaptureNoticeUsbHint">請重新插拔傳輸線後重試</system:String>
@@ -132,6 +133,23 @@
     <system:String x:Key="BluetoothControlFailedTitle">藍牙控制無法啟動</system:String>
     <system:String x:Key="BluetoothControlFailedBody">Windows 未能啟動 BLE HID 外設服務。請檢查藍牙適配器和驅動是否支援外設模式。</system:String>
     <system:String x:Key="BluetoothControlFailedStatus">啟動失敗</system:String>
+    <system:String x:Key="ReverseControlErrorTitle">反向控制錯誤</system:String>
+    <system:String x:Key="ReverseControlErrorBodyFormat">{0}反向控制發生錯誤：{1}</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteStatus">請確認準備工作後繼續</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteWiredTitle">啟用有線控制前請確認</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteWiredBody">1. 開啟「開發者模式」並重新啟動裝置。
+2. 使用 USB 連接裝置，解鎖並點選「信任此電腦」。
+3. 首次使用會從 GitHub 下載相符的 DDI。
+4. 準備完成前不會傳送輸入。
+
+完成後點選「繼續」，否則點選「取消」。</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteWirelessTitle">啟用無線控制前請確認</system:String>
+    <system:String x:Key="ReverseControlPrerequisiteWirelessBody">1. 開啟「開發者模式」並重新啟動裝置。
+2. 先透過 USB 完成信任和無線配對。
+3. 保持裝置解鎖，並連接同一區域網絡。
+4. 允許 iPhoneMirror 通過 Windows 防火牆通訊。
+
+完成後點選「繼續」，否則點選「取消」。</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedTitle">藍牙控制需要重新配對</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedBody">此更新修改了藍牙 HID 控制。請在 iPhone/iPad 上忽略現有的 iPhoneMirror 裝置，然後重新配對，再啟用控制。</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedDetail">移除舊配對後關閉此提示。完成新配對後再次啟用藍牙控制。</system:String>
@@ -143,6 +161,9 @@
     <system:String x:Key="BluetoothControlPromptShortcutFormat">按 {0} 釋放滑鼠</system:String>
     <system:String x:Key="BluetoothControlPromptAutoCloseFormat">{0} 秒後自動關閉</system:String>
     <system:String x:Key="IndependentWindowReverseControl">反向控制</system:String>
+    <system:String x:Key="IndependentWindowBluetoothControl">藍牙控制</system:String>
+    <system:String x:Key="IndependentWindowWirelessProjection">無線投屏</system:String>
+    <system:String x:Key="IndependentWindowWiredProjection">有線投屏</system:String>
     <system:String x:Key="ShortcutSettings">快捷鍵設定</system:String>
     <system:String x:Key="ShortcutSettingsTitle">快捷鍵設定</system:String>
     <system:String x:Key="ShortcutSettingsDescription">設定螢幕鏡像工具的快捷鍵。</system:String>
@@ -151,12 +172,17 @@
     <system:String x:Key="ShortcutSettingsCategoryAssistant">助理</system:String>
     <system:String x:Key="OpenShortcutSettings">設定快捷鍵</system:String>
     <system:String x:Key="ShortcutSettingsReverseControl">反向控制</system:String>
+    <system:String x:Key="ShortcutSettingsBluetoothControl">藍牙控制</system:String>
+    <system:String x:Key="ShortcutSettingsWirelessControl">無線投屏</system:String>
+    <system:String x:Key="ShortcutSettingsWiredControl">有線投屏</system:String>
     <system:String x:Key="ShortcutSettingsControlCenter">開啟控制中心</system:String>
     <system:String x:Key="ShortcutSettingsNotificationCenter">開啟通知中心</system:String>
     <system:String x:Key="ShortcutSettingsAppSwitcher">開啟多工</system:String>
     <system:String x:Key="ShortcutSettingsHome">返回主畫面</system:String>
     <system:String x:Key="ShortcutSettingsBossKey">老闆鍵（隱藏 / 顯示視窗）</system:String>
     <system:String x:Key="ShortcutSettingsLockScreen">鎖定螢幕</system:String>
+    <system:String x:Key="ShortcutSettingsVolumeUp">音量+</system:String>
+    <system:String x:Key="ShortcutSettingsVolumeDown">音量-</system:String>
     <system:String x:Key="ShortcutSettingsDock">顯示 Dock</system:String>
     <system:String x:Key="ShortcutSettingsSearch">開啟搜尋</system:String>
     <system:String x:Key="ShortcutSettingsKeyboardShortcuts">顯示鍵盤快速鍵</system:String>
@@ -168,7 +194,9 @@
     <system:String x:Key="ShortcutSettingsSiri">啟動 Siri</system:String>
     <system:String x:Key="ShortcutSettingsUnbound">未繫結</system:String>
     <system:String x:Key="ShortcutSettingsDuplicate">每個動作必須使用不同的快捷鍵。</system:String>
-    <system:String x:Key="ShortcutSettingsCaptureHint">聚焦輸入框後按下快捷鍵。按 Backspace 或 Delete 可解除繫結；F1-F11 可單獨使用。</system:String>
+    <system:String x:Key="ShortcutSettingsCaptureHint">聚焦輸入框後按下快捷鍵。按 Backspace 或 Delete 可解除繫結；F1-F11、右鍵、中鍵可單獨使用。</system:String>
+    <system:String x:Key="ShortcutMouseRight">右鍵</system:String>
+    <system:String x:Key="ShortcutMouseMiddle">中鍵</system:String>
     <system:String x:Key="ShortcutSettingsReset">還原預設值</system:String>
     <system:String x:Key="ShortcutSettingsInvalid">請選擇有效快捷鍵。F12、Windows 鍵組合及單獨修飾鍵不可用。</system:String>
     <system:String x:Key="ShortcutRegistrationFailedFormat">Windows 無法註冊 {0}，該快捷鍵可能已被佔用。</system:String>
@@ -187,10 +215,18 @@
     <system:String x:Key="BluetoothClientAddressFormat">裝置 ID：{0}</system:String>
     <system:String x:Key="BluetoothClientConnectionTimeFormat">目前連接：{0}</system:String>
     <system:String x:Key="BluetoothClientBoundToFormat">已綁定至：{0}</system:String>
+    <system:String x:Key="DeviceProfileGuidanceWiredTitle">首次連接此有線裝置</system:String>
+    <system:String x:Key="DeviceProfileGuidanceWiredBody">偵測到新的有線 iPhone/iPad。為了讓有線投屏、無線投屏和反向控制始終對應同一台真實裝置，請現在建立裝置檔案。
+
+請保持裝置解鎖並完成「信任此電腦」。點選「繼續」會開啟裝置綁定器，確認或管理此裝置檔案；點選「取消」亦可稍後從「反向控制」選單開啟。</system:String>
+    <system:String x:Key="DeviceProfileGuidanceWirelessTitle">首次連接此無線裝置</system:String>
+    <system:String x:Key="DeviceProfileGuidanceWirelessBody">偵測到新的 AirPlay 無線裝置。為了讓無線投屏能夠配對對應的有線裝置並啟用反向控制，請現在建立裝置檔案。
+
+請確保手機和電腦處於同一區域網絡，並保持裝置名稱可識別。點選「繼續」會開啟裝置綁定器，選擇並綁定此 AirPlay 裝置；點選「取消」亦可稍後從「反向控制」選單開啟。</system:String>
     <system:String x:Key="ClearBluetoothBindings">清除所有藍牙綁定資料</system:String>
     <system:String x:Key="ClearBluetoothBindingsTitle">清除藍牙綁定資料</system:String>
-    <system:String x:Key="ClearBluetoothBindingsBody">這會刪除所有投屏裝置與藍牙手機的綁定關係。下次啟用反向控制時需要重新確認。</system:String>
-    <system:String x:Key="ClearBluetoothBindingsFailed">藍牙綁定資料儲存失敗。</system:String>
+    <system:String x:Key="ClearBluetoothBindingsBody">這會移除所有裝置檔案中的 Bluetooth 身份，已綁定的 USB 和 AirPlay 身份會保留。</system:String>
+    <system:String x:Key="ClearBluetoothBindingsFailed">無法更新裝置綁定檔案。</system:String>
 
     <system:String x:Key="StatusCheckingEnvironment">正在檢查 Apple USB 環境…</system:String>
     <system:String x:Key="StatusWaitingDevice">等待裝置連接</system:String>
@@ -426,6 +462,15 @@
     <system:String x:Key="AppSubtitleConnectivity">Windows USB 低延遲與 AirPlay 無線螢幕鏡像</system:String>
     <system:String x:Key="WirelessReceiverTitle">無線 AirPlay</system:String>
     <system:String x:Key="WirelessReceiverNameLabel">接收端名稱</system:String>
+    <system:String x:Key="WirelessBackendLabel">接收方案</system:String>
+    <system:String x:Key="WirelessBackendOriginal">原始方案</system:String>
+    <system:String x:Key="WirelessBackendUxPlay">UxPlay（備用）</system:String>
+    <system:String x:Key="WirelessBackendChangeFormat">接收方案：{0} → {1}</system:String>
+    <system:String x:Key="WirelessBackendAppliedFormat">目前接收方案：{0}</system:String>
+    <system:String x:Key="WirelessRunningWithBackendFormat">{0} 無線接收端正在運作：{1}</system:String>
+    <system:String x:Key="WirelessBackendUnavailableFormat">{0} 無線接收元件遺失，請重新建構發佈套件。</system:String>
+    <system:String x:Key="WirelessBackendSettingsSaveFailed">無法儲存所選無線接收方案。</system:String>
+    <system:String x:Key="WirelessUxPlayStartupFailed">UxPlay 啟動後立即結束。請修復 UxPlay 執行階段後重新套用無線設定。</system:String>
     <system:String x:Key="ApplyReceiverName">套用</system:String>
     <system:String x:Key="WirelessResolutionTitle">無線螢幕鏡像畫質</system:String>
     <system:String x:Key="WirelessSettingsTitle">套用無線 AirPlay 設定</system:String>
@@ -476,6 +521,7 @@
     <system:String x:Key="MediaCastReady">影片 AirPlay 接收端已就緒</system:String>
     <system:String x:Key="MediaCastStarting">正在啟動影片 AirPlay 接收端...</system:String>
     <system:String x:Key="MediaCastReceiverMissing">影片投放元件遺失，請重新建構發佈套件。</system:String>
+    <system:String x:Key="MediaCastRequiresOriginalBackend">影片 App 投放僅支援「原始方案」無線接收端。</system:String>
     <system:String x:Key="MediaCastWindowTitle">iPhoneMirror 影片 App AirPlay 播放</system:String>
     <system:String x:Key="MediaCastWaitingVideo">等待影片 App AirPlay 播放內容...</system:String>
     <system:String x:Key="MediaCastLoadingVideo">正在載入投放的影片...</system:String>
@@ -682,6 +728,12 @@
     <system:String x:Key="DeveloperAdvancedSettingsDescription">解析度輸入驗證</system:String>
     <system:String x:Key="DeveloperPrompt">確認提示</system:String>
     <system:String x:Key="DeveloperPromptDescription">標準確認和資訊版面</system:String>
+    <system:String x:Key="DeveloperReverseControlWiredPrerequisite">有線控制前置提示</system:String>
+    <system:String x:Key="DeveloperReverseControlWiredPrerequisiteDescription">開發者模式、USB 信任和 DDI 說明</system:String>
+    <system:String x:Key="DeveloperReverseControlWirelessPrerequisite">無線控制前置提示</system:String>
+    <system:String x:Key="DeveloperReverseControlWirelessPrerequisiteDescription">開發者模式、配對和區域網絡說明</system:String>
+    <system:String x:Key="DeveloperReverseControlError">反向控制錯誤對話方塊</system:String>
+    <system:String x:Key="DeveloperReverseControlErrorDescription">反向控制橋接失敗時的錯誤訊息</system:String>
     <system:String x:Key="DeveloperCaptureError">螢幕鏡像錯誤提示</system:String>
     <system:String x:Key="DeveloperCaptureErrorDescription">影片串流失敗後顯示的錯誤提示</system:String>
     <system:String x:Key="DeveloperSessionClosed">螢幕鏡像已停止提示</system:String>

@@ -605,6 +605,14 @@ void end_usb_device_discovery() noexcept {
 
 namespace detail {
 
+void normalize_wired_screen_mirroring_color(
+    media::DecodedFrame& frame) noexcept {
+    // QuickTime screen mirroring decoders publish SDR samples in full-range
+    // NV12, but some MFTs retain a limited-range type-level annotation. Do not
+    // expand those already-normalized pixels a second time.
+    if (!frame.color.is_hdr()) frame.color.range = coremedia::ColorRange::Full;
+}
+
 void VideoWorkerFailure::capture_current() noexcept {
     const auto current = std::current_exception();
     try {
@@ -1848,6 +1856,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     }
                     std::shared_ptr<const media::DecodedFrame> published;
                     for (auto& decoded_frame : decoded_frames) {
+                        detail::normalize_wired_screen_mirroring_color(decoded_frame);
                         const auto received = std::find_if(input_times.begin(), input_times.end(),
                             [&](const auto& entry) { return entry.first == decoded_frame.timestamp_100ns; });
                         if (received != input_times.end()) {

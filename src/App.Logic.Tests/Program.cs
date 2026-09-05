@@ -71,6 +71,7 @@ static async Task ThrowsAsync<TException>(Func<Task> action, string name)
     throw new InvalidOperationException($"{name}: expected {typeof(TException).Name}");
 }
 
+
 static async Task<(int ExitCode, string Output)> RunWindowsPowerShellAsync(
     string script, string zipPath, string installDirectory, string restartExecutable,
     string? expectedSha256 = null, bool skipRestart = false)
@@ -455,6 +456,43 @@ Equal(true, UsbDeviceRefreshPolicy.ShouldRefreshMetadata(true, false),
     "an explicit idle refresh may update Lockdown metadata");
 Equal(false, UsbDeviceRefreshPolicy.ShouldRefreshMetadata(true, true),
     "an explicit refresh cannot open Lockdown while a wired session exists");
+var wifiSyncTracker = new WifiSyncInsertionTracker();
+Sequence([], wifiSyncTracker.Observe([
+        new WiredDeviceTrustState("phone-a", 10, false, false),
+    ]),
+    "an untrusted USB insertion does not request Wi-Fi sync provisioning");
+Sequence(["phone-a"], wifiSyncTracker.Observe([
+        new WiredDeviceTrustState("phone-a", 10, true, true),
+    ]),
+    "a newly trusted USB insertion requests Wi-Fi sync provisioning once");
+Sequence([], wifiSyncTracker.Observe([
+        new WiredDeviceTrustState("PHONE-A", 10, true, true),
+    ]),
+    "ordinary polling does not repeat Wi-Fi sync provisioning");
+Sequence([], wifiSyncTracker.Observe([]),
+    "disconnecting clears the current USB insertion");
+Sequence(["phone-a"], wifiSyncTracker.Observe([
+        new WiredDeviceTrustState("phone-a", 11, true, true),
+    ]),
+    "reconnecting the same trusted USB device provisions the new insertion");
+Sequence(["phone-a"], wifiSyncTracker.Observe([
+        new WiredDeviceTrustState("phone-a", 12, true, true),
+    ]),
+    "a changed usbmux device ID detects a fast reconnect between polls");
+var inaccessibleWifiSyncTracker = new WifiSyncInsertionTracker();
+Sequence([], inaccessibleWifiSyncTracker.Observe([
+        new WiredDeviceTrustState("phone-b", 20, true, false),
+    ]),
+    "a paired but Lockdown-inaccessible device waits for access");
+Sequence(["phone-b"], inaccessibleWifiSyncTracker.Observe([
+        new WiredDeviceTrustState("phone-b", 20, true, true),
+    ]),
+    "Lockdown access becoming available provisions the pending insertion");
+Equal(true, mainViewModelSource.Contains("device.PairRecordPresent != 0",
+        StringComparison.Ordinal) &&
+    mainViewModelSource.Contains("device.LockdownAccessible != 0",
+        StringComparison.Ordinal),
+    "automatic Wi-Fi sync only targets trusted Lockdown-accessible USB devices");
 var captureStartIndex = mainViewModelSource.IndexOf(
     "private async Task StartAsync()", StringComparison.Ordinal);
 var captureReuseIndex = captureStartIndex >= 0
@@ -468,6 +506,13 @@ var capturePreflightIndex = captureStartIndex >= 0
 Equal(true, captureStartIndex >= 0 && captureReuseIndex > captureStartIndex &&
             capturePreflightIndex > captureReuseIndex,
     "main start reuses a session created by an independent window before USB preflight");
+Equal(false, mainViewModelSource.Contains("BonjourServiceStarter.EnsureRunningAsync",
+        StringComparison.Ordinal),
+    "wireless capture and reverse control do not launch the administrator Bonjour repair flow");
+Equal(true, mainViewModelSource.Contains(
+        "bridge.StartAsync(UsbTouchTransport.Wireless, boundUdid, bridgePath",
+        StringComparison.Ordinal),
+    "wireless reverse control reaches the Network usbmux bridge directly");
 Equal(true, mainViewModelSource.Contains(
         "IPhoneFilterDriverState.UnsafeStack => LocalizationService.Get(\"DriverUnsafeAppleStack\")",
         StringComparison.Ordinal),
@@ -549,11 +594,13 @@ Equal(true, installerScript.Contains(
 Equal(true, installerScript.Contains(
         "WirelessFirewallRuleName = 'iPhoneMirror Wireless AirPlay'",
         StringComparison.Ordinal) &&
-        installerScript.Contains(
-            "localport=5001,7001,7100,8090",
-            StringComparison.Ordinal) &&
+        installerScript.Contains("protocol=TCP", StringComparison.Ordinal) &&
         installerScript.Contains("protocol=UDP", StringComparison.Ordinal) &&
-        installerScript.Contains("localport=1900", StringComparison.Ordinal) &&
+        installerScript.Split("localport=any", StringSplitOptions.None).Length - 1 >= 2 &&
+        !installerScript.Contains("localport=5001,7001,7100,8090",
+            StringComparison.Ordinal) &&
+        !installerScript.Contains("localport=1900",
+            StringComparison.Ordinal) &&
         installerScript.Contains("remoteip=localsubnet", StringComparison.Ordinal) &&
         installerScript.Contains("AddTcpArguments", StringComparison.Ordinal) &&
         installerScript.Contains("AddUdpArguments", StringComparison.Ordinal) &&
@@ -564,9 +611,33 @@ Equal(false, installerScript.Split('\n').Any(line =>
         line.TrimStart().StartsWith("Flags:", StringComparison.OrdinalIgnoreCase) &&
         line.Contains("restartreplace", StringComparison.OrdinalIgnoreCase)),
     "installer never defers shared runtime replacement until reboot");
+var receiverBuildScript = File.ReadAllText(Path.Combine(repositoryRoot,
+    "scripts", "build_airplay_receiver.ps1"));
+var receiverSourceRecord = File.ReadAllText(Path.Combine(repositoryRoot,
+    "third_party", "airplay-server", "SOURCE.md"));
+var mirrorRecoveryPatch = File.ReadAllText(Path.Combine(repositoryRoot,
+    "third_party", "airplay-server", "patches",
+    "Apply-AirPlayMirrorRecoveryPatch.ps1"));
+Equal(true, receiverBuildScript.Contains(
+        "Apply-AirPlayCompatibilityPatch.ps1", StringComparison.Ordinal) &&
+    receiverBuildScript.Contains(
+        "Apply-AirPlayMirrorRecoveryPatch.ps1", StringComparison.Ordinal) &&
+    receiverBuildScript.Contains(
+        "IPHONE_MIRROR_AIRPLAY_PAIR_VERIFY_TWO_STAGE", StringComparison.Ordinal) &&
+    receiverBuildScript.Contains(
+        "IPHONE_MIRROR_AIRPLAY_MIRROR_RECOVERY", StringComparison.Ordinal),
+    "receiver builds reapply upstream AirPlay compatibility and mirror recovery patches");
+Equal(true, receiverSourceRecord.Contains("c788d6fe", StringComparison.Ordinal) &&
+    receiverSourceRecord.Contains("37d7fd0f", StringComparison.Ordinal),
+    "receiver source record names the upstream fixes carried by the pinned runtime");
+Equal(true, mirrorRecoveryPatch.Contains("MIRROR_READ_TIMEOUT_MS", StringComparison.Ordinal) &&
+    mirrorRecoveryPatch.Contains("mirror_recv_exact", StringComparison.Ordinal) &&
+    mirrorRecoveryPatch.Contains("mirror_enable_keepalive", StringComparison.Ordinal) &&
+    mirrorRecoveryPatch.Contains("MIRROR_MAX_PAYLOAD_SIZE", StringComparison.Ordinal),
+    "mirror recovery bounds stale reads after sleep or a network-path change");
 Equal(true, installerScript.Contains("[InstallDelete]", StringComparison.Ordinal) &&
             installerScript.Contains(
-                "{app}\\tools\\ffmpeg\\ffmpeg.exe", StringComparison.Ordinal),
+        "{app}\\tools\\ffmpeg\\ffmpeg.exe", StringComparison.Ordinal),
     "installer removes legacy media-output FFmpeg files before upgrade");
 Equal(true, installerScript.Contains(
         "{userprograms}\\{#MyAppName}", StringComparison.Ordinal) &&
@@ -1153,17 +1224,13 @@ Equal(true,
 Equal(true,
     bluetoothHidCode.Contains("MergePendingMotion(_pendingMouseReport, report)",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains(
-        "MouseReportInterval = TimeSpan.FromMilliseconds(8)",
-        StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains(
-        "await Task.Delay(MouseReportInterval).ConfigureAwait(false)",
-        StringComparison.Ordinal) &&
+    !bluetoothHidCode.Contains("MouseReportInterval", StringComparison.Ordinal) &&
+    !bluetoothHidCode.Contains("Task.Delay(MouseReportInterval)", StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("QueuePendingMotionBeforePriorityReport();",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("_controlPointerTimer.Change(1, 4)",
         StringComparison.Ordinal),
-    "Bluetooth motion preserves queued travel before input-state changes, samples input every four milliseconds, and paces BLE reports at 125 Hz");
+    "Bluetooth motion keeps only current reports before input-state changes, samples input every four milliseconds, and paces BLE reports at 125 Hz");
 Equal(true,
     bluetoothHidCode.Contains("RunGattCallbackAsync", StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("gatt_callback_failed", StringComparison.Ordinal) &&
@@ -1310,8 +1377,51 @@ Equal(true,
     nativePreviewWindowCode.Contains("HideSystemCursor();", StringComparison.Ordinal) &&
     mainWindowCode.Contains("IsSystemCursorVisible(out", StringComparison.Ordinal) &&
     nativePreviewWindowCode.Contains("GetCursorInfo(ref cursor)",
-        StringComparison.Ordinal),
+        StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("SetCursor(0);", StringComparison.Ordinal) &&
+    !nativePreviewWindowCode.Contains("SetCursor(0);", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("ClearBluetoothControlInputState", StringComparison.Ordinal),
     "independent reverse control continuously reasserts the process-wide hidden cursor state");
+var independentCloseStart = mainWindowCode.IndexOf(
+    "private async void OnIndependentPreviewClosed", StringComparison.Ordinal);
+var independentCloseEnd = independentCloseStart >= 0
+    ? mainWindowCode.IndexOf(
+        "private async void OnIndependentReverseControlRequested",
+        independentCloseStart, StringComparison.Ordinal)
+    : -1;
+var independentCloseCode = independentCloseStart >= 0 &&
+    independentCloseEnd > independentCloseStart
+        ? mainWindowCode[independentCloseStart..independentCloseEnd]
+        : string.Empty;
+var closeQueueIndex = independentCloseCode.IndexOf(
+    "QueueMainPreviewHostSync();", StringComparison.Ordinal);
+var closeGateIndex = independentCloseCode.IndexOf(
+    "await _bluetoothRouteGate.WaitAsync();", StringComparison.Ordinal);
+var inactiveCloseIndex = independentCloseCode.IndexOf(
+    "if (!closingActiveControlWindow)", StringComparison.Ordinal);
+var inactiveCloseReturnIndex = inactiveCloseIndex >= 0
+    ? independentCloseCode.IndexOf(
+        "return;", inactiveCloseIndex, StringComparison.Ordinal)
+    : -1;
+var inactiveCloseClearIndex = inactiveCloseIndex >= 0
+    ? independentCloseCode.IndexOf(
+        "ClearBluetoothControlInputState();", inactiveCloseIndex,
+        StringComparison.Ordinal)
+    : -1;
+var inactiveCloseDisabledIndex = inactiveCloseIndex >= 0
+    ? independentCloseCode.IndexOf(
+        "!_viewModel.IsBluetoothControlEnabled", inactiveCloseIndex,
+        StringComparison.Ordinal)
+    : -1;
+Equal(true, closeQueueIndex >= 0 && closeGateIndex > closeQueueIndex &&
+    independentCloseCode.Contains(
+        "closingActiveControlWindow = _activeControlWindow != 0",
+        StringComparison.Ordinal) && inactiveCloseIndex >= 0 &&
+    inactiveCloseDisabledIndex > inactiveCloseIndex &&
+    inactiveCloseDisabledIndex < inactiveCloseReturnIndex &&
+    inactiveCloseClearIndex > inactiveCloseDisabledIndex &&
+    inactiveCloseClearIndex < inactiveCloseReturnIndex,
+    "closing a detached preview restores the main host and cursor after reverse control was already disabled");
 Equal(true,
     appProjectText.Contains("Assets\\iPhoneMirror.ico", StringComparison.Ordinal) &&
     appProjectText.Contains("<ExcludeFromSingleFile>true</ExcludeFromSingleFile>",
@@ -1373,8 +1483,16 @@ Equal(true,
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("CenterColumn.Width = new GridLength", StringComparison.Ordinal) &&
     mainWindowCode.Contains("_lightweightWindowTargetX", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("bounds.Right - plannedWindowPixels", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("A left-only transition must never move the right edge.",
+    mainWindowCode.Contains("_lightweightWindowTargetX = bounds.Left;", StringComparison.Ordinal) &&
+    !mainWindowCode.Contains("bounds.Right - plannedWindowPixels", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("Keep the left navigation rail fixed",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("var anchoredMaximumWindowWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("AnimateWorkspaceGap", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("GridLengthAnimation", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("Duration = new Duration(WorkspaceTransitionDuration)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_lightweightWindowLastAppliedProgress",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("LockLightweightCenterWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("ReleaseLightweightCenterWidth", StringComparison.Ordinal) &&
@@ -1493,7 +1611,7 @@ Equal(true,
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("GetClientNameAsync",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("_clientRoutes.Refresh(clients, targetName, _preferredClientId)",
+    bluetoothHidCode.Contains("_clientRoutes.Refresh(clients, targetName",
         StringComparison.Ordinal) &&
     bluetoothRoutesSource.Contains("IsMeaningfulName",
         StringComparison.Ordinal) &&
@@ -1507,11 +1625,12 @@ Equal(true,
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("NotifyValueAsync(buffer, targetClient)",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("WaitAsync(NotificationTimeout,",
+    bluetoothHidCode.Contains("channel.Gate.WaitAsync(timeout,",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("timeout.CancelAfter(NotificationTimeout);",
+    bluetoothHidCode.Contains("notificationTimeout.CancelAfter(timeout);",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains(".AsTask(timeout.Token)", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains(".AsTask(notificationTimeout.Token)",
+        StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("BluetoothClientRouteTable",
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("BeginTargetRouteAsync",
@@ -1541,6 +1660,25 @@ Equal(true,
     multiPreviewManagerCode.Contains("internal bool Activate(string? udid)",
         StringComparison.Ordinal),
     "Bluetooth control serializes routing and targets only the selected mirrored device and GATT client");
+var playbackVolumeStart = mainViewModelSource.IndexOf(
+    "public double PlaybackVolume", StringComparison.Ordinal);
+var playAudioStart = mainViewModelSource.IndexOf(
+    "public bool PlayAudio", StringComparison.Ordinal);
+var playAudioEnd = mainViewModelSource.IndexOf(
+    "private UsbProjectionMode", playAudioStart, StringComparison.Ordinal);
+var playbackVolumeCode = playbackVolumeStart >= 0 && playAudioStart > playbackVolumeStart
+    ? mainViewModelSource[playbackVolumeStart..playAudioStart] : string.Empty;
+var playAudioCode = playAudioStart >= 0 && playAudioEnd > playAudioStart
+    ? mainViewModelSource[playAudioStart..playAudioEnd] : string.Empty;
+Equal(true,
+    playbackVolumeCode.IndexOf("if (!result.Success)", StringComparison.Ordinal) >= 0 &&
+    playbackVolumeCode.IndexOf("if (!result.Success)", StringComparison.Ordinal) <
+        playbackVolumeCode.IndexOf("_playbackVolume = clamped", StringComparison.Ordinal) &&
+    playAudioCode.IndexOf("if (!result.Success)", StringComparison.Ordinal) >= 0 &&
+    playAudioCode.IndexOf("if (!result.Success)", StringComparison.Ordinal) <
+        playAudioCode.IndexOf("_playAudio = value", StringComparison.Ordinal) &&
+    playAudioCode.Contains("OnPropertyChanged();", StringComparison.Ordinal),
+    "audio toggle and volume keep their prior UI state when the native session rejects an update");
 var busyStateStart = mainViewModelSource.IndexOf("public bool IsBusy", StringComparison.Ordinal);
 var busyStateEnd = busyStateStart >= 0
     ? mainViewModelSource.IndexOf("private bool IsSettingsInteractionBlocked", busyStateStart,
@@ -1747,6 +1885,20 @@ Equal(true, mainWindowXaml.Contains("OpenShortcutSettingsButton",
          StringComparison.Ordinal) &&
      mainWindowCode.Contains("BluetoothBossKeyHotKeyId",
          StringComparison.Ordinal) &&
+     mainWindowCode.Contains("BluetoothVolumeUpHotKeyId",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("BluetoothVolumeDownHotKeyId",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("BluetoothLockScreenHotKeyId",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("BluetoothShortcutAction.VolumeUp => BluetoothVolumeUpHotKeyId",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("BluetoothShortcutAction.VolumeDown => BluetoothVolumeDownHotKeyId",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("BluetoothShortcutAction.LockScreen => BluetoothLockScreenHotKeyId",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("CoreDeviceTouchProtocol.IndigoLock, 500",
+         StringComparison.Ordinal) &&
      File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
          "NativePreviewWindow.cs")).Contains("IsBossKeyHotkey",
              StringComparison.Ordinal) &&
@@ -1802,6 +1954,74 @@ Equal(true, StartupDiagnostics.UserMessage(new FileNotFoundException(), false)
 Equal(true, StartupDiagnostics.UserMessage(new DllNotFoundException(), "zh-HK")
     .Contains("原生元件", StringComparison.Ordinal),
     "Hong Kong startup diagnostics use localized native dependency guidance");
+var bridgeRuntimeTestRoot = Path.Combine(Path.GetTempPath(),
+    $"iPhoneMirror-bridge-runtime-{Guid.NewGuid():N}");
+try
+{
+    var bridgeRuntimeInternal = Path.Combine(bridgeRuntimeTestRoot, "_internal");
+    Directory.CreateDirectory(bridgeRuntimeInternal);
+    var bridgeRuntimeExecutable = Path.Combine(bridgeRuntimeTestRoot,
+        "UsbTouchBridge.exe");
+    var bridgeRuntimeDependency = Path.Combine(bridgeRuntimeInternal, "dependency.bin");
+    File.WriteAllText(bridgeRuntimeExecutable, "bridge");
+    File.WriteAllText(bridgeRuntimeDependency, "dependency");
+    var bridgeRuntimeFiles = new[]
+    {
+        new
+        {
+            path = "UsbTouchBridge.exe",
+            sha256 = Convert.ToHexString(SHA256.HashData(
+                File.ReadAllBytes(bridgeRuntimeExecutable))).ToLowerInvariant(),
+        },
+        new
+        {
+            path = "_internal/dependency.bin",
+            sha256 = Convert.ToHexString(SHA256.HashData(
+                File.ReadAllBytes(bridgeRuntimeDependency))).ToLowerInvariant(),
+        },
+    };
+    File.WriteAllText(Path.Combine(bridgeRuntimeTestRoot,
+        "UsbTouchBridge.runtime.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1,
+        files = bridgeRuntimeFiles,
+    }));
+    Equal(true, RuntimeBinaryIntegrity.VerifyUsbTouchBridgeRuntime(
+            bridgeRuntimeExecutable, out var bridgeRuntimeFailure),
+        "USB touch bridge runtime accepts the complete generated payload");
+    Equal(string.Empty, bridgeRuntimeFailure,
+        "USB touch bridge runtime has no failure for a complete payload");
+
+    File.AppendAllText(bridgeRuntimeDependency, "-tampered");
+    Equal(false, RuntimeBinaryIntegrity.VerifyUsbTouchBridgeRuntime(
+            bridgeRuntimeExecutable, out bridgeRuntimeFailure),
+        "USB touch bridge runtime rejects a changed dependency");
+    Equal(true, bridgeRuntimeFailure.Contains("hash mismatch",
+            StringComparison.OrdinalIgnoreCase),
+        "USB touch bridge runtime reports dependency hash mismatches");
+
+    File.WriteAllText(Path.Combine(bridgeRuntimeTestRoot,
+        "UsbTouchBridge.runtime.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1,
+        files = new[]
+        {
+            new
+            {
+                path = "../outside.dll",
+                sha256 = new string('0', 64),
+            },
+        },
+    }));
+    Equal(false, RuntimeBinaryIntegrity.VerifyUsbTouchBridgeRuntime(
+            bridgeRuntimeExecutable, out bridgeRuntimeFailure),
+        "USB touch bridge runtime rejects path traversal entries");
+}
+finally
+{
+    if (Directory.Exists(bridgeRuntimeTestRoot))
+        Directory.Delete(bridgeRuntimeTestRoot, recursive: true);
+}
 Equal(true, CaptureErrorGuidance.IsNoPingTimeout(
         "QuickTime endpoint opened but iPhone sent no PING; keep the device unlocked"),
     "capture guidance recognizes the native no-PING timeout");
@@ -2270,6 +2490,7 @@ try
         Language = "zh-CN",
         Theme = AppTheme.Light,
         ApplicationDisplayMode = ApplicationDisplayMode.Lightweight,
+        WirelessReceiverBackend = WirelessReceiverBackend.UxPlay,
         BluetoothMouseSensitivity = 135,
         BluetoothMouseSensitivitySchema = 1,
         BluetoothLandscapeMouseOrientationTurns = 3,
@@ -2307,6 +2528,10 @@ try
         "update settings preserve theme preference");
     Equal(ApplicationDisplayMode.Lightweight, loadedSettings.ApplicationDisplayMode,
         "update settings preserve lightweight application mode");
+    Equal(WirelessReceiverBackend.UxPlay, loadedSettings.WirelessReceiverBackend,
+        "update settings preserve the selected UxPlay wireless backend");
+    Equal(WirelessReceiverBackend.UxPlay, loadedSettings.Clone().WirelessReceiverBackend,
+        "cloned update settings preserve the selected wireless backend");
     Equal("zh-CN", loadedSettings.Language,
         "update settings preserve language preference");
     Equal(135d, loadedSettings.BluetoothMouseSensitivity,
@@ -2381,6 +2606,8 @@ Equal("BluetoothLE#TEST-CLIENT",
         "language updates preserve unrelated update preferences");
     Equal(AppTheme.Light, languageUpdatedSettings.Theme,
         "language updates preserve the selected theme");
+    Equal(WirelessReceiverBackend.UxPlay, languageUpdatedSettings.WirelessReceiverBackend,
+        "unrelated settings updates preserve the selected wireless backend");
     Equal("en-US", languageUpdatedSettings.Language,
         "language updates persist the selected language");
 }
@@ -2402,6 +2629,8 @@ try
         "Bluetooth wheel sensitivity defaults to 1000 percent");
     Equal(ApplicationDisplayMode.Complete, defaults.ApplicationDisplayMode,
         "application display mode defaults to complete");
+    Equal(WirelessReceiverBackend.Original, defaults.WirelessReceiverBackend,
+        "wireless receiver backend defaults to the original implementation");
     Equal(0, defaults.BluetoothPortraitMouseDirection,
         "Bluetooth portrait direction defaults to up");
     Equal(1, defaults.BluetoothLandscapeMouseDirection,
@@ -2440,6 +2669,17 @@ try
     Equal(true, KeyboardShortcut.FromSettings(migrated,
         BluetoothShortcutAction.BossKey).Equals(KeyboardShortcut.BossKeyDefault),
         "legacy settings receive the default boss key shortcut");
+
+    var invalidBackendPath = Path.Combine(defaultSettingsRoot, "invalid-backend.json");
+    File.WriteAllText(invalidBackendPath, "{\"WirelessReceiverBackend\":99}");
+    var invalidBackend = new UpdateSettingsStore(invalidBackendPath).Load();
+    Equal(WirelessReceiverBackend.Original, invalidBackend.WirelessReceiverBackend,
+        "invalid wireless backend values fall back to the original implementation");
+    var persistedInvalidBackend = JsonSerializer.Deserialize<UpdateSettings>(
+        File.ReadAllText(invalidBackendPath))
+        ?? throw new InvalidOperationException("invalid wireless backend migration was not persisted");
+    Equal(WirelessReceiverBackend.Original, persistedInvalidBackend.WirelessReceiverBackend,
+        "invalid wireless backend fallback persists immediately");
 }
 finally
 {
@@ -2472,16 +2712,16 @@ Equal(false, KeyboardShortcut.HaveUniqueBoundValues([
 
 var mergedMouseReport = BluetoothMouseReportCoalescer.MergePendingMotion(
     [0, 10, 0, 0, 0, 0], [0, 20, 0, 0xFB, 0xFF, 0]);
-Equal((byte)30, mergedMouseReport[1],
-    "pending Bluetooth mouse motion retains the horizontal travel");
+Equal((byte)20, mergedMouseReport[1],
+    "pending Bluetooth mouse motion keeps the newest horizontal travel");
 Equal((byte)0xFB, mergedMouseReport[3],
-    "pending Bluetooth mouse motion retains the vertical travel");
+    "pending Bluetooth mouse motion keeps the newest vertical travel");
 var saturatedMouseReport = BluetoothMouseReportCoalescer.MergePendingMotion(
     [0, 0xFF, 0x7F, 0, 0, 0], [0, 1, 0, 0, 0, 0]);
-Equal((byte)0xFF, saturatedMouseReport[1],
-    "pending Bluetooth mouse motion clamps instead of wrapping");
-Equal((byte)0x7F, saturatedMouseReport[2],
-    "pending Bluetooth mouse motion keeps the maximum signed range");
+Equal((byte)1, saturatedMouseReport[1],
+    "pending Bluetooth mouse motion uses the newest value instead of wrapping");
+Equal((byte)0, saturatedMouseReport[2],
+    "pending Bluetooth mouse motion uses the newest vertical value");
 var wheelMouseReport = BluetoothMouseReportCoalescer.MergePendingMotion(
     [0, 10, 0, 0, 0, 0], [0, 20, 0, 0, 0, 1]);
 Equal((byte)20, wheelMouseReport[1],
@@ -3347,6 +3587,148 @@ Equal(true, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 3
     "wireless 720p weak-network profile is supported");
 Equal(false, WirelessReceiverConfiguration.IsSupportedDisplayProfile(1280, 720, 60),
     "unsupported wireless profile combinations are rejected");
+Equal(WirelessReceiverBackend.Original, WirelessReceiverConfiguration.NormalizeBackend(
+        (WirelessReceiverBackend)99),
+    "unknown wireless backend values normalize to the original implementation");
+Equal("iPhoneMirror.UxPlayHost.exe",
+    WirelessReceiverConfiguration.GetRuntime(WirelessReceiverBackend.UxPlay).ExecutableName,
+    "UxPlay uses its dedicated bridge executable");
+Equal("IPHONE_MIRROR_UXPLAY_HOST",
+    WirelessReceiverConfiguration.GetRuntime(WirelessReceiverBackend.UxPlay)
+        .OverrideEnvironmentVariable,
+    "UxPlay bridge discovery exposes the documented override variable");
+var uxPlayRequiredRuntimeFiles = WirelessReceiverConfiguration.GetRuntime(
+    WirelessReceiverBackend.UxPlay).RequiredRuntimeFiles;
+Equal(true,
+    uxPlayRequiredRuntimeFiles.Contains("uxplay.exe", StringComparer.OrdinalIgnoreCase) &&
+    uxPlayRequiredRuntimeFiles.Contains("LICENSE", StringComparer.OrdinalIgnoreCase) &&
+    uxPlayRequiredRuntimeFiles.Contains("SOURCE.md", StringComparer.OrdinalIgnoreCase) &&
+    uxPlayRequiredRuntimeFiles.Contains("bin\\libgstreamer-1.0-0.dll",
+        StringComparer.OrdinalIgnoreCase) &&
+    uxPlayRequiredRuntimeFiles.Contains("bin\\libplist-2.0.dll",
+        StringComparer.OrdinalIgnoreCase) &&
+    uxPlayRequiredRuntimeFiles.Contains("bin\\dnssd.dll",
+        StringComparer.OrdinalIgnoreCase) &&
+    uxPlayRequiredRuntimeFiles.Contains("lib\\gstreamer-1.0\\libgstlibav.dll",
+        StringComparer.OrdinalIgnoreCase) &&
+    !uxPlayRequiredRuntimeFiles.Contains("lib\\gstreamer-1.0\\libgstlevel.dll",
+        StringComparer.OrdinalIgnoreCase) &&
+    uxPlayRequiredRuntimeFiles.Contains("lib\\gstreamer-1.0\\libgsty4m.dll",
+        StringComparer.OrdinalIgnoreCase) &&
+    !uxPlayRequiredRuntimeFiles.Contains("lib\\gstreamer-1.0\\libgstplayback.dll",
+        StringComparer.OrdinalIgnoreCase),
+    "UxPlay packaging omits unused GStreamer plugins");
+var uxPlayPreparationSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "..", "scripts", "prepare_uxplay.ps1"));
+Equal(true,
+    uxPlayPreparationSource.Contains("-DUSE_DNS_SD=OFF", StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains("destinationBin", StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains("bundled mdnsd implementation", StringComparison.Ordinal),
+    "UxPlay uses bundled mdnsd to avoid competing Bonjour registrations");
+var wirelessControllerSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "WirelessReceiverController.cs"));
+Equal(true,
+    wirelessControllerSource.Contains("UxPlayStartupGracePeriod", StringComparison.Ordinal) &&
+    wirelessControllerSource.Contains("_automaticRestartBlocked", StringComparison.Ordinal) &&
+    wirelessControllerSource.Contains("WirelessUxPlayStartupFailed", StringComparison.Ordinal) &&
+    wirelessControllerSource.Contains("manual Apply is the explicit retry path", StringComparison.Ordinal),
+    "a crashing UxPlay child is not relaunched by every background refresh");
+var uxPlayHostSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "UxPlayHost", "UxPlayHost.cpp"));
+Equal(true,
+    uxPlayHostSource.Contains("gst_quote_location", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("character == L'\\\\'", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("filesink location=", StringComparison.Ordinal),
+    "UxPlay named-pipe paths are escaped before entering GStreamer pipeline strings");
+Equal(true,
+    uxPlayHostSource.Contains("y4menc", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("UxPlay appends its own videoscale after -vc",
+        StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("invalid Y4M stream header", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("const auto converter = std::wstring(L\"videoconvert ! video/x-raw,format=I420\")",
+        StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("native_video_format", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("forward_y4m_frames", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("AirPlay client negotiation request", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("quote_argument(resolution)", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("reset_video_stream", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("config-interval=-1 disable-passthrough=true",
+        StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains(
+        "output-corrupt=false discard-corrupted-frames=true",
+        StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("automatic-request-sync-points=true",
+        StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("libgsty4m.dll", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("LoadLibraryExW", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("LOAD_WITH_ALTERED_SEARCH_PATH", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("-vsync no -nofreeze -nohold", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("StreamForwarder forwarder(writer)",
+        StringComparison.Ordinal),
+    "UxPlay negotiates the selected profile and resynchronizes native Y4M frames after reconnects");
+Equal(true,
+    uxPlayPreparationSource.Contains("gst-inspect-1.0 avdec_h264",
+        StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains("discard-corrupted-frames",
+        StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains("gst-inspect-1.0 h264parse",
+        StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains("disable-passthrough",
+        StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains("Video recovery:",
+        StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains(".staging-$PID-",
+        StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains(".backup-$PID-",
+        StringComparison.Ordinal) &&
+    uxPlayPreparationSource.Contains("Move-Item -LiteralPath $Destination",
+        StringComparison.Ordinal),
+    "UxPlay packaging verifies recovery properties and replaces complete runtimes transactionally");
+Equal(true,
+    uxPlayHostSource.Contains("AudioMessageBytes = 1764", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("queue_.insert(video, std::move(message))", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("Video frames are large and replaceable", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("otherwise it starves real-time PCM delivery", StringComparison.Ordinal),
+    "UxPlay prioritizes short real-time audio packets ahead of replaceable video frames");
+var wasapiRendererSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "Core", "src", "Audio", "WasapiRenderer.cpp"));
+Equal(true,
+    wasapiRendererSource.Contains("restarting WASAPI here causes", StringComparison.Ordinal) &&
+    wasapiRendererSource.Contains("(void)write_available(true);", StringComparison.Ordinal),
+    "WASAPI keeps the stream alive through short network jitter instead of restarting repeatedly");
+Equal(true,
+    uxPlayHostSource.Contains("--uxplay", StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("const auto directory = executable.parent_path().wstring()",
+        StringComparison.Ordinal) &&
+    uxPlayHostSource.Contains("prepare_uxplay_environment(*uxplay)",
+        StringComparison.Ordinal),
+    "UxPlay host launches the selected runtime with its bundled DLL environment");
+Equal(true, WirelessReceiverConfiguration.SupportsMediaCast(
+        WirelessReceiverBackend.Original),
+    "video app casting remains available with the original receiver");
+Equal(false, WirelessReceiverConfiguration.SupportsMediaCast(
+        WirelessReceiverBackend.UxPlay),
+    "video app casting is disabled for the UxPlay fallback receiver");
+var uxPlayRuntimeRoot = Path.Combine(Path.GetTempPath(),
+    $"iphone-mirror-uxplay-runtime-{Guid.NewGuid():N}");
+try
+{
+    var uxPlayHostPath = Path.Combine(uxPlayRuntimeRoot, "Wireless", "UxPlay",
+        "iPhoneMirror.UxPlayHost.exe");
+    Directory.CreateDirectory(Path.GetDirectoryName(uxPlayHostPath)!);
+    File.WriteAllText(uxPlayHostPath, string.Empty);
+    Equal(Path.GetFullPath(uxPlayHostPath), WirelessReceiverConfiguration.FindExecutable(
+            WirelessReceiverBackend.UxPlay, uxPlayRuntimeRoot),
+        "UxPlay discovery uses the dedicated Wireless UxPlay runtime directory");
+    Equal(Path.GetFullPath(uxPlayHostPath), WirelessReceiverConfiguration.FindExecutable(
+            WirelessReceiverBackend.UxPlay, uxPlayRuntimeRoot, uxPlayHostPath),
+        "UxPlay discovery accepts an explicit bridge override path");
+}
+finally
+{
+    if (Directory.Exists(uxPlayRuntimeRoot))
+        Directory.Delete(uxPlayRuntimeRoot, recursive: true);
+}
 Equal(true, WirelessReceiverService.IsCodeIntegrityError(4551),
     "wireless runtime recognizes Windows system integrity policy violations");
 Equal(true, WirelessReceiverService.IsCodeIntegrityError(577),
@@ -3570,8 +3952,11 @@ Sequence(["-hide_banner", "-loglevel", "warning", "-nostdin",
         "-thread_queue_size", "512", "-f", "s16le", "-ar", "48000", "-ac", "2",
         "-i", @"\\.\pipe\iphoneMirror-audio-test", "-f", "rawvideo",
         "-pixel_format", "nv12", "-video_size", "1280x720", "-framerate", "30",
-        "-i", "pipe:0", "-map", "1:v:0", "-map", "0:a:0", "-c:v", "h264_mf",
-        "-hw_encoding", "1", "-scenario", "archive", "-pix_fmt", "nv12",
+        "-color_range", "pc", "-colorspace", "bt709", "-color_primaries", "bt709",
+        "-color_trc", "bt709", "-i", "pipe:0", "-map", "1:v:0", "-map", "0:a:0", "-c:v", "h264_mf",
+        "-hw_encoding", "1", "-scenario", "archive", "-color_range", "pc",
+        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+        "-pix_fmt", "nv12",
         "-g", "60", "-b:v", "6000k",
         "-maxrate", "6000k", "-bufsize", "12000k", "-c:a", "aac",
         "-b:a", "192k", "-movflags", "+faststart",
@@ -3583,10 +3968,13 @@ var softwareRecordingArguments = MediaOutputService.BuildArguments(
     new MediaOutputRequest(MediaOutputKind.Recording, "software.mp4", 1280, 720,
         30, 6000), videoOnlyCapabilities, audioPipePath: null,
     includeAudio: false);
-Sequence(["-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p"],
+Sequence(["-preset", "veryfast", "-tune", "zerolatency"],
     softwareRecordingArguments
-        .SkipWhile(argument => argument != "-preset").Take(6),
+        .SkipWhile(argument => argument != "-preset").Take(4),
     "libx264 remains the compatible software fallback");
+Equal(true, softwareRecordingArguments.Contains("-color_range", StringComparer.Ordinal) &&
+        softwareRecordingArguments.Contains("pc", StringComparer.Ordinal),
+    "software recording preserves full-range video metadata");
 
 var silentRecordingArguments = MediaOutputService.BuildArguments(
     new MediaOutputRequest(MediaOutputKind.Recording, "silent.mp4", 1280, 720, 30, 6000),
@@ -3707,6 +4095,24 @@ Sequence(["-f", "mpegts", "srt://example.test:9000"], srtArguments.TakeLast(3),
 var whipArguments = MediaOutputService.BuildArguments(
     new MediaOutputRequest(MediaOutputKind.Whip, "https://example.test/whip", 1280, 720,
         30, 5000, " Bearer secret "), ffmpegCapabilities);
+foreach (var outputKind in Enum.GetValues<MediaOutputKind>())
+{
+    var outputArguments = MediaOutputService.BuildArguments(
+        new MediaOutputRequest(outputKind,
+            outputKind == MediaOutputKind.Recording ? "capture.mp4" :
+                outputKind == MediaOutputKind.Rtmp ? "rtmp://example.test/live" :
+                outputKind == MediaOutputKind.Srt ? "srt://example.test:9000" :
+                "https://example.test/whip",
+            1280, 720, 30, 5000,
+            outputKind == MediaOutputKind.Whip ? "token" : ""),
+        outputKind == MediaOutputKind.Whip ? ffmpegCapabilities : mediaFoundationOnly,
+        audioPipePath: null, includeAudio: false);
+    Equal(true, outputArguments.Count(argument => argument == "-color_range") >= 2 &&
+            outputArguments.Count(argument => argument == "pc") >= 2 &&
+            outputArguments.Count(argument => argument == "-colorspace") >= 2 &&
+            outputArguments.Count(argument => argument == "bt709") >= 4,
+        $"{outputKind} output preserves full-range BT.709 metadata at input and encoder");
+}
 Sequence(["-authorization", "secret", "-f", "whip",
         "https://example.test/whip"], whipArguments.TakeLast(5),
     "WHIP output passes the token expected by FFmpeg without a duplicate bearer prefix");
@@ -4424,6 +4830,119 @@ catch (InvalidOperationException error) when (error.Message == "stop failed")
 {
 }
 Sequence(["stop", "dispose"], failureOrder, "core is disposed after stop failure");
+
+var deviceBindingTestRoot = Path.Combine(Path.GetTempPath(),
+    $"iPhoneMirror-device-bindings-{Guid.NewGuid():N}");
+var deviceBindingPath = Path.Combine(deviceBindingTestRoot, "profiles.json");
+var bindings = new DeviceBindingManager(deviceBindingPath);
+var phone17 = new DeviceFingerprint(ProductType: "iPhone18,3");
+var phone15 = new DeviceFingerprint(ProductType: "iPhone15,4");
+Equal(0, bindings.Profiles.Count,
+    "an empty binding store does not show a device profile before explicit creation");
+Equal(null, bindings.FindByIdentity(DeviceIdentityType.Wired, "UDID-A"),
+    "observing a USB identity does not create a device profile");
+Equal(null, bindings.FindByIdentity(DeviceIdentityType.AirPlay, "airplay://stable-a"),
+    "observing an AirPlay identity does not create a device profile");
+Equal(0, bindings.Profiles.Count,
+    "identity lookups leave an empty binding store empty");
+var createdProfileA = bindings.CreateProfileFromIdentity("Device A",
+    DeviceIdentityType.Wired, "UDID-A", phone17);
+Equal(true, createdProfileA.Success, "a profile can be created from a wired identity");
+var profileA = createdProfileA.Profile ?? throw new InvalidOperationException(
+    "created profile was not returned");
+var createdProfileB = bindings.CreateProfileFromIdentity("Device B",
+    DeviceIdentityType.Wired, "UDID-B", phone15);
+var profileB = createdProfileB.Profile ?? throw new InvalidOperationException(
+    "second created profile was not returned");
+
+Equal(false, bindings.CreateProfileFromIdentity("Duplicate Device A",
+    DeviceIdentityType.Wired, "UDID-A", phone17).Success,
+    "creating a duplicate identity is rejected without an empty profile");
+Equal(2, bindings.Profiles.Count, "duplicate creation does not leave an empty profile");
+var compatibleNeedsConfirmation = bindings.Bind(profileA.Id, DeviceIdentityType.AirPlay,
+    "airplay://stable-a", "Device A", phone17);
+Equal(false, compatibleNeedsConfirmation.Success,
+    "same model identities require confirmation");
+Equal(DeviceBindingCompatibility.Compatible, compatibleNeedsConfirmation.Compatibility,
+    "same model identities are compatible but not confirmed");
+Equal(true, bindings.Bind(profileA.Id, DeviceIdentityType.AirPlay,
+    "airplay://stable-a", "Device A", phone17, userConfirmed: true).Success,
+    "confirmed same-model AirPlay identity binds");
+Equal(DeviceBindingCompatibility.Confirmed, bindings.Bind(profileA.Id,
+    DeviceIdentityType.Wired, "UDID-A", "Device A", phone17).Compatibility,
+    "an identity already owned by its profile is confirmed");
+Equal(false, bindings.Bind(profileB.Id, DeviceIdentityType.Wired, "UDID-A",
+    "Device A", phone17, userConfirmed: true).Success,
+    "a wired identity cannot belong to two profiles");
+Equal(false, bindings.Bind(profileB.Id, DeviceIdentityType.AirPlay,
+    "airplay://stable-a", "Device A", phone17, userConfirmed: true).Success,
+    "an AirPlay identity cannot belong to two profiles");
+var incompatible = bindings.Bind(profileA.Id, DeviceIdentityType.AirPlay,
+    "airplay://stable-wrong-model", "Device A", phone15, userConfirmed: true);
+Equal(DeviceBindingCompatibility.Incompatible, incompatible.Compatibility,
+    "different model fingerprint is rejected");
+Equal(false, incompatible.Success, "different model fingerprint cannot bind");
+Equal(true, bindings.Bind(profileA.Id, DeviceIdentityType.Bluetooth,
+    "BluetoothLE#A", "Device A", null, userConfirmed: true).Success,
+    "Bluetooth can bind after explicit user confirmation");
+Equal(true, bindings.Unbind(profileA.Id, DeviceIdentityType.AirPlay),
+    "one identity can be independently unbound");
+Equal("UDID-A", bindings.FindById(profileA.Id)!.WiredIdentity!.Udid,
+    "unbinding AirPlay preserves the wired identity");
+Equal(null, bindings.FindById(profileA.Id)!.AirPlayIdentity,
+    "unbound AirPlay identity is removed");
+Equal(true, bindings.UnbindBluetoothByStableId("BluetoothLE#A"),
+    "Bluetooth can be independently unbound by stable id");
+var reloadedBindings = new DeviceBindingManager(deviceBindingPath);
+Equal("UDID-A", reloadedBindings.FindById(profileA.Id)!.WiredIdentity!.Udid,
+    "profiles persist across manager reload");
+if (Directory.Exists(deviceBindingTestRoot))
+    Directory.Delete(deviceBindingTestRoot, recursive: true);
+
+var stallTracker = new WirelessStallRecoveryTracker();
+var stallStart = DateTimeOffset.UtcNow;
+static NativeCaptureStatus StreamingStatus(uint width = 1920, uint height = 1080,
+    ulong videoFrames = 100, CaptureState state = CaptureState.Streaming) =>
+    new()
+    {
+        State = state, Width = width, Height = height, Fps = 60,
+        LatencyMs = 12, VideoFrames = videoFrames,
+    };
+Equal(WirelessStallRecoveryAction.None,
+    stallTracker.Observe(77, StreamingStatus(), 1_000, stallStart),
+    "wireless stall tracker accepts the first frame sample");
+Equal(WirelessStallRecoveryAction.None,
+    stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
+        stallStart.AddSeconds(1)),
+    "advancing wireless frames do not trigger recovery");
+Equal(WirelessStallRecoveryAction.RefreshPreview,
+    stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
+        stallStart.AddMilliseconds(2900)),
+    "frozen wireless telemetry first requests a preview refresh");
+Equal(WirelessStallRecoveryAction.None,
+    stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
+        stallStart.AddSeconds(6)),
+    "wireless recovery cooldown prevents an immediate restart");
+Equal(WirelessStallRecoveryAction.RestartSession,
+    stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
+        stallStart.AddSeconds(8)),
+    "continued freeze after cooldown requests a session restart");
+Equal(WirelessStallRecoveryAction.None,
+    stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
+        stallStart.AddSeconds(20)),
+    "wireless recovery is capped after the restart attempt");
+Equal(WirelessStallRecoveryAction.None,
+    stallTracker.Observe(77, StreamingStatus(1080, 1920, 101),
+        1_010, stallStart.AddSeconds(21)),
+    "orientation size changes begin a fresh recovery window");
+Equal(WirelessStallRecoveryAction.RefreshPreview,
+    stallTracker.Observe(77, StreamingStatus(1080, 1920, 101),
+        1_010, stallStart.AddSeconds(23)),
+    "a second frozen orientation can request one new refresh");
+Equal(WirelessStallRecoveryAction.None,
+    stallTracker.Observe(77, StreamingStatus(state: CaptureState.Idle),
+        1_010, stallStart.AddSeconds(24)),
+    "stopped wireless sessions never trigger recovery");
 
 Console.WriteLine("App logic tests passed.");
 if (Directory.Exists(diagnosticTestRoot))

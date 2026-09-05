@@ -113,7 +113,7 @@ bool sample_has_nonblack_luma(IMFSample* sample, UINT32 width,
         for (const UINT32 y : rows) {
             const BYTE* row = scanline + static_cast<std::ptrdiff_t>(y) * pitch;
             for (const UINT32 x : columns)
-                nonblack = nonblack || row[x] != 16;
+                nonblack = nonblack || row[x] != 0;
         }
     }
     if (is_2d) buffer_2d->Unlock2D();
@@ -316,11 +316,11 @@ void test_media_source() {
                  "lock video sample");
     bool contains_published_pixels{};
     if (sample_bytes != nullptr && current_length >= 1280U * 720U) {
-        // The default type is NV12. A black fallback has luma 16 everywhere;
+        // The default type is NV12. A black fallback has luma 0 everywhere;
         // the bright-blue test frame must change pixels in the fitted region.
         const auto luma = std::span(sample_bytes, 1280U * 720U);
         contains_published_pixels = std::any_of(
-            luma.begin(), luma.end(), [](BYTE value) { return value != 16; });
+            luma.begin(), luma.end(), [](BYTE value) { return value != 0; });
     }
     check(contains_published_pixels,
           "media source discovers and renders the published frame without activation attributes");
@@ -438,6 +438,20 @@ void test_configured_media_source(FramePublisher& publisher) {
                      "read configured frame rate");
             check_hr(type->GetGUID(MF_MT_SUBTYPE, &subtype),
                      "read configured pixel format");
+            UINT32 primaries{}, transfer{}, matrix{}, range{};
+            check_hr(type->GetUINT32(MF_MT_VIDEO_PRIMARIES, &primaries),
+                     "read configured color primaries");
+            check_hr(type->GetUINT32(MF_MT_TRANSFER_FUNCTION, &transfer),
+                     "read configured transfer function");
+            check_hr(type->GetUINT32(MF_MT_YUV_MATRIX, &matrix),
+                     "read configured YUV matrix");
+            check_hr(type->GetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, &range),
+                     "read configured nominal range");
+            check(primaries == MFVideoPrimaries_BT709 &&
+                      transfer == MFVideoTransFunc_709 &&
+                      matrix == MFVideoTransferMatrix_BT709 &&
+                      range == MFNominalRange_0_255,
+                  "configured virtual camera type declares full-range BT.709");
         }
         check(width == 998 && height == 2160,
               "configured media type uses the selected resolution");

@@ -128,6 +128,7 @@ private:
     std::uint64_t rejected_audio_messages_{};
 
     void clear_media() noexcept;
+    void reset_video_for_attach() noexcept;
     void stop_audio_renderer() noexcept;
     [[nodiscard]] float effective_audio_volume() const noexcept;
 };

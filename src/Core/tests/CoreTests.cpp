@@ -1183,6 +1183,83 @@ void test_capture_media_safety_helpers() {
                 return value == ++index;
             }),
         "P010 recording export reduces each component to its high eight bits");
+    iPhoneMirror::media::DecodedFrame full_range_gray;
+    full_range_gray.width = 4;
+    full_range_gray.height = 4;
+    full_range_gray.stride = 4;
+    full_range_gray.pixel_format = iPhoneMirror::media::PixelFormat::Nv12;
+    full_range_gray.color.primaries =
+        iPhoneMirror::coremedia::ColorPrimaries::Bt709;
+    full_range_gray.color.transfer =
+        iPhoneMirror::coremedia::TransferFunction::Bt709;
+    full_range_gray.color.matrix =
+        iPhoneMirror::coremedia::MatrixCoefficients::Bt709;
+    full_range_gray.color.range =
+        iPhoneMirror::coremedia::ColorRange::Full;
+    full_range_gray.nv12.assign(24, 128);
+    std::fill_n(full_range_gray.nv12.data(), 16, std::uint8_t{243});
+    std::vector<std::uint8_t> canonical_output(24);
+    check(iPhoneMirror::media::detail::copy_nv12_frame_letterboxed_sdr(
+            full_range_gray, canonical_output, 4, 4) &&
+            std::all_of(canonical_output.begin(), canonical_output.begin() + 16,
+                [](std::uint8_t value) { return value == 243; }) &&
+            std::all_of(canonical_output.begin() + 16, canonical_output.end(),
+                [](std::uint8_t value) { return value == 128; }),
+        "full-range SDR NV12 export preserves gray 243 and neutral chroma");
+    std::vector<std::uint8_t> scaled_canonical_output(8U * 8U * 3U / 2U);
+    check(iPhoneMirror::media::detail::copy_nv12_frame_letterboxed_sdr(
+            full_range_gray, scaled_canonical_output, 8, 8) &&
+            [&] {
+                for (std::uint32_t y{}; y < 8; ++y)
+                    for (std::uint32_t x{}; x < 8; ++x) {
+                        const auto expected = x >= 2 && x < 6 && y >= 2 && y < 6
+                            ? std::uint8_t{243} : std::uint8_t{0};
+                        if (scaled_canonical_output[y * 8U + x] != expected)
+                            return false;
+                    }
+                return true;
+            }(),
+        "scaled full-range SDR NV12 export keeps gray levels and black bars");
+    iPhoneMirror::media::DecodedFrame p010_reference = p010_frame;
+    p010_reference.color.range = iPhoneMirror::coremedia::ColorRange::Limited;
+    p010_reference.nv12.assign(48, 0);
+    for (std::size_t component{}; component < 16; ++component) {
+        const auto value = static_cast<std::uint16_t>(940U << 6U);
+        p010_reference.nv12[component * 2] =
+            static_cast<std::uint8_t>(value & 0xffU);
+        p010_reference.nv12[component * 2 + 1] =
+            static_cast<std::uint8_t>(value >> 8U);
+    }
+    for (std::size_t component{}; component < 8; ++component) {
+        const auto offset = 32U + component * 2U;
+        const auto value = static_cast<std::uint16_t>(512U << 6U);
+        p010_reference.nv12[offset] = static_cast<std::uint8_t>(value & 0xffU);
+        p010_reference.nv12[offset + 1U] =
+            static_cast<std::uint8_t>(value >> 8U);
+    }
+    std::fill(canonical_output.begin(), canonical_output.end(), std::uint8_t{0});
+    check(iPhoneMirror::media::detail::copy_nv12_frame_letterboxed_sdr(
+            p010_reference, canonical_output, 4, 4) &&
+            std::all_of(canonical_output.begin(), canonical_output.begin() + 16,
+                [](std::uint8_t value) { return value >= 254; }) &&
+            std::all_of(canonical_output.begin() + 16, canonical_output.end(),
+                [](std::uint8_t value) { return value == 128; }),
+        "limited-range P010 reference white is tone-mapped to SDR white");
+    for (std::size_t component{}; component < 16; ++component) {
+        const auto value = static_cast<std::uint16_t>(64U << 6U);
+        p010_reference.nv12[component * 2] =
+            static_cast<std::uint8_t>(value & 0xffU);
+        p010_reference.nv12[component * 2 + 1] =
+            static_cast<std::uint8_t>(value >> 8U);
+    }
+    std::fill(canonical_output.begin(), canonical_output.end(), std::uint8_t{0});
+    check(iPhoneMirror::media::detail::copy_nv12_frame_letterboxed_sdr(
+            p010_reference, canonical_output, 4, 4) &&
+            std::all_of(canonical_output.begin(), canonical_output.begin() + 16,
+                [](std::uint8_t value) { return value == 0; }) &&
+            std::all_of(canonical_output.begin() + 16, canonical_output.end(),
+                [](std::uint8_t value) { return value == 128; }),
+        "limited-range P010 reference black is normalized to SDR black");
     p010_frame.nv12.pop_back();
     check(!iPhoneMirror::media::detail::copy_nv12_frame_letterboxed(
             p010_frame, p010_output, 4, 4) &&
@@ -1251,6 +1328,20 @@ void test_capture_media_safety_helpers() {
         .matrix = iPhoneMirror::coremedia::MatrixCoefficients::Bt709,
         .range = iPhoneMirror::coremedia::ColorRange::Limited,
     };
+    iPhoneMirror::media::DecodedFrame wired_sdr_frame;
+    wired_sdr_frame.color = sdr_color;
+    iPhoneMirror::capture::detail::normalize_wired_screen_mirroring_color(
+        wired_sdr_frame);
+    const auto wired_light_gray =
+        iPhoneMirror::media::detail::convert_yuv_to_sdr(
+            243.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0,
+            wired_sdr_frame.color, iPhoneMirror::media::PixelFormat::Nv12);
+    check(wired_sdr_frame.color.range ==
+            iPhoneMirror::coremedia::ColorRange::Full &&
+            std::lround(wired_light_gray.red * 255.0) == 243 &&
+            std::lround(wired_light_gray.green * 255.0) == 243 &&
+            std::lround(wired_light_gray.blue * 255.0) == 243,
+        "wired SDR screen mirroring does not expand gray 243 to white");
     const auto p010_black = iPhoneMirror::media::detail::convert_yuv_to_sdr(
         static_cast<double>(64U << 6U) / 65535.0,
         static_cast<double>(512U << 6U) / 65535.0,
@@ -1272,6 +1363,14 @@ void test_capture_media_safety_helpers() {
     hdr_color.matrix = iPhoneMirror::coremedia::MatrixCoefficients::Bt2020;
     hdr_color.range = iPhoneMirror::coremedia::ColorRange::Full;
     hdr_color.hdr.max_mastering_luminance = 1000;
+    iPhoneMirror::media::DecodedFrame wired_hdr_frame;
+    wired_hdr_frame.color = hdr_color;
+    wired_hdr_frame.color.range = iPhoneMirror::coremedia::ColorRange::Limited;
+    iPhoneMirror::capture::detail::normalize_wired_screen_mirroring_color(
+        wired_hdr_frame);
+    check(wired_hdr_frame.color.range ==
+            iPhoneMirror::coremedia::ColorRange::Limited,
+        "wired HDR frames retain decoder-provided nominal range metadata");
     const auto tone_mapped = iPhoneMirror::media::detail::convert_yuv_to_sdr(
         0.75, static_cast<double>(512U << 6U) / 65535.0,
         static_cast<double>(512U << 6U) / 65535.0,
@@ -1558,6 +1657,23 @@ void test_wireless_i420_conversion() {
     check(nv12 == std::vector<std::uint8_t>{
         1, 2, 3, 0, 4, 5, 6, 0, 10, 20, 11, 21,
     }, "wireless NV12 planes and chroma order are correct");
+    iPhoneMirror::capture::WirelessClientStream stream(L"test", L"test");
+    stream.set_identity(L"test", true);
+    stream.publish_video(header, i420);
+    const auto published = stream.latest_frame();
+    check(published && published->color.range ==
+            iPhoneMirror::coremedia::ColorRange::Full,
+        "wireless AirPlay frames retain their full-range color levels");
+    if (published) {
+        const auto light_gray =
+            iPhoneMirror::media::detail::convert_yuv_to_sdr(
+                243.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0,
+                published->color, published->pixel_format);
+        check(std::lround(light_gray.red * 255.0) == 243 &&
+                std::lround(light_gray.green * 255.0) == 243 &&
+                std::lround(light_gray.blue * 255.0) == 243,
+            "wireless full-range gray 243 is not expanded and clipped to white");
+    }
     check(!iPhoneMirror::capture::detail::convert_i420_to_nv12(
         header, std::span(i420).first(11), nv12, stride),
         "wireless conversion rejects truncated planes");
@@ -1706,6 +1822,16 @@ void test_wireless_volume_before_connection() {
           std::abs(WirelessReceiverHubTestAccess::remote_volume(
               hub, L"00:11:22:33:44:55") - 0.25F) < 0.001F,
         "AirPlay connection consumes the retained remote volume");
+
+    volume.media_command_id = 2;
+    volume.media_volume = 0.0;
+    WirelessReceiverHubTestAccess::handle(hub, volume);
+    volume.media_command_id = 3;
+    volume.media_volume = 0.5;
+    WirelessReceiverHubTestAccess::handle(hub, volume);
+    check(std::abs(WirelessReceiverHubTestAccess::remote_volume(
+              hub, L"00:11:22:33:44:55") - 0.5F) < 0.001F,
+        "AirPlay volume recovers after a remote mute event");
 
     auto disconnected = connected;
     disconnected.type = iPhoneMirror::wireless::MessageType::Disconnected;

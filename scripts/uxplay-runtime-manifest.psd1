@@ -1,0 +1,28 @@
+@{
+    Files = @(
+        'iPhoneMirror.UxPlayHost.exe'
+        'uxplay.exe'
+        'LICENSE'
+        'SOURCE.md'
+        'bin\libgstreamer-1.0-0.dll'
+        'bin\libgstbase-1.0-0.dll'
+        'bin\libgstvideo-1.0-0.dll'
+        'bin\libgstaudio-1.0-0.dll'
+        'bin\libgstapp-1.0-0.dll'
+        'bin\libgstpbutils-1.0-0.dll'
+        'bin\libgsttag-1.0-0.dll'
+        'bin\libglib-2.0-0.dll'
+        'bin\libgobject-2.0-0.dll'
+        'bin\libplist-2.0.dll'
+        'bin\libgcc_s_seh-1.dll'
+        'bin\dnssd.dll'
+        'lib\gstreamer-1.0\libgstapp.dll'
+        'lib\gstreamer-1.0\libgstcoreelements.dll'
+        'lib\gstreamer-1.0\libgstaudioconvert.dll'
+        'lib\gstreamer-1.0\libgstaudioresample.dll'
+        'lib\gstreamer-1.0\libgstvideoconvertscale.dll'
+        'lib\gstreamer-1.0\libgsty4m.dll'
+        'lib\gstreamer-1.0\libgstvideoparsersbad.dll'
+        'lib\gstreamer-1.0\libgstlibav.dll'
+    )
+}

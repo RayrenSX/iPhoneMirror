@@ -6,6 +6,8 @@ using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Services;
 
+internal enum ShortcutMouseButton { None, Right, Middle }
+
 /// <summary>Represents one user-configurable Windows global hotkey.</summary>
 internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey)
 {
@@ -13,6 +15,8 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     internal const uint Control = 0x0002;
     internal const uint Shift = 0x0004;
     internal const uint NoRepeat = 0x4000;
+    internal const uint MouseRight = 0x100;
+    internal const uint MouseMiddle = 0x101;
     internal static KeyboardShortcut Default { get; } = new(0, 0x78); // F9
     internal static KeyboardShortcut BossKeyDefault { get; } = new(Control | Alt, 0x42); // Ctrl+Alt+B
     internal static KeyboardShortcut Unbound { get; } = new(0, 0);
@@ -30,7 +34,13 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     internal static KeyboardShortcut FromSettings(UpdateSettings settings,
         BluetoothShortcutAction action) => action switch
         {
-            BluetoothShortcutAction.ReverseControl => FromSettings(settings),
+            // The legacy reverse-control shortcut was replaced by the
+            // Bluetooth control shortcut. Keep the enum value for old data,
+            // but never expose or register its stored key again.
+            BluetoothShortcutAction.ReverseControl => Unbound,
+            BluetoothShortcutAction.BluetoothControl => FromStoredSettings(settings.BluetoothModeShortcutModifiers, settings.BluetoothModeShortcutVirtualKey, Unbound),
+            BluetoothShortcutAction.WirelessControl => FromStoredSettings(settings.WirelessModeShortcutModifiers, settings.WirelessModeShortcutVirtualKey, Unbound),
+            BluetoothShortcutAction.WiredControl => FromStoredSettings(settings.WiredModeShortcutModifiers, settings.WiredModeShortcutVirtualKey, Unbound),
             BluetoothShortcutAction.ControlCenter => FromStoredSettings(
                 settings.BluetoothControlCenterShortcutModifiers,
                 settings.BluetoothControlCenterShortcutVirtualKey, Unbound),
@@ -52,6 +62,9 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
             BluetoothShortcutAction.Siri => FromStoredSettings(
                 settings.BluetoothSiriShortcutModifiers,
                 settings.BluetoothSiriShortcutVirtualKey, Unbound),
+            BluetoothShortcutAction.VolumeUp => FromStoredSettings(settings.BluetoothVolumeUpShortcutModifiers, settings.BluetoothVolumeUpShortcutVirtualKey, Unbound),
+            BluetoothShortcutAction.VolumeDown => FromStoredSettings(settings.BluetoothVolumeDownShortcutModifiers, settings.BluetoothVolumeDownShortcutVirtualKey, Unbound),
+            BluetoothShortcutAction.LockScreen => FromStoredSettings(settings.BluetoothLockScreenShortcutModifiers, settings.BluetoothLockScreenShortcutVirtualKey, Unbound),
             _ => Default,
         };
 
@@ -63,7 +76,7 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
         out KeyboardShortcut shortcut)
     {
         shortcut = default;
-        if (key is Key.None or Key.DeadCharProcessed or Key.F12 ||
+        if (key is Key.None or Key.DeadCharProcessed ||
             IsModifierKey(key) || modifiers.HasFlag(ModifierKeys.Windows))
             return false;
 
@@ -71,7 +84,7 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
         if (virtualKey == 0) return false;
 
         var normalizedModifiers = ToNativeModifiers(modifiers);
-        if (normalizedModifiers == 0 && key is not Key.Escape and < Key.F1 or > Key.F11)
+        if (normalizedModifiers == 0 && key != Key.Escape && !IsFunctionKey(key))
             return false;
 
         shortcut = new KeyboardShortcut(normalizedModifiers, (uint)virtualKey);
@@ -80,6 +93,20 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
 
     internal bool Matches(Key key, ModifierKeys modifiers) =>
         TryCreate(key, modifiers, out var shortcut) && shortcut == this;
+
+    internal static bool TryCreateMouse(ShortcutMouseButton button, ModifierKeys modifiers,
+        out KeyboardShortcut shortcut)
+    {
+        shortcut = default;
+        if (button is not (ShortcutMouseButton.Right or ShortcutMouseButton.Middle) ||
+            modifiers.HasFlag(ModifierKeys.Windows)) return false;
+        var virtualKey = button == ShortcutMouseButton.Right ? MouseRight : MouseMiddle;
+        shortcut = new KeyboardShortcut(ToNativeModifiers(modifiers), virtualKey);
+        return true;
+    }
+
+    internal bool MatchesMouse(ShortcutMouseButton button, ModifierKeys modifiers) =>
+        TryCreateMouse(button, modifiers, out var shortcut) && shortcut == this;
 
     internal bool MatchesVirtualKey(int virtualKey, bool controlPressed,
         bool altPressed, bool shiftPressed) =>
@@ -108,13 +135,14 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     internal static bool IsValid(int modifiers, int virtualKey) =>
         (modifiers == 0 && virtualKey == 0) ||
         (modifiers is >= 0 and <= (int)(Alt | Control | Shift) &&
-        virtualKey is > 0 and <= 0xFE &&
-        TryCreate(KeyInterop.KeyFromVirtualKey(virtualKey),
-            ToModifierKeys((uint)modifiers), out _));
+        ((virtualKey is (int)MouseRight or (int)MouseMiddle) ||
+         (virtualKey is > 0 and <= 0xFE && virtualKey != 0x7B &&
+          TryCreate(KeyInterop.KeyFromVirtualKey(virtualKey),
+              ToModifierKeys((uint)modifiers), out _))));
 
     internal static KeyboardShortcut DefaultFor(BluetoothShortcutAction action) => action switch
     {
-        BluetoothShortcutAction.ReverseControl => Default,
+        BluetoothShortcutAction.ReverseControl => Unbound,
         BluetoothShortcutAction.BossKey => BossKeyDefault,
         _ => Unbound,
     };
@@ -128,6 +156,8 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
 
     private string FormatKey()
     {
+        if (VirtualKey == MouseRight) return LocalizationService.Get("ShortcutMouseRight");
+        if (VirtualKey == MouseMiddle) return LocalizationService.Get("ShortcutMouseMiddle");
         var key = KeyInterop.KeyFromVirtualKey((int)VirtualKey);
         if (key is >= Key.A and <= Key.Z)
             return key.ToString();
@@ -142,6 +172,10 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     private static bool IsModifierKey(Key key) => key is Key.LeftAlt or Key.RightAlt or
         Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or
         Key.LWin or Key.RWin;
+
+    // F12 is reserved by the application/debugger and must remain unavailable
+    // as a user shortcut. F1-F11 retain the original standalone behavior.
+    private static bool IsFunctionKey(Key key) => key is >= Key.F1 and <= Key.F11;
 
     private static uint ToNativeModifiers(ModifierKeys modifiers)
     {
@@ -165,6 +199,9 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
 internal enum BluetoothShortcutAction
 {
     ReverseControl,
+    BluetoothControl,
+    WirelessControl,
+    WiredControl,
     ControlCenter,
     NotificationCenter,
     AppSwitcher,
@@ -172,4 +209,7 @@ internal enum BluetoothShortcutAction
     BossKey,
     Dock,
     Siri,
+    VolumeUp,
+    VolumeDown,
+    LockScreen,
 }

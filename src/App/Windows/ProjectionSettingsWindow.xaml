@@ -97,6 +97,16 @@
                         <StackPanel>
                             <TextBlock Text="{DynamicResource WirelessReceiverTitle}"
                                        Style="{StaticResource ControlSectionTitle}"/>
+                            <TextBlock Text="{DynamicResource WirelessBackendLabel}"
+                                       Style="{StaticResource DetailLabel}"/>
+                            <ComboBox ItemsSource="{Binding WirelessReceiverBackends}"
+                                      DisplayMemberPath="Label"
+                                      SelectedItem="{Binding SelectedWirelessReceiverBackend, Mode=TwoWay}"
+                                      AutomationProperties.AutomationId="WirelessBackendComboBox"/>
+                            <TextBlock Text="{Binding AppliedWirelessBackendDisplay}"
+                                       FontSize="10" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="0,5,0,0"/>
                             <TextBlock Text="{DynamicResource WirelessResolutionLabel}"
                                        Style="{StaticResource DetailLabel}"/>
                             <ComboBox ItemsSource="{Binding WirelessDisplayProfiles}"

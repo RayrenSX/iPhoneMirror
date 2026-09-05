@@ -21,6 +21,7 @@ internal sealed class NativePreviewHost : HwndHost
     private const double MainPreviewInnerCornerRadius = 15.0;
     private nint _window;
     private bool _presentationVisible;
+    private byte _capturedMouseButtons;
     private bool _isFullScreenPresentation;
 
     internal bool CapturePointerInput { get; set; }
@@ -162,6 +163,8 @@ internal sealed class NativePreviewHost : HwndHost
         {
             if (message is 0x0008 or 0x001F or 0x0215) // focus/capture lost
             {
+                _capturedMouseButtons = 0;
+                _ = ReleaseCapture();
                 PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                     PreviewPointerKind.Reset, 0, 0, 0, 0));
                 KeyboardInput?.Invoke(this, new PreviewKeyboardEventArgs(
@@ -184,6 +187,8 @@ internal sealed class NativePreviewHost : HwndHost
                 case 0x0201: // WM_LBUTTONDOWN
                 case 0x0204: // WM_RBUTTONDOWN
                 case 0x0207: // WM_MBUTTONDOWN
+                    _capturedMouseButtons |= MouseButtonFromMessage(message);
+                    _ = SetCapture(_window);
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.ButtonDown, GetSignedLowWord(lParam),
                         GetSignedHighWord(lParam), MouseButtonFromMessage(message), 0,
@@ -193,10 +198,12 @@ internal sealed class NativePreviewHost : HwndHost
                 case 0x0202: // WM_LBUTTONUP
                 case 0x0205: // WM_RBUTTONUP
                 case 0x0208: // WM_MBUTTONUP
+                    _capturedMouseButtons = (byte)(_capturedMouseButtons & ~MouseButtonFromMessage(message));
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.ButtonUp, GetSignedLowWord(lParam),
                         GetSignedHighWord(lParam), MouseButtonFromMessage(message), 0,
                         GetClientWidth(), GetClientHeight()));
+                    if (_capturedMouseButtons == 0) _ = ReleaseCapture();
                     handled = true;
                     return 0;
                 case 0x020A: // WM_MOUSEWHEEL
@@ -294,6 +301,13 @@ internal sealed class NativePreviewHost : HwndHost
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeleteObject(nint value);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetCapture(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
 }
 
 internal enum PreviewPointerKind { Move, ButtonDown, ButtonUp, Wheel, Reset }

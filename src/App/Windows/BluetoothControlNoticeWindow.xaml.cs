@@ -11,25 +11,32 @@ namespace IPhoneMirror.App.Windows;
 public sealed partial class BluetoothControlNoticeWindow :
     Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
 {
-    private enum NoticeState { Waiting, Connected, Failed, ReportMapChanged }
+    private enum NoticeState { Waiting, Connected, Failed, ReportMapChanged, Prerequisite }
 
     private static BluetoothControlNoticeWindow? _active;
     private const double WaitingWidth = 500;
     private readonly DispatcherTimer _closeTimer;
+    private readonly bool _previewOnly;
     private NoticeState _state = NoticeState.Waiting;
     private string? _failureDetail;
     private string? _suggestedDeviceName;
     private Action? _reportMapAcknowledged;
+    private string? _prerequisiteTitle;
+    private string? _prerequisiteBody;
     private int _remainingSeconds = 5;
 
-    public string TitleText => LocalizationService.Get(_state switch
-    {
-        NoticeState.Waiting => "BluetoothControlWaitingTitle",
-        NoticeState.Failed => "BluetoothControlFailedTitle",
-        NoticeState.ReportMapChanged => "BluetoothControlReportMapChangedTitle",
-        _ => "BluetoothControlPromptTitle",
-    });
-    public string BodyText => _state == NoticeState.Connected
+    public string TitleText => _state == NoticeState.Prerequisite
+        ? _prerequisiteTitle ?? string.Empty
+        : LocalizationService.Get(_state switch
+        {
+            NoticeState.Waiting => "BluetoothControlWaitingTitle",
+            NoticeState.Failed => "BluetoothControlFailedTitle",
+            NoticeState.ReportMapChanged => "BluetoothControlReportMapChangedTitle",
+            _ => "BluetoothControlPromptTitle",
+        });
+    public string BodyText => _state == NoticeState.Prerequisite
+        ? _prerequisiteBody ?? string.Empty
+        : _state == NoticeState.Connected
         ? LocalizationService.Format("BluetoothControlPromptBodyFormat",
             GetConfiguredShortcut().DisplayText)
         : LocalizationService.Get(_state switch
@@ -42,6 +49,7 @@ public sealed partial class BluetoothControlNoticeWindow :
     {
         get
         {
+            if (_state == NoticeState.Prerequisite) return string.Empty;
             if (_state == NoticeState.Failed && !string.IsNullOrWhiteSpace(_failureDetail))
                 return _failureDetail;
             var detail = LocalizationService.Get(_state switch
@@ -56,6 +64,8 @@ public sealed partial class BluetoothControlNoticeWindow :
                 : detail;
         }
     }
+    public Visibility DetailVisibility => string.IsNullOrWhiteSpace(DetailText)
+        ? Visibility.Collapsed : Visibility.Visible;
     public string ShortcutText => LocalizationService.Format(
         "BluetoothControlPromptShortcutFormat", GetConfiguredShortcut().DisplayText);
     public string PairStepOneText => LocalizationService.Get("BluetoothControlPairStepOneFormat");
@@ -67,6 +77,7 @@ public sealed partial class BluetoothControlNoticeWindow :
     public string StatusText => _state switch
     {
         NoticeState.Waiting => LocalizationService.Get("BluetoothControlWaitingStatus"),
+        NoticeState.Prerequisite => LocalizationService.Get("ReverseControlPrerequisiteStatus"),
         NoticeState.Failed => LocalizationService.Get("BluetoothControlFailedStatus"),
         NoticeState.ReportMapChanged => LocalizationService.Get("BluetoothControlReportMapChangedStatus"),
         _ => LocalizationService.Format(
@@ -76,13 +87,18 @@ public sealed partial class BluetoothControlNoticeWindow :
         ? Visibility.Visible : Visibility.Collapsed;
     public Visibility WaitingStepsVisibility => _state is NoticeState.Waiting or NoticeState.ReportMapChanged
         ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility PrerequisiteActionsVisibility => _state == NoticeState.Prerequisite
+        ? Visibility.Visible : Visibility.Collapsed;
+    public string CloseButtonText => _state == NoticeState.Prerequisite
+        ? LocalizationService.Get("Cancel") : LocalizationService.Get("Close");
     public Visibility ReportMapAcknowledgementVisibility =>
         _state == NoticeState.ReportMapChanged ? Visibility.Visible : Visibility.Collapsed;
 
     internal static event EventHandler? ActiveNoticeClosed;
 
-    private BluetoothControlNoticeWindow(Window owner)
+    private BluetoothControlNoticeWindow(Window owner, bool previewOnly = false)
     {
+        _previewOnly = previewOnly;
         Owner = owner;
         DataContext = this;
         InitializeComponent();
@@ -151,6 +167,35 @@ public sealed partial class BluetoothControlNoticeWindow :
         window.Activate();
     }
 
+    internal static bool ConfirmPrerequisite(Window owner, bool wireless)
+    {
+        var window = CreatePrerequisite(owner, wireless, previewOnly: false);
+        window.SetState(NoticeState.Prerequisite);
+        return window.ShowDialog() == true;
+    }
+
+    internal static void ShowPrerequisitePreview(Window owner, bool wireless)
+    {
+        var window = CreatePrerequisite(owner, wireless, previewOnly: true);
+        window.SetState(NoticeState.Prerequisite);
+        window.Show();
+        window.Activate();
+    }
+
+    private static BluetoothControlNoticeWindow CreatePrerequisite(Window owner, bool wireless,
+        bool previewOnly)
+    {
+        return new BluetoothControlNoticeWindow(owner, previewOnly)
+        {
+            _prerequisiteTitle = LocalizationService.Get(wireless
+                ? "ReverseControlPrerequisiteWirelessTitle"
+                : "ReverseControlPrerequisiteWiredTitle"),
+            _prerequisiteBody = LocalizationService.Get(wireless
+                ? "ReverseControlPrerequisiteWirelessBody"
+                : "ReverseControlPrerequisiteWiredBody"),
+        };
+    }
+
     internal static bool TryCloseActive()
     {
         if (_active is null) return false;
@@ -170,6 +215,13 @@ public sealed partial class BluetoothControlNoticeWindow :
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
+    private void OnPrerequisiteConfirmClick(object sender, RoutedEventArgs e)
+    {
+        if (_state != NoticeState.Prerequisite) return;
+        if (_previewOnly) Close();
+        else DialogResult = true;
+    }
+
     private void OnReportMapAcknowledgedClick(object sender, RoutedEventArgs e)
     {
         if (_state != NoticeState.ReportMapChanged) return;
@@ -181,8 +233,9 @@ public sealed partial class BluetoothControlNoticeWindow :
 
     private static KeyboardShortcut GetConfiguredShortcut() =>
         Application.Current is App app
-            ? KeyboardShortcut.FromSettings(app.UpdateSettings)
-            : KeyboardShortcut.Default;
+            ? KeyboardShortcut.FromSettings(app.UpdateSettings,
+                BluetoothShortcutAction.BluetoothControl)
+            : KeyboardShortcut.Unbound;
 
     private void RefreshShortcutText()
     {
@@ -218,6 +271,7 @@ public sealed partial class BluetoothControlNoticeWindow :
         OnPropertyChanged(nameof(TitleText));
         OnPropertyChanged(nameof(BodyText));
         OnPropertyChanged(nameof(DetailText));
+        OnPropertyChanged(nameof(DetailVisibility));
         OnPropertyChanged(nameof(ShortcutText));
         OnPropertyChanged(nameof(PairStepOneText));
         OnPropertyChanged(nameof(PairStepTwoText));
@@ -228,6 +282,8 @@ public sealed partial class BluetoothControlNoticeWindow :
         OnPropertyChanged(nameof(ShortcutVisibility));
         OnPropertyChanged(nameof(WaitingStepsVisibility));
         OnPropertyChanged(nameof(ReportMapAcknowledgementVisibility));
+        OnPropertyChanged(nameof(PrerequisiteActionsVisibility));
+        OnPropertyChanged(nameof(CloseButtonText));
         PairingStepsPanel.Visibility = WaitingStepsVisibility;
         ShortcutBadge.Visibility = ShortcutVisibility;
         ReflowToContent();
@@ -239,6 +295,7 @@ public sealed partial class BluetoothControlNoticeWindow :
         OnPropertyChanged(nameof(TitleText));
         OnPropertyChanged(nameof(BodyText));
         OnPropertyChanged(nameof(DetailText));
+        OnPropertyChanged(nameof(DetailVisibility));
         OnPropertyChanged(nameof(ShortcutText));
         OnPropertyChanged(nameof(PairStepOneText));
         OnPropertyChanged(nameof(PairStepTwoText));
@@ -246,6 +303,8 @@ public sealed partial class BluetoothControlNoticeWindow :
         OnPropertyChanged(nameof(PairStepFourText));
         OnPropertyChanged(nameof(PairStepFiveText));
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(PrerequisiteActionsVisibility));
+        OnPropertyChanged(nameof(CloseButtonText));
         Dispatcher.BeginInvoke(ReflowToContent, DispatcherPriority.Render);
     }
 

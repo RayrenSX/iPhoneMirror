@@ -32,7 +32,7 @@ jobs:
   release:
     name: Build and publish Windows x64 release
     runs-on: windows-2025-vs2026
-    timeout-minutes: 60
+    timeout-minutes: 75
 
     steps:
       - name: Resolve release tag
@@ -82,6 +82,29 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
+
+      - name: Set up Python for USB touch bridge
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Set up MSYS2 UCRT64 for UxPlay
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gstreamer
+            mingw-w64-ucrt-x86_64-gst-plugins-base
+            mingw-w64-ucrt-x86_64-gst-plugins-good
+            mingw-w64-ucrt-x86_64-gst-plugins-bad
+            mingw-w64-ucrt-x86_64-gst-libav
+            mingw-w64-ucrt-x86_64-libplist
+            mingw-w64-ucrt-x86_64-openssl
 
       - name: Install Microsoft SBOM Tool
         shell: pwsh

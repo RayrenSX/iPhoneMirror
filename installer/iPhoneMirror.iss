@@ -72,6 +72,8 @@ WizardStyle=modern
 WizardSizePercent=110
 Compression={#MyCompression}
 SolidCompression={#MySolidCompression}
+LZMAUseSeparateProcess=yes
+LZMANumFastBytes=273
 CloseApplications=yes
 CloseApplicationsFilter=iPhoneMirror.exe,iPhoneMirror.Driver.exe
 RestartApplications=no
@@ -168,6 +170,9 @@ Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 ; Remove media-output files from older releases before copying the current
 ; payload. If the current build includes FFmpeg, [Files] restores these files.
 [InstallDelete]
+; The bridge is a PyInstaller onedir runtime. Delete its previous contents
+; before install so an upgrade never combines new code with stale Python DLLs.
+Type: filesandordirs; Name: "{app}\tools\_internal"
 Type: files; Name: "{app}\tools\ffmpeg\ffmpeg.exe"
 Type: files; Name: "{app}\tools\ffmpeg\LICENSE.txt"
 Type: files; Name: "{app}\tools\ffmpeg\README.txt"
@@ -213,14 +218,17 @@ begin
   HostPath := ExpandConstant('{app}\Wireless\iPhoneMirror.WirelessHost.exe');
   DeleteArguments := 'advfirewall firewall delete rule name="' +
     WirelessFirewallRuleName + '"';
+  { AirPlay SETUP negotiates per-session mirror and RAOP media ports. Keep
+    the rule constrained to the installed host process and local subnet, but do
+    not restrict it to the fixed discovery/control ports. }
   AddTcpArguments := 'advfirewall firewall add rule name="' +
     WirelessFirewallRuleName + '" dir=in action=allow program="' + HostPath +
     '" enable=yes profile=private,public remoteip=localsubnet protocol=TCP ' +
-    'localport=5001,7001,7100,8090';
+    'localport=any';
   AddUdpArguments := 'advfirewall firewall add rule name="' +
     WirelessFirewallRuleName + '" dir=in action=allow program="' + HostPath +
     '" enable=yes profile=private,public remoteip=localsubnet protocol=UDP ' +
-    'localport=1900';
+    'localport=any';
   Exec(ExpandConstant('{sys}\netsh.exe'), DeleteArguments, '', SW_HIDE,
     ewWaitUntilTerminated, ResultCode);
   if not Exec(ExpandConstant('{sys}\netsh.exe'), AddTcpArguments, '', SW_HIDE,
@@ -233,6 +241,47 @@ begin
     Log('Could not start netsh to add the wireless SSDP firewall rule.')
   else if ResultCode <> 0 then
     Log(Format('Could not add the wireless SSDP firewall rule: %d.', [ResultCode]));
+
+  { UxPlay is launched by the adapter in a child process. Use a second
+    program rule so the optional fallback receives the same local-subnet
+    access as the bundled receiver. }
+  HostPath := ExpandConstant('{app}\Wireless\UxPlay\uxplay.exe');
+  if FileExists(HostPath) then begin
+    AddTcpArguments := 'advfirewall firewall add rule name="' +
+      WirelessFirewallRuleName + ' UxPlay" dir=in action=allow program="' + HostPath +
+      '" enable=yes profile=private,public remoteip=localsubnet protocol=TCP ' +
+      'localport=any';
+    AddUdpArguments := 'advfirewall firewall add rule name="' +
+      WirelessFirewallRuleName + ' UxPlay" dir=in action=allow program="' + HostPath +
+      '" enable=yes profile=private,public remoteip=localsubnet protocol=UDP ' +
+      'localport=any';
+    Exec(ExpandConstant('{sys}\netsh.exe'), AddTcpArguments, '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\netsh.exe'), AddUdpArguments, '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode);
+    { mDNS discovery uses the link-local multicast address 224.0.0.251,
+      which is not covered by remoteip=localsubnet. }
+    AddUdpArguments := 'advfirewall firewall add rule name="' +
+      WirelessFirewallRuleName + ' UxPlay mDNS" dir=in action=allow program="' + HostPath +
+      '" enable=yes profile=private,public protocol=UDP localport=5353';
+    Exec(ExpandConstant('{sys}\netsh.exe'), AddUdpArguments, '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
+procedure EnsureBonjourService();
+var
+  ResultCode: Integer;
+begin
+  if not IsAdminInstallMode then
+    Exit;
+
+  Exec(ExpandConstant('{sys}\sc.exe'),
+    'config "Bonjour Service" start= auto', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'),
+    'start "Bonjour Service"', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure RemoveWirelessFirewall();
@@ -248,6 +297,12 @@ begin
     Log('Could not start netsh to remove the wireless AirPlay firewall rule.')
   else if ResultCode <> 0 then
     Log(Format('Could not remove the wireless AirPlay firewall rule: %d.', [ResultCode]));
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+      'advfirewall firewall delete rule name="' + WirelessFirewallRuleName + ' UxPlay"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+      'advfirewall firewall delete rule name="' + WirelessFirewallRuleName + ' UxPlay mDNS"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 function UserDataDirectory(Param: String): String;
@@ -295,7 +350,10 @@ begin
   end;
 
   if CurStep = ssPostInstall then
+  begin
     ConfigureWirelessFirewall();
+    EnsureBonjourService();
+  end;
 
   if (CurStep = ssDone) and
      (ExpandConstant('{param:STARTAPP|0}') = '1') then

@@ -13,20 +13,22 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
     public string HintText { get; }
     public bool IsStopped { get; }
     public bool IsUsbConfiguration { get; }
+    public bool IsReverseControl { get; }
     public bool IsWarning => IsStopped || IsUsbConfiguration;
 
     private CaptureStatusNoticeWindow(string title, string body, NoticeKind kind,
-        bool previewOnly = false)
+        bool reverseControl = false, bool previewOnly = false)
     {
         TitleText = title;
         BodyText = body;
         IsStopped = kind == NoticeKind.Stopped;
         IsUsbConfiguration = kind == NoticeKind.UsbConfiguration;
+        IsReverseControl = reverseControl;
         BadgeText = LocalizationService.Get(kind switch
         {
             NoticeKind.Stopped => "CaptureNoticeStoppedBadge",
             NoticeKind.UsbConfiguration => "CaptureNoticeUsbBadge",
-            _ => "CaptureNoticeErrorBadge",
+            _ => reverseControl ? "ReverseControlNoticeErrorBadge" : "CaptureNoticeErrorBadge",
         });
         HintText = LocalizationService.Get(kind switch
         {
@@ -42,9 +44,10 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
         ShowError(title, body, usbConfiguration: false);
 
     internal static void ShowError(string title, string body,
-        bool usbConfiguration) =>
+        bool usbConfiguration, bool reverseControl = false) =>
         new CaptureStatusNoticeWindow(title, body,
-            usbConfiguration ? NoticeKind.UsbConfiguration : NoticeKind.Error)
+            usbConfiguration ? NoticeKind.UsbConfiguration : NoticeKind.Error,
+            reverseControl: reverseControl)
         {
             Owner = Application.Current.MainWindow,
         }.ShowDialog();
@@ -83,6 +86,13 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
                 LocalizationService.Get("DeveloperPreviewDeviceName")),
             LocalizationService.Get("CaptureActionVideoRetry"), NoticeKind.Error);
 
+    internal static void ShowDeveloperReverseControlErrorPreview(Window owner) =>
+        ShowDeveloperPreview(owner,
+            LocalizationService.Get("ReverseControlErrorTitle"),
+            LocalizationService.Format("ReverseControlErrorBodyFormat", "USB",
+                "开发者服务未就绪（开发者工具预览）"), NoticeKind.Error,
+            reverseControl: true);
+
     internal static void ShowDeveloperStoppedPreview(Window owner) =>
         ShowDeveloperPreview(owner,
             LocalizationService.Format("DeviceSessionClosedWarningTitleFormat",
@@ -96,9 +106,10 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
             NoticeKind.UsbConfiguration);
 
     private static void ShowDeveloperPreview(Window owner, string title,
-        string body, NoticeKind kind)
+        string body, NoticeKind kind, bool reverseControl = false)
     {
-        new CaptureStatusNoticeWindow(title, body, kind, previewOnly: true)
+        new CaptureStatusNoticeWindow(title, body, kind,
+            reverseControl: reverseControl, previewOnly: true)
         {
             Owner = owner,
         }.Show();

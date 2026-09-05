@@ -113,9 +113,10 @@
                                             <TextBlock Text="{Binding Label}" VerticalAlignment="Center"
                                                        FontWeight="SemiBold" TextWrapping="Wrap"/>
                                             <TextBox Grid.Column="1" Text="{Binding ShortcutText, Mode=OneWay}"
-                                                     Style="{StaticResource ShortcutCaptureBox}" Height="40"
-                                                     PreviewKeyDown="OnShortcutPreviewKeyDown"
-                                                     ToolTip="{DynamicResource ShortcutSettingsCaptureHint}"
+                                                      Style="{StaticResource ShortcutCaptureBox}" Height="40"
+                                                      PreviewKeyDown="OnShortcutPreviewKeyDown"
+                                                      PreviewMouseDown="OnShortcutPreviewMouseDown"
+                                                      ToolTip="{DynamicResource ShortcutSettingsCaptureHint}"
                                                      shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
                                             <Button Grid.Column="2" Click="OnResetRowClick"
                                                     Style="{StaticResource ShortcutClearButton}">

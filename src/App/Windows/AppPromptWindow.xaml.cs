@@ -73,6 +73,19 @@ public partial class AppPromptWindow : Wpf.Ui.Controls.FluentWindow
             showCancel: true);
     }
 
+    internal static void ShowReverseControlPrerequisitePreview(Window owner, bool wireless)
+    {
+        BluetoothControlNoticeWindow.ShowPrerequisitePreview(owner, wireless);
+    }
+
+    internal static void ShowReverseControlErrorPreview(Window owner)
+    {
+        CaptureStatusNoticeWindow.ShowDeveloperReverseControlErrorPreview(owner);
+    }
+
+    internal static bool ConfirmReverseControlPrerequisite(Window owner, bool wireless) =>
+        BluetoothControlNoticeWindow.ConfirmPrerequisite(owner, wireless);
+
     private static void ShowDeveloperPreview(Window owner, string title,
         string body, bool showCancel)
     {

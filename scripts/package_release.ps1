@@ -7,6 +7,7 @@ param(
     [switch]$UpdateReleaseManifest,
     [switch]$IncludeMediaOutputRuntime,
     [switch]$OmitMediaOutputRuntime,
+    [switch]$IncludeUxPlayRuntime,
     [string]$AppleSupportPackagePath,
     [switch]$ConfirmAppleRedistributionRights
 )
@@ -20,6 +21,11 @@ if ($SkipBuild -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath))
     throw '-AppleSupportPackagePath cannot be used with -SkipBuild.'
 }
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$UsbTouchBridgeRuntimeScript = Join-Path $Root 'scripts\UsbTouchBridgeRuntime.ps1'
+if (-not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeScript -PathType Leaf)) {
+    throw "USB touch bridge runtime validator is missing: $UsbTouchBridgeRuntimeScript"
+}
+. $UsbTouchBridgeRuntimeScript
 
 function Get-ProjectVersion([string]$ProjectPath) {
     [xml]$project = Get-Content -LiteralPath $ProjectPath -Raw
@@ -68,6 +74,20 @@ if (-not (Test-Path -LiteralPath $MediaOutputManifestPath -PathType Leaf)) {
 }
 $MediaOutputManifest = Import-PowerShellDataFile -LiteralPath $MediaOutputManifestPath
 $MediaOutputRuntimeHashes = [Collections.IDictionary]$MediaOutputManifest.Files
+$UxPlayRuntimeManifestPath = Join-Path $Root 'scripts\uxplay-runtime-manifest.psd1'
+if (-not (Test-Path -LiteralPath $UxPlayRuntimeManifestPath -PathType Leaf)) {
+    throw "UxPlay runtime manifest is missing: $UxPlayRuntimeManifestPath"
+}
+$UxPlayRuntimeManifest = Import-PowerShellDataFile -LiteralPath $UxPlayRuntimeManifestPath
+$UxPlayRuntimeFiles = @($UxPlayRuntimeManifest.Files)
+if ($UxPlayRuntimeFiles.Count -eq 0 -or
+    @($UxPlayRuntimeFiles | Select-Object -Unique).Count -ne $UxPlayRuntimeFiles.Count -or
+    @($UxPlayRuntimeFiles | Where-Object {
+        [string]::IsNullOrWhiteSpace($_) -or [IO.Path]::IsPathRooted($_) -or
+        $_.Split([IO.Path]::DirectorySeparatorChar) -contains '..'
+    }).Count -ne 0) {
+    throw 'UxPlay runtime manifest is invalid.'
+}
 
 $RequiredArtifacts = @(
     'iPhoneMirror.exe',
@@ -88,6 +108,8 @@ $RequiredArtifacts = @(
     'Assets\iPhoneMirror.ico',
     'licenses\WPF-UI-LICENSE.md',
     'licenses\WPF-UI-ThirdPartyNotices.txt',
+    'tools\UsbTouchBridge.exe',
+    'tools\UsbTouchBridge.runtime.json',
     'tools\updater\Apply-ZipUpdate.ps1',
     'licenses\libusb-COPYING.txt',
     'licenses\libusb-win32-COPYING-LGPL.txt',
@@ -108,6 +130,9 @@ $RequiredArtifacts = @(
     'Wireless\licenses\SOURCE.md',
     'Wireless\licenses\SHA256SUMS.txt'
 )
+$RequiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
+    Join-Path 'Wireless\UxPlay' $_
+})
 
 function Assert-ProductVersion([string]$Path, [string]$ExpectedVersion) {
     $actual = (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion
@@ -297,6 +322,9 @@ function Assert-PublishedOutput {
             throw "Published artifact is missing: $relative"
         }
     }
+    $bridgeToolsRoot = Join-Path $PublishRoot 'tools'
+    Assert-UsbTouchBridgeRuntime $bridgeToolsRoot 'Published USB touch bridge runtime'
+    $bridgeRuntimeArtifacts = @(Get-UsbTouchBridgeRuntimePayloadFiles $bridgeToolsRoot 'tools')
 
     $fullPublishRoot = (Resolve-Path -LiteralPath $PublishRoot).Path.TrimEnd('\')
     $actualArtifacts = @(Get-ChildItem -LiteralPath $PublishRoot -Recurse -File |
@@ -310,7 +338,14 @@ function Assert-PublishedOutput {
             'tools\ffmpeg\SOURCE.txt'
         )
     }
-    $allowedArtifacts = @($RequiredArtifacts) + $optionalArtifacts
+    $uxplayRoot = Join-Path $PublishRoot 'Wireless\UxPlay'
+    $uxplayArtifacts = if (Test-Path -LiteralPath $uxplayRoot -PathType Container) {
+        @(Get-ChildItem -LiteralPath $uxplayRoot -Recurse -File |
+            ForEach-Object { $_.FullName.Substring($fullPublishRoot.Length + 1) })
+    }
+    else { @() }
+    $allowedArtifacts = @($RequiredArtifacts) + $bridgeRuntimeArtifacts +
+        $optionalArtifacts + $uxplayArtifacts
     $unexpected = @($actualArtifacts | Where-Object { $_ -notin $allowedArtifacts })
     if ($unexpected.Count -ne 0) {
         throw "Unexpected files in published output: $($unexpected -join ', ')"
@@ -498,9 +533,13 @@ try {
 
     if (-not $SkipBuild) {
         $buildArguments = @{ Configuration = 'Release' }
-        if ($OmitMediaOutputRuntime) {
+    if ($OmitMediaOutputRuntime) {
             $buildArguments.OmitMediaOutputRuntime = $true
         }
+        # UxPlay is included by the standard build because it is exposed as a
+        # selectable fallback receiver. Keep forwarding the switch so existing
+        # release automation remains compatible.
+        if ($IncludeUxPlayRuntime) { $buildArguments.IncludeUxPlayRuntime = $true }
         if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
             $buildArguments.AppleSupportPackagePath = $AppleSupportPackagePath
             $buildArguments.ConfirmAppleRedistributionRights =
@@ -521,7 +560,8 @@ try {
         'iPhoneMirror.Driver.dll', 'iPhoneMirror.Driver.deps.json',
         'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
-        'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll'
+        'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
+        'tools\UsbTouchBridge.exe', 'tools\UsbTouchBridge.runtime.json'
     )
     if ($UseMediaOutputRuntime) {
         $installerRequiredArtifacts += @(
@@ -535,6 +575,8 @@ try {
             throw "Shared-runtime installer artifact is missing: $required"
         }
     }
+    Assert-UsbTouchBridgeRuntime (Join-Path $InstallerPublishRoot 'tools') `
+        'Shared-runtime installer USB touch bridge runtime'
     $versionedDac = @(Get-ChildItem -LiteralPath $InstallerPublishRoot `
         -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
     if ($versionedDac.Count -ne 1) {
@@ -611,6 +653,15 @@ try {
         $RootPackage.copyrightText = 'Copyright (c) 2026 RayrenSX and third-party contributors'
         $VcRuntimeVersion = (Get-Item -LiteralPath `
             (Join-Path $PublishRoot 'vcruntime140.dll')).VersionInfo.ProductVersion
+        $UxPlaySource = Join-Path $PublishRoot 'Wireless\UxPlay\SOURCE.md'
+        $UxPlaySourceText = [IO.File]::ReadAllText($UxPlaySource, [Text.Encoding]::UTF8)
+        $GStreamerVersionMatch = [regex]::Match($UxPlaySourceText,
+            '(?m)^GStreamer version:\s*(?<version>\d+(?:\.\d+){1,3})\s*$')
+        if (-not $GStreamerVersionMatch.Success) {
+            throw 'UxPlay source record does not declare the bundled GStreamer version.'
+        }
+        $GStreamerVersion = $GStreamerVersionMatch.Groups['version'].Value
+        $GStreamerSpdxVersion = $GStreamerVersion -replace '\.', '-'
 
         $NativePackages = [Collections.Generic.List[object]]@(
             [PSCustomObject][ordered]@{
@@ -666,6 +717,38 @@ try {
                 copyrightText = 'NOASSERTION'
                 versionInfo = '4.4.2'
                 supplier = 'Organization: FFmpeg project'
+            },
+            [PSCustomObject][ordered]@{
+                name = 'FDH2 UxPlay wireless receiver'
+                SPDXID = 'SPDXRef-Package-UxPlay-1.74'
+                downloadLocation = 'https://github.com/FDH2/UxPlay/tree/aec205d49302df8d4eb291b9e927ed428b2d0166'
+                filesAnalyzed = $false
+                licenseConcluded = 'GPL-3.0-only'
+                licenseDeclared = 'GPL-3.0-only'
+                copyrightText = 'Copyright (c) FDH2 and UxPlay contributors'
+                versionInfo = '1.74'
+                supplier = 'Organization: FDH2'
+                externalRefs = @([PSCustomObject][ordered]@{
+                    referenceCategory = 'PACKAGE-MANAGER'
+                    referenceType = 'purl'
+                    referenceLocator = 'pkg:github/FDH2/UxPlay@aec205d49302df8d4eb291b9e927ed428b2d0166'
+                })
+            },
+            [PSCustomObject][ordered]@{
+                name = 'GStreamer UCRT64 runtime'
+                SPDXID = "SPDXRef-Package-GStreamer-$GStreamerSpdxVersion"
+                downloadLocation = 'https://gstreamer.freedesktop.org/'
+                filesAnalyzed = $false
+                licenseConcluded = 'LGPL-2.1-or-later'
+                licenseDeclared = 'LGPL-2.1-or-later'
+                copyrightText = 'NOASSERTION'
+                versionInfo = $GStreamerVersion
+                supplier = 'Organization: GStreamer project'
+                externalRefs = @([PSCustomObject][ordered]@{
+                    referenceCategory = 'PACKAGE-MANAGER'
+                    referenceType = 'purl'
+                    referenceLocator = "pkg:generic/gstreamer@$GStreamerVersion"
+                })
             },
             [PSCustomObject][ordered]@{
                 name = 'Microsoft Visual C++ x64 runtime'

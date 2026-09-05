@@ -161,6 +161,8 @@ internal static class StartupDiagnostics
         yield return ("iPhoneMirror.VirtualCamera.Admin.exe", false);
         yield return (Path.Combine("tools", "ffmpeg", "ffmpeg.exe"), false);
         yield return (Path.Combine("Wireless", "iPhoneMirror.WirelessHost.exe"), false);
+        yield return (Path.Combine("Wireless", "UxPlay", "iPhoneMirror.UxPlayHost.exe"), false);
+        yield return (Path.Combine("Wireless", "UxPlay", "uxplay.exe"), false);
         yield return (Path.Combine("Wireless", "dnssd.dll"), false);
         yield return (Path.Combine("Wireless", "airplay2dll.dll"), false);
         yield return (Path.Combine("Wireless", "avcodec-58.dll"), false);

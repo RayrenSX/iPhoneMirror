@@ -25,6 +25,9 @@ constexpr std::uint16_t AppleVendorId = 0x05ac;
 constexpr std::uint8_t QuickTimeSubclass = 0x2a;
 constexpr std::uint8_t QuickTimePlaceholderSubclass = 0xfd;
 constexpr int LibUsb0TransferTimedOut = -116;
+constexpr int LibUsb0DeviceNotFound = -5;
+constexpr int LibUsb0TransientReadRetries = 12;
+constexpr auto LibUsb0TransientReadDelay = std::chrono::milliseconds(50);
 // libusb-win32 returns this value when the handle has no active configuration
 // (its internal pipe table is still at configuration 0).  It is distinct from
 // a genuinely busy interface and is the only claim failure that can be
@@ -1104,15 +1107,25 @@ std::size_t LibUsb0Connection::read(std::span<std::uint8_t> destination, unsigne
     auto* handle = handle_;
     if (!handle || destination.empty())
         throw std::invalid_argument("invalid QuickTime USB read");
-    const int count = usb_bulk_read(handle, endpoints_.bulk_in,
-        reinterpret_cast<char*>(destination.data()),
-        static_cast<int>(std::min<std::size_t>(destination.size(), INT_MAX)),
-        static_cast<int>(timeout_ms));
-    if (count == LibUsb0TransferTimedOut) return 0;
-    if (count < 0)
-        throw std::runtime_error(std::format(
-            "QuickTime bulk read: libusb0 error {}", count));
-    return static_cast<std::size_t>(count);
+    const auto size = static_cast<int>(std::min<std::size_t>(destination.size(), INT_MAX));
+    for (int attempt = 0; ; ++attempt) {
+        const int count = usb_bulk_read(handle, endpoints_.bulk_in,
+            reinterpret_cast<char*>(destination.data()), size,
+            static_cast<int>(timeout_ms));
+        if (count == LibUsb0TransferTimedOut) return 0;
+        if (count == LibUsb0DeviceNotFound && attempt < LibUsb0TransientReadRetries) {
+            // During the legacy filter's QuickTime re-enumeration, libusb0 can
+            // report a missing pipe for a few polls while the same device node
+            // is being rebuilt. Keep the handle alive and retry briefly before
+            // promoting it to a real capture failure.
+            std::this_thread::sleep_for(LibUsb0TransientReadDelay);
+            continue;
+        }
+        if (count < 0)
+            throw std::runtime_error(std::format(
+                "QuickTime bulk read: libusb0 error {}", count));
+        return static_cast<std::size_t>(count);
+    }
 }
 
 void LibUsb0Connection::write(std::span<const std::uint8_t> source, unsigned timeout_ms) {

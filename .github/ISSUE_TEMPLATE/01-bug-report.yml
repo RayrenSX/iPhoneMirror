@@ -13,7 +13,7 @@ body:
     id: version
     attributes:
       label: iPhoneMirror version
-      placeholder: v1.0.3
+      placeholder: v1.8.1
     validations:
       required: true
   - type: dropdown
@@ -41,6 +41,7 @@ body:
       options:
         - Apple Devices (Microsoft Store)
         - iTunes / Apple Mobile Device Support
+        - Standalone Apple Mobile Device Support MSI
         - Both
         - Unknown
     validations:

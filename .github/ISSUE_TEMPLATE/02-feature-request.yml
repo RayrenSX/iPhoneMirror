@@ -41,5 +41,5 @@ body:
     attributes:
       label: Scope confirmation
       options:
-        - label: This request is for wired USB capture and does not require remote-control bypasses.
+        - label: This request stays within the project's supported mirroring, output, driver, Bluetooth, or documentation workflows and does not request bypassing platform/content protections.
           required: true

@@ -16,9 +16,10 @@ $PairingFile = Join-Path $SourceRoot 'AirPlayServerLib\lib\pairing.c'
 $GlobalFile = Join-Path $SourceRoot 'AirPlayServerLib\lib\global.h'
 $MirrorBufferFile = Join-Path $SourceRoot 'AirPlayServerLib\lib\mirror_buffer.c'
 $WrapperServerFile = Join-Path $SourceRoot 'airplay2dll\src\FgAirplayServer.cpp'
+$ChannelFile = Join-Path $SourceRoot 'airplay2dll\FgAirplayChannel.cpp'
 foreach ($File in @($DnsSdFile, $AirPlayFile, $AirPlayHandlersFile,
         $RaopFile, $RaopHeaderFile, $RaopRouterFile, $PairingFile, $GlobalFile,
-        $MirrorBufferFile, $WrapperServerFile)) {
+        $MirrorBufferFile, $WrapperServerFile, $ChannelFile)) {
     if (-not (Test-Path -LiteralPath $File)) {
         throw "AirPlayServer media capability source is missing: $File"
     }
@@ -797,9 +798,13 @@ iphone_mirror_reject_media_setup(raop_conn_t *conn, http_request_t *request)
 	if (eiv != NULL) {
 		uint8_t is_mirroring = 0;
 		plist_t flag = plist_dict_get_item(root, "isScreenMirroringSession");
-		if (flag != NULL) plist_get_bool_val(flag, &is_mirroring);
-		if (is_mirroring) conn->mirror_session_requested = 1;
-		else reject = 1;
+		/* IPHONE_MIRROR_MIRROR_FLAG_OPTIONAL: older and some newer senders
+		 * omit this advisory flag and identify mirroring in SETUP type 110. */
+		if (flag != NULL) {
+			plist_get_bool_val(flag, &is_mirroring);
+			if (is_mirroring) conn->mirror_session_requested = 1;
+			else reject = 1;
+		}
 	}
 	else {
 		streams = plist_dict_get_item(root, "streams");
@@ -1216,4 +1221,173 @@ if (-not $Wrapper.Contains($DeviceIdParserMarker) -or
     throw 'AirPlay receiver endpoint identity was not unified.'
 }
 [IO.File]::WriteAllText($WrapperServerFile, $Wrapper, $Encoding)
+
+# The original wrapper opens FFmpeg with the Annex-B SPS/PPS bytes as
+# AVCodecContext extradata and only attempts initialization for a packet marked
+# as a key frame. Some senders provide the codec packet in a form that FFmpeg
+# rejects as extradata, leaving every subsequent frame silently dropped. Feed
+# the codec packet through the normal H.264 parser instead and open the
+# decoder before handling either packet type.
+$Channel = [IO.File]::ReadAllText($ChannelFile, $Encoding)
+$ChannelMarker = 'IPHONE_MIRROR_H264_DECODER_RECOVERY'
+if (-not $Channel.Contains($ChannelMarker)) {
+    $ChannelNewLine = if ($Channel.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $InitPattern = '(?s)int FgAirplayChannel::initFFmpeg\(.*?\r?\n\}\r?\n\r?\nvoid FgAirplayChannel::unInitFFmpeg'
+    if ([regex]::Matches($Channel, $InitPattern).Count -ne 1) {
+        throw 'AirPlay H.264 decoder initialization patch point changed.'
+    }
+    $InitReplacement = @'
+int FgAirplayChannel::initFFmpeg(const void* privatedata, int privatedatalen) {
+	/* IPHONE_MIRROR_H264_DECODER_RECOVERY: SPS/PPS is Annex-B input, not
+	 * avcC extradata. Let the H.264 parser consume it as a regular packet. */
+	(void)privatedata;
+	(void)privatedatalen;
+	if (m_bCodecOpened) return 0;
+	m_pCodec = avcodec_find_decoder(AV_CODEC_ID_H264);
+	if (m_pCodec == NULL) {
+		printf("IPHONE_MIRROR_H264_DECODER_RECOVERY decoder_missing\n");
+		return -1;
+	}
+	m_pCodecCtx = avcodec_alloc_context3(m_pCodec);
+	if (m_pCodecCtx == NULL) {
+		printf("IPHONE_MIRROR_H264_DECODER_RECOVERY context_alloc_failed\n");
+		return -1;
+	}
+	m_pCodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+	m_pCodecCtx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+	m_pCodecCtx->thread_count = 4;
+	m_pCodecCtx->thread_type = FF_THREAD_SLICE;
+	int res = avcodec_open2(m_pCodecCtx, m_pCodec, NULL);
+	if (res < 0) {
+		printf("IPHONE_MIRROR_H264_DECODER_RECOVERY open_failed=%d\n", res);
+		avcodec_free_context(&m_pCodecCtx);
+		m_pCodec = NULL;
+		return res;
+	}
+	m_bCodecOpened = true;
+	return 0;
+}
+
+void FgAirplayChannel::unInitFFmpeg
+'@ -replace '\r?\n', $ChannelNewLine
+    $Channel = [regex]::Replace($Channel, $InitPattern, $InitReplacement)
+    $Condition = 'if (data->is_key && !m_bCodecOpened) {'
+    if ([regex]::Matches($Channel, [regex]::Escape($Condition)).Count -ne 1) {
+        throw 'AirPlay H.264 decoder open condition changed.'
+    }
+    $Channel = $Channel.Replace($Condition, 'if (!m_bCodecOpened) {')
+    [IO.File]::WriteAllText($ChannelFile, $Channel, $Encoding)
+}
+if (-not $Channel.Contains($ChannelMarker) -or
+    -not $Channel.Contains('avcodec_open2(m_pCodecCtx, m_pCodec, NULL)')) {
+    throw 'AirPlay H.264 decoder recovery patch was not applied.'
+}
+
+# Rotation sends a new SPS/PPS followed by an IDR. The protocol layer combines
+# those into one access unit before this decoder sees it. Drain each packet,
+# but do not flush merely because it contains an IDR: ordinary keyframes are
+# common at original quality and flushing them can discard the new geometry.
+$RotationMarker = 'IPHONE_MIRROR_H264_ROTATION_RECOVERY'
+if (-not $Channel.Contains($RotationMarker)) {
+    $ChannelNewLine = if ($Channel.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $DecodePattern = '(?s)int FgAirplayChannel::decodeH264Data\(.*?\r?\n\}\r?\n\r?\nint FgAirplayChannel::scaleH264Data'
+    if ([regex]::Matches($Channel, $DecodePattern).Count -ne 1) {
+        throw 'AirPlay H.264 decode replacement point changed.'
+    }
+    $DecodeReplacement = @'
+int FgAirplayChannel::decodeH264Data(SFgH264Data* data, const char* remoteName, const char* remoteDeviceId) {
+	/* IPHONE_MIRROR_H264_ROTATION_RECOVERY */
+	if (data == NULL || data->data == NULL || data->size <= 0) return -1;
+	CAutoLock oLock(m_mutexVideo, "decodeH264Data");
+	int ret = 0;
+	if (!m_bCodecOpened) {
+		ret = initFFmpeg(NULL, 0);
+		if (ret < 0) return ret;
+	}
+	AVPacket packet;
+	av_init_packet(&packet);
+	packet.data = data->data;
+	packet.size = data->size;
+	packet.pts = data->pts;
+	ret = avcodec_send_packet(m_pCodecCtx, &packet);
+	if (ret < 0 && ret != AVERROR(EAGAIN)) {
+		printf("IPHONE_MIRROR_H264_ROTATION_RECOVERY send_failed=%d\\n", ret);
+		return ret;
+	}
+
+	/* One packet can produce more than one frame, especially while the
+	 * decoder drains frames queued immediately before an orientation change. */
+	for (;;) {
+		AVFrame* pFrame = av_frame_alloc();
+		if (pFrame == NULL) return -1;
+		ret = avcodec_receive_frame(m_pCodecCtx, pFrame);
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+			av_frame_free(&pFrame);
+			break;
+		}
+		if (ret < 0) {
+			printf("IPHONE_MIRROR_H264_ROTATION_RECOVERY receive_failed=%d\\n", ret);
+			av_frame_free(&pFrame);
+			break;
+		}
+		if (pFrame->width <= 0 || pFrame->height <= 0 ||
+			pFrame->data[0] == NULL || pFrame->data[1] == NULL ||
+			pFrame->data[2] == NULL) {
+			av_frame_free(&pFrame);
+			continue;
+		}
+
+		const int chromaHeight = (pFrame->height + 1) >> 1;
+		const int ySize = pFrame->linesize[0] * pFrame->height;
+		const int uSize = pFrame->linesize[1] * chromaHeight;
+		const int vSize = pFrame->linesize[2] * chromaHeight;
+		const int totalSize = ySize + uSize + vSize;
+		if (ySize <= 0 || uSize <= 0 || vSize <= 0 || totalSize <= 0) {
+			av_frame_free(&pFrame);
+			continue;
+		}
+		if (m_sVideoFrameOri.data == NULL ||
+			m_sVideoFrameOri.width != pFrame->width ||
+			m_sVideoFrameOri.height != pFrame->height ||
+			m_sVideoFrameOri.dataTotalLen < totalSize) {
+			delete[] m_sVideoFrameOri.data;
+			m_sVideoFrameOri.data = new uint8_t[totalSize];
+		}
+		m_sVideoFrameOri.width = pFrame->width;
+		m_sVideoFrameOri.height = pFrame->height;
+		m_sVideoFrameOri.pts = pFrame->pts;
+		m_sVideoFrameOri.isKey = pFrame->key_frame;
+		m_sVideoFrameOri.dataTotalLen = totalSize;
+		m_sVideoFrameOri.dataLen[0] = ySize;
+		m_sVideoFrameOri.dataLen[1] = uSize;
+		m_sVideoFrameOri.dataLen[2] = vSize;
+		m_sVideoFrameOri.pitch[0] = pFrame->linesize[0];
+		m_sVideoFrameOri.pitch[1] = pFrame->linesize[1];
+		m_sVideoFrameOri.pitch[2] = pFrame->linesize[2];
+		memcpy(m_sVideoFrameOri.data, pFrame->data[0], ySize);
+		memcpy(m_sVideoFrameOri.data + ySize, pFrame->data[1], uSize);
+		memcpy(m_sVideoFrameOri.data + ySize + uSize, pFrame->data[2], vSize);
+
+		if (m_pCallback != NULL) {
+			if (m_fScaleRatio < 0.9999f || m_fScaleRatio > 1.0001f) {
+				scaleH264Data(&m_sVideoFrameOri);
+				m_pCallback->outputVideo(&m_sVideoFrameScale, remoteName, remoteDeviceId);
+			} else {
+				m_pCallback->outputVideo(&m_sVideoFrameOri, remoteName, remoteDeviceId);
+			}
+		}
+		av_frame_free(&pFrame);
+	}
+	return 0;
+}
+
+int FgAirplayChannel::scaleH264Data
+'@ -replace '\r?\n', $ChannelNewLine
+    $Channel = [regex]::Replace($Channel, $DecodePattern, $DecodeReplacement)
+    [IO.File]::WriteAllText($ChannelFile, $Channel, $Encoding)
+}
+if (-not $Channel.Contains($RotationMarker) -or
+    -not $Channel.Contains('avcodec_receive_frame(m_pCodecCtx, pFrame)')) {
+    throw 'AirPlay H.264 rotation recovery patch was not applied.'
+}
 Write-Host 'Applied combined AirPlay mirror and URL-video request policy.'

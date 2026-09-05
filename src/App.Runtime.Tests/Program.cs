@@ -600,6 +600,7 @@ internal static class Program
 
             TestProtectedContentOverlay(owner, assembly);
             TestProtectedContentNoticeWindow(owner, assembly);
+            TestWorkspaceAnimations(application);
             TestDeveloperToolsWindow(application, assembly);
             TestMainWindowThemeAndCaptionControls(application, assembly);
         }
@@ -757,7 +758,7 @@ internal static class Program
                         "Developer tools window must be independent and non-topmost.");
                 AssertWindowsOwnOuterCorners(window, "Developer tools");
                 AssertCatalogCount(windowType, window, "WorkspaceItems", 6);
-                AssertCatalogCount(windowType, window, "WindowItems", 15);
+                AssertCatalogCount(windowType, window, "WindowItems", 18);
                 foreach (var controlName in new[]
                 {
                     "ThemeComboBox", "LanguageComboBox", "OpacitySlider",
@@ -839,6 +840,200 @@ internal static class Program
         {
             window.Close();
         }
+    }
+
+    private static void TestWorkspaceAnimations(Application application)
+    {
+        var app = application as App ??
+            throw new InvalidOperationException("Runtime test application is not iPhoneMirror.App.");
+        var displayMode = GetApplicationDisplayMode(app);
+        try
+        {
+            SetApplicationDisplayMode(app, ApplicationDisplayMode.Complete);
+            var full = CreateWorkspaceTestWindow(application);
+            try
+            {
+                TestCompleteWorkspaceAnimation(full);
+            }
+            finally
+            {
+                CloseWorkspaceTestWindow(full);
+            }
+
+            SetApplicationDisplayMode(app, ApplicationDisplayMode.Lightweight);
+            var lightweight = CreateWorkspaceTestWindow(application);
+            try
+            {
+                TestLightweightWorkspaceAnimation(lightweight);
+            }
+            finally
+            {
+                CloseWorkspaceTestWindow(lightweight);
+            }
+        }
+        finally
+        {
+            SetApplicationDisplayMode(app, displayMode);
+        }
+    }
+
+    private static MainWindow CreateWorkspaceTestWindow(Application application)
+    {
+        var window = new MainWindow
+        {
+            Width = 1800,
+            Height = 820,
+            ShowInTaskbar = false,
+        };
+        // Keep device enumeration from changing the selected workspace while
+        // a deterministic animation sample is running.
+        var loaded = typeof(MainWindow).GetMethod("OnLoaded",
+            BindingFlags.Instance | BindingFlags.NonPublic, binder: null,
+            types: [typeof(object), typeof(RoutedEventArgs)], modifiers: null) ??
+            throw new MissingMethodException(typeof(MainWindow).FullName, "OnLoaded");
+        window.Loaded -= (RoutedEventHandler)Delegate.CreateDelegate(
+            typeof(RoutedEventHandler), window, loaded);
+        application.MainWindow = window;
+        window.Show();
+        var applyWorkspace = RequireMethod(typeof(MainWindow),
+            "ApplyWorkspacePanelState", BindingFlags.Instance | BindingFlags.NonPublic);
+        applyWorkspace.Invoke(window, [false]);
+        var applyMode = RequireMethod(typeof(MainWindow),
+            "ApplyApplicationDisplayMode", BindingFlags.Instance | BindingFlags.NonPublic);
+        applyMode.Invoke(window, null);
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(450));
+        window.UpdateLayout();
+        return window;
+    }
+
+    private static void CloseWorkspaceTestWindow(MainWindow window)
+    {
+        var allowClose = typeof(MainWindow).GetField("_allowClose",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new MissingFieldException(typeof(MainWindow).FullName, "_allowClose");
+        allowClose.SetValue(window, true);
+        window.Close();
+    }
+
+    private static void TestCompleteWorkspaceAnimation(MainWindow window)
+    {
+        var setLeft = RequireMethod(typeof(MainWindow), "SetLeftWorkspacePanel",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        var setSettings = RequireMethod(typeof(MainWindow), "SetSettingsPanelVisible",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        var panelType = typeof(MainWindow).GetNestedType("LeftWorkspacePanel",
+            BindingFlags.NonPublic) ??
+            throw new MissingMemberException(typeof(MainWindow).FullName,
+                "LeftWorkspacePanel");
+        var none = Enum.Parse(panelType, "None");
+        var devices = Enum.Parse(panelType, "Devices");
+        var leftPanel = window.FindName("LeftPanelHost") as FrameworkElement ??
+            throw new InvalidOperationException("Workspace left panel was not found.");
+        var leftGap = window.FindName("LeftGapColumn") as System.Windows.Controls.ColumnDefinition ??
+            throw new InvalidOperationException("Workspace left gap was not found.");
+
+        if (leftPanel.ActualWidth < 299 || leftGap.ActualWidth < 17)
+            throw new InvalidOperationException("Complete workspace did not start with the device panel open.");
+
+        setLeft.Invoke(window, [none]);
+        window.UpdateLayout();
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+        window.UpdateLayout();
+
+        setSettings.Invoke(window, [true]);
+        setLeft.Invoke(window, [devices]);
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(360));
+        window.UpdateLayout();
+        var controlPanel = window.FindName("ControlPanel") as FrameworkElement ??
+            throw new InvalidOperationException("Workspace control panel was not found.");
+        if (leftPanel.ActualWidth < 299 || leftGap.ActualWidth < 17 ||
+            controlPanel.Width < 335 || controlPanel.Visibility != Visibility.Visible)
+            throw new InvalidOperationException(
+                $"Complete workspace did not settle both panels after the retargeted animation: " +
+                $"left={leftPanel.ActualWidth:F1}, gap={leftGap.ActualWidth:F1}, " +
+                $"control={controlPanel.ActualWidth:F1}, controlWidth={controlPanel.Width:F1}, " +
+                $"controlDesired={controlPanel.DesiredSize.Width:F1}, controlMin={controlPanel.MinWidth:F1}, " +
+                $"controlVisibility={controlPanel.Visibility}, " +
+                $"grid={((System.Windows.Controls.Grid)window.FindName("MainContentGrid")!).ActualWidth:F1}, " +
+                $"columns={string.Join(",", ((System.Windows.Controls.Grid)window.FindName("MainContentGrid")!).ColumnDefinitions.Select(column => $"{column.ActualWidth:F1}/{column.Width.GridUnitType}"))}, " +
+                $"column={((System.Windows.Controls.ColumnDefinition)window.FindName("ControlColumn")!).ActualWidth:F1}, " +
+                $"columnWidth={((System.Windows.Controls.ColumnDefinition)window.FindName("ControlColumn")!).Width.Value:F1}, " +
+                $"columnUnit={((System.Windows.Controls.ColumnDefinition)window.FindName("ControlColumn")!).Width.GridUnitType}.");
+    }
+
+    private static void TestLightweightWorkspaceAnimation(MainWindow window)
+    {
+        var setLeft = RequireMethod(typeof(MainWindow), "SetLeftWorkspacePanel",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        var panelType = typeof(MainWindow).GetNestedType("LeftWorkspacePanel",
+            BindingFlags.NonPublic) ??
+            throw new MissingMemberException(typeof(MainWindow).FullName,
+                "LeftWorkspacePanel");
+        var none = Enum.Parse(panelType, "None");
+        var devices = Enum.Parse(panelType, "Devices");
+        var startLeft = window.Left;
+        var expandedWidth = window.ActualWidth;
+
+        setLeft.Invoke(window, [none]);
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+        var closingWidth = window.ActualWidth;
+        if (Math.Abs(window.Left - startLeft) > 1 ||
+            closingWidth >= expandedWidth - 1)
+            throw new InvalidOperationException(
+                $"Lightweight workspace did not contract from the right with its left rail fixed: " +
+                $"left={window.Left:F1}/{startLeft:F1}, width={closingWidth:F1}/{expandedWidth:F1}.");
+
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(360));
+        var collapsedWidth = window.ActualWidth;
+        if (Math.Abs(window.Left - startLeft) > 1 ||
+            collapsedWidth >= expandedWidth - 8)
+            throw new InvalidOperationException(
+                "Lightweight workspace did not finish the right-side contraction.");
+
+        setLeft.Invoke(window, [devices]);
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(360));
+        if (Math.Abs(window.Left - startLeft) > 1 ||
+            window.ActualWidth <= collapsedWidth + 8)
+            throw new InvalidOperationException(
+                "Lightweight workspace did not expand to the right with its left rail fixed.");
+    }
+
+    private static ApplicationDisplayMode GetApplicationDisplayMode(App app)
+    {
+        var settings = app.GetType().GetProperty("UpdateSettings",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(app) ??
+            throw new MissingMemberException(typeof(App).FullName, "UpdateSettings");
+        return (ApplicationDisplayMode)(settings.GetType().GetProperty(
+            "ApplicationDisplayMode")?.GetValue(settings) ??
+            throw new MissingMemberException(settings.GetType().FullName,
+                "ApplicationDisplayMode"));
+    }
+
+    private static void SetApplicationDisplayMode(App app, ApplicationDisplayMode value)
+    {
+        var settings = app.GetType().GetProperty("UpdateSettings",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(app) ??
+            throw new MissingMemberException(typeof(App).FullName, "UpdateSettings");
+        var property = settings.GetType().GetProperty("ApplicationDisplayMode") ??
+            throw new MissingMemberException(settings.GetType().FullName,
+                "ApplicationDisplayMode");
+        property.SetValue(settings, value);
+    }
+
+    private static void AdvanceDispatcher(TimeSpan duration)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = duration,
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            frame.Continue = false;
+        };
+        timer.Start();
+        Dispatcher.PushFrame(frame);
     }
 
     private static void TestShortcutSettingsWindow(MainWindow owner, Assembly assembly)
@@ -1082,6 +1277,12 @@ internal static class Program
             "prompt", "AppPromptWindow", "OnConfirmClick");
         TestDeveloperPreviewAction(application, owner, openSurface,
             "prompt", "AppPromptWindow", "OnCancelClick");
+        TestDeveloperPreviewAction(application, owner, openSurface,
+            "reverse-control-wired-prerequisite", "AppPromptWindow", "OnCancelClick");
+        TestDeveloperPreviewAction(application, owner, openSurface,
+            "reverse-control-wireless-prerequisite", "AppPromptWindow", "OnCancelClick");
+        TestDeveloperPreviewAction(application, owner, openSurface,
+            "reverse-control-error", "AppPromptWindow", "OnConfirmClick");
         TestDeveloperPreviewAction(application, owner, openSurface,
             "capture-error", "CaptureStatusNoticeWindow", "OnCloseClick");
         TestDeveloperPreviewAction(application, owner, openSurface,

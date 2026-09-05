@@ -394,12 +394,12 @@ std::optional<std::uint32_t> checked_nv12_buffer_size(
 
 bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
     std::span<std::uint8_t> output, std::uint32_t output_width,
-    std::uint32_t output_height) noexcept {
+    std::uint32_t output_height, bool canonicalize_sdr) noexcept {
     if (frame.nv12.empty() && frame.gpu_frame) {
         auto materialized = frame;
         if (!materialize_gpu_frame(materialized)) return false;
         return copy_nv12_frame_letterboxed(materialized, output,
-            output_width, output_height);
+            output_width, output_height, canonicalize_sdr);
     }
     if (frame.width == 0 || frame.height == 0 || output_width == 0 ||
         output_height == 0 || (output_width & 1U) != 0 ||
@@ -435,7 +435,8 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
 
     const auto output_y_bytes = static_cast<std::size_t>(output_width) *
         output_height;
-    const auto black_y = frame.color.range == coremedia::ColorRange::Full
+    const auto black_y = canonicalize_sdr ||
+        frame.color.range == coremedia::ColorRange::Full
         ? std::uint8_t{0} : std::uint8_t{16};
     std::fill_n(output.data(), output_y_bytes, black_y);
     std::fill(output.begin() + static_cast<std::ptrdiff_t>(output_y_bytes),
@@ -464,7 +465,16 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
     auto* destination_y = output.data();
     auto* destination_uv = output.data() + output_y_bytes;
 
+    const bool canonical_color = frame.pixel_format == PixelFormat::Nv12 &&
+        !frame.color.is_hdr() && frame.color.range == coremedia::ColorRange::Full &&
+        (frame.color.transfer == coremedia::TransferFunction::Bt709 ||
+            frame.color.transfer == coremedia::TransferFunction::Unspecified) &&
+        (frame.color.matrix == coremedia::MatrixCoefficients::Bt709 ||
+            frame.color.matrix == coremedia::MatrixCoefficients::Unspecified) &&
+        (frame.color.primaries == coremedia::ColorPrimaries::Bt709 ||
+            frame.color.primaries == coremedia::ColorPrimaries::Unspecified);
     if (frame.pixel_format == PixelFormat::Nv12 &&
+        (!canonicalize_sdr || canonical_color) &&
         content_width == frame.width && content_height == frame.height) {
         for (std::uint32_t y = 0; y < content_height; ++y) {
             std::memcpy(destination_y + static_cast<std::size_t>(top + y) *
@@ -528,6 +538,70 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
         return frame.pixel_format == PixelFormat::P010
             ? row[component * 2U + 1U] : row[component];
     };
+    if (canonicalize_sdr && !canonical_color) {
+        const auto conversion = yuv_conversion_parameters(
+            frame.pixel_format, frame.color.range, frame.color.matrix);
+        const auto sample_normalized = [&](const std::uint8_t* row,
+            std::size_t component) noexcept {
+            if (frame.pixel_format == PixelFormat::P010) {
+                const auto offset = component * 2U;
+                const auto value = static_cast<std::uint16_t>(row[offset]) |
+                    (static_cast<std::uint16_t>(row[offset + 1U]) << 8U);
+                return static_cast<double>(value) / 65535.0;
+            }
+            return static_cast<double>(row[component]) / 255.0;
+        };
+        const auto sample_rgb = [&](std::uint32_t x,
+            std::uint32_t y) noexcept {
+            const auto source_x = x_map[x];
+            const auto source_y_index = y_map[y];
+            const auto* y_row = source_y +
+                static_cast<std::size_t>(source_y_index) * source_stride;
+            const auto* uv_row = source_uv +
+                static_cast<std::size_t>(source_y_index / 2U) * source_stride;
+            const auto chroma_component = static_cast<std::size_t>(source_x / 2U) * 2U;
+            return convert_yuv_to_sdr(
+                sample_normalized(y_row, source_x),
+                sample_normalized(uv_row, chroma_component),
+                sample_normalized(uv_row, chroma_component + 1U),
+                frame.color, conversion);
+        };
+        const auto encode_luma = [](double value) noexcept {
+            return static_cast<std::uint8_t>(std::clamp(
+                static_cast<int>(std::lround(value * 255.0)), 0, 255));
+        };
+        const auto encode_chroma = [](double value) noexcept {
+            return static_cast<std::uint8_t>(std::clamp(
+                static_cast<int>(std::lround(value * 255.0 + 128.0)), 0, 255));
+        };
+        for (std::uint32_t y = 0; y < content_height; ++y) {
+            auto* destination_row = destination_y +
+                static_cast<std::size_t>(top + y) * output_width + left;
+            for (std::uint32_t x = 0; x < content_width; ++x) {
+                const auto rgb = sample_rgb(x, y);
+                destination_row[x] = encode_luma(
+                    0.2126 * rgb.red + 0.7152 * rgb.green + 0.0722 * rgb.blue);
+            }
+        }
+        for (std::uint32_t y = 0; y < content_height; y += 2U) {
+            auto* destination_row = destination_uv +
+                static_cast<std::size_t>((top + y) / 2U) * output_width + left;
+            for (std::uint32_t x = 0; x < content_width; x += 2U) {
+                const auto a = sample_rgb(x, y);
+                const auto b = sample_rgb(x + 1U, y);
+                const auto c = sample_rgb(x, y + 1U);
+                const auto d = sample_rgb(x + 1U, y + 1U);
+                const auto red = (a.red + b.red + c.red + d.red) * 0.25;
+                const auto green = (a.green + b.green + c.green + d.green) * 0.25;
+                const auto blue = (a.blue + b.blue + c.blue + d.blue) * 0.25;
+                destination_row[x] = encode_chroma(
+                    -0.114572 * red - 0.385428 * green + 0.5 * blue);
+                destination_row[x + 1U] = encode_chroma(
+                    0.5 * red - 0.454153 * green - 0.045847 * blue);
+            }
+        }
+        return true;
+    }
     for (std::uint32_t y = 0; y < content_height; ++y) {
         const auto* source_row = source_y + static_cast<std::size_t>(y_map[y]) *
             source_stride;
@@ -549,6 +623,13 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
         }
     }
     return true;
+}
+
+bool copy_nv12_frame_letterboxed_sdr(const DecodedFrame& frame,
+    std::span<std::uint8_t> output, std::uint32_t output_width,
+    std::uint32_t output_height) noexcept {
+    return copy_nv12_frame_letterboxed(frame, output, output_width,
+        output_height, true);
 }
 
 bool materialize_gpu_frame(DecodedFrame& frame) noexcept {

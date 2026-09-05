@@ -8,6 +8,7 @@ Describe the problem and the chosen solution.
 - [ ] `./build.ps1 -Configuration Release`
 - [ ] Core protocol tests pass
 - [ ] GUI behavior checked when applicable
+- [ ] User-facing documentation and release notes updated when behavior, ports, dependencies or output formats changed
 - [ ] Real-device result includes ProductType/iOS but no UDID
 
 ## Risk review

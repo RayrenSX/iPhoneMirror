@@ -1,0 +1,18 @@
+{
+  "version": 5,
+  "rotation": 0,
+  "toggleKey": "ALT",
+  "uiReferenceWidth": 1080,
+  "uiReferenceHeight": 2400,
+  "keyMap": {},
+  "antiCheat": {
+    "randomOffsetRange": 0.005,
+    "microMoveRange": 0.008,
+    "microMoveSpeed": 0.05,
+    "microMoveDelayMs": 1000,
+    "driftHoldTimeMin": 200,
+    "driftHoldTimeMax": 1500,
+    "driftDurationMin": 50,
+    "driftDurationMax": 150
+  }
+}

@@ -15,6 +15,8 @@
     <Compile Include="..\Shared\Networking\SegmentedHttpDownloader.cs" Link="Networking\SegmentedHttpDownloader.cs" />
     <Compile Include="..\App\Services\StableDeviceSelection.cs" Link="StableDeviceSelection.cs" />
     <Compile Include="..\App\Services\UsbDeviceRefreshPolicy.cs" Link="UsbDeviceRefreshPolicy.cs" />
+    <Compile Include="..\App\Services\WifiSyncInsertionTracker.cs" Link="WifiSyncInsertionTracker.cs" />
+    <Compile Include="..\App\Services\DeviceBindingManager.cs" Link="DeviceBindingManager.cs" />
     <Compile Include="..\App\Services\CaptureShutdownCoordinator.cs" Link="CaptureShutdownCoordinator.cs" />
     <Compile Include="..\App\Services\DeviceSessionManager.cs" Link="DeviceSessionManager.cs" />
     <Compile Include="..\App\Services\SingleInstanceCoordinator.cs" Link="SingleInstanceCoordinator.cs" />
@@ -29,6 +31,7 @@
     <Compile Include="..\SharedUI\Services\WindowWorkAreaController.cs" Link="WindowWorkAreaController.cs" />
     <Compile Include="..\App\Localization\LocalizationService.cs" Link="LocalizationService.cs" />
     <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
+    <Compile Include="..\App\Services\WirelessStallRecoveryTracker.cs" Link="WirelessStallRecoveryTracker.cs" />
     <Compile Include="..\App\Services\NativeLogTailReader.cs" Link="NativeLogTailReader.cs" />
     <Compile Include="..\App\Services\AppLog.cs" Link="AppLog.cs" />
     <Compile Include="..\App\Services\DiagnosticLogger.cs" Link="DiagnosticLogger.cs" />

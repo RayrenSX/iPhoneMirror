@@ -110,6 +110,13 @@ internal sealed class HlsMediaPlaybackBridge : IDisposable
             "-hide_banner", "-nostdin", "-loglevel", "info",
             "-reconnect", "1",
             "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+            // Several mobile live-CDN endpoints (including Douyin) reject
+            // FFmpeg's default user agent or wait indefinitely on a stalled
+            // TLS read. Use a Safari-like identity and bounded I/O waits so
+            // the caller can restart the bridge instead of hanging forever.
+            "-user_agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            "-headers", "Accept: */*\\r\\nAccept-Language: zh-CN,zh;q=0.9,en;q=0.8\\r\\n",
+            "-rw_timeout", "15000000",
             "-protocol_whitelist", "http,https,tcp,tls,crypto",
             "-i", source.AbsoluteUri,
             "-map", "0:v:0?", "-map", "0:a:0?",

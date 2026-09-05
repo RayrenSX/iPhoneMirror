@@ -19,7 +19,9 @@
         WindowCornerPreference="Round"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}"
-        PreviewKeyDown="OnPreviewKeyDown">
+        PreviewKeyDown="OnPreviewKeyDown"
+        PreviewKeyUp="OnPreviewKeyUp"
+        PreviewMouseDown="OnPreviewMouseDown">
     <ui:FluentWindow.Resources>
         <Style TargetType="ListBox">
             <Setter Property="Background" Value="Transparent"/>
@@ -805,6 +807,15 @@
                         <ui:SymbolIcon Symbol="Settings24" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
+                <ui:NavigationViewItem Style="{StaticResource ShellNavigationItem}"
+                                       Content="设备绑定器"
+                                       Click="OnNavigateReverseControlClick"
+                                       ToolTip="管理真实设备的 USB、AirPlay 和 Bluetooth 身份绑定"
+                                       AutomationProperties.AutomationId="DeviceBindingNavButton">
+                    <ui:NavigationViewItem.Icon>
+                        <ui:SymbolIcon Symbol="UsbPlug24" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
                 <ui:NavigationViewItemSeparator/>
                 <ui:NavigationViewItem Style="{StaticResource ShellNavigationItem}"
                                        Content="{DynamicResource NavOutput}"
@@ -822,7 +833,7 @@
                                        ToolTip="{DynamicResource NavDriverDescription}"
                                        AutomationProperties.AutomationId="DriverManagerButton">
                     <ui:NavigationViewItem.Icon>
-                        <ui:SymbolIcon Symbol="UsbPlug24" FontSize="20"/>
+                        <ui:SymbolIcon Symbol="DeveloperBoard20" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.MenuItems>
@@ -865,6 +876,16 @@
             </StackPanel>
             <Border Grid.Column="1" Padding="0" VerticalAlignment="Center"
                     Background="Transparent" BorderThickness="0" MaxWidth="360">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsLightweightApplicationMode}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <StackPanel Orientation="Horizontal">
                     <Ellipse Width="6" Height="6" Fill="{DynamicResource WarningBrush}" Margin="0,0,8,0"/>
                     <TextBlock Text="{Binding DriverState}" FontSize="12" VerticalAlignment="Center"
@@ -920,7 +941,8 @@
                 <ColumnDefinition x:Name="ControlColumn" Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <Grid x:Name="LeftPanelHost" Grid.Column="0" Width="300">
+            <Grid x:Name="LeftPanelHost" Grid.Column="0" Width="300"
+                  ClipToBounds="True">
             <Border x:Name="DevicePanel"
                     Style="{StaticResource WorkspaceCardBorder}" Padding="16">
                 <Grid>
@@ -1174,14 +1196,34 @@
                         <StackPanel x:Name="PreviewQuickActions" Grid.Column="1"
                                     Orientation="Horizontal" VerticalAlignment="Center"
                                     Visibility="{Binding PreviewAndObsVisibility}">
-                            <Button Command="{Binding ToggleBluetoothControlCommand}"
-                                    IsEnabled="{Binding CanToggleBluetoothControl}"
+                            <Button Click="OnStartWirelessControlClick"
+                                    IsEnabled="{Binding CanToggleWirelessControl}"
+                                    Style="{StaticResource PreviewToolButton}"
+                                    ToolTip="{Binding WirelessControlActionText}"
+                                    AutomationProperties.AutomationId="WirelessControlButton">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Wifi120" FontSize="15"/>
+                                    <TextBlock Text="无线控制" Margin="6,0,0,0"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="OnStartUsbControlClick"
+                                    IsEnabled="{Binding CanToggleWiredControl}"
+                                    Style="{StaticResource PreviewToolButton}"
+                                    ToolTip="{Binding WiredControlActionText}"
+                                    AutomationProperties.AutomationId="UsbControlButton">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="UsbPlug24" FontSize="15"/>
+                                    <TextBlock Text="有线控制" Margin="6,0,0,0"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="OnStartBluetoothControlClick"
+                                    IsEnabled="{Binding CanStartBluetoothControl}"
                                     Style="{StaticResource PreviewToolButton}"
                                     ToolTip="{Binding BluetoothControlActionText}"
                                     AutomationProperties.AutomationId="BluetoothControlButton">
                                 <StackPanel Orientation="Horizontal">
                                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Cursor20" FontSize="15"/>
-                                    <TextBlock Text="{Binding BluetoothControlActionText}" Margin="6,0,0,0"/>
+                                    <TextBlock Text="蓝牙控制" Margin="6,0,0,0"/>
                                 </StackPanel>
                             </Button>
                             <Button x:Name="QuickMediaOutputButton"
@@ -1690,7 +1732,8 @@
 
             <Border x:Name="ControlPanel" Grid.Column="4" Width="0"
                     Style="{StaticResource WorkspaceCardBorder}"
-                    Padding="16,16,1,16" Visibility="Collapsed">
+                    Padding="16,16,1,16" Visibility="Collapsed"
+                    ClipToBounds="True">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto"
                               PanningMode="VerticalOnly">
@@ -1711,25 +1754,13 @@
                             </Button>
                         </Grid>
 
-                        <Border Style="{StaticResource ControlSectionCard}">
-                            <StackPanel>
-                                <TextBlock Text="{DynamicResource ApplicationModeLabel}"
-                                           Style="{StaticResource ControlSectionTitle}"/>
-                                <ComboBox SelectedValue="{Binding SelectedApplicationDisplayMode, Mode=TwoWay}"
-                                          SelectedValuePath="Tag" Margin="0,10,0,0"
-                                          AutomationProperties.AutomationId="ApplicationDisplayModeComboBox">
-                                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Lightweight}"
-                                                  Content="{DynamicResource ApplicationModeLightweight}"/>
-                                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Complete}"
-                                                  Content="{DynamicResource ApplicationModeComplete}"/>
-                                </ComboBox>
-                            </StackPanel>
-                        </Border>
-
                         <Border Style="{StaticResource ControlSectionCard}"
                                 Visibility="{Binding WirelessTopSettingsVisibility}">
                             <StackPanel>
                                 <Grid><TextBlock Text="{DynamicResource WirelessReceiverTitle}" Style="{StaticResource ControlSectionTitle}"/><TextBlock Text="{DynamicResource WirelessServiceAlwaysOn}" HorizontalAlignment="Right" Foreground="{DynamicResource SuccessBrush}" FontSize="10"/></Grid>
+                                <TextBlock Text="{DynamicResource WirelessBackendLabel}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                <ComboBox ItemsSource="{Binding WirelessReceiverBackends}" DisplayMemberPath="Label" SelectedItem="{Binding SelectedWirelessReceiverBackend, Mode=TwoWay}"/>
+                                <TextBlock Text="{Binding AppliedWirelessBackendDisplay}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" Margin="1,4,0,0"/>
                                 <TextBlock Text="{DynamicResource WirelessResolutionLabel}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
                                 <ComboBox ItemsSource="{Binding WirelessDisplayProfiles}" DisplayMemberPath="Label" SelectedItem="{Binding SelectedWirelessDisplayProfile, Mode=TwoWay}"/>
                                 <TextBlock Text="{DynamicResource WirelessResolutionHelp}" Foreground="{DynamicResource MutedTextBrush}" FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"/>
@@ -1998,6 +2029,15 @@
                                                HorizontalAlignment="Right" VerticalAlignment="Center"
                                                Foreground="{DynamicResource SuccessBrush}" FontSize="10"/>
                                 </Grid>
+                                <TextBlock Text="{DynamicResource WirelessBackendLabel}"
+                                           Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                <ComboBox ItemsSource="{Binding WirelessReceiverBackends}"
+                                          DisplayMemberPath="Label"
+                                          SelectedItem="{Binding SelectedWirelessReceiverBackend, Mode=TwoWay}"
+                                          AutomationProperties.AutomationId="WirelessBackendComboBox"/>
+                                <TextBlock Text="{Binding AppliedWirelessBackendDisplay}"
+                                           Foreground="{DynamicResource MutedTextBrush}"
+                                           FontSize="9" TextWrapping="Wrap" Margin="1,4,0,0"/>
                                 <TextBlock Text="{DynamicResource WirelessResolutionLabel}"
                                            Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
                                 <ComboBox ItemsSource="{Binding WirelessDisplayProfiles}"
@@ -2063,6 +2103,16 @@
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource AppPreferencesTitle}"
                                            Style="{StaticResource ControlSectionTitle}"/>
+                                <TextBlock Text="{DynamicResource ApplicationModeLabel}"
+                                           Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                <ComboBox SelectedValue="{Binding SelectedApplicationDisplayMode, Mode=TwoWay}"
+                                          SelectedValuePath="Tag"
+                                          AutomationProperties.AutomationId="ApplicationDisplayModeComboBox">
+                                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Lightweight}"
+                                                  Content="{DynamicResource ApplicationModeLightweight}"/>
+                                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Complete}"
+                                                  Content="{DynamicResource ApplicationModeComplete}"/>
+                                </ComboBox>
                                 <TextBlock Text="{DynamicResource LanguageToolTip}"
                                            Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
                                 <ComboBox x:Name="LanguageComboBox" Height="36"
