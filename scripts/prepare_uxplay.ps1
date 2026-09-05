@@ -45,6 +45,16 @@ function Resolve-MsysRoot {
     if ($null -ne $bash -and $bash.Source -match '\\usr\\bin\\bash\.exe$') {
         $candidates += Split-Path (Split-Path $bash.Source -Parent) -Parent
     }
+    if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -and
+        (Test-Path -LiteralPath $env:RUNNER_TEMP -PathType Container)) {
+        $runnerBash = Get-ChildItem -LiteralPath $env:RUNNER_TEMP -Filter 'bash.exe' `
+            -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\usr\\bin\\bash\.exe$' } |
+            Select-Object -First 1
+        if ($null -ne $runnerBash) {
+            $candidates += Split-Path (Split-Path $runnerBash.FullName -Parent) -Parent
+        }
+    }
     $candidates += @(
         'C:\msys64',
         (Join-Path $Root 'work\dependencies\msys2-20260611\root\msys64'))
