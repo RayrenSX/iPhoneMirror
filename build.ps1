@@ -105,18 +105,23 @@ function Build-UsbTouchBridge {
         -Label 'Built USB touch bridge'
 
     # Exercise the packaged executable before it becomes application content.
-    # The bridge help includes localized text. Force UTF-8 for the native
-    # process so Windows runners using cp1252 do not fail before validation.
+    # The bridge help includes localized text. Run it with file-backed UTF-8
+    # redirection so runner console encoding cannot affect the smoke test.
+    $helpOutput = Join-Path $Root 'work\iUsbBridge-help.txt'
+    $helpError = Join-Path $Root 'work\iUsbBridge-help.err.txt'
     $previousPythonIoEncoding = $env:PYTHONIOENCODING
     try {
         $env:PYTHONIOENCODING = 'utf-8'
-        & $UsbTouchBridgeOutput --help *> $null
-        if ($LASTEXITCODE -ne 0) {
-            throw "USB touch bridge smoke test failed: $LASTEXITCODE"
+        $helpProcess = Start-Process -FilePath $UsbTouchBridgeOutput -ArgumentList '--help' `
+            -Wait -PassThru -NoNewWindow -RedirectStandardOutput $helpOutput `
+            -RedirectStandardError $helpError
+        if ($helpProcess.ExitCode -ne 0) {
+            throw "USB touch bridge smoke test failed: $($helpProcess.ExitCode)"
         }
     }
     finally {
         $env:PYTHONIOENCODING = $previousPythonIoEncoding
+        Remove-Item -LiteralPath $helpOutput, $helpError -Force -ErrorAction SilentlyContinue
     }
 }
 
