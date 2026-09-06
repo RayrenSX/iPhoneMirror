@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.8.2",
+    "name": "iPhoneMirror v1.8.2",
+    "body": "### Added\n\n- Add wired and wireless reverse-control routes using the maintained USB\n  bridge, including keyboard text input and iOS hardware-button commands.\n- Add configurable global shortcuts for individual control actions and mouse\n  button shortcut capture.\n\n### Changed\n\n- Use the maintained iUsbBridge release payload directly in application,\n  installer, integrity validation, and release packaging.\n- Persist wireless-mirroring settings and improve orientation-aware control\n  coordinate handling for portrait and landscape sessions.\n\n### Fixed\n\n- Improve recovery from wireless landscape frame stalls without changing the\n  selected mirroring session.\n- Ensure drag state is released when the pointer leaves a mirrored preview.\n- Improve reverse-control prerequisite and failure guidance, device-profile\n  onboarding, and release build reproducibility.\n\n### Added\n\n- Add a mirroring-settings shortcut window for configuring the reverse-control\n  hotkey, with conflict detection and live updates to control guidance.\n\n### Fixed\n\n- Retry the active wired-mirroring usbmux interface when its device-side\n  VERSION handshake times out, then fall back to Apple usbmuxd without\n  interrupting the wired mirror.\n- Give volume up, volume down, and lock-screen reverse-control shortcuts\n  independent global-hotkey registrations, route hardware button reports to\n  the selected wired/wireless bridge, and hold the lock-side-button report\n  long enough for iOS to accept it.\n- Pass the selected wireless resolution and frame rate to the UxPlay AirPlay\n  negotiation, and reset partial Y4M state whenever its raw video pipe\n  reconnects so a truncated session cannot corrupt the first frame of the next\n  connection. Reinsert H.264 parameter sets at IDR frames and make the bundled\n  software decoder discard corrupted output until the next sync point instead\n  of leaving a persistent green preview. Runtime preflight now also requires\n  and loads the Y4M bridge plugin plus its transitive DLL dependencies before\n  the UxPlay backend is reported available. Runtime preparation now builds into\n  a validated staging directory and restores the previous bundle if packaging\n  is interrupted or fails.\n- Allow the AirPlay wireless host's per-session TCP and UDP media ports through\n  the process-scoped local-subnet firewall rule; previously only fixed control\n  ports were opened, leaving some devices connected with a black screen before\n  the sender timed out.\n- Port upstream AirPlayServer connection-compatibility and mirror-stream\n  recovery fixes while keeping the reproducible v1.1.2 source pin; this\n  preserves HTTP/RTSP request handling, case-insensitive headers, two-stage\n  pair verification, bounded mirror reads, and TCP keepalive.\n- Preserve full-range BT.709 metadata for SDR USB/AirPlay frames across D3D11\n  preview, NV12 output, recordings, live streams and the virtual camera, so\n  light interface grays are not expanded a second time and clipped to white.\n- Keep HDR frame range metadata intact while normalizing non-HDR wired frames;\n  add regression coverage for gray-level conversion and full-range wireless I420.\n- Bound queued Bluetooth motion reports and discard stale movement after a\n  notification stall while preserving button, wheel and keyboard transitions.\n- Treat the GATT notification status as the delivery result, avoiding false\n  disconnects when an adapter reports an optional byte count of zero.",
+    "published_at": "2026-09-06T01:11:35Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.8.2-x64.exe",
+        "size": 187366698,
+        "digest": "sha256:05067239fba6157e36b0b00ba0e2eeaa182a470a94a09ea894e96e71bee1feed",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.2/iPhoneMirror-Setup-v1.8.2-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.2-win-x64.zip",
+        "size": 338964662,
+        "digest": "sha256:5d17e633cd6505130b44eb647f8fb77f81dc8b0f6597fabfc30a27012d625c2f",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.2/iPhoneMirror-v1.8.2-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.2-win-x64-sbom.spdx.json",
+        "size": 861790,
+        "digest": "sha256:19f54562dbf4c1b4d75c841397dcc15ba0059b6ff57e859a45cd54700f1238da",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.2/iPhoneMirror-v1.8.2-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 307,
+        "digest": "sha256:f93112e1a76ab59b887ab14eaac8c4263866a8ad4cfd0976b357ce3934a8f4c8",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.2/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.8.1",
     "name": "iPhoneMirror v1.8.1",
     "body": "### Fixed\n\n- Bind Bluetooth HID reports to the uniquely matched GATT client for the\n  selected mirrored device instead of broadcasting input to every subscribed\n  iPhone/iPad, and serialize multi-window control-route changes.\n\n- Repair mismatched `libusb0.dll` system files during driver installation and\n  restore the original files if the operation fails.\n- Add transactional system-file replacement coverage to the driver installer tests.",
