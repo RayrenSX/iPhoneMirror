@@ -90,6 +90,33 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(bridgeScript)) ?? AppContext.BaseDirectory,
             CreateNoWindow = true,
         };
+        // libusb0.dll is published beside the main application, while the
+        // PyInstaller bridge runs from tools\.  Python's ctypes loader does
+        // not search the parent directory, so make every packaged runtime
+        // location explicit for both fresh installs and overlay upgrades.
+        var bridgeDirectory = Path.GetDirectoryName(Path.GetFullPath(bridgeScript))
+            ?? AppContext.BaseDirectory;
+        var applicationDirectory = AppContext.BaseDirectory.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var runtimeDirectories = new[]
+        {
+            applicationDirectory,
+            bridgeDirectory,
+            Path.Combine(bridgeDirectory, "_internal"),
+        };
+        var existingPath = psi.Environment.TryGetValue("PATH", out var path)
+            ? path
+            : Environment.GetEnvironmentVariable("PATH");
+        var pathEntries = new List<string>(runtimeDirectories.Length + 1);
+        foreach (var directory in runtimeDirectories)
+        {
+            if (!string.IsNullOrWhiteSpace(directory) &&
+                !pathEntries.Contains(directory, StringComparer.OrdinalIgnoreCase))
+                pathEntries.Add(directory);
+        }
+        if (!string.IsNullOrWhiteSpace(existingPath))
+            pathEntries.Add(existingPath);
+        psi.Environment["PATH"] = string.Join(Path.PathSeparator, pathEntries);
         if (!usePackagedBridge)
             psi.ArgumentList.Add(bridgeScript);
         psi.ArgumentList.Add(wireless ? "--wireless" : "--usb");

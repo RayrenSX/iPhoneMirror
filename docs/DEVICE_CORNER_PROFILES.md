@@ -1,4 +1,4 @@
-# Device-aware preview corners (v1.8.2)
+# Device-aware preview corners (v1.8.3)
 
 The detached/OBS preview uses a device-family display outline instead of one
 hard-coded iPhone radius. `DeviceCornerProfileResolver` selects the curve from

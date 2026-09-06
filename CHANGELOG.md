@@ -5,6 +5,14 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-09-06
+
+### Fixed
+
+- Emergency fix for reverse control failing to find `libusb0.dll` after a
+  direct upgrade from 1.8.1 to 1.8.2. The USB bridge now receives all packaged
+  runtime directories in its process-specific DLL search path.
+
 ## [1.8.2] - 2026-09-06
 
 ### Added
@@ -1499,7 +1507,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.2...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.3...HEAD
+[1.8.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.1...v1.8.0

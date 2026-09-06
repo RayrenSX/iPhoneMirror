@@ -44,7 +44,7 @@
 
 ## Download
 
-The current release is `v1.8.2`. Download `iPhoneMirror-Setup-v*-x64.exe` from
+The current release is `v1.8.3`. Download `iPhoneMirror-Setup-v*-x64.exe` from
 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases). The three-language
 Setup wizard supports a custom destination, defaults to
 `C:\Program Files\iPhoneMirror` for an administrator install, creates Start menu
@@ -415,7 +415,7 @@ publishing the compact edition.
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.8.2 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.8.3 -GenerateSbom
 ```
 
 Pass `-UpdateReleaseManifest` when producing the assets that will be uploaded.

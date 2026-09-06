@@ -1,7 +1,7 @@
 # Third-party notices
 
 This file describes third-party material intentionally included in the source
-tree or release package for the current `v1.8.2` baseline. Each component
+tree or release package for the current `v1.8.3` baseline. Each component
 remains under its upstream license.
 The root GNU General Public License v3.0 only applies to original iPhoneMirror
 material and does not replace, narrow or relicense any component listed below.

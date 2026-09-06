@@ -1,7 +1,7 @@
 # Support
 
 iPhoneMirror is a community-maintained public preview. The current release is
-`v1.8.2`; use the latest release or `main` build when reproducing a problem.
+`v1.8.3`; use the latest release or `main` build when reproducing a problem.
 
 ## Before requesting help
 

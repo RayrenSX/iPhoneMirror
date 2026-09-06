@@ -45,7 +45,7 @@ QQ群号：**1050045279**
 
 ## 项目描述
 
-当前最新正式版为 `v1.8.2`。iPhoneMirror 是一个面向 Windows 10/11 x64 的本地
+当前最新正式版为 `v1.8.3`。iPhoneMirror 是一个面向 Windows 10/11 x64 的本地
 iPhone/iPad 投屏与蓝牙反向控制工具，目标是
 在不依赖云端中转的情况下，将 USB 有线采集和局域网 AirPlay 接收统一到同一套
 预览、音频、截图、独立窗口、OBS 和多设备会话能力中。
@@ -375,7 +375,7 @@ outputs/iPhoneMirror/Wireless/UxPlay/uxplay.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.8.2 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.8.3 -GenerateSbom
 ```
 
 正式生成待上传资产时传入 `-UpdateReleaseManifest`，发布脚本会同步
