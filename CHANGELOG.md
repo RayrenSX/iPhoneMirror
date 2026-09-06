@@ -5,6 +5,30 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-09-06
+
+### Added
+
+- Add wired and wireless reverse-control routes using the maintained USB
+  bridge, including keyboard text input and iOS hardware-button commands.
+- Add configurable global shortcuts for individual control actions and mouse
+  button shortcut capture.
+
+### Changed
+
+- Use the maintained iUsbBridge release payload directly in application,
+  installer, integrity validation, and release packaging.
+- Persist wireless-mirroring settings and improve orientation-aware control
+  coordinate handling for portrait and landscape sessions.
+
+### Fixed
+
+- Improve recovery from wireless landscape frame stalls without changing the
+  selected mirroring session.
+- Ensure drag state is released when the pointer leaves a mirrored preview.
+- Improve reverse-control prerequisite and failure guidance, device-profile
+  onboarding, and release build reproducibility.
+
 ### Added
 
 - Add a mirroring-settings shortcut window for configuring the reverse-control

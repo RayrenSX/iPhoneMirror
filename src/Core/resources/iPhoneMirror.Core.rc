@@ -20,7 +20,7 @@ BEGIN
             VALUE "LegalCopyright", "Copyright (c) 2026 RayrenSX\0"
             VALUE "OriginalFilename", "iPhoneMirror.Core.dll\0"
             VALUE "ProductName", "iPhoneMirror\0"
-            VALUE "ProductVersion", "1.8.2-test90\0"
+            VALUE "ProductVersion", "1.8.2\0"
         END
     END
     BLOCK "VarFileInfo"
