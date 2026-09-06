@@ -1499,7 +1499,8 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.2...HEAD
+[1.8.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.7.1...v1.8.0
 [1.8.0-insider30]: https://github.com/RayrenSX/iPhoneMirror/releases/tag/v1.8.0-insider30

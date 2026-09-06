@@ -2,7 +2,7 @@
 
 This document defines every driver-level dependency used by iPhoneMirror and
 whether it is bundled, supplied by Windows, or acquired from an official vendor.
-The inventory reflects the `v1.8.1` release layout.
+The inventory reflects the `v1.8.2` release layout.
 
 | Component | Purpose | Delivery | Verification |
 |---|---|---|---|
@@ -51,7 +51,7 @@ An organization that holds Apple redistribution rights can produce a fully
 offline Setup by supplying its authorized MSI explicitly:
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.8.1 -GenerateSbom `
+./scripts/package_release.ps1 -Version 1.8.2 -GenerateSbom `
   -AppleSupportPackagePath C:\Authorized\AppleMobileDeviceSupport64.msi `
   -ConfirmAppleRedistributionRights
 ```

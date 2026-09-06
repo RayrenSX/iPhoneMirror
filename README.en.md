@@ -44,7 +44,7 @@
 
 ## Download
 
-The current release is `v1.8.1`. Download `iPhoneMirror-Setup-v*-x64.exe` from
+The current release is `v1.8.2`. Download `iPhoneMirror-Setup-v*-x64.exe` from
 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases). The three-language
 Setup wizard supports a custom destination, defaults to
 `C:\Program Files\iPhoneMirror` for an administrator install, creates Start menu
@@ -320,11 +320,20 @@ to a third-party receiver.
 Enable iOS AssistiveTouch and use a Windows Bluetooth adapter that supports BLE
 peripheral mode. On the first connection, confirm the matching phone in the
 Bluetooth client-binding dialog; bindings are stored per mirrored device and can
-be removed from Settings. The shortcut window configures reverse control, Control
-Center, Notification Center, App Switcher, Home, Boss key, Dock and Siri actions.
+be removed from Settings. The shortcut window configures Bluetooth, wired and
+wireless control, Control Center, Notification Center, App Switcher, Home, Boss
+key, volume, lock-screen, Dock and Siri actions. F12 is reserved; F1-F11 and
+right/middle mouse buttons can be captured directly.
 Unbound actions stay disabled, duplicate bindings are rejected, and `Backspace`
-or `Delete` clears a binding. The default reverse-control key is `F9` and the
+or `Delete` clears a binding. The default Bluetooth-control key is `F9` and the
 default Boss key is `Ctrl+Alt+B`.
+
+Wired and wireless reverse control use the bundled `iUsbBridge.exe`. Wired
+control requires an unlocked trusted device and Developer Mode when requested;
+the matching Developer Disk Image is resolved and verified from official GitHub
+metadata on first use. Wireless control requires pairing and local-network
+reachability. The first USB or AirPlay connection opens device-profile guidance
+so both identities can be associated with the same phone.
 
 ## Third-party dependencies and licensing
 
@@ -406,7 +415,7 @@ publishing the compact edition.
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.8.1 -GenerateSbom
+./scripts/package_release.ps1 -Version 1.8.2 -GenerateSbom
 ```
 
 Pass `-UpdateReleaseManifest` when producing the assets that will be uploaded.

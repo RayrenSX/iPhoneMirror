@@ -1,4 +1,4 @@
-# iPhoneMirror 架构（v1.8.1）
+# iPhoneMirror 架构（v1.8.2）
 
 ## 数据流
 

@@ -35,8 +35,8 @@
 
 ## 组件说明
 
-### 1. Python USB 触控运行时 (`tools/usb_touch_bridge.py`)
-- 提供稳定的 stdin/stdout IPC 协议
+### 1. USB 触控运行时 (`iUsbBridge.exe`)
+- 发布包中的可执行桥接器由 `tools/usb_touch_bridge.py` 等源码构建，提供稳定的 stdin/stdout IPC 协议
 - 诚实报告 9021 gate 状态
 - 五点触控状态机、58 字节 HID 报告、异常清理释放触点
 - 不依赖外部专有控制程序
@@ -49,13 +49,15 @@
 ### 3. C# 集成 (`src/App/Services/`)
 - `DirectUsbInputBridge.cs`: 启动/管理 USB 触控桥接器，通过 IPC 通信
 - `CoreDeviceTouchProtocol.cs`: 协议常量
+- `UsbTouchBridgeHost.cs`: 管理桥接器生命周期、状态事件、输入队列和退出时按键释放
 
 ### 4. 启用条件 (iPhoneMirror 集成)
-- 无线 AirPlay 镜像在连
-- 同 UDID 的 iPhone 已 USB 连接
-- 已配对信任
-- RSD 通道验证成功
-- 用户主动按"启用 USB 鼠标控制"按钮
+- 有线控制：选择有线来源，设备解锁并信任此电脑，按提示开启开发者模式；桥接器会从 GitHub
+  官方 API 获取并校验匹配 DDI，再验证 mainTouchscreen（Service ID 257）。
+- 无线控制：选择无线来源，设备已完成配对并在同一局域网可达；桥接器使用 `--wireless`，
+  不回退到 USB。
+- 首次连接先在设备绑定器建立设备档案，将 USB、AirPlay 和 Bluetooth 身份关联到同一设备。
+- 用户主动点击“开启有线控制”或“开启无线控制”；再次点击同一按钮可关闭控制。
 
 ### 5. 停止条件
 - 无线断开 / USB 拔出 / UDID 不匹配 / 会话异常
