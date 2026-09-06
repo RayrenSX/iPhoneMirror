@@ -9,6 +9,9 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ### Fixed
 
+⚠⚠⚠紧急修复⚠⚠⚠
+1.8.1 直接升级到 1.8.2 后反控找不到 `libusb0.dll` 的问题。
+
 - Emergency fix for reverse control failing to find `libusb0.dll` after a
   direct upgrade from 1.8.1 to 1.8.2. The USB bridge now receives all packaged
   runtime directories in its process-specific DLL search path.

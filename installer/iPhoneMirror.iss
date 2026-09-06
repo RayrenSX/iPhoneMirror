@@ -165,7 +165,11 @@ english.DeleteUserDataPrompt=Also delete iPhoneMirror settings and downloaded up
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Install the bridge's libusb0 copy explicitly. Inno Setup can collapse the
+; identical root and _internal payload entries from a recursive wildcard,
+; which left upgraded installations without the copy Python can load.
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Excludes: "tools\_internal\libusb0.dll"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MySourceDir}\libusb0.dll"; DestDir: "{app}\tools\_internal"; DestName: "libusb0.dll"; Flags: ignoreversion
 
 ; Remove media-output files from older releases before copying the current
 ; payload. If the current build includes FFmpeg, [Files] restores these files.
