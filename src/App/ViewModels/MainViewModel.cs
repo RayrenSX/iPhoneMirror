@@ -2591,11 +2591,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task EnableWifiSyncForDetectedDevicesAsync(IEnumerable<string> udids)
     {
-            var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
+        var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
         if (!File.Exists(bridgePath)) return;
         foreach (var udid in udids)
         {
             if (_disposed || string.IsNullOrWhiteSpace(udid)) return;
+            // Enabling Wi-Fi sync uses the same Lockdown/device plumbing as a
+            // wired QuickTime start. Serialize it with capture lifecycle work,
+            // and never reconfigure a device that is already starting or live.
+            var coreGateHeld = false;
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
@@ -2613,6 +2617,12 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             var lockdownGateHeld = false;
             try
             {
+                await _coreGate.WaitAsync(_shutdownCancellation.Token);
+                coreGateHeld = true;
+                if (_disposed || _sessions.Values.Any(state =>
+                        string.Equals(state.Udid, udid, StringComparison.OrdinalIgnoreCase) &&
+                        (state.IsStarting || state.HasSession)))
+                    continue;
                 await _lockdownHandshakeGate.WaitAsync(_shutdownCancellation.Token);
                 lockdownGateHeld = true;
                 if (!process.Start()) continue;
@@ -2648,6 +2658,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             {
                 try { if (!process.HasExited) process.Kill(true); } catch { }
                 if (lockdownGateHeld) _lockdownHandshakeGate.Release();
+                if (coreGateHeld) _coreGate.Release();
             }
         }
     }
