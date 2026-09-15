@@ -193,20 +193,21 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 !CoreDeviceTouchProtocol.IsNormalizedCoordinate(point.NormalizedY))
                 throw new ArgumentOutOfRangeException(nameof(points), "触点坐标必须是 0 到 1 之间的有限数值。");
         }
-        var json = JsonSerializer.Serialize(new
-            {
-                schema = CoreDeviceTouchProtocol.MessageSchema,
-                kind = CoreDeviceTouchProtocol.MessageKind,
-                seq = sequence,
-                timestampNs,
-                points,
-            });
-        var bytes = Encoding.UTF8.GetBytes(json);
-        var header = BitConverter.GetBytes((uint)bytes.Length);
-
         await _sendLock.WaitAsync(ct);
         try
         {
+            var frameSequence = NextSequence();
+            var json = JsonSerializer.Serialize(new
+                {
+                    schema = CoreDeviceTouchProtocol.MessageSchema,
+                    kind = CoreDeviceTouchProtocol.MessageKind,
+                    seq = frameSequence,
+                    timestampNs,
+                    points,
+                });
+            var bytes = Encoding.UTF8.GetBytes(json);
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);
             await _stdin.BaseStream.FlushAsync(ct);
@@ -389,19 +390,20 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         // widen the usages before serialization instead of passing byte[].
         var normalized = usages.Distinct().OrderBy(value => value)
             .Select(value => (int)value).ToArray();
-        var frame = new
-        {
-            schema = CoreDeviceTouchProtocol.MessageSchema,
-            kind = CoreDeviceTouchProtocol.KeyboardMessageKind,
-            seq = NextSequence(),
-            timestampNs = DateTimeOffset.UtcNow.ToUnixTimeNanoseconds(),
-            usages = normalized,
-        };
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
-        var header = BitConverter.GetBytes((uint)bytes.Length);
         await _sendLock.WaitAsync(ct);
         try
         {
+            var frame = new
+            {
+                schema = CoreDeviceTouchProtocol.MessageSchema,
+                kind = CoreDeviceTouchProtocol.KeyboardMessageKind,
+                seq = NextSequence(),
+                timestampNs = DateTimeOffset.UtcNow.ToUnixTimeNanoseconds(),
+                usages = normalized,
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);
             await _stdin.BaseStream.FlushAsync(ct);
@@ -416,20 +418,21 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
         if (state is not ("down" or "up" or "canceled"))
             throw new ArgumentOutOfRangeException(nameof(state));
-        var frame = new
-        {
-            schema = CoreDeviceTouchProtocol.MessageSchema,
-            kind = CoreDeviceTouchProtocol.ButtonMessageKind,
-            seq = NextSequence(),
-            usagePage = (int)usagePage,
-            usageCode = (int)usageCode,
-            state,
-        };
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
-        var header = BitConverter.GetBytes((uint)bytes.Length);
         await _sendLock.WaitAsync(ct);
         try
         {
+            var frame = new
+            {
+                schema = CoreDeviceTouchProtocol.MessageSchema,
+                kind = CoreDeviceTouchProtocol.ButtonMessageKind,
+                seq = NextSequence(),
+                usagePage = (int)usagePage,
+                usageCode = (int)usageCode,
+                state,
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);
             await _stdin.BaseStream.FlushAsync(ct);
