@@ -68,6 +68,7 @@ internal sealed class BluetoothMouseDirectionOption(
 
 internal sealed class MainViewModel : INotifyPropertyChanged
 {
+    internal ControlStatusService ControlStatus { get; } = new();
     // Synthetic handle used by the output services for the WPF media-cast
     // source. It is deliberately outside the native session handle range.
     internal const ulong MediaCastOutputHandle = 0x4D434153544F5554UL;
@@ -1337,10 +1338,24 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         bool configurationOnly = false)
     {
         var controlDeviceUdid = targetDeviceUdid ?? SelectedDevice?.Udid;
+        var statusDeviceName = Devices.FirstOrDefault(device =>
+            DeviceViewModel.UdidEquals(device.Udid, controlDeviceUdid))?.Name ?? "iPhone";
+        ControlStatus.Report(ControlStatusMode.Bluetooth, ControlStage.CheckingDevice,
+            statusDeviceName, "正在检查设备和绑定状态…");
         if (string.IsNullOrWhiteSpace(controlDeviceUdid) ||
             (!CanEnableBluetoothControlFor(controlDeviceUdid) &&
-             !(fromReverseControl && CanStartReverseBluetoothPeripheral))) return;
-        if (!AcknowledgeBluetoothHidReportMapChange()) return;
+             !(fromReverseControl && CanStartReverseBluetoothPeripheral)))
+        {
+            ControlStatus.Failed(ControlStatusMode.Bluetooth, statusDeviceName,
+                "无法启用蓝牙反向控制", "设备未就绪或尚未完成绑定。");
+            return;
+        }
+        if (!AcknowledgeBluetoothHidReportMapChange())
+        {
+            ControlStatus.Failed(ControlStatusMode.Bluetooth, statusDeviceName,
+                "已取消蓝牙反向控制", "用户取消了启动前置确认。");
+            return;
+        }
         _bluetoothControlDeviceUdid = controlDeviceUdid;
         var savedBinding = GetBluetoothControlBinding(controlDeviceUdid);
         _reverseControlSetupActive = fromReverseControl && configurationOnly;
@@ -1365,6 +1380,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
         try
         {
+            ControlStatus.Report(ControlStatusMode.Bluetooth, ControlStage.CheckingPermissions,
+                statusDeviceName, "正在检查设备权限和连接状态…");
+            ControlStatus.Report(ControlStatusMode.Bluetooth, ControlStage.Connecting,
+                statusDeviceName, "正在建立蓝牙控制连接…");
             AddDiagnosticLog(AppLog.Event("bluetooth_control_start_begin",
                 ("device", AppLog.Device(controlDeviceUdid)),
                 ("show_notice", _bluetoothControlNoticePending)));
@@ -1402,6 +1421,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             // the HID reports, so remain available until explicitly stopped.
             _bluetoothControlEnabled = true;
             _bluetoothControlConnected = _bluetoothControl.IsConnected;
+            ControlStatus.Report(ControlStatusMode.Bluetooth, ControlStage.InitializingServices,
+                statusDeviceName, "正在初始化触控和输入服务…");
             var bluetoothIdentity = _identityResolver.Resolve(Devices.FirstOrDefault(device =>
                 DeviceViewModel.UdidEquals(device.Udid, controlDeviceUdid)));
             if (!configurationOnly && !string.IsNullOrWhiteSpace(bluetoothIdentity.AppleUdid))
@@ -1422,6 +1443,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             DiagnosticLogger.ReverseControl("bluetooth", "start_complete",
                 ("advertising", _bluetoothControl.IsAdvertising),
                 ("connected", _bluetoothControlConnected));
+            ControlStatus.Report(ControlStatusMode.Bluetooth, ControlStage.StartingInputRouter,
+                statusDeviceName, "正在准备鼠标、键盘和系统控制…");
+            ControlStatus.Ready(ControlStatusMode.Bluetooth, statusDeviceName,
+                _bluetoothControlConnected ? "反向控制已经准备就绪" : "蓝牙控制已启动，正在等待设备连接");
             await EnsureBluetoothControlBindingAsync();
         }
         catch (OperationCanceledException)
@@ -1434,6 +1459,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception error)
         {
+            ControlStatus.Failed(ControlStatusMode.Bluetooth, statusDeviceName,
+                "无法启用蓝牙反向控制", error.Message);
             var showFailureNotice = _bluetoothControlNoticePending;
             _bluetoothControlEnabled = false;
             _bluetoothControlConnected = false;
@@ -1856,10 +1883,14 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private async Task EnableWirelessControlAsync()
     {
         var device = SelectedDevice;
+        ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.CheckingDevice, device?.Name ?? "iPhone", "正在检查设备和绑定状态…");
         var boundUdid = device is null ? null : _identityResolver.Resolve(device).AppleUdid;
-        if (device is null || string.IsNullOrWhiteSpace(boundUdid) || !CanEnableWirelessControlFor(device)) return;
-        if (!ConfirmReverseControlPrerequisites(wireless: true)) return;
+        if (device is null || string.IsNullOrWhiteSpace(boundUdid) || !CanEnableWirelessControlFor(device))
+        { ControlStatus.Failed(ControlStatusMode.Wireless, device?.Name ?? "iPhone", "无法启用无线反向控制", "设备未就绪或尚未完成绑定。"); return; }
+        if (!ConfirmReverseControlPrerequisites(wireless: true))
+        { ControlStatus.Failed(ControlStatusMode.Wireless, device.Name, "已取消无线反向控制", "用户取消了启动前置确认。"); return; }
         _usbControlStarting = true;
+        ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.CheckingPermissions, device.Name, "正在检查设备权限和连接状态…");
         _usbControlStatus = LocalizationService.Get("ReverseControlConnectingWireless");
         DiagnosticLogger.ReverseControl("wireless", "start_begin",
             ("device", AppLog.Device(device.Udid)), ("apple_device", AppLog.Device(boundUdid)));
@@ -1874,6 +1905,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (bridgeEvent.EventName is not ("error" or "status") ||
                 (bridgeEvent.EventName == "status" && bridgeEvent.Code != "terminated")) return;
             _wirelessControlConnected = false;
+            ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.Recovering, device.Name, "检测到控制通道暂时中断，正在尝试重新连接…");
             _usbControlStatus = LocalizationService.Get("ReverseControlWirelessDisconnected");
             ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWireless"), FormatReverseControlBridgeError(bridgeEvent));
             if (Application.Current?.Dispatcher is { } dispatcher)
@@ -1884,6 +1916,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             if (_bluetoothControlEnabled) await DisableBluetoothControlAsync();
             _usbControlStatus = LocalizationService.Get("ReverseControlConnectingWireless");
+            ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.Connecting, device.Name, "正在建立设备控制通道…");
             NotifyUsbControlStateChanged();
             var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
             // The bridge owns Network usbmux/mDNS discovery. Do not gate this
@@ -1895,6 +1928,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _wirelessControlEnabled = _wirelessControlConnected = true;
             _wirelessControlDeviceUdid = device.Udid;
             _reverseInputRouter.Begin(boundUdid, ReverseControlMode.Wireless);
+            ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.InitializingServices, device.Name, "正在初始化触控和输入服务…");
+            ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.StartingInputRouter, device.Name, "正在准备鼠标、键盘和系统控制…");
+            ControlStatus.Ready(ControlStatusMode.Wireless, device.Name);
             _usbControlStatus = bridge.AuthMode == "direct"
                 ? LocalizationService.Get("ReverseControlWirelessEnabledDirect")
                 : bridge.GateOpen ? LocalizationService.Get("ReverseControlWirelessEnabled") : LocalizationService.Get("ReverseControlWirelessConnected");
@@ -1904,6 +1940,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception error)
         {
+            ControlStatus.Failed(ControlStatusMode.Wireless, device?.Name ?? "iPhone", "无线反向控制无法启动", error.Message);
             if (ReferenceEquals(_wirelessTouchBridge, bridge)) _wirelessTouchBridge = null;
             await bridge.DisposeAsync();
             _usbControlStatus = LocalizationService.Format("ReverseControlWirelessFailedFormat", GetUsbControlFailureMessage(error, bridge));
@@ -1956,12 +1993,17 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private async Task EnableUsbControlAsync()
     {
         var device = SelectedDevice;
-        if (!CanEnableUsbControlFor(device)) return;
-        if (!ConfirmReverseControlPrerequisites(wireless: false)) return;
+        ControlStatus.Report(ControlStatusMode.Usb, ControlStage.CheckingDevice, device?.Name ?? "iPhone", "正在检查设备和绑定状态…");
+        if (!CanEnableUsbControlFor(device))
+        { ControlStatus.Failed(ControlStatusMode.Usb, device?.Name ?? "iPhone", "无法启用 USB 反向控制", "设备未就绪或尚未完成绑定。"); return; }
+        if (!ConfirmReverseControlPrerequisites(wireless: false))
+        { ControlStatus.Failed(ControlStatusMode.Usb, device?.Name ?? "iPhone", "已取消 USB 反向控制", "用户取消了启动前置确认。"); return; }
         if (device is null) return;
         var boundUsbUdid = GetUsbControlBinding(device.Udid);
-        if (string.IsNullOrWhiteSpace(boundUsbUdid)) return;
+        if (string.IsNullOrWhiteSpace(boundUsbUdid))
+        { ControlStatus.Failed(ControlStatusMode.Usb, device.Name, "无法启用 USB 反向控制", "未找到设备绑定信息。"); return; }
         _usbControlStarting = true;
+        ControlStatus.Report(ControlStatusMode.Usb, ControlStage.CheckingPermissions, device.Name, "正在检查设备权限和连接状态…");
         _usbControlFailed = false;
         _usbControlDeviceUdid = device.Udid;
         _usbControlStatus = LocalizationService.Get("ReverseControlUsbConnecting");
@@ -1978,6 +2020,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (bridgeEvent.EventName is not ("error" or "status") ||
                 (bridgeEvent.EventName == "status" && bridgeEvent.Code != "terminated")) return;
             _usbControlConnected = false;
+            ControlStatus.Report(ControlStatusMode.Usb, ControlStage.Recovering, device.Name, "检测到控制通道暂时中断，正在尝试重新连接…");
             _usbControlStatus = LocalizationService.Get("ReverseControlUsbDisconnected");
             if (Application.Current?.Dispatcher is { } dispatcher)
                 dispatcher.BeginInvoke(async () => await DisableUsbControlAsync());
@@ -1985,6 +2028,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         var lockdownGateHeld = false;
         try
         {
+            ControlStatus.Report(ControlStatusMode.Usb, ControlStage.PreparingDeviceSupport, device.Name, "正在准备设备所需的支持文件…");
             if (_bluetoothControlEnabled) await DisableBluetoothControlAsync();
             var bridgePath = GetUsbDirectControlBridgePath();
             // Bind the AirPlay mirror session to exactly one trusted USB
@@ -1996,7 +2040,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _usbControlEnabled = true;
             _usbControlFailed = false;
             _usbControlConnected = true;
+            ControlStatus.Report(ControlStatusMode.Usb, ControlStage.Connecting, device.Name, "正在建立设备控制通道…");
             _reverseInputRouter.Begin(boundUsbUdid, ReverseControlMode.Usb);
+            ControlStatus.Report(ControlStatusMode.Usb, ControlStage.InitializingServices, device.Name, "正在初始化触控和输入服务…");
+            ControlStatus.Report(ControlStatusMode.Usb, ControlStage.StartingInputRouter, device.Name, "正在准备鼠标、键盘和系统控制…");
+            ControlStatus.Ready(ControlStatusMode.Usb, device.Name);
             _usbControlStatus = bridge.AuthMode == "direct"
                 ? LocalizationService.Get("ReverseControlUsbEnabledDirect")
                 : bridge.GateOpen
@@ -2011,6 +2059,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception error)
         {
+            ControlStatus.Failed(ControlStatusMode.Usb, device?.Name ?? "iPhone", "无法启用反向控制", error.Message);
             if (ReferenceEquals(_usbTouchBridge, bridge)) _usbTouchBridge = null;
             await bridge.DisposeAsync();
             var message = GetUsbControlFailureMessage(error, bridge);
@@ -2165,6 +2214,20 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _ => null,
         };
         if (status is null) return;
+
+        var mode = string.Equals(transport, "无线", StringComparison.Ordinal)
+            ? ControlStatusMode.Wireless : ControlStatusMode.Usb;
+        var stage = bridgeEvent.Code switch
+        {
+            "checking_developer_environment" => ControlStage.CheckingPermissions,
+            "mounting_developer_image" or "testing_developer_image_sources" or
+                "downloading_developer_image" or "remounting_developer_image" => ControlStage.PreparingDeviceSupport,
+            "discovering_wireless_device" => ControlStage.Connecting,
+            "waiting_for_hid_service" or "initializing_touch" => ControlStage.InitializingServices,
+            _ => ControlStage.Connecting,
+        };
+        var deviceName = SelectedDevice?.Name ?? "iPhone";
+        ControlStatus.Report(mode, stage, deviceName, status, technical: bridgeEvent.Code);
 
         void Apply()
         {
