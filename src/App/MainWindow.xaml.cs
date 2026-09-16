@@ -935,6 +935,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         await _bluetoothRouteGate.WaitAsync();
         try
         {
+            ShowReverseControlStatus(ControlStatusMode.Bluetooth);
             ResetControlRouteState();
             if (_viewModel.IsBluetoothControlEnabled && _activeControlWindow == window)
             {
@@ -994,6 +995,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         try
         {
+            ShowReverseControlStatus(ControlStatusMode.Usb);
             var device = _viewModel.Devices.FirstOrDefault(candidate =>
                 DeviceViewModel.UdidEquals(candidate.Udid, udid));
             if (device is null || device.IsMediaCast) return;
@@ -1027,6 +1029,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         try
         {
+            ShowReverseControlStatus(ControlStatusMode.Wireless);
             await _viewModel.StartWirelessControlAsync(udid);
             if (!_viewModel.IsWirelessControlTarget(udid)) return;
             _activeControlWindow = window;
@@ -4963,6 +4966,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         try
         {
+            ShowReverseControlStatus(ControlStatusMode.Bluetooth);
             _viewModel.AddDiagnosticLog(AppLog.Event("bluetooth_control_toolbar_start",
                 ("device", AppLog.Device(_viewModel.SelectedDevice?.Udid))));
             await _viewModel.StartBluetoothControlAsync();
@@ -4979,6 +4983,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         try
         {
+            ShowReverseControlStatus(ControlStatusMode.Usb);
             _viewModel.AddDiagnosticLog(AppLog.Event("usb_control_toolbar_toggle",
                 ("device", AppLog.Device(_viewModel.SelectedDevice?.Udid)),
                 ("wireless", _viewModel.IsWirelessSelected)));
@@ -4999,6 +5004,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         try
         {
+            ShowReverseControlStatus(ControlStatusMode.Wireless);
             _viewModel.AddDiagnosticLog(AppLog.Event("wireless_control_toolbar_toggle",
                 ("device", AppLog.Device(_viewModel.SelectedDevice?.Udid))));
             await _viewModel.ToggleWirelessControlAsync();
@@ -6581,7 +6587,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void ToggleBluetoothControlFromHotkey()
     {
         BluetoothControlNoticeWindow.TryCloseActive();
+        ShowReverseControlStatus(ControlStatusMode.Bluetooth);
         _ = _viewModel.ToggleBluetoothControlAsync();
+    }
+
+    private void ShowReverseControlStatus(ControlStatusMode mode)
+    {
+        if (mode == ControlStatusMode.Bluetooth && _viewModel.IsBluetoothControlEnabled) return;
+        if (mode == ControlStatusMode.Usb && _viewModel.IsUsbControlEnabled) return;
+        if (mode == ControlStatusMode.Wireless && _viewModel.IsUsbControlEnabled) return;
+        _viewModel.ControlStatus.Begin(mode, _viewModel.SelectedDevice?.Name ?? "iPhone");
+        ReverseControlStatusWindow.Show(this, _viewModel.ControlStatus);
     }
 
     private void HandleConfiguredShortcut(BluetoothShortcutAction action)
@@ -6592,11 +6608,20 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         if (action == BluetoothShortcutAction.BluetoothControl)
+        {
+            ShowReverseControlStatus(ControlStatusMode.Bluetooth);
             _ = _viewModel.ToggleBluetoothControlAsync();
+        }
         else if (action == BluetoothShortcutAction.WirelessControl)
+        {
+            ShowReverseControlStatus(ControlStatusMode.Wireless);
             _ = _viewModel.ToggleWirelessControlAsync();
+        }
         else if (action == BluetoothShortcutAction.WiredControl)
+        {
+            ShowReverseControlStatus(ControlStatusMode.Usb);
             _ = _viewModel.ToggleWiredControlAsync();
+        }
         else
             _ = SendConfiguredSystemShortcutAsync(action);
     }
