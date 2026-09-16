@@ -126,9 +126,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         psi.ArgumentList.Add(udid);
         if (GetPersonalizedDdiDirectory() is { } ddiDirectory)
         {
-            // Never package Apple DDI payloads. An operator can place an
-            // officially obtained, device-compatible bundle in this user-data
-            // location or select a different one through the environment.
+            // Prefer the verified bundled Personalized DDI; an environment
+            // override still allows operators to provide a different build.
             psi.ArgumentList.Add("--ddi-dir");
             psi.ArgumentList.Add(ddiDirectory);
         }
@@ -154,6 +153,11 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     {
         var configured = Environment.GetEnvironmentVariable("IPHONE_MIRROR_DDI_DIR");
         if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
+
+        var bundledDirectory = Path.Combine(
+            AppContext.BaseDirectory, "tools", "ddi", "Xcode_iOS_DDI_Personalized");
+        if (HasCompletePersonalizedDdiBundle(bundledDirectory))
+            return bundledDirectory;
 
         var defaultDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

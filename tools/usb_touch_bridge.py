@@ -177,10 +177,7 @@ class BridgePrerequisiteError(RuntimeError):
 def local_personalized_ddi_bundle(ddi_dir: Path) -> tuple[Path, Path, Path]:
     """Return an explicitly supplied local Personalized DDI bundle.
 
-    The bridge never discovers a DDI from its install directory. When this
-    explicit override is absent, pymobiledevice3 prepares its cached
-    Personalized DDI through its normal download and Apple personalization
-    flow instead. Apple verifies the supplied local image during mount.
+    Apple verifies the supplied local image during mount.
     """
     root = Path(ddi_dir).expanduser()
     if not root.is_dir():
@@ -209,6 +206,21 @@ def local_personalized_ddi_bundle(ddi_dir: Path) -> tuple[Path, Path, Path]:
             + ', '.join(invalid),
         )
     return tuple(paths)
+
+
+def bundled_personalized_ddi_directory() -> Optional[Path]:
+    """Find the DDI shipped beside the bridge executable or source script."""
+    candidates = [
+        Path(sys.executable).resolve().parent / 'ddi' / 'Xcode_iOS_DDI_Personalized',
+        Path(__file__).resolve().parent / 'ddi' / 'Xcode_iOS_DDI_Personalized',
+    ]
+    for candidate in candidates:
+        try:
+            local_personalized_ddi_bundle(candidate)
+            return candidate
+        except BridgePrerequisiteError:
+            continue
+    return None
 
 
 @dataclass(frozen=True)
@@ -1360,6 +1372,23 @@ class TouchSession:
                 'wireless_remote_pairing_required',
                 'Wireless CoreDevice control requires a known Apple UDID and a USB provisioning pass.',
             )
+        # RemotePairing provides the network tunnel, but DDI mounting is a
+        # Lockdown operation. Complete the preflight over trusted USB before
+        # opening the wireless tunnel so HID service discovery sees the DDI.
+        provisioning_lockdown = None
+        try:
+            provisioning_lockdown = await self._create_lockdown_with_retry('USB')
+            await self._preflight_developer_environment(provisioning_lockdown)
+        except DeviceNotFoundError as error:
+            raise BridgePrerequisiteError(
+                'wireless_remote_pairing_required',
+                'Wireless control requires one trusted USB provisioning pass to mount the Personalized DDI. '
+                'Connect the iPhone by USB, unlock it, and retry once.',
+            ) from error
+        finally:
+            if provisioning_lockdown is not None:
+                with contextlib.suppress(Exception):
+                    await provisioning_lockdown.close()
         try:
             # The public discovery helper compares the requested identifier
             # byte-for-byte with the pair-record filename.  Keep the exact
@@ -1433,10 +1462,9 @@ class TouchSession:
     async def _preflight_developer_environment(self, lockdown) -> None:
         """Require Developer Mode and prepare a Personalized DDI before RSD.
 
-        An explicit ``--ddi-dir`` wins when provided.  Otherwise the bridge
-        lets pymobiledevice3 obtain the current DDI through its normal cache
-        and Apple personalization flow.  Neither path searches the install
-        directory or consumes a bundled image.
+        An explicit ``--ddi-dir`` wins when provided. Otherwise the caller
+        supplies the bundled DDI when available, with the verified cache and
+        GitHub downloader retained as fallbacks.
         """
         await self._emit_status('checking_developer_environment')
         try:
@@ -2171,7 +2199,8 @@ def main() -> int:
             if not args.udid:
                 parser.error('--enable-wifi-sync requires --udid')
             return 0 if asyncio.run(enable_wifi_sync_async(args.udid)) else 1
-        asyncio.run(main_async(args.rate_hz, args.udid, args.transport, args.ddi_dir))
+        ddi_dir = args.ddi_dir or bundled_personalized_ddi_directory()
+        asyncio.run(main_async(args.rate_hz, args.udid, args.transport, ddi_dir))
     except KeyboardInterrupt:
         return 0
     return 0
