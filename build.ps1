@@ -124,7 +124,7 @@ function Resolve-CMakeTool([string]$Name) {
         (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe"),
         (Join-Path ${env:ProgramFiles} "Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe")
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-    if ($candidates.Count -gt 0) { return $candidates[0] }
+    if (@($candidates).Count -gt 0) { return @($candidates)[0] }
 
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
