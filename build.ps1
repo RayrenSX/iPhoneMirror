@@ -45,18 +45,18 @@ $VersionProperty = if ([string]::IsNullOrWhiteSpace($Version)) {
     "-p:Version=$Version"
 }
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$UsbControlRepository = 'https://github.com/RayrenSX/iUsbBridge.git'
+
 $UsbControlRoot = if ([string]::IsNullOrWhiteSpace($env:IPHONE_MIRROR_USB_BRIDGE_ROOT)) {
-    Join-Path (Split-Path -Parent $Root) 'iUsbBridge'
+    Join-Path $Root 'scripts\usb-bridge-recipe'
 } else {
     [IO.Path]::GetFullPath($env:IPHONE_MIRROR_USB_BRIDGE_ROOT)
 }
 $UsbControlBuild = Join-Path $UsbControlRoot 'build.ps1'
-$UsbControlSource = Join-Path $UsbControlRoot 'src\usb_touch_bridge.py'
+$UsbControlSource = Join-Path $Root 'tools\usb_touch_bridge.py'
 $UsbTouchBridgeOutput = Join-Path $Root 'dist\iUsbBridge.exe'
 $UsbTouchBridgeRuntimeManifest = Join-Path $Root 'dist\iUsbBridge.runtime.json'
 $UsbTouchBridgeRuntimeTools = Join-Path $Root 'scripts\UsbTouchBridgeRuntime.ps1'
-$UsbControlEnvironment = Join-Path $UsbControlRoot 'work\usb-touch-bridge-python'
+$UsbControlEnvironment = Join-Path $Root 'work\usb-touch-bridge-python'
 $UsbControlPython = Join-Path $UsbControlEnvironment 'Scripts\python.exe'
 
 if (-not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeTools -PathType Leaf)) {
@@ -66,26 +66,8 @@ if (-not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeTools -PathType Leaf)) {
 . (Join-Path $Root 'scripts\UsbBridgeBuildSource.ps1')
 
 function Build-UsbTouchBridge {
-    # CI checkouts contain only iPhoneMirror. Fetch the maintained bridge
-    # project into the sibling path used by local development when needed.
-    if (-not (Test-Path -LiteralPath $UsbControlBuild -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $UsbControlSource -PathType Leaf)) {
-        if (-not [string]::IsNullOrWhiteSpace($env:IPHONE_MIRROR_USB_BRIDGE_ROOT)) {
-            throw "USB touch bridge source is incomplete: $UsbControlRoot"
-        }
-        $parent = Split-Path -Parent $UsbControlRoot
-        if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
-            New-Item -ItemType Directory -Force -Path $parent | Out-Null
-        }
-        if (Test-Path -LiteralPath $UsbControlRoot) {
-            throw "USB touch bridge directory exists but is incomplete: $UsbControlRoot"
-        }
-        Write-Host "Cloning USB touch bridge from $UsbControlRepository"
-        & git clone --depth 1 $UsbControlRepository $UsbControlRoot
-        if ($LASTEXITCODE -ne 0) {
-            throw "USB touch bridge clone failed: $LASTEXITCODE"
-        }
-    }
+    # Use the versioned Python recipe so upstream backend migrations cannot
+    # replace the audited source in tools with an incompatible executable.
     foreach ($required in @($UsbControlBuild, $UsbControlSource)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "USB touch bridge build input is missing: $required"
@@ -96,18 +78,8 @@ function Build-UsbTouchBridge {
     $stage = New-UsbBridgeBuildSource -RecipeRoot $UsbControlRoot `
         -SourceRoot (Join-Path $Root 'tools') -WorkRoot $stageRoot
     try {
-        # Bridge releases before the Rust helper did not expose
-        # EnvironmentPath; pass it only when the checked-out recipe supports
-        # it so the generated venv lands at the path validated below.
-        $bridgeParameters = @{
-            BridgeOnly = $true
-            BridgeOutputPath = $UsbTouchBridgeOutput
-        }
-        $bridgeRecipe = Get-Content -LiteralPath (Join-Path $stage 'build.ps1') -Raw
-        if ($bridgeRecipe -match '\[string\]\$EnvironmentPath') {
-            $bridgeParameters.EnvironmentPath = $UsbControlEnvironment
-        }
-        & (Join-Path $stage 'build.ps1') @bridgeParameters
+        & (Join-Path $stage 'build.ps1') -BridgeOnly `
+            -BridgeOutputPath $UsbTouchBridgeOutput -EnvironmentPath $UsbControlEnvironment
         if ($LASTEXITCODE -ne 0) {
             throw "USB touch bridge build failed: $LASTEXITCODE"
         }
@@ -120,12 +92,7 @@ function Build-UsbTouchBridge {
         throw 'USB touch bridge output is incomplete.'
     }
     if (-not (Test-Path -LiteralPath $UsbControlPython -PathType Leaf)) {
-        $systemPython = Get-Command python -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($null -eq $systemPython) {
-            throw "USB touch bridge Python environment is missing and no system Python was found: $UsbControlPython"
-        }
-        $UsbControlPython = $systemPython.Source
+        throw "USB touch bridge Python environment is missing: $UsbControlPython"
     }
     Assert-UsbTouchBridgeRuntime -Directory (Join-Path $Root 'dist') `
         -Label 'Built USB touch bridge'
