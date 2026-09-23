@@ -27,6 +27,24 @@ function New-UsbBridgeBuildSource {
         Copy-Item -LiteralPath (Join-Path $RecipeRoot $name) -Destination $stage
     }
     Copy-Item -LiteralPath $bridge -Destination $stageSource
+    # Newer bridge releases include a Rust usbmux helper built by the same
+    # recipe. Copy the manifest, lockfile, build script, and Rust sources when
+    # present so the staged build remains compatible across bridge versions.
+    foreach ($name in @('Cargo.toml', 'Cargo.lock', 'build.rs')) {
+        $inputPath = Join-Path $RecipeRoot $name
+        if (Test-Path -LiteralPath $inputPath -PathType Leaf) {
+            Copy-Item -LiteralPath $inputPath -Destination $stage
+        }
+    }
+    $rustSource = Join-Path $RecipeRoot 'src'
+    if (Test-Path -LiteralPath $rustSource -PathType Container) {
+        Get-ChildItem -LiteralPath $rustSource -Recurse -File -Filter '*.rs' | ForEach-Object {
+            $relative = $_.FullName.Substring([IO.Path]::GetFullPath($RecipeRoot).TrimEnd('\\').Length + 1)
+            $destination = Join-Path $stage $relative
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $destination
+        }
+    }
     # Copy source only: stale bytecode from either checkout must not ship.
     Get-ChildItem -LiteralPath $package -Recurse -File -Filter '*.py' | ForEach-Object {
         $relative = $_.FullName.Substring([IO.Path]::GetFullPath($SourceRoot).TrimEnd('\').Length + 1)
