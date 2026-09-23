@@ -1,0 +1,49 @@
+<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.ReverseControlStatusWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        Width="574" SizeToContent="Height" MaxHeight="720" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Mica" WindowCornerPreference="Round" ShowInTaskbar="False"
+        Background="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
+    <Border Style="{StaticResource ModernDialogSurface}" Background="{DynamicResource DialogSurfaceBrush}"
+            Margin="0" Padding="25,24,25,20" BorderThickness="0"
+            CornerRadius="0" Effect="{x:Null}">
+        <Grid animations:PageTransition.IsEnabled="True">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="20"/><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
+                <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
+                </Button>
+            <StackPanel HorizontalAlignment="Center">
+                <Border Width="52" Height="52" CornerRadius="26" Background="{DynamicResource ControlFillBrush}">
+                    <Ellipse Width="13" Height="13" Fill="{DynamicResource AccentBrush}"/>
+                </Border>
+                <TextBlock Text="{Binding StageTitle}" Style="{StaticResource SubWindowTitle}" HorizontalAlignment="Center" Margin="0,11,0,0"/>
+                <TextBlock Text="{Binding StageDescription}" Foreground="{DynamicResource MutedTextBrush}" FontSize="14" TextWrapping="Wrap" TextAlignment="Center" Margin="0,3,0,0"/>
+                <TextBlock Text="{Binding DeviceSummary}" Foreground="{DynamicResource MutedTextBrush}" Opacity="0.78" FontSize="12" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                <TextBlock Text="{Binding CountdownText}" Foreground="{DynamicResource AccentBrush}" FontSize="12" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+            </StackPanel>
+            </Grid>
+            <Border Grid.Row="2" Background="{DynamicResource ControlFillBrush}" CornerRadius="17" Padding="14,13">
+            <ItemsControl ItemsSource="{Binding Stages}">
+                <ItemsControl.ItemTemplate><DataTemplate>
+                    <Grid Height="31"><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Marker}" FontSize="17" Foreground="{Binding MarkerBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Title}" Foreground="{DynamicResource TextBrush}" FontSize="16" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding DurationText}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    </Grid>
+                </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+            </Border>
+            <Expander Grid.Row="4" Header="查看详细信息" IsExpanded="{Binding IsDetailsExpanded}" Foreground="{DynamicResource MutedTextBrush}" Background="{DynamicResource ControlFillBrush}" Padding="14,8" Margin="1,0">
+                <ListBox ItemsSource="{Binding Diagnostics}" MaxHeight="150" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource MutedTextBrush}" FontFamily="Consolas" FontSize="10" Margin="0,8,0,0"/>
+            </Expander>
+            <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,9,0">
+                <Button Content="取消" Click="OnCancelClick" Visibility="{Binding CancelVisibility}" MinWidth="108" Height="52" FontSize="16"/>
+                <Button Content="关闭" Click="OnCloseClick" Visibility="{Binding CloseVisibility}" MinWidth="108" Height="52" FontSize="16" Margin="8,0,0,0"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</ui:FluentWindow>

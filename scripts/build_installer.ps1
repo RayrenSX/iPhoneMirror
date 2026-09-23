@@ -4,6 +4,7 @@ param(
     [string]$Version,
     [switch]$AllowVersionOverride,
     [switch]$SkipAppBuild,
+    [switch]$OmitUxPlayRuntime,
     [string]$SourceDirectory,
     [string]$OutputDirectory
 )
@@ -80,7 +81,7 @@ $expectedPath = Join-Path $OutputDirectory $expectedName
 Push-Location $Root
 try {
     if (-not $SkipAppBuild) {
-        & (Join-Path $Root 'build.ps1') -Configuration Release -Version $Version
+        & (Join-Path $Root 'build.ps1') -Configuration Release -Version $Version -OmitUxPlayRuntime:$OmitUxPlayRuntime
         if ($LASTEXITCODE -ne 0) { throw "Release build failed: $LASTEXITCODE" }
     }
     $appExecutable = Join-Path $SourceDirectory 'iPhoneMirror.exe'
@@ -116,9 +117,11 @@ try {
             'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
             'Wireless\msvcp140.dll', 'Wireless\vcruntime140.dll',
             'Wireless\vcruntime140_1.dll')
-    $requiredPayload += @($UxPlayRuntimeFiles | ForEach-Object {
-        Join-Path 'Wireless\UxPlay' $_
-    })
+    if (-not $OmitUxPlayRuntime) {
+        $requiredPayload += @($UxPlayRuntimeFiles | ForEach-Object {
+            Join-Path 'Wireless\UxPlay' $_
+        })
+    }
     foreach ($required in $requiredPayload) {
         if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory $required) -PathType Leaf)) {
             throw "Installer payload is missing: $required"

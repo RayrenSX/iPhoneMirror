@@ -3,6 +3,7 @@
 #include "IpcProtocol.h"
 #include "DlnaRenderer.h"
 #include "HttpUrl.h"
+#include "HostCommon.h"
 
 #include <Windows.h>
 #include <bcrypt.h>
@@ -29,6 +30,8 @@
 #include <vector>
 
 namespace {
+
+using namespace iPhoneMirror::host_common;
 
 constexpr char StartExport[] = "?fgServerStart@@YAPEAXQEBDIIPEAVIAirServerCallback@@@Z";
 constexpr char StopExport[] = "?fgServerStop@@YAXPEAX@Z";
@@ -170,37 +173,7 @@ float airplay_decibels_to_linear_gain(float decibels) noexcept {
     return std::clamp((decibels + 30.0F) / 30.0F, 0.0F, 1.0F);
 }
 
-bool write_all(HANDLE pipe, const void* source, std::size_t size,
-    DWORD* failure_reason = nullptr) noexcept {
-    const auto* bytes = static_cast<const std::uint8_t*>(source);
-    while (size != 0) {
-        DWORD written{};
-        const auto request = static_cast<DWORD>(std::min<std::size_t>(size, 1024U * 1024U));
-        if (!WriteFile(pipe, bytes, request, &written, nullptr)) {
-            if (failure_reason) *failure_reason = GetLastError();
-            return false;
-        }
-        if (written == 0) {
-            if (failure_reason) *failure_reason = ERROR_BROKEN_PIPE;
-            return false;
-        }
-        bytes += written;
-        size -= written;
-    }
-    return true;
-}
 
-bool read_all(HANDLE pipe, void* destination, std::size_t size) noexcept {
-    auto* bytes = static_cast<std::uint8_t*>(destination);
-    while (size != 0) {
-        DWORD read{};
-        const auto request = static_cast<DWORD>(std::min<std::size_t>(size, 1024U * 1024U));
-        if (!ReadFile(pipe, bytes, request, &read, nullptr) || read == 0) return false;
-        bytes += read;
-        size -= read;
-    }
-    return true;
-}
 
 class IpcWriter {
 public:
@@ -999,8 +972,11 @@ public:
 private:
     IpcWriter& writer_;
     std::mutex playback_mutex_;
-    std::uint64_t media_command_id_{GetTickCount64() << 16};
-    std::atomic_uint64_t mirror_volume_command_id_{GetTickCount64() << 16};
+    // Mask the tick count to 48 bits before shifting so the high bits are not
+    // truncated, keeping the command ids distinct from mirror_volume_command_id_.
+    static constexpr std::uint64_t TickMask = 0x0000FFFFFFFFFFFFULL;
+    std::uint64_t media_command_id_{(GetTickCount64() & TickMask) << 16};
+    std::atomic_uint64_t mirror_volume_command_id_{(GetTickCount64() & TickMask) << 16};
     PlaybackState playback_;
     std::atomic_uint64_t audio_callbacks_{};
     std::atomic_uint64_t video_callbacks_{};
@@ -1015,17 +991,6 @@ private:
     std::atomic_uint64_t suppressed_log_callbacks_{};
 };
 
-std::wstring argument_value(int argc, wchar_t** argv, std::wstring_view name) {
-    for (int index = 1; index + 1 < argc; ++index)
-        if (std::wstring_view(argv[index]) == name) return argv[index + 1];
-    return {};
-}
-
-bool has_argument(int argc, wchar_t** argv, std::wstring_view name) noexcept {
-    for (int index = 1; index < argc; ++index)
-        if (std::wstring_view(argv[index]) == name) return true;
-    return false;
-}
 
 unsigned int argument_uint(int argc, wchar_t** argv, std::wstring_view name,
     unsigned int fallback) noexcept {
@@ -1041,29 +1006,7 @@ unsigned int argument_uint(int argc, wchar_t** argv, std::wstring_view name,
     }
 }
 
-bool supported_capability(unsigned int width, unsigned int height,
-    unsigned int fps) noexcept {
-    const auto matches = [width, height](unsigned int long_edge,
-        unsigned int short_edge) {
-        return (width == long_edge && height == short_edge) ||
-            (width == short_edge && height == long_edge);
-    };
-    return (matches(5120, 2880) && fps == 60) ||
-        (matches(1920, 1080) && fps == 60) ||
-        (matches(1280, 720) && fps == 30) ||
-        (matches(960, 540) && fps == 30);
-}
 
-std::string utf8(std::wstring_view value) {
-    if (value.empty()) return {};
-    const auto length = WideCharToMultiByte(CP_UTF8, 0, value.data(),
-        static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-    if (length <= 0) return {};
-    std::string result(static_cast<std::size_t>(length), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
-        result.data(), length, nullptr, nullptr);
-    return result;
-}
 
 bool set_airplay_environment(std::wstring_view name,
     std::wstring_view value) {
@@ -1147,13 +1090,6 @@ std::wstring dlna_receiver_name(std::wstring name) {
     return name;
 }
 
-std::filesystem::path executable_directory() {
-    std::wstring path(32768, L'\0');
-    const auto length = GetModuleFileNameW(nullptr, path.data(),
-        static_cast<DWORD>(path.size()));
-    path.resize(length);
-    return std::filesystem::path(path).parent_path();
-}
 
 struct AirPlayLibraryLoad {
     HMODULE library{};
@@ -1179,14 +1115,6 @@ void close_airplay_library(const AirPlayLibraryLoad& loaded) noexcept {
     if (loaded.search_cookie) RemoveDllDirectory(loaded.search_cookie);
 }
 
-bool is_code_integrity_error(DWORD error) noexcept {
-    return error == ERROR_INVALID_IMAGE_HASH ||
-        error == ERROR_ACCESS_DISABLED_BY_POLICY ||
-        (error >= ERROR_SYSTEM_INTEGRITY_ROLLBACK_DETECTED &&
-            error <= ERROR_SYSTEM_INTEGRITY_REPUTATION_OFFLINE) ||
-        (error >= ERROR_SYSTEM_INTEGRITY_REPUTATION_UNFRIENDLY_FILE &&
-            error <= ERROR_SYSTEM_INTEGRITY_WHQL_NOT_SATISFIED);
-}
 
 DWORD probe_image(const std::filesystem::path& path) noexcept {
     const auto file = CreateFileW(path.c_str(), GENERIC_READ,
@@ -1238,17 +1166,6 @@ int preflight_airplay_runtime(const std::filesystem::path& path) noexcept {
     return exports_available ? 0 : 42;
 }
 
-HANDLE connect_pipe(const std::wstring& pipe_name) {
-    for (int attempt = 0; attempt < 100; ++attempt) {
-        const auto pipe = CreateFileW(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (pipe != INVALID_HANDLE_VALUE) return pipe;
-        if (GetLastError() != ERROR_PIPE_BUSY && GetLastError() != ERROR_FILE_NOT_FOUND)
-            return INVALID_HANDLE_VALUE;
-        WaitNamedPipeW(pipe_name.c_str(), 100);
-    }
-    return INVALID_HANDLE_VALUE;
-}
 
 bool receive_playback_updates(HANDLE pipe, AirPlayCallback& callback,
     iPhoneMirror::wireless::DlnaRenderer& dlna, DWORD* failure_reason = nullptr) noexcept {
@@ -1285,6 +1202,7 @@ bool receive_playback_updates(HANDLE pipe, AirPlayCallback& callback,
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    using namespace iPhoneMirror::host_common;
     // LoadLibrary failures must be reported through IPC/preflight instead of a
     // system "Bad Image" dialog that incorrectly describes policy blocks as corruption.
     SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS);
@@ -1302,7 +1220,12 @@ int wmain(int argc, wchar_t** argv) {
     const auto airplay_port = argument_uint(argc, argv, L"--airplay-port", 7001);
     const auto dlna_port = argument_uint(argc, argv, L"--dlna-port", 8090);
     const auto dlna_ssdp_port = argument_uint(argc, argv, L"--dlna-ssdp-port", 1900);
-    const auto directory = executable_directory();
+    std::filesystem::path directory;
+    try {
+        directory = executable_directory();
+    } catch (...) {
+        return 4;
+    }
     const auto library_path = library_override.empty()
         ? directory / L"airplay2dll.dll"
         : std::filesystem::absolute(std::filesystem::path(library_override));

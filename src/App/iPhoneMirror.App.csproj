@@ -55,6 +55,13 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
+    <Content Include="..\..\tools\ddi\Xcode_iOS_DDI_Personalized\**\*">
+      <Link>tools\ddi\Xcode_iOS_DDI_Personalized\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <TargetPath>tools\ddi\Xcode_iOS_DDI_Personalized\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
     <PackageReference Include="Markdig" Version="1.3.2" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>

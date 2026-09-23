@@ -53,12 +53,14 @@ plist::Value UsbMuxClient::base_message(std::string message_type) const {
 std::pair<Socket, plist::Value> UsbMuxClient::request_with_socket(const plist::Value& body) {
     Socket socket = Socket::connect_loopback(port_);
     const std::string xml = plist::to_xml(body);
+    // Guard against silent uint32_t wraparound when building the length field.
+    if (xml.size() > 0xFFFFFFFFu - 16) throw std::runtime_error("usbmux packet too large");
     std::vector<std::uint8_t> packet;
     packet.reserve(16 + xml.size());
     append_u32le(packet, static_cast<std::uint32_t>(16 + xml.size()));
     append_u32le(packet, ProtocolVersion);
     append_u32le(packet, PlistMessage);
-    append_u32le(packet, next_tag_++);
+    append_u32le(packet, next_tag_.fetch_add(1, std::memory_order_relaxed));
     packet.insert(packet.end(), xml.begin(), xml.end());
     socket.send_all(packet);
 

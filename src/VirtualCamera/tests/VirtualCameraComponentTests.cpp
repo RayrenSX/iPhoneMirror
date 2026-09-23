@@ -126,7 +126,7 @@ void test_frame_exchange(FramePublisher& publisher) {
     if (publisher.channel_path().empty()) return;
     check(publisher.channel_path().find(L"iPhoneMirror\\FrameChannels") !=
               std::wstring::npos,
-          "place the frame channel in a service-accessible shared directory");
+          "place the frame channel in an iPhoneMirror frame directory");
 
     FrameReader reader;
     check_hr(reader.open(publisher.channel_path().c_str()), "open frame reader");

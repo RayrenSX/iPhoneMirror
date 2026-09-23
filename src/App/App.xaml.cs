@@ -38,7 +38,21 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             StartupDiagnostics.Write("WPF dispatcher", args.Exception);
-            args.Handled = true;
+            // Only swallow known non-fatal UI exceptions (e.g. DragMove outside window).
+            if (args.Exception is InvalidOperationException)
+                args.Handled = true;
+            else
+                args.Handled = false; // let WPF terminate to avoid corrupt-state continuation
+        };
+        // Backstop for fire-and-forget tasks (`_ = SomeAsync()`): when such a
+        // Task is collected with an unobserved exception, log it and mark it
+        // observed so the process does not crash. This covers all call sites
+        // without needing to wrap each one individually.
+        TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+        {
+            DiagnosticLogger.Exception("async", "unobserved_task_exception",
+                eventArgs.Exception);
+            eventArgs.SetObserved();
         };
         try
         {

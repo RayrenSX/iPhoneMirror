@@ -38,6 +38,8 @@ internal static class Program
                 return RunCaptureStatusPreview(statusArgs.FirstOrDefault());
             if (args is ["--ui-preview", var themeName, var surface])
                 return RunUiPreview(themeName, surface);
+            TestWheelCancellationState();
+            TestUsbPasteKeyboardState();
             TestUpdateWindowThemeSwitch();
             Console.WriteLine("App runtime tests passed.");
             return 0;
@@ -47,6 +49,98 @@ internal static class Program
             Console.Error.WriteLine(error);
             return 1;
         }
+    }
+
+    private static void TestWheelCancellationState()
+    {
+        var pointerType = typeof(MainWindow).GetNestedType("UsbTouchPointerState", BindingFlags.NonPublic)!;
+        var state = Activator.CreateInstance(pointerType, nonPublic: true)!;
+        var cancel = typeof(MainWindow).GetMethod("CancelWheelScroll", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var cancelled = pointerType.GetField("WheelCancelled")!;
+        var draining = pointerType.GetField("WheelDraining")!;
+        cancel.Invoke(null, [state]);
+        if ((bool)cancelled.GetValue(state)!)
+            throw new InvalidOperationException("A regular click must not cancel the next wheel gesture.");
+        draining.SetValue(state, true);
+        cancel.Invoke(null, [state]);
+        if (!(bool)cancelled.GetValue(state)!)
+            throw new InvalidOperationException("A click must cancel an in-flight wheel gesture.");
+    }
+
+    private static void TestUsbPasteKeyboardState()
+    {
+        var intercept = typeof(MainWindow).GetMethod("TryInterceptUsbPasteKey",
+            BindingFlags.NonPublic | BindingFlags.Static) ??
+            throw new MissingMethodException(typeof(MainWindow).FullName,
+                "TryInterceptUsbPasteKey");
+        var usages = new HashSet<byte>();
+        const byte vUsage = 0x19;
+
+        usages.Add(vUsage);
+        var firstDown = InvokeUsbPasteIntercept(intercept, isKeyDown: true,
+            vUsage, modifiers: 0x01, usages, pastePending: false);
+        if (!firstDown.Intercepted || !firstDown.PasteRequested ||
+            !firstDown.PastePending || usages.Contains(vUsage))
+            throw new InvalidOperationException(
+                "The first Ctrl+V down must request one paste and remove V from USB HID state.");
+
+        // Raw Input and the legacy key message can both report this same down.
+        usages.Add(vUsage);
+        var duplicateDown = InvokeUsbPasteIntercept(intercept, isKeyDown: true,
+            vUsage, modifiers: 0x01, usages, firstDown.PastePending);
+        if (!duplicateDown.Intercepted || duplicateDown.PasteRequested ||
+            !duplicateDown.PastePending || usages.Contains(vUsage))
+            throw new InvalidOperationException(
+                "A duplicate Ctrl+V down must stay suppressed without requesting another paste.");
+
+        // Releasing Ctrl before V causes another keyboard report. V must not
+        // reappear in that report while the intercepted press is pending.
+        if (usages.Contains(vUsage))
+            throw new InvalidOperationException(
+                "An intercepted V leaked into the Ctrl-release keyboard report.");
+
+        var up = InvokeUsbPasteIntercept(intercept, isKeyDown: false,
+            vUsage, modifiers: 0, usages, duplicateDown.PastePending);
+        if (!up.Intercepted || up.PasteRequested || up.PastePending ||
+            usages.Contains(vUsage))
+            throw new InvalidOperationException(
+                "The matching V up must be suppressed and clear paste state.");
+
+        var staleUp = InvokeUsbPasteIntercept(intercept, isKeyDown: false,
+            vUsage, modifiers: 0, usages, up.PastePending);
+        if (staleUp.Intercepted || staleUp.PasteRequested || staleUp.PastePending)
+            throw new InvalidOperationException(
+                "A duplicate V up after the intercepted press must remain idempotent.");
+
+        // A Ctrl release or unrelated key must not clear the pending V until
+        // the matching V-up arrives.
+        usages.Add(0x04);
+        var unrelatedDown = InvokeUsbPasteIntercept(intercept, isKeyDown: true,
+            usage: 0x04, modifiers: 0, usages, pastePending: true);
+        var unrelatedUp = InvokeUsbPasteIntercept(intercept, isKeyDown: false,
+            usage: 0x04, modifiers: 0, usages, unrelatedDown.PastePending);
+        if (unrelatedDown.Intercepted || unrelatedUp.Intercepted ||
+            !unrelatedDown.PastePending || !unrelatedUp.PastePending)
+            throw new InvalidOperationException(
+                "Unrelated keys must not alter an intercepted V lifecycle.");
+
+        usages.Add(vUsage);
+        var regularDown = InvokeUsbPasteIntercept(intercept, isKeyDown: true,
+            vUsage, modifiers: 0, usages, pastePending: false);
+        if (regularDown.Intercepted || regularDown.PasteRequested ||
+            regularDown.PastePending || !usages.Contains(vUsage))
+            throw new InvalidOperationException(
+                "A regular V down must remain available to normal USB and Bluetooth keyboard routing.");
+    }
+
+    private static (bool Intercepted, bool PastePending, bool PasteRequested)
+        InvokeUsbPasteIntercept(MethodInfo intercept, bool isKeyDown, byte usage,
+            byte modifiers, HashSet<byte> usages, bool pastePending)
+    {
+        object?[] arguments =
+            [isKeyDown, usage, modifiers, usages, pastePending, false];
+        var intercepted = (bool)intercept.Invoke(null, arguments)!;
+        return (intercepted, (bool)arguments[4]!, (bool)arguments[5]!);
     }
 
     private static void DrainDispatcher()

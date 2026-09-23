@@ -1,0 +1,9 @@
+# The bridge is built as a Windows x64, Python 3.13 onedir executable. Keep
+# iUsbBridge.exe, _internal, and iUsbBridge.runtime.json together.
+# Keep the tunnel stack versions explicit: pymobiledevice3 imports the pure
+# userspace tunnel lazily, so relying only on its broad transitive ranges can
+# produce a package that launches but lacks the runtime used by USB control.
+pymobiledevice3==11.3.1
+pytun-pmd3==3.0.3
+pmd-pytcp==0.3.7
+pyinstaller==6.21.0

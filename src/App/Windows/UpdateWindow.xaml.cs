@@ -76,6 +76,10 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
     private async Task DownloadAndInstallAsync()
     {
         if (_downloading) return;
+        // Capture the token up front. OnClosing disposes _cancellation; reading
+        // _cancellation.IsCancellationRequested in the catch filter after that
+        // would throw ObjectDisposedException.
+        var token = _cancellation.Token;
         _downloading = true;
         UpdateButtonText = LocalizationService.Get("DownloadingUpdate");
         StatusText = LocalizationService.Get("PreparingDownload");
@@ -104,7 +108,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
         try
         {
             var downloaded = await _client.DownloadAsync(_release, progress,
-                _cancellation.Token, _allowMirrorFallback);
+                token, _allowMirrorFallback);
             StatusText = downloaded.HashVerified
                 ? LocalizationService.Get("UpdateVerified")
                 : LocalizationService.Get("UpdateDownloadedNoChecksum");
@@ -118,7 +122,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
             // if Setup is cancelled or fails earlier, the app remains usable.
             Close();
         }
-        catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             DiagnosticLogger.Info("updater", "download_cancelled",
                 ("release", _release.TagName));
@@ -160,6 +164,8 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (!_installationStarted) _cancellation.Cancel();
+        // Release the cancellation source now that the window is closing.
+        _cancellation.Dispose();
     }
 
     private void OnLaterClick(object sender, RoutedEventArgs e) => Close();

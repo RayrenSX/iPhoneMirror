@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace IPhoneMirror.App.Services;
 
-public sealed record BridgeEvent(string Event, string? Code, string? Message);
+public sealed record BridgeEvent(string Event, string? Code, string? Message, string? Text = null);
 
 public sealed record TouchPoint(
     [property: JsonPropertyName("pointerId")] int PointerId,
@@ -126,9 +126,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         psi.ArgumentList.Add(udid);
         if (GetPersonalizedDdiDirectory() is { } ddiDirectory)
         {
-            // Never package Apple DDI payloads. An operator can place an
-            // officially obtained, device-compatible bundle in this user-data
-            // location or select a different one through the environment.
+            // Prefer the verified bundled Personalized DDI; an environment
+            // override still allows operators to provide a different build.
             psi.ArgumentList.Add("--ddi-dir");
             psi.ArgumentList.Add(ddiDirectory);
         }
@@ -154,6 +153,11 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     {
         var configured = Environment.GetEnvironmentVariable("IPHONE_MIRROR_DDI_DIR");
         if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
+
+        var bundledDirectory = Path.Combine(
+            AppContext.BaseDirectory, "tools", "ddi", "Xcode_iOS_DDI_Personalized");
+        if (HasCompletePersonalizedDdiBundle(bundledDirectory))
+            return bundledDirectory;
 
         var defaultDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -193,20 +197,21 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 !CoreDeviceTouchProtocol.IsNormalizedCoordinate(point.NormalizedY))
                 throw new ArgumentOutOfRangeException(nameof(points), "触点坐标必须是 0 到 1 之间的有限数值。");
         }
-        var json = JsonSerializer.Serialize(new
-            {
-                schema = CoreDeviceTouchProtocol.MessageSchema,
-                kind = CoreDeviceTouchProtocol.MessageKind,
-                seq = sequence,
-                timestampNs,
-                points,
-            });
-        var bytes = Encoding.UTF8.GetBytes(json);
-        var header = BitConverter.GetBytes((uint)bytes.Length);
-
         await _sendLock.WaitAsync(ct);
         try
         {
+            var frameSequence = NextSequence();
+            var json = JsonSerializer.Serialize(new
+                {
+                    schema = CoreDeviceTouchProtocol.MessageSchema,
+                    kind = CoreDeviceTouchProtocol.MessageKind,
+                    seq = frameSequence,
+                    timestampNs,
+                    points,
+                });
+            var bytes = Encoding.UTF8.GetBytes(json);
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);
             await _stdin.BaseStream.FlushAsync(ct);
@@ -238,10 +243,28 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     {
         Interlocked.Exchange(ref _stopping, 1);
         _cts.Cancel();
+        // Closing stdin ends the bridge's input loop and lets its teardown run:
+        // releasing all touch points, closing the CoreDevice tunnel, and
+        // releasing the claimed usbmux interface. Killing the process instead
+        // leaves that interface to asynchronous PnP cleanup, which races the
+        // capture teardown that follows and can force iOS to re-prompt for
+        // trust. Give the graceful exit a bounded window before killing.
         try { _stdin?.Close(); } catch { }
         if (_process is { HasExited: false })
         {
-            try { _process.Kill(); } catch { }
+            try
+            {
+                using var gracePeriod = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(2));
+                await _process.WaitForExitAsync(gracePeriod.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (InvalidOperationException) { }
+            if (!_process.HasExited)
+            {
+                try { _process.Kill(); } catch { }
+            }
         }
         var reader = _readerTask;
         var errorDrain = _errorDrainTask;
@@ -344,6 +367,10 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         root.TryGetProperty("code", out var wc) ? wc.GetString() : null,
                         root.TryGetProperty("message", out var m) ? m.GetString() : null));
                     break;
+                case "clipboard_text":
+                    OnEvent?.Invoke(new BridgeEvent("clipboard_text", null, null,
+                        root.TryGetProperty("text", out var ct) ? ct.GetString() : null));
+                    break;
                 case "error":
                     Interlocked.Exchange(ref _terminalEventReceived, 1);
                     _lastErrorCode = root.TryGetProperty("code", out var ec)
@@ -389,19 +416,20 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         // widen the usages before serialization instead of passing byte[].
         var normalized = usages.Distinct().OrderBy(value => value)
             .Select(value => (int)value).ToArray();
-        var frame = new
-        {
-            schema = CoreDeviceTouchProtocol.MessageSchema,
-            kind = CoreDeviceTouchProtocol.KeyboardMessageKind,
-            seq = NextSequence(),
-            timestampNs = DateTimeOffset.UtcNow.ToUnixTimeNanoseconds(),
-            usages = normalized,
-        };
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
-        var header = BitConverter.GetBytes((uint)bytes.Length);
         await _sendLock.WaitAsync(ct);
         try
         {
+            var frame = new
+            {
+                schema = CoreDeviceTouchProtocol.MessageSchema,
+                kind = CoreDeviceTouchProtocol.KeyboardMessageKind,
+                seq = NextSequence(),
+                timestampNs = DateTimeOffset.UtcNow.ToUnixTimeNanoseconds(),
+                usages = normalized,
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);
             await _stdin.BaseStream.FlushAsync(ct);
@@ -416,26 +444,74 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
         if (state is not ("down" or "up" or "canceled"))
             throw new ArgumentOutOfRangeException(nameof(state));
-        var frame = new
-        {
-            schema = CoreDeviceTouchProtocol.MessageSchema,
-            kind = CoreDeviceTouchProtocol.ButtonMessageKind,
-            seq = NextSequence(),
-            usagePage = (int)usagePage,
-            usageCode = (int)usageCode,
-            state,
-        };
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
-        var header = BitConverter.GetBytes((uint)bytes.Length);
         await _sendLock.WaitAsync(ct);
         try
         {
+            var frame = new
+            {
+                schema = CoreDeviceTouchProtocol.MessageSchema,
+                kind = CoreDeviceTouchProtocol.ButtonMessageKind,
+                seq = NextSequence(),
+                usagePage = (int)usagePage,
+                usageCode = (int)usageCode,
+                state,
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);
             await _stdin.BaseStream.FlushAsync(ct);
         }
         finally { _sendLock.Release(); }
     }
+
+
+    public async Task SendPasteTextAsync(string text, CancellationToken ct = default)
+    {
+        if (!IsReady || _stdin is null)
+            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+        await _sendLock.WaitAsync(ct);
+        try
+        {
+            var frame = new
+            {
+                schema = CoreDeviceTouchProtocol.MessageSchema,
+                kind = CoreDeviceTouchProtocol.PasteTextMessageKind,
+                seq = NextSequence(),
+                text,
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+            await _stdin.BaseStream.WriteAsync(header, ct);
+            await _stdin.BaseStream.WriteAsync(bytes, ct);
+            await _stdin.BaseStream.FlushAsync(ct);
+        }
+        finally { _sendLock.Release(); }
+    }
+
+    public async Task SendReadClipboardAsync(CancellationToken ct = default)
+    {
+        if (!IsReady || _stdin is null)
+            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+        await _sendLock.WaitAsync(ct);
+        try
+        {
+            var frame = new
+            {
+                schema = CoreDeviceTouchProtocol.MessageSchema,
+                kind = CoreDeviceTouchProtocol.ReadClipboardMessageKind,
+                seq = NextSequence(),
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+            await _stdin.BaseStream.WriteAsync(header, ct);
+            await _stdin.BaseStream.WriteAsync(bytes, ct);
+            await _stdin.BaseStream.FlushAsync(ct);
+        }
+        finally { _sendLock.Release(); }
+    }
+
 
     private async Task DrainErrorAsync(StreamReader reader)
     {

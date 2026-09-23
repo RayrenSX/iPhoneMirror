@@ -154,13 +154,45 @@ internal static class DriverPayload
     {
         EnsureNoReparsePoints(path);
         var expectedSecurity = CreateProtectedSystemDirectorySecurity();
-        new DirectoryInfo(path).Create(expectedSecurity);
-        EnsureNoReparsePoints(path);
 
-        var info = new DirectoryInfo(path);
-        info.SetAccessControl(expectedSecurity);
-        info.Refresh();
+        // Existing directories can contain the only driver recovery backup.
+        // Fail closed on unexpected permissions, but never delete that data.
+        if (Directory.Exists(path))
+        {
+            EnsureNoReparsePoints(path);
+            var existingInfo = new DirectoryInfo(path);
+            ValidateProtectedSystemDirectorySecurity(existingInfo.GetAccessControl(
+                AccessControlSections.Access | AccessControlSections.Owner));
+            return;
+        }
+
+        // Create under a temporary name, apply the protected ACL before any
+        // content is written, then atomically rename into place.
+        var tempPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            var tempInfo = new DirectoryInfo(tempPath);
+            tempInfo.Create(expectedSecurity);
+            EnsureNoReparsePoints(tempPath);
+            tempInfo.SetAccessControl(expectedSecurity);
+            tempInfo.Refresh();
+            EnsureNoReparsePoints(tempPath);
+            ValidateProtectedSystemDirectorySecurity(tempInfo.GetAccessControl(
+                AccessControlSections.Access | AccessControlSections.Owner));
+
+            Directory.Move(tempPath, path);
+        }
+        finally
+        {
+            if (Directory.Exists(tempPath))
+            {
+                try { Directory.Delete(tempPath, recursive: true); } catch { }
+            }
+        }
+
         EnsureNoReparsePoints(path);
+        var info = new DirectoryInfo(path);
+        info.Refresh();
         ValidateProtectedSystemDirectorySecurity(info.GetAccessControl(
             AccessControlSections.Access | AccessControlSections.Owner));
     }
@@ -276,6 +308,10 @@ internal static class DriverPayload
     internal static bool IsAllowedAppleSignerSubject(string? subject) =>
         string.Equals(subject, DriverConstants.AppleSignerSubject, StringComparison.Ordinal);
 
+    internal static bool CanRetryAuthenticodeWithoutRevocation(int trustResult) =>
+        trustResult is unchecked((int)0x80092013) // CRYPT_E_REVOCATION_OFFLINE
+            or unchecked((int)0x800B010E);        // CERT_E_REVOCATION_FAILURE
+
     internal static bool IsTrustedAppleSignature(string path) =>
         TryGetAuthenticodeSignerSubject(path, out var subject) &&
         IsAllowedAppleSignerSubject(subject);
@@ -303,18 +339,31 @@ internal static class DriverPayload
         {
             StructSize = (uint)Marshal.SizeOf<WinTrustData>(),
             UiChoice = 2,
-            RevocationChecks = 0,
+            // WTD_REVOKE_WHOLECHAIN: reject packages signed by a certificate
+            // whose chain contains a revoked cert. The previous WTD_REVOKE_NONE
+            // accepted Apple packages even after their signing cert was revoked.
+            RevocationChecks = 1,
             UnionChoice = 1,
             FileInfo = fileInfoPointer,
             StateAction = 1,
-            ProviderFlags = 0x00000010,
+            // ProviderFlags must be 0 (default). The previous 0x10 is not a
+            // documented WTD_PROVIDER_FLAG_* value and produced undefined behavior.
+            ProviderFlags = 0,
             UiContext = 0,
         };
         var action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
         try
         {
             Marshal.StructureToPtr(fileInfo, fileInfoPointer, false);
-            if (WinVerifyTrust(0, ref action, ref data) != 0) return false;
+            var trustResult = WinVerifyTrust(0, ref action, ref data);
+            if (trustResult != 0)
+            {
+                // Never install a kernel driver when the chain revocation
+                // status is unknown. An offline retry with WTD_REVOKE_NONE
+                // would silently weaken the trust decision and could accept a
+                // package signed by a revoked certificate.
+                return false;
+            }
             if (!readSignerSubject) return true;
 
             var providerData = WTHelperProvDataFromStateData(data.StateData);

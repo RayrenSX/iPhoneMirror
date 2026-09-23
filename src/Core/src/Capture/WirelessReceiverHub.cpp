@@ -1,5 +1,6 @@
 #include "Capture/WirelessReceiverHub.h"
 
+#include "HostCommon.h"
 #include "HttpUrl.h"
 #include "Audio/WasapiRenderer.h"
 #include "IpcProtocol.h"
@@ -57,17 +58,6 @@ std::wstring unique_ipc_suffix() {
     return std::format(L"{}-{}", GetCurrentProcessId(), text);
 }
 
-bool read_all(HANDLE pipe, void* destination, std::size_t size) noexcept {
-    auto* bytes = static_cast<std::uint8_t*>(destination);
-    while (size != 0) {
-        DWORD read{};
-        const auto request = static_cast<DWORD>(std::min<std::size_t>(size, 1024U * 1024U));
-        if (!ReadFile(pipe, bytes, request, &read, nullptr) || read == 0) return false;
-        bytes += read;
-        size -= read;
-    }
-    return true;
-}
 
 bool write_all(HANDLE pipe, const void* source, std::size_t size) noexcept {
     const auto* bytes = static_cast<const std::uint8_t*>(source);
@@ -158,6 +148,14 @@ std::wstring header_text(const char (&value)[Size]) {
 } // namespace
 
 namespace iPhoneMirror::capture {
+
+// read_all is shared via HostCommon.h; pull it into this namespace so the
+// existing unqualified call sites resolve to host_common::read_all.
+using iPhoneMirror::host_common::read_all;
+
+void HandleDeleter::operator()(void* handle) const noexcept {
+    if (handle) CloseHandle(handle);
+}
 
 namespace detail {
 
@@ -613,7 +611,7 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
     std::scoped_lock lifecycle_lock(lifecycle_mutex_);
     // A crashed host leaves a signaled process handle and a joinable reader
     // thread behind. Reap that stale state before starting its replacement.
-    if (process_ && (WaitForSingleObject(as_handle(process_), 0) != WAIT_TIMEOUT ||
+    if (process_ && (WaitForSingleObject(as_handle(process_.get()), 0) != WAIT_TIMEOUT ||
             pipe_disconnected_.load(std::memory_order_acquire)))
         stop_locked();
     if (worker_.joinable() || playback_worker_.joinable() || process_) return;
@@ -637,22 +635,20 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
         0, security.get());
     if (pipe == INVALID_HANDLE_VALUE)
         throw std::runtime_error(std::format("CreateNamedPipe failed: {}", GetLastError()));
-    pipe_ = pipe;
+    pipe_.reset(pipe);
     SetLastError(ERROR_SUCCESS);
     const auto stop_event = CreateEventW(security.get(), TRUE, FALSE, stop_event_name_.c_str());
     const auto stop_event_error = GetLastError();
     if (!stop_event) {
-        CloseHandle(pipe);
-        pipe_ = nullptr;
+        pipe_.reset();
         throw std::runtime_error(std::format("CreateEvent failed: {}", stop_event_error));
     }
     if (stop_event_error == ERROR_ALREADY_EXISTS) {
         CloseHandle(stop_event);
-        CloseHandle(pipe);
-        pipe_ = nullptr;
+        pipe_.reset();
         throw std::runtime_error("AirPlay stop event name was already claimed");
     }
-    stop_event_ = stop_event;
+    stop_event_.reset(stop_event);
 
     auto command = quote_argument(host_path_) + L" --pipe " + quote_argument(pipe_name_) +
         L" --stop-event " + quote_argument(stop_event_name_) + L" --name " +
@@ -665,14 +661,13 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
     const auto working_directory = std::filesystem::path(host_path_).parent_path().wstring();
     if (!CreateProcessW(host_path_.c_str(), command.data(), nullptr, nullptr, FALSE,
             CREATE_NO_WINDOW, nullptr, working_directory.c_str(), &startup, &process)) {
-        CloseHandle(stop_event);
-        CloseHandle(pipe);
-        stop_event_ = pipe_ = nullptr;
+        stop_event_.reset();
+        pipe_.reset();
         throw std::runtime_error(std::format("CreateProcess for wireless host failed: {}",
             GetLastError()));
     }
     CloseHandle(process.hThread);
-    process_ = process.hProcess;
+    process_.reset(process.hProcess);
     stopping_.store(false, std::memory_order_release);
     ready_.store(false, std::memory_order_release);
     pipe_disconnected_.store(false, std::memory_order_release);
@@ -699,15 +694,15 @@ void WirelessReceiverHub::stop_locked() noexcept {
     if (!worker_.joinable() && !playback_worker_.joinable() && !process_) return;
     stopping_.store(true, std::memory_order_release);
     ready_.store(false, std::memory_order_release);
-    if (stop_event_) SetEvent(as_handle(stop_event_));
+    if (stop_event_) SetEvent(as_handle(stop_event_.get()));
     if (playback_worker_.joinable()) {
         playback_worker_.request_stop();
         CancelSynchronousIo(playback_worker_.native_handle());
     }
     playback_condition_.notify_all();
     if (pipe_) {
-        CancelIoEx(as_handle(pipe_), nullptr);
-        DisconnectNamedPipe(as_handle(pipe_));
+        CancelIoEx(as_handle(pipe_.get()), nullptr);
+        DisconnectNamedPipe(as_handle(pipe_.get()));
     }
     if (worker_.joinable()) {
         worker_.request_stop();
@@ -715,21 +710,14 @@ void WirelessReceiverHub::stop_locked() noexcept {
     }
     if (playback_worker_.joinable()) playback_worker_.join();
     if (process_) {
-        if (WaitForSingleObject(as_handle(process_), 3000) == WAIT_TIMEOUT) {
-            TerminateProcess(as_handle(process_), 1);
-            WaitForSingleObject(as_handle(process_), 1000);
+        if (WaitForSingleObject(as_handle(process_.get()), 3000) == WAIT_TIMEOUT) {
+            TerminateProcess(as_handle(process_.get()), 1);
+            WaitForSingleObject(as_handle(process_.get()), 1000);
         }
-        CloseHandle(as_handle(process_));
-        process_ = nullptr;
+        process_.reset();
     }
-    if (stop_event_) {
-        CloseHandle(as_handle(stop_event_));
-        stop_event_ = nullptr;
-    }
-    if (pipe_) {
-        CloseHandle(as_handle(pipe_));
-        pipe_ = nullptr;
-    }
+    stop_event_.reset();
+    pipe_.reset();
     mark_all_disconnected();
     logging::write("wireless_hub stopped");
 }
@@ -737,7 +725,7 @@ void WirelessReceiverHub::stop_locked() noexcept {
 bool WirelessReceiverHub::running() const noexcept {
     std::scoped_lock lifecycle_lock(lifecycle_mutex_);
     return process_ && !pipe_disconnected_.load(std::memory_order_acquire) &&
-        WaitForSingleObject(as_handle(process_), 0) == WAIT_TIMEOUT;
+        WaitForSingleObject(as_handle(process_.get()), 0) == WAIT_TIMEOUT;
 }
 
 bool WirelessReceiverHub::ready() const noexcept {
@@ -862,7 +850,7 @@ void WirelessReceiverHub::run_playback_writer(std::stop_token stop_token) noexce
             header.media_rate = update.rate;
         }
         std::scoped_lock write_lock(pipe_write_mutex_);
-        if (!pipe_ || !write_all(as_handle(pipe_), &header, sizeof(header))) {
+        if (!pipe_ || !write_all(as_handle(pipe_.get()), &header, sizeof(header))) {
             if (!stopping_.load(std::memory_order_acquire))
                 logging::write("wireless_hub playback writer disconnected");
             ready_.store(false, std::memory_order_release);
@@ -878,8 +866,8 @@ void WirelessReceiverHub::run_playback_writer(std::stop_token stop_token) noexce
 
 void WirelessReceiverHub::run(std::stop_token stop_token) noexcept {
     try {
-        const auto pipe = as_handle(pipe_);
-        const auto expected_process_id = process_ ? GetProcessId(as_handle(process_)) : 0;
+        const auto pipe = as_handle(pipe_.get());
+        const auto expected_process_id = process_ ? GetProcessId(as_handle(process_.get())) : 0;
         const auto connected = expected_process_id != 0 &&
             connect_expected_client(pipe, expected_process_id, stop_token);
         if (!connected) throw std::runtime_error("wireless host could not connect");
@@ -1112,8 +1100,13 @@ std::shared_ptr<WirelessClientStream> WirelessReceiverHub::get_or_create(
     std::shared_ptr<WirelessClientStream> stream;
     {
         std::scoped_lock lock(mutex_);
-        auto [position, inserted] = clients_.try_emplace(id);
-        if (inserted) position->second = std::make_shared<WirelessClientStream>(id, name);
+        auto position = clients_.find(id);
+        if (position == clients_.end()) {
+            // Construct before inserting so a bad_alloc never leaves a null
+            // entry that find_connected would later dereference.
+            auto created = std::make_shared<WirelessClientStream>(id, name);
+            position = clients_.emplace(id, std::move(created)).first;
+        }
         stream = position->second;
     }
     if (mark_connected) stream->set_identity(std::move(name), true);

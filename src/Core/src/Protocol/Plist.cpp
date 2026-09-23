@@ -196,11 +196,14 @@ private:
         return unescape_xml(text);
     }
 
-    Value parse_value() {
-        return parse_value_from_tag(read_tag());
+    Value parse_value(std::size_t depth = 0) {
+        return parse_value_from_tag(read_tag(), depth);
     }
 
-    Value parse_value_from_tag(const Tag& tag) {
+    Value parse_value_from_tag(const Tag& tag, std::size_t depth = 0) {
+        // Wire payload size limits do not bound recursion depth. Limit every
+        // value (including scalar leaves) before descending into a container.
+        if (depth >= 128) throw ParseError("plist nesting limit exceeded");
         if (tag.closing) throw ParseError("unexpected closing tag");
         if (tag.name == "dict") {
             std::map<std::string, Value, std::less<>> dictionary;
@@ -211,7 +214,7 @@ private:
                         throw ParseError("plist dictionary entry does not start with <key>");
                     }
                     const std::string key = parse_text(key_tag);
-                    dictionary.insert_or_assign(key, parse_value());
+                    dictionary.insert_or_assign(key, parse_value(depth + 1));
                 }
                 expect_end("dict");
             }
@@ -220,7 +223,7 @@ private:
         if (tag.name == "array") {
             std::vector<Value> array;
             if (!tag.self_closing) {
-                while (!next_is_end("array")) array.push_back(parse_value());
+                while (!next_is_end("array")) array.push_back(parse_value(depth + 1));
                 expect_end("array");
             }
             return Value::Array(std::move(array));

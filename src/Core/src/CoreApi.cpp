@@ -1153,8 +1153,8 @@ std::int32_t IM_CALL im_copy_latest_video_frame_scaled(iPhoneMirror::VideoFrameI
     if (!nv12_to_bgra_scaled(*frame, buffer, output_width, output_height)) {
         return fail(iPhoneMirror::Result::ProtocolError, L"NV12/P010 缩放视频帧布局无效");
     }
-    static std::uint64_t conversion_count{};
-    const auto conversion_number = ++conversion_count;
+    static std::atomic<std::uint64_t> conversion_count{};
+    const auto conversion_number = conversion_count.fetch_add(1, std::memory_order_relaxed) + 1;
     if (conversion_number <= 3 || conversion_number % 60 == 0) {
         const auto elapsed = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - conversion_started).count();

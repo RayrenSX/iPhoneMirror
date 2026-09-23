@@ -122,14 +122,29 @@ internal static class DriverCleanupHost
         DriverPayload.EnsureNoReparsePoints(scriptPath);
         if (File.Exists(scriptPath) && IsTrustedScript(scriptPath)) return scriptPath;
 
-        if (File.Exists(scriptPath)) File.Delete(scriptPath);
         using var source = Assembly.GetExecutingAssembly().GetManifestResourceStream(
             ScriptResourceName) ?? throw new InvalidOperationException(
             "The embedded driver cleanup script is missing.");
-        using (var destination = new FileStream(scriptPath, FileMode.CreateNew,
-                   FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.WriteThrough))
-            source.CopyTo(destination);
-        ValidateTrustedScriptHash(scriptPath);
+        // Write to a temporary path first, validate the hash, then atomically
+        // rename into place. This closes the TOCTOU window between File.Delete
+        // and FileMode.CreateNew where a peer-privileged process could plant a
+        // symlink at the target path.
+        var tempPath = scriptPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using (var destination = new FileStream(tempPath, FileMode.CreateNew,
+                       FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.WriteThrough))
+                source.CopyTo(destination);
+            ValidateTrustedScriptHash(tempPath);
+            File.Move(tempPath, scriptPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
+        }
         return scriptPath;
     }
 
@@ -141,7 +156,13 @@ internal static class DriverCleanupHost
             ValidateTrustedScriptHash(path);
             return true;
         }
-        catch { return false; }
+        // Only swallow failures that reflect an untrusted or unreadable script.
+        // Fatal errors (OOM, ThreadAbort, etc.) must propagate to the caller.
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException
+            or CryptographicException or System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     private static void ValidateTrustedScriptHash(string path)

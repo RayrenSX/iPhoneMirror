@@ -7,6 +7,7 @@ param(
     [switch]$IncludeMediaOutputRuntime,
     [switch]$OmitMediaOutputRuntime,
     [switch]$IncludeUxPlayRuntime,
+    [switch]$OmitUxPlayRuntime,
     [string]$AppleSupportPackagePath,
     [switch]$ConfirmAppleRedistributionRights,
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
@@ -31,8 +32,10 @@ if ($IncludeMediaOutputRuntime -and $OmitMediaOutputRuntime) {
 $UseMediaOutputRuntime = -not $OmitMediaOutputRuntime
 # UxPlay is a selectable receiver in the shipped settings UI, so its runtime
 # belongs to the standard release payload. Keep the switch accepted for older
-# build invocations and explicit intent in automation.
-$UseUxPlayRuntime = $true
+# build invocations and explicit intent in automation. -OmitUxPlayRuntime
+# allows machines without MSYS2 UCRT64 to produce a test payload without the
+# optional UxPlay fallback receiver.
+$UseUxPlayRuntime = -not $OmitUxPlayRuntime
 if ($NoPublish -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
     throw '-AppleSupportPackagePath cannot be used with -NoPublish.'
 }
@@ -42,60 +45,50 @@ $VersionProperty = if ([string]::IsNullOrWhiteSpace($Version)) {
     "-p:Version=$Version"
 }
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$UsbControlRepository = 'https://github.com/RayrenSX/iUsbBridge.git'
+
 $UsbControlRoot = if ([string]::IsNullOrWhiteSpace($env:IPHONE_MIRROR_USB_BRIDGE_ROOT)) {
-    Join-Path (Split-Path -Parent $Root) 'iUsbBridge'
+    Join-Path $Root 'scripts\usb-bridge-recipe'
 } else {
     [IO.Path]::GetFullPath($env:IPHONE_MIRROR_USB_BRIDGE_ROOT)
 }
 $UsbControlBuild = Join-Path $UsbControlRoot 'build.ps1'
-$UsbControlSource = Join-Path $UsbControlRoot 'src\usb_touch_bridge.py'
+$UsbControlSource = Join-Path $Root 'tools\usb_touch_bridge.py'
 $UsbTouchBridgeOutput = Join-Path $Root 'dist\iUsbBridge.exe'
 $UsbTouchBridgeRuntimeManifest = Join-Path $Root 'dist\iUsbBridge.runtime.json'
 $UsbTouchBridgeRuntimeTools = Join-Path $Root 'scripts\UsbTouchBridgeRuntime.ps1'
-$UsbControlEnvironment = Join-Path $UsbControlRoot 'work\usb-touch-bridge-python'
+$UsbControlEnvironment = Join-Path $Root 'work\usb-touch-bridge-python'
 $UsbControlPython = Join-Path $UsbControlEnvironment 'Scripts\python.exe'
 
 if (-not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeTools -PathType Leaf)) {
     throw "USB touch bridge runtime validation script is missing: $UsbTouchBridgeRuntimeTools"
 }
 . $UsbTouchBridgeRuntimeTools
+. (Join-Path $Root 'scripts\UsbBridgeBuildSource.ps1')
 
 function Build-UsbTouchBridge {
-    # CI checkouts contain only iPhoneMirror. Fetch the maintained bridge
-    # project into the sibling path used by local development when needed.
-    if (-not (Test-Path -LiteralPath $UsbControlBuild -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $UsbControlSource -PathType Leaf)) {
-        if (-not [string]::IsNullOrWhiteSpace($env:IPHONE_MIRROR_USB_BRIDGE_ROOT)) {
-            throw "USB touch bridge source is incomplete: $UsbControlRoot"
-        }
-        $parent = Split-Path -Parent $UsbControlRoot
-        if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
-            New-Item -ItemType Directory -Force -Path $parent | Out-Null
-        }
-        if (Test-Path -LiteralPath $UsbControlRoot) {
-            throw "USB touch bridge directory exists but is incomplete: $UsbControlRoot"
-        }
-        Write-Host "Cloning USB touch bridge from $UsbControlRepository"
-        & git clone --depth 1 $UsbControlRepository $UsbControlRoot
-        if ($LASTEXITCODE -ne 0) {
-            throw "USB touch bridge clone failed: $LASTEXITCODE"
-        }
-    }
+    # Use the versioned Python recipe so upstream backend migrations cannot
+    # replace the audited source in tools with an incompatible executable.
     foreach ($required in @($UsbControlBuild, $UsbControlSource)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "USB touch bridge build input is missing: $required"
         }
     }
 
-    & $UsbControlBuild -BridgeOnly -BridgeOutputPath $UsbTouchBridgeOutput `
-        -EnvironmentPath $UsbControlEnvironment
-    if ($LASTEXITCODE -ne 0) {
-        throw "USB touch bridge build failed: $LASTEXITCODE"
+    $stageRoot = Join-Path $Root 'work\usb-bridge-build'
+    $stage = New-UsbBridgeBuildSource -RecipeRoot $UsbControlRoot `
+        -SourceRoot (Join-Path $Root 'tools') -WorkRoot $stageRoot
+    try {
+        & (Join-Path $stage 'build.ps1') -BridgeOnly `
+            -BridgeOutputPath $UsbTouchBridgeOutput -EnvironmentPath $UsbControlEnvironment
+        if ($LASTEXITCODE -ne 0) {
+            throw "USB touch bridge build failed: $LASTEXITCODE"
+        }
+    }
+    finally {
+        Remove-UsbBridgeBuildSource -Stage $stage -WorkRoot $stageRoot
     }
     if (-not (Test-Path -LiteralPath $UsbTouchBridgeOutput -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeManifest -PathType Leaf) -or
-        -not (Test-Path -LiteralPath (Join-Path $Root 'dist\_internal') -PathType Container)) {
+        -not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeManifest -PathType Leaf)) {
         throw 'USB touch bridge output is incomplete.'
     }
     if (-not (Test-Path -LiteralPath $UsbControlPython -PathType Leaf)) {
@@ -126,8 +119,27 @@ function Build-UsbTouchBridge {
     }
 }
 
-$CMake = 'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
-$CTest = 'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe'
+function Resolve-CMakeTool([string]$Name) {
+    $candidates = @(
+        (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe"),
+        (Join-Path ${env:ProgramFiles} "Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe")
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    if (@($candidates).Count -gt 0) { return @($candidates)[0] }
+
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
+        $installations = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        foreach ($installation in @($installations)) {
+            $candidate = Join-Path $installation "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe"
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
+    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($null -ne $command) { return $command.Source }
+    throw "$Name.exe was not found. Install Visual Studio C++/CMake tools or add $Name to PATH."
+}
+$CMake = Resolve-CMakeTool 'cmake'
+$CTest = Resolve-CMakeTool 'ctest'
 $WirelessRoot = Join-Path $Root 'third_party\airplay-server'
 $WirelessManifest = Join-Path $WirelessRoot 'SHA256SUMS.txt'
 $ExpectedWirelessManifestPaths = @(
@@ -355,23 +367,23 @@ try {
             (Join-Path $AppNative 'iPhoneMirror.VirtualCamera.Admin.exe') -Force
         Copy-Item $WirelessHost `
             (Join-Path $AppWireless 'iPhoneMirror.WirelessHost.exe') -Force
-        Copy-Item $UxPlayHost `
-            (Join-Path $AppUxPlay 'iPhoneMirror.UxPlayHost.exe') -Force
-        Copy-Item (Join-Path $Root 'third_party\uxplay\SOURCE.md') `
-            (Join-Path $AppUxPlay 'SOURCE.md') -Force
         if ($UseUxPlayRuntime) {
+            Copy-Item $UxPlayHost `
+                (Join-Path $AppUxPlay 'iPhoneMirror.UxPlayHost.exe') -Force
+            Copy-Item (Join-Path $Root 'third_party\uxplay\SOURCE.md') `
+                (Join-Path $AppUxPlay 'SOURCE.md') -Force
             if (-not (Test-Path -LiteralPath $PrepareUxPlayRuntime -PathType Leaf)) {
                 throw "UxPlay preparation script is missing: $PrepareUxPlayRuntime"
             }
             & $PrepareUxPlayRuntime -Destination $AppUxPlay -DnsSdPath $DnsSdRuntime | Out-Host
-        }
-        # prepare_uxplay refreshes the optional runtime directory atomically;
-        # restore the iPhoneMirror IPC adapter after that refresh.
-        Copy-Item $UxPlayHost `
-            (Join-Path $AppUxPlay 'iPhoneMirror.UxPlayHost.exe') -Force
-        foreach ($relative in $UxPlayRuntimeFiles) {
-            if (-not (Test-Path -LiteralPath (Join-Path $AppUxPlay $relative) -PathType Leaf)) {
-                throw "Prepared UxPlay runtime is missing: $relative"
+            # prepare_uxplay refreshes the optional runtime directory atomically;
+            # restore the iPhoneMirror IPC adapter after that refresh.
+            Copy-Item $UxPlayHost `
+                (Join-Path $AppUxPlay 'iPhoneMirror.UxPlayHost.exe') -Force
+            foreach ($relative in $UxPlayRuntimeFiles) {
+                if (-not (Test-Path -LiteralPath (Join-Path $AppUxPlay $relative) -PathType Leaf)) {
+                    throw "Prepared UxPlay runtime is missing: $relative"
+                }
             }
         }
         # Ship the hash-pinned receiver runtime, not the build-local shim. The
@@ -396,8 +408,9 @@ try {
 
         $libUsbDirectory = Join-Path $Root 'third_party\libusb\bin\x64'
         $env:PATH = "$libUsbDirectory$([IO.Path]::PathSeparator)$env:PATH"
-        & $UsbControlPython -m unittest tests\usb_touch_logic_test.py
+        & $UsbControlPython -m unittest discover -s tests -p '*test.py'
         if ($LASTEXITCODE -ne 0) { throw "USB touch bridge tests failed: $LASTEXITCODE" }
+        & (Join-Path $Root 'scripts\test_usb_bridge_build_source.ps1') | Out-Host
 
         $TestProjects = @(
             'src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj',
@@ -521,9 +534,11 @@ try {
             'Wireless\licenses\SOURCE.md',
             'Wireless\licenses\SHA256SUMS.txt'
         )
-        $requiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
-            Join-Path 'Wireless\UxPlay' $_
-        })
+        if ($UseUxPlayRuntime) {
+            $requiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
+                Join-Path 'Wireless\UxPlay' $_
+            })
+        }
         $bridgeToolsRoot = Join-Path $PublishRoot 'tools'
         Assert-UsbTouchBridgeRuntime -Directory $bridgeToolsRoot `
             -Label 'Published USB touch bridge runtime'
@@ -556,6 +571,13 @@ try {
             $optionalPublishedArtifacts += @($MediaOutputRuntimeFiles | ForEach-Object {
                 Join-Path 'tools\ffmpeg' $_
             })
+        }
+        # The Personalized DDI bundle shipped beside the bridge (0202f06) is
+        # published as loose content; allow every file beneath its directory.
+        $ddiRoot = Join-Path $PublishRoot 'tools\ddi'
+        if (Test-Path -LiteralPath $ddiRoot -PathType Container) {
+            $optionalPublishedArtifacts += @(Get-ChildItem -LiteralPath $ddiRoot -Recurse -File |
+                ForEach-Object { $_.FullName.Substring($PublishRoot.Length + 1) })
         }
         $allowedPublishedArtifacts = @($requiredArtifacts) + $optionalPublishedArtifacts +
             $uxplayFiles
@@ -746,9 +768,11 @@ try {
                 'tools\ffmpeg\README.txt', 'tools\ffmpeg\SOURCE.txt'
             )
         }
-        $installerRequiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
-            Join-Path 'Wireless\UxPlay' $_
-        })
+        if ($UseUxPlayRuntime) {
+            $installerRequiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
+                Join-Path 'Wireless\UxPlay' $_
+            })
+        }
         foreach ($required in $installerRequiredArtifacts) {
             if (-not (Test-Path -LiteralPath `
                     (Join-Path $InstallerPublishRoot $required) -PathType Leaf)) {

@@ -269,6 +269,20 @@ private:
     std::deque<std::shared_ptr<const AudioPacket>> audio_output_queue_;
     std::uint64_t audio_output_sequence_{};
 
+    // Result of the run() opening setup block. Carries the native display
+    // size and device fingerprint back to the caller so the worker can reuse
+    // them without re-running the side effects (atomic store + log write).
+    struct RunOpenState {
+        std::uint32_t native_width{};
+        std::uint32_t native_height{};
+        std::string device_fp;
+    };
+
+    // Publishes native_portrait_size_ and writes the capture_run begin log.
+    // Extracted from run() to lower its cyclomatic complexity; behavior is
+    // unchanged. Returns the native panel size and the device fingerprint.
+    [[nodiscard]] RunOpenState prepare_run_open_log() noexcept;
+
     void run(std::stop_token stop_token) noexcept;
     void acquire_usb_transition_gate() noexcept;
     void release_usb_transition_gate() noexcept;

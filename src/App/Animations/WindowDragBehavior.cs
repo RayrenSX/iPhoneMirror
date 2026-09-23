@@ -25,10 +25,37 @@ public static class WindowDragBehavior
     private static void OnIsEnabledChanged(DependencyObject dependencyObject,
         DependencyPropertyChangedEventArgs args)
     {
-        if (dependencyObject is not UIElement element) return;
+        if (dependencyObject is not FrameworkElement element) return;
+        element.Loaded -= OnElementLoaded;
+        element.Unloaded -= OnElementUnloaded;
         element.PreviewMouseLeftButtonDown -= OnMouseLeftButtonDown;
         if (args.NewValue is true)
-            element.PreviewMouseLeftButtonDown += OnMouseLeftButtonDown;
+        {
+            // Subscribe to Loaded/Unloaded symmetrically so the mouse handler
+            // is re-attached every time the element re-enters the visual tree
+            // (TabItem switches, ContentControl reuse). Without this, drag
+            // silently stops working after the first Unloaded.
+            element.Loaded += OnElementLoaded;
+            element.Unloaded += OnElementUnloaded;
+            // Attach immediately when the element is already loaded at bind
+            // time; Loaded will not fire again in that case.
+            if (element.IsLoaded) element.PreviewMouseLeftButtonDown += OnMouseLeftButtonDown;
+        }
+    }
+
+    private static void OnElementLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not UIElement element) return;
+        element.PreviewMouseLeftButtonDown -= OnMouseLeftButtonDown;
+        element.PreviewMouseLeftButtonDown += OnMouseLeftButtonDown;
+    }
+
+    // Detach the mouse handler when the host element leaves the visual tree so
+    // the static handler does not keep the element alive after unload.
+    private static void OnElementUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not UIElement element) return;
+        element.PreviewMouseLeftButtonDown -= OnMouseLeftButtonDown;
     }
 
     private static void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs args)
@@ -59,10 +86,7 @@ public static class WindowDragBehavior
             return;
         }
 
-        try
-        {
-            window.DragMove();
-        }
+        try { window.DragMove(); }
         catch (InvalidOperationException)
         {
             // The mouse can be released between the routed event and DragMove.
@@ -75,4 +99,5 @@ public static class WindowDragBehavior
         FrameworkContentElement content => content.Parent,
         _ => LogicalTreeHelper.GetParent(element),
     };
+
 }

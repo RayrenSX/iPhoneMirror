@@ -201,19 +201,15 @@ std::filesystem::path default_path() {
 
 std::filesystem::path configured_path() {
     constexpr auto variable = L"IPHONE_MIRROR_LOG_FILE";
-    const auto required = GetEnvironmentVariableW(variable, nullptr, 0);
-    if (required == 0) return default_path();
-
-    // Environment variables can approach 32 KiB. Keep that storage off the
-    // caller's stack and allocate only as much as this value needs.
-    std::wstring buffer(required, L'\0');
+    // Environment variables can approach 32 KiB. Allocate one buffer large enough
+    // for the whole value and read it in a single call to avoid the TOCTOU race
+    // between querying the required size and reading the value.
+    std::wstring buffer(32768, L'\0');
     const auto length = GetEnvironmentVariableW(
         variable, buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (length > 0 && length < buffer.size()) {
-        buffer.resize(length);
-        return std::filesystem::path(buffer);
-    }
-    return default_path();
+    if (length == 0 || length >= buffer.size()) return default_path();
+    buffer.resize(length);
+    return std::filesystem::path(buffer);
 }
 
 void rotate_if_needed(const std::filesystem::path& path) {
@@ -226,6 +222,15 @@ void rotate_if_needed(const std::filesystem::path& path) {
     std::filesystem::remove(previous, error);
     error.clear();
     std::filesystem::rename(path, previous, error);
+    if (error) {
+        // rotate_if_needed runs inside ensure_session_open_locked, which is
+        // reached with log_mutex already held. Calling write() here would
+        // re-acquire the non-recursive mutex on the same thread and deadlock.
+        // write_line_locked is the lock-held path; if the file is not open at
+        // this point it simply counts the line as dropped without recursing.
+        write_line_locked(Level::Warning, "logging",
+            std::format("log rotate failed: {}", error.message()));
+    }
 }
 
 std::string now_text() {

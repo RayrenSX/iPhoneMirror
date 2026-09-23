@@ -469,7 +469,7 @@ internal static class ElevatedDriverHost
         {
             var after = CaptureOne(before.InstanceId);
             if (after.UpperFiltersExisted != before.UpperFiltersExisted ||
-                !after.UpperFilters.SequenceEqual(before.UpperFilters, StringComparer.Ordinal))
+                !after.UpperFilters.SequenceEqual(before.UpperFilters, StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException(
                     $"A child-interface filter changed unexpectedly: {before.InstanceId}.");
         }

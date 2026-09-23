@@ -3,6 +3,7 @@
 #include "Protocol/Plist.h"
 #include "Transport/Socket.h"
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -28,7 +29,7 @@ public:
 
 private:
     std::uint16_t port_;
-    std::uint32_t next_tag_{1};
+    std::atomic<std::uint32_t> next_tag_{1};
 
     [[nodiscard]] plist::Value request(const plist::Value& body);
     [[nodiscard]] std::pair<Socket, plist::Value> request_with_socket(const plist::Value& body);

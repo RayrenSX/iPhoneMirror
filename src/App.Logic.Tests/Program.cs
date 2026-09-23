@@ -71,6 +71,21 @@ static async Task ThrowsAsync<TException>(Func<Task> action, string name)
     throw new InvalidOperationException($"{name}: expected {typeof(TException).Name}");
 }
 
+var clipboardSync = new ClipboardSyncState();
+Equal(true, clipboardSync.TryBegin("device text"),
+    "new clipboard text is accepted");
+Equal(false, clipboardSync.TryBegin("device text"),
+    "an in-flight clipboard update is coalesced");
+clipboardSync.Complete("device text", succeeded: false);
+Equal(true, clipboardSync.TryBegin("device text"),
+    "a failed Windows clipboard write allows the same text to retry");
+clipboardSync.Complete("device text", succeeded: true);
+Equal(false, clipboardSync.TryBegin("device text"),
+    "a successfully synchronized clipboard value is deduplicated");
+Equal(true, clipboardSync.TryBegin("new device text"),
+    "a changed device clipboard value is accepted");
+clipboardSync.Complete("new device text", succeeded: true);
+
 
 static async Task<(int ExitCode, string Output)> RunWindowsPowerShellAsync(
     string script, string zipPath, string installDirectory, string restartExecutable,
@@ -373,7 +388,7 @@ Equal(true,
         "if (!ReferenceEquals(_wirelessTouchBridge, bridge)) return;",
         StringComparison.Ordinal) &&
     mainViewModelSource.Contains(
-        "if (!ReferenceEquals(_usbTouchBridge, bridge)) return;",
+        "if (!ReferenceEquals(_usbTouchBridge, bridge) || cancellationToken.IsCancellationRequested) return;",
         StringComparison.Ordinal) &&
     mainViewModelSource.Contains(
         "_usbControlStopping = true;",
@@ -381,10 +396,10 @@ Equal(true,
     "reverse-control bridge callbacks and shutdowns are instance-safe");
 Equal(true,
     mainWindowSource.Contains(
-        "e.Kind == Controls.PreviewPointerKind.ButtonUp && _usbTouchPressed",
+        "e.Kind == Controls.PreviewPointerKind.ButtonUp && state.Pressed",
         StringComparison.Ordinal) &&
     mainWindowSource.Contains(
-        "SendUsbTouchAsync(\"up\", _lastUsbTouchPosition.X",
+        "SendUsbTouchAsync(\"up\", state.LastX",
         StringComparison.Ordinal),
     "USB touch releases at the last valid position when the pointer leaves the image");
 Equal(true, mainWindowSource.Contains("MainPreviewHost.Deactivate();",
@@ -605,7 +620,7 @@ Equal(true, restoreWarningCatchIndex > stopMethodIndex &&
 Equal(true, stopMethodIndex >= 0 &&
         mainViewModelSource.IndexOf("requestedState.IsStopping = true;", stopMethodIndex,
             StringComparison.Ordinal) > stopMethodIndex &&
-        mainViewModelSource.IndexOf("NativeCore.SelectPreviewSession(0);", stopMethodIndex,
+        mainViewModelSource.IndexOf("NativeCore.SelectPreviewSession(null);", stopMethodIndex,
             StringComparison.Ordinal) > stopMethodIndex &&
         mainViewModelSource.IndexOf("CaptureCleaningDevice", stopMethodIndex,
             StringComparison.Ordinal) > stopMethodIndex,
@@ -4261,6 +4276,14 @@ Equal(24, nv12Payload.Length,
     "NV12 output writes one-and-a-half bytes per pixel");
 Equal(true, nv12Payload.Span.SequenceEqual(nv12Pixels),
     "NV12 output is forwarded without a managed color conversion or copy");
+var frameLatch = new MediaOutputService.FrameLatch();
+frameLatch.Publish(nv12Payload);
+var writingFrame = frameLatch.Get();
+nv12Pixels[0] = 99;
+Equal((byte)1, writingFrame.Span[0], "published frame owns its bytes before native buffer reuse");
+frameLatch.Publish(nv12Payload);
+Equal((byte)1, writingFrame.Span[0], "an in-flight pipe write retains the preceding snapshot");
+Equal((byte)99, frameLatch.Get().Span[0], "the next snapshot receives the new frame");
 Throws<InvalidDataException>(() => MediaOutputService.GetNv12FramePayload(
         new IPhoneMirror.App.Interop.Nv12VideoFrame(4, 4, 8, 2, nv12Pixels),
         4, 4),
@@ -4722,6 +4745,45 @@ Sequence(["phone-b", "phone-c"],
 // Closing must explicitly stop the QuickTime session before core disposal,
 // and repeated close notifications must not send a second shutdown sequence.
 var shutdownOrder = new List<string>();
+var recoveryOperation = new SingleFlightOperation();
+var recoveryEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var recoveryCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var recoveryCanFinish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var recoveryStarts = 0;
+var lateReady = false;
+var recovering = recoveryOperation.RunAsync(async token =>
+{
+    ++recoveryStarts;
+    recoveryEntered.SetResult();
+    try
+    {
+        await Task.Delay(Timeout.Infinite, token);
+        lateReady = true;
+    }
+    finally
+    {
+        recoveryCleanup.SetResult();
+        await recoveryCanFinish.Task;
+    }
+});
+await recoveryEntered.Task;
+var duplicateRecovery = recoveryOperation.RunAsync(_ =>
+{
+    ++recoveryStarts;
+    return Task.CompletedTask;
+});
+Equal(true, ReferenceEquals(recovering, duplicateRecovery),
+    "duplicate bridge errors share one recovery operation");
+var cancellingRecovery = recoveryOperation.CancelAsync();
+await recoveryCleanup.Task.WaitAsync(TimeSpan.FromSeconds(5));
+Equal(false, cancellingRecovery.IsCompleted, "disable joins recovery cleanup before disposing its resources");
+recoveryCanFinish.SetResult();
+await cancellingRecovery;
+Equal(1, recoveryStarts, "only one recovery starts while a retry is pending");
+Equal(false, lateReady, "disabling during backoff cannot re-enable control");
+await recoveryOperation.RunAsync(_ => { ++recoveryStarts; return Task.CompletedTask; });
+Equal(2, recoveryStarts, "explicit re-enable starts a fresh operation after cancellation");
+
 var shutdown = new CaptureShutdownCoordinator();
 await shutdown.StopAndDisposeOnceAsync(
     () => { shutdownOrder.Add("stop"); return Task.CompletedTask; },
@@ -4748,14 +4810,14 @@ var sessionManager = new DeviceSessionManager(
 var concurrentSession = new DeviceCaptureState
 {
     Udid = "concurrent-stop-device",
-    Handle = 77,
+    Handle = new NativeSessionHandle(77, ownsHandle: false),
 };
 var firstTeardown = sessionManager.StopAndDestroyAsync(concurrentSession);
 await teardownEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 var secondTeardown = sessionManager.StopAndDestroyAsync(concurrentSession);
 Equal(true, ReferenceEquals(firstTeardown, secondTeardown),
     "concurrent stop callers share the in-flight teardown task");
-Equal((ulong)0, concurrentSession.Handle,
+Equal(true, concurrentSession.Handle is null,
     "session handle is revoked before native teardown finishes");
 Equal(true, concurrentSession.IsStopping,
     "session remains stopping while native teardown is in flight");
@@ -4780,7 +4842,7 @@ var warningManager = new DeviceSessionManager(
 var warningSession = new DeviceCaptureState
 {
     Udid = "restore-warning-device",
-    Handle = 88,
+    Handle = new NativeSessionHandle(88, ownsHandle: false),
 };
 try
 {
@@ -4796,7 +4858,7 @@ Equal(1, warningStops,
     "USB restore warning still invokes native stop exactly once");
 Equal(1, warningDestroys,
     "USB restore warning still destroys the native session handle");
-Equal((ulong)0, warningSession.Handle,
+Equal(true, warningSession.Handle is null,
     "USB restore warning revokes the session handle before reporting the warning");
 Equal(false, warningSession.IsStopping,
     "USB restore warning clears the in-flight stop state");
@@ -4844,8 +4906,8 @@ Equal(false, SingleInstanceCoordinator.IsSameExecutable(currentExecutable,
 Equal(false, SingleInstanceCoordinator.IsSameExecutable(currentExecutable, null),
     "single-instance matching rejects processes whose executable path cannot be verified");
 
-var deviceA = new DeviceCaptureState { Udid = "phone-a", Handle = 11, FrameRate = 60, Volume = 80 };
-var deviceB = new DeviceCaptureState { Udid = "phone-b", Handle = 22, FrameRate = 30, Volume = 25 };
+var deviceA = new DeviceCaptureState { Udid = "phone-a", Handle = new NativeSessionHandle(11, ownsHandle: false), FrameRate = 60, Volume = 80 };
+var deviceB = new DeviceCaptureState { Udid = "phone-b", Handle = new NativeSessionHandle(22, ownsHandle: false), FrameRate = 30, Volume = 25 };
 Equal(UsbProjectionMode.Demo, deviceA.UsbProjectionMode,
     "USB projection defaults to recommended demo mode");
 deviceA.UsbProjectionMode = UsbProjectionMode.AirPlay;
@@ -4875,7 +4937,7 @@ Equal(12.0, deviceA.Brightness,
 Equal(75.0, deviceB.Saturation,
     "device B keeps its independent saturation adjustment");
 deviceB.FrameRate = 24;
-Equal((ulong)11, deviceA.Handle, "switching device does not release first session");
+Equal((ulong)11, deviceA.Handle.RawHandle, "switching device does not release first session");
 Equal(60, deviceA.FrameRate, "device A settings remain independent");
 Equal(24, deviceB.FrameRate, "device B settings update independently");
 Equal(true, deviceA.UpdateProtectionState(true, false, 0, 0),
@@ -4895,16 +4957,27 @@ Equal(false, deviceA.VideoProtected,
 var imageSettingsSession = new DeviceCaptureState
 {
     Udid = "image-settings-device",
-    Handle = 41,
+    Handle = new NativeSessionHandle(41, ownsHandle: false),
 };
 Equal(true, imageSettingsSession.MatchesSessionHandle(41),
     "image settings recognizes the session handle that opened the window");
-imageSettingsSession.Handle = 42;
+imageSettingsSession.Handle = new NativeSessionHandle(42, ownsHandle: false);
 Equal(false, imageSettingsSession.MatchesSessionHandle(41),
     "image settings rejects a replacement session even when its state object is reused");
 imageSettingsSession.IsStopping = true;
 Equal(false, imageSettingsSession.MatchesSessionHandle(42),
     "image settings rejects a session while it is being torn down");
+var idleSettingsSession = new DeviceCaptureState { Udid = "idle-settings-device" };
+Equal(true, idleSettingsSession.MatchesSessionHandle(0),
+    "settings can be saved before capture starts");
+idleSettingsSession.IsStopping = true;
+Equal(false, idleSettingsSession.MatchesSessionHandle(0),
+    "settings reject an idle handle during teardown");
+imageSettingsSession.IsStopping = false;
+imageSettingsSession.Handle.Dispose();
+Equal(false, imageSettingsSession.HasSession, "closed handles are not live sessions");
+Equal(false, imageSettingsSession.MatchesSessionHandle(42),
+    "settings reject a disposed session handle");
 
 var videoSettings = new DeviceCaptureState
 {

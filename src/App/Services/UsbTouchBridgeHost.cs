@@ -3,11 +3,12 @@ namespace IPhoneMirror.App.Services;
 internal enum UsbTouchTransport { Usb, Wireless }
 internal enum ReverseControlState { Idle, BindingRequired, DeviceUnavailable, Connecting, Ready, Controlling, Error }
 
-internal sealed class BridgeStatusEventArgs(string eventName, string? code, string? message) : EventArgs
+internal sealed class BridgeStatusEventArgs(string eventName, string? code, string? message, string? text = null) : EventArgs
 {
     internal string EventName { get; } = eventName;
     internal string? Code { get; } = code;
     internal string? Message { get; } = message;
+    internal string? Text { get; } = text;
 }
 
 /// <summary>
@@ -85,6 +86,22 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
         return _bridge.SendButtonAsync(usagePage, usageCode, state, cancellationToken);
     }
 
+    internal Task SendPasteTextAsync(string text,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureReady();
+        State = ReverseControlState.Controlling;
+        return _bridge.SendPasteTextAsync(text, cancellationToken);
+    }
+
+    internal Task SendReadClipboardAsync(
+        CancellationToken cancellationToken = default)
+    {
+        EnsureReady();
+        return _bridge.SendReadClipboardAsync(cancellationToken);
+    }
+
+
     internal async Task StopAsync()
     {
         if (Interlocked.Exchange(ref _started, 0) == 0) return;
@@ -99,9 +116,9 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
             throw new InvalidOperationException("反控桥接器尚未就绪。");
     }
 
-    private void OnBridgeEvent(BridgeEvent e) => Raise(e.Event, e.Code, e.Message);
-    private void Raise(string name, string? code, string? message) =>
-        StatusChanged?.Invoke(this, new BridgeStatusEventArgs(name, code, message));
+    private void OnBridgeEvent(BridgeEvent e) => Raise(e.Event, e.Code, e.Message, e.Text);
+    private void Raise(string name, string? code, string? message, string? text = null) =>
+        StatusChanged?.Invoke(this, new BridgeStatusEventArgs(name, code, message, text));
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 }

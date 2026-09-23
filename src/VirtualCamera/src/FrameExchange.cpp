@@ -77,20 +77,13 @@ HRESULT create_channel_security(SECURITY_ATTRIBUTES& attributes,
 HRESULT create_backing_file(HANDLE& file, std::wstring& path,
                             SECURITY_ATTRIBUTES* attributes) {
     PWSTR raw_public_documents{};
-    HRESULT result = SHGetKnownFolderPath(
+    const HRESULT public_documents_result = SHGetKnownFolderPath(
         FOLDERID_PublicDocuments, KF_FLAG_DEFAULT, nullptr,
         &raw_public_documents);
-    if (FAILED(result)) return result;
-    const auto release_path = std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)>(
-        raw_public_documents, &CoTaskMemFree);
-
-    std::filesystem::path directory =
-        std::filesystem::path(raw_public_documents) / L"iPhoneMirror" /
-        L"FrameChannels";
-    std::error_code directory_error;
-    std::filesystem::create_directories(directory, directory_error);
-    if (directory_error)
-        return HRESULT_FROM_WIN32(static_cast<DWORD>(directory_error.value()));
+    const auto release_public_path =
+        std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)>(
+            raw_public_documents, &CoTaskMemFree);
+    HRESULT result = S_OK;
 
     GUID identifier{};
     if (FAILED(result = CoCreateGuid(&identifier))) return result;
@@ -98,18 +91,60 @@ HRESULT create_backing_file(HANDLE& file, std::wstring& path,
     if (StringFromGUID2(identifier, identifier_text,
                         static_cast<int>(std::size(identifier_text))) == 0)
         return E_UNEXPECTED;
-    path = (directory / (std::wstring(L"imv-") + identifier_text +
-                         L".frame")).native();
+    const std::wstring filename = std::wstring(L"imv-") + identifier_text +
+        L".frame";
 
-    file = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                       attributes, CREATE_NEW,
-                       FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-                       nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        result = win32_error();
+    // PublicDocuments is normally reachable by Frame Server, but enterprise
+    // policy can make it non-writable. Try a per-user fallback when directory
+    // creation or file creation is denied, so a local app can still start.
+    std::vector<std::filesystem::path> directories;
+    if (SUCCEEDED(public_documents_result)) {
+        directories.emplace_back(std::filesystem::path(raw_public_documents) /
+                                 L"iPhoneMirror" / L"FrameChannels");
+    }
+    PWSTR raw_local_app_data{};
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT,
+                                       nullptr, &raw_local_app_data))) {
+        const auto release_local = std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)>(
+            raw_local_app_data, &CoTaskMemFree);
+        directories.emplace_back(std::filesystem::path(raw_local_app_data) /
+                                 L"iPhoneMirror" / L"FrameChannels");
+    }
+    wchar_t raw_temp_path[MAX_PATH]{};
+    const DWORD temp_path_length = GetTempPathW(
+        static_cast<DWORD>(std::size(raw_temp_path)), raw_temp_path);
+    if (temp_path_length != 0 &&
+        temp_path_length < std::size(raw_temp_path)) {
+        directories.emplace_back(std::filesystem::path(raw_temp_path) /
+                                 L"iPhoneMirror" / L"FrameChannels");
+    }
+
+    HRESULT last_result = E_ACCESSDENIED;
+    for (const auto& directory : directories) {
+        std::error_code directory_error;
+        std::filesystem::create_directories(directory, directory_error);
+        if (directory_error) {
+            last_result = HRESULT_FROM_WIN32(
+                static_cast<DWORD>(directory_error.value()));
+            continue;
+        }
+        path = (directory / filename).native();
+        file = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE |
+                               FILE_SHARE_DELETE,
+                           attributes, CREATE_NEW,
+                           FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+                           nullptr);
+        if (file != INVALID_HANDLE_VALUE) break;
+        last_result = win32_error();
         path.clear();
-        return result;
+        if (last_result != E_ACCESSDENIED &&
+            last_result != HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND))
+            return last_result;
+    }
+    if (file == INVALID_HANDLE_VALUE) {
+        path.clear();
+        return last_result;
     }
 
     const auto mapping_bytes = static_cast<LONGLONG>(
@@ -230,13 +265,23 @@ void FramePublisher::serve_channel_path(std::stop_token stop_token) const noexce
     while (!stop_token.stop_requested()) {
         SECURITY_ATTRIBUTES attributes{};
         LocalMemory descriptor;
-        if (FAILED(create_channel_security(attributes, descriptor))) return;
+        if (FAILED(create_channel_security(attributes, descriptor))) {
+            // Without diagnostics the worker thread would vanish silently
+            // while the publisher still believes the channel is served.
+            OutputDebugStringW(L"FramePublisher: create_channel_security "
+                               L"failed; channel server thread exiting\n");
+            return;
+        }
         HANDLE pipe = CreateNamedPipeW(
             FrameChannelPipeName,
             PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             1, 1024, 1024, 0, &attributes);
-        if (pipe == INVALID_HANDLE_VALUE) return;
+        if (pipe == INVALID_HANDLE_VALUE) {
+            OutputDebugStringW(L"FramePublisher: CreateNamedPipeW failed; "
+                               L"channel server thread exiting\n");
+            return;
+        }
         const BOOL connected = ConnectNamedPipe(pipe, nullptr) ||
             GetLastError() == ERROR_PIPE_CONNECTED;
         if (connected && !stop_token.stop_requested()) {

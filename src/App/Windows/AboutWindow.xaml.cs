@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -75,8 +76,27 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
         await _mainViewModel.RefreshLogsAsync();
     }
 
-    private void OnLogTimerTick(object? sender, EventArgs e) =>
-        _ = _mainViewModel.RefreshLogsAsync();
+    private int _refreshInProgress;
+
+    private async void OnLogTimerTick(object? sender, EventArgs e)
+    {
+        // Reentrancy guard: the timer fires every 500ms but a refresh may take
+        // longer. Skip overlapping invocations instead of queueing them, and
+        // observe exceptions so a slow refresh never surfaces unobserved.
+        if (Interlocked.CompareExchange(ref _refreshInProgress, 1, 0) != 0) return;
+        try
+        {
+            await _mainViewModel.RefreshLogsAsync();
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.Exception("about", "log_refresh_failed", ex);
+        }
+        finally
+        {
+            _refreshInProgress = 0;
+        }
+    }
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {

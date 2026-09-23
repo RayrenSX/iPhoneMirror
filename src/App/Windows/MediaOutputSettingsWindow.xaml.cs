@@ -245,6 +245,18 @@ public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
         await PromptToSaveRecordingAsync();
     }
 
+    private void OnDiscardClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.PendingRecordingPath is null) return;
+        if (MessageBox.Show(this, LocalizationService.Get("DiscardRecordingConfirmation"),
+                LocalizationService.Get("DiscardRecording"), MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        FeedbackText.Text = _viewModel.DiscardPendingRecording()
+            ? LocalizationService.Get("RecordingDiscarded")
+            : LocalizationService.Get("RecordingDiscardFailed");
+    }
+
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     private async Task PromptToSaveRecordingAsync()

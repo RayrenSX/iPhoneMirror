@@ -41,6 +41,11 @@ Socket& Socket::operator=(Socket&& other) noexcept {
 }
 
 Socket Socket::connect_loopback(std::uint16_t port, int timeout_ms) {
+    // Validate the timeout up front so a non-positive value is rejected even
+    // when connect succeeds immediately; otherwise setsockopt would receive an
+    // undefined non-positive timeout and the select branch below would never
+    // run to guard it.
+    if (timeout_ms <= 0) throw SocketError("connect timeout must be positive", WSAEINVAL);
     ensure_winsock();
     const SOCKET handle = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (handle == INVALID_SOCKET) throw SocketError("socket", WSAGetLastError());
@@ -63,6 +68,8 @@ Socket Socket::connect_loopback(std::uint16_t port, int timeout_ms) {
         fd_set write_set;
         FD_ZERO(&write_set);
         FD_SET(handle, &write_set);
+        // select's timeval fields are unsigned; the entry-point check above
+        // guarantees timeout_ms is positive so tv_sec/tv_usec are well-defined.
         timeval timeout{ timeout_ms / 1000, (timeout_ms % 1000) * 1000 };
         status = select(0, nullptr, &write_set, nullptr, &timeout);
         if (status == 0) throw SocketError("connect timeout", WSAETIMEDOUT);

@@ -147,7 +147,7 @@ internal static class ThemeService
         _ = Application.Current.Dispatcher.BeginInvoke(() => Apply(AppTheme.System));
     }
 
-    private static void ApplyBackdrop(Window window)
+    internal static void ApplyBackdrop(Window window)
     {
         if (window.AllowsTransparency) return;
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;

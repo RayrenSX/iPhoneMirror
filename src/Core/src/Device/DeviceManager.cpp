@@ -305,27 +305,57 @@ std::vector<DeviceRecord> DeviceManager::refresh(bool refresh_metadata) {
         try { list_devices_from_port(37015, devices); } catch (...) {}
     }
 
-    std::vector<DeviceRecord> result;
-    result.reserve(devices.size());
-    std::scoped_lock metadata_lock(metadata_mutex_);
-    for (const auto& [serial, source] : devices) {
-        auto record = make_presence_record(source);
-        const auto cached = metadata_cache_.find(serial);
-        const bool metadata_needed = refresh_metadata ||
-            cached == metadata_cache_.end();
-        if (!metadata_needed) {
-            apply_cached_metadata(record, cached->second);
-        } else {
-            enrich_device_metadata(source, record);
-            // A transient explicit refresh must not erase known model/name data.
-            if (!record.lockdown_accessible &&
-                cached != metadata_cache_.end()) {
-                apply_cached_metadata(record, cached->second);
-            } else {
-                metadata_cache_.insert_or_assign(serial, record);
-            }
+    // Snapshot the cache decisions under the lock, then run the network-bound
+    // enrichment outside so concurrent refresh/environment callers are not
+    // blocked for the duration of USB/lockdownd roundtrips.
+    struct WorkItem {
+        std::string serial;
+        const MuxDeviceRecord* source;
+        DeviceRecord record;
+        bool metadata_needed;
+        bool had_cache;
+        DeviceRecord cached_snapshot;
+    };
+    std::vector<WorkItem> work;
+    work.reserve(devices.size());
+    {
+        std::scoped_lock metadata_lock(metadata_mutex_);
+        for (const auto& [serial, source] : devices) {
+            WorkItem item{};
+            item.serial = serial;
+            item.source = &source;
+            item.record = make_presence_record(source);
+            const auto cached = metadata_cache_.find(serial);
+            item.had_cache = cached != metadata_cache_.end();
+            item.metadata_needed = refresh_metadata || !item.had_cache;
+            if (item.had_cache) item.cached_snapshot = cached->second;
+            if (!item.metadata_needed)
+                apply_cached_metadata(item.record, item.cached_snapshot);
+            work.push_back(std::move(item));
         }
-        result.push_back(std::move(record));
+    }
+
+    // Network roundtrips happen here, with no lock held.
+    for (auto& item : work)
+        if (item.metadata_needed)
+            enrich_device_metadata(*item.source, item.record);
+
+    std::vector<DeviceRecord> result;
+    result.reserve(work.size());
+    {
+        std::scoped_lock metadata_lock(metadata_mutex_);
+        for (auto& item : work) {
+            if (item.metadata_needed) {
+                // A transient explicit refresh must not erase known
+                // model/name data.
+                if (!item.record.lockdown_accessible && item.had_cache) {
+                    apply_cached_metadata(item.record, item.cached_snapshot);
+                } else {
+                    metadata_cache_.insert_or_assign(item.serial, item.record);
+                }
+            }
+            result.push_back(std::move(item.record));
+        }
     }
     return result;
 }

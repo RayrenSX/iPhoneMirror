@@ -1181,7 +1181,9 @@ internal sealed class NativePreviewWindow : IDisposable
         _aspectController.Dispose();
         if (_attached && _handle != 0)
         {
-            _detachPreview(_handle);
+            // Isolate native detach failures so subsequent HWND/GDI cleanup still runs.
+            try { _detachPreview(_handle); }
+            catch (Exception ex) { Log("detach_preview_failed", ("error", ex.Message)); }
             _attached = false;
         }
         if (_managedContentRoot is not null)
