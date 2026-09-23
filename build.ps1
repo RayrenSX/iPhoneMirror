@@ -120,7 +120,12 @@ function Build-UsbTouchBridge {
         throw 'USB touch bridge output is incomplete.'
     }
     if (-not (Test-Path -LiteralPath $UsbControlPython -PathType Leaf)) {
-        throw "USB touch bridge Python environment is missing: $UsbControlPython"
+        $systemPython = Get-Command python -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($null -eq $systemPython) {
+            throw "USB touch bridge Python environment is missing and no system Python was found: $UsbControlPython"
+        }
+        $UsbControlPython = $systemPython.Source
     }
     Assert-UsbTouchBridgeRuntime -Directory (Join-Path $Root 'dist') `
         -Label 'Built USB touch bridge'
