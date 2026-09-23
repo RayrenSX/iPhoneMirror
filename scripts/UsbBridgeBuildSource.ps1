@@ -45,6 +45,15 @@ function New-UsbBridgeBuildSource {
             Copy-Item -LiteralPath $_.FullName -Destination $destination
         }
     }
+    $patches = Join-Path $RecipeRoot 'patches'
+    if (Test-Path -LiteralPath $patches -PathType Container) {
+        Get-ChildItem -LiteralPath $patches -Recurse -File | ForEach-Object {
+            $relative = $_.FullName.Substring([IO.Path]::GetFullPath($RecipeRoot).TrimEnd('\\').Length + 1)
+            $destination = Join-Path $stage $relative
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $destination
+        }
+    }
     # Copy source only: stale bytecode from either checkout must not ship.
     Get-ChildItem -LiteralPath $package -Recurse -File -Filter '*.py' | ForEach-Object {
         $relative = $_.FullName.Substring([IO.Path]::GetFullPath($SourceRoot).TrimEnd('\').Length + 1)
