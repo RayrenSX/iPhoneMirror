@@ -96,8 +96,10 @@ function Build-UsbTouchBridge {
     $stage = New-UsbBridgeBuildSource -RecipeRoot $UsbControlRoot `
         -SourceRoot (Join-Path $Root 'tools') -WorkRoot $stageRoot
     try {
-        & (Join-Path $stage 'build.ps1') -BridgeOnly -BridgeOutputPath $UsbTouchBridgeOutput `
-            -EnvironmentPath $UsbControlEnvironment
+        # The bridge repository has shipped builds with and without an
+        # EnvironmentPath parameter. Its default path is the maintained
+        # sibling work directory, which is also the path validated below.
+        & (Join-Path $stage 'build.ps1') -BridgeOnly -BridgeOutputPath $UsbTouchBridgeOutput
         if ($LASTEXITCODE -ne 0) {
             throw "USB touch bridge build failed: $LASTEXITCODE"
         }
