@@ -1,7 +1,10 @@
 #include "Protocol/QuickTimeSession.h"
 
+#include "Logging.h"
+
 #include <bit>
 #include <cmath>
+#include <format>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -225,10 +228,32 @@ void SessionProtocol::reset() {
     epoch_ = std::chrono::steady_clock::now();
     device_audio_clock_ = local_audio_clock_ = device_video_clock_ = local_video_clock_ = local_host_clock_ = 0;
     video_frames_ = audio_packets_ = 0;
+    need_sent_ = reply_received_ = 0;
+    last_video_sample_at_.reset();
+    last_audio_sample_at_.reset();
     video_format_.reset();
     audio_format_.reset();
     negotiated_audio_.reset();
 }
+
+namespace {
+
+// Rate-limited one-line hex preview for protocol diagnostics. Keeps a single
+// idle-screen reproduction to a handful of lines while still exposing the
+// clock fields needed to correlate a device stall with NEED/RPLY traffic.
+void log_packet_diagnostic(std::string_view event, std::uint64_t sequence,
+    std::uint64_t clock_or_correlation, std::span<const std::uint8_t> payload) {
+    const auto preview_bytes = std::min<std::size_t>(payload.size(), 24);
+    std::string preview;
+    preview.reserve(preview_bytes * 3);
+    for (std::size_t index = 0; index < preview_bytes; ++index)
+        preview += std::format("{:02x}", payload[index]);
+    logging::write(std::format(
+        "{} n={} clock_or_correlation={} bytes={} hex={}",
+        event, sequence, clock_or_correlation, payload.size(), preview));
+}
+
+} // namespace
 
 SessionEvent SessionProtocol::process(const Packet& packet) {
     SessionEvent event;
@@ -255,6 +280,10 @@ SessionEvent SessionProtocol::process(const Packet& packet) {
                 if (packet.payload.size() < 32) throw std::runtime_error("CVRP has no device video clock");
                 device_video_clock_ = u64le(packet.payload.data() + 24);
                 local_video_clock_ = device_video_clock_ + 0x1000af;
+                ++need_sent_;
+                if (need_sent_ <= 3 || need_sent_ % 25 == 0)
+                    log_packet_diagnostic("qt_need_sent", need_sent_,
+                        device_video_clock_, {});
                 event.outbound.push_back(make_need(device_video_clock_));
                 event.outbound.push_back(clock_reply(id, local_video_clock_));
             } else if (packet.subtype == fourcc('c', 'l', 'o', 'k')) {
@@ -283,8 +312,26 @@ SessionEvent SessionProtocol::process(const Packet& packet) {
                 if (sample.format) video_format_ = sample.format;
                 event.video_sample = std::move(sample);
                 ++video_frames_;
-                if (!tearing_down && device_video_clock_ != 0)
+                const auto video_now = std::chrono::steady_clock::now();
+                if (last_video_sample_at_) {
+                    const auto gap = video_now - *last_video_sample_at_;
+                    if (gap >= std::chrono::seconds(1))
+                        logging::write(std::format(
+                            "qt_video_resume frame={} gap_ms={}",
+                            video_frames_,
+                            std::chrono::duration_cast<std::chrono::milliseconds>(gap).count()));
+                }
+                last_video_sample_at_ = video_now;
+                if (video_frames_ <= 5 || video_frames_ % 25 == 0)
+                    logging::write(std::format("qt_video_sample frame={}", video_frames_));
+                if (!tearing_down && device_video_clock_ != 0) {
+                    ++need_sent_;
+                    if (need_sent_ <= 3 || need_sent_ % 25 == 0)
+                        logging::write(std::format(
+                            "qt_need_sent n={} device_clock={}",
+                            need_sent_, device_video_clock_));
                     event.outbound.push_back(make_need(device_video_clock_));
+                }
                 // Media already queued by the device can arrive after HPD0 or
                 // SYNC STOP. It must not roll a teardown state back to
                 // Streaming and suppress the final HPD0 release control.
@@ -296,7 +343,28 @@ SessionEvent SessionProtocol::process(const Packet& packet) {
                 if (sample.format) audio_format_ = sample.format;
                 event.audio_sample = std::move(sample);
                 ++audio_packets_;
+                const auto audio_now = std::chrono::steady_clock::now();
+                if (last_audio_sample_at_) {
+                    const auto gap = audio_now - *last_audio_sample_at_;
+                    if (gap >= std::chrono::seconds(1))
+                        logging::write(std::format(
+                            "qt_audio_resume packet={} gap_ms={}",
+                            audio_packets_,
+                            std::chrono::duration_cast<std::chrono::milliseconds>(gap).count()));
+                }
+                last_audio_sample_at_ = audio_now;
+                if (audio_packets_ <= 5 || audio_packets_ % 25 == 0)
+                    logging::write(std::format("qt_audio_sample packet={}", audio_packets_));
             }
+        } else if (packet.kind == PacketKind::Reply) {
+            // Diagnostics only: the device's clock answer to our NEED probe is
+            // currently ignored by design; log it (rate-limited) to confirm
+            // what the device returns and whether it keeps arriving while the
+            // media stream stalls. No protocol behavior is changed here.
+            ++reply_received_;
+            if (reply_received_ <= 3 || reply_received_ % 20 == 0)
+                log_packet_diagnostic("qt_reply_received", reply_received_,
+                    packet.clock_ref, packet.payload);
         }
     } catch (const std::exception& error) {
         state_ = SessionState::Error;

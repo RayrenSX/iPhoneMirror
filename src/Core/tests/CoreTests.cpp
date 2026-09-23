@@ -147,6 +147,30 @@ void test_plist() {
     check_throws([] {
         (void)iPhoneMirror::plist::parse_xml("<string>&#x110000;</string>");
     }, "out-of-range XML entity rejected");
+
+    const auto nested = [](int count, bool mixed) {
+        std::string value = "<true/>";
+        for (int i = 0; i < count; ++i) {
+            value = mixed && i % 2 ? "<dict><key>x</key>" + value + "</dict>"
+                                  : "<array>" + value + "</array>";
+        }
+        return value;
+    };
+    for (bool mixed : {false, true}) {
+        (void)iPhoneMirror::plist::parse_xml(nested(127, mixed));
+        for (const auto& wrapper : {std::string{}, std::string{"<plist>"}}) {
+            try {
+                (void)iPhoneMirror::plist::parse_xml(wrapper + nested(128, mixed) +
+                    (wrapper.empty() ? "" : "</plist>"));
+                check(false, "excessive plist nesting must be rejected");
+            } catch (const iPhoneMirror::plist::ParseError&) {
+                // A recoverable parser error, never a stack overflow.
+            }
+        }
+    }
+    check_throws([&] {
+        (void)iPhoneMirror::plist::parse_xml(nested(10000, false));
+    }, "small deeply nested payload is safely rejected");
 }
 
 void test_quicktime_framing() {

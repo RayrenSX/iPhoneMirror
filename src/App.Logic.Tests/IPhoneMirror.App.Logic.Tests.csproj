@@ -8,6 +8,8 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\App\Services\SingleFlightOperation.cs" Link="SingleFlightOperation.cs" />
+    <Compile Include="..\App\Services\ClipboardSyncState.cs" Link="ClipboardSyncState.cs" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
   <ItemGroup>

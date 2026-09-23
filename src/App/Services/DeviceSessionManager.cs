@@ -5,8 +5,8 @@ namespace IPhoneMirror.App.Services;
 
 internal sealed class DeviceSessionManager
 {
-    private readonly Action<ulong> _stopSession;
-    private readonly Action<ulong> _destroySession;
+    private readonly Action<NativeSessionHandle> _stopSession;
+    private readonly Action<NativeSessionHandle> _destroySession;
     private readonly object _gate = new();
     private readonly Dictionary<string, DeviceCaptureState> _states =
         new(StringComparer.OrdinalIgnoreCase);
@@ -18,13 +18,15 @@ internal sealed class DeviceSessionManager
     internal DeviceSessionManager(NativeCore core)
         : this(core.StopDeviceSession, core.DestroyDeviceSession) { }
 
-    internal DeviceSessionManager(Action<ulong> stopSession,
-        Action<ulong> destroySession)
+    internal DeviceSessionManager(Action<NativeSessionHandle> stopSession,
+        Action<NativeSessionHandle> destroySession)
     {
         _stopSession = stopSession;
         _destroySession = destroySession;
     }
 
+    // Kept as ulong because UI subscribers only need the raw identity for
+    // comparison, not SafeHandle ownership.
     internal event Action<string, ulong>? SessionHandleChanged;
 
     internal IReadOnlyList<KeyValuePair<string, DeviceCaptureState>> Entries
@@ -58,28 +60,28 @@ internal sealed class DeviceSessionManager
         lock (_gate) _states[state.Udid] = state;
     }
 
-    internal void SetHandle(DeviceCaptureState state, ulong handle)
+    internal void SetHandle(DeviceCaptureState state, NativeSessionHandle? handle)
     {
         var changed = false;
         lock (_gate)
         {
-            if (state.Handle != handle)
+            if (state.Handle?.RawHandle != handle?.RawHandle)
             {
                 state.ResetRuntimeObservations();
                 state.Handle = handle;
-                if (handle != 0) state.ErrorShown = false;
+                if (handle is not null && !handle.IsInvalid) state.ErrorShown = false;
                 changed = true;
             }
         }
         if (!changed) return;
-        try { SessionHandleChanged?.Invoke(state.Udid, handle); }
+        try { SessionHandleChanged?.Invoke(state.Udid, handle?.RawHandle ?? 0); }
         catch (Exception error)
         {
             // Session ownership changes must complete even if a UI observer
             // fails while closing a stale window.
             DiagnosticLogger.Exception("capture", "session_handle_observer_failed",
                 error, ("device", AppLog.Device(state.Udid)),
-                ("handle", AppLog.Handle(handle)));
+                ("handle", AppLog.Handle(handle?.RawHandle ?? 0)));
         }
     }
 
@@ -105,16 +107,16 @@ internal sealed class DeviceSessionManager
     internal Task StopAndDestroyAsync(DeviceCaptureState state)
     {
         Task teardown;
-        ulong handle;
+        NativeSessionHandle? handle;
         lock (_gate)
         {
             if (_teardowns.TryGetValue(state.Udid, out teardown!))
                 return teardown;
             handle = state.Handle;
-            if (handle == 0) return Task.CompletedTask;
+            if (handle is null || handle.IsInvalid) return Task.CompletedTask;
             state.IsStopping = true;
             state.ResetRuntimeObservations();
-            state.Handle = 0;
+            state.Handle = null;
             teardown = StopAndDestroyCoreAsync(state, handle);
             _teardowns[state.Udid] = teardown;
         }
@@ -125,7 +127,7 @@ internal sealed class DeviceSessionManager
     }
 
     private async Task StopAndDestroyCoreAsync(DeviceCaptureState state,
-        ulong handle)
+        NativeSessionHandle handle)
     {
         // Always return to StopAndDestroyAsync before native work can finish,
         // so the in-flight task is registered before any concurrent caller or

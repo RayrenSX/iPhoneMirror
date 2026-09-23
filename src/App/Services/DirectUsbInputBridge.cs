@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace IPhoneMirror.App.Services;
 
-public sealed record BridgeEvent(string Event, string? Code, string? Message);
+public sealed record BridgeEvent(string Event, string? Code, string? Message, string? Text = null);
 
 public sealed record TouchPoint(
     [property: JsonPropertyName("pointerId")] int PointerId,
@@ -243,10 +243,28 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     {
         Interlocked.Exchange(ref _stopping, 1);
         _cts.Cancel();
+        // Closing stdin ends the bridge's input loop and lets its teardown run:
+        // releasing all touch points, closing the CoreDevice tunnel, and
+        // releasing the claimed usbmux interface. Killing the process instead
+        // leaves that interface to asynchronous PnP cleanup, which races the
+        // capture teardown that follows and can force iOS to re-prompt for
+        // trust. Give the graceful exit a bounded window before killing.
         try { _stdin?.Close(); } catch { }
         if (_process is { HasExited: false })
         {
-            try { _process.Kill(); } catch { }
+            try
+            {
+                using var gracePeriod = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(2));
+                await _process.WaitForExitAsync(gracePeriod.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (InvalidOperationException) { }
+            if (!_process.HasExited)
+            {
+                try { _process.Kill(); } catch { }
+            }
         }
         var reader = _readerTask;
         var errorDrain = _errorDrainTask;
@@ -349,6 +367,10 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         root.TryGetProperty("code", out var wc) ? wc.GetString() : null,
                         root.TryGetProperty("message", out var m) ? m.GetString() : null));
                     break;
+                case "clipboard_text":
+                    OnEvent?.Invoke(new BridgeEvent("clipboard_text", null, null,
+                        root.TryGetProperty("text", out var ct) ? ct.GetString() : null));
+                    break;
                 case "error":
                     Interlocked.Exchange(ref _terminalEventReceived, 1);
                     _lastErrorCode = root.TryGetProperty("code", out var ec)
@@ -443,6 +465,53 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         }
         finally { _sendLock.Release(); }
     }
+
+
+    public async Task SendPasteTextAsync(string text, CancellationToken ct = default)
+    {
+        if (!IsReady || _stdin is null)
+            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+        await _sendLock.WaitAsync(ct);
+        try
+        {
+            var frame = new
+            {
+                schema = CoreDeviceTouchProtocol.MessageSchema,
+                kind = CoreDeviceTouchProtocol.PasteTextMessageKind,
+                seq = NextSequence(),
+                text,
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+            await _stdin.BaseStream.WriteAsync(header, ct);
+            await _stdin.BaseStream.WriteAsync(bytes, ct);
+            await _stdin.BaseStream.FlushAsync(ct);
+        }
+        finally { _sendLock.Release(); }
+    }
+
+    public async Task SendReadClipboardAsync(CancellationToken ct = default)
+    {
+        if (!IsReady || _stdin is null)
+            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+        await _sendLock.WaitAsync(ct);
+        try
+        {
+            var frame = new
+            {
+                schema = CoreDeviceTouchProtocol.MessageSchema,
+                kind = CoreDeviceTouchProtocol.ReadClipboardMessageKind,
+                seq = NextSequence(),
+            };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var header = BitConverter.GetBytes((uint)bytes.Length);
+            await _stdin.BaseStream.WriteAsync(header, ct);
+            await _stdin.BaseStream.WriteAsync(bytes, ct);
+            await _stdin.BaseStream.FlushAsync(ct);
+        }
+        finally { _sendLock.Release(); }
+    }
+
 
     private async Task DrainErrorAsync(StreamReader reader)
     {

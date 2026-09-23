@@ -25,6 +25,14 @@ struct MessageHeader;
 
 namespace iPhoneMirror::capture {
 
+// RAII wrapper for Win32 HANDLEs. The deleter is declared here and defined in
+// the translation unit that includes <Windows.h>, keeping this header free of
+// platform headers.
+struct HandleDeleter {
+    void operator()(void* handle) const noexcept;
+};
+using ScopedHandle = std::unique_ptr<void, HandleDeleter>;
+
 struct WirelessReceiverHubTestAccess;
 
 struct WirelessDeviceSnapshot {
@@ -167,9 +175,9 @@ private:
     std::wstring stop_event_name_;
     std::jthread worker_;
     std::jthread playback_worker_;
-    void* pipe_{};
-    void* stop_event_{};
-    void* process_{};
+    ScopedHandle pipe_;
+    ScopedHandle stop_event_;
+    ScopedHandle process_;
     std::atomic_bool stopping_{};
     std::atomic_bool ready_{};
     std::atomic_bool pipe_disconnected_{};

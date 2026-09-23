@@ -62,6 +62,7 @@ from pymobiledevice3.exceptions import (
     MuxException,
     NotMountedError,
     NotPairedError,
+    PasswordRequiredError,
     RemotePairingCompletedError,
 )
 from pymobiledevice3.pair_records import iter_remote_paired_identifiers
@@ -78,6 +79,7 @@ from pymobiledevice3.remote.tunnel_service import (
     get_remote_pairing_tunnel_services,
 )
 from pymobiledevice3.remote.core_device.display_service import DisplayService
+from pymobiledevice3.remote.core_device.pasteboard_service import PasteboardService
 from pymobiledevice3.remote.core_device.hid_service import (
     UniversalHIDServiceService,
     IndigoHIDService,
@@ -90,29 +92,69 @@ from pymobiledevice3.remote.core_device.hid_service import (
 from pymobiledevice3.remote.xpc_message import XpcUInt64Type
 
 try:
-    from iostouch.qt.usb import find_devices as _find_usb_devices, get_backend as _get_usb_backend
+    from iostouch.qt.usb import (
+        correct_serial as _correct_serial,
+        find_devices as _find_usb_devices,
+        get_backend as _get_usb_backend,
+    )
     from iostouch.qt.usbmux_usb import UsbMuxTransport as _UsbMuxTransport
     from iostouch.qt.usbmuxd_server import UsbmuxdThread as _UsbmuxdThread
 except ImportError:  # pragma: no cover - optional in minimal source environments
-    _find_usb_devices = _get_usb_backend = _UsbMuxTransport = _UsbmuxdThread = None
+    _correct_serial = _find_usb_devices = _get_usb_backend = None  # type: ignore[assignment]
+    _UsbMuxTransport = _UsbmuxdThread = None
 
 log = logging.getLogger('iphoneMirror.usb_touch')
+
+APPLE_VENDOR_ID = 0x05AC
+INTERFACE_CLASS_VENDOR = 0xFF
+INTERFACE_SUBCLASS_USBMUX = 0xFE
+INTERFACE_SUBCLASS_QUICKTIME = 0x2A
+
+
+def _udid_matches(serial: str, udid: str) -> bool:
+    """Compare an Apple identifier across hyphenation and letter-case drift."""
+    return serial.replace('-', '').casefold() == udid.replace('-', '').casefold()
+
+
+def _interface_with_subclass(configuration, subclass: int):
+    for interface in configuration:
+        if (interface.bInterfaceClass == INTERFACE_CLASS_VENDOR and
+                interface.bInterfaceSubClass == subclass):
+            return interface
+    return None
 
 PROTOCOL_VERSION = 2
 CAPABILITIES = ['iphoneMirror.usb_touch.v2', 'iphoneMirror.usb_keyboard.v1']
 MAX_SLOTS = 5
-MAX_FRAME_SIZE = 64 * 1024
+MAX_FRAME_SIZE = 4 * 1024 * 1024
 MESSAGE_SCHEMA = 'iphoneMirror.touch.v2'
 MESSAGE_KIND = 'touch_batch'
 VALID_ACTIONS = frozenset(('down', 'move', 'up'))
 KEYBOARD_MESSAGE_KIND = 'keyboard_batch'
+PASTE_TEXT_MESSAGE_KIND = 'paste_text'
+READ_CLIPBOARD_MESSAGE_KIND = 'read_clipboard'
 BUTTON_MESSAGE_KIND = 'button_event'
+
 BUTTON_STATES = frozenset(('down', 'up', 'canceled'))
 LEGACY_UNIVERSAL_HID_SERVICE = 'com.apple.coredevice.hid.universalhid'
 LOCKDOWN_CONNECT_ATTEMPTS = 4
 LOCKDOWN_RETRY_DELAY_SECONDS = 0.35
 CAPTURE_MUX_START_ATTEMPTS = 3
 CAPTURE_MUX_RETRY_DELAY_SECONDS = 0.75
+PASTEBOARD_POLL_INTERVAL_SECONDS = 0.8
+# PasteboardService is a best-effort side channel.  It must never be allowed
+# to stall the HID input reader when iOS or the Windows clipboard companion is
+# busy (for example while Win+Shift+S is committing a screenshot).
+PASTEBOARD_OPERATION_TIMEOUT_SECONDS = 2.0
+# A CoreDevice HID request can remain pending after iOS has invalidated the
+# direct Universal HID session. Do not leave stdin's reader blocked forever:
+# exiting lets the host discard this stale bridge and reconnect cleanly.
+HID_OPERATION_TIMEOUT_SECONDS = 3.0
+# On devices that reject media-stream authentication (9021), iOS can revoke a
+# direct Universal HID session without warning even while the USB mirror is
+# healthy. Rotate this control-only process before the observed device lease
+# expires; the host rebuilds control without stopping the mirror session.
+DIRECT_HID_ROTATION_SECONDS = 12 * 60
 LOCKDOWN_RETRYABLE_ERRORS = (
     BadDevError,
     ConnectionFailedError,
@@ -177,7 +219,10 @@ class BridgePrerequisiteError(RuntimeError):
 def local_personalized_ddi_bundle(ddi_dir: Path) -> tuple[Path, Path, Path]:
     """Return an explicitly supplied local Personalized DDI bundle.
 
-    Apple verifies the supplied local image during mount.
+    The bridge never discovers a DDI from its install directory. When this
+    explicit override is absent, pymobiledevice3 prepares its cached
+    Personalized DDI through its normal download and Apple personalization
+    flow instead. Apple verifies the supplied local image during mount.
     """
     root = Path(ddi_dir).expanduser()
     if not root.is_dir():
@@ -206,21 +251,6 @@ def local_personalized_ddi_bundle(ddi_dir: Path) -> tuple[Path, Path, Path]:
             + ', '.join(invalid),
         )
     return tuple(paths)
-
-
-def bundled_personalized_ddi_directory() -> Optional[Path]:
-    """Find the DDI shipped beside the bridge executable or source script."""
-    candidates = [
-        Path(sys.executable).resolve().parent / 'ddi' / 'Xcode_iOS_DDI_Personalized',
-        Path(__file__).resolve().parent / 'ddi' / 'Xcode_iOS_DDI_Personalized',
-    ]
-    for candidate in candidates:
-        try:
-            local_personalized_ddi_bundle(candidate)
-            return candidate
-        except BridgePrerequisiteError:
-            continue
-    return None
 
 
 @dataclass(frozen=True)
@@ -917,6 +947,10 @@ def bridge_error_code(error: Exception) -> str:
         return 'apple_usbmux_unavailable'
     if isinstance(error, NotPairedError):
         return 'apple_device_not_trusted'
+    if isinstance(error, PasswordRequiredError):
+        # lockdownd answers PasswordProtected while the iPhone is locked or
+        # waiting for its passcode; discovery is fine, sensitive queries are not.
+        return 'apple_device_locked'
     if isinstance(error, DeviceNotFoundError):
         return 'apple_device_not_found'
     return type(error).__name__.lower()
@@ -1048,6 +1082,7 @@ def decode_button_event(message: dict) -> tuple[int, int, int, str]:
     return sequence, page, code, state
 
 
+
 class FiveSlotStateMachine:
     """逻辑触点 ID → 固定 slot 0..4，最多 5 点同触。
 
@@ -1155,6 +1190,7 @@ class TouchSession:
         self.hid: Optional[UniversalHIDServiceService] = None
         self.indigo: Optional[IndigoHIDService] = None
         self.keyboard_service_id: Optional[int] = None
+
         self.display: Optional[DisplayService] = None
         self.dial_plane = None
         self.stream_answer = None
@@ -1169,6 +1205,10 @@ class TouchSession:
         self._usb_mux_transport = None
         self._usb_mux_server = None
         self._usb_mux_previous_env: Optional[str] = None
+        self._pasteboard_lock = asyncio.Lock()
+        self._paste_sequence_lock = asyncio.Lock()
+        self._keyboard_lock = asyncio.Lock()
+        self._hid_operation_lock = asyncio.Lock()
 
     async def _start_capture_mux(self) -> None:
         """Prefer the active QuickTime configuration without making it fatal.
@@ -1179,14 +1219,44 @@ class TouchSession:
         the mirror, while a final fallback lets the normal Apple usbmuxd path
         handle devices that still expose it.
         """
-        if self.transport_mode != 'usb' or _UsbMuxTransport is None:
+        if self.transport_mode != 'usb':
+            return
+        if _UsbMuxTransport is None or _UsbmuxdThread is None:
+            # Never lose the userspace transport silently: without it a mirror
+            # session cannot share the USB link with reverse control.
+            await self.ipc.emit({
+                'event': 'warning', 'code': 'capture_mux_unavailable',
+                'message': 'The userspace usbmux transport is unavailable in this build.',
+            })
             return
         backend = _get_usb_backend('auto')
         devices = _find_usb_devices(backend, self.udid)
-        device = next((item for item in devices if item.activated), None)
+        device = next((item for item in devices if item.activated and
+                       (not self.udid or _udid_matches(item.serial, self.udid))), None)
+        if device is None:
+            # The discovery filter may differ in case/hyphen normalization.
+            # Uniqueness is not proof of identity: never adopt another phone
+            # (or an unreadable serial) just because it is the only one present.
+            candidates = _find_usb_devices(backend, None)
+            activated = [item for item in candidates if item.activated]
+            matching = [item for item in activated
+                        if _udid_matches(item.serial, self.udid or '')]
+            if matching:
+                device = matching[0]
         if device is None:
             # No active QuickTime configuration means standalone wired control;
             # Apple's normal usbmuxd remains the correct transport in that case.
+            overview = '; '.join(
+                f'serial={item.serial!r} activated={item.activated}'
+                for item in _find_usb_devices(backend, None)) or 'none'
+            log.info('no activated QuickTime configuration for %s; using Apple '
+                     'usbmuxd (enumeration: %s)', self.udid or 'any device', overview)
+            await self.ipc.emit({
+                'event': 'warning', 'code': 'capture_mux_device_absent',
+                'message': (f'No device with an active QuickTime configuration is '
+                            f'enumerable over USB (enumeration: {overview}); '
+                            'continuing with the Apple usbmuxd path.'),
+            })
             return
         for attempt in range(1, CAPTURE_MUX_START_ATTEMPTS + 1):
             mux = None
@@ -1194,7 +1264,11 @@ class TouchSession:
             try:
                 mux = _UsbMuxTransport(device.dev, device.serial)
                 mux.start()
-                server = _UsbmuxdThread(mux.mux, device.serial, port=0)
+                # Advertise the requested UDID verbatim: pymobiledevice3
+                # matches the usbmux serial case-sensitively, and the USB
+                # string descriptor need not equal the binding profile's
+                # spelling.
+                server = _UsbmuxdThread(mux.mux, self.udid or device.serial, port=0)
                 address = server.start()
             except Exception as error:  # The fallback below owns this failure.
                 with contextlib.suppress(Exception):
@@ -1237,7 +1311,109 @@ class TouchSession:
             self._usb_mux_server = server
             os.environ['USBMUXD_SOCKET_ADDRESS'] = address
             log.info('capture usbmux bridge active at %s (attempt %d)', address, attempt)
+            await self._emit_status('capture_mux_ready')
             return
+
+    async def _recover_lockdown_via_capture_mux(self,
+                                                discovery_error: DeviceNotFoundError):
+        """Rebuild Lockdown over a userspace usbmux when usbmuxd lost the device.
+
+        A wired QuickTime mirror switches the iPhone into a USB configuration
+        that Apple's usbmuxd stops listing, and ``_start_capture_mux`` can come
+        up empty when full configuration discovery fails under that driver
+        state even though the device itself is still enumerable. When the
+        usbmuxd handshake reports the device missing, attach the userspace
+        transport to the claimable usbmux interface of the ACTIVE mirroring
+        configuration and retry the handshake before surfacing the failure.
+        """
+        if (not self.udid or _UsbMuxTransport is None or _UsbmuxdThread is None or
+                self._usb_mux_server is not None):
+            raise discovery_error
+        strict_candidates: list = []
+        enumeration_notes: list[str] = []
+        try:
+            import usb.core
+            import usb.util
+            backend = _get_usb_backend('auto')
+            for device in usb.core.find(find_all=True, idVendor=APPLE_VENDOR_ID,
+                                        backend=backend):
+                try:
+                    serial = _correct_serial(
+                        (usb.util.get_string(device, device.iSerialNumber) or '')
+                        .rstrip('\x00').strip())
+                except Exception as error:  # noqa: BLE001  descriptor reads fail per device
+                    serial = ''
+                    enumeration_notes.append(f'serial unreadable ({error})')
+                try:
+                    configuration = device.get_active_configuration()
+                except Exception as error:  # noqa: BLE001
+                    enumeration_notes.append(
+                        f'serial={serial!r} active-config error {error}')
+                    continue
+                # Only take over the interface from a live mirroring
+                # configuration. In the normal configuration Apple's usbmuxd
+                # owns the interface and the discovery error has another cause.
+                if (_interface_with_subclass(configuration, INTERFACE_SUBCLASS_QUICKTIME)
+                        is None or
+                        _interface_with_subclass(configuration, INTERFACE_SUBCLASS_USBMUX)
+                        is None):
+                    enumeration_notes.append(
+                        f'serial={serial!r} active config has no mirroring '
+                        'interface pair')
+                    continue
+                if _udid_matches(serial, self.udid):
+                    strict_candidates.append(device)
+                else:
+                    enumeration_notes.append(f'serial={serial!r} does not identify the requested device')
+        except Exception as error:  # noqa: BLE001
+            await self.ipc.emit({
+                'event': 'warning', 'code': 'capture_mux_recovery_failed',
+                'message': (f'{type(error).__name__}: {str(error)[:180]}; '
+                            'keeping the Apple usbmuxd failure.'),
+            })
+            raise discovery_error from error
+        if strict_candidates:
+            candidate = strict_candidates[0]
+        else:
+            candidate = None
+        if candidate is None:
+            detail = '; '.join(enumeration_notes) or 'no matching Apple USB device was enumerable'
+            await self.ipc.emit({
+                'event': 'warning', 'code': 'capture_mux_recovery_unavailable',
+                'message': (
+                    'Apple usbmuxd cannot see the mirrored iPhone and no claimable '
+                    f'usbmux interface was found in the active USB configuration '
+                    f'({detail}); stop the wired mirror or replug the cable and retry.'
+                ),
+            })
+            raise discovery_error
+        mux = None
+        server = None
+        try:
+            mux = _UsbMuxTransport(candidate, self.udid)
+            mux.start()
+            server = _UsbmuxdThread(mux.mux, self.udid, port=0)
+            address = server.start()
+        except Exception as error:  # noqa: BLE001
+            with contextlib.suppress(Exception):
+                if server is not None:
+                    server.stop()
+            with contextlib.suppress(Exception):
+                if mux is not None:
+                    mux.close()
+            await self.ipc.emit({
+                'event': 'warning', 'code': 'capture_mux_recovery_failed',
+                'message': (f'{type(error).__name__}: {str(error)[:180]}; '
+                            'keeping the Apple usbmuxd failure.'),
+            })
+            raise discovery_error from error
+        self._usb_mux_previous_env = os.environ.get('USBMUXD_SOCKET_ADDRESS')
+        self._usb_mux_transport = mux
+        self._usb_mux_server = server
+        os.environ['USBMUXD_SOCKET_ADDRESS'] = address
+        log.info('capture usbmux recovery active at %s', address)
+        await self._emit_status('capture_mux_ready')
+        return await self._create_lockdown_with_retry('USB')
 
     async def _emit_status(self, code: str) -> None:
         await self.ipc.emit({'event': 'status', 'code': code, 'message': {
@@ -1248,6 +1424,7 @@ class TouchSession:
             'downloading_developer_image': '正在下载并校验开发者镜像',
             'remounting_developer_image': '正在刷新不兼容的开发者镜像',
             'discovering_wireless_device': '正在通过 RemotePairing 发现无线设备',
+            'capture_mux_ready': '正在通过镜像共存 USB 通道连接设备',
             'initializing_touch': '正在初始化触控通道',
             'terminated': 'USB 触控会话已结束',
         }.get(code, code)})
@@ -1265,15 +1442,18 @@ class TouchSession:
         # make the UI claim that a network control path is working.
         try:
             lockdown = await self._create_lockdown_with_retry(connection_type)
-        except DeviceNotFoundError:
-            if self.transport_mode != 'wireless':
-                raise
-            # Wi-Fi Sync only gives us a legacy Network usbmux record. On
-            # current iOS releases the supported wireless CoreDevice route is
-            # RemotePairing over mDNS, so try it when that legacy record is
-            # absent instead of silently changing to the USB path.
-            await self._connect_via_remote_pairing()
-            return
+        except DeviceNotFoundError as discovery_error:
+            if self.transport_mode == 'wireless':
+                # Wi-Fi Sync only gives us a legacy Network usbmux record. On
+                # current iOS releases the supported wireless CoreDevice route is
+                # RemotePairing over mDNS, so try it when that legacy record is
+                # absent instead of silently changing to the USB path.
+                await self._connect_via_remote_pairing()
+                return
+            # Apple usbmuxd lost the device while the wired mirror holds the
+            # QuickTime configuration. Attach our own usbmux to the active
+            # mirroring configuration before declaring the device missing.
+            lockdown = await self._recover_lockdown_via_capture_mux(discovery_error)
         try:
             await self._connect_with_ddi_recovery(lockdown)
         finally:
@@ -1372,23 +1552,6 @@ class TouchSession:
                 'wireless_remote_pairing_required',
                 'Wireless CoreDevice control requires a known Apple UDID and a USB provisioning pass.',
             )
-        # RemotePairing provides the network tunnel, but DDI mounting is a
-        # Lockdown operation. Complete the preflight over trusted USB before
-        # opening the wireless tunnel so HID service discovery sees the DDI.
-        provisioning_lockdown = None
-        try:
-            provisioning_lockdown = await self._create_lockdown_with_retry('USB')
-            await self._preflight_developer_environment(provisioning_lockdown)
-        except DeviceNotFoundError as error:
-            raise BridgePrerequisiteError(
-                'wireless_remote_pairing_required',
-                'Wireless control requires one trusted USB provisioning pass to mount the Personalized DDI. '
-                'Connect the iPhone by USB, unlock it, and retry once.',
-            ) from error
-        finally:
-            if provisioning_lockdown is not None:
-                with contextlib.suppress(Exception):
-                    await provisioning_lockdown.close()
         try:
             # The public discovery helper compares the requested identifier
             # byte-for-byte with the pair-record filename.  Keep the exact
@@ -1462,9 +1625,10 @@ class TouchSession:
     async def _preflight_developer_environment(self, lockdown) -> None:
         """Require Developer Mode and prepare a Personalized DDI before RSD.
 
-        An explicit ``--ddi-dir`` wins when provided. Otherwise the caller
-        supplies the bundled DDI when available, with the verified cache and
-        GitHub downloader retained as fallbacks.
+        An explicit ``--ddi-dir`` wins when provided.  Otherwise the bridge
+        lets pymobiledevice3 obtain the current DDI through its normal cache
+        and Apple personalization flow.  Neither path searches the install
+        directory or consumes a bundled image.
         """
         await self._emit_status('checking_developer_environment')
         try:
@@ -1671,6 +1835,11 @@ class TouchSession:
         )
 
     async def _connect_with_lockdown(self, lockdown) -> None:
+        if not lockdown.udid or (self.udid and not _udid_matches(lockdown.udid, self.udid)):
+            raise BridgePrerequisiteError(
+                'device_identity_mismatch',
+                'The connected iPhone does not match the selected device; refusing control.',
+            )
         if self.udid is None:
             self.udid = lockdown.udid
         if self.transport_mode == 'usb' and not self._remote_pairing_provision_attempted:
@@ -1972,27 +2141,161 @@ class TouchSession:
 
     async def _serve(self) -> None:
         sm = FiveSlotStateMachine()
-        async for frame in self.ipc.read_messages():
+        # Universal HID over the wired CoreDevice tunnel is single-session on
+        # affected iOS builds. Periodic pasteboard service connections can
+        # reset that HID session while a user is actively controlling the
+        # device. Keep device-to-Windows clipboard monitoring on wireless,
+        # where it uses a separate network transport; USB paste remains
+        # available only when explicitly requested by the host.
+        pasteboard_task = (asyncio.create_task(self._poll_device_pasteboard())
+                           if self.transport_mode == 'wireless' else None)
+        rotation_task = (asyncio.create_task(self._request_direct_hid_rotation())
+                         if self.transport_mode == 'usb' and self.auth_mode == 'direct'
+                         else None)
+        paste_tasks: set[asyncio.Task[None]] = set()
+
+        def track_paste_task(task: asyncio.Task[None]) -> None:
+            paste_tasks.discard(task)
+
+        async def run_paste(text: str) -> None:
             try:
-                if frame.get('kind') == KEYBOARD_MESSAGE_KIND:
-                    _, ts, usages = decode_keyboard_batch(frame)
-                    await self._apply_keyboard(frame, ts, usages)
-                elif frame.get('kind') == BUTTON_MESSAGE_KIND:
-                    _, page, code, state = decode_button_event(frame)
-                    await self._apply_button(page, code, state)
-                else:
-                    _, _, points = decode_touch_batch(frame)
-                    await self._apply_frame(sm, frame, points)
-            except Exception as e:
-                await self.ipc.emit({'event': 'error', 'code': 'send_failed',
-                                     'message': f'{type(e).__name__}: {str(e)[:200]}'})
-                break
+                async with self._paste_sequence_lock:
+                    await self._apply_paste_text(text)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                # A transient pasteboard failure must not terminate the HID
+                # reader. Touch and keyboard reports remain usable, and the
+                # host can retry Ctrl+V after iOS finishes its clipboard work.
+                await self.ipc.emit({
+                    'event': 'warning',
+                    'code': 'paste_failed',
+                    'message': f'{type(error).__name__}: {str(error)[:200]}',
+                })
+        async def run_clipboard_read() -> None:
+            try:
+                text = await asyncio.wait_for(
+                    self._read_device_pasteboard(),
+                    timeout=PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                await self.ipc.emit({'event': 'clipboard_text',
+                                     'text': text if isinstance(text, str) else ''})
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                await self.ipc.emit({'event': 'warning', 'code': 'clipboard_read_failed',
+                                     'message': f'{type(error).__name__}: {str(error)[:200]}'})
+        try:
+            async for frame in self.ipc.read_messages():
+                try:
+                    if frame.get('kind') == KEYBOARD_MESSAGE_KIND:
+                        _, ts, usages = decode_keyboard_batch(frame)
+                        await self._apply_keyboard(frame, ts, usages)
+                    elif frame.get('kind') == PASTE_TEXT_MESSAGE_KIND:
+                        text = frame.get('text')
+                        if not isinstance(text, str):
+                            raise ValueError('paste text must be a string')
+                        paste_task = asyncio.create_task(run_paste(text))
+                        paste_tasks.add(paste_task)
+                        paste_task.add_done_callback(track_paste_task)
+                    elif frame.get('kind') == READ_CLIPBOARD_MESSAGE_KIND:
+                        read_task = asyncio.create_task(run_clipboard_read())
+                        paste_tasks.add(read_task)
+                        read_task.add_done_callback(track_paste_task)
+                    elif frame.get('kind') == BUTTON_MESSAGE_KIND:
+                        _, page, code, state = decode_button_event(frame)
+                        await self._apply_button(page, code, state)
+
+                    else:
+                        _, _, points = decode_touch_batch(frame)
+                        await self._apply_frame(sm, frame, points)
+                except Exception as e:
+                    await self.ipc.emit({'event': 'error', 'code': 'send_failed',
+                                         'message': f'{type(e).__name__}: {str(e)[:200]}'})
+                    break
+        finally:
+            if pasteboard_task is not None:
+                pasteboard_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await pasteboard_task
+            if rotation_task is not None:
+                rotation_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await rotation_task
+            for task in paste_tasks:
+                task.cancel()
+            if paste_tasks:
+                await asyncio.gather(*paste_tasks, return_exceptions=True)
+
+    async def _request_direct_hid_rotation(self) -> None:
+        """Ask the host to replace an unverified direct HID session before iOS drops it."""
+        try:
+            await asyncio.sleep(DIRECT_HID_ROTATION_SECONDS)
+            await self.ipc.emit({
+                'event': 'error',
+                'code': 'direct_hid_rotation',
+                'message': 'Rotating the direct Universal HID session before its device lease expires.',
+            })
+        except asyncio.CancelledError:
+            raise
+
+    async def _read_device_pasteboard(self):
+        if self.rsd is None:
+            raise RuntimeError('pasteboard service is unavailable')
+        async with self._pasteboard_lock:
+            async with PasteboardService(self.rsd) as pasteboard:
+                return await pasteboard.get_text()
+
+    async def _write_device_pasteboard(self, text: str) -> None:
+        if self.rsd is None:
+            raise RuntimeError('pasteboard service is unavailable')
+        async with self._pasteboard_lock:
+            async with PasteboardService(self.rsd) as pasteboard:
+                await pasteboard.set_text(text)
+
+    async def _poll_device_pasteboard(self) -> None:
+        if self.rsd is None:
+            return
+        last_text = object()
+        try:
+            while True:
+                try:
+                    text = await asyncio.wait_for(
+                        self._read_device_pasteboard(),
+                        timeout=PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                    # Keep an empty text pasteboard as a real state so the
+                    # host-side Shift+V cache cannot retain stale content.
+                    # The host decides separately whether an empty value may
+                    # replace the Windows clipboard.
+                    if isinstance(text, str):
+                        normalized_text = text
+                    elif text is None:
+                        normalized_text = ''
+                    else:
+                        normalized_text = None
+                    if normalized_text is not None and normalized_text != last_text:
+                        last_text = normalized_text
+                        await self.ipc.emit({
+                            'event': 'clipboard_text',
+                            'text': normalized_text,
+                        })
+                except Exception as error:
+                    log.debug('device pasteboard poll failed: %s', error)
+                await asyncio.sleep(PASTEBOARD_POLL_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            log.debug('device pasteboard monitor unavailable: %s', error)
 
     async def _apply_keyboard(self, frame: dict, timestamp: Optional[int], usages: list[int]) -> None:
         if timestamp is not None:
             # Host timestamps are Unix nanoseconds, while the Universal HID
             # keyboard report reserves six bytes for a Mach-absolute value.
             timestamp = int(timestamp) & ((1 << 48) - 1)
+        async with self._keyboard_lock:
+            await self._send_keyboard_report(usages, timestamp)
+
+    async def _send_keyboard_report(self, usages: list[int],
+                                    timestamp: Optional[int] = None) -> None:
         if self.keyboard_service_id is None:
             # Register the virtual keyboard through the same public API used by
             # The service ID is device-specific; do not assume that a requested
@@ -2004,14 +2307,68 @@ class TouchSession:
                                  'message': str(self.keyboard_service_id)})
         # send_keyboard builds the report using the active pymobiledevice3
         # implementation and addresses the registered service consistently.
-        await self.hid.send_keyboard(self.keyboard_service_id, usages, timestamp)
+        async with self._hid_operation_lock:
+            await asyncio.wait_for(
+                self.hid.send_keyboard(self.keyboard_service_id, usages, timestamp),
+                timeout=HID_OPERATION_TIMEOUT_SECONDS)
+
+    async def _send_touch_report(self, report: bytes) -> None:
+        if self.hid is None:
+            raise RuntimeError('Universal HID service is unavailable')
+        # send_report uses send_request (not send_receive_request), so it
+        # is fire-and-forget at the XPC level. The _hid_operation_lock is
+        # unnecessary here — it serializes reports at the writer.drain()
+        # boundary, capping the send rate at the device's HID processing
+        # speed. Without the lock, multiple reports fill the transport
+        # buffer back-to-back and the device drains them at its own pace.
+        # A single TimeoutError is often a transient USB stall or an iOS
+        # scheduling hiccup; retry once before surfacing the failure so
+        # the host does not tear down the entire bridge for a one-off blip.
+        try:
+            await asyncio.wait_for(
+                self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report),
+                timeout=HID_OPERATION_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            await asyncio.sleep(0.5)
+            await asyncio.wait_for(
+                self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report),
+                timeout=HID_OPERATION_TIMEOUT_SECONDS)
+
+    async def _apply_paste_text(self, text: str) -> None:
+        if self.rsd is None:
+            raise RuntimeError('pasteboard service is unavailable')
+        await asyncio.wait_for(
+            self._write_device_pasteboard(text),
+            timeout=PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+        # The HID service exposes a full pressed-key bitmap. If Command and V
+        # arrive in the same report, iOS may dispatch V before it observes the
+        # Command modifier and inserts a literal "v". Keep the modifier held
+        # across separate reports, matching a physical keyboard chord.
+        async with self._keyboard_lock:
+            command_pressed = False
+            try:
+                await asyncio.sleep(0.15)
+                await self._send_keyboard_report([0xE3])
+                command_pressed = True
+                await asyncio.sleep(0.06)
+                await self._send_keyboard_report([0xE3, 0x19])
+                await asyncio.sleep(0.08)
+                await self._send_keyboard_report([0xE3])
+                await asyncio.sleep(0.06)
+            finally:
+                if command_pressed:
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await self._send_keyboard_report([])
 
     async def _apply_button(self, usage_page: int, usage_code: int, state: str) -> None:
         if self.indigo is None:
             self.indigo = IndigoHIDService(self.rsd)
             await self.indigo.__aenter__()
         state_code = {'down': 1, 'up': 2, 'canceled': 3}[state]
-        await self.indigo.send_button(usage_page, usage_code, state_code)
+        await asyncio.wait_for(
+            self.indigo.send_button(usage_page, usage_code, state_code),
+            timeout=HID_OPERATION_TIMEOUT_SECONDS)
+
 
     async def _apply_frame(self, sm: FiveSlotStateMachine, frame: dict, points: list[dict]) -> None:
         ts = frame.get('timestampNs')
@@ -2027,21 +2384,39 @@ class TouchSession:
                 if slot is None:
                     continue
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_CONTACT, x, y, ts)
-                await self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report)
+                await self._send_touch_report(report)
             elif action == 'move':
                 slot = sm.slot_for(pointer_id)
                 if slot is None:
                     continue
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_CONTACT, x, y, ts)
-                await self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report)
+                await self._send_touch_report(report)
             elif action == 'up':
                 slot = sm.release(pointer_id)
                 if slot is None:
                     continue
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_RELEASE, x, y, ts)
-                await self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report)
+                await self._send_touch_report(report)
 
     async def _cleanup(self) -> None:
+        # Release the capture usbmux before closing the longer-lived CoreDevice
+        # scopes below.  The host gives the bridge a bounded shutdown window;
+        # leaving the claimed interface until the end makes an immediate
+        # second reverse-control start race the old process teardown.
+        if self._usb_mux_server is not None:
+            with contextlib.suppress(Exception):
+                self._usb_mux_server.stop()
+            self._usb_mux_server = None
+        if self._usb_mux_transport is not None:
+            with contextlib.suppress(Exception):
+                self._usb_mux_transport.close()
+            self._usb_mux_transport = None
+        if self._usb_mux_previous_env is None:
+            os.environ.pop('USBMUXD_SOCKET_ADDRESS', None)
+        else:
+            os.environ['USBMUXD_SOCKET_ADDRESS'] = self._usb_mux_previous_env
+        self._usb_mux_previous_env = None
+
         # 强制释放所有触点（异常清理）
         if self.hid is not None:
             try:
@@ -2076,6 +2451,7 @@ class TouchSession:
             except Exception:
                 pass
         self.keyboard_service_id = None
+
         if self.stream_answer is not None and self.display is not None:
             try:
                 import uuid as _uuid
@@ -2114,19 +2490,6 @@ class TouchSession:
         self.stream_answer = None
         self.drain_task = None
         self.transport = None
-        if self._usb_mux_server is not None:
-            with contextlib.suppress(Exception):
-                self._usb_mux_server.stop()
-            self._usb_mux_server = None
-        if self._usb_mux_transport is not None:
-            with contextlib.suppress(Exception):
-                self._usb_mux_transport.close()
-            self._usb_mux_transport = None
-        if self._usb_mux_previous_env is None:
-            os.environ.pop('USBMUXD_SOCKET_ADDRESS', None)
-        else:
-            os.environ['USBMUXD_SOCKET_ADDRESS'] = self._usb_mux_previous_env
-        self._usb_mux_previous_env = None
         self.gate_open = False
         self.auth_mode = None
 
@@ -2141,6 +2504,11 @@ async def main_async(rate_hz: int, udid: Optional[str], transport: str,
         await ipc.emit({'event': 'error', 'code': bridge_error_code(e),
                         'message': str(e)[:300]})
         await ipc.emit({'event': 'status', 'code': 'terminated'})
+    finally:
+        # connect() normally owns tunnel teardown, but failures during
+        # capture-mux setup or lockdown discovery happen before that scope is
+        # entered. Always release those early resources as well.
+        await session._cleanup()
 
 
 async def enable_wifi_sync_async(udid: str) -> bool:
@@ -2199,8 +2567,7 @@ def main() -> int:
             if not args.udid:
                 parser.error('--enable-wifi-sync requires --udid')
             return 0 if asyncio.run(enable_wifi_sync_async(args.udid)) else 1
-        ddi_dir = args.ddi_dir or bundled_personalized_ddi_directory()
-        asyncio.run(main_async(args.rate_hz, args.udid, args.transport, ddi_dir))
+        asyncio.run(main_async(args.rate_hz, args.udid, args.transport, args.ddi_dir))
     except KeyboardInterrupt:
         return 0
     return 0

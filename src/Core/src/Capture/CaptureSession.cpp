@@ -35,6 +35,9 @@ namespace iPhoneMirror::capture {
 namespace {
 
 std::binary_semaphore usb_transition_gate{1};
+// Guards the try_begin/end_usb_device_discovery pairing so end() never
+// releases a binary_semaphore that was never acquired (undefined behavior).
+std::atomic<bool> usb_discovery_held{false};
 // The legacy libusb0/AppleUsbFilter stack performs configuration changes as
 // asynchronous PnP transactions. A per-session transition gate cannot
 // protect the driver when two CaptureSession instances tear down close
@@ -593,14 +596,21 @@ bool sample_contains_keyframe(const coremedia::SampleBuffer& sample,
 
 bool try_begin_usb_device_discovery() noexcept {
     try {
-        return usb_transition_gate.try_acquire();
+        if (usb_transition_gate.try_acquire()) {
+            usb_discovery_held.store(true, std::memory_order_release);
+            return true;
+        }
+        return false;
     } catch (...) {
         return false;
     }
 }
 
 void end_usb_device_discovery() noexcept {
-    usb_transition_gate.release();
+    // Only release when a matching acquire succeeded; releasing an unacquired
+    // binary_semaphore would be undefined behavior.
+    if (usb_discovery_held.exchange(false, std::memory_order_acq_rel))
+        usb_transition_gate.release();
 }
 
 namespace detail {
@@ -933,8 +943,11 @@ void CaptureSession::stop() noexcept {
     if (worker_.joinable()) {
         const bool terminal_error_already_published =
             snapshot().state == State::Error;
+        // set_state may throw std::bad_alloc while assigning the wide message.
+        // stop() is noexcept, so swallow allocation failures here to keep the
+        // previous state/message instead of invoking std::terminate.
         if (!terminal_error_already_published)
-            set_state(State::Stopping, L"正在停止投屏");
+            try { set_state(State::Stopping, L"正在停止投屏"); } catch (...) {}
         worker_.request_stop();
         // Cancel pending I/O only on transports that implement a safe cancel.
         // The legacy libusb0 transport deliberately treats this callback as a
@@ -948,7 +961,7 @@ void CaptureSession::stop() noexcept {
         // the terminal state stable for the GUI unless the worker reported a
         // genuine capture error.
         if (!terminal_error_already_published && snapshot().state != State::Error)
-            set_state(State::Stopped, L"投屏已停止");
+            try { set_state(State::Stopped, L"投屏已停止"); } catch (...) {}
     }
     // Decoded frames are immutable but device-specific. Do not let the native
     // preview or screenshot path expose the previous iPhone after a stop and
@@ -1081,8 +1094,11 @@ void CaptureSession::set_stopped_warning(FailureKind kind, FailureStage stage,
     snapshot_.message = std::move(message);
 }
 
-void CaptureSession::run(std::stop_token stop_token) noexcept {
+CaptureSession::RunOpenState CaptureSession::prepare_run_open_log() noexcept {
+    RunOpenState state;
     const auto native = native_display_size(product_type_);
+    state.native_width = native.width;
+    state.native_height = native.height;
     native_portrait_size_.store(
         detail::pack_video_dimensions(native.width, native.height),
         std::memory_order_release);
@@ -1090,18 +1106,31 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
     product_type_ascii.reserve(product_type_.size());
     for (const auto ch : product_type_)
         product_type_ascii.push_back(ch <= 0x7f ? static_cast<char>(ch) : '?');
-    const auto device_fp = logging::fingerprint(serial_);
-    logging::write(std::format(
-        "capture_run begin device_fp={} backend={} product_type={} usb_display_size={}x{} render_fps_limit={} audio={} volume={:.3f} decoder_policy={} color_policy={}", device_fp,
-        usb_backend_ == UsbBackend::LibUsb0 ? "libusb0" :
-        usb_backend_ == UsbBackend::UsbDk ? "usbdk" : "libusb1",
-        product_type_ascii,
-        native.width, native.height,
-        target_fps(),
-        play_audio_.load(std::memory_order_relaxed),
-        audio_volume_.load(std::memory_order_relaxed),
-        media::decoder_preference_name(decoder_switch_.requested().preference),
-        static_cast<unsigned>(preferences_.color_output_preference)));
+    state.device_fp = logging::fingerprint(serial_);
+    // std::format may throw std::bad_alloc; this function is noexcept, so an
+    // escaping exception would call std::terminate. Swallow formatting/log
+    // failures here so the capture run can proceed without a diagnostic line.
+    try {
+        logging::write(std::format(
+            "capture_run begin device_fp={} backend={} product_type={} usb_display_size={}x{} render_fps_limit={} audio={} volume={:.3f} decoder_policy={} color_policy={}", state.device_fp,
+            usb_backend_ == UsbBackend::LibUsb0 ? "libusb0" :
+            usb_backend_ == UsbBackend::UsbDk ? "usbdk" : "libusb1",
+            product_type_ascii,
+            native.width, native.height,
+            target_fps(),
+            play_audio_.load(std::memory_order_relaxed),
+            audio_volume_.load(std::memory_order_relaxed),
+            media::decoder_preference_name(decoder_switch_.requested().preference),
+            static_cast<unsigned>(preferences_.color_output_preference)));
+    } catch (...) {
+    }
+    return state;
+}
+
+void CaptureSession::run(std::stop_token stop_token) noexcept {
+    const auto run_open = prepare_run_open_log();
+    const auto device_fp = run_open.device_fp;
+    const NativeDisplaySize native{run_open.native_width, run_open.native_height};
     DeferredCleanup transition_release(
         [this] { release_usb_transition_gate(); });
     UsbConfigurationRestoreResult configuration_restore_result;
@@ -1925,6 +1954,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         });
         const auto started = std::chrono::steady_clock::now();
         auto fps_sample_at = started;
+        auto last_activity_log_at = started;
         std::uint64_t fps_sample_frames{};
         bool display_reconfigure_pending{};
         bool display_release_seen{};
@@ -1990,6 +2020,34 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         };
         while (!stop_token.stop_requested()) {
             video_worker_failure.rethrow_if_set();
+            const auto activity_log_now = std::chrono::steady_clock::now();
+            if (activity_log_now - last_activity_log_at >= std::chrono::seconds(2)) {
+                last_activity_log_at = activity_log_now;
+                const auto video_age_ms = protocol.last_video_sample_at()
+                    ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                          activity_log_now - *protocol.last_video_sample_at()).count()
+                    : -1LL;
+                const auto audio_age_ms = protocol.last_audio_sample_at()
+                    ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                          activity_log_now - *protocol.last_audio_sample_at()).count()
+                    : -1LL;
+                // Diagnostic only: expose per-stream silence watchdogs so the
+                // 19.6s/73-frame death mode can be correlated with video
+                // silence while audio remains active. Does not alter control
+                // flow or protocol behavior.
+                const auto video_silence_ms =
+                    video_silence_watchdog.silence_duration(activity_log_now).count();
+                const auto media_silence_ms =
+                    media_silence_watchdog.silence_duration(activity_log_now).count();
+                logging::write(std::format(
+                    "stream_activity video_frames={} audio_packets={} need_sent={} "
+                    "reply_received={} video_age_ms={} audio_age_ms={} "
+                    "video_silence_ms={} media_silence_ms={}",
+                    protocol.video_frames(), protocol.audio_packets(),
+                    protocol.need_sent(), protocol.reply_received(),
+                    video_age_ms, audio_age_ms,
+                    video_silence_ms, media_silence_ms));
+            }
             if (fast_stream_reconnect_requested.exchange(false, std::memory_order_acq_rel)) {
                 try {
                     {

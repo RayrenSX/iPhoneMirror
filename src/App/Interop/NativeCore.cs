@@ -18,8 +18,30 @@ internal enum NativeResult : int
     UsbConfigurationRestoreWarning = -12,
 }
 
+internal sealed class NativeSessionHandle : Microsoft.Win32.SafeHandles.SafeHandleZeroOrMinusOneIsInvalid
+{
+    public NativeSessionHandle() : base(ownsHandle: true) { }
+
+    // Construct from a raw native handle obtained via out parameter. Takes
+    // ownership by default; tests can wrap fake handles without owning them.
+    internal NativeSessionHandle(ulong handle, bool ownsHandle = true) : base(ownsHandle)
+    {
+        SetHandle((IntPtr)handle);
+    }
+
+    internal ulong RawHandle => IsClosed || IsInvalid ? 0UL : (ulong)DangerousGetHandle();
+
+    protected override bool ReleaseHandle()
+    {
+        // Best-effort destroy. im_session_destroy is void and tolerant of
+        // already-released handles.
+        NativeCore.im_session_destroy((ulong)handle);
+        return true;
+    }
+}
+
 internal readonly record struct NativeSessionCreateResult(
-    bool Success, ulong Handle, int ErrorCode, string Message);
+    bool Success, NativeSessionHandle? Handle, int ErrorCode, string Message);
 
 internal sealed class UsbDeviceRefreshDeferredException(string message)
     : InvalidOperationException(message);
@@ -379,7 +401,7 @@ internal sealed class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_stop(ulong handle);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern void im_session_destroy(ulong handle);
+    internal static extern void im_session_destroy(ulong handle);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_session_get_status(ulong handle, ref NativeCaptureStatus status);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -434,12 +456,16 @@ internal sealed class NativeCore : IDisposable
     private static nint _selectedPreviewWindow;
     private static readonly object PreviewSelectionGate = new();
 
-    internal static void SelectPreviewSession(ulong handle)
+    internal static void SelectPreviewSession(NativeSessionHandle? handle)
     {
+        // _selectedPreviewSession stays a raw long to avoid SafeHandle finalizer
+        // ordering issues on cross-thread access. We only extract the raw value
+        // here; the SafeHandle itself remains owned by the caller.
+        var raw = handle?.RawHandle ?? 0;
         lock (PreviewSelectionGate)
         {
             var previous = unchecked((ulong)_selectedPreviewSession);
-            if (previous == handle) return;
+            if (previous == raw) return;
 
             // Release the HWND before publishing its new owner. Flip-model
             // swap chains cannot overlap on the same window, even briefly.
@@ -450,12 +476,12 @@ internal sealed class NativeCore : IDisposable
                 else
                     im_detach_preview_window();
             }
-            else if (previous == 0 && handle != 0)
+            else if (previous == 0 && raw != 0)
             {
                 im_detach_preview_window();
             }
 
-            _selectedPreviewSession = unchecked((long)handle);
+            _selectedPreviewSession = unchecked((long)raw);
         }
     }
 
@@ -484,18 +510,39 @@ internal sealed class NativeCore : IDisposable
         }
     }
 
+    internal static bool AttachDevicePreview(NativeSessionHandle handle, nint hwnd) =>
+        handle is not null && !handle.IsInvalid && hwnd != 0 &&
+        im_session_attach_preview(handle.RawHandle, hwnd) == 0;
+
+    // Overload accepting a raw ulong handle. Used by NativePreviewWindow which
+    // only stores the raw identity (the SafeHandle is owned by DeviceCaptureState).
     internal static bool AttachDevicePreview(ulong handle, nint hwnd) =>
         handle != 0 && hwnd != 0 && im_session_attach_preview(handle, hwnd) == 0;
+
+    internal static void DetachDevicePreview(NativeSessionHandle handle, nint hwnd)
+    {
+        if (handle is null || handle.IsInvalid || hwnd == 0) return;
+        im_session_detach_preview(handle.RawHandle, hwnd);
+    }
 
     internal static void DetachDevicePreview(ulong handle, nint hwnd)
     {
         if (handle != 0 && hwnd != 0) im_session_detach_preview(handle, hwnd);
     }
 
+    internal static bool SetDeviceWindowCornerProfile(NativeSessionHandle handle, nint hwnd,
+        double radius, double exponent) => handle is not null && !handle.IsInvalid && hwnd != 0 &&
+        im_session_set_window_corner_profile(handle.RawHandle, hwnd,
+            Math.Clamp((float)radius, 0, 0.5f), Math.Clamp((float)exponent, 1.5f, 8)) == 0;
+
     internal static bool SetDeviceWindowCornerProfile(ulong handle, nint hwnd,
         double radius, double exponent) => handle != 0 && hwnd != 0 &&
         im_session_set_window_corner_profile(handle, hwnd,
             Math.Clamp((float)radius, 0, 0.5f), Math.Clamp((float)exponent, 1.5f, 8)) == 0;
+
+    internal static bool SetDeviceWindowRotation(NativeSessionHandle handle, nint hwnd, int turns) =>
+        handle is not null && !handle.IsInvalid && hwnd != 0 &&
+        im_session_set_window_rotation(handle.RawHandle, hwnd, turns) == 0;
 
     internal static bool SetDeviceWindowRotation(ulong handle, nint hwnd, int turns) =>
         handle != 0 && hwnd != 0 && im_session_set_window_rotation(handle, hwnd, turns) == 0;
@@ -515,6 +562,19 @@ internal sealed class NativeCore : IDisposable
         {
             DiagnosticLogger.ExceptionOnce("native-force-refresh", "native",
                 "force_refresh_entrypoint_missing", error);
+            return false;
+        }
+    }
+
+    internal static bool ForceDevicePreviewRefresh(NativeSessionHandle handle)
+    {
+        if (handle is null || handle.IsInvalid) return false;
+        try { return im_session_force_preview_refresh(handle.RawHandle) == 0; }
+        catch (Exception error) when (error is EntryPointNotFoundException or
+                                      DllNotFoundException)
+        {
+            DiagnosticLogger.ExceptionOnce("native-session-force-refresh", "native",
+                "session_force_refresh_unavailable", error);
             return false;
         }
     }
@@ -774,8 +834,8 @@ internal sealed class NativeCore : IDisposable
         options.Reserved[4] = Math.Min(colorOutputPreference, 2U);
         var result = im_session_create(udid, ref options, out var handle);
         return result == 0
-            ? new(true, handle, 0, LocalizationService.Get("CaptureStarted"))
-            : new(false, 0, result,
+            ? new(true, new NativeSessionHandle(handle), 0, LocalizationService.Get("CaptureStarted"))
+            : new(false, null, result,
                 GetLastError(LocalizationService.Get("CannotStartCapture")));
     }
 
@@ -796,15 +856,15 @@ internal sealed class NativeCore : IDisposable
         };
         var result = im_wireless_session_create(deviceId, ref options, out var handle);
         return result == 0
-            ? new(true, handle, 0, LocalizationService.Get("CaptureStarted"))
-            : new(false, 0, result,
+            ? new(true, new NativeSessionHandle(handle), 0, LocalizationService.Get("CaptureStarted"))
+            : new(false, null, result,
                 GetLastError(LocalizationService.Get("CannotStartCapture")));
     }
 
-    public void StopDeviceSession(ulong handle)
+    public void StopDeviceSession(NativeSessionHandle handle)
     {
-        if (handle == 0) return;
-        var result = im_session_stop(handle);
+        if (handle is null || handle.IsInvalid) return;
+        var result = im_session_stop(handle.RawHandle);
         if (result == 0) return;
         var message = GetLastError(
             $"{LocalizationService.Get("StopFailedFormat")} (error {result})");
@@ -813,30 +873,38 @@ internal sealed class NativeCore : IDisposable
         throw new InvalidOperationException(message);
     }
 
-    public void DestroyDeviceSession(ulong handle)
+    public void DestroyDeviceSession(NativeSessionHandle handle)
     {
-        if (handle != 0) im_session_destroy(handle);
+        if (handle is null || handle.IsInvalid) return;
+        // Let ReleaseHandle own the native destroy. Calling im_session_destroy
+        // here and then Dispose() would double-destroy because Dispose() runs
+        // ReleaseHandle which calls im_session_destroy again.
+        handle.Dispose();
     }
 
-    public NativeCaptureStatus GetDeviceSessionStatus(ulong handle)
+    public NativeCaptureStatus GetDeviceSessionStatus(NativeSessionHandle handle)
     {
         var status = new NativeCaptureStatus
         {
             StructSize = (uint)Marshal.SizeOf<NativeCaptureStatus>(),
             Message = string.Empty,
         };
-        var result = im_session_get_status(handle, ref status);
+        if (handle is null || handle.IsInvalid) throw new InvalidOperationException(
+            GetLastError(LocalizationService.Get("ReadCaptureStatusFailed")));
+        var result = im_session_get_status(handle.RawHandle, ref status);
         if (result != 0) throw new InvalidOperationException(GetLastError(
             LocalizationService.Get("ReadCaptureStatusFailed")));
         return status;
     }
 
-    public long GetDeviceSessionLatestFrameTimestamp(ulong handle)
+    public long GetDeviceSessionLatestFrameTimestamp(NativeSessionHandle handle)
     {
-        if (handle == 0) return 0;
+        if (handle is null || handle.IsInvalid) return 0;
+        bool added = false;
         try
         {
-            return im_session_get_latest_video_timestamp(handle,
+            handle.DangerousAddRef(ref added);
+            return im_session_get_latest_video_timestamp((ulong)handle.DangerousGetHandle(),
                 out var timestamp) == 0 ? timestamp : 0;
         }
         catch (Exception error) when (error is EntryPointNotFoundException or
@@ -846,23 +914,26 @@ internal sealed class NativeCore : IDisposable
                 "session_frame_timestamp_unavailable", error);
             return 0;
         }
+        finally { if (added) handle.DangerousRelease(); }
     }
 
-    public bool TryGetDeviceVideoOutputStatus(ulong handle,
+    public bool TryGetDeviceVideoOutputStatus(NativeSessionHandle handle,
         out NativeVideoOutputStatus status)
     {
         status = new NativeVideoOutputStatus
         {
             StructSize = (uint)Marshal.SizeOf<NativeVideoOutputStatus>(),
         };
-        if (handle == 0) return false;
+        if (handle is null || handle.IsInvalid) return false;
+        bool added = false;
         try
         {
+            handle.DangerousAddRef(ref added);
             // Decoder state belongs to the capture session, not to whichever
             // HWND currently owns its preview. Passing no HWND deliberately
             // avoids treating a detached, hidden, or transitioning preview as
             // an unavailable decoder and leaving the UI at "detecting".
-            return im_session_get_video_output_status(handle, 0, ref status) == 0;
+            return im_session_get_video_output_status((ulong)handle.DangerousGetHandle(), 0, ref status) == 0;
         }
         catch (Exception error) when (error is EntryPointNotFoundException or
                                       DllNotFoundException)
@@ -871,23 +942,26 @@ internal sealed class NativeCore : IDisposable
                 "video_output_status_unavailable", error);
             return false;
         }
+        finally { if (added) handle.DangerousRelease(); }
     }
 
-    public (bool Success, string Message) SetDeviceVideoPreferences(ulong handle,
+    public (bool Success, string Message) SetDeviceVideoPreferences(NativeSessionHandle handle,
         uint width, uint height, uint fps)
     {
-        var result = im_session_set_video_preferences(handle, width, height, fps);
+        if (handle is null || handle.IsInvalid)
+            return (false, LocalizationService.Get("VideoPreferencesUpdateFailed"));
+        var result = im_session_set_video_preferences(handle.RawHandle, width, height, fps);
         return result == 0 ? (true, LocalizationService.Get("VideoPreferencesApplied"))
             : (false, GetLastError(LocalizationService.Get("VideoPreferencesUpdateFailed")));
     }
 
-    public (bool Success, string Message) SetDevicePipelinePreferences(ulong handle,
+    public (bool Success, string Message) SetDevicePipelinePreferences(NativeSessionHandle handle,
         uint decoderPreference, uint colorOutputPreference)
     {
-        if (handle == 0) return (false, LocalizationService.Get("VideoPreferencesUpdateFailed"));
+        if (handle is null || handle.IsInvalid) return (false, LocalizationService.Get("VideoPreferencesUpdateFailed"));
         try
         {
-            var result = im_session_set_pipeline_preferences(handle,
+            var result = im_session_set_pipeline_preferences(handle.RawHandle,
                 Math.Min(decoderPreference, 2U), Math.Min(colorOutputPreference, 2U));
             return result == 0
                 ? (true, LocalizationService.Get("VideoPreferencesApplied"))
@@ -901,14 +975,14 @@ internal sealed class NativeCore : IDisposable
         }
     }
 
-    public (bool Success, string Message) SetDeviceImageAdjustments(ulong handle,
+    public (bool Success, string Message) SetDeviceImageAdjustments(NativeSessionHandle handle,
         double brightness, double contrast, double saturation, double gamma)
     {
-        if (handle == 0)
+        if (handle is null || handle.IsInvalid)
             return (false, LocalizationService.Get("VideoPreferencesUpdateFailed"));
         try
         {
-            var result = im_session_set_image_adjustments(handle,
+            var result = im_session_set_image_adjustments(handle.RawHandle,
                 Math.Clamp((float)brightness / 100.0f, -1.0f, 1.0f),
                 Math.Clamp((float)contrast / 100.0f, 0.0f, 2.0f),
                 Math.Clamp((float)saturation / 100.0f, 0.0f, 2.0f),
@@ -927,17 +1001,23 @@ internal sealed class NativeCore : IDisposable
         }
     }
 
-    public void SetDeviceAudioEnabled(ulong handle, bool enabled)
+    public void SetDeviceAudioEnabled(NativeSessionHandle handle, bool enabled)
     {
-        if (im_session_set_audio_enabled(handle, enabled ? 1 : 0) != 0)
+        if (handle is null || handle.IsInvalid) return;
+        if (im_session_set_audio_enabled(handle.RawHandle, enabled ? 1 : 0) != 0)
             throw new InvalidOperationException(GetLastError(LocalizationService.Get("AudioStateUpdateFailed")));
     }
 
-    public void SetDeviceAudioVolume(ulong handle, double volume)
+    public void SetDeviceAudioVolume(NativeSessionHandle handle, double volume)
     {
-        if (im_session_set_audio_volume(handle, Math.Clamp((float)volume, 0, 1)) != 0)
+        if (handle is null || handle.IsInvalid) return;
+        if (im_session_set_audio_volume(handle.RawHandle, Math.Clamp((float)volume, 0, 1)) != 0)
             throw new InvalidOperationException(GetLastError(LocalizationService.Get("AudioVolumeUpdateFailed")));
     }
+
+    internal static bool SetDeviceCornerProfile(NativeSessionHandle handle, double radius, double exponent) =>
+        handle is not null && !handle.IsInvalid && im_session_set_corner_profile(handle.RawHandle,
+            Math.Clamp((float)radius, 0, 0.5f), Math.Clamp((float)exponent, 1.5f, 8)) == 0;
 
     internal static bool SetDeviceCornerProfile(ulong handle, double radius, double exponent) =>
         handle != 0 && im_session_set_corner_profile(handle,
@@ -1030,44 +1110,54 @@ internal sealed class NativeCore : IDisposable
         return new VideoFrame(info.Width, info.Height, info.Stride, info.Timestamp100Ns, _frameBuffer);
     }
 
-    internal VideoFrame? GetDeviceOutputFrame(ulong handle, uint width, uint height)
+    internal VideoFrame? GetDeviceOutputFrame(NativeSessionHandle handle, uint width, uint height)
     {
-        if (handle == 0) return null;
+        if (handle is null || handle.IsInvalid) return null;
+        bool added = false;
+        handle.DangerousAddRef(ref added);
+        try
+        {
         var info = new NativeVideoFrameInfo
         {
             StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>(),
         };
         uint size = (uint)(_outputFrameBuffer?.Length ?? 0);
-        var result = im_session_copy_latest_video_frame(handle, ref info,
+        var result = im_session_copy_latest_video_frame(handle.RawHandle, ref info,
             _outputFrameBuffer, ref size, width, height);
         if (result == (int)NativeResult.BufferTooSmall)
         {
             _outputFrameBuffer = new byte[size];
             info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
-            result = im_session_copy_latest_video_frame(handle, ref info,
+            result = im_session_copy_latest_video_frame(handle.RawHandle, ref info,
                 _outputFrameBuffer, ref size, width, height);
         }
         if (result != 0 || _outputFrameBuffer is null) return null;
         return new VideoFrame(info.Width, info.Height, info.Stride,
             info.Timestamp100Ns, _outputFrameBuffer);
+        }
+        finally { if (added) handle.DangerousRelease(); }
     }
 
-    internal Nv12VideoFrame? GetDeviceOutputNv12Frame(ulong handle, uint width,
+    internal Nv12VideoFrame? GetDeviceOutputNv12Frame(NativeSessionHandle handle, uint width,
         uint height)
     {
-        if (handle == 0) return null;
+        if (handle is null || handle.IsInvalid) return null;
+        bool added = false;
+        handle.DangerousAddRef(ref added);
+        try
+        {
         var info = new NativeVideoFrameInfo
         {
             StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>(),
         };
         uint size = (uint)(_outputNv12FrameBuffer?.Length ?? 0);
-        var result = im_session_copy_latest_video_frame_nv12(handle, ref info,
+        var result = im_session_copy_latest_video_frame_nv12(handle.RawHandle, ref info,
             _outputNv12FrameBuffer, ref size, width, height);
         if (result == (int)NativeResult.BufferTooSmall)
         {
             _outputNv12FrameBuffer = new byte[size];
             info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
-            result = im_session_copy_latest_video_frame_nv12(handle, ref info,
+            result = im_session_copy_latest_video_frame_nv12(handle.RawHandle, ref info,
                 _outputNv12FrameBuffer, ref size, width, height);
         }
         if (result != 0 || _outputNv12FrameBuffer is null ||
@@ -1075,30 +1165,38 @@ internal sealed class NativeCore : IDisposable
             return null;
         return new Nv12VideoFrame(info.Width, info.Height, info.Stride,
             info.Timestamp100Ns, _outputNv12FrameBuffer);
+        }
+        finally { if (added) handle.DangerousRelease(); }
     }
 
-    internal AudioPacket? GetDeviceOutputAudioPacket(ulong handle,
+    internal AudioPacket? GetDeviceOutputAudioPacket(NativeSessionHandle handle,
         ulong afterSequence)
     {
-        if (handle == 0) return null;
+        if (handle is null || handle.IsInvalid) return null;
+        bool added = false;
+        handle.DangerousAddRef(ref added);
+        try
+        {
         var info = new NativeAudioPacketInfo
         {
             StructSize = (uint)Marshal.SizeOf<NativeAudioPacketInfo>(),
         };
         uint size = (uint)(_outputAudioBuffer?.Length ?? 0);
-        var result = im_session_copy_next_audio_packet(handle, afterSequence,
+        var result = im_session_copy_next_audio_packet(handle.RawHandle, afterSequence,
             ref info, _outputAudioBuffer, ref size);
         if (result == (int)NativeResult.BufferTooSmall)
         {
             _outputAudioBuffer = new byte[size];
             info.StructSize = (uint)Marshal.SizeOf<NativeAudioPacketInfo>();
-            result = im_session_copy_next_audio_packet(handle, afterSequence,
+            result = im_session_copy_next_audio_packet(handle.RawHandle, afterSequence,
                 ref info, _outputAudioBuffer, ref size);
         }
         if (result == (int)NativeResult.CaptureBackendUnavailable) return null;
         if (result != 0 || _outputAudioBuffer is null || size == 0) return null;
         return new AudioPacket(info.Sequence, info.SampleRate, info.Channels,
             info.BitsPerSample, _outputAudioBuffer.AsSpan(0, checked((int)size)).ToArray());
+        }
+        finally { if (added) handle.DangerousRelease(); }
     }
 
     private static string GetLastError(string fallback)

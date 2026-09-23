@@ -29,10 +29,25 @@ public:
     }
 
     IFACEMETHODIMP LockServer(BOOL lock) override {
-        if (lock)
+        if (lock) {
             module_object_count.fetch_add(1, std::memory_order_relaxed);
-        else
-            module_object_count.fetch_sub(1, std::memory_order_relaxed);
+        } else {
+            // Guard against underflow from unbalanced LockServer(FALSE)
+            // calls. A wrap-around to ULONG_MAX would leave the module
+            // permanently loaded (DllCanUnloadNow returns S_FALSE).
+            unsigned long current = module_object_count.load(
+                std::memory_order_relaxed);
+            if (current == 0) {
+                OutputDebugStringW(L"LockServer(FALSE) called with zero "
+                                   L"module object count; ignoring to avoid "
+                                   L"underflow\n");
+            }
+            while (current != 0 &&
+                   !module_object_count.compare_exchange_weak(
+                       current, current - 1, std::memory_order_relaxed)) {
+                // current is refreshed by compare_exchange_weak on failure.
+            }
+        }
         return S_OK;
     }
 };

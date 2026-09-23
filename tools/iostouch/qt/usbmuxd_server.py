@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 import plistlib
+import re
 import struct
 import threading
 import uuid
@@ -150,11 +151,19 @@ class UsbmuxdServer:
                     else:
                         writer.write(self._frame(tag, {"PairRecordData": data}))
                 elif mt == "SavePairRecord":
-                    self.pair_records[str(req.get("PairRecordID", ""))] = bytes(req.get("PairRecordData", b""))
-                    writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_OK}))
+                    identifier = req.get("PairRecordID", "")
+                    data = req.get("PairRecordData")
+                    valid = self._valid_pair_record_id(identifier) and isinstance(data, bytes)
+                    if valid:
+                        self.pair_records[self.serial] = data
+                    writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_OK if valid else RESULT_BADDEV}))
                 elif mt == "DeletePairRecord":
-                    self.pair_records.pop(str(req.get("PairRecordID", "")), None)
-                    writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_OK}))
+                    valid = self._valid_pair_record_id(req.get("PairRecordID", ""))
+                    if valid:
+                        for key in list(self.pair_records):
+                            if self._valid_pair_record_id(key):
+                                self.pair_records.pop(key, None)
+                    writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_OK if valid else RESULT_BADDEV}))
                 elif mt == "Connect":
                     await self._handle_connect(tag, req, reader, writer)
                     return
@@ -169,17 +178,28 @@ class UsbmuxdServer:
             with _suppress():
                 writer.close()
 
+    def _valid_pair_record_id(self, identifier: str) -> bool:
+        # This server exposes exactly one device. Never accept paths, other
+        # devices' records, or special files such as SystemConfiguration.
+        return (isinstance(identifier, str) and
+                re.fullmatch(r"[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{16}|[0-9A-Fa-f]{40}", identifier) is not None and
+                identifier.replace("-", "").lower() == self.serial.replace("-", "").lower())
+
     def _load_pair_record(self, identifier: str) -> Optional[bytes]:
-        for key in (identifier, identifier.replace("-", ""), self.serial):
-            if key in self.pair_records:
-                return self.pair_records[key]
+        if not self._valid_pair_record_id(identifier):
+            return None
+        for key, data in self.pair_records.items():
+            if self._valid_pair_record_id(key):
+                return data
+        root = _pair_record_dir().resolve()
         for name in (identifier, identifier.replace("-", ""), self.serial, self.serial.replace("-", "")):
-            p = _pair_record_dir() / f"{name}.plist"
-            if p.is_file():
-                try:
+            try:
+                p = (root / f"{name}.plist").resolve()
+                # Also refuse symlinks/junctions pointing outside Lockdown.
+                if p.parent == root and p.is_file():
                     return p.read_bytes()
-                except OSError:
-                    continue
+            except (OSError, RuntimeError):
+                continue
         return None
 
     async def _handle_connect(self, tag: int, req: dict, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

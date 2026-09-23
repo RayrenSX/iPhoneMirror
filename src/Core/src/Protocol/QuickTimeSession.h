@@ -66,6 +66,12 @@ public:
     [[nodiscard]] SessionState state() const noexcept { return state_; }
     [[nodiscard]] std::uint64_t video_frames() const noexcept { return video_frames_; }
     [[nodiscard]] std::uint64_t audio_packets() const noexcept { return audio_packets_; }
+    [[nodiscard]] std::uint64_t need_sent() const noexcept { return need_sent_; }
+    [[nodiscard]] std::uint64_t reply_received() const noexcept { return reply_received_; }
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point>
+    last_video_sample_at() const noexcept { return last_video_sample_at_; }
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point>
+    last_audio_sample_at() const noexcept { return last_audio_sample_at_; }
     [[nodiscard]] const std::optional<coremedia::FormatDescription>& video_format() const noexcept { return video_format_; }
     [[nodiscard]] const std::optional<coremedia::FormatDescription>& audio_format() const noexcept { return audio_format_; }
     [[nodiscard]] const std::optional<coremedia::AudioStreamBasicDescription>& negotiated_audio() const noexcept { return negotiated_audio_; }
@@ -81,6 +87,13 @@ private:
     std::uint64_t local_host_clock_{};
     std::uint64_t video_frames_{};
     std::uint64_t audio_packets_{};
+    // Stream-flow diagnostics: the mirror currently emits NEED only per video
+    // sample and ignores RPLY entirely. These counters let a single idle-screen
+    // capture confirm how the device stall correlates with NEED/RPLY traffic.
+    std::uint64_t need_sent_{};
+    std::uint64_t reply_received_{};
+    std::optional<std::chrono::steady_clock::time_point> last_video_sample_at_{};
+    std::optional<std::chrono::steady_clock::time_point> last_audio_sample_at_{};
     std::optional<coremedia::FormatDescription> video_format_;
     std::optional<coremedia::FormatDescription> audio_format_;
     std::optional<coremedia::AudioStreamBasicDescription> negotiated_audio_;

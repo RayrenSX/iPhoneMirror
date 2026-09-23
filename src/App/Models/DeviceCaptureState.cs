@@ -1,3 +1,5 @@
+using IPhoneMirror.App.Interop;
+
 namespace IPhoneMirror.App.Models;
 
 internal enum UsbProjectionMode : uint
@@ -17,7 +19,7 @@ internal enum DecoderPreference : uint
 internal sealed class DeviceCaptureState
 {
     internal required string Udid { get; init; }
-    internal ulong Handle { get; set; }
+    internal NativeSessionHandle? Handle { get; set; }
     internal bool IsStarting { get; set; }
     internal bool IsStopping { get; set; }
     internal uint RenderWidth { get; set; }
@@ -43,7 +45,7 @@ internal sealed class DeviceCaptureState
     internal double AppliedSaturation { get; private set; } = 100;
     internal double AppliedGamma { get; private set; } = 100;
     internal bool HasAppliedVideoSettings { get; private set; }
-    internal bool HasSession => Handle != 0;
+    internal bool HasSession => Handle is not null && !Handle.IsClosed && !Handle.IsInvalid;
     internal bool ErrorShown { get; set; }
     internal bool VideoProtected { get; private set; }
     internal bool ProtectedAudioActive { get; private set; }
@@ -78,8 +80,10 @@ internal sealed class DeviceCaptureState
     // A settings window is tied to the native session that existed when it
     // opened. The state object intentionally survives reconnects, so object
     // identity alone cannot distinguish the old session from its replacement.
+    // Kept as ulong because callers compare against CurrentSessionHandle (a
+    // public ulong property). RawHandle extracts the native value for comparison.
     internal bool MatchesSessionHandle(ulong expectedHandle) =>
-        !IsStopping && Handle == expectedHandle;
+        !IsStopping && (Handle?.RawHandle ?? 0UL) == expectedHandle;
 
     internal bool HasPendingVideoSettings => !HasAppliedVideoSettings ||
         RenderWidth != AppliedRenderWidth || RenderHeight != AppliedRenderHeight ||

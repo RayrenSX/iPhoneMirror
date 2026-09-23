@@ -155,6 +155,19 @@ internal sealed class DriverOperationClient
             var result = await JsonSerializer.DeserializeAsync<DriverOperationResult>(stream,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             var completed = result ?? Failure(DriverLocalization.Get("ElevatedInvalidResult"), paths.LogPath);
+            // Guard against the elevated host writing a result for a different device.
+            if (result is not null && result.InstanceId is not null &&
+                !string.Equals(result.InstanceId, device.InstanceId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                DriverLogger.WriteError("driver-operation", "result_instance_id_mismatch",
+                    ("operation", operationId), ("kind", kind),
+                    ("expected", deviceFingerprint),
+                    ("actual", DriverLogger.DeviceFingerprint(result.InstanceId)));
+                return Failure(
+                    "The elevated driver operation result did not match the requested device instance id.",
+                    paths.LogPath);
+            }
             if (!IsResultConsistentWithExitCode(process.ExitCode, completed))
             {
                 DriverLogger.WriteError("driver-operation", "result_exit_code_mismatch",

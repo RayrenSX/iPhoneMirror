@@ -109,6 +109,36 @@ std::vector<std::uint8_t> length_prefixed_to_annex_b(
     return result;
 }
 
+// Overload that reuses a caller-supplied buffer to avoid per-frame heap
+// allocation on the decode hot path. thread_local storage at the call site
+// keeps a per-thread capacity across frames.
+void length_prefixed_to_annex_b(std::span<const std::uint8_t> sample,
+    std::uint8_t length_size, std::vector<std::uint8_t>& result) {
+    if (length_size < 1 || length_size > 4) {
+        throw std::runtime_error("invalid video NAL length size");
+    }
+    result.clear();
+    result.reserve(sample.size() + 16);
+    std::size_t offset{};
+    while (offset < sample.size()) {
+        if (sample.size() - offset < length_size) {
+            throw std::runtime_error("truncated length-prefixed video NAL header");
+        }
+        std::uint32_t length{};
+        for (std::uint8_t index{}; index < length_size; ++index) {
+            length = (length << 8U) | sample[offset + index];
+        }
+        offset += length_size;
+        if (length == 0 || length > sample.size() - offset) {
+            throw std::runtime_error("invalid length-prefixed video NAL size");
+        }
+        result.insert(result.end(), {0, 0, 0, 1});
+        result.insert(result.end(), sample.begin() + static_cast<std::ptrdiff_t>(offset),
+            sample.begin() + static_cast<std::ptrdiff_t>(offset + length));
+        offset += length;
+    }
+}
+
 GUID input_subtype(coremedia::VideoCodec codec) {
     if (codec == coremedia::VideoCodec::H264) return MFVideoFormat_H264;
     if (codec == coremedia::VideoCodec::Hevc) return MFVideoFormat_HEVC;
@@ -409,7 +439,9 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
     const auto required = checked_nv12_buffer_size(output_width, output_height);
     if (!required || output.size() < *required) return false;
 
-    const auto source_stride = static_cast<std::size_t>(std::abs(frame.stride));
+    // std::abs on INT32_MIN is undefined behavior; widen to 64-bit first.
+    const auto stride_ll = static_cast<std::int64_t>(frame.stride);
+    const auto source_stride = static_cast<std::size_t>(stride_ll < 0 ? -stride_ll : stride_ll);
     const auto component_bytes = frame.pixel_format == PixelFormat::P010 ? 2U : 1U;
     const auto source_y_row_bytes = static_cast<std::size_t>(frame.width) *
         component_bytes;
@@ -1418,7 +1450,16 @@ struct MediaFoundationVideoDecoder::Impl {
         const D3D11_BOX visible_box{0, 0, 0, format.width, format.height, 1};
         d3d_context->CopySubresourceRegion(selected_slot->texture.Get(), 0, 0, 0, 0,
             source, source_subresource, &visible_box);
-        if (FAILED(selected_slot->mutex->ReleaseSync(1))) return false;
+        const auto release_hr = selected_slot->mutex->ReleaseSync(1);
+        if (FAILED(release_hr)) {
+            // The keyed mutex is now in an inconsistent state; record the
+            // HRESULT so consumers are not left blocking silently on the next
+            // AcquireSync before giving up on this slot.
+            logging::write(std::format(
+                "mf_decoder keyed_mutex release failed hr=0x{:08X}",
+                static_cast<unsigned int>(release_hr)));
+            return false;
+        }
 
         if (!selected_slot->frame) {
             ComPtr<IDXGIResource1> resource;
@@ -1689,26 +1730,33 @@ struct MediaFoundationVideoDecoder::Impl {
 
     std::vector<DecodedFrame> decode_once(std::span<const std::uint8_t> source,
         std::int64_t timestamp, std::int64_t duration, bool random_access) {
-        auto encoded = length_prefixed_to_annex_b(source, format.nalu_length_size);
+        // Reuse a per-thread buffer across frames to avoid per-frame heap
+        // allocation on the decode hot path. Only the first frame (which
+        // prepends parameter sets) allocates a fresh vector.
+        thread_local static std::vector<std::uint8_t> annex_b_buffer;
+        length_prefixed_to_annex_b(source, format.nalu_length_size, annex_b_buffer);
+        const std::vector<std::uint8_t>* encoded = &annex_b_buffer;
+        std::vector<std::uint8_t> parameter_sets_storage;
         if (!sent_parameter_sets) {
-            auto parameter_sets = parameter_sets_annex_b(format);
-            parameter_sets.insert(parameter_sets.end(), encoded.begin(), encoded.end());
-            encoded = std::move(parameter_sets);
+            parameter_sets_storage = parameter_sets_annex_b(format);
+            parameter_sets_storage.insert(parameter_sets_storage.end(),
+                annex_b_buffer.begin(), annex_b_buffer.end());
+            encoded = &parameter_sets_storage;
             sent_parameter_sets = true;
         }
-        if (encoded.size() > std::numeric_limits<DWORD>::max())
+        if (encoded->size() > std::numeric_limits<DWORD>::max())
             throw std::runtime_error("compressed video sample is too large");
         ComPtr<IMFSample> sample;
         ComPtr<IMFMediaBuffer> buffer;
         check(MFCreateSample(&sample), "create decoder input sample");
-        check(MFCreateMemoryBuffer(static_cast<DWORD>(encoded.size()), &buffer),
+        check(MFCreateMemoryBuffer(static_cast<DWORD>(encoded->size()), &buffer),
             "create decoder input buffer");
         BYTE* destination{};
         DWORD capacity{};
         check(buffer->Lock(&destination, &capacity, nullptr), "lock decoder input buffer");
-        std::copy(encoded.begin(), encoded.end(), destination);
+        std::copy(encoded->begin(), encoded->end(), destination);
         buffer->Unlock();
-        check(buffer->SetCurrentLength(static_cast<DWORD>(encoded.size())),
+        check(buffer->SetCurrentLength(static_cast<DWORD>(encoded->size())),
             "set decoder input length");
         check(sample->AddBuffer(buffer.Get()), "attach decoder input buffer");
         check(sample->SetSampleTime(timestamp), "set decoder sample time");

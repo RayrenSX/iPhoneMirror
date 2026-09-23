@@ -90,6 +90,9 @@
                                 <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Complete}"
                                               Content="{DynamicResource ApplicationModeComplete}"/>
                             </ComboBox>
+                            <Button Content="{DynamicResource ApplyLightweightMode}"
+                                    Click="OnApplyLightweightModeClick"
+                                    Style="{StaticResource ToolButton}" Margin="0,10,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource ControlSectionCard}"

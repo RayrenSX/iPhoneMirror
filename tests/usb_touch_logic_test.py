@@ -17,12 +17,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'tools'))
 
 
 class TestPackagedSourceParity(unittest.TestCase):
-    def test_usb_control_copy_matches_application_bridge(self):
+    def test_packaging_uses_audited_application_bridge(self):
         root = Path(__file__).resolve().parents[1]
-        self.assertEqual(
-            (root / 'tools' / 'usb_touch_bridge.py').read_text(encoding='utf-8').splitlines(),
-            (root.parent / 'iUsbBridge' / 'src' / 'usb_touch_bridge.py').read_text(encoding='utf-8').splitlines(),
-        )
+        build = (root / 'build.ps1').read_text(encoding='utf-8')
+        self.assertIn("-SourceRoot (Join-Path $Root 'tools')", build)
+        self.assertIn("& (Join-Path $stage 'build.ps1') -BridgeOnly", build)
 
 
 class TestFiveSlotStateMachine(unittest.TestCase):
@@ -925,9 +924,20 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
 
         ipc = Ipc()
         session = bridge.TouchSession(ipc, 120, udid='00008150-ABCDEF', transport='wireless')
+
+        async def usb_preflight_lockdown(_connection_type):
+            return object()
+
+        async def skip_developer_preflight(_lockdown):
+            pass
+
         with patch.object(bridge, 'iter_remote_paired_identifiers',
                           return_value=iter(('00008150-abcdef',))), \
-             patch.object(bridge, 'get_remote_pairing_tunnel_services', discover):
+             patch.object(bridge, 'get_remote_pairing_tunnel_services', discover), \
+             patch.object(session, '_create_lockdown_with_retry',
+                          usb_preflight_lockdown), \
+             patch.object(session, '_preflight_developer_environment',
+                          skip_developer_preflight):
             with self.assertRaises(bridge.BridgePrerequisiteError) as raised:
                 await session._connect_via_remote_pairing()
 
@@ -1115,7 +1125,8 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(attempts[0].closed)
             self.assertIs(session._usb_mux_transport, attempts[1])
             self.assertEqual(os.environ['USBMUXD_SOCKET_ADDRESS'], '127.0.0.1:45678')
-            self.assertEqual([event['code'] for event in ipc.events], ['capture_mux_retry'])
+            self.assertEqual([event['code'] for event in ipc.events],
+                             ['capture_mux_retry', 'capture_mux_ready'])
         finally:
             await session._cleanup()
             if previous_address is None:

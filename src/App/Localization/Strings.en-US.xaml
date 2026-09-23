@@ -89,10 +89,12 @@
     <system:String x:Key="ReverseControlDownloadingImage">Downloading and verifying the developer image</system:String>
     <system:String x:Key="ReverseControlRemountingImage">Refreshing the old developer image to enable touch service</system:String>
     <system:String x:Key="ReverseControlDiscoveringWireless">Discovering wireless CoreDevice devices</system:String>
+    <system:String x:Key="ReverseControlCaptureMuxReady">Connecting over the USB channel shared with the mirror</system:String>
     <system:String x:Key="ReverseControlWaitingTouchService">Waiting for the developer image to publish the touch service</system:String>
     <system:String x:Key="ReverseControlInitializingTouchFormat">Initializing the {0} touch channel</system:String>
     <system:String x:Key="UsbControlFailureAppleUsbmux">The Apple USB pairing service is not ready. Install or repair Apple Devices/iTunes support in the driver manager, connect and unlock the iPhone, then try again.</system:String>
     <system:String x:Key="UsbControlFailureNotTrusted">This iPhone has not trusted the current Windows account. Keep the phone unlocked, reconnect the cable, and tap “Trust” on the phone.</system:String>
+    <system:String x:Key="UsbControlFailureDeviceLocked">The iPhone is locked or waiting for its passcode. Unlock the phone and keep the screen on, complete any Trust This Computer or passcode prompt on the phone, then start reverse control again.</system:String>
     <system:String x:Key="UsbControlFailureDeveloperMode">Developer Mode is not enabled on this device. Turn it on under iPhone/iPad Settings → Privacy &amp; Security → Developer Mode, then restart the device and try again.</system:String>
     <system:String x:Key="UsbControlFailureImageRequired">The device has not mounted the Personalized Developer Disk Image. Mount the official Xcode image matching the device system, then try again.</system:String>
     <system:String x:Key="UsbControlFailureImageDownload">The developer image download failed or timed out. Check the GitHub network connection, or provide an official local image through IPHONE_MIRROR_DDI_DIR.</system:String>
@@ -109,6 +111,7 @@
     <system:String x:Key="UsbControlFailureGateUnavailable">The device did not confirm that CoreDevice touch authentication is enabled. Reverse control was not started to prevent silent input loss.</system:String>
     <system:String x:Key="UsbControlFailureTouchService">The device has not provided the touch-control service. Keep it unlocked and trusted, then try again; otherwise use Bluetooth or wireless control.</system:String>
     <system:String x:Key="UsbControlFailureDeviceNotFound">The Apple network-pairing session for this device was not found. Connect by cable once, enable “Sync with this iPhone over Wi-Fi” in Apple Devices or iTunes, and try again.</system:String>
+    <system:String x:Key="UsbControlFailureWiredDeviceNotFound">The control channel for this device was not found over USB. While mirroring, the system may temporarily lose access to the device: stop the mirror before starting reverse control, or replug the cable, unlock the iPhone, confirm it trusts this PC, and retry.</system:String>
     <system:String x:Key="UsbControlFailureMux">The Apple USB service disconnected during the device handshake. Keep the device unlocked and trusted, reconnect the cable, and try again.</system:String>
     <system:String x:Key="UsbControlFailureNoDetails">The USB touch bridge provided no error details. Confirm the device is connected by USB and trusted.</system:String>
     <system:String x:Key="UsbControlFailureUnknown">The USB reverse-control bridge returned an unrecognized error. Check the diagnostic log and try again.</system:String>
@@ -191,6 +194,7 @@
     <system:String x:Key="ProjectionSettingsTitle">Mirroring settings</system:String>
     <system:String x:Key="ApplicationModeLabel">Application mode</system:String>
     <system:String x:Key="ApplicationModeLightweight">Lightweight</system:String>
+    <system:String x:Key="ApplyLightweightMode">Switch to lightweight mode</system:String>
     <system:String x:Key="ApplicationModeComplete">Complete</system:String>
     <system:String x:Key="KeepUnlocked">Keep the Apple device unlocked after connecting</system:String>
     <system:String x:Key="PreviewLabel">Preview</system:String>
@@ -750,6 +754,10 @@ Make sure the phone and computer are on the same local network and keep the devi
     <system:String x:Key="RecordingPendingSave">The previous recording is complete but has not been saved. Choose its location and file name first.</system:String>
     <system:String x:Key="RecordingSavedFormat">Recording saved to: {0}</system:String>
     <system:String x:Key="RecordingSaveFailedFormat">Could not save the recording: {0}</system:String>
+    <system:String x:Key="DiscardRecording">Discard recording</system:String>
+    <system:String x:Key="DiscardRecordingConfirmation">Delete this unsaved recording? This cannot be undone.</system:String>
+    <system:String x:Key="RecordingDiscarded">Recording discarded.</system:String>
+    <system:String x:Key="RecordingDiscardFailed">Could not discard the recording.</system:String>
     <system:String x:Key="UnknownError">Unknown error</system:String>
     <system:String x:Key="AboutTitle">About</system:String>
     <system:String x:Key="AboutToolTip">About and update settings</system:String>

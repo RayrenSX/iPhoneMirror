@@ -679,6 +679,17 @@ struct DlnaRenderer::Impl {
         std::chrono::steady_clock::time_point expires;
     };
 
+    // A client worker thread plus a completion flag. The flag lets the accept
+    // loop reap finished threads mid-session: std::thread::joinable() stays true
+    // after the thread function returns, so joinable() alone cannot identify
+    // completed workers. The worker stores its done flag by raw pointer; the
+    // pointer stays valid because the owning unique_ptr lives in client_threads
+    // until the reaper joins the thread and erases the entry.
+    struct ClientWorker {
+        std::thread thread;
+        std::atomic<bool> done{false};
+    };
+
     std::string name;
     std::string uuid;
     std::uint16_t http_port{};
@@ -689,7 +700,7 @@ struct DlnaRenderer::Impl {
     std::atomic_bool stopping{};
     std::thread http_thread;
     std::thread ssdp_thread;
-    std::vector<std::thread> client_threads;
+    std::vector<std::unique_ptr<ClientWorker>> client_threads;
     bool winsock_started{};
     std::mutex state_mutex;
     std::mutex http_listener_mutex;
@@ -1573,7 +1584,9 @@ struct DlnaRenderer::Impl {
                 break;
             }
             try {
-                std::thread worker([this, client] {
+                auto worker = std::make_unique<ClientWorker>();
+                auto* done_flag = &worker->done;
+                worker->thread = std::thread([this, client, done_flag] {
                     try {
                         handle_http(client);
                     } catch (...) {
@@ -1581,8 +1594,21 @@ struct DlnaRenderer::Impl {
                         log("dlna http handler failed with an exception");
                     }
                     closesocket(client);
+                    // Signal completion last so the reaper only joins after the
+                    // thread function has fully returned; the reaper owns the
+                    // unique_ptr and destroys the flag after join.
+                    done_flag->store(true, std::memory_order_release);
                 });
                 std::scoped_lock lock(client_mutex);
+                // Reap finished workers before appending to bound the vector
+                // size over long-running sessions. Joining a completed thread
+                // returns immediately; only then is the entry erased so the
+                // done flag (still referenced by the joined thread) stays live.
+                std::erase_if(client_threads, [](const auto& entry) {
+                    if (!entry->done.load(std::memory_order_acquire)) return false;
+                    if (entry->thread.joinable()) entry->thread.join();
+                    return true;
+                });
                 client_threads.push_back(std::move(worker));
             } catch (...) {
                 closesocket(client);
@@ -1868,7 +1894,7 @@ void DlnaRenderer::stop() noexcept {
     {
         std::scoped_lock lock(impl_->client_mutex);
         for (auto& client : impl_->client_threads) {
-            if (client.joinable()) client.join();
+            if (client->thread.joinable()) client->thread.join();
         }
         impl_->client_threads.clear();
     }

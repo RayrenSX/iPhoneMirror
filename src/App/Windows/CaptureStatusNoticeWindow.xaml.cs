@@ -5,6 +5,7 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
 {
+    private static CaptureStatusNoticeWindow? _activeError;
     private enum NoticeKind { Error, UsbConfiguration, Stopped }
 
     public string TitleText { get; }
@@ -45,12 +46,29 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
 
     internal static void ShowError(string title, string body,
         bool usbConfiguration, bool reverseControl = false) =>
-        new CaptureStatusNoticeWindow(title, body,
+        ShowErrorCore(title, body, usbConfiguration, reverseControl);
+
+    private static void ShowErrorCore(string title, string body,
+        bool usbConfiguration, bool reverseControl)
+    {
+        if (_activeError is { IsVisible: true })
+        {
+            _activeError.Activate();
+            return;
+        }
+        var notice = new CaptureStatusNoticeWindow(title, body,
             usbConfiguration ? NoticeKind.UsbConfiguration : NoticeKind.Error,
             reverseControl: reverseControl)
         {
             Owner = Application.Current.MainWindow,
-        }.ShowDialog();
+        };
+        _activeError = notice;
+        notice.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_activeError, notice)) _activeError = null;
+        };
+        notice.ShowDialog();
+    }
 
     internal static void ShowStoppedThen(string title, string body,
         Func<Task> afterShown)

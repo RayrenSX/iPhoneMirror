@@ -63,6 +63,7 @@ function Resolve-MsysRoot {
     }
     $candidates += @(
         'C:\msys64',
+        'C:\msys64\msys64',
         (Join-Path $Root 'work\dependencies\msys2-20260611\root\msys64'))
     foreach ($candidate in $candidates) {
         if ([string]::IsNullOrWhiteSpace($candidate)) { continue }

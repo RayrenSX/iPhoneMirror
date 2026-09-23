@@ -75,7 +75,18 @@ std::vector<Packet> StreamDecoder::push(std::span<const std::uint8_t> bytes) {
         consumed += packet_length;
     }
 
-    if (consumed != 0) buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(consumed));
+    if (consumed != 0) {
+        // The decoder state requires buffer_.data() to start at the first
+        // unconsumed byte because `consumed` is local and reset to 0 on
+        // every push, so the compaction cannot be deferred with an offset.
+        // Clearing in the fully-consumed case avoids the element-wise move;
+        // the partial case remains O(buffer_.size()) by necessity.
+        if (consumed >= buffer_.size())
+            buffer_.clear();
+        else
+            buffer_.erase(buffer_.begin(),
+                buffer_.begin() + static_cast<std::ptrdiff_t>(consumed));
+    }
     return packets;
 }
 

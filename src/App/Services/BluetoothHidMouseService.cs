@@ -1069,7 +1069,13 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
     private void OnSubscribedClientsChanged(GattLocalCharacteristic sender, object args)
     {
-        TrackClientRefresh(() => RefreshSubscribedClientsAsync(sender));
+        // This handler runs on the WinRT GATT callback thread. Calling back
+        // into the Bluetooth stack from that thread (e.g. reading
+        // SubscribedClients inside TrackSubscribedClients) raises
+        // RPC_E_CANTCALLOUT_ININPUTSYNCCALL, which can destabilize the
+        // dispatcher. Offload the refresh to the thread pool so no WinRT
+        // call is made re-entrantly from the callback.
+        TrackClientRefresh(() => Task.Run(() => RefreshSubscribedClientsAsync(sender)));
     }
 
     private async Task RefreshSubscribedClientsAsync(GattLocalCharacteristic sender)
@@ -1291,7 +1297,10 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     {
         if (Volatile.Read(ref _disposed) != 0 ||
             args.Status != GattSessionStatus.Closed) return;
-        TrackClientRefresh(RefreshClosedSessionAsync);
+        // Offload to the thread pool: reading SessionStatus / SubscribedClients
+        // directly from the WinRT callback thread triggers the COM re-entrancy
+        // rejection (RPC_E_CANTCALLOUT_ININPUTSYNCCALL).
+        TrackClientRefresh(() => Task.Run(RefreshClosedSessionAsync));
     }
 
     private void TrackClientRefresh(Func<Task> factory)

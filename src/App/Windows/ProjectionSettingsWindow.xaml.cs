@@ -1,5 +1,7 @@
 using System.Windows;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Updater;
+using IPhoneMirror.App.ViewModels;
 
 namespace IPhoneMirror.App.Windows;
 
@@ -45,6 +47,12 @@ public partial class ProjectionSettingsWindow : Wpf.Ui.Controls.FluentWindow
 
     private async void OnSeparateWindowClick(object sender, RoutedEventArgs e) =>
         await RunAsync(_separateWindow);
+
+    private void OnApplyLightweightModeClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SelectedApplicationDisplayMode = ApplicationDisplayMode.Lightweight;
+    }
 
     private async void OnScreenshotClick(object sender, RoutedEventArgs e) =>
         await RunAsync(_screenshot);

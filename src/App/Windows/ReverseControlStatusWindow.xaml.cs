@@ -73,6 +73,14 @@ public partial class ReverseControlStatusWindow : Wpf.Ui.Controls.FluentWindow
         if (_active is { IsVisible: true }) return;
         _active = new(owner, service, cancel); _active.Show(); _active.Activate();
     }
+    internal static void CloseActive()
+    {
+        if (_active is { } window)
+        {
+            _active = null;
+            window.Close();
+        }
+    }
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
     private void OnCancelClick(object sender, RoutedEventArgs e) { _viewModel.CancelRequested?.Invoke(); Close(); }
 }

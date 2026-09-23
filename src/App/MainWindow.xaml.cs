@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using System.Collections.Specialized;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -71,8 +72,46 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private DateTime _devicePressStartedUtc;
     private bool _deviceDragStarted;
     private int _previewTransitionRevision;
-    private bool _usbTouchPressed;
-    private (double X, double Y) _lastUsbTouchPosition = (0.5, 0.5);
+
+
+    // Per-device USB touch pointer state. The main preview and every
+    // independent preview window route pointer events here with a target
+    // udid; a single shared pressed/pending-move state would let one
+    // device's drag sequence suppress or corrupt another device's input.
+    // Keys are normalized with OrdinalIgnoreCase to match the
+    // DeviceViewModel.UdidEquals comparison used for bridge targeting.
+    private sealed class UsbTouchPointerState
+    {
+        public bool Pressed;
+        public double LastX = 0.5;
+        public double LastY = 0.5;
+        public bool MoveDraining;
+        public bool PendingMoveQueued;
+        public double PendingMoveX;
+        public double PendingMoveY;
+        public double WheelRemainder;
+        public bool WheelActive;
+        public double WheelY;
+        public bool WheelNeedsDown;
+        public bool WheelDraining;
+        public bool WheelCancelled;
+        public double WheelVelocity;
+        public double WheelGestureDistance;
+        public int WheelLastDirection;
+    }
+
+    // Wheel touch gestures are confined to this vertical band. Starting a
+    // gesture at least 6% away from either screen edge guarantees two things:
+    // (1) even an edge-clipped gesture still travels far enough that iOS
+    // cannot classify it as a tap (which would open whatever sits under the
+    // cursor), and (2) the synthesized contact never enters the iOS edge
+    // gesture zones (home-indicator swipe, notification-center pull).
+    private const double WheelSafeMinY = 0.06;
+    private const double WheelSafeMaxY = 0.94;
+    private const double WheelMinGesture = 0.08;
+
+    private readonly Dictionary<string, UsbTouchPointerState> _usbTouchStates =
+        new(StringComparer.OrdinalIgnoreCase);
     private ulong _mediaCommandId;
     private double _mediaStartPosition;
     private bool _mediaPlaying;
@@ -211,6 +250,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private readonly HashSet<byte> _controlKeyboardUsages = [];
     private readonly HashSet<int> _controlModifierKeys = [];
     private byte _controlKeyboardModifiers;
+    private bool _pasteVPending;
     private bool _windowsCursorHidden;
     private nint _activeControlWindow;
     private string? _activeControlUdid;
@@ -579,15 +619,65 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var usbTargetActive = _viewModel.UsbControlIsInputEnabled &&
             _viewModel.IsUsbControlTarget(sourceUdid);
         if ((!IsUsbControlActive && !usbTargetActive) || string.IsNullOrWhiteSpace(sourceUdid)) return;
+        var state = GetUsbTouchPointerState(sourceUdid);
         var sourceWidth = e.SourceWidth != 0 ? e.SourceWidth : _viewModel.SourceVideoWidth;
         var sourceHeight = e.SourceHeight != 0 ? e.SourceHeight : _viewModel.SourceVideoHeight;
         if (e.Kind == Controls.PreviewPointerKind.Reset)
         {
-            var wasPressed = _usbTouchPressed;
-            _usbTouchPressed = false;
+            CancelWheelScroll(state);
+            var wasPressed = state.Pressed;
+            state.Pressed = false;
+            state.PendingMoveQueued = false;
+            state.WheelRemainder = 0;
             if (wasPressed)
-                await _viewModel.SendUsbTouchAsync("up", _lastUsbTouchPosition.X,
-                    _lastUsbTouchPosition.Y, sourceUdid);
+                await _viewModel.SendUsbTouchAsync("up", state.LastX,
+                    state.LastY, sourceUdid);
+            return;
+        }
+        if (e.Kind == Controls.PreviewPointerKind.Wheel)
+        {
+            // Velocity-based wheel simulation: the whole scroll gesture is
+            // ONE continuous drag. Wheel events never emit moves themselves
+            // — they only inject velocity, and the drain loop converts that
+            // velocity into evenly paced moves on a fixed frame interval.
+            // Continuous rolling therefore produces one smooth drag instead
+            // of a burst of separate small swipes, and releasing the wheel
+            // lets the velocity decay for a natural ease-out stop. Positive
+            // delta (scroll up) = downward drag (Y increases) on iOS.
+            if (state.Pressed) return;
+            state.WheelRemainder += e.Wheel;
+            var ticks = (int)Math.Truncate(state.WheelRemainder / 120.0);
+            state.WheelRemainder -= ticks * 120.0;
+            if (ticks == 0) return;
+            const double velocityPerTick = 0.45;
+            const double maxVelocity = 2.2;
+            if (!state.WheelActive)
+            {
+                state.WheelCancelled = false;
+                state.WheelActive = true;
+                // Clamp the gesture origin into the safe vertical band with
+                // direction-aware margin: leave room for the initial travel
+                // so the gesture never immediately hits the safe-band edge
+                // and collapses to a zero-distance down→up (which iOS reads
+                // as a tap and opens whatever is under the cursor).
+                if (ticks > 0) // scrolling up = Y increases
+                    state.WheelY = Math.Clamp(state.LastY,
+                        WheelSafeMinY, WheelSafeMaxY - WheelMinGesture);
+                else // scrolling down = Y decreases
+                    state.WheelY = Math.Clamp(state.LastY,
+                        WheelSafeMinY + WheelMinGesture, WheelSafeMaxY);
+                state.WheelNeedsDown = true;
+                state.WheelGestureDistance = 0;
+            }
+            state.WheelVelocity = Math.Clamp(
+                state.WheelVelocity + ticks * velocityPerTick,
+                -maxVelocity, maxVelocity);
+            state.WheelLastDirection = Math.Sign(ticks);
+            if (!state.WheelDraining)
+            {
+                state.WheelDraining = true;
+                _ = DrainWheelAsync(state, sourceUdid);
+            }
             return;
         }
         if (e.Kind is not (Controls.PreviewPointerKind.Move or
@@ -595,11 +685,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var mapped = MapPointerToNormalized(e, sourceWidth, sourceHeight);
         if (mapped is null)
         {
-            if (e.Kind == Controls.PreviewPointerKind.ButtonUp && _usbTouchPressed)
+            if (e.Kind == Controls.PreviewPointerKind.ButtonUp && state.Pressed)
             {
-                _usbTouchPressed = false;
-                await _viewModel.SendUsbTouchAsync("up", _lastUsbTouchPosition.X,
-                    _lastUsbTouchPosition.Y, sourceUdid);
+                state.Pressed = false;
+                state.PendingMoveQueued = false;
+                await _viewModel.SendUsbTouchAsync("up", state.LastX,
+                    state.LastY, sourceUdid);
             }
             return;
         }
@@ -610,14 +701,180 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _viewModel.AppliedBluetoothMouseReverseHorizontal,
             _viewModel.AppliedBluetoothMouseReverseVertical);
         if (e.Kind == Controls.PreviewPointerKind.ButtonDown)
-            _usbTouchPressed = true;
-        else if (e.Kind == Controls.PreviewPointerKind.Move && !_usbTouchPressed)
+        {
+            CancelWheelScroll(state);
+            state.Pressed = true;
+            // A new contact starts from a clean coalescing state; the down
+            // itself carries the newest position, so any move sampled before
+            // it would only be stale after this point.
+            state.PendingMoveQueued = false;
+        }
+        else if (e.Kind == Controls.PreviewPointerKind.Move && !state.Pressed)
             return;
         var action = e.Kind == Controls.PreviewPointerKind.ButtonDown ? "down" :
             e.Kind == Controls.PreviewPointerKind.ButtonUp ? "up" : "move";
-        if (action == "up") _usbTouchPressed = false;
-        await _viewModel.SendUsbTouchAsync(action, position.X, position.Y, sourceUdid);
-        _lastUsbTouchPosition = position;
+        if (action == "up") state.Pressed = false;
+        if (action == "move")
+            await SendUsbMoveCoalescedAsync(state, position.X, position.Y, sourceUdid);
+        else
+            await _viewModel.SendUsbTouchAsync(action, position.X, position.Y, sourceUdid);
+        state.LastX = position.X;
+        state.LastY = position.Y;
+    }
+
+    private UsbTouchPointerState GetUsbTouchPointerState(string udid)
+    {
+        if (_usbTouchStates.TryGetValue(udid, out var state)) return state;
+        state = new UsbTouchPointerState();
+        _usbTouchStates.Add(udid, state);
+        return state;
+    }
+
+    private static void CancelWheelScroll(UsbTouchPointerState state)
+    {
+        state.WheelCancelled = state.WheelDraining;
+        state.WheelVelocity = 0;
+        state.WheelRemainder = 0;
+    }
+
+    // Velocity-driven drain for the wheel gesture. Runs on a fixed frame
+    // interval and converts the current velocity into moves, so the contact
+    // glides continuously no matter when wheel events arrive — the whole
+    // gesture is one uninterrupted drag, not one swipe per wheel notch.
+    // Velocity decays every frame; wheel events inject on top, so the
+    // steady-state speed reflects the rolling rate. When the velocity decays
+    // to zero the gesture ends, with a minimum-distance tail so even a
+    // single light tick travels far enough that iOS never reads it as a tap.
+    private async Task DrainWheelAsync(UsbTouchPointerState state,
+        string? sourceUdid)
+    {
+        const double stopVelocity = 0.05;   // below this the gesture is over
+        const double decayPerFrame = 0.9;   // velocity decay each frame
+        const double maxFrameSeconds = 0.1; // clamp for pathological stalls
+        const double minGesture = 0.08;     // total travel so iOS sees a drag
+        const double tailStep = 0.008;      // per-frame distance while topping up
+        try
+        {
+            if (state.WheelNeedsDown)
+            {
+                state.WheelNeedsDown = false;
+                await _viewModel.SendUsbTouchAsync("down", state.LastX,
+                    state.WheelY, sourceUdid);
+            }
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var lastMs = 0.0;
+            while (!state.WheelCancelled)
+            {
+                await Task.Delay(16);
+                if (state.WheelCancelled) break;
+                // Real elapsed time (not the nominal 16 ms) keeps the speed
+                // correct even when the HID tunnel backpressure stretches a
+                // frame beyond its target interval.
+                var frameSeconds = Math.Min(
+                    (stopwatch.Elapsed.TotalMilliseconds - lastMs) / 1000.0,
+                    maxFrameSeconds);
+                lastMs = stopwatch.Elapsed.TotalMilliseconds;
+                state.WheelVelocity *= decayPerFrame;
+                if (Math.Abs(state.WheelVelocity) < stopVelocity)
+                    state.WheelVelocity = 0;
+                if (state.WheelVelocity == 0)
+                {
+                    if (state.WheelGestureDistance >= minGesture ||
+                        state.WheelLastDirection == 0)
+                        break;
+                    // Top up the travel so the gesture never reads as a tap.
+                    // Clamp the tail to the safe band and credit whatever
+                    // travel remains instead of aborting the tail mid-way.
+                    var tailDelta = state.WheelLastDirection *
+                        Math.Min(tailStep,
+                            minGesture - state.WheelGestureDistance);
+                    var tailY = Math.Clamp(state.WheelY + tailDelta,
+                        WheelSafeMinY, WheelSafeMaxY);
+                    var tailTravel = Math.Abs(tailY - state.WheelY);
+                    state.WheelY = tailY;
+                    state.WheelGestureDistance += tailTravel;
+                    if (tailTravel > 0.0005)
+                        await _viewModel.SendUsbTouchAsync("move",
+                            state.LastX, tailY, sourceUdid);
+                    // A tail clamped against the band can no longer move —
+                    // bail out instead of spinning on the same position.
+                    if (state.WheelGestureDistance >= minGesture ||
+                        tailTravel < 0.0005)
+                        break;
+                    continue;
+                }
+                var deltaY = state.WheelVelocity * frameSeconds;
+                var newY = state.WheelY + deltaY;
+                if (newY <= WheelSafeMinY || newY >= WheelSafeMaxY)
+                {
+                    // Hit the safe-band edge: finish the gesture there. The
+                    // origin clamp guarantees at least the band margin of
+                    // travel before this fires, so the gesture stays a drag.
+                    newY = Math.Max(WheelSafeMinY, Math.Min(WheelSafeMaxY,
+                        newY));
+                    state.WheelVelocity = 0;
+                    if (Math.Abs(newY - state.WheelY) > 0.0005)
+                    {
+                        state.WheelGestureDistance +=
+                            Math.Abs(newY - state.WheelY);
+                        state.WheelY = newY;
+                        await _viewModel.SendUsbTouchAsync("move",
+                            state.LastX, newY, sourceUdid);
+                    }
+                    break;
+                }
+                state.WheelY = newY;
+                state.WheelGestureDistance += Math.Abs(deltaY);
+                await _viewModel.SendUsbTouchAsync("move", state.LastX,
+                    newY, sourceUdid);
+            }
+            // Release the contact unless the user has taken it over with a
+            // ButtonDown (race: the button's down must not be undone here).
+            if (!state.Pressed)
+                await _viewModel.SendUsbTouchAsync("up", state.LastX,
+                    state.WheelY, sourceUdid);
+        }
+        finally
+        {
+            state.WheelCancelled = false;
+            state.WheelActive = false;
+            state.WheelNeedsDown = false;
+            state.WheelDraining = false;
+        }
+    }
+
+    // Mouse move events (WM_MOUSEMOVE direct from the message pump) arrive far
+    // faster than the HID tunnel drains them, and the Python bridge processes
+    // touch frames strictly one at a time - each frame waits for the previous
+    // HID round trip. Queueing every intermediate position therefore builds up
+    // latency and the on-device pointer keeps moving after the mouse stops.
+    // Coalesce instead: while a send is in flight keep only the newest sample
+    // and push it once the in-flight send completes. down/up keep their
+    // immediate send because their semantics must not be skipped; the bridge's
+    // five-slot state machine already ignores stale moves that arrive after
+    // the pointer was released, so the Pressed guard here is enough. All state
+    // is per-device so concurrent preview windows cannot corrupt each other.
+    private async Task SendUsbMoveCoalescedAsync(UsbTouchPointerState state,
+        double x, double y, string? sourceUdid)
+    {
+        state.PendingMoveX = x;
+        state.PendingMoveY = y;
+        state.PendingMoveQueued = true;
+        if (state.MoveDraining) return;
+        state.MoveDraining = true;
+        try
+        {
+            while (state.PendingMoveQueued && state.Pressed)
+            {
+                state.PendingMoveQueued = false;
+                await _viewModel.SendUsbTouchAsync("move", state.PendingMoveX,
+                    state.PendingMoveY, sourceUdid);
+            }
+        }
+        finally
+        {
+            state.MoveDraining = false;
+        }
     }
 
     private static (double X, double Y)? MapPointerToNormalized(
@@ -1129,6 +1386,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 _controlKeyboardUsages.Clear();
                 _controlModifierKeys.Clear();
                 _controlKeyboardModifiers = 0;
+                _pasteVPending = false;
                 if (bluetoothTargetActive) await _viewModel.SendBluetoothKeyboardAsync(0, []);
                 if (usbTargetActive) await _viewModel.SendUsbKeyboardAsync([], routeUdid);
                 return;
@@ -1152,10 +1410,44 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 else if (usage != 0) _controlKeyboardUsages.Remove(usage);
             }
             _controlKeyboardModifiers = ModifierMask(_controlModifierKeys);
+            // Bluetooth and USB are normally mutually exclusive, but keep a
+            // pre-interception snapshot so an overlapping route still sees
+            // the physical V key exactly as it did before USB paste handling.
+            var bluetoothUsages = _controlKeyboardUsages.ToArray();
+            // Ctrl+V interception: when V is pressed while Ctrl is held and
+            // USB target is active, push the Windows clipboard to iOS via
+            // paste_text instead of sending V through the HID keyboard
+            // channel. The bridge writes the iOS pasteboard and simulates
+            // Cmd+V internally, so both the V keydown and keyup must be
+            // suppressed to avoid clobbering the bridge's HID keyboard
+            // sequence with our own reports.
+            var pasteRequested = false;
+            var pasteIntercepted = usbTargetActive && TryInterceptUsbPasteKey(
+                e.Kind == Controls.PreviewKeyboardKind.Down, usage,
+                _controlKeyboardModifiers, _controlKeyboardUsages,
+                ref _pasteVPending, out pasteRequested);
             var usages = _controlKeyboardUsages.ToArray();
+            if (pasteRequested)
+            {
+                // Clipboard API requires an STA thread; this keyboard
+                // handler already runs on the UI thread so we read
+                // synchronously and fire-and-forget the bridge send.
+                try
+                {
+                    if (System.Windows.Clipboard.ContainsText())
+                    {
+                        var clipText = System.Windows.Clipboard.GetText();
+                        if (!string.IsNullOrEmpty(clipText))
+                            _ = _viewModel.SendUsbPasteTextAsync(
+                                clipText, routeUdid);
+                    }
+                }
+                catch { /* Clipboard lock or bridge unavailable. */ }
+            }
             if (bluetoothTargetActive)
-                await _viewModel.SendBluetoothKeyboardAsync(_controlKeyboardModifiers, usages);
-            if (usbTargetActive)
+                await _viewModel.SendBluetoothKeyboardAsync(_controlKeyboardModifiers,
+                    bluetoothUsages);
+            if (usbTargetActive && !pasteIntercepted)
             {
                 var usbUsages = usages.Concat(ModifierUsages(_controlModifierKeys)).ToArray();
                 await _viewModel.SendUsbKeyboardAsync(usbUsages, routeUdid);
@@ -1172,6 +1464,34 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             _bluetoothRouteGate.Release();
         }
+    }
+
+    private static bool TryInterceptUsbPasteKey(bool isKeyDown, byte usage,
+        byte modifiers, HashSet<byte> keyboardUsages, ref bool pasteVPending,
+        out bool pasteRequested)
+    {
+        pasteRequested = false;
+        if (usage != 0x19) return false;
+
+        if (isKeyDown)
+        {
+            // Raw Input and the legacy window message can both describe the
+            // same physical key press. Once a paste owns V, suppress every
+            // duplicate or repeat until its matching release.
+            if ((modifiers & 0x01) == 0 && !pasteVPending) return false;
+            keyboardUsages.Remove(usage);
+            if (!pasteVPending)
+            {
+                pasteVPending = true;
+                pasteRequested = true;
+            }
+            return true;
+        }
+
+        if (!pasteVPending) return false;
+        keyboardUsages.Remove(usage);
+        pasteVPending = false;
+        return true;
     }
 
     private static IEnumerable<byte> ModifierUsages(IEnumerable<int> modifierKeys) =>
@@ -2166,7 +2486,31 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
 
-        DragMove();
+        // Mica/Acrylic forces the DWM to resample the desktop behind the
+        // window on every position change. On integrated GPUs or high-DPI
+        // multi-monitor setups that cost dominates the modal move loop and
+        // the window visibly lags behind the cursor. Temporarily switching
+        // to a solid backdrop removes it for the duration of the drag.
+        var handle = new WindowInteropHelper(this).Handle;
+        var suppressedBackdrop = handle != 0 &&
+            OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000) &&
+            WindowBackdropType is Wpf.Ui.Controls.WindowBackdropType.Mica
+                or Wpf.Ui.Controls.WindowBackdropType.Acrylic;
+        if (suppressedBackdrop)
+        {
+            var none = DwmBackdropNone;
+            _ = DwmSetWindowAttribute(handle, DwmSystemBackdropType,
+                ref none, sizeof(int));
+        }
+        try
+        {
+            DragMove();
+        }
+        finally
+        {
+            if (suppressedBackdrop)
+                ThemeService.ApplyBackdrop(this);
+        }
     }
 
     private void OnMaximizeClick(object sender, RoutedEventArgs e)
@@ -5336,7 +5680,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         RegisterRawInput(false, false);
         ClipCursor(IntPtr.Zero);
         ResetControlRouteState();
-        _usbTouchPressed = false;
+        // Reset the pressed/pending state of every USB touch target: this
+        // route reset is global (window hidden, pointer route lost), so no
+        // per-device state may survive it. The bridge's five-slot state
+        // machine already ignores an "up" for a pointer it never saw go down,
+        // so dropping pending moves without a device-side release is safe.
+        foreach (var state in _usbTouchStates.Values)
+        {
+            CancelWheelScroll(state);
+            state.Pressed = false;
+            state.PendingMoveQueued = false;
+            state.WheelRemainder = 0;
+        }
     }
 
     private void ApplyApplicationDisplayMode()
@@ -5927,6 +6282,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _controlKeyboardUsages.Clear();
         _controlModifierKeys.Clear();
         _controlKeyboardModifiers = 0;
+        _pasteVPending = false;
         StopControlPointerTimer();
     }
 
@@ -7060,4 +7416,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UnregisterHotKey(nint window, int id);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(nint window, int attribute,
+        ref int value, int valueSize);
+
+    private const int DwmSystemBackdropType = 38;
+    private const int DwmBackdropNone = 1;
 }

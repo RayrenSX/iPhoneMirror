@@ -89,10 +89,12 @@
     <system:String x:Key="ReverseControlDownloadingImage">正在下载并校验开发者镜像</system:String>
     <system:String x:Key="ReverseControlRemountingImage">正在刷新旧开发者镜像以启用触控服务</system:String>
     <system:String x:Key="ReverseControlDiscoveringWireless">正在发现无线 CoreDevice 设备</system:String>
+    <system:String x:Key="ReverseControlCaptureMuxReady">正在通过镜像共存的 USB 通道连接设备</system:String>
     <system:String x:Key="ReverseControlWaitingTouchService">正在等待开发者镜像发布触控服务</system:String>
     <system:String x:Key="ReverseControlInitializingTouchFormat">正在初始化{0}触控通道</system:String>
     <system:String x:Key="UsbControlFailureAppleUsbmux">Apple USB 配对服务未就绪。请在驱动管理中安装或修复 Apple Devices/iTunes 支持，连接并解锁 iPhone 后重试。</system:String>
     <system:String x:Key="UsbControlFailureNotTrusted">此 iPhone 尚未信任当前 Windows 帐户。请保持手机解锁，重新插拔数据线并在手机上点按“信任”。</system:String>
+    <system:String x:Key="UsbControlFailureDeviceLocked">iPhone 正处于锁定状态或正在等待输入密码。请解锁手机并保持亮屏，如有“信任此电脑”或密码提示请先在手机上完成，然后重新启动反向控制。</system:String>
     <system:String x:Key="UsbControlFailureDeveloperMode">此设备未开启开发者模式。请在 iPhone/iPad 的“设置 > 隐私与安全性 > 开发者模式”中开启并重启设备后重试。</system:String>
     <system:String x:Key="UsbControlFailureImageRequired">设备尚未挂载 Personalized Developer Disk Image。请使用与设备系统匹配的官方 Xcode 开发者镜像完成挂载后重试。</system:String>
     <system:String x:Key="UsbControlFailureImageDownload">开发者镜像下载失败或超时。请检查 GitHub 网络连接后重试，也可通过 IPHONE_MIRROR_DDI_DIR 提供官方本地镜像。</system:String>
@@ -109,6 +111,7 @@
     <system:String x:Key="UsbControlFailureGateUnavailable">设备未确认 CoreDevice 触控认证已开启。为避免输入被系统静默丢弃，反控未启动。</system:String>
     <system:String x:Key="UsbControlFailureTouchService">设备暂未提供触控反控服务。请保持设备解锁并信任此电脑后重试；若仍失败，请改用蓝牙反控或无线反控。</system:String>
     <system:String x:Key="UsbControlFailureDeviceNotFound">未找到这台设备的 Apple 网络配对会话。请先用数据线连接一次，在 Apple Devices 或 iTunes 中启用“通过 Wi-Fi 与此 iPhone 同步”，保持手机解锁并与电脑连接同一局域网后再试。</system:String>
+    <system:String x:Key="UsbControlFailureWiredDeviceNotFound">未能在 USB 连接中找到这台设备的控制通道。投屏运行时系统可能暂时无法访问设备：请先停止投屏再启动反向控制，或重新插拔数据线、解锁手机并确认已信任此电脑后重试。</system:String>
     <system:String x:Key="UsbControlFailureMux">Apple USB 服务在设备握手时中断了连接。请保持设备解锁并确认已信任此电脑；若仍失败，请重新插拔数据线后重试。</system:String>
     <system:String x:Key="UsbControlFailureNoDetails">USB 触控桥接器未提供错误详情。请确认设备已通过 USB 连接并已信任此电脑。</system:String>
     <system:String x:Key="UsbControlFailureUnknown">USB 反控桥接器返回了无法识别的错误。请查看诊断日志后重试。</system:String>
@@ -191,6 +194,7 @@
     <system:String x:Key="ProjectionSettingsTitle">投屏设置</system:String>
     <system:String x:Key="ApplicationModeLabel">应用模式</system:String>
     <system:String x:Key="ApplicationModeLightweight">轻量模式</system:String>
+    <system:String x:Key="ApplyLightweightMode">一键切换轻量模式</system:String>
     <system:String x:Key="ApplicationModeComplete">完整模式</system:String>
     <system:String x:Key="KeepUnlocked">连接后请保持 Apple 设备解锁</system:String>
     <system:String x:Key="PreviewLabel">预览</system:String>
@@ -750,6 +754,10 @@
     <system:String x:Key="RecordingPendingSave">上一段录制已完成但尚未保存，请先选择保存位置和文件名。</system:String>
     <system:String x:Key="RecordingSavedFormat">录制已保存到：{0}</system:String>
     <system:String x:Key="RecordingSaveFailedFormat">无法保存录制文件：{0}</system:String>
+    <system:String x:Key="DiscardRecording">丢弃录制</system:String>
+    <system:String x:Key="DiscardRecordingConfirmation">确定要删除这段尚未保存的录制吗？此操作不可撤销。</system:String>
+    <system:String x:Key="RecordingDiscarded">录制已丢弃。</system:String>
+    <system:String x:Key="RecordingDiscardFailed">无法丢弃录制文件。</system:String>
     <system:String x:Key="UnknownError">未知错误</system:String>
     <system:String x:Key="AboutTitle">关于</system:String>
     <system:String x:Key="AboutToolTip">关于和更新设置</system:String>

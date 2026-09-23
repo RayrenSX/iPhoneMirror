@@ -14,7 +14,10 @@ public partial class BluetoothClientBindingWindow : Wpf.Ui.Controls.FluentWindow
     private readonly Func<string, bool> _unbind;
     private readonly Func<Task<IReadOnlyList<BluetoothClientInfo>>> _refresh;
     private readonly string? _suggestedId;
+    private readonly TaskCompletionSource<string?> _result =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _isRefreshing;
+    private bool _resultCompleted;
 
     public ObservableCollection<BluetoothClientInfo> Clients { get; } = [];
     public string TargetText { get; }
@@ -58,14 +61,44 @@ public partial class BluetoothClientBindingWindow : Wpf.Ui.Controls.FluentWindow
         return window.ShowDialog() == true ? window.SelectedClient?.Id : null;
     }
 
+    // The Bluetooth control startup path must not enter a nested modal
+    // dispatcher loop. Keep the window modeless and let callers await the
+    // user's choice without blocking the main window.
+    internal static Task<string?> ShowAsync(Window owner, string targetName,
+        IReadOnlyList<BluetoothClientInfo> clients, string? suggestedId,
+        Func<Task<IReadOnlyList<BluetoothClientInfo>>> refresh,
+        Func<string, bool> unbind)
+    {
+        var window = new BluetoothClientBindingWindow(owner, targetName, clients,
+            suggestedId, refresh, unbind);
+        window.Closed += window.OnClosed;
+        window.Show();
+        return window._result.Task;
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void OnConfirmClick(object sender, RoutedEventArgs e)
     {
-        if (CanConfirm) DialogResult = true;
+        if (!CanConfirm) return;
+        CompleteResult(SelectedClient?.Id);
+        if (IsVisible) Close();
     }
 
-    private void OnCancelClick(object sender, RoutedEventArgs e) => DialogResult = false;
+    private void OnCancelClick(object sender, RoutedEventArgs e)
+    {
+        CompleteResult(null);
+        if (IsVisible) Close();
+    }
+
+    private void OnClosed(object? sender, EventArgs e) => CompleteResult(null);
+
+    private void CompleteResult(string? value)
+    {
+        if (_resultCompleted) return;
+        _resultCompleted = true;
+        _result.TrySetResult(value);
+    }
 
     private void OnUnbindClick(object sender, RoutedEventArgs e)
     {

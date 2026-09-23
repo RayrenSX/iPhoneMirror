@@ -11,6 +11,10 @@ public static class CoreDeviceTouchProtocol
     public const string MessageKind = "touch_batch";
     public const string KeyboardMessageKind = "keyboard_batch";
     public const string ButtonMessageKind = "button_event";
+    public const string PasteTextMessageKind = "paste_text";
+    public const string ReadClipboardMessageKind = "read_clipboard";
+    public const string ClipboardTextEvent = "clipboard_text";
+
 
     public const string CapabilityTouch5pt = "iphoneMirror.usb_touch.v2";
 

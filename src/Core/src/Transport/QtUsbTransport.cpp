@@ -296,8 +296,10 @@ std::optional<AppleUsbDevice> QtUsbContext::find_apple_device(
     AppleUsbDevice info;
     libusb_device* device = find_device(*this, identity, info,
         require_quicktime);
-    std::unique_ptr<libusb_device, decltype(&libusb_unref_device)> guard(
-        device, &libusb_unref_device);
+    auto unref = [](libusb_device* d) noexcept {
+        if (d) libusb_unref_device(d);
+    };
+    std::unique_ptr<libusb_device, decltype(unref)> guard(device, unref);
     if (!device)
         return std::nullopt;
     return info;

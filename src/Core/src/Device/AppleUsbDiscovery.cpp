@@ -31,7 +31,12 @@ std::wstring property(HDEVINFO set, SP_DEVINFO_DATA& data, DWORD property_id) {
     std::vector<BYTE> buffer(required + sizeof(wchar_t), 0);
     if (!SetupDiGetDeviceRegistryPropertyW(set, &data, property_id, &type, buffer.data(),
             static_cast<DWORD>(buffer.size()), nullptr)) return {};
-    return std::wstring(reinterpret_cast<const wchar_t*>(buffer.data()));
+    // Build the wstring from the reported byte length instead of relying on an
+    // implicit null terminator in the registry buffer.
+    const wchar_t* text = reinterpret_cast<const wchar_t*>(buffer.data());
+    std::size_t chars = required / sizeof(wchar_t);
+    while (chars > 0 && text[chars - 1] == L'\0') --chars;
+    return std::wstring(text, chars);
 }
 
 std::wstring uppercase(std::wstring value) {

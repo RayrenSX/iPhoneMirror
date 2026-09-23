@@ -228,9 +228,14 @@
             <TextBlock x:Name="FeedbackText" Text="{Binding MediaOutputStatus}"
                        VerticalAlignment="Center" TextWrapping="Wrap"
                        Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
-            <Button Grid.Column="2" Content="{DynamicResource StopMediaOutput}"
-                    Click="OnStopClick" Style="{StaticResource ToolButton}"
-                    IsEnabled="{Binding CanStopMediaOutput}" MinWidth="110"/>
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="{DynamicResource DiscardRecording}"
+                        Click="OnDiscardClick" Style="{StaticResource ToolButton}"
+                        MinWidth="110" Margin="0,0,8,0"/>
+                <Button Content="{DynamicResource StopMediaOutput}"
+                        Click="OnStopClick" Style="{StaticResource ToolButton}"
+                        IsEnabled="{Binding CanStopMediaOutput}" MinWidth="110"/>
+            </StackPanel>
         </Grid>
     </Grid>
 </ui:FluentWindow>

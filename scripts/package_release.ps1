@@ -9,6 +9,7 @@ param(
     [switch]$IncludeMediaOutputRuntime,
     [switch]$OmitMediaOutputRuntime,
     [switch]$IncludeUxPlayRuntime,
+    [switch]$OmitUxPlayRuntime,
     [string]$AppleSupportPackagePath,
     [switch]$ConfirmAppleRedistributionRights
 )
@@ -94,6 +95,11 @@ if ($UxPlayRuntimeFiles.Count -eq 0 -or
     throw 'UxPlay runtime manifest is invalid.'
 }
 
+# -OmitUxPlayRuntime mirrors the build switch for test payloads produced on
+# machines without MSYS2 UCRT64; the optional UxPlay fallback receiver is left
+# out of the package and its artifacts are no longer required.
+$UseUxPlayRuntime = -not $OmitUxPlayRuntime
+
 $RequiredArtifacts = @(
     'iPhoneMirror.exe',
     'iPhoneMirror.Core.dll',
@@ -135,9 +141,11 @@ $RequiredArtifacts = @(
     'Wireless\licenses\SOURCE.md',
     'Wireless\licenses\SHA256SUMS.txt'
 )
-$RequiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
-    Join-Path 'Wireless\UxPlay' $_
-})
+if ($UseUxPlayRuntime) {
+    $RequiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
+        Join-Path 'Wireless\UxPlay' $_
+    })
+}
 
 function Assert-ProductVersion([string]$Path, [string]$ExpectedVersion) {
     $actual = (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion
@@ -349,8 +357,14 @@ function Assert-PublishedOutput {
             ForEach-Object { $_.FullName.Substring($fullPublishRoot.Length + 1) })
     }
     else { @() }
+    $ddiRoot = Join-Path $PublishRoot 'tools\ddi'
+    $ddiArtifacts = if (Test-Path -LiteralPath $ddiRoot -PathType Container) {
+        @(Get-ChildItem -LiteralPath $ddiRoot -Recurse -File |
+            ForEach-Object { $_.FullName.Substring($fullPublishRoot.Length + 1) })
+    }
+    else { @() }
     $allowedArtifacts = @($RequiredArtifacts) + $bridgeRuntimeArtifacts +
-        $optionalArtifacts + $uxplayArtifacts
+        $optionalArtifacts + $uxplayArtifacts + $ddiArtifacts
     $unexpected = @($actualArtifacts | Where-Object { $_ -notin $allowedArtifacts })
     if ($unexpected.Count -ne 0) {
         throw "Unexpected files in published output: $($unexpected -join ', ')"
@@ -542,13 +556,14 @@ try {
             Configuration = 'Release'
             Version = $Version
         }
-    if ($OmitMediaOutputRuntime) {
+        if ($OmitMediaOutputRuntime) {
             $buildArguments.OmitMediaOutputRuntime = $true
         }
         # UxPlay is included by the standard build because it is exposed as a
         # selectable fallback receiver. Keep forwarding the switch so existing
         # release automation remains compatible.
         if ($IncludeUxPlayRuntime) { $buildArguments.IncludeUxPlayRuntime = $true }
+        if ($OmitUxPlayRuntime) { $buildArguments.OmitUxPlayRuntime = $true }
         if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
             $buildArguments.AppleSupportPackagePath = $AppleSupportPackagePath
             $buildArguments.ConfirmAppleRedistributionRights =
@@ -605,10 +620,17 @@ try {
     }
     Assert-SafeWorkspaceDirectory $StagingRoot
     New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null
-    & (Join-Path $Root 'scripts\build_installer.ps1') -Version $Version `
-        -AllowVersionOverride `
-        -SkipAppBuild -SourceDirectory $InstallerPublishRoot `
-        -OutputDirectory $StagingRoot
+    $installerArguments = @{
+        Version = $Version
+        AllowVersionOverride = $true
+        SkipAppBuild = $true
+        SourceDirectory = $InstallerPublishRoot
+        OutputDirectory = $StagingRoot
+    }
+    if ($OmitUxPlayRuntime) {
+        $installerArguments.OmitUxPlayRuntime = $true
+    }
+    & (Join-Path $Root 'scripts\build_installer.ps1') @installerArguments
     if ($LASTEXITCODE -ne 0 -or
         -not (Test-Path -LiteralPath $StagedInstaller -PathType Leaf)) {
         throw "Windows installer build failed: $LASTEXITCODE"

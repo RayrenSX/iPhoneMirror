@@ -440,41 +440,77 @@ internal sealed class MediaOutputService : IAsyncDisposable
         var outputClock = Stopwatch.StartNew();
         long framesWritten = 0;
         ReadOnlyMemory<byte> lastFrame = default;
-        using var timer = new PeriodicTimer(frameInterval);
+        // Decouple the GPU->CPU frame readback from the pump timer. The
+        // readback (materialize_gpu_frame + letterbox + SDR) is synchronous
+        // and can exceed the frame interval on weak hardware, which delays
+        // the PeriodicTimer tick and produces uneven frame spacing in the
+        // recording. A background reader fills a latch at the frame rate;
+        // the pump timer takes the latest buffered frame without blocking.
+        var latch = new FrameLatch();
+        using var readerCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        var readerTask = FrameReaderAsync(sessionHandle, request.Width,
+            request.Height, latch, frameInterval, readerCts.Token);
+        try
+        {
+            using var timer = new PeriodicTimer(frameInterval);
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (process.HasExited)
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(_lastError)
+                        ? $"FFmpeg exited with code {process.ExitCode}." : _lastError);
+                // The rawvideo input has a fixed frame rate and therefore assigns
+                // one frame interval to every frame received. A slow frame copy,
+                // resize, encode, or pipe write can make a timer tick miss its
+                // deadline; writing only one frame in that case would shorten the
+                // resulting recording. Keep the frame count aligned with elapsed
+                // wall time and repeat the newest frame to cover missed slots.
+                var dueBeforeRead = CalculateDueVideoFrames(outputClock.Elapsed,
+                    request.FrameRate, framesWritten);
+                if (dueBeforeRead <= 0) continue;
+                var buffered = latch.Get();
+                if (!buffered.IsEmpty)
+                    lastFrame = buffered;
+                else if (lastFrame.IsEmpty)
+                {
+                    if (firstFrameWait.Elapsed > TimeSpan.FromSeconds(5))
+                        throw new TimeoutException("No projection frame was received for 5 seconds.");
+                    continue;
+                }
+                var schedule = CalculateVideoWritePlan(outputClock.Elapsed,
+                    request.FrameRate, framesWritten);
+                framesWritten = schedule.FramesWrittenBaseline;
+                for (long index = 0; index < schedule.FramesToWrite; ++index)
+                {
+                    await process.StandardInput.BaseStream.WriteAsync(lastFrame,
+                        cancellationToken);
+                    ++framesWritten;
+                }
+            }
+        }
+        finally
+        {
+            readerCts.Cancel();
+            try { await readerTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch { /* Reader teardown failure does not affect the recording. */ }
+        }
+    }
+
+    private async Task FrameReaderAsync(ulong sessionHandle, uint width,
+        uint height, FrameLatch latch, TimeSpan interval,
+        CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(interval);
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
-            if (process.HasExited)
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(_lastError)
-                    ? $"FFmpeg exited with code {process.ExitCode}." : _lastError);
-            // The rawvideo input has a fixed frame rate and therefore assigns
-            // one frame interval to every frame received. A slow frame copy,
-            // resize, encode, or pipe write can make a timer tick miss its
-            // deadline; writing only one frame in that case would shorten the
-            // resulting recording. Keep the frame count aligned with elapsed
-            // wall time and repeat the newest frame to cover missed slots.
-            var dueBeforeRead = CalculateDueVideoFrames(outputClock.Elapsed,
-                request.FrameRate, framesWritten);
-            if (dueBeforeRead <= 0) continue;
-            var frame = _frameProvider(sessionHandle, request.Width, request.Height);
-            if (frame is not null)
+            try
             {
-                lastFrame = GetNv12FramePayload(frame, request.Width, request.Height);
+                var frame = _frameProvider(sessionHandle, width, height);
+                if (frame is not null)
+                    latch.Publish(GetNv12FramePayload(frame, width, height));
             }
-            else if (lastFrame.IsEmpty)
-            {
-                if (firstFrameWait.Elapsed > TimeSpan.FromSeconds(5))
-                    throw new TimeoutException("No projection frame was received for 5 seconds.");
-                continue;
-            }
-            var schedule = CalculateVideoWritePlan(outputClock.Elapsed,
-                request.FrameRate, framesWritten);
-            framesWritten = schedule.FramesWrittenBaseline;
-            for (long index = 0; index < schedule.FramesToWrite; ++index)
-            {
-                await process.StandardInput.BaseStream.WriteAsync(lastFrame,
-                    cancellationToken);
-                ++framesWritten;
-            }
+            catch { /* Transient frame read failure; best-effort. */ }
         }
     }
 
@@ -1248,5 +1284,24 @@ internal sealed class MediaOutputService : IAsyncDisposable
     {
         await StopAsync();
         _lifecycleGate.Dispose();
+    }
+
+    internal sealed class FrameLatch
+    {
+        private ReadOnlyMemory<byte> _frame;
+
+        internal void Publish(ReadOnlyMemory<byte> frame)
+        {
+            // Native readback reuses its array. The writer may still be awaiting
+            // a pipe write when the next frame arrives, so publish an owned,
+            // immutable snapshot rather than a view of the producer's buffer.
+            var snapshot = frame.ToArray();
+            lock (this) { _frame = snapshot; }
+        }
+
+        internal ReadOnlyMemory<byte> Get()
+        {
+            lock (this) { return _frame; }
+        }
     }
 }

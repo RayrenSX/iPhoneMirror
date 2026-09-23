@@ -180,6 +180,26 @@ Run("Apple signer subject allowlist is exact", () =>
     False(DriverPayload.IsAllowedAppleSignerSubject(null));
 });
 
+Run("Authenticode revocation fallback only accepts unavailable checks", () =>
+{
+    True(DriverPayload.CanRetryAuthenticodeWithoutRevocation(
+        unchecked((int)0x80092013))); // CRYPT_E_REVOCATION_OFFLINE
+    True(DriverPayload.CanRetryAuthenticodeWithoutRevocation(
+        unchecked((int)0x800B010E))); // CERT_E_REVOCATION_FAILURE
+
+    False(DriverPayload.CanRetryAuthenticodeWithoutRevocation(
+        unchecked((int)0x800B010C))); // CERT_E_REVOKED
+    False(DriverPayload.CanRetryAuthenticodeWithoutRevocation(
+        unchecked((int)0x800B0111))); // TRUST_E_EXPLICIT_DISTRUST
+    False(DriverPayload.CanRetryAuthenticodeWithoutRevocation(
+        unchecked((int)0x800B0004))); // TRUST_E_SUBJECT_NOT_TRUSTED
+    False(DriverPayload.CanRetryAuthenticodeWithoutRevocation(
+        unchecked((int)0x800B0100))); // TRUST_E_NOSIGNATURE
+    False(DriverPayload.CanRetryAuthenticodeWithoutRevocation(
+        unchecked((int)0x80092012))); // CRYPT_E_NO_REVOCATION_CHECK
+    False(DriverPayload.CanRetryAuthenticodeWithoutRevocation(0));
+});
+
 Run("unsigned Apple package is rejected", () =>
 {
     var root = Path.Combine(Path.GetTempPath(), "iPhoneMirror.Driver.Tests",
@@ -368,6 +388,28 @@ Run("protected operation directory ACL", () =>
 
     Throws<IOException>(() => DriverPayload.ValidateProtectedSystemDirectorySecurity(
         new DirectorySecurity()));
+});
+
+Run("invalid directory ACL preserves recovery backups", () =>
+{
+    var directory = Path.Combine(Path.GetTempPath(), "driver-backup-test-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var backup = Path.Combine(directory, "snapshot.json");
+    try
+    {
+        File.WriteAllText(backup, "recovery snapshot");
+        var info = new DirectoryInfo(directory);
+        var security = info.GetAccessControl();
+        security.SetAccessRuleProtection(isProtected: false, preserveInheritance: true);
+        info.SetAccessControl(security);
+        Throws<IOException>(() => DriverPayload.CreateProtectedSystemDirectory(directory));
+        True(File.Exists(backup));
+        True(File.ReadAllText(backup) == "recovery snapshot");
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
 });
 
 Run("elevated result matches process exit code", () =>
