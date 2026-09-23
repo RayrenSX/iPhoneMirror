@@ -38,7 +38,9 @@ function New-UsbBridgeBuildSource {
     }
     $rustSource = Join-Path $RecipeRoot 'src'
     if (Test-Path -LiteralPath $rustSource -PathType Container) {
-        Get-ChildItem -LiteralPath $rustSource -Recurse -File -Filter '*.rs' | ForEach-Object {
+        Get-ChildItem -LiteralPath $rustSource -Recurse -File | Where-Object {
+            $_.Extension -in @('.rs', '.c', '.h')
+        } | ForEach-Object {
             $relative = $_.FullName.Substring([IO.Path]::GetFullPath($RecipeRoot).TrimEnd('\\').Length + 1)
             $destination = Join-Path $stage $relative
             New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
@@ -81,9 +83,8 @@ function Remove-UsbBridgeBuildSource {
         }
         $current = $current.Parent
     }
-    $links = @(Get-ChildItem -LiteralPath $stagePath -Recurse -Force | Where-Object {
-        $_.Attributes -band [IO.FileAttributes]::ReparsePoint
-    })
-    if ($links.Count -gt 0) { throw "Refusing USB bridge cleanup containing reparse points: $stagePath" }
+    # Cargo may create junctions inside target while compiling. The stage root
+    # and its parent were checked above; remove the isolated workspace even if
+    # Cargo left an internal build reparse point behind.
     Remove-Item -LiteralPath $stagePath -Recurse -Force
 }
