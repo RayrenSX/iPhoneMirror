@@ -103,8 +103,8 @@ function Build-UsbTouchBridge {
             BridgeOnly = $true
             BridgeOutputPath = $UsbTouchBridgeOutput
         }
-        $bridgeCommand = Get-Command (Join-Path $stage 'build.ps1')
-        if ($bridgeCommand.Parameters.ContainsKey('EnvironmentPath')) {
+        $bridgeRecipe = Get-Content -LiteralPath (Join-Path $stage 'build.ps1') -Raw
+        if ($bridgeRecipe -match '\[string\]\$EnvironmentPath') {
             $bridgeParameters.EnvironmentPath = $UsbControlEnvironment
         }
         & (Join-Path $stage 'build.ps1') @bridgeParameters
