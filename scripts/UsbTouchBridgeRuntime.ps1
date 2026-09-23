@@ -18,7 +18,8 @@ function Get-UsbTouchBridgeRuntimeManifestEntries {
     catch {
         throw "$Label manifest is invalid: $manifestPath"
     }
-    if ($manifest.schema -ne 1 -or $null -eq $manifest.files) {
+    if ($null -eq $manifest.schema -or
+        [string]$manifest.schema -ne '1' -or $null -eq $manifest.files) {
         throw "$Label manifest has an unsupported schema."
     }
     $entries = @($manifest.files)
