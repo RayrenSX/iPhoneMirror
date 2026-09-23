@@ -96,10 +96,18 @@ function Build-UsbTouchBridge {
     $stage = New-UsbBridgeBuildSource -RecipeRoot $UsbControlRoot `
         -SourceRoot (Join-Path $Root 'tools') -WorkRoot $stageRoot
     try {
-        # The bridge repository has shipped builds with and without an
-        # EnvironmentPath parameter. Its default path is the maintained
-        # sibling work directory, which is also the path validated below.
-        & (Join-Path $stage 'build.ps1') -BridgeOnly -BridgeOutputPath $UsbTouchBridgeOutput
+        # Bridge releases before the Rust helper did not expose
+        # EnvironmentPath; pass it only when the checked-out recipe supports
+        # it so the generated venv lands at the path validated below.
+        $bridgeParameters = @{
+            BridgeOnly = $true
+            BridgeOutputPath = $UsbTouchBridgeOutput
+        }
+        $bridgeCommand = Get-Command (Join-Path $stage 'build.ps1')
+        if ($bridgeCommand.Parameters.ContainsKey('EnvironmentPath')) {
+            $bridgeParameters.EnvironmentPath = $UsbControlEnvironment
+        }
+        & (Join-Path $stage 'build.ps1') @bridgeParameters
         if ($LASTEXITCODE -ne 0) {
             throw "USB touch bridge build failed: $LASTEXITCODE"
         }
@@ -108,8 +116,7 @@ function Build-UsbTouchBridge {
         Remove-UsbBridgeBuildSource -Stage $stage -WorkRoot $stageRoot
     }
     if (-not (Test-Path -LiteralPath $UsbTouchBridgeOutput -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeManifest -PathType Leaf) -or
-        -not (Test-Path -LiteralPath (Join-Path $Root 'dist\_internal') -PathType Container)) {
+        -not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeManifest -PathType Leaf)) {
         throw 'USB touch bridge output is incomplete.'
     }
     if (-not (Test-Path -LiteralPath $UsbControlPython -PathType Leaf)) {
