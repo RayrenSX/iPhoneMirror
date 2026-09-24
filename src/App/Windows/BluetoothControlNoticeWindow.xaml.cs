@@ -182,6 +182,13 @@ public sealed partial class BluetoothControlNoticeWindow :
         window.Activate();
     }
 
+    internal static void ShowDeveloperPreview(Window owner)
+    {
+        var window = new BluetoothControlNoticeWindow(owner, previewOnly: true);
+        window.SetState(NoticeState.Waiting);
+        window.Show();
+    }
+
     private static BluetoothControlNoticeWindow CreatePrerequisite(Window owner, bool wireless,
         bool previewOnly)
     {

@@ -965,10 +965,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             {
                 lock (_controlQueueSync)
                 {
-                    _pendingControlDx = Math.Clamp(_pendingControlDx + sendX,
-                        -32767, 32767);
-                    _pendingControlDy = Math.Clamp(_pendingControlDy + sendY,
-                        -32767, 32767);
+                    // BLE mouse reports are relative, but replaying every
+                    // sample after a slow notification creates a stale burst.
+                    // Keep only the newest bounded sample; the next pointer
+                    // event supersedes it while the GATT pump is busy.
+                    _pendingControlDx = Math.Clamp(sendX, -127, 127);
+                    _pendingControlDy = Math.Clamp(sendY, -127, 127);
                     _pendingControlButtons = _controlButtons;
                     // Keep the timestamp of the first unsent movement. Updating
                     // it for every packet disguises a multi-second route/UI
@@ -1041,7 +1043,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // motion can otherwise create an immediate callback storm and starve
         // both WPF and the BLE notification pump.
         if (Interlocked.Exchange(ref _controlPointerTimerArmed, 1) == 0)
-            _controlPointerTimer.Change(1, 4);
+            _controlPointerTimer.Change(1, 16);
     }
 
     private void StopControlPointerTimer()
@@ -1940,7 +1942,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             _reverseControlWindow = null;
             DiagnosticLogger.Exception("ui", "device_binding_window_open_failed", error);
-            AppPromptWindow.Inform(LocalizationService.Get("DeviceBindingTitle"), LocalizationService.Format("DeviceBindingOpenFailedFormat", error.Message));
+            AppPromptWindow.Inform(LocalizationService.Get("DeviceBindingTitle"),
+                LocalizationService.Get("GeneralOperationFailed"));
         }
     }
 
@@ -4922,7 +4925,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _developerToolsWindow = null;
             DiagnosticLogger.Exception("ui", "developer_tools_open_failed", error);
             AppPromptWindow.Inform(
-                LocalizationService.Get("DeveloperToolsTitle"), error.Message);
+                LocalizationService.Get("DeveloperToolsTitle"),
+                LocalizationService.Get("GeneralOperationFailed"));
         }
     }
 
@@ -4951,6 +4955,27 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             case "advanced-settings":
                 new AdvancedSettingsWindow(1920, 1080, previewOnly: true)
                     { Owner = this }.Show();
+                break;
+            case "device-binding":
+                DeviceBindingWindow.ShowDeveloperPreview(this, _viewModel);
+                break;
+            case "airplay-device-selection":
+                AirPlayDeviceSelectionWindow.ShowDeveloperPreview(this);
+                break;
+            case "bluetooth-connection":
+                BluetoothConnectionWindow.ShowDeveloperPreview(this);
+                break;
+            case "bluetooth-client-binding":
+                BluetoothClientBindingWindow.ShowDeveloperPreview(this);
+                break;
+            case "bluetooth-control-notice":
+                BluetoothControlNoticeWindow.ShowDeveloperPreview(this);
+                break;
+            case "shortcut-settings":
+                ShortcutSettingsWindow.ShowDeveloperPreview(this);
+                break;
+            case "reverse-control-status":
+                ReverseControlStatusWindow.ShowDeveloperPreview(this);
                 break;
             case "prompt":
                 AppPromptWindow.ShowDeveloperPreview(this);
@@ -5317,7 +5342,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception error)
         {
-            _viewModel.AddUiLog(LocalizationService.Format("BluetoothControlStartFailedFormat", error.Message));
+            var message = LocalizationService.Get("ReverseControlUnknownError");
+            _viewModel.AddUiLog(message);
+            _viewModel.ShowControlOperationError(
+                LocalizationService.Get("ReverseControlTransportBluetooth"),
+                message, AppLog.Error(error));
             _viewModel.AddDiagnosticLog(AppLog.Event("bluetooth_control_toolbar_failed",
                 ("error", AppLog.Error(error))));
         }
@@ -5335,10 +5364,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception error)
         {
-            var message = LocalizationService.Format("UsbControlOperationFailedFormat", error.Message);
+            var message = LocalizationService.Get("UsbControlFailureUnknown");
             _viewModel.AddUiLog(message);
-            System.Windows.MessageBox.Show(this, message,
-                LocalizationService.Get("UsbControlTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            _viewModel.ShowControlOperationError(
+                LocalizationService.Get("ReverseControlTransportWired"),
+                message, AppLog.Error(error));
             _viewModel.AddDiagnosticLog(AppLog.Event("usb_control_toolbar_failed",
                 ("error", AppLog.Error(error))));
         }
@@ -5355,7 +5385,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception error)
         {
-            _viewModel.AddUiLog(LocalizationService.Format("WirelessControlOperationFailedFormat", error.Message));
+            var message = LocalizationService.Get("ReverseControlUnknownError");
+            _viewModel.AddUiLog(message);
+            _viewModel.ShowControlOperationError(
+                LocalizationService.Get("ReverseControlTransportWireless"),
+                message, AppLog.Error(error));
             _viewModel.AddDiagnosticLog(AppLog.Event("wireless_control_toolbar_failed",
                 ("error", AppLog.Error(error))));
         }
@@ -6951,7 +6985,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (mode == ControlStatusMode.Bluetooth && _viewModel.IsBluetoothControlEnabled) return;
         if (mode == ControlStatusMode.Usb && _viewModel.IsUsbControlEnabled) return;
-        if (mode == ControlStatusMode.Wireless && _viewModel.IsUsbControlEnabled) return;
+        if (mode == ControlStatusMode.Wireless && _viewModel.IsWirelessControlEnabled) return;
         _viewModel.ControlStatus.Begin(mode, _viewModel.SelectedDevice?.Name ?? "iPhone");
         ReverseControlStatusWindow.Show(this, _viewModel.ControlStatus);
     }

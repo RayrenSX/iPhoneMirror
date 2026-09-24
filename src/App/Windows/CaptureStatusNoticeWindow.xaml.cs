@@ -10,6 +10,8 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
 
     public string TitleText { get; }
     public string BodyText { get; }
+    public string? TechnicalDetails { get; }
+    public bool HasTechnicalDetails => !string.IsNullOrWhiteSpace(TechnicalDetails);
     public string BadgeText { get; }
     public string HintText { get; }
     public bool IsStopped { get; }
@@ -18,10 +20,11 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
     public bool IsWarning => IsStopped || IsUsbConfiguration;
 
     private CaptureStatusNoticeWindow(string title, string body, NoticeKind kind,
-        bool reverseControl = false, bool previewOnly = false)
+        bool reverseControl = false, bool previewOnly = false, string? technicalDetails = null)
     {
         TitleText = title;
         BodyText = body;
+        TechnicalDetails = technicalDetails;
         IsStopped = kind == NoticeKind.Stopped;
         IsUsbConfiguration = kind == NoticeKind.UsbConfiguration;
         IsReverseControl = reverseControl;
@@ -45,20 +48,24 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
         ShowError(title, body, usbConfiguration: false);
 
     internal static void ShowError(string title, string body,
-        bool usbConfiguration, bool reverseControl = false) =>
-        ShowErrorCore(title, body, usbConfiguration, reverseControl);
+        bool usbConfiguration, bool reverseControl = false, string? technicalDetails = null) =>
+        ShowErrorCore(title, body, usbConfiguration, reverseControl, technicalDetails);
 
     private static void ShowErrorCore(string title, string body,
-        bool usbConfiguration, bool reverseControl)
+        bool usbConfiguration, bool reverseControl, string? technicalDetails)
     {
         if (_activeError is { IsVisible: true })
         {
-            _activeError.Activate();
-            return;
+            if (_activeError.TitleText == title && _activeError.BodyText == body)
+            {
+                _activeError.Activate();
+                return;
+            }
+            _activeError.Close();
         }
         var notice = new CaptureStatusNoticeWindow(title, body,
             usbConfiguration ? NoticeKind.UsbConfiguration : NoticeKind.Error,
-            reverseControl: reverseControl)
+            reverseControl: reverseControl, technicalDetails: technicalDetails)
         {
             Owner = Application.Current.MainWindow,
         };

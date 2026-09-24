@@ -80,24 +80,54 @@ function Resolve-MsysRoot {
 function Invoke-Msys([string]$Msys, [string]$Command) {
     $oldMsystem = $env:MSYSTEM
     $oldChere = $env:CHERE_INVOKING
+    $oldHome = $env:HOME
+    $oldTemp = $env:TEMP
+    $oldTmp = $env:TMP
+    $oldTmpDir = $env:TMPDIR
     try {
         $env:MSYSTEM = 'UCRT64'
         $env:CHERE_INVOKING = '1'
-        & (Join-Path $Msys 'usr\bin\bash.exe') -lc $Command
+        $env:HOME = (Join-Path $Root 'work\msys2-home')
+        $msysTemp = Join-Path $Root 'work\msys2-tmp'
+        New-Item -ItemType Directory -Force -Path $env:HOME, $msysTemp | Out-Null
+        $env:TEMP = $msysTemp
+        $env:TMP = $msysTemp
+        $env:TMPDIR = $msysTemp
+        $homeUnix = '/' + $env:HOME.Substring(0, 1).ToLowerInvariant() +
+            ($env:HOME.Substring(2) -replace '\\', '/')
+        $tempUnix = '/' + $msysTemp.Substring(0, 1).ToLowerInvariant() +
+            ($msysTemp.Substring(2) -replace '\\', '/')
+        $shellCommand = "export HOME='$homeUnix' TMPDIR='$tempUnix' " +
+            "TEMP='$tempUnix' TMP='$tempUnix'; $Command"
+        & (Join-Path $Msys 'usr\bin\bash.exe') -lc $shellCommand
         if ($LASTEXITCODE -ne 0) { throw "MSYS2 command failed ($LASTEXITCODE): $Command" }
     }
     finally {
         $env:MSYSTEM = $oldMsystem
         $env:CHERE_INVOKING = $oldChere
+        $env:HOME = $oldHome
+        $env:TEMP = $oldTemp
+        $env:TMP = $oldTmp
+        $env:TMPDIR = $oldTmpDir
     }
 }
 
 function Get-MsysOutput([string]$Msys, [string]$Command) {
     $oldMsystem = $env:MSYSTEM
     $oldChere = $env:CHERE_INVOKING
+    $oldHome = $env:HOME
+    $oldTemp = $env:TEMP
+    $oldTmp = $env:TMP
+    $oldTmpDir = $env:TMPDIR
     try {
         $env:MSYSTEM = 'UCRT64'
         $env:CHERE_INVOKING = '1'
+        $env:HOME = (Join-Path $Root 'work\msys2-home')
+        $msysTemp = Join-Path $Root 'work\msys2-tmp'
+        New-Item -ItemType Directory -Force -Path $env:HOME, $msysTemp | Out-Null
+        $env:TEMP = $msysTemp
+        $env:TMP = $msysTemp
+        $env:TMPDIR = $msysTemp
         $output = & (Join-Path $Msys 'usr\bin\bash.exe') -lc $Command
         if ($LASTEXITCODE -ne 0) { throw "MSYS2 command failed ($LASTEXITCODE): $Command" }
         return ($output -join "`n").Trim()
@@ -105,20 +135,49 @@ function Get-MsysOutput([string]$Msys, [string]$Command) {
     finally {
         $env:MSYSTEM = $oldMsystem
         $env:CHERE_INVOKING = $oldChere
+        $env:HOME = $oldHome
+        $env:TEMP = $oldTemp
+        $env:TMP = $oldTmp
+        $env:TMPDIR = $oldTmpDir
     }
 }
 
 function Get-MsysPath([string]$Msys, [string]$WindowsPath) {
     $oldMsystem = $env:MSYSTEM
     $oldChere = $env:CHERE_INVOKING
+    $oldHome = $env:HOME
+    $oldTemp = $env:TEMP
+    $oldTmp = $env:TMP
+    $oldTmpDir = $env:TMPDIR
     try {
         $env:MSYSTEM = 'UCRT64'
         $env:CHERE_INVOKING = '1'
-        return (& (Join-Path $Msys 'usr\bin\bash.exe') -lc "cygpath -u '$WindowsPath'").Trim()
+        $env:HOME = (Join-Path $Root 'work\msys2-home')
+        $msysTemp = Join-Path $Root 'work\msys2-tmp'
+        New-Item -ItemType Directory -Force -Path $env:HOME, $msysTemp | Out-Null
+        $env:TEMP = $msysTemp
+        $env:TMP = $msysTemp
+        $env:TMPDIR = $msysTemp
+        $lines = @(& (Join-Path $Msys 'usr\bin\bash.exe') -lc "cygpath -u '$WindowsPath'")
+        if ($LASTEXITCODE -ne 0) {
+            throw "MSYS2 path conversion failed: $WindowsPath"
+        }
+        $path = $lines | Where-Object {
+            $_ -match '^/(?:[A-Za-z]/|ucrt64/|usr/|mingw64/|mingw32/|clang64/|clangarm64/)'
+        } |
+            Select-Object -Last 1
+        if ([string]::IsNullOrWhiteSpace($path)) {
+            throw "MSYS2 returned no valid path for: $WindowsPath"
+        }
+        return $path.Trim()
     }
     finally {
         $env:MSYSTEM = $oldMsystem
         $env:CHERE_INVOKING = $oldChere
+        $env:HOME = $oldHome
+        $env:TEMP = $oldTemp
+        $env:TMP = $oldTmp
+        $env:TMPDIR = $oldTmpDir
     }
 }
 

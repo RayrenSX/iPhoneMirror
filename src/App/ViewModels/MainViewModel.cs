@@ -127,6 +127,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private UsbTouchBridgeHost? _wirelessTouchBridge;
     private bool _wirelessControlEnabled;
     private bool _wirelessControlConnected;
+    private bool _wirelessStartupTerminated;
     private string? _wirelessControlDeviceUdid;
     private readonly ClipboardSyncState _clipboardSyncState = new();
     private readonly SemaphoreSlim _clipboardPollGate = new(1, 1);
@@ -159,6 +160,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private bool _usbControlStarting;
     private bool _usbControlStopping;
     private readonly SingleFlightOperation _usbControlOperation = new();
+    private readonly SingleFlightOperation _wirelessControlOperation = new();
     private int _activeSessionStatusPolls;
     private string? _activeCaptureUdid;
     private int _manualRefreshPending;
@@ -343,6 +345,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _bluetoothControlEnabled && _bluetoothControlInputEnabled
             ? "StopBluetoothControl" : "StartBluetoothControl");
     public bool IsUsbControlEnabled => _usbControlEnabled || _wirelessControlEnabled;
+    internal bool IsWirelessControlEnabled => _wirelessControlEnabled;
     public bool UsbControlIsInputEnabled => (_usbControlEnabled && _usbControlConnected) ||
         (_wirelessControlEnabled && _wirelessControlConnected);
     internal string? UsbControlTargetUdid => _usbControlDeviceUdid ?? _wirelessControlDeviceUdid;
@@ -1230,6 +1233,15 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 StartBluetoothControlCommand.NotifyCanExecuteChanged();
                 StopBluetoothControlCommand.NotifyCanExecuteChanged();
                 ToggleBluetoothControlCommand.NotifyCanExecuteChanged();
+                if (_bluetoothControlEnabled && !_bluetoothControlStarting &&
+                    !_bluetoothControlStopping && !_bluetoothControl.IsAdvertising &&
+                    _bluetoothControl.Error is not null)
+                {
+                    ShowReverseControlError(LocalizationService.Get("ReverseControlTransportBluetooth"),
+                        LocalizationService.Get("ReverseControlBluetoothFailureAdvice"),
+                        technicalDetails: _bluetoothControl.Error);
+                    _ = DisableBluetoothControlAsync();
+                }
                 if (_bluetoothControlEnabled)
                     _ = EnsureBluetoothControlBindingAsync();
             }
@@ -1575,11 +1587,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     ("connected", false), ("error", _bluetoothControl.Error)));
                 DiagnosticLogger.ReverseControlError("bluetooth", "start_failed",
                     ("error", _bluetoothControl.Error));
-                if (showFailureNotice && Application.Current?.MainWindow is { } failedOwner)
-                    BluetoothControlNoticeWindow.ShowFailure(failedOwner,
-                        _bluetoothControl.Error ?? _bluetoothControl.Status);
-                else
-                    ShowReverseControlError(LocalizationService.Get("ReverseControlTransportBluetooth"), _bluetoothControl.Error ?? _bluetoothControl.Status);
+                ShowReverseControlError(LocalizationService.Get("ReverseControlTransportBluetooth"),
+                    LocalizationService.Get("ReverseControlBluetoothFailureAdvice"),
+                    technicalDetails: _bluetoothControl.Error ?? _bluetoothControl.Status);
                 return;
             }
 
@@ -1639,10 +1649,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("error", AppLog.Error(error))));
             DiagnosticLogger.ReverseControlError("bluetooth", "start_failed",
                 ("error", AppLog.Error(error)));
-            if (showFailureNotice && Application.Current?.MainWindow is { } owner)
-                BluetoothControlNoticeWindow.ShowFailure(owner, error.Message);
-            else
-                ShowReverseControlError(LocalizationService.Get("ReverseControlTransportBluetooth"), error.Message);
+            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportBluetooth"),
+                LocalizationService.Get("ReverseControlBluetoothFailureAdvice"),
+                technicalDetails: AppLog.Error(error));
         }
         finally
         {
@@ -1767,6 +1776,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             while (_bluetoothControlEnabled &&
                 DeviceViewModel.UdidEquals(_bluetoothControlDeviceUdid, targetUdid));
             if (clients.Count == 0) return;
+            if (!_bluetoothControlEnabled || !DeviceViewModel.UdidEquals(
+                    _bluetoothControlDeviceUdid, targetUdid)) return;
             if (savedBinding is not null && clients.Any(client =>
                     string.Equals(client.Id, savedBinding,
                         StringComparison.OrdinalIgnoreCase)))
@@ -1774,8 +1785,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 // The GATT subscription event can arrive before the route
                 // refresh publishes TargetClientId. Restore the persisted
                 // client directly instead of asking the user to bind again.
-                if (await _bluetoothControl.BindTargetClientAsync(savedBinding))
+                if (await _bluetoothControl.BindTargetClientAsync(targetUdid,
+                        savedBinding))
                 {
+                    if (!_bluetoothControlEnabled || !DeviceViewModel.UdidEquals(
+                            _bluetoothControlDeviceUdid, targetUdid)) return;
                     _bluetoothControlConnected =
                         _bluetoothControl.IsTargetClientConnected;
                     _bluetoothControlInputEnabled = !_bluetoothControlNoticePending;
@@ -1797,8 +1811,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     _bluetoothControl.TargetClientId,
                     RefreshBluetoothBindingClientsAsync,
                     UnbindBluetoothControlBinding)));
-            if (string.IsNullOrWhiteSpace(selected) ||
-                !await _bluetoothControl.BindTargetClientAsync(selected)) return;
+            if (!_bluetoothControlEnabled || !DeviceViewModel.UdidEquals(
+                    _bluetoothControlDeviceUdid, targetUdid) ||
+                string.IsNullOrWhiteSpace(selected) ||
+                !await _bluetoothControl.BindTargetClientAsync(targetUdid,
+                    selected)) return;
+            if (!_bluetoothControlEnabled || !DeviceViewModel.UdidEquals(
+                    _bluetoothControlDeviceUdid, targetUdid)) return;
             if (!SaveBluetoothControlBinding(targetUdid, selected))
             {
                 AddDiagnosticLog(AppLog.Event("bluetooth_control_binding_save_failed",
@@ -1895,11 +1914,18 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             _bluetoothControlConnected = false;
             _bluetoothControlCalibrated = false;
             ResetBluetoothControlInputState();
+            if (_reverseInputRouter.Mode == ReverseControlMode.Bluetooth)
+                _reverseInputRouter.Stop();
             NotifyBluetoothControlStateChanged();
             BluetoothControlNoticeWindow.TryCloseActive();
             if (!string.IsNullOrWhiteSpace(controlDeviceUdid))
                 _bluetoothBindingPromptedTargets.Remove(controlDeviceUdid);
-            await _bluetoothControl.ReleaseAllAsync();
+            try { await _bluetoothControl.ReleaseAllAsync(); }
+            catch (Exception error)
+            {
+                AddDiagnosticLog(AppLog.Event("bluetooth_control_release_failed",
+                    ("error", AppLog.Error(error))));
+            }
             await _bluetoothControl.StopAsync();
             AddDiagnosticLog(AppLog.Event("bluetooth_control_stop_complete"));
             DiagnosticLogger.ReverseControl("bluetooth", "stop_complete");
@@ -2054,7 +2080,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         await EnableWirelessControlAsync();
     }
 
-    private async Task EnableWirelessControlAsync()
+    private Task EnableWirelessControlAsync() => _wirelessControlOperation.RunAsync(
+        EnableWirelessControlCoreAsync, _shutdownCancellation.Token);
+
+    private async Task EnableWirelessControlCoreAsync(CancellationToken cancellationToken)
     {
         var device = SelectedDevice;
         ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.CheckingDevice, device?.Name ?? "iPhone", "正在检查设备和绑定状态…");
@@ -2064,6 +2093,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (!ConfirmReverseControlPrerequisites(wireless: true))
         { ControlStatus.Failed(ControlStatusMode.Wireless, device.Name, "已取消无线反向控制", "用户取消了启动前置确认。"); return; }
         _usbControlStarting = true;
+        _wirelessStartupTerminated = false;
         ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.CheckingPermissions, device.Name, "正在检查设备权限和连接状态…");
         _usbControlStatus = LocalizationService.Get("ReverseControlConnectingWireless");
         DiagnosticLogger.ReverseControl("wireless", "start_begin",
@@ -2071,25 +2101,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         NotifyUsbControlStateChanged();
         var bridge = new UsbTouchBridgeHost();
         _wirelessTouchBridge = bridge;
-        bridge.StatusChanged += (_, bridgeEvent) =>
-        {
-            if (!ReferenceEquals(_wirelessTouchBridge, bridge)) return;
-            if (bridgeEvent.EventName == "clipboard_text")
-            {
-                HandleClipboardTextFromDevice(bridgeEvent.Text);
-                return;
-            }
-            LogBridgeEvent("wireless", bridgeEvent);
-            UpdateReverseControlStartupStatus(LocalizationService.Get("ReverseControlTransportWireless"), ControlStatusMode.Wireless, bridgeEvent);
-            if (bridgeEvent.EventName is not ("error" or "status") ||
-                (bridgeEvent.EventName == "status" && bridgeEvent.Code != "terminated")) return;
-            _wirelessControlConnected = false;
-            ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.Recovering, device.Name, "检测到控制通道暂时中断，正在尝试重新连接…");
-            _usbControlStatus = LocalizationService.Get("ReverseControlWirelessDisconnected");
-            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWireless"), FormatReverseControlBridgeError(bridgeEvent));
-            if (Application.Current?.Dispatcher is { } dispatcher)
-                dispatcher.BeginInvoke(async () => await DisableWirelessControlAsync());
-        };
+        AttachWirelessBridgeEvents(bridge, device);
         var lockdownGateHeld = false;
         try
         {
@@ -2100,10 +2112,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
             // The bridge owns Network usbmux/mDNS discovery. Do not gate this
             // path on the optional system Bonjour service or launch repair UI.
-            await _lockdownHandshakeGate.WaitAsync(_shutdownCancellation.Token);
+            await _lockdownHandshakeGate.WaitAsync(cancellationToken);
             lockdownGateHeld = true;
             await bridge.StartAsync(UsbTouchTransport.Wireless, boundUdid, bridgePath,
-                _shutdownCancellation.Token);
+                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!bridge.IsReady || _wirelessStartupTerminated)
+                throw new InvalidOperationException("无线控制通道在启动完成前已断开。");
             _wirelessControlEnabled = _wirelessControlConnected = true;
             _wirelessControlDeviceUdid = device.Udid;
             _reverseInputRouter.Begin(boundUdid, ReverseControlMode.Wireless);
@@ -2121,11 +2136,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             ControlStatus.Failed(ControlStatusMode.Wireless, device?.Name ?? "iPhone", "无线反向控制无法启动", error.Message);
             if (ReferenceEquals(_wirelessTouchBridge, bridge)) _wirelessTouchBridge = null;
-            await bridge.DisposeAsync();
+            try { await bridge.DisposeAsync(); }
+            catch (Exception cleanupError)
+            {
+                DiagnosticLogger.ReverseControlError("wireless", "startup_cleanup_failed",
+                    ("error", AppLog.Error(cleanupError)));
+            }
+            if (cancellationToken.IsCancellationRequested) return;
             _usbControlStatus = LocalizationService.Format("ReverseControlWirelessFailedFormat", GetUsbControlFailureMessage(error, bridge, wireless: true));
-            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWireless"), GetUsbControlFailureMessage(error, bridge, wireless: true));
+            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWireless"),
+                GetUsbControlFailureMessage(error, bridge, wireless: true),
+                technicalDetails: $"{bridge.LastErrorCode}: {AppLog.Error(error)}");
             DiagnosticLogger.ReverseControlError("wireless", "start_failed",
-                ("device", AppLog.Device(device.Udid)), ("error", AppLog.Error(error)),
+                ("device", AppLog.Device(device?.Udid)), ("error", AppLog.Error(error)),
                 ("bridge_code", bridge.LastErrorCode), ("bridge_diagnostic", bridge.LastDiagnostic));
         }
         finally
@@ -2133,6 +2156,159 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             if (lockdownGateHeld) _lockdownHandshakeGate.Release();
             _usbControlStarting = false;
             NotifyUsbControlStateChanged();
+            if (_wirelessStartupTerminated && _wirelessControlEnabled &&
+                !_usbControlStopping && Application.Current?.Dispatcher is { } dispatcher)
+                _ = dispatcher.BeginInvoke(new Action(() => _ = RecoverWirelessControlAsync()));
+        }
+    }
+
+    private void AttachWirelessBridgeEvents(UsbTouchBridgeHost bridge, DeviceViewModel device)
+    {
+        bridge.StatusChanged += (_, bridgeEvent) =>
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!ReferenceEquals(_wirelessTouchBridge, bridge) || _disposed) return;
+                if (bridgeEvent.EventName == "clipboard_text")
+                {
+                    HandleClipboardTextFromDevice(bridgeEvent.Text);
+                    return;
+                }
+                LogBridgeEvent("wireless", bridgeEvent);
+                UpdateReverseControlStartupStatus(
+                    LocalizationService.Get("ReverseControlTransportWireless"),
+                    ControlStatusMode.Wireless, bridgeEvent);
+                if (bridgeEvent.EventName is not ("error" or "status") ||
+                    (bridgeEvent.EventName == "status" && bridgeEvent.Code != "terminated"))
+                    return;
+                if (_usbControlStarting)
+                {
+                    _wirelessStartupTerminated = true;
+                    return;
+                }
+                if (_usbControlStopping || !_wirelessControlEnabled) return;
+                _wirelessControlConnected = false;
+                _reverseInputRouter.Stop();
+                ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.Recovering,
+                    device.Name, "检测到控制通道暂时中断，正在尝试重新连接…");
+                _usbControlStatus = LocalizationService.Get("ReverseControlWirelessDisconnected");
+                NotifyUsbControlStateChanged();
+                _ = RecoverWirelessControlAsync();
+            }));
+        };
+    }
+
+    private Task RecoverWirelessControlAsync() => _wirelessControlOperation.RunAsync(
+        RecoverWirelessControlCoreAsync, _shutdownCancellation.Token);
+
+    private async Task RecoverWirelessControlCoreAsync(CancellationToken cancellationToken)
+    {
+        if (_disposed || !_wirelessControlEnabled || _usbControlStopping) return;
+        var deviceUdid = _wirelessControlDeviceUdid;
+        var device = Devices.FirstOrDefault(d => DeviceViewModel.UdidEquals(d.Udid, deviceUdid));
+        var appleUdid = device is null ? null : _identityResolver.Resolve(device).AppleUdid;
+        var oldBridge = _wirelessTouchBridge;
+        _wirelessTouchBridge = null;
+        _wirelessControlConnected = false;
+        _reverseInputRouter.Stop();
+        if (oldBridge is not null)
+        {
+            try { await oldBridge.DisposeAsync(); }
+            catch (Exception error)
+            {
+                DiagnosticLogger.ReverseControlError("wireless", "old_bridge_cleanup_failed",
+                    ("error", AppLog.Error(error)));
+            }
+        }
+        if (device is null || string.IsNullOrWhiteSpace(appleUdid))
+        {
+            _wirelessControlEnabled = false;
+            _wirelessControlDeviceUdid = null;
+            _usbControlStatus = LocalizationService.Get("ReverseControlWirelessOff");
+            NotifyUsbControlStateChanged();
+            return;
+        }
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_wirelessControlEnabled || _usbControlStopping ||
+                !DeviceViewModel.UdidEquals(_wirelessControlDeviceUdid, deviceUdid)) return;
+            ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.Recovering,
+                device.Name, $"正在自动重新连接无线控制通道（第 {attempt} 次尝试）…",
+                retryAttempt: attempt, retryLimit: 3);
+            await Task.Delay(attempt * 1000, cancellationToken);
+            if (!Devices.Contains(device) ||
+                !DeviceViewModel.UdidEquals(
+                    _identityResolver.Resolve(device).AppleUdid, appleUdid))
+            {
+                _wirelessControlEnabled = false;
+                _wirelessControlDeviceUdid = null;
+                _usbControlStatus = LocalizationService.Get("ReverseControlWirelessOff");
+                NotifyUsbControlStateChanged();
+                return;
+            }
+            var bridge = new UsbTouchBridgeHost();
+            _wirelessTouchBridge = bridge;
+            AttachWirelessBridgeEvents(bridge, device);
+            var lockdownGateHeld = false;
+            try
+            {
+                await _lockdownHandshakeGate.WaitAsync(cancellationToken);
+                lockdownGateHeld = true;
+                var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
+                await bridge.StartAsync(UsbTouchTransport.Wireless, appleUdid,
+                    bridgePath, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!bridge.IsReady || !ReferenceEquals(_wirelessTouchBridge, bridge) ||
+                    _usbControlStopping || !_wirelessControlEnabled)
+                    throw new InvalidOperationException("无线控制通道在自动重连完成前已断开。");
+                _wirelessControlConnected = true;
+                _reverseInputRouter.Begin(appleUdid, ReverseControlMode.Wireless);
+                _usbControlStatus = bridge.AuthMode == "direct"
+                    ? LocalizationService.Get("ReverseControlWirelessEnabledDirect")
+                    : LocalizationService.Get("ReverseControlWirelessEnabled");
+                ControlStatus.Ready(ControlStatusMode.Wireless, device.Name);
+                NotifyUsbControlStateChanged();
+                return;
+            }
+            catch (Exception error)
+            {
+                if (ReferenceEquals(_wirelessTouchBridge, bridge)) _wirelessTouchBridge = null;
+                try { await bridge.DisposeAsync(); }
+                catch { /* A failed bridge must not prevent the next attempt. */ }
+                if (cancellationToken.IsCancellationRequested) return;
+                DiagnosticLogger.ReverseControlError("wireless", "recovery_failed",
+                    ("device", AppLog.Device(deviceUdid)), ("attempt", attempt),
+                    ("error", AppLog.Error(error)));
+                var prerequisiteFailure = bridge.LastErrorCode is
+                    "developer_image_required" or "developer_mode_required" or
+                    "apple_device_not_trusted" or "wireless_remote_pairing_required" or
+                    "device_identity_mismatch" or "developer_image_bundle_invalid" or
+                    "developer_image_download_incompatible";
+                if (attempt == 3 || prerequisiteFailure)
+                {
+                    _wirelessControlEnabled = false;
+                    _wirelessControlDeviceUdid = null;
+                    _usbControlStatus = LocalizationService.Format(
+                        "ReverseControlWirelessFailedFormat",
+                        GetUsbControlFailureMessage(error, bridge, wireless: true));
+                    ControlStatus.Failed(ControlStatusMode.Wireless, device.Name,
+                        "无线反向控制自动重连失败", error.Message);
+                    ShowReverseControlError(
+                        LocalizationService.Get("ReverseControlTransportWireless"),
+                        GetUsbControlFailureMessage(error, bridge, wireless: true),
+                        "ReverseControlRecoveryErrorTitle",
+                        $"{bridge.LastErrorCode}: {AppLog.Error(error)}");
+                }
+            }
+            finally
+            {
+                if (lockdownGateHeld) _lockdownHandshakeGate.Release();
+                NotifyUsbControlStateChanged();
+            }
         }
     }
 
@@ -2149,6 +2325,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         _reverseInputRouter.Stop();
         try
         {
+            await _wirelessControlOperation.CancelAsync();
             if (bridge is not null) await bridge.DisposeAsync();
             _usbControlStatus = LocalizationService.Get("ReverseControlWirelessOff");
             DiagnosticLogger.ReverseControl("wireless", "stop_complete");
@@ -2160,7 +2337,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("error", AppLog.Error(error))));
             DiagnosticLogger.ReverseControlError("wireless", "stop_failed",
                 ("error", AppLog.Error(error)));
-            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWireless"), LocalizationService.Format("ReverseControlStopFailureDetailFormat", error.Message));
+            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWireless"),
+                LocalizationService.Get("ReverseControlStopFailureAdvice"),
+                "ReverseControlStopErrorTitle", AppLog.Error(error));
         }
         finally
         {
@@ -2254,20 +2433,26 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception error)
         {
             if (ReferenceEquals(_usbTouchBridge, bridge)) _usbTouchBridge = null;
-            await bridge.DisposeAsync();
+            try { await bridge.DisposeAsync(); }
+            catch (Exception cleanupError)
+            {
+                DiagnosticLogger.ReverseControlError("usb", "startup_cleanup_failed",
+                    ("error", AppLog.Error(cleanupError)));
+            }
             if (cancellationToken.IsCancellationRequested) return;
             ControlStatus.Failed(ControlStatusMode.Usb, device?.Name ?? "iPhone", "无法启用反向控制", error.Message);
             var message = GetUsbControlFailureMessage(error, bridge);
             _usbControlFailed = true;
             _usbControlStatus = LocalizationService.Format("ReverseControlUsbFailedFormat", message);
-            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWired"), message);
+            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWired"), message,
+                technicalDetails: $"{bridge.LastErrorCode}: {AppLog.Error(error)}");
             _usbControlDeviceUdid = null;
             AddDiagnosticLog(AppLog.Event("usb_control_enable_failed",
-                ("device", AppLog.Device(device.Udid)), ("error", AppLog.Error(error)),
+                ("device", AppLog.Device(device?.Udid)), ("error", AppLog.Error(error)),
                 ("bridge_code", bridge.LastErrorCode),
                 ("bridge_diagnostic", bridge.LastDiagnostic)));
             DiagnosticLogger.ReverseControlError("usb", "start_failed",
-                ("device", AppLog.Device(device.Udid)), ("error", AppLog.Error(error)),
+                ("device", AppLog.Device(device?.Udid)), ("error", AppLog.Error(error)),
                 ("bridge_code", bridge.LastErrorCode), ("bridge_diagnostic", bridge.LastDiagnostic));
         }
         finally
@@ -2333,8 +2518,11 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (bridge.LastErrorCode is "developer_image_download_failed" or
             "developer_image_download_timeout")
             return LocalizationService.Get("UsbControlFailureImageDownload");
-        if (bridge.LastErrorCode is "developer_image_download_rate_limited" or
-            "developer_image_download_integrity_failed")
+        if (string.Equals(bridge.LastErrorCode, "developer_image_download_integrity_failed",
+                StringComparison.OrdinalIgnoreCase))
+            return LocalizationService.Get("UsbControlFailureImageIntegrity");
+        if (string.Equals(bridge.LastErrorCode, "developer_image_download_rate_limited",
+                StringComparison.OrdinalIgnoreCase))
             return LocalizationService.Get("UsbControlFailureImageRateLimited");
         if (string.Equals(bridge.LastErrorCode, "developer_image_download_incompatible",
                 StringComparison.OrdinalIgnoreCase))
@@ -2388,15 +2576,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             return LocalizationService.Get("UsbControlFailureMux");
         if (string.IsNullOrWhiteSpace(raw))
             return LocalizationService.Get("UsbControlFailureNoDetails");
-        return ContainsCjk(raw)
-            ? LocalizationService.Get("UsbControlFailureUnknown")
-            : raw;
+        return LocalizationService.Get("UsbControlFailureUnknown");
     }
-
-    private static bool ContainsCjk(string value) => value.Any(character =>
-        character is >= '\u3400' and <= '\u4DBF' or
-        >= '\u4E00' and <= '\u9FFF' or
-        >= '\uF900' and <= '\uFAFF');
 
     private void UpdateReverseControlStartupStatus(string transport,
         ControlStatusMode mode, BridgeStatusEventArgs bridgeEvent)
@@ -2452,23 +2633,36 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 LocalizationService.Format("ReverseControlErrorCodeFormat", bridgeEvent.Code))
             : bridgeEvent.Message!;
 
-    private void ShowReverseControlError(string transport, string? detail)
+    internal void ShowControlOperationError(string transport, string detail, string technicalDetails)
+    {
+        if (ControlStatus.Current is null)
+            ControlStatus.Begin(transport switch
+            {
+                "蓝牙" or "Bluetooth" => ControlStatusMode.Bluetooth,
+                "无线" or "wireless" => ControlStatusMode.Wireless,
+                _ => ControlStatusMode.Usb,
+            }, SelectedDevice?.Name ?? "iPhone");
+        ShowReverseControlError(transport, detail, technicalDetails: technicalDetails);
+    }
+
+    private void ShowReverseControlError(string transport, string? detail,
+        string titleKey = "ReverseControlStartErrorTitle", string? technicalDetails = null)
     {
         if (Interlocked.Exchange(ref _reverseControlErrorPromptInFlight, 1) != 0)
             return;
-        ReverseControlStatusWindow.CloseActive();
-        var body = string.IsNullOrWhiteSpace(detail)
-            ? LocalizationService.Format("ReverseControlErrorBodyFormat", transport,
-                LocalizationService.Get("ReverseControlNoDetail"))
-            : LocalizationService.Format("ReverseControlErrorBodyFormat", transport,
-                detail.Trim());
         void Show()
         {
             try
             {
-                CaptureStatusNoticeWindow.ShowError(
-                    LocalizationService.Get("ReverseControlErrorTitle"), body,
-                    usbConfiguration: false, reverseControl: true);
+                // The status window is the single control error surface. The
+                // ControlStatusService snapshot has already been marked failed
+                // by the caller; keep the technical detail in its diagnostics.
+                ControlStatus.FailCurrent(detail ?? "反向控制失败", technicalDetails);
+                if (!string.IsNullOrWhiteSpace(technicalDetails))
+                    ControlStatus.AddDiagnostic(detail ?? "反向控制失败", technicalDetails, "Error");
+                ReverseControlStatusWindow.Show(
+                    Application.Current?.MainWindow ?? throw new InvalidOperationException("Main window unavailable"),
+                    ControlStatus);
             }
             finally
             {
@@ -2535,7 +2729,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                 ("error", AppLog.Error(error))));
             DiagnosticLogger.ReverseControlError("usb", "stop_failed",
                 ("error", AppLog.Error(error)));
-            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWired"), LocalizationService.Format("ReverseControlStopFailureDetailFormat", error.Message));
+            ShowReverseControlError(LocalizationService.Get("ReverseControlTransportWired"),
+                LocalizationService.Get("ReverseControlStopFailureAdvice"),
+                "ReverseControlStopErrorTitle", AppLog.Error(error));
         }
         finally
         {
@@ -2691,7 +2887,9 @@ internal sealed class MainViewModel : INotifyPropertyChanged
                     _usbControlDeviceUdid = null;
                     ShowReverseControlError(
                         LocalizationService.Get("ReverseControlTransportWired"),
-                        error.Message);
+                        GetUsbControlFailureMessage(error, newBridge),
+                        "ReverseControlRecoveryErrorTitle",
+                        $"{newBridge.LastErrorCode}: {AppLog.Error(error)}");
                 }
             }
             finally

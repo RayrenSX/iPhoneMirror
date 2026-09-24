@@ -149,7 +149,11 @@ PASTEBOARD_OPERATION_TIMEOUT_SECONDS = 2.0
 # A CoreDevice HID request can remain pending after iOS has invalidated the
 # direct Universal HID session. Do not leave stdin's reader blocked forever:
 # exiting lets the host discard this stale bridge and reconnect cleanly.
+# Touch motion is a high-rate best-effort stream. A multi-second retry here
+# freezes the host-side coalescing loop and is visible as a periodic pointer
+# stall. Lifecycle and keyboard operations retain their longer timeout below.
 HID_OPERATION_TIMEOUT_SECONDS = 3.0
+HID_TOUCH_MOTION_TIMEOUT_SECONDS = 0.35
 # On devices that reject media-stream authentication (9021), iOS can revoke a
 # direct Universal HID session without warning even while the USB mirror is
 # healthy. Rotate this control-only process before the observed device lease
@@ -250,6 +254,19 @@ def local_personalized_ddi_bundle(ddi_dir: Path) -> tuple[Path, Path, Path]:
             'The supplied Personalized DDI directory is missing non-empty files: '
             + ', '.join(invalid),
         )
+    try:
+        manifest = plistlib.loads(paths[1].read_bytes())
+    except (OSError, ValueError, plistlib.InvalidFileException) as error:
+        raise BridgePrerequisiteError(
+            'developer_image_bundle_invalid',
+            'The supplied Personalized DDI BuildManifest.plist is invalid.',
+        ) from error
+    if not isinstance(manifest, dict) or not isinstance(
+            manifest.get('ProductBuildVersion'), str):
+        raise BridgePrerequisiteError(
+            'developer_image_bundle_invalid',
+            'The supplied Personalized DDI BuildManifest.plist has no build version.',
+        )
     return tuple(paths)
 
 
@@ -268,6 +285,7 @@ class PersonalizedDdiDownloadSource:
     name: str
     kind: str
     prefix: str = ''
+    proxy: Optional[str] = None
 
 
 PERSONALIZED_DDI_PINNED_BUILD_ID = '27A5228h'
@@ -426,11 +444,32 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _github_request_json(url: str) -> object:
+def _request_proxy_kwargs(proxy: Optional[str]) -> dict[str, object]:
+    if not proxy:
+        return {}
+    return {'proxies': {'http': proxy, 'https': proxy}}
+
+
+def _local_proxy_candidates() -> tuple[str, ...]:
+    candidates = []
+    for name in ('IPHONE_MIRROR_GITHUB_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY'):
+        value = os.environ.get(name, '').strip()
+        if not value or value.upper() == 'DIRECT':
+            continue
+        parsed = urlsplit(value)
+        if parsed.scheme.casefold() not in ('http', 'https', 'socks5', 'socks5h') or not parsed.hostname:
+            continue
+        if value not in candidates:
+            candidates.append(value)
+    return tuple(candidates)
+
+
+def _github_request_json(url: str, proxy: Optional[str] = None) -> object:
     try:
         response = requests.get(
             url,
             headers=_ddi_source_headers(PersonalizedDdiDownloadSource('github-api', 'api')),
+            **_request_proxy_kwargs(proxy),
             timeout=(PERSONALIZED_DDI_DOWNLOAD_CONNECT_TIMEOUT_SECONDS,
                      PERSONALIZED_DDI_DOWNLOAD_READ_TIMEOUT_SECONDS),
         )
@@ -459,13 +498,12 @@ def _github_request_json(url: str) -> object:
 def _resolve_github_personalized_ddi_assets() -> tuple[PersonalizedDdiAsset, ...]:
     """Resolve the current GitHub DDI directory and bind it to this runtime build.
 
-    GitHub's blob SHA is a content identity (SHA-1), not the file SHA-256 used
-    by the cache. The downloader verifies both: blob identity while fetching,
-    and SHA-256 after the complete payload is received.
+    GitHub's directory API supplies a blob id, while the cache uses the
+    stronger pinned SHA-256 and size checks for downloaded payloads.
     """
     ref_url = PERSONALIZED_DDI_GITHUB_COMMIT_API_URL.format(
         ref=quote(PERSONALIZED_DDI_GITHUB_REF, safe=''))
-    commit_payload = _github_request_json(ref_url)
+    commit_payload = _github_request_with_proxy_fallback(ref_url)
     revision = commit_payload.get('sha') if isinstance(commit_payload, dict) else None
     if not isinstance(revision, str) or len(revision) < 7:
         raise BridgePrerequisiteError(
@@ -473,7 +511,7 @@ def _resolve_github_personalized_ddi_assets() -> tuple[PersonalizedDdiAsset, ...
             'GitHub did not return a valid DDI commit revision.',
         )
     contents_url = PERSONALIZED_DDI_GITHUB_CONTENTS_API_URL.format(revision=revision)
-    contents_payload = _github_request_json(contents_url)
+    contents_payload = _github_request_with_proxy_fallback(contents_url)
     if not isinstance(contents_payload, list):
         raise BridgePrerequisiteError(
             'developer_image_download_incompatible',
@@ -502,6 +540,23 @@ def _resolve_github_personalized_ddi_assets() -> tuple[PersonalizedDdiAsset, ...
         assets.append(PersonalizedDdiAsset(
             local_name, upstream_name, blob_id, size, None, revision))
     return tuple(assets)
+
+
+def _github_request_with_proxy_fallback(url: str) -> object:
+    try:
+        return _github_request_json(url)
+    except BridgePrerequisiteError as direct_error:
+        proxies = _local_proxy_candidates()
+        if not proxies:
+            raise
+        for proxy in proxies:
+            try:
+                result = _github_request_json(url, proxy)
+                log.info('GitHub DDI metadata request succeeded through configured proxy')
+                return result
+            except BridgePrerequisiteError:
+                continue
+        raise direct_error
 
 
 def _ddi_metadata_path(root: Path) -> Path:
@@ -626,12 +681,26 @@ def _ddi_source_root(source: PersonalizedDdiDownloadSource,
 
 
 def _personalized_ddi_download_sources() -> tuple[PersonalizedDdiDownloadSource, ...]:
-    # DDI downloads must use GitHub directly. Do not route device images
-    # through the updater's third-party mirror list or throughput probes.
-    return (
+    direct = (
         PersonalizedDdiDownloadSource('github-raw', 'raw'),
         PersonalizedDdiDownloadSource('github-api', 'api'),
     )
+    proxies = _local_proxy_candidates()
+    configured = direct + tuple(
+        replace(source, name=f'{source.name}-proxy', proxy=proxy)
+        for proxy in proxies for source in direct)
+    mirrors = tuple(
+        PersonalizedDdiDownloadSource(f'github-raw-mirror-{index}', 'mirror', prefix)
+        for index, prefix in enumerate(PERSONALIZED_DDI_MIRROR_PREFIXES, 1))
+    return configured + mirrors
+
+
+def _source_phase(source: PersonalizedDdiDownloadSource) -> str:
+    if source.proxy:
+        return 'proxy'
+    if source.kind == 'mirror':
+        return 'mirror'
+    return 'direct'
 
 
 def _parse_content_length(response) -> Optional[int]:
@@ -676,6 +745,7 @@ def _ping_personalized_ddi_source(source: PersonalizedDdiDownloadSource,
             timeout=(PERSONALIZED_DDI_SOURCE_CONNECT_TIMEOUT_SECONDS,
                      PERSONALIZED_DDI_SOURCE_CONNECT_TIMEOUT_SECONDS),
             allow_redirects=True,
+            **_request_proxy_kwargs(source.proxy),
         )
         try:
             _validate_ddi_source_response(source, requested_url, response)
@@ -702,7 +772,8 @@ def _probe_personalized_ddi_source(source: PersonalizedDdiDownloadSource,
                 timeout=(PERSONALIZED_DDI_SOURCE_CONNECT_TIMEOUT_SECONDS,
                          PERSONALIZED_DDI_SOURCE_READ_TIMEOUT_SECONDS),
                 stream=True,
-                allow_redirects=True) as response:
+                allow_redirects=True,
+                **_request_proxy_kwargs(source.proxy)) as response:
             _validate_ddi_source_response(source, requested_url, response)
             content_length = _parse_content_length(response)
             if response.status_code == 200:
@@ -759,12 +830,27 @@ def _deduplicate_ddi_sources(sources: list[PersonalizedDdiDownloadSource]) -> \
     return tuple(selected)
 
 
-def rank_personalized_ddi_download_sources() -> tuple[PersonalizedDdiDownloadSource, ...]:
-    """Return deterministic official GitHub endpoints without mirror probing."""
+def rank_personalized_ddi_download_sources(
+        assets: Optional[tuple[PersonalizedDdiAsset, ...]] = None
+        ) -> tuple[PersonalizedDdiDownloadSource, ...]:
+    """Prefer direct/proxy GitHub, then rank mirrors by measured throughput."""
     sources = _personalized_ddi_download_sources()
-    log.info('Personalized DDI downloads use direct GitHub endpoints: %s',
-             ', '.join(source.name for source in sources))
-    return sources
+    direct = sources[:2]
+    proxy_sources = tuple(source for source in sources[2:] if source.proxy)
+    mirrors = tuple(source for source in sources if source.kind == 'mirror')
+    ranked_mirrors = []
+    if mirrors:
+        probe_candidates = assets or PERSONALIZED_DDI_ASSETS
+        probe_asset = next(asset for asset in probe_candidates
+                           if asset.local_name == 'Image.trustcache')
+        measurements = _measure_ddi_sources(
+            mirrors, lambda source: _probe_personalized_ddi_source(source, probe_asset),
+            PERSONALIZED_DDI_SOURCE_THROUGHPUT_WINDOW_SECONDS)
+        ranked_mirrors = [source for source, _ in sorted(
+            measurements, key=lambda item: item[1], reverse=True)]
+    log.info('Personalized DDI download order: direct=%d proxy=%d mirrors_tested=%d/%d',
+             len(direct), len(proxy_sources), len(ranked_mirrors), len(mirrors))
+    return direct + proxy_sources + tuple(ranked_mirrors)
 
 
 def _download_personalized_ddi_asset(
@@ -778,7 +864,8 @@ def _download_personalized_ddi_asset(
                 timeout=(PERSONALIZED_DDI_DOWNLOAD_CONNECT_TIMEOUT_SECONDS,
                          PERSONALIZED_DDI_DOWNLOAD_READ_TIMEOUT_SECONDS),
                 stream=True,
-                allow_redirects=True) as response:
+                allow_redirects=True,
+                **_request_proxy_kwargs(source.proxy)) as response:
             _validate_ddi_source_response(source, requested_url, response)
             if response.status_code in (403, 429) and \
                     response.headers.get('X-RateLimit-Remaining') == '0':
@@ -798,8 +885,6 @@ def _download_personalized_ddi_asset(
                     f'{source.name} returned an unexpected size for {asset.local_name}.',
                 )
             digest = hashlib.sha256()
-            git_digest = hashlib.sha1(
-                b'blob ' + str(asset.size).encode('ascii') + b'\0')
             received = 0
             with destination.open('xb') as output:
                 for chunk in response.iter_content(
@@ -813,18 +898,15 @@ def _download_personalized_ddi_asset(
                             f'{source.name} exceeded the pinned size for {asset.local_name}.',
                         )
                     digest.update(chunk)
-                    git_digest.update(chunk)
                     output.write(chunk)
                 output.flush()
                 os.fsync(output.fileno())
             actual_sha256 = digest.hexdigest()
-            actual_blob_id = git_digest.hexdigest()
-            if received != asset.size or (asset.sha256 and actual_sha256 != asset.sha256) or \
-                    (asset.blob_id and actual_blob_id != asset.blob_id):
+            if received != asset.size or (asset.sha256 and actual_sha256 != asset.sha256):
                 raise BridgePrerequisiteError(
                     'developer_image_download_integrity_failed',
-                    f'{source.name} failed content verification for {asset.local_name} '
-                    f'(sha256={actual_sha256}, blob={actual_blob_id}).',
+                    f'{source.name} failed size/SHA-256 verification for {asset.local_name} '
+                    f'(sha256={actual_sha256}).',
                 )
     except BridgePrerequisiteError:
         raise
@@ -869,8 +951,12 @@ def fetch_automatic_personalized_ddi_bundle(
     cache.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='iphoneMirror-ddi-', dir=cache.parent))
     try:
-        sources = rank_personalized_ddi_download_sources()
-        if not sources:
+        sources_by_phase = {
+            phase: tuple(source for source in _personalized_ddi_download_sources()
+                         if _source_phase(source) == phase)
+            for phase in ('direct', 'proxy', 'mirror')
+        }
+        if not any(sources_by_phase.values()):
             raise BridgePrerequisiteError(
                 'developer_image_download_failed',
                 'No Personalized DDI download sources are available.',
@@ -881,24 +967,41 @@ def fetch_automatic_personalized_ddi_bundle(
             except Exception as error:
                 log.info('Unable to report Personalized DDI download status: %s', error)
 
+        mirrors_ranked = False
         for asset in assets:
             partial = staging / f'{asset.local_name}.download'
             target = staging / asset.local_name
             failures: list[BridgePrerequisiteError] = []
-            for source in sources:
-                with contextlib.suppress(OSError):
-                    partial.unlink()
-                try:
-                    _download_personalized_ddi_asset(source, asset, partial)
-                    os.replace(partial, target)
-                    log.info('Downloaded verified Personalized DDI asset %s from %s',
-                             asset.local_name, source.name)
+            completed = False
+            for phase in ('direct', 'proxy', 'mirror'):
+                phase_sources = sources_by_phase[phase]
+                if phase == 'mirror' and not mirrors_ranked:
+                    phase_sources = tuple(source for source, _ in sorted(
+                        _measure_ddi_sources(
+                            phase_sources,
+                            lambda source: _probe_personalized_ddi_source(source, asset),
+                            PERSONALIZED_DDI_SOURCE_THROUGHPUT_WINDOW_SECONDS),
+                        key=lambda item: item[1], reverse=True))
+                    mirrors_ranked = True
+                    log.info('Personalized DDI mirrors tested and ranked by throughput: %d/%d',
+                             len(phase_sources), len(sources_by_phase['mirror']))
+                for source in phase_sources:
+                    with contextlib.suppress(OSError):
+                        partial.unlink()
+                    try:
+                        _download_personalized_ddi_asset(source, asset, partial)
+                        os.replace(partial, target)
+                        log.info('Downloaded verified Personalized DDI asset %s from %s',
+                                 asset.local_name, source.name)
+                        completed = True
+                        break
+                    except BridgePrerequisiteError as error:
+                        failures.append(error)
+                        log.info('Personalized DDI source failed: asset=%s phase=%s source=%s code=%s',
+                                 asset.local_name, phase, source.name, error.code)
+                if completed:
                     break
-                except BridgePrerequisiteError as error:
-                    failures.append(error)
-                    log.info('Personalized DDI source failed: asset=%s source=%s code=%s',
-                             asset.local_name, source.name, error.code)
-            else:
+            if not completed:
                 _raise_ddi_download_failure(asset, failures)
 
         resolved_assets = tuple(replace(asset, sha256=_sha256_file(staging / asset.local_name))
@@ -1301,7 +1404,8 @@ class TouchSession:
                 })
                 await asyncio.sleep(CAPTURE_MUX_RETRY_DELAY_SECONDS * attempt)
                 devices = _find_usb_devices(backend, self.udid)
-                device = next((item for item in devices if item.activated), None)
+                device = next((item for item in devices if item.activated and
+                               _udid_matches(item.serial, self.udid or '')), None)
                 if device is None:
                     log.info('active wired-mirroring usbmux disappeared during retry; using Apple usbmuxd')
                     return
@@ -1545,7 +1649,7 @@ class TouchSession:
         if last_error is not None:
             raise last_error
 
-    async def _connect_via_remote_pairing(self) -> None:
+    async def _connect_via_remote_pairing(self, allow_ddi_recovery: bool = True) -> None:
         """Use RemotePairing when usbmux cannot provide a CoreDevice tunnel."""
         if not self.udid:
             raise BridgePrerequisiteError(
@@ -1603,9 +1707,15 @@ class TouchSession:
             )
 
         selected, *unused_services = pairing_services
+        needs_ddi_recovery = False
         try:
             async with start_tunnel(selected, protocol=TunnelProtocol.TCP) as tunnel_result:
-                await self._connect_with_tunnel_result(tunnel_result)
+                try:
+                    await self._connect_with_tunnel_result(tunnel_result)
+                except BridgePrerequisiteError as error:
+                    if error.code != 'touch_surface_unavailable' or not allow_ddi_recovery:
+                        raise
+                    needs_ddi_recovery = True
         except BridgePrerequisiteError:
             raise
         except Exception as error:
@@ -1617,6 +1727,37 @@ class TouchSession:
             for service in unused_services:
                 with contextlib.suppress(Exception):
                     await service.close()
+        if needs_ddi_recovery:
+            await self._prepare_ddi_for_remote_pairing()
+            # RSD's service inventory is a snapshot. Rediscover and rebuild
+            # the wireless tunnel after changing the device image.
+            await self._connect_via_remote_pairing(allow_ddi_recovery=False)
+
+    async def _prepare_ddi_for_remote_pairing(self) -> None:
+        try:
+            lockdown = await self._create_lockdown_with_retry('USB')
+        except DeviceNotFoundError as error:
+            raise BridgePrerequisiteError(
+                'developer_image_required',
+                'Wireless HID is unavailable. Connect and unlock this iPhone by USB '
+                'once to prepare its Personalized DDI, then retry wireless control.',
+            ) from error
+        try:
+            if not lockdown.udid or not _udid_matches(lockdown.udid, self.udid or ''):
+                raise BridgePrerequisiteError(
+                    'device_identity_mismatch',
+                    'USB DDI preparation found a different iPhone; refusing to use it.',
+                )
+            # Wireless pairing uses the exact same DDI candidate chain as the
+            # wired path: bundled image, environment override, then the
+            # verified GitHub direct/proxy/mirror downloader.
+            await self._preflight_developer_environment(lockdown)
+            if self._ddi_was_mounted and not self._ddi_refresh_attempted:
+                self._ddi_refresh_attempted = True
+                await self._refresh_personalized_ddi(lockdown)
+        finally:
+            with contextlib.suppress(Exception):
+                await lockdown.close()
 
     async def _create_lockdown_with_retry(self, connection_type: str):
         return await create_lockdown_with_retry(
@@ -1665,83 +1806,129 @@ class TouchSession:
             return
         await self._mount_personalized_ddi(lockdown)
 
-    async def _mount_personalized_ddi(self, lockdown) -> None:
-        await self._emit_status('mounting_developer_image')
+    def _local_ddi_candidates(self) -> list[tuple[tuple[Path, Path, Path], str]]:
+        candidates: list[tuple[tuple[Path, Path, Path], str]] = []
+        seen: set[str] = set()
+        configured = []
         if self.ddi_dir is not None:
-            image, build_manifest, trustcache = local_personalized_ddi_bundle(self.ddi_dir)
-            source = 'local'
-        else:
-            source = 'automatic'
-            await self._emit_status('testing_developer_image_sources')
-            loop = asyncio.get_running_loop()
-
-            def report_download_started() -> None:
-                status = asyncio.run_coroutine_threadsafe(
-                    self._emit_status('downloading_developer_image'), loop)
-                status.result(timeout=5)
-
+            configured.append((self.ddi_dir, 'bundled'))
+        env_dir = os.environ.get('IPHONE_MIRROR_DDI_DIR')
+        if env_dir:
+            configured.append((Path(env_dir), 'environment'))
+        for directory, source in configured:
+            key = str(Path(directory).expanduser()).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
             try:
-                image, build_manifest, trustcache = await asyncio.wait_for(
-                    asyncio.to_thread(fetch_automatic_personalized_ddi_bundle,
-                                      report_download_started),
-                    timeout=PERSONALIZED_DDI_DOWNLOAD_TIMEOUT_SECONDS,
-                )
-            except BridgePrerequisiteError:
-                raise
-            except asyncio.TimeoutError as error:
-                raise BridgePrerequisiteError(
-                    'developer_image_download_timeout',
-                    'Testing and downloading the Personalized DDI timed out after '
-                    f'{PERSONALIZED_DDI_DOWNLOAD_TIMEOUT_SECONDS} seconds.',
-                ) from error
-            except Exception as error:
-                raise BridgePrerequisiteError(
-                    'developer_image_download_failed',
-                    'Unable to prepare the Personalized DDI download: '
-                    f'{type(error).__name__}: {str(error)[:180]}',
-                ) from error
+                candidates.append((local_personalized_ddi_bundle(Path(directory)), source))
+            except BridgePrerequisiteError as error:
+                log.warning('Personalized DDI %s candidate unavailable: %s', source, error)
+        return candidates
+
+    async def _resolve_personalized_ddi_bundle(self, allow_local: bool = True):
+        local_candidates = self._local_ddi_candidates() if allow_local else []
+        if local_candidates:
+            return local_candidates[0]
+        await self._emit_status('testing_developer_image_sources')
+        loop = asyncio.get_running_loop()
+
+        def report_download_started() -> None:
+            status = asyncio.run_coroutine_threadsafe(
+                self._emit_status('downloading_developer_image'), loop)
+            status.result(timeout=5)
 
         try:
+            bundle = await asyncio.wait_for(
+                asyncio.to_thread(fetch_automatic_personalized_ddi_bundle,
+                                  report_download_started),
+                timeout=PERSONALIZED_DDI_DOWNLOAD_TIMEOUT_SECONDS,
+            )
+        except BridgePrerequisiteError:
+            raise
+        except asyncio.TimeoutError as error:
+            raise BridgePrerequisiteError(
+                'developer_image_download_timeout',
+                'Testing and downloading the Personalized DDI timed out after '
+                f'{PERSONALIZED_DDI_DOWNLOAD_TIMEOUT_SECONDS} seconds.',
+            ) from error
+        except Exception as error:
+            raise BridgePrerequisiteError(
+                'developer_image_download_failed',
+                'Unable to prepare the Personalized DDI download: '
+                f'{type(error).__name__}: {str(error)[:180]}',
+            ) from error
+        return bundle, 'github'
+
+    async def _mount_personalized_ddi(self, lockdown, prepared=None) -> None:
+        await self._emit_status('mounting_developer_image')
+        candidates = [prepared] if prepared is not None else self._local_ddi_candidates()
+        failures: list[str] = []
+        for candidate in candidates:
+            (image, build_manifest, trustcache), source = candidate
+            try:
+                async with PersonalizedImageMounter(lockdown=lockdown) as mounter:
+                    await asyncio.wait_for(
+                        mounter.mount(image, build_manifest, trustcache),
+                        timeout=PERSONALIZED_DDI_MOUNT_TIMEOUT_SECONDS,
+                    )
+                if await self._is_personalized_ddi_mounted(lockdown):
+                    return
+                raise BridgePrerequisiteError(
+                    'developer_image_mount_failed',
+                    f'The {source} Personalized DDI mount did not become active on the device.')
+            except AlreadyMountedError:
+                return
+            except DeveloperModeIsNotEnabledError as error:
+                raise BridgePrerequisiteError(
+                    'developer_mode_required',
+                    'Developer Mode must remain enabled while mounting the Personalized DDI.',
+                ) from error
+            except asyncio.TimeoutError as error:
+                failures.append(f'{source}: timeout')
+            except Exception as error:
+                failures.append(f'{source}: {type(error).__name__}: {str(error)[:160]}')
+
+        # Local candidates failed. Prepare the GitHub candidate only after all
+        # local options have been attempted, preserving the requested order.
+        try:
+            github_candidate = await self._resolve_personalized_ddi_bundle(allow_local=False)
+            if github_candidate[1] != 'github':
+                raise BridgePrerequisiteError('developer_image_download_failed',
+                                               'GitHub DDI fallback did not produce a downloaded image.')
+            (image, build_manifest, trustcache), source = github_candidate
             async with PersonalizedImageMounter(lockdown=lockdown) as mounter:
                 await asyncio.wait_for(
                     mounter.mount(image, build_manifest, trustcache),
                     timeout=PERSONALIZED_DDI_MOUNT_TIMEOUT_SECONDS,
                 )
-        except AlreadyMountedError:
-            # A concurrent Apple/Xcode client may have completed the mount
-            # between our preflight and this request.
-            pass
-        except DeveloperModeIsNotEnabledError as error:
-            raise BridgePrerequisiteError(
-                'developer_mode_required',
-                'Developer Mode must remain enabled while mounting the Personalized DDI.',
-            ) from error
-        except asyncio.TimeoutError as error:
-            raise BridgePrerequisiteError(
-                'developer_image_mount_timeout',
-                f'Mounting the {source} Personalized DDI timed out after 180 seconds.',
-            ) from error
-        except Exception as error:
-            if source == 'automatic':
-                code = 'developer_image_tss_failed'
-                context = 'Apple personalization and mounting of the downloaded'
-            else:
-                code = 'developer_image_mount_failed'
-                context = 'mounting of the local'
-            raise BridgePrerequisiteError(
-                code,
-                f'Unable to complete {context} Personalized DDI: '
-                f'{type(error).__name__}: {str(error)[:180]}',
-            ) from error
-
-        if not await self._is_personalized_ddi_mounted(lockdown):
+            if await self._is_personalized_ddi_mounted(lockdown):
+                return
             raise BridgePrerequisiteError(
                 'developer_image_mount_failed',
-                f'The {source} Personalized DDI mount did not become active on the device.',
-            )
+                'The GitHub Personalized DDI mount did not become active on the device.')
+        except BridgePrerequisiteError as error:
+            if error.code.startswith('developer_image_download_'):
+                raise
+            failures.append(f'github: {type(error).__name__}: {str(error)[:160]}')
+            raise BridgePrerequisiteError(
+                'developer_image_mount_failed',
+                'All Personalized DDI sources failed in order (bundled, environment, GitHub): '
+                + ' | '.join(failures),
+            ) from error
+        except Exception as error:
+            failures.append(f'github: {type(error).__name__}: {str(error)[:160]}')
+            raise BridgePrerequisiteError(
+                'developer_image_mount_failed',
+                'All Personalized DDI sources failed in order (bundled, environment, GitHub): '
+                + ' | '.join(failures),
+            ) from error
 
     async def _refresh_personalized_ddi(self, lockdown) -> None:
         await self._emit_status('remounting_developer_image')
+        # A failed download must not remove an image already mounted by Xcode
+        # or another client. Prepare the replacement before touching the device.
+        prepared = await self._resolve_personalized_ddi_bundle()
         try:
             async with PersonalizedImageMounter(lockdown=lockdown) as mounter:
                 await asyncio.wait_for(
@@ -1760,7 +1947,7 @@ class TouchSession:
                 'developer_image_remount_failed',
                 f'Unable to remove the stale Personalized DDI: {type(error).__name__}: {str(error)[:180]}',
             ) from error
-        await self._mount_personalized_ddi(lockdown)
+        await self._mount_personalized_ddi(lockdown, prepared)
 
     @staticmethod
     async def _is_personalized_ddi_mounted(lockdown) -> bool:
@@ -2312,7 +2499,7 @@ class TouchSession:
                 self.hid.send_keyboard(self.keyboard_service_id, usages, timestamp),
                 timeout=HID_OPERATION_TIMEOUT_SECONDS)
 
-    async def _send_touch_report(self, report: bytes) -> None:
+    async def _send_touch_report(self, report: bytes, *, motion: bool = False) -> None:
         if self.hid is None:
             raise RuntimeError('Universal HID service is unavailable')
         # send_report uses send_request (not send_receive_request), so it
@@ -2321,15 +2508,16 @@ class TouchSession:
         # boundary, capping the send rate at the device's HID processing
         # speed. Without the lock, multiple reports fill the transport
         # buffer back-to-back and the device drains them at its own pace.
-        # A single TimeoutError is often a transient USB stall or an iOS
-        # scheduling hiccup; retry once before surfacing the failure so
-        # the host does not tear down the entire bridge for a one-off blip.
+        timeout = (HID_TOUCH_MOTION_TIMEOUT_SECONDS if motion
+                   else HID_OPERATION_TIMEOUT_SECONDS)
         try:
             await asyncio.wait_for(
                 self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report),
-                timeout=HID_OPERATION_TIMEOUT_SECONDS)
+                timeout=timeout)
         except asyncio.TimeoutError:
-            await asyncio.sleep(0.5)
+            if motion:
+                # Drop one stale move. The next coalesced sample supersedes it.
+                return
             await asyncio.wait_for(
                 self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report),
                 timeout=HID_OPERATION_TIMEOUT_SECONDS)
@@ -2390,7 +2578,7 @@ class TouchSession:
                 if slot is None:
                     continue
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_CONTACT, x, y, ts)
-                await self._send_touch_report(report)
+                await self._send_touch_report(report, motion=True)
             elif action == 'up':
                 slot = sm.release(pointer_id)
                 if slot is None:

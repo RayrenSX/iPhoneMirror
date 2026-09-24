@@ -176,7 +176,8 @@ public partial class App : Application
         catch (Exception error)
         {
             DiagnosticLogger.Exception("ui", "about_window_open_failed", error);
-            AppPromptWindow.Inform(LocalizationService.Get("AboutTitle"), error.Message);
+            AppPromptWindow.Inform(LocalizationService.Get("AboutTitle"),
+                LocalizationService.Get("GeneralOperationFailed"));
         }
     }
 

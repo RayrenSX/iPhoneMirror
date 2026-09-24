@@ -182,7 +182,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
             DiagnosticLogger.Exception("shell", "open_target_failed", error,
                 ("target", target));
             AppPromptWindow.Inform(LocalizationService.Get("OpenLinkFailedTitle"),
-                error.Message);
+                LocalizationService.Get("GeneralOperationFailed"));
         }
     }
 

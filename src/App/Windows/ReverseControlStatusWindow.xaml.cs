@@ -73,6 +73,13 @@ public partial class ReverseControlStatusWindow : Wpf.Ui.Controls.FluentWindow
         if (_active is { IsVisible: true }) return;
         _active = new(owner, service, cancel); _active.Show(); _active.Activate();
     }
+    internal static void ShowDeveloperPreview(Window owner)
+    {
+        var service = new ControlStatusService();
+        service.Report(ControlStatusMode.Usb, ControlStage.Connecting, "iPhone",
+            "正在建立控制连接…", canCancel: false);
+        new ReverseControlStatusWindow(owner, service, null).Show();
+    }
     internal static void CloseActive()
     {
         if (_active is { } window)

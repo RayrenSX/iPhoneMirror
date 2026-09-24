@@ -529,16 +529,18 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         catch { return false; }
     }
 
-    internal async Task<bool> BindTargetClientAsync(string clientId)
+    internal async Task<bool> BindTargetClientAsync(string targetDeviceUdid,
+        string clientId)
     {
         await _targetClientGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (!IsAdvertising || string.IsNullOrWhiteSpace(_targetDeviceUdid))
+            if (!IsAdvertising || !string.Equals(_targetDeviceUdid,
+                    targetDeviceUdid, StringComparison.OrdinalIgnoreCase))
                 return false;
             var clientIds = EnumerateSubscribedClients()
                 .Select(client => client.Session.DeviceId.Id).ToArray();
-            if (!_clientRoutes.SetBinding(_targetDeviceUdid, clientId, clientIds))
+            if (!_clientRoutes.SetBinding(targetDeviceUdid, clientId, clientIds))
                 return false;
             Volatile.Write(ref _targetClientId, clientId);
             AdvanceRouteGeneration();

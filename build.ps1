@@ -4,6 +4,7 @@ param(
     [string]$Configuration = 'Release',
     [switch]$SkipTests,
     [switch]$NoPublish,
+    [switch]$TestBuild,
     [switch]$IncludeMediaOutputRuntime,
     [switch]$OmitMediaOutputRuntime,
     [switch]$IncludeUxPlayRuntime,
@@ -36,15 +37,55 @@ $UseMediaOutputRuntime = -not $OmitMediaOutputRuntime
 # allows machines without MSYS2 UCRT64 to produce a test payload without the
 # optional UxPlay fallback receiver.
 $UseUxPlayRuntime = -not $OmitUxPlayRuntime
+
+if ($TestBuild -and $NoPublish) {
+    throw '-TestBuild requires publishing.'
+}
+if ($TestBuild -and $PSBoundParameters.ContainsKey('Version')) {
+    throw '-TestBuild chooses the next test version automatically; do not pass -Version.'
+}
 if ($NoPublish -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
     throw '-AppleSupportPackagePath cannot be used with -NoPublish.'
+}
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$OutputsRoot = Join-Path $Root 'outputs'
+$TestVersionRecord = Join-Path $Root 'work\test-build-version.txt'
+[xml]$appProject = Get-Content -LiteralPath (Join-Path $Root 'src\App\iPhoneMirror.App.csproj') -Raw
+$projectVersion = [string]$appProject.Project.PropertyGroup.Version |
+    Select-Object -First 1
+
+if ($TestBuild) {
+    if ($projectVersion -notmatch '^(?<base>\d+\.\d+\.\d+)-test(?<number>\d+)$') {
+        throw "Application project version must be base-testN for test builds: $projectVersion"
+    }
+    $baseVersion = $Matches['base']
+    $currentNumber = [int]$Matches['number']
+    $knownVersions = @($projectVersion)
+    if (Test-Path -LiteralPath $TestVersionRecord -PathType Leaf) {
+        $knownVersions += (Get-Content -LiteralPath $TestVersionRecord -Raw).Trim()
+    }
+    if (Test-Path -LiteralPath $OutputsRoot -PathType Container) {
+        $candidateExecutables = @(Get-ChildItem -LiteralPath $OutputsRoot -Filter 'iPhoneMirror.exe' -File) +
+            @(Get-ChildItem -LiteralPath $OutputsRoot -Directory | ForEach-Object {
+                Get-ChildItem -LiteralPath $_.FullName -Filter 'iPhoneMirror.exe' -File
+            })
+        $knownVersions += @($candidateExecutables | ForEach-Object {
+            ($_.VersionInfo.ProductVersion -split '\+', 2)[0]
+        })
+    }
+    foreach ($knownVersion in $knownVersions) {
+        if ($knownVersion -match ('^' + [regex]::Escape($baseVersion) + '-test(?<number>\d+)$')) {
+            $currentNumber = [Math]::Max($currentNumber, [int]$Matches['number'])
+        }
+    }
+    $Version = "$baseVersion-test$($currentNumber + 1)"
+    Write-Host "Test build version: $Version"
 }
 $VersionProperty = if ([string]::IsNullOrWhiteSpace($Version)) {
     $null
 } else {
     "-p:Version=$Version"
 }
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $UsbControlRoot = if ([string]::IsNullOrWhiteSpace($env:IPHONE_MIRROR_USB_BRIDGE_ROOT)) {
     Join-Path $Root 'scripts\usb-bridge-recipe'
@@ -120,14 +161,20 @@ function Build-UsbTouchBridge {
 }
 
 function Resolve-CMakeTool([string]$Name) {
-    $candidates = @(
-        (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe"),
-        (Join-Path ${env:ProgramFiles} "Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe")
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    $candidateRoots = @(
+        [Environment]::GetEnvironmentVariable('ProgramFiles(x86)'),
+        [Environment]::GetEnvironmentVariable('ProgramFiles')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $candidates = @($candidateRoots | ForEach-Object {
+        Join-Path $_ ("Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe")
+    }) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
     if (@($candidates).Count -gt 0) { return @($candidates)[0] }
 
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-    if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
+    $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+    $vswhere = if ([string]::IsNullOrWhiteSpace($programFilesX86)) { $null } else {
+        Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe'
+    }
+    if ($vswhere -and (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
         $installations = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
         foreach ($installation in @($installations)) {
             $candidate = Join-Path $installation "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$Name.exe"
@@ -137,6 +184,51 @@ function Resolve-CMakeTool([string]$Name) {
     $command = Get-Command $Name -ErrorAction SilentlyContinue
     if ($null -ne $command) { return $command.Source }
     throw "$Name.exe was not found. Install Visual Studio C++/CMake tools or add $Name to PATH."
+}
+
+function Invoke-NativeToolWithSanitizedEnvironment(
+    [string]$FilePath,
+    [string[]]$ArgumentList
+) {
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.WorkingDirectory = $Root
+    $startInfo.UseShellExecute = $false
+
+    # Some Windows hosts expose both Path and PATH in the inherited block.
+    # .NET Framework MSBuild treats those as duplicate Hashtable keys when it
+    # launches CL.exe. Rebuild the child environment case-insensitively so the
+    # compiler always receives exactly one canonical Path entry.
+    $environment = [Environment]::GetEnvironmentVariables()
+    $canonicalPath = @($environment.GetEnumerator() |
+        Where-Object { $_.Key -ceq 'Path' } |
+        Select-Object -First 1).Value
+    if ([string]::IsNullOrWhiteSpace($canonicalPath)) {
+        $canonicalPath = @($environment.GetEnumerator() |
+            Where-Object { $_.Key -ieq 'Path' } |
+            Select-Object -First 1).Value
+    }
+    $startInfo.Environment.Clear()
+    $seenEnvironmentNames = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $environment.GetEnumerator()) {
+        $name = [string]$entry.Key
+        if ($name -ieq 'Path' -or -not $seenEnvironmentNames.Add($name)) {
+            continue
+        }
+        $startInfo.Environment[$name] = [string]$entry.Value
+    }
+    $startInfo.Environment['Path'] = $canonicalPath
+    # Do not reconnect to long-lived MSBuild worker nodes that may have been
+    # created before the environment was sanitized.
+    $startInfo.Environment['MSBUILDDISABLENODEREUSE'] = '1'
+    foreach ($argument in $ArgumentList) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [Diagnostics.Process]::Start($startInfo)
+    $process.WaitForExit()
+    return $process.ExitCode
 }
 $CMake = Resolve-CMakeTool 'cmake'
 $CTest = Resolve-CMakeTool 'ctest'
@@ -208,6 +300,43 @@ function Assert-NoReparseChildren([string]$Path) {
     }
 }
 
+function Clear-TestOutputs {
+    Assert-SafeWorkspaceDirectory $OutputsRoot
+    if (-not (Test-Path -LiteralPath $OutputsRoot -PathType Container)) {
+        New-Item -ItemType Directory -Path $OutputsRoot | Out-Null
+        return
+    }
+    Assert-NoReparseChildren $OutputsRoot
+    foreach ($item in @(Get-ChildItem -LiteralPath $OutputsRoot -Force)) {
+        if ($item.PSIsContainer) {
+            if ($item.Name -in @('releases', 'release-staging')) { continue }
+            if ($item.Name -in @('Assets', 'Wireless', 'licenses', 'tools')) {
+                Remove-Item -LiteralPath $item.FullName -Recurse -Force
+                continue
+            }
+            $appExe = Join-Path $item.FullName 'iPhoneMirror.exe'
+            $driverExe = Join-Path $item.FullName 'iPhoneMirror.Driver.exe'
+            $candidate = if (Test-Path -LiteralPath $appExe -PathType Leaf) {
+                $appExe
+            } elseif (Test-Path -LiteralPath $driverExe -PathType Leaf) {
+                $driverExe
+            } else { $null }
+            if ($null -ne $candidate -and
+                (Get-Item -LiteralPath $candidate).VersionInfo.ProductVersion -match '-test\d+') {
+                Remove-Item -LiteralPath $item.FullName -Recurse -Force
+                continue
+            }
+            throw "Unrecognized output directory; refusing to clean it: $($item.FullName)"
+        }
+        # Versioned final release packages are kept; all other root files are
+        # owned by the test publish, including old test archives and PDBs.
+        if ($item.Name -match '^iPhoneMirror(?:-Setup)?-v\d+\.\d+\.\d+-(?!test)') {
+            continue
+        }
+        Remove-Item -LiteralPath $item.FullName -Force
+    }
+}
+
 function Assert-ExpectedRuntimeDirectory([string]$Path, [string[]]$ExpectedFiles,
     [string]$Label, [Collections.IDictionary]$ExpectedHashes) {
     Assert-SafeWorkspaceDirectory $Path
@@ -249,6 +378,7 @@ if (-not (Test-Path $CTest)) {
 
 Push-Location $Root
 try {
+    if ($TestBuild) { Clear-TestOutputs }
     Build-UsbTouchBridge
 
     Assert-SafeWorkspaceDirectory $WirelessRoot
@@ -315,16 +445,24 @@ try {
     & $PidGenerator -Root $Root
     if (-not $?) { throw 'Apple mobile capture PID generation failed.' }
 
-    $cmakeConfigureArguments = @('--preset', 'windows-x64')
-    if (-not [string]::IsNullOrWhiteSpace($Version)) {
-        $cmakeConfigureArguments += "-DIPHONEMIRROR_VERSION=$Version"
+    $nativeVersion = if ([string]::IsNullOrWhiteSpace($Version)) {
+        $projectVersion
+    } else { $Version }
+    $cmakeConfigureArguments = @('--preset', 'windows-x64',
+        "-DIPHONEMIRROR_VERSION=$nativeVersion")
+    $cmakeConfigureExitCode = Invoke-NativeToolWithSanitizedEnvironment `
+        $CMake $cmakeConfigureArguments
+    if ($cmakeConfigureExitCode -ne 0) {
+        throw "CMake configure failed: $cmakeConfigureExitCode"
     }
-    & $CMake @cmakeConfigureArguments
-    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
 
     $BuildPreset = "windows-x64-$($Configuration.ToLowerInvariant())"
-    & $CMake --build --preset $BuildPreset --parallel
-    if ($LASTEXITCODE -ne 0) { throw "Native build failed: $LASTEXITCODE" }
+    $cmakeBuildExitCode = Invoke-NativeToolWithSanitizedEnvironment $CMake `
+        @('--build', '--preset', $BuildPreset, '--parallel', '--',
+            '/nodeReuse:false')
+    if ($cmakeBuildExitCode -ne 0) {
+        throw "Native build failed: $cmakeBuildExitCode"
+    }
 
     if (Test-Path 'src/App/iPhoneMirror.App.csproj') {
         $NativeDll = Join-Path $Root "build/native/src/Core/$Configuration/iPhoneMirror.Core.dll"
@@ -455,9 +593,11 @@ try {
     }
 
     if (-not $NoPublish -and (Test-Path 'src/App/iPhoneMirror.App.csproj')) {
-        $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
+        $PublishRoot = if ($TestBuild) { $OutputsRoot } else {
+            Join-Path $Root 'outputs\iPhoneMirror'
+        }
         Assert-SafeWorkspaceDirectory $PublishRoot
-        if (Test-Path -LiteralPath $PublishRoot) {
+        if (-not $TestBuild -and (Test-Path -LiteralPath $PublishRoot)) {
             Assert-NoReparseChildren $PublishRoot
             Remove-Item -LiteralPath $PublishRoot -Recurse -Force
         }
@@ -468,7 +608,7 @@ try {
             -p:IncludeBundledFfmpeg=$($UseMediaOutputRuntime.ToString().ToLowerInvariant()) `
             -p:NuGetAudit=false `
             $VersionProperty `
-            --output outputs/iPhoneMirror
+            --output $PublishRoot
         if ($LASTEXITCODE -ne 0) { throw "WPF publish failed: $LASTEXITCODE" }
 
         if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
@@ -582,7 +722,12 @@ try {
         $allowedPublishedArtifacts = @($requiredArtifacts) + $optionalPublishedArtifacts +
             $uxplayFiles
         $actualPublishedArtifacts = @(Get-ChildItem -LiteralPath $PublishRoot -Recurse -File |
-            ForEach-Object { $_.FullName.Substring($PublishRoot.Length + 1) })
+            ForEach-Object { $_.FullName.Substring($PublishRoot.Length + 1) } |
+            Where-Object {
+                -not $TestBuild -or
+                ($_ -notmatch '^(?:releases|release-staging)\\' -and
+                    $_ -notmatch '^iPhoneMirror(?:-Setup)?-v\d+\.\d+\.\d+-(?!test)')
+            })
         $unexpectedPublishedArtifacts = @($actualPublishedArtifacts |
             Where-Object { $_ -notin $allowedPublishedArtifacts })
         if ($unexpectedPublishedArtifacts.Count -ne 0) {
@@ -666,7 +811,9 @@ try {
             throw 'Driver installer output contains an unexpected licensing payload.'
         }
 
-        $MainPublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
+        $MainPublishRoot = if ($TestBuild) { $OutputsRoot } else {
+            Join-Path $Root 'outputs\iPhoneMirror'
+        }
         if (-not (Test-Path -LiteralPath (Join-Path $MainPublishRoot 'iPhoneMirror.exe'))) {
             throw 'Main application output is missing before driver-manager integration.'
         }
@@ -701,10 +848,14 @@ try {
             $allowedTopLevelFiles += 'AppleMobileDeviceSupport64.msi'
         }
         $unexpectedFiles = @(Get-ChildItem -LiteralPath $MainPublishRoot -File | Where-Object {
-            $_.Name -notin $allowedTopLevelFiles
+            $_.Name -notin $allowedTopLevelFiles -and
+            (-not $TestBuild -or
+                $_.Name -notmatch '^iPhoneMirror(?:-Setup)?-v\d+\.\d+\.\d+-(?!test)')
         })
         $unexpectedDirectories = @(Get-ChildItem -LiteralPath $MainPublishRoot -Directory |
-            Where-Object { $_.Name -notin @('Assets', 'Wireless', 'licenses', 'tools') })
+            Where-Object { $_.Name -notin @('Assets', 'Wireless', 'licenses', 'tools',
+                    'releases', 'release-staging') -or
+                (-not $TestBuild -and $_.Name -in @('releases', 'release-staging')) })
         if ($unexpectedFiles.Count -ne 0 -or $unexpectedDirectories.Count -ne 0) {
             $unexpected = @($unexpectedFiles.Name) + @($unexpectedDirectories.Name)
             throw "Unexpected files in compact application output: $($unexpected -join ', ')"
@@ -712,6 +863,7 @@ try {
 
         # The installer uses framework files shared by both WPF entry points.
         # The portable ZIP keeps the two compressed single-file executables.
+        if (-not $TestBuild) {
         $InstallerPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Installer'
         Assert-SafeWorkspaceDirectory $InstallerPublishRoot
         if (Test-Path -LiteralPath $InstallerPublishRoot) {
@@ -784,10 +936,18 @@ try {
         if ($versionedDac.Count -ne 1) {
             throw 'Shared-runtime installer must contain exactly one versioned .NET DAC.'
         }
+        }
     }
 
     if ($NoPublish) {
         Write-Host 'Build and tests complete (publishing skipped).' -ForegroundColor Green
+    }
+    elseif ($TestBuild) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TestVersionRecord) |
+            Out-Null
+        Set-Content -LiteralPath $TestVersionRecord -Value $Version -NoNewline
+        Write-Host "Test build complete: $OutputsRoot\iPhoneMirror.exe ($Version)" `
+            -ForegroundColor Green
     }
     else {
         Write-Host "Build complete: $Root\outputs\iPhoneMirror" -ForegroundColor Green

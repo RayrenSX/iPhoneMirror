@@ -124,6 +124,23 @@
                         <TextBlock Text="{Binding BodyText}"
                                    Foreground="{DynamicResource MutedTextBrush}"
                                    FontSize="12" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                        <Expander Header="{DynamicResource ErrorTechnicalDetails}"
+                                  Margin="0,8,0,0" MaxHeight="180">
+                            <Expander.Style>
+                                <Style TargetType="Expander">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasTechnicalDetails}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Expander.Style>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <TextBlock Text="{Binding TechnicalDetails}" FontSize="11"
+                                           TextWrapping="Wrap"/>
+                            </ScrollViewer>
+                        </Expander>
                     </StackPanel>
                 </Grid>
             </Border>

@@ -384,9 +384,12 @@ Equal(true,
         StringComparison.Ordinal),
     "wired, wireless, and Bluetooth control modes remain mutually exclusive");
 Equal(true,
-    mainViewModelSource.Contains(
+    (mainViewModelSource.Contains(
         "if (!ReferenceEquals(_wirelessTouchBridge, bridge)) return;",
-        StringComparison.Ordinal) &&
+        StringComparison.Ordinal) ||
+     mainViewModelSource.Contains(
+        "if (!ReferenceEquals(_wirelessTouchBridge, bridge) || _disposed) return;",
+        StringComparison.Ordinal)) &&
     mainViewModelSource.Contains(
         "if (!ReferenceEquals(_usbTouchBridge, bridge) || cancellationToken.IsCancellationRequested) return;",
         StringComparison.Ordinal) &&
@@ -1310,7 +1313,7 @@ Equal(true,
     !bluetoothHidCode.Contains("Task.Delay(MouseReportInterval)", StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("QueuePendingMotionBeforePriorityReport();",
         StringComparison.Ordinal) &&
-    mainWindowCode.Contains("_controlPointerTimer.Change(1, 4)",
+    mainWindowCode.Contains("_controlPointerTimer.Change(1, 16)",
         StringComparison.Ordinal),
     "Bluetooth motion keeps only current reports before input-state changes, samples input every four milliseconds, and paces BLE reports at 125 Hz");
 Equal(true,
@@ -1742,6 +1745,12 @@ Equal(true,
     multiPreviewManagerCode.Contains("internal bool Activate(string? udid)",
         StringComparison.Ordinal),
     "Bluetooth control serializes routing and targets only the selected mirrored device and GATT client");
+Equal(true,
+    mainWindowCode.Contains("_pendingControlDx = Math.Clamp(sendX, -127, 127)",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_pendingControlDy = Math.Clamp(sendY, -127, 127)",
+        StringComparison.Ordinal),
+    "Bluetooth motion keeps only the newest bounded sample instead of accumulating stale travel");
 var playbackVolumeStart = mainViewModelSource.IndexOf(
     "public double PlaybackVolume", StringComparison.Ordinal);
 var playAudioStart = mainViewModelSource.IndexOf(

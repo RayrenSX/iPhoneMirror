@@ -6,10 +6,12 @@ FiveSlotStateMachine 和 HID 报告构建器的单元测试。
 
 import struct
 import time
+import hashlib
 import unittest
 from unittest.mock import patch
 import sys
 import os
+import plistlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -257,13 +259,83 @@ class TestPersonalizedDdiMirrorDownloads(unittest.TestCase):
     def test_uses_only_official_github_endpoints(self):
         sources = self.bridge._personalized_ddi_download_sources()
         self.assertEqual(len(self.bridge.PERSONALIZED_DDI_MIRROR_PREFIXES), 115)
-        self.assertEqual(len(sources), 2)
-        self.assertEqual([source.name for source in sources],
+        self.assertEqual(len(sources), 117)
+        self.assertEqual([source.name for source in sources[:2]],
                          ['github-raw', 'github-api'])
 
     def test_rank_does_not_probe_or_reorder_github_endpoints(self):
         sources = self.bridge.rank_personalized_ddi_download_sources()
-        self.assertEqual([source.kind for source in sources], ['raw', 'api'])
+        self.assertEqual([source.kind for source in sources[:2]], ['raw', 'api'])
+        self.assertLessEqual(sum(source.kind == 'mirror' for source in sources), 115)
+        self.assertTrue(all(source.kind == 'mirror' for source in sources[2:]))
+
+    def test_rank_uses_current_resolved_asset_for_mirror_probe(self):
+        asset = self.bridge.PersonalizedDdiAsset(
+            'Image.trustcache', 'Image.dmg.trustcache', 'current-blob', 11,
+            revision='current-revision')
+        with patch.object(self.bridge, '_measure_ddi_sources',
+                          side_effect=lambda sources, operation, _timeout:
+                          [(source, operation(source)) for source in sources[:1]]), \
+             patch.object(self.bridge, '_probe_personalized_ddi_source',
+                          return_value=None) as probe:
+            self.bridge.rank_personalized_ddi_download_sources((asset,))
+        self.assertTrue(probe.called)
+        self.assertIs(probe.call_args.args[1], asset)
+
+    def test_proxy_candidates_accept_configured_http_proxy(self):
+        with patch.dict(os.environ, {
+            'IPHONE_MIRROR_GITHUB_PROXY': 'http://127.0.0.1:7890',
+            'HTTPS_PROXY': '', 'HTTP_PROXY': '', 'ALL_PROXY': '',
+        }, clear=True):
+            self.assertEqual(self.bridge._local_proxy_candidates(),
+                             ('http://127.0.0.1:7890',))
+
+    def test_github_metadata_retries_proxy_after_direct_failure(self):
+        calls = []
+        with patch.dict(os.environ, {
+            'IPHONE_MIRROR_GITHUB_PROXY': 'http://127.0.0.1:7890',
+            'HTTPS_PROXY': '', 'HTTP_PROXY': '', 'ALL_PROXY': '',
+        }, clear=True), patch.object(
+                self.bridge, '_github_request_json',
+                side_effect=lambda url, proxy=None: (
+                    calls.append(proxy),
+                    {'sha': 'abc'} if proxy else (_ for _ in ()).throw(
+                        self.bridge.BridgePrerequisiteError(
+                            'developer_image_download_failed', 'offline')))[1]):
+            result = self.bridge._github_request_with_proxy_fallback('https://api.github.com/test')
+        self.assertEqual(result, {'sha': 'abc'})
+        self.assertEqual(calls, [None, 'http://127.0.0.1:7890'])
+
+    def test_download_passes_proxy_to_requests(self):
+        asset = next(asset for asset in self.bridge.PERSONALIZED_DDI_ASSETS
+                     if asset.local_name == 'Image.trustcache')
+        source = self.bridge.PersonalizedDdiDownloadSource(
+            'test-proxy', 'api', proxy='http://127.0.0.1:7890')
+        class Response:
+            status_code = 200
+            headers = {'Content-Length': str(asset.size)}
+            url = self.bridge.PERSONALIZED_DDI_GITHUB_API_URL.format(blob_id=asset.blob_id)
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def iter_content(self, chunk_size): yield b'x' * asset.size
+        with TemporaryDirectory() as directory, patch.object(
+                self.bridge.requests, 'get', return_value=Response()) as request:
+            with self.assertRaises(self.bridge.BridgePrerequisiteError):
+                self.bridge._download_personalized_ddi_asset(
+                    source, asset, Path(directory) / 'asset.download')
+        self.assertEqual(request.call_args.kwargs['proxies'], {
+            'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'})
+
+    def test_download_source_phases_keep_direct_proxy_mirror_order(self):
+        sources = self.bridge._personalized_ddi_download_sources()
+        phases = [self.bridge._source_phase(source) for source in sources]
+        self.assertEqual(phases[:2], ['direct', 'direct'])
+        first_proxy = next((index for index, phase in enumerate(phases)
+                            if phase == 'proxy'), len(phases))
+        first_mirror = next(index for index, phase in enumerate(phases)
+                            if phase == 'mirror')
+        self.assertLessEqual(first_mirror, first_proxy)
+        self.assertTrue(all(phase == 'mirror' for phase in phases[first_mirror:]))
 
     def test_github_token_is_never_sent_to_a_public_mirror(self):
         mirror = self.bridge.PersonalizedDdiDownloadSource(
@@ -304,6 +376,28 @@ class TestPersonalizedDdiMirrorDownloads(unittest.TestCase):
 
         self.assertEqual(raised.exception.code,
                          'developer_image_download_integrity_failed')
+
+    def test_download_accepts_matching_sha256_even_when_blob_id_metadata_differs(self):
+        payload = b'verified DDI test payload'
+        asset = self.bridge.PersonalizedDdiAsset(
+            'Image.trustcache', 'Image.dmg.trustcache', 'stale-blob-id',
+            len(payload), hashlib.sha256(payload).hexdigest(), 'revision')
+        source = self.bridge.PersonalizedDdiDownloadSource(
+            'test-mirror', 'mirror', 'https://mirror.invalid/')
+
+        class Response:
+            status_code = 200
+            headers = {'Content-Length': str(len(payload))}
+            url = 'https://mirror.invalid/test'
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def iter_content(self, chunk_size): yield payload
+
+        with TemporaryDirectory() as directory, patch.object(
+                self.bridge.requests, 'get', return_value=Response()):
+            destination = Path(directory) / 'asset.download'
+            self.bridge._download_personalized_ddi_asset(source, asset, destination)
+            self.assertEqual(destination.read_bytes(), payload)
 
 
 class TestDeveloperEnvironmentPreflight(unittest.IsolatedAsyncioTestCase):
@@ -490,6 +584,8 @@ class TestDeveloperEnvironmentPreflight(unittest.IsolatedAsyncioTestCase):
             ddi_dir = Path(directory)
             for name in bridge.PERSONALIZED_DDI_FILES:
                 (ddi_dir / name).write_bytes(b'test-ddi')
+            (ddi_dir / 'BuildManifest.plist').write_bytes(
+                plistlib.dumps({'ProductBuildVersion': 'test-build'}))
 
             ipc = self.Ipc()
             session = bridge.TouchSession(ipc, 120, ddi_dir=ddi_dir)
@@ -556,10 +652,41 @@ class TestDeveloperEnvironmentPreflight(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state['unmount_calls'], 1)
         self.assertEqual(state['mount_calls'], 1)
         self.assertEqual(timeouts, [
-            bridge.PERSONALIZED_DDI_REMOUNT_TIMEOUT_SECONDS,
             bridge.PERSONALIZED_DDI_DOWNLOAD_TIMEOUT_SECONDS,
+            bridge.PERSONALIZED_DDI_REMOUNT_TIMEOUT_SECONDS,
             bridge.PERSONALIZED_DDI_MOUNT_TIMEOUT_SECONDS])
         self.assertIn('remounting_developer_image', [event['code'] for event in ipc.events])
+
+    async def test_ddi_refresh_download_failure_preserves_existing_mount(self):
+        import usb_touch_bridge as bridge
+
+        session = bridge.TouchSession(self.Ipc(), 120)
+        unmounted = False
+
+        class Mounter:
+            def __init__(self, lockdown):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                pass
+
+            async def umount(self):
+                nonlocal unmounted
+                unmounted = True
+
+        async def download_failure():
+            raise bridge.BridgePrerequisiteError(
+                'developer_image_download_failed', 'source unavailable')
+
+        with patch.object(bridge, 'PersonalizedImageMounter', Mounter), \
+             patch.object(session, '_resolve_personalized_ddi_bundle', download_failure):
+            with self.assertRaises(bridge.BridgePrerequisiteError):
+                await session._refresh_personalized_ddi(object())
+
+        self.assertFalse(unmounted)
 
     async def test_missing_touch_surface_refreshes_a_preexisting_ddi_once(self):
         import usb_touch_bridge as bridge
@@ -656,6 +783,18 @@ class TestDeveloperEnvironmentPreflight(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, 'developer_image_bundle_invalid')
         self.assertIn('BuildManifest.plist', str(raised.exception))
         self.assertIn('Image.trustcache', str(raised.exception))
+
+    def test_local_ddi_bundle_rejects_corrupt_manifest(self):
+        import usb_touch_bridge as bridge
+
+        with TemporaryDirectory() as directory:
+            ddi_dir = Path(directory)
+            for name in bridge.PERSONALIZED_DDI_FILES:
+                (ddi_dir / name).write_bytes(b'test-ddi')
+            with self.assertRaises(bridge.BridgePrerequisiteError) as raised:
+                bridge.local_personalized_ddi_bundle(ddi_dir)
+
+        self.assertEqual(raised.exception.code, 'developer_image_bundle_invalid')
 
     async def test_preflight_runs_before_coredevice_tunnel_setup(self):
         import usb_touch_bridge as bridge
@@ -890,6 +1029,70 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
             await session.connect()
 
         self.assertEqual(remote_attempts, [True])
+
+    async def test_remote_pairing_rebuilds_tunnel_after_usb_ddi_recovery(self):
+        import usb_touch_bridge as bridge
+
+        class Ipc:
+            async def emit(self, _event):
+                pass
+
+        class Service:
+            async def close(self):
+                pass
+
+        class Tunnel:
+            async def __aenter__(self):
+                return object()
+
+            async def __aexit__(self, *_args):
+                pass
+
+        async def discover(**_kwargs):
+            return [Service()]
+
+        async def connect(_result):
+            connect.attempts += 1
+            if connect.attempts == 1:
+                raise bridge.BridgePrerequisiteError(
+                    'touch_surface_unavailable', 'no HID surface')
+
+        connect.attempts = 0
+        prepared = []
+
+        async def prepare():
+            prepared.append(True)
+
+        session = bridge.TouchSession(Ipc(), 120, udid='trusted-device',
+                                      transport='wireless')
+        with patch.object(bridge, 'iter_remote_paired_identifiers',
+                          side_effect=lambda: iter(['trusted-device'])), \
+             patch.object(bridge, 'get_remote_pairing_tunnel_services', discover), \
+             patch.object(bridge, 'start_tunnel', return_value=Tunnel()), \
+             patch.object(session, '_connect_with_tunnel_result', connect), \
+             patch.object(session, '_prepare_ddi_for_remote_pairing', prepare):
+            await session._connect_via_remote_pairing()
+
+        self.assertEqual(connect.attempts, 2)
+        self.assertEqual(prepared, [True])
+
+    async def test_remote_pairing_ddi_recovery_requires_matching_usb_device(self):
+        import usb_touch_bridge as bridge
+
+        class Ipc:
+            async def emit(self, _event):
+                pass
+
+        session = bridge.TouchSession(Ipc(), 120, udid='trusted-device',
+                                      transport='wireless')
+
+        async def no_usb(_connection_type):
+            raise bridge.DeviceNotFoundError('not connected')
+
+        with patch.object(session, '_create_lockdown_with_retry', no_usb):
+            with self.assertRaises(bridge.BridgePrerequisiteError) as raised:
+                await session._prepare_ddi_for_remote_pairing()
+        self.assertEqual(raised.exception.code, 'developer_image_required')
 
     async def test_wireless_without_remote_pairing_record_has_stable_error(self):
         import usb_touch_bridge as bridge
@@ -1133,6 +1336,45 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
                 os.environ.pop('USBMUXD_SOCKET_ADDRESS', None)
             else:
                 os.environ['USBMUXD_SOCKET_ADDRESS'] = previous_address
+
+    async def test_capture_mux_retry_does_not_claim_another_device(self):
+        import usb_touch_bridge as bridge
+
+        class Ipc:
+            async def emit(self, _event):
+                pass
+
+        class Device:
+            activated = True
+
+            def __init__(self, serial):
+                self.serial = serial
+                self.dev = object()
+
+        selected = Device('trusted-device')
+        other = Device('different-device')
+        enumerations = iter(([selected], [other]))
+        claimed = []
+
+        class Mux:
+            def __init__(self, _dev, serial):
+                claimed.append(serial)
+
+            def start(self):
+                raise RuntimeError('handshake unavailable')
+
+            def close(self):
+                pass
+
+        session = bridge.TouchSession(Ipc(), 120, udid='trusted-device')
+        with patch.object(bridge, '_get_usb_backend', return_value=object()), \
+             patch.object(bridge, '_find_usb_devices',
+                          side_effect=lambda *_args: next(enumerations)), \
+             patch.object(bridge, '_UsbMuxTransport', Mux), \
+             patch.object(bridge.asyncio, 'sleep', return_value=None):
+            await session._start_capture_mux()
+
+        self.assertEqual(claimed, ['trusted-device'])
 
     async def test_active_capture_mux_falls_back_after_repeated_version_timeouts(self):
         import usb_touch_bridge as bridge

@@ -44,6 +44,12 @@ public partial class ShortcutSettingsWindow : Wpf.Ui.Controls.FluentWindow,
         Closed += (_, _) => LocalizationService.LanguageChanged -= OnLanguageChanged;
     }
 
+    internal static void ShowDeveloperPreview(Window owner) =>
+        new ShortcutSettingsWindow(
+            new Dictionary<BluetoothShortcutAction, KeyboardShortcut>(),
+            _ => LocalizationService.Get("DeveloperReadOnlyPreview"))
+        { Owner = owner }.Show();
+
     public string StatusText
     {
         get => _statusText;

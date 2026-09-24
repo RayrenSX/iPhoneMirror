@@ -151,18 +151,14 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     private static string? GetPersonalizedDdiDirectory()
     {
-        var configured = Environment.GetEnvironmentVariable("IPHONE_MIRROR_DDI_DIR");
-        if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
-
         var bundledDirectory = Path.Combine(
             AppContext.BaseDirectory, "tools", "ddi", "Xcode_iOS_DDI_Personalized");
         if (HasCompletePersonalizedDdiBundle(bundledDirectory))
             return bundledDirectory;
-
-        var defaultDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "iPhoneMirror", "developer-image");
-        return HasCompletePersonalizedDdiBundle(defaultDirectory) ? defaultDirectory : null;
+        // The bridge owns fallback ordering: bundled image first, then the
+        // IPHONE_MIRROR_DDI_DIR environment override, then GitHub download.
+        // Do not pass the environment path here or it would bypass the bundle.
+        return null;
     }
 
     private static bool HasCompletePersonalizedDdiBundle(string directory)

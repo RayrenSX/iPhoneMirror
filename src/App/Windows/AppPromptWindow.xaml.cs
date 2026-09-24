@@ -28,12 +28,12 @@ public partial class AppPromptWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
     }
 
-    internal static bool Confirm(string title, string body) =>
-        new AppPromptWindow(title, body, true) { Owner = Application.Current.MainWindow }
+    internal static bool Confirm(string title, string body, Window? owner = null) =>
+        new AppPromptWindow(title, body, true) { Owner = owner ?? Application.Current.MainWindow }
             .ShowDialog() == true;
 
-    internal static void Inform(string title, string body) =>
-        new AppPromptWindow(title, body, false) { Owner = Application.Current.MainWindow }
+    internal static void Inform(string title, string body, Window? owner = null) =>
+        new AppPromptWindow(title, body, false) { Owner = owner ?? Application.Current.MainWindow }
             .ShowDialog();
 
     internal static void InformThen(string title, string body, Func<Task> afterShown)

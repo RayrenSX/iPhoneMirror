@@ -96,6 +96,14 @@ internal sealed class ControlStatusService
         StatusChanged?.Invoke(this, snapshot);
     }
 
+    internal void FailCurrent(string message, string? technical = null)
+    {
+        ControlStatusSnapshot? current;
+        lock (_gate) current = _current;
+        if (current is null) return;
+        Failed(current.Mode, current.DeviceName, message, technical);
+    }
+
     internal void AddDiagnostic(string message, string technical, string level = "Info")
     {
         lock (_gate) AddDiagnosticUnsafe(message, technical, level);

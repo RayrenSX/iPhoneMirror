@@ -14,6 +14,9 @@ public partial class BluetoothConnectionWindow : Wpf.Ui.Controls.FluentWindow
     internal static string? Show(Window owner, string targetName,
         Func<Task<IReadOnlyList<BluetoothClientInfo>>> refresh, Func<string, bool> unbind)
     { var window = new BluetoothConnectionWindow(owner, targetName, refresh, unbind); return window.ShowDialog() == true ? window.Tag as string : null; }
+    internal static void ShowDeveloperPreview(Window owner) =>
+        new BluetoothConnectionWindow(owner, "iPhone",
+            () => Task.FromResult<IReadOnlyList<BluetoothClientInfo>>([]), _ => false).Show();
     private async void NextClick(object sender, RoutedEventArgs e)
     {
         var clients = await _refresh();

@@ -99,6 +99,7 @@
     <system:String x:Key="UsbControlFailureImageRequired">裝置尚未掛載 Personalized Developer Disk Image。請使用與裝置系統匹配的官方 Xcode 開發者映像檔完成掛載後重試。</system:String>
     <system:String x:Key="UsbControlFailureImageDownload">開發者映像檔下載失敗或逾時。請檢查 GitHub 網絡連線後重試，也可透過 IPHONE_MIRROR_DDI_DIR 提供官方本機映像檔。</system:String>
     <system:String x:Key="UsbControlFailureImageRateLimited">開發者映像檔下載未通過 GitHub 內容驗證或目前 API 被限流。請稍後重試。</system:String>
+    <system:String x:Key="UsbControlFailureImageIntegrity">開發者映像檔驗證失敗，下載檔案可能不完整或已損壞。請檢查網絡或更換來源後重試。</system:String>
     <system:String x:Key="UsbControlFailureImageIncompatible">目前橋接器沒有與此執行階段匹配的開發者映像檔下載中繼資料。請更新 iPhoneMirror，或透過 IPHONE_MIRROR_DDI_DIR 提供官方本機映像檔。</system:String>
     <system:String x:Key="UsbControlFailureImageTss">開發者映像檔已下載，但 Apple 個人化服務或裝置掛載失敗。請檢查 Apple 服務網絡、保持裝置解鎖，然後重試。</system:String>
     <system:String x:Key="UsbControlFailureImageRemount">無法重新整理舊的 Personalized Developer Disk Image。請關閉可能佔用裝置的 Xcode/開發工具，重新啟動 iPhone 後再試。</system:String>
@@ -272,6 +273,13 @@
     <system:String x:Key="BluetoothControlFailedBody">Windows 未能啟動 BLE HID 外設服務。請檢查藍牙適配器和驅動是否支援外設模式。</system:String>
     <system:String x:Key="BluetoothControlFailedStatus">啟動失敗</system:String>
     <system:String x:Key="ReverseControlErrorTitle">反向控制錯誤</system:String>
+    <system:String x:Key="ReverseControlStartErrorTitle">反向控制啟動失敗</system:String>
+    <system:String x:Key="ReverseControlRecoveryErrorTitle">反向控制連線中斷</system:String>
+    <system:String x:Key="ReverseControlStopErrorTitle">反向控制關閉異常</system:String>
+    <system:String x:Key="ReverseControlStopFailureAdvice">控制已停止，但裝置資源可能尚未完全釋放。請重新連接裝置後再試。</system:String>
+    <system:String x:Key="ReverseControlBluetoothFailureAdvice">藍牙控制無法連接。請確認電腦藍牙已開啟、裝置已配對，再重新嘗試。</system:String>
+    <system:String x:Key="ErrorTechnicalDetails">技術詳情</system:String>
+    <system:String x:Key="GeneralOperationFailed">操作未能完成。請重試；如果問題持續，請查看診斷記錄。</system:String>
     <system:String x:Key="ReverseControlErrorBodyFormat">{0}反向控制發生錯誤：{1}</system:String>
     <system:String x:Key="ReverseControlPrerequisiteStatus">請確認準備工作後繼續</system:String>
     <system:String x:Key="ReverseControlPrerequisiteWiredTitle">啟用有線控制前請確認</system:String>
@@ -866,6 +874,13 @@
     <system:String x:Key="DeveloperDriverDescription">開啟獨立驅動程式管理器</system:String>
     <system:String x:Key="DeveloperAbout">關於與更新</system:String>
     <system:String x:Key="DeveloperAboutDescription">版本、診斷和更新資訊</system:String>
+    <system:String x:Key="DeveloperDeviceBindingWindow">裝置綁定視窗</system:String>
+    <system:String x:Key="DeveloperAirPlaySelectionWindow">AirPlay 裝置選擇</system:String>
+    <system:String x:Key="DeveloperBluetoothConnectionWindow">藍牙連接視窗</system:String>
+    <system:String x:Key="DeveloperBluetoothClientBindingWindow">藍牙用戶端綁定</system:String>
+    <system:String x:Key="DeveloperBluetoothControlNoticeWindow">藍牙控制通知</system:String>
+    <system:String x:Key="DeveloperShortcutSettingsWindow">快捷鍵設定視窗</system:String>
+    <system:String x:Key="DeveloperReverseControlStatusWindow">反向控制狀態</system:String>
     <system:String x:Key="DeveloperAdvancedSettings">進階 USB 設定</system:String>
     <system:String x:Key="DeveloperAdvancedSettingsDescription">解析度輸入驗證</system:String>
     <system:String x:Key="DeveloperPrompt">確認提示</system:String>

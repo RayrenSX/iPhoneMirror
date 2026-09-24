@@ -15,6 +15,8 @@ public partial class AirPlayDeviceSelectionWindow : Wpf.Ui.Controls.FluentWindow
     { Owner = owner; Devices = devices; DataContext = this; InitializeComponent(); }
     internal static DeviceViewModel? Show(Window owner, IReadOnlyList<DeviceViewModel> devices)
     { var window = new AirPlayDeviceSelectionWindow(owner, devices); return window.ShowDialog() == true ? window.SelectedDevice : null; }
+    internal static void ShowDeveloperPreview(Window owner) =>
+        new AirPlayDeviceSelectionWindow(owner, []).Show();
     private void ConfirmClick(object sender, RoutedEventArgs e) { if (CanConfirm) DialogResult = true; }
     private void CancelClick(object sender, RoutedEventArgs e) => DialogResult = false;
     private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));

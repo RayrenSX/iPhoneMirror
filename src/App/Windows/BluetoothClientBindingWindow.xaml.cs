@@ -61,6 +61,10 @@ public partial class BluetoothClientBindingWindow : Wpf.Ui.Controls.FluentWindow
         return window.ShowDialog() == true ? window.SelectedClient?.Id : null;
     }
 
+    internal static void ShowDeveloperPreview(Window owner) =>
+        new BluetoothClientBindingWindow(owner, "iPhone", [], null,
+            () => Task.FromResult<IReadOnlyList<BluetoothClientInfo>>([]), _ => false).Show();
+
     // The Bluetooth control startup path must not enter a nested modal
     // dispatcher loop. Keep the window modeless and let callers await the
     // user's choice without blocking the main window.

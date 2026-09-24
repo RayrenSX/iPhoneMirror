@@ -51,6 +51,13 @@ public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
         WindowItems =
         [
             Surface("advanced-settings", SymbolRegular.Settings20, "DeveloperAdvancedSettings", "DeveloperAdvancedSettingsDescription"),
+            Surface("device-binding", SymbolRegular.Link20, "DeveloperDeviceBindingWindow", "DeveloperReadOnlyPreview"),
+            Surface("airplay-device-selection", SymbolRegular.Phone20, "DeveloperAirPlaySelectionWindow", "DeveloperReadOnlyPreview"),
+            Surface("bluetooth-connection", SymbolRegular.Bluetooth20, "DeveloperBluetoothConnectionWindow", "DeveloperReadOnlyPreview"),
+            Surface("bluetooth-client-binding", SymbolRegular.Bluetooth20, "DeveloperBluetoothClientBindingWindow", "DeveloperReadOnlyPreview"),
+            Surface("bluetooth-control-notice", SymbolRegular.Bluetooth20, "DeveloperBluetoothControlNoticeWindow", "DeveloperReadOnlyPreview"),
+            Surface("shortcut-settings", SymbolRegular.Keyboard20, "DeveloperShortcutSettingsWindow", "DeveloperReadOnlyPreview"),
+            Surface("reverse-control-status", SymbolRegular.Clock20, "DeveloperReverseControlStatusWindow", "DeveloperReadOnlyPreview"),
             Surface("prompt", SymbolRegular.QuestionCircle20, "DeveloperPrompt", "DeveloperPromptDescription"),
             Surface("reverse-control-wired-prerequisite", SymbolRegular.UsbPlug20, "DeveloperReverseControlWiredPrerequisite", "DeveloperReverseControlWiredPrerequisiteDescription"),
             Surface("reverse-control-wireless-prerequisite", SymbolRegular.Info20, "DeveloperReverseControlWirelessPrerequisite", "DeveloperReverseControlWirelessPrerequisiteDescription"),
@@ -124,6 +131,13 @@ public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
             var titleKey = windows[index].Key switch
             {
                 "advanced-settings" => "DeveloperAdvancedSettings",
+                "device-binding" => "DeveloperDeviceBindingWindow",
+                "airplay-device-selection" => "DeveloperAirPlaySelectionWindow",
+                "bluetooth-connection" => "DeveloperBluetoothConnectionWindow",
+                "bluetooth-client-binding" => "DeveloperBluetoothClientBindingWindow",
+                "bluetooth-control-notice" => "DeveloperBluetoothControlNoticeWindow",
+                "shortcut-settings" => "DeveloperShortcutSettingsWindow",
+                "reverse-control-status" => "DeveloperReverseControlStatusWindow",
                 "prompt" => "DeveloperPrompt",
                 "reverse-control-wired-prerequisite" => "DeveloperReverseControlWiredPrerequisite",
                 "reverse-control-wireless-prerequisite" => "DeveloperReverseControlWirelessPrerequisite",
@@ -142,7 +156,12 @@ public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
                 "protected-content" => "DeveloperProtectedContent",
                 _ => "DeveloperNativePreview",
             };
-            var descriptionKey = titleKey + "Description";
+            var descriptionKey = windows[index].Key is
+                "device-binding" or "airplay-device-selection" or
+                "bluetooth-connection" or "bluetooth-client-binding" or
+                "bluetooth-control-notice" or "shortcut-settings" or
+                "reverse-control-status"
+                ? "DeveloperReadOnlyPreview" : titleKey + "Description";
             windows[index] = windows[index] with
             {
                 Title = LocalizationService.Get(titleKey),
