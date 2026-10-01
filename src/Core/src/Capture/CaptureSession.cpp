@@ -960,7 +960,11 @@ void CaptureSession::stop() noexcept {
         // A normal stop may race with the bulk read timeout/close path. Keep
         // the terminal state stable for the GUI unless the worker reported a
         // genuine capture error.
-        if (!terminal_error_already_published && snapshot().state != State::Error)
+        const auto terminal_state = snapshot().state;
+        // The worker may have published a Stopped state WITH a USB-restore
+        // warning. Reapplying Stopped clears that warning in set_state().
+        if (!terminal_error_already_published && terminal_state != State::Error &&
+            terminal_state != State::Stopped)
             try { set_state(State::Stopped, L"投屏已停止"); } catch (...) {}
     }
     // Decoded frames are immutable but device-specific. Do not let the native
@@ -1972,7 +1976,9 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             const auto now = std::chrono::steady_clock::now();
             if (video_silence_watchdog.silence_duration(now) <
                 std::chrono::milliseconds(2500)) return;
-            if (!fast_stream_reconnect_gate.request()) return;
+            if (!fast_stream_reconnect_gate.request_for_silence(
+                    video_silence_watchdog.silence_duration(now),
+                    media_silence_watchdog.silence_duration(now))) return;
             fast_stream_reconnect_requested.store(true, std::memory_order_release);
             {
                 std::scoped_lock lock(mutex_);

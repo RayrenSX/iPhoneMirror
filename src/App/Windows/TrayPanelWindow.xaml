@@ -1,0 +1,101 @@
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.TrayPanelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:updater="clr-namespace:IPhoneMirror.App.Updater"
+        Title="{DynamicResource ApplicationModeTray}" Width="400" Height="570"
+        ResizeMode="NoResize" ShowInTaskbar="False" WindowStartupLocation="Manual"
+        Foreground="{DynamicResource TextBrush}" PreviewKeyDown="OnPreviewKeyDown">
+    <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="16"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
+            <StackPanel Margin="0,0,44,0">
+                <TextBlock Text="iPhoneMirror" Style="{StaticResource SubWindowTitle}"/>
+                <TextBlock Text="{DynamicResource TrayPanelSubtitle}" Style="{StaticResource SubWindowSubtitle}"/>
+            </StackPanel>
+            <Button Style="{StaticResource SubWindowCloseButton}" Click="OnHideClick"
+                    ToolTip="{DynamicResource TrayHidePanel}" AutomationProperties.Name="{DynamicResource TrayHidePanel}">
+                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
+            </Button>
+        </Grid>
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <Border Style="{StaticResource SettingsSection}" Padding="16">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="{DynamicResource DevicesTitle}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button HorizontalAlignment="Right" Click="OnRefreshClick" x:Name="RefreshButton"
+                                    Style="{StaticResource ToolButton}" ToolTip="{DynamicResource RefreshDevices}"
+                                    AutomationProperties.Name="{DynamicResource RefreshDevices}">
+                                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ArrowClockwise20"/>
+                            </Button>
+                        </Grid>
+                        <ListBox x:Name="DeviceList" MaxHeight="174" MinHeight="48"
+                                 BorderThickness="0" Background="Transparent"
+                                 SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 AutomationProperties.AutomationId="TrayDeviceList">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource SelectableListItem}">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="4,6">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayName}"/>
+                                        <TextBlock Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
+                                                   TextTrimming="CharacterEllipsis">
+                                            <Run Text="{Binding ConnectionType, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding StatusDisplay, Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Text="{DynamicResource TrayNoDevices}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource MutedTextBrush}" Margin="0,10,0,0">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ElementName=DeviceList, Path=HasItems}" Value="False">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <Button x:Name="StartButton" Content="{DynamicResource TrayStartMirroring}" Margin="0,12,0,0"
+                                Style="{StaticResource PrimaryButton}" Click="OnStartClick"
+                                AutomationProperties.AutomationId="TrayStartMirroring"/>
+                        <Button Content="{DynamicResource StopMirroring}" Command="{Binding StopCommand}"
+                                Margin="0,8,0,0" Style="{StaticResource ToolButton}"/>
+                        <TextBlock Text="{Binding WirelessStatus}" TextWrapping="Wrap" Margin="0,10,0,0"
+                                   FontSize="{StaticResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}"/>
+                    </StackPanel>
+                </Border>
+                <TextBlock x:Name="FeedbackText" Visibility="Collapsed" TextWrapping="Wrap"
+                           Margin="0,10,0,0" Foreground="{DynamicResource WarningBrush}"
+                           AutomationProperties.LiveSetting="Polite"/>
+                <TextBlock Text="{DynamicResource ApplicationModeLabel}" Margin="0,12,0,6" FontWeight="SemiBold"/>
+                <ComboBox x:Name="ModeSelector" SelectedValue="{Binding SelectedApplicationDisplayMode, Mode=TwoWay}" SelectedValuePath="Tag">
+                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Lightweight}" Content="{DynamicResource ApplicationModeLightweight}"/>
+                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Complete}" Content="{DynamicResource ApplicationModeComplete}"/>
+                    <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Tray}" Content="{DynamicResource ApplicationModeTray}"/>
+                </ComboBox>
+            </StackPanel>
+        </ScrollViewer>
+        <Grid Grid.Row="3" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Button Content="{DynamicResource ProjectionSettingsTitle}" Click="OnSettingsClick" Style="{StaticResource ToolButton}"/>
+            <Button Grid.Column="2" Content="{DynamicResource TrayExit}" Click="OnExitClick" Style="{StaticResource ToolButton}"/>
+        </Grid>
+    </Grid>
+</chrome:RoundedWindow>

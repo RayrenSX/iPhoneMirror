@@ -1,5 +1,7 @@
 ﻿[CmdletBinding()]
 param(
+    [ValidateSet('system', 'zh-CN', 'zh-HK', 'en-US')]
+    [string]$Language = 'system',
     [switch]$ListOnly,
     [switch]$PreviewOnly,
     [switch]$NoPause,
@@ -9,6 +11,310 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# User-visible console messages. Keep protocol fields and confirmation tokens unchanged.
+$script:CleanupMessages = @'
+{
+  "zh-CN": {
+    "Pause": "按 Enter 键关闭窗口",
+    "ScanPnp": "正在扫描当前 PnP 设备…",
+    "PnpCached": "PnP 缓存完成：{0} 个设备",
+    "PnpFallback": "Get-PnpDevice 扫描失败，正在改用 pnputil：",
+    "PnpEnumerationFailed": "无法枚举 PnP 设备，pnputil 退出代码为 {0}",
+    "PnpXmlEmpty": "pnputil PnP XML 为空，无法枚举设备。",
+    "PnpXmlInvalid": "pnputil PnP XML 解析失败：",
+    "NoConnectedPnp": "pnputil PnP XML 中没有当前连接的设备。",
+    "NoCachedPnp": "pnputil PnP 缓存完成：0 个设备",
+    "NoAvailablePnp": "pnputil PnP XML 中没有可用设备。",
+    "PnpUtilCached": "pnputil PnP 缓存完成：{0} 个设备",
+    "IndexDriverStore": "正在建立 Driver Store 驱动索引…",
+    "DriverXmlUnavailable": "无法使用 Driver Store XML，退出代码为 {0}",
+    "DriverEnumerationFailed": "pnputil Driver Store 枚举失败，退出代码为 {0}；",
+    "StopMissingPackages": "已停止清理，以免遗漏驱动包。",
+    "DriverXmlEmpty": "Driver Store XML 为空。",
+    "DriverXmlEmptyStopped": "Driver Store XML 为空，已停止清理，以免遗漏驱动包。",
+    "DriverXmlInvalid": "Driver Store XML 解析失败：",
+    "DriverXmlInvalidStopped": "Driver Store XML 解析失败，已停止清理：",
+    "DriverNodesMissing": "Driver Store XML 中没有 Driver 节点，已停止清理，以免遗漏驱动包。",
+    "DriverIndexReady": "Driver Store 索引完成：{0} 个 OEM INF",
+    "ClosingProcesses": "正在关闭 iPhoneMirror 相关进程…",
+    "BluetoothExcluded": "已安全排除 BTHLE 设备：{0}",
+    "DeviceNode": "设备节点：{0}",
+    "DeviceNodeRestart": "设备节点已移除，重启后完成：{0}",
+    "DeviceNodeFailedDetail": "设备节点删除失败：{0} ",
+    "DeviceNodeFailed": "设备节点删除失败：{0}",
+    "DriverPackage": "驱动包：{0}",
+    "DriverPackageRestart": "驱动包已删除，重启后完成：{0}",
+    "DriverPackageFailedDetail": "驱动包删除失败：{0} ",
+    "DriverPackageFailed": "驱动包删除失败：{0}",
+    "ManifestWriteFailed": "无法写入清单：",
+    "ProtectedLaunchRequired": "请通过 iPhoneMirror.Driver.exe 或发布包中的清理入口运行此工具，以获得受保护的管理员权限。",
+    "PnpUtilMissing": "找不到 pnputil.exe：{0}",
+    "ScopeWarning": "将清理所选设备的关联设备节点及可安全移除的驱动包，可能包括 Apple 官方驱动；其他设备仍在使用的驱动包会保留。",
+    "ReinstallAdvice": "完成后可重新安装 Apple Devices 或 iTunes，以恢复所需驱动。",
+    "ScanningDevices": "正在扫描设备…",
+    "MappingDevices": "正在建立 Apple 设备关系…",
+    "PhysicalDeviceCount": "Apple 物理设备分组完成：{0} 台",
+    "NoAppleDevice": "未找到当前连接的 iPhone/iPad。",
+    "CheckRequirements": "请确认：",
+    "RequirementUsb": "  1. iPhone/iPad 已通过 USB 连接",
+    "RequirementUnlocked": "  2. 设备已解锁",
+    "RequirementTrusted": "  3. 已在设备上选择“信任此电脑”",
+    "RequirementCable": "  4. 数据线支持数据传输",
+    "BluetoothNotListed": "BTHLE / Bluetooth LE 设备不会显示。",
+    "MappingDrivers": "正在建立驱动关系…",
+    "MappingReady": "设备关系建立完成。",
+    "DetectedDevices": "检测到以下 Apple 物理设备：",
+    "PnpNodeCount": "    PnP 节点：{0}",
+    "DriverStoreCount": "    Driver Store 驱动包：{0}",
+    "ListOnly": "仅列表模式，未修改系统。",
+    "SelectDevice": "请输入设备序号；输入 Q 取消",
+    "InvalidDeviceNumber": "设备序号无效。",
+    "CleanupPlan": " 清理计划",
+    "SelectedDevice": "设备：{0}",
+    "OnePhysicalDevice": "物理设备：1 台",
+    "AssociatedNodes": "关联 PnP 节点：{0}",
+    "AssociatedDrivers": "关联驱动包总数：{0}",
+    "PreviewOnly": " 仅预览，未修改系统",
+    "NoRemovableNodes": "没有可删除的目标 PnP 节点。",
+    "Irreversible": "此操作不可撤销。",
+    "Confirm": "请输入 {0} 确认：",
+    "ConfirmationMismatch": "确认文字不匹配，未做任何修改。",
+    "FinalDeviceCheck": "正在执行删除前的最终设备确认…",
+    "SelectedDisconnected": "所选 iPhone 已断开。",
+    "RemovingNodes": " 正在卸载设备节点",
+    "RemovingPackages": " 正在删除 Driver Store 驱动包",
+    "WaitingWindows": "正在等待 Windows 更新设备状态…",
+    "FinalVerification": "正在执行最终验证…",
+    "CleanupResults": " 清理结果",
+    "NodesRemoved": "目标 PnP 节点已清理。",
+    "UnresolvedNodes": "仍存在 {0} 个目标 PnP 节点。",
+    "RemainingNodes": "仍存在 {0} 个目标节点。",
+    "PackagesHandled": "目标 Driver Store 驱动包已处理。",
+    "UnresolvedPackages": "仍存在 {0} 个目标 Driver Store 驱动包。",
+    "RemainingPackages": "仍存在 {0} 个驱动包。",
+    "RestartRequired": "Windows 报告部分操作需要重启。",
+    "LogPath": "日志：{0}",
+    "Error": "错误：{0}",
+    "Location": "位置：",
+    "StackTrace": "调用栈：",
+    "ErrorLog": "错误日志：{0}",
+    "Title": " 清除 iPhone/iPad 关联驱动",
+    "Completed": " 清理完成。",
+    "CompletedWithErrors": " 清理结束，发生 {0} 个错误。",
+    "InternalError": " 清理工具内部错误",
+    "FatalError": "iPhoneMirror 驱动清理严重错误",
+    "SharedPackagePreserved": "驱动包 {0} 正被其他设备使用，已保留。",
+    "PackagesPreservedUnsupported": "此 Windows 版本无法完整列出驱动包使用者；将只清理所选设备节点，保留驱动包。",
+    "DriverOperationBusy": "另一个驱动操作或回滚仍在进行，请等待完成后重试清理。"
+  },
+  "zh-HK": {
+    "Pause": "按 Enter 鍵關閉視窗",
+    "ScanPnp": "正在掃描目前 PnP 裝置…",
+    "PnpCached": "PnP 快取完成：{0} 個裝置",
+    "PnpFallback": "Get-PnpDevice 掃描失敗，正在改用 pnputil：",
+    "PnpEnumerationFailed": "無法列舉 PnP 裝置，pnputil 結束代碼為 {0}",
+    "PnpXmlEmpty": "pnputil PnP XML 為空，無法列舉裝置。",
+    "PnpXmlInvalid": "pnputil PnP XML 解析失敗：",
+    "NoConnectedPnp": "pnputil PnP XML 中沒有目前連接的裝置。",
+    "NoCachedPnp": "pnputil PnP 快取完成：0 個裝置",
+    "NoAvailablePnp": "pnputil PnP XML 中沒有可用裝置。",
+    "PnpUtilCached": "pnputil PnP 快取完成：{0} 個裝置",
+    "IndexDriverStore": "正在建立 Driver Store 驅動程式索引…",
+    "DriverXmlUnavailable": "無法使用 Driver Store XML，結束代碼為 {0}",
+    "DriverEnumerationFailed": "pnputil Driver Store 列舉失敗，結束代碼為 {0}；",
+    "StopMissingPackages": "已停止清理，以免遺漏驅動程式套件。",
+    "DriverXmlEmpty": "Driver Store XML 為空。",
+    "DriverXmlEmptyStopped": "Driver Store XML 為空，已停止清理，以免遺漏驅動程式套件。",
+    "DriverXmlInvalid": "Driver Store XML 解析失敗：",
+    "DriverXmlInvalidStopped": "Driver Store XML 解析失敗，已停止清理：",
+    "DriverNodesMissing": "Driver Store XML 中沒有 Driver 節點，已停止清理，以免遺漏驅動程式套件。",
+    "DriverIndexReady": "Driver Store 索引完成：{0} 個 OEM INF",
+    "ClosingProcesses": "正在關閉 iPhoneMirror 相關程序…",
+    "BluetoothExcluded": "已安全排除 BTHLE 裝置：{0}",
+    "DeviceNode": "裝置節點：{0}",
+    "DeviceNodeRestart": "裝置節點已移除，重新啟動後完成：{0}",
+    "DeviceNodeFailedDetail": "裝置節點刪除失敗：{0} ",
+    "DeviceNodeFailed": "裝置節點刪除失敗：{0}",
+    "DriverPackage": "驅動程式套件：{0}",
+    "DriverPackageRestart": "驅動程式套件已刪除，重新啟動後完成：{0}",
+    "DriverPackageFailedDetail": "驅動程式套件刪除失敗：{0} ",
+    "DriverPackageFailed": "驅動程式套件刪除失敗：{0}",
+    "ManifestWriteFailed": "無法寫入清單：",
+    "ProtectedLaunchRequired": "請透過 iPhoneMirror.Driver.exe 或發佈套件中的清理入口執行此工具，以取得受保護的管理員權限。",
+    "PnpUtilMissing": "找不到 pnputil.exe：{0}",
+    "ScopeWarning": "將清理所選裝置的關聯裝置節點及可安全移除的驅動程式套件，可能包括 Apple 官方驅動程式；其他裝置仍在使用的驅動程式套件會保留。",
+    "ReinstallAdvice": "完成後可重新安裝 Apple Devices 或 iTunes，以還原所需驅動程式。",
+    "ScanningDevices": "正在掃描裝置…",
+    "MappingDevices": "正在建立 Apple 裝置關係…",
+    "PhysicalDeviceCount": "Apple 實體裝置分組完成：{0} 部",
+    "NoAppleDevice": "找不到目前連接的 iPhone/iPad。",
+    "CheckRequirements": "請確認：",
+    "RequirementUsb": "  1. iPhone/iPad 已透過 USB 連接",
+    "RequirementUnlocked": "  2. 裝置已解鎖",
+    "RequirementTrusted": "  3. 已在裝置上選擇「信任此電腦」",
+    "RequirementCable": "  4. 數據線支援資料傳輸",
+    "BluetoothNotListed": "BTHLE / Bluetooth LE 裝置不會顯示。",
+    "MappingDrivers": "正在建立驅動程式關係…",
+    "MappingReady": "裝置關係建立完成。",
+    "DetectedDevices": "偵測到以下 Apple 實體裝置：",
+    "PnpNodeCount": "    PnP 節點：{0}",
+    "DriverStoreCount": "    Driver Store 驅動程式套件：{0}",
+    "ListOnly": "僅清單模式，未修改系統。",
+    "SelectDevice": "請輸入裝置編號；輸入 Q 取消",
+    "InvalidDeviceNumber": "裝置編號無效。",
+    "CleanupPlan": " 清理計劃",
+    "SelectedDevice": "裝置：{0}",
+    "OnePhysicalDevice": "實體裝置：1 部",
+    "AssociatedNodes": "關聯 PnP 節點：{0}",
+    "AssociatedDrivers": "關聯驅動程式套件總數：{0}",
+    "PreviewOnly": " 僅預覽，未修改系統",
+    "NoRemovableNodes": "沒有可刪除的目標 PnP 節點。",
+    "Irreversible": "此操作無法復原。",
+    "Confirm": "請輸入 {0} 確認：",
+    "ConfirmationMismatch": "確認文字不符，未作任何修改。",
+    "FinalDeviceCheck": "正在執行刪除前的最終裝置確認…",
+    "SelectedDisconnected": "所選 iPhone 已中斷連線。",
+    "RemovingNodes": " 正在卸載裝置節點",
+    "RemovingPackages": " 正在刪除 Driver Store 驅動程式套件",
+    "WaitingWindows": "正在等待 Windows 更新裝置狀態…",
+    "FinalVerification": "正在執行最終驗證…",
+    "CleanupResults": " 清理結果",
+    "NodesRemoved": "目標 PnP 節點已清理。",
+    "UnresolvedNodes": "仍存在 {0} 個目標 PnP 節點。",
+    "RemainingNodes": "仍存在 {0} 個目標節點。",
+    "PackagesHandled": "目標 Driver Store 驅動程式套件已處理。",
+    "UnresolvedPackages": "仍存在 {0} 個目標 Driver Store 驅動程式套件。",
+    "RemainingPackages": "仍存在 {0} 個驅動程式套件。",
+    "RestartRequired": "Windows 報告部分操作需要重新啟動。",
+    "LogPath": "記錄：{0}",
+    "Error": "錯誤：{0}",
+    "Location": "位置：",
+    "StackTrace": "呼叫堆疊：",
+    "ErrorLog": "錯誤記錄：{0}",
+    "Title": " 清除 iPhone/iPad 關聯驅動程式",
+    "Completed": " 清理完成。",
+    "CompletedWithErrors": " 清理結束，發生 {0} 個錯誤。",
+    "InternalError": " 清理工具內部錯誤",
+    "FatalError": "iPhoneMirror 驅動程式清理嚴重錯誤",
+    "SharedPackagePreserved": "驅動程式套件 {0} 正被其他裝置使用，已保留。",
+    "PackagesPreservedUnsupported": "此 Windows 版本無法完整列出驅動程式套件使用者；只會清理所選裝置節點，保留驅動程式套件。",
+    "DriverOperationBusy": "另一個驅動操作或復原仍在進行，請等待完成後重試清理。"
+  },
+  "en-US": {
+    "Pause": "Press Enter to close this window",
+    "ScanPnp": "Scanning current PnP devices…",
+    "PnpCached": "PnP cache ready. Devices: {0}",
+    "PnpFallback": "Get-PnpDevice scan failed; switching to pnputil: ",
+    "PnpEnumerationFailed": "Could not enumerate PnP devices. pnputil exit code: {0}",
+    "PnpXmlEmpty": "pnputil PnP XML is empty; devices cannot be enumerated.",
+    "PnpXmlInvalid": "Could not parse pnputil PnP XML: ",
+    "NoConnectedPnp": "No connected devices were found in pnputil PnP XML.",
+    "NoCachedPnp": "pnputil PnP cache ready. Devices: 0",
+    "NoAvailablePnp": "No available devices were found in pnputil PnP XML.",
+    "PnpUtilCached": "pnputil PnP cache ready. Devices: {0}",
+    "IndexDriverStore": "Indexing Driver Store packages…",
+    "DriverXmlUnavailable": "Driver Store XML is unavailable. Exit code: {0}",
+    "DriverEnumerationFailed": "pnputil Driver Store enumeration failed (exit code {0}). ",
+    "StopMissingPackages": "Cleanup stopped to avoid missing driver packages.",
+    "DriverXmlEmpty": "Driver Store XML is empty.",
+    "DriverXmlEmptyStopped": "Driver Store XML is empty. Cleanup stopped to avoid missing driver packages.",
+    "DriverXmlInvalid": "Could not parse Driver Store XML: ",
+    "DriverXmlInvalidStopped": "Could not parse Driver Store XML. Cleanup stopped: ",
+    "DriverNodesMissing": "Driver Store XML has no Driver nodes. Cleanup stopped to avoid missing driver packages.",
+    "DriverIndexReady": "Driver Store index ready. OEM INF files: {0}",
+    "ClosingProcesses": "Closing iPhoneMirror processes…",
+    "BluetoothExcluded": "BTHLE device safely excluded: {0}",
+    "DeviceNode": "Device node: {0}",
+    "DeviceNodeRestart": "Device node removed; a restart is required to finish: {0}",
+    "DeviceNodeFailedDetail": "Could not remove device node: {0} ",
+    "DeviceNodeFailed": "Could not remove device node: {0}",
+    "DriverPackage": "Driver package: {0}",
+    "DriverPackageRestart": "Driver package removed; a restart is required to finish: {0}",
+    "DriverPackageFailedDetail": "Could not remove driver package: {0} ",
+    "DriverPackageFailed": "Could not remove driver package: {0}",
+    "ManifestWriteFailed": "Could not write the manifest: ",
+    "ProtectedLaunchRequired": "Run this tool through iPhoneMirror.Driver.exe or the cleanup entry in the release package to obtain protected administrator privileges.",
+    "PnpUtilMissing": "pnputil.exe was not found: {0}",
+    "ScopeWarning": "Cleanup will remove device nodes associated with the selected device and driver packages that can be safely removed, which may include official Apple drivers. Packages still used by other devices will be preserved.",
+    "ReinstallAdvice": "Afterward, reinstall Apple Devices or iTunes to restore the required drivers.",
+    "ScanningDevices": "Scanning devices…",
+    "MappingDevices": "Mapping Apple device relationships…",
+    "PhysicalDeviceCount": "Apple physical devices grouped: {0}",
+    "NoAppleDevice": "No connected iPhone/iPad was found.",
+    "CheckRequirements": "Check the following:",
+    "RequirementUsb": "  1. The iPhone/iPad is connected by USB",
+    "RequirementUnlocked": "  2. The device is unlocked",
+    "RequirementTrusted": "  3. You have trusted this computer on the device",
+    "RequirementCable": "  4. The cable supports data transfer",
+    "BluetoothNotListed": "BTHLE / Bluetooth LE devices are not listed.",
+    "MappingDrivers": "Mapping driver relationships…",
+    "MappingReady": "Device relationships are ready.",
+    "DetectedDevices": "Detected Apple physical devices:",
+    "PnpNodeCount": "    PnP nodes: {0}",
+    "DriverStoreCount": "    Driver Store packages: {0}",
+    "ListOnly": "List-only mode. No system changes were made.",
+    "SelectDevice": "Enter a device number, or Q to cancel",
+    "InvalidDeviceNumber": "Invalid device number.",
+    "CleanupPlan": " Cleanup plan",
+    "SelectedDevice": "Device: {0}",
+    "OnePhysicalDevice": "Physical devices: 1",
+    "AssociatedNodes": "Associated PnP nodes: {0}",
+    "AssociatedDrivers": "Total associated driver packages: {0}",
+    "PreviewOnly": " Preview only. No system changes were made.",
+    "NoRemovableNodes": "There are no target PnP nodes to remove.",
+    "Irreversible": "This operation cannot be undone.",
+    "Confirm": "Type {0} to confirm:",
+    "ConfirmationMismatch": "The confirmation text did not match. No changes were made.",
+    "FinalDeviceCheck": "Performing the final device check before removal…",
+    "SelectedDisconnected": "The selected iPhone disconnected.",
+    "RemovingNodes": " Removing device nodes",
+    "RemovingPackages": " Removing Driver Store packages",
+    "WaitingWindows": "Waiting for Windows to update device status…",
+    "FinalVerification": "Performing final verification…",
+    "CleanupResults": " Cleanup results",
+    "NodesRemoved": "Target PnP nodes were removed.",
+    "UnresolvedNodes": "Target PnP nodes remaining: {0}.",
+    "RemainingNodes": "Target nodes remaining: {0}.",
+    "PackagesHandled": "Target Driver Store packages were processed.",
+    "UnresolvedPackages": "Target Driver Store packages remaining: {0}.",
+    "RemainingPackages": "Driver packages remaining: {0}.",
+    "RestartRequired": "Windows reported that some operations require a restart.",
+    "LogPath": "Log: {0}",
+    "Error": "Error: {0}",
+    "Location": "Location:",
+    "StackTrace": "Stack trace:",
+    "ErrorLog": "Error log: {0}",
+    "Title": " Remove iPhone/iPad associated drivers",
+    "Completed": " Cleanup completed successfully.",
+    "CompletedWithErrors": " Cleanup finished. Errors: {0}",
+    "InternalError": " Cleanup tool internal error",
+    "FatalError": "iPhoneMirror driver cleanup fatal error",
+    "SharedPackagePreserved": "Driver package {0} is used by other devices and has been preserved.",
+    "PackagesPreservedUnsupported": "This Windows version cannot list all driver package users. Only selected device nodes will be removed; driver packages will be preserved.",
+    "DriverOperationBusy": "Another driver operation or rollback is in progress. Wait for it to finish before retrying cleanup."
+  }
+}
+'@ | ConvertFrom-Json
+if ($Language -eq 'system') {
+    try {
+        $settingsPath = Join-Path $env:LOCALAPPDATA 'iPhoneMirror\settings.json'
+        $settings = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+        $Language = $settings.Language
+    } catch { $Language = 'system' }
+}
+if ($Language -notin @('zh-CN', 'zh-HK', 'en-US')) {
+    $cultureName = [Globalization.CultureInfo]::InstalledUICulture.Name
+    $Language = if ($cultureName -match '^zh-(Hant|HK|MO|TW|CHT)') { 'zh-HK' }
+        elseif ($cultureName -match '^zh') { 'zh-CN' } else { 'en-US' }
+}
+function Get-CleanupText {
+    param([string]$Key, [object[]]$Values = @())
+    $template = $script:CleanupMessages.$Language.$Key
+    if ($Values.Count -eq 0) { return $template }
+    return [string]::Format([Globalization.CultureInfo]::GetCultureInfo($Language), $template, $Values)
+}
+
 
 # ============================================================
 # Configuration
@@ -69,6 +375,10 @@ $script:DeviceCache = @{}
 $script:ContainerCache = @{}
 $script:DriverInventory = @{}
 $script:DriverInventoryInitialized = $false
+$script:DriverInventorySupported = $true
+$script:PreservedDrivers = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$cleanupMutex = $null
+$cleanupLockTaken = $false
 $script:Failures = [System.Collections.Generic.List[string]]::new()
 $script:RestartRequired = $false
 $script:RestartPendingNodes =
@@ -167,7 +477,7 @@ function Stop-Cleanup {
         Write-Host ''
 
         try {
-            [void](Read-Host '按 Enter 键关闭窗口')
+            [void](Read-Host (Get-CleanupText 'Pause'))
         }
         catch {
         }
@@ -459,7 +769,7 @@ function Initialize-DeviceCache {
     $script:DeviceCache.Clear()
     $script:ContainerCache.Clear()
 
-    Write-Log '扫描当前 PnP 设备...'
+    Write-Log (Get-CleanupText 'ScanPnp')
 
     $getPnpDevice =
         Get-Command `
@@ -512,7 +822,7 @@ function Initialize-DeviceCache {
             }
 
             Write-OK (
-                "PnP 缓存完成：$($script:DeviceCache.Count) 个设备"
+                (Get-CleanupText 'PnpCached' -Values @($script:DeviceCache.Count))
             )
 
             return
@@ -520,7 +830,7 @@ function Initialize-DeviceCache {
         catch {
 
             Write-Warn (
-                'Get-PnpDevice 扫描失败，切换到 pnputil：' +
+                (Get-CleanupText 'PnpFallback') +
                 $_.Exception.Message
             )
         }
@@ -542,12 +852,12 @@ function Initialize-DeviceCache {
     if ($result.ExitCode -ne 0) {
 
         throw (
-            "无法枚举 PnP 设备，pnputil ExitCode=$($result.ExitCode)"
+            (Get-CleanupText 'PnpEnumerationFailed' -Values @($result.ExitCode))
         )
     }
 
     if ([string]::IsNullOrWhiteSpace($result.Text)) {
-        throw 'pnputil PnP XML 为空，无法枚举设备。'
+        throw (Get-CleanupText 'PnpXmlEmpty')
     }
 
     try {
@@ -555,7 +865,7 @@ function Initialize-DeviceCache {
     }
     catch {
         throw (
-            'pnputil PnP XML 解析失败：' +
+            (Get-CleanupText 'PnpXmlInvalid') +
             $_.Exception.Message
         )
     }
@@ -564,8 +874,8 @@ function Initialize-DeviceCache {
         @($xml.SelectNodes('//*[local-name()="Container"]'))
 
     if ($containerNodes.Count -eq 0) {
-        Write-Warn 'pnputil PnP XML 中没有当前连接的设备。'
-        Write-OK 'pnputil PnP 缓存完成：0 个设备'
+        Write-Warn (Get-CleanupText 'NoConnectedPnp')
+        Write-OK (Get-CleanupText 'NoCachedPnp')
         return
     }
 
@@ -601,11 +911,11 @@ function Initialize-DeviceCache {
     }
 
     if ($script:DeviceCache.Count -eq 0) {
-        Write-Warn 'pnputil PnP XML 中没有可用设备。'
+        Write-Warn (Get-CleanupText 'NoAvailablePnp')
     }
 
     Write-OK (
-        "pnputil PnP 缓存完成：$($script:DeviceCache.Count) 个设备"
+        (Get-CleanupText 'PnpUtilCached' -Values @($script:DeviceCache.Count))
     )
 }
 
@@ -939,6 +1249,12 @@ function Get-ApplePhysicalDevices {
 # Driver Store inventory
 # ============================================================
 
+function Test-PnpDriverInventorySupport {
+    $help = Invoke-PnpUtil @('/?')
+    $syntax = [regex]::Match($help.Text, '(?m)^[ \t]+/enum-drivers[^\r\n]*(?:\r?\n[ \t]+\[[^\r\n]*)*').Value
+    return $syntax.Contains('/devices') -and $syntax.Contains('/format')
+}
+
 function Get-DriverStoreInventory {
 
     if ($script:DriverInventoryInitialized) {
@@ -948,7 +1264,14 @@ function Get-DriverStoreInventory {
         )
     }
 
-    Write-Log '建立 Driver Store 驱动索引...'
+    if (-not (Test-PnpDriverInventorySupport)) {
+        $script:DriverInventorySupported = $false
+        $script:DriverInventoryInitialized = $true
+        Write-Warn (Get-CleanupText 'PackagesPreservedUnsupported')
+        return @()
+    }
+
+    Write-Log (Get-CleanupText 'IndexDriverStore')
 
     $result =
         Invoke-PnpUtil @(
@@ -961,12 +1284,12 @@ function Get-DriverStoreInventory {
     if ($result.ExitCode -ne 0) {
 
         Write-Warn (
-            "无法使用 Driver Store XML，ExitCode=$($result.ExitCode)"
+            (Get-CleanupText 'DriverXmlUnavailable' -Values @($result.ExitCode))
         )
 
         throw (
-            "pnputil Driver Store 枚举失败，ExitCode=$($result.ExitCode)；" +
-            '已停止清理以避免遗漏驱动包。'
+            (Get-CleanupText 'DriverEnumerationFailed' -Values @($result.ExitCode)) +
+            (Get-CleanupText 'StopMissingPackages')
         )
     }
 
@@ -975,9 +1298,9 @@ function Get-DriverStoreInventory {
 
     if ([string]::IsNullOrWhiteSpace($xmlText)) {
 
-        Write-Warn 'Driver Store XML 为空。'
+        Write-Warn (Get-CleanupText 'DriverXmlEmpty')
 
-        throw 'Driver Store XML 为空，已停止清理以避免遗漏驱动包。'
+        throw (Get-CleanupText 'DriverXmlEmptyStopped')
     }
 
     try {
@@ -988,12 +1311,12 @@ function Get-DriverStoreInventory {
     catch {
 
         Write-Warn (
-            'Driver Store XML 解析失败：' +
+            (Get-CleanupText 'DriverXmlInvalid') +
             $_.Exception.Message
         )
 
         throw (
-            'Driver Store XML 解析失败，已停止清理：' +
+            (Get-CleanupText 'DriverXmlInvalidStopped') +
             $_.Exception.Message
         )
     }
@@ -1005,7 +1328,7 @@ function Get-DriverStoreInventory {
         @($xml.SelectNodes('//*[local-name()="Driver"]'))
 
     if ($driverNodes.Count -eq 0) {
-        throw 'Driver Store XML 中没有 Driver 节点，已停止清理以避免遗漏驱动包。'
+        throw (Get-CleanupText 'DriverNodesMissing')
     }
 
     foreach ($driverNode in $driverNodes) {
@@ -1034,8 +1357,7 @@ function Get-DriverStoreInventory {
                 [string]$deviceNode.GetAttribute('InstanceId')
 
             if (
-                [string]::IsNullOrWhiteSpace($id) -or
-                (Test-IsBthle $id)
+                [string]::IsNullOrWhiteSpace($id)
             ) {
                 continue
             }
@@ -1080,7 +1402,7 @@ function Get-DriverStoreInventory {
     $script:DriverInventoryInitialized = $true
 
     Write-OK (
-        "Driver Store 索引完成：$($script:DriverInventory.Count) 个 OEM INF"
+        (Get-CleanupText 'DriverIndexReady' -Values @($script:DriverInventory.Count))
     )
 
     return @(
@@ -1092,94 +1414,26 @@ function Get-DriverStoreInventory {
 # Find drivers for one physical device
 # ============================================================
 
+function Test-DriverExclusiveToDevice {
+    param([object]$Driver, [object]$PhysicalDevice)
+    if (@($Driver.Devices).Count -eq 0) { return $false }
+    foreach ($id in $Driver.Devices) {
+        if (Test-IsBthle $id) { return $false }
+        $identity = Get-NormalizedUsbIdentity $id
+        $matches = @($PhysicalDevice.InstanceIds | Where-Object {
+            $_ -ieq $id -or (-not [string]::IsNullOrWhiteSpace($identity) -and
+                (Get-NormalizedUsbIdentity $_) -ieq $identity)
+        })
+        if ($matches.Count -eq 0) { return $false }
+    }
+    return $true
+}
+
 function Get-DriversForPhysicalDevice {
-    param(
-        [object]$PhysicalDevice
-    )
-
-    $inventory =
-        @(Get-DriverStoreInventory)
-
-    if ($inventory.Count -eq 0) {
-        return @()
-    }
-
-    $targetIds =
-        [System.Collections.Generic.HashSet[string]]::new(
-            [StringComparer]::OrdinalIgnoreCase
-        )
-
-    foreach ($id in $PhysicalDevice.InstanceIds) {
-
-        if (
-            -not (Test-IsBthle $id) -and
-            -not [string]::IsNullOrWhiteSpace($id)
-        ) {
-
-            [void]$targetIds.Add($id)
-        }
-    }
-
-    $matched =
-        [System.Collections.Generic.List[object]]::new()
-
-    foreach ($driver in $inventory) {
-
-        $isMatch = $false
-
-        foreach ($driverDeviceId in $driver.Devices) {
-
-            if (Test-IsBthle $driverDeviceId) {
-                continue
-            }
-
-            if ($targetIds.Contains($driverDeviceId)) {
-
-                $isMatch = $true
-                break
-            }
-
-            # Normalize interface IDs.
-
-            $normalizedDriverId =
-                Get-NormalizedUsbIdentity `
-                    $driverDeviceId
-
-            if (-not [string]::IsNullOrWhiteSpace($normalizedDriverId)) {
-
-                foreach ($targetId in $targetIds) {
-
-                    $normalizedTargetId =
-                        Get-NormalizedUsbIdentity `
-                            $targetId
-
-                    if (
-                        -not [string]::IsNullOrWhiteSpace($normalizedTargetId) -and
-                        $normalizedDriverId -ieq
-                        $normalizedTargetId
-                    ) {
-
-                        $isMatch = $true
-                        break
-                    }
-                }
-            }
-
-            if ($isMatch) {
-                break
-            }
-        }
-
-        if ($isMatch) {
-
-            $matched.Add($driver)
-        }
-    }
-
-    return @(
-        $matched |
-            Sort-Object InfName -Unique
-    )
+    param([object]$PhysicalDevice)
+    return @(Get-DriverStoreInventory | Where-Object {
+        Test-DriverExclusiveToDevice $_ $PhysicalDevice
+    } | Sort-Object InfName -Unique)
 }
 
 # ============================================================
@@ -1190,7 +1444,7 @@ function Stop-iPhoneMirrorProcesses {
 
     $processNames = @(
         'iPhoneMirror'
-        'iPhoneMirror.Driver'
+        # Driver managers and elevated transaction hosts must never be killed.
     )
 
     $processes =
@@ -1208,7 +1462,7 @@ function Stop-iPhoneMirrorProcesses {
         return
     }
 
-    Write-Log '关闭 iPhoneMirror 相关进程...'
+    Write-Log (Get-CleanupText 'ClosingProcesses')
 
     foreach ($process in $processes) {
 
@@ -1238,7 +1492,7 @@ function Remove-DeviceNode {
     if (Test-IsBthle $InstanceId) {
 
         Write-Warn (
-            "安全过滤 BTHLE：$InstanceId"
+            (Get-CleanupText 'BluetoothExcluded' -Values @($InstanceId))
         )
 
         return $true
@@ -1248,14 +1502,13 @@ function Remove-DeviceNode {
         Invoke-PnpUtil @(
             '/remove-device'
             $InstanceId
-            '/subtree'
-            '/force'
+            # Each confirmed instance is removed separately; avoid unsupported flags.
         )
 
     if ($result.ExitCode -eq 0) {
 
         Write-OK (
-            "设备节点：$InstanceId"
+            (Get-CleanupText 'DeviceNode' -Values @($InstanceId))
         )
 
         return $true
@@ -1267,14 +1520,14 @@ function Remove-DeviceNode {
         [void]$script:RestartPendingNodes.Add($InstanceId)
 
         Write-OK (
-            "设备节点已移除，重启后完成：$InstanceId"
+            (Get-CleanupText 'DeviceNodeRestart' -Values @($InstanceId))
         )
 
         return $true
     }
 
     Write-Err (
-        "设备节点删除失败：$InstanceId " +
+        (Get-CleanupText 'DeviceNodeFailedDetail' -Values @($InstanceId)) +
         "(ExitCode=$($result.ExitCode))"
     )
 
@@ -1285,7 +1538,7 @@ function Remove-DeviceNode {
     }
 
     Add-Failure (
-        "设备节点删除失败：$InstanceId"
+        (Get-CleanupText 'DeviceNodeFailed' -Values @($InstanceId))
     )
 
     return $false
@@ -1297,7 +1550,8 @@ function Remove-DeviceNode {
 
 function Remove-DriverPackage {
     param(
-        [string]$InfName
+        [string]$InfName,
+        [object]$PhysicalDevice
     )
 
     if (
@@ -1308,18 +1562,29 @@ function Remove-DriverPackage {
         return $false
     }
 
+    # Refresh all package users immediately before deletion. Windows also refuses
+    # to delete an in-use package because /uninstall and /force are never passed.
+    $script:DriverInventory.Clear()
+    $script:DriverInventoryInitialized = $false
+    $current = @(Get-DriverStoreInventory | Where-Object { $_.InfName -ieq $InfName })
+    if (-not $script:DriverInventorySupported -or
+        ($current.Count -gt 0 -and @($current[0].Devices).Count -gt 0 -and
+         -not (Test-DriverExclusiveToDevice $current[0] $PhysicalDevice))) {
+        [void]$script:PreservedDrivers.Add($InfName)
+        Write-Warn (Get-CleanupText 'SharedPackagePreserved' -Values @($InfName))
+        return $true
+    }
+
     $result =
         Invoke-PnpUtil @(
             '/delete-driver'
             $InfName
-            '/uninstall'
-            '/force'
         )
 
     if ($result.ExitCode -eq 0) {
 
         Write-OK (
-            "驱动包：$InfName"
+            (Get-CleanupText 'DriverPackage' -Values @($InfName))
         )
 
         return $true
@@ -1331,14 +1596,14 @@ function Remove-DriverPackage {
         [void]$script:RestartPendingDrivers.Add($InfName)
 
         Write-OK (
-            "驱动包已删除，重启后完成：$InfName"
+            (Get-CleanupText 'DriverPackageRestart' -Values @($InfName))
         )
 
         return $true
     }
 
     Write-Err (
-        "驱动包删除失败：$InfName " +
+        (Get-CleanupText 'DriverPackageFailedDetail' -Values @($InfName)) +
         "(ExitCode=$($result.ExitCode))"
     )
 
@@ -1349,7 +1614,7 @@ function Remove-DriverPackage {
     }
 
     Add-Failure (
-        "驱动包删除失败：$InfName"
+        (Get-CleanupText 'DriverPackageFailed' -Values @($InfName))
     )
 
     return $false
@@ -1417,7 +1682,7 @@ function Save-Manifest {
     catch {
 
         Write-Warn (
-            '无法写入 manifest：' +
+            (Get-CleanupText 'ManifestWriteFailed') +
             $_.Exception.Message
         )
     }
@@ -1432,7 +1697,7 @@ if (-not $ListOnly -and -not $PreviewOnly) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Err '请通过 iPhoneMirror.Driver.exe 或发布包中的清理入口运行此工具，以获得受保护的管理员权限。'
+        Write-Err (Get-CleanupText 'ProtectedLaunchRequired')
         Stop-Cleanup 5
     }
 }
@@ -1440,7 +1705,7 @@ if (-not $ListOnly -and -not $PreviewOnly) {
 if (-not (Test-Path -LiteralPath $PnpUtil -PathType Leaf)) {
 
     Write-Err (
-        "找不到 pnputil.exe：$PnpUtil"
+        (Get-CleanupText 'PnpUtilMissing' -Values @($PnpUtil))
     )
 
     Stop-Cleanup 10
@@ -1462,16 +1727,16 @@ Clear-Host
 Write-Host '========================================' `
     -ForegroundColor Cyan
 
-Write-Host ' iPhone/iPad Remove All Drivers' `
+Write-Host (Get-CleanupText 'Title') `
     -ForegroundColor Cyan
 
 Write-Host '========================================' `
     -ForegroundColor Cyan
 
 Write-Host ''
-Write-Host '将清除所选设备关联的所有设备节点和驱动包，包括 Apple 官方驱动。' `
+Write-Host (Get-CleanupText 'ScopeWarning') `
     -ForegroundColor Yellow
-Write-Host '完成后可重新安装 Apple Devices 或 iTunes 以恢复所需驱动。' `
+Write-Host (Get-CleanupText 'ReinstallAdvice') `
     -ForegroundColor Yellow
 Write-Host ''
 
@@ -1481,31 +1746,31 @@ try {
     # Scan
     # ========================================================
 
-    Write-Log '开始设备扫描...'
+    Write-Log (Get-CleanupText 'ScanningDevices')
 
     Initialize-DeviceCache
 
-    Write-Log '建立 Apple 设备关系...'
+    Write-Log (Get-CleanupText 'MappingDevices')
 
     $physicalDevices =
         @(Get-ApplePhysicalDevices)
 
     Write-OK (
-        "Apple 物理设备分组完成：$($physicalDevices.Count) 台"
+        (Get-CleanupText 'PhysicalDeviceCount' -Values @($physicalDevices.Count))
     )
 
     if ($physicalDevices.Count -eq 0) {
 
         Write-Host ''
-        Write-Warn '没有找到当前连接的 iPhone/iPad。'
+        Write-Warn (Get-CleanupText 'NoAppleDevice')
         Write-Host ''
-        Write-Host '请确认：'
-        Write-Host '  1. iPhone/iPad 已通过 USB 连接'
-        Write-Host '  2. 设备已解锁'
-        Write-Host '  3. 已点击“信任此电脑”'
-        Write-Host '  4. 数据线支持数据传输'
+        Write-Host (Get-CleanupText 'CheckRequirements')
+        Write-Host (Get-CleanupText 'RequirementUsb')
+        Write-Host (Get-CleanupText 'RequirementUnlocked')
+        Write-Host (Get-CleanupText 'RequirementTrusted')
+        Write-Host (Get-CleanupText 'RequirementCable')
         Write-Host ''
-        Write-Host 'BTHLE / Bluetooth LE 设备不会显示。' `
+        Write-Host (Get-CleanupText 'BluetoothNotListed') `
             -ForegroundColor DarkGray
 
         Stop-Cleanup 2
@@ -1515,7 +1780,7 @@ try {
     # Driver inventory
     # ========================================================
 
-    Write-Log '建立驱动关系...'
+    Write-Log (Get-CleanupText 'MappingDrivers')
 
     $initialDriverInventory =
         @(Get-DriverStoreInventory)
@@ -1555,14 +1820,14 @@ try {
     $physicalDevices =
         @($devicesWithDrivers)
 
-    Write-OK '设备关系建立完成。'
+    Write-OK (Get-CleanupText 'MappingReady')
 
     # ========================================================
     # Display
     # ========================================================
 
     Write-Host ''
-    Write-Host '检测到以下物理 Apple 设备：' `
+    Write-Host (Get-CleanupText 'DetectedDevices') `
         -ForegroundColor Cyan
 
     Write-Host ''
@@ -1579,12 +1844,12 @@ try {
         ) -ForegroundColor White
 
         Write-Host (
-            '    PnP 节点：{0}' -f
+            (Get-CleanupText 'PnpNodeCount') -f
             $device.InstanceIds.Count
         ) -ForegroundColor DarkGray
 
         Write-Host (
-            '    Driver Store 驱动包：{0}' -f
+            (Get-CleanupText 'DriverStoreCount') -f
             $device.Drivers.Count
         ) -ForegroundColor DarkGray
 
@@ -1601,7 +1866,7 @@ try {
 
     if ($ListOnly) {
 
-        Write-OK '仅列表模式，未修改系统。'
+        Write-OK (Get-CleanupText 'ListOnly')
 
         Stop-Cleanup 0
     }
@@ -1615,7 +1880,7 @@ try {
     while ($selectedIndex -lt 0) {
 
         $answer =
-            Read-Host '请输入设备序号；输入 Q 取消'
+            Read-Host (Get-CleanupText 'SelectDevice')
 
         if ($answer -match '^(?i)q$') {
             Stop-Cleanup 0
@@ -1637,7 +1902,7 @@ try {
         }
         else {
 
-            Write-Warn '设备序号无效。'
+            Write-Warn (Get-CleanupText 'InvalidDeviceNumber')
         }
     }
 
@@ -1706,7 +1971,7 @@ try {
     Write-Host '========================================' `
         -ForegroundColor Cyan
 
-    Write-Host ' 清理计划' `
+    Write-Host (Get-CleanupText 'CleanupPlan') `
         -ForegroundColor Cyan
 
     Write-Host '========================================' `
@@ -1715,21 +1980,21 @@ try {
     Write-Host ''
 
     Write-Host (
-        '设备：{0}' -f
+        (Get-CleanupText 'SelectedDevice') -f
         $selected.Name
     )
 
     Write-Host (
-        '物理设备：1 台'
+        (Get-CleanupText 'OnePhysicalDevice')
     ) -ForegroundColor Green
 
     Write-Host (
-        '关联 PnP 节点：{0}' -f
+        (Get-CleanupText 'AssociatedNodes') -f
         $targetNodeArray.Count
     ) -ForegroundColor Green
 
     Write-Host (
-        '关联全部驱动包：{0}' -f
+        (Get-CleanupText 'AssociatedDrivers') -f
         $targetDrivers.Count
     ) -ForegroundColor Green
 
@@ -1771,7 +2036,7 @@ try {
         Write-Host '========================================' `
             -ForegroundColor Green
 
-        Write-Host ' Preview only - 未修改系统' `
+        Write-Host (Get-CleanupText 'PreviewOnly') `
             -ForegroundColor Green
 
         Write-Host '========================================' `
@@ -1786,7 +2051,7 @@ try {
 
     if ($targetNodeArray.Count -eq 0) {
 
-        Write-Err '没有可删除的目标 PnP 节点。'
+        Write-Err (Get-CleanupText 'NoRemovableNodes')
         Stop-Cleanup 1
     }
 
@@ -1806,11 +2071,11 @@ try {
         )
 
     Write-Host ''
-    Write-Host '这是不可撤销的操作。' `
+    Write-Host (Get-CleanupText 'Irreversible') `
         -ForegroundColor Red
 
     Write-Host (
-        '请输入 {0} 确认：' -f
+        (Get-CleanupText 'Confirm') -f
         $confirmation
     ) -ForegroundColor Yellow
 
@@ -1819,7 +2084,7 @@ try {
 
     if ($typed -cne $confirmation) {
 
-        Write-Warn '确认文字不匹配，未做任何修改。'
+        Write-Warn (Get-CleanupText 'ConfirmationMismatch')
 
         Stop-Cleanup 0
     }
@@ -1828,13 +2093,18 @@ try {
     # Re-scan before deletion
     # ========================================================
 
-    Write-Log '执行删除前最终设备确认...'
+    $cleanupMutex = [System.Threading.Mutex]::new($false, 'Global\iPhoneMirror.Driver.Operation')
+    try { $cleanupLockTaken = $cleanupMutex.WaitOne(0) }
+    catch [System.Threading.AbandonedMutexException] { $cleanupLockTaken = $true }
+    if (-not $cleanupLockTaken) { throw (Get-CleanupText 'DriverOperationBusy') }
+
+    Write-Log (Get-CleanupText 'FinalDeviceCheck')
 
     Initialize-DeviceCache
 
     if (-not (Test-PhysicalDeviceConnected $selected)) {
 
-        Write-Warn '所选 iPhone 已断开。'
+        Write-Warn (Get-CleanupText 'SelectedDisconnected')
 
         Stop-Cleanup 3
     }
@@ -1905,7 +2175,7 @@ try {
         Write-Host '========================================' `
             -ForegroundColor Cyan
 
-        Write-Host ' 卸载设备节点' `
+        Write-Host (Get-CleanupText 'RemovingNodes') `
             -ForegroundColor Cyan
 
         Write-Host '========================================' `
@@ -1929,7 +2199,7 @@ try {
         Write-Host '========================================' `
             -ForegroundColor Cyan
 
-        Write-Host ' 删除 Driver Store 驱动包' `
+        Write-Host (Get-CleanupText 'RemovingPackages') `
             -ForegroundColor Cyan
 
         Write-Host '========================================' `
@@ -1938,7 +2208,7 @@ try {
         foreach ($driver in $targetDrivers) {
 
             Remove-DriverPackage `
-                $driver.InfName |
+                -InfName $driver.InfName -PhysicalDevice $selected |
                 Out-Null
         }
 
@@ -1948,7 +2218,7 @@ try {
 
         Write-Host ''
 
-        Write-Log '等待 Windows 更新设备状态...'
+        Write-Log (Get-CleanupText 'WaitingWindows')
 
         Start-Sleep -Milliseconds 1500
 
@@ -1989,7 +2259,7 @@ try {
         # Final verification
         # ====================================================
 
-        Write-Log '执行最终验证...'
+        Write-Log (Get-CleanupText 'FinalVerification')
 
         Initialize-DeviceCache
 
@@ -2017,6 +2287,7 @@ try {
 
         foreach ($driver in $targetDrivers) {
 
+            if ($script:PreservedDrivers.Contains($driver.InfName)) { continue }
             $infPath =
                 Join-Path `
                     $env:windir `
@@ -2041,7 +2312,7 @@ try {
         Write-Host '========================================' `
             -ForegroundColor Cyan
 
-        Write-Host ' 清理结果' `
+        Write-Host (Get-CleanupText 'CleanupResults') `
             -ForegroundColor Cyan
 
         Write-Host '========================================' `
@@ -2051,7 +2322,7 @@ try {
 
         if ($remainingNodes.Count -eq 0) {
 
-            Write-OK '目标 PnP 节点已清理。'
+            Write-OK (Get-CleanupText 'NodesRemoved')
         }
         else {
             $unresolvedNodes = @(
@@ -2060,11 +2331,11 @@ try {
                 }
             )
             if ($unresolvedNodes.Count -gt 0) {
-                Add-Failure "仍存在 $($unresolvedNodes.Count) 个目标 PnP 节点。"
+                Add-Failure (Get-CleanupText 'UnresolvedNodes' -Values @($unresolvedNodes.Count))
             }
 
             Write-Warn (
-                "仍存在 $($remainingNodes.Count) 个目标节点。"
+                (Get-CleanupText 'RemainingNodes' -Values @($remainingNodes.Count))
             )
 
             foreach ($id in $remainingNodes) {
@@ -2077,7 +2348,8 @@ try {
 
         if ($remainingDrivers.Count -eq 0) {
 
-            Write-OK '目标 Driver Store 驱动包已处理。'
+            if ($script:DriverInventorySupported) { Write-OK (Get-CleanupText 'PackagesHandled') }
+            else { Write-Warn (Get-CleanupText 'PackagesPreservedUnsupported') }
         }
         else {
             $unresolvedDrivers = @(
@@ -2086,11 +2358,11 @@ try {
                 }
             )
             if ($unresolvedDrivers.Count -gt 0) {
-                Add-Failure "仍存在 $($unresolvedDrivers.Count) 个目标 Driver Store 驱动包。"
+                Add-Failure (Get-CleanupText 'UnresolvedPackages' -Values @($unresolvedDrivers.Count))
             }
 
             Write-Warn (
-                "仍存在 $($remainingDrivers.Count) 个驱动包。"
+                (Get-CleanupText 'RemainingPackages' -Values @($remainingDrivers.Count))
             )
 
             foreach ($inf in $remainingDrivers) {
@@ -2108,7 +2380,7 @@ try {
             Write-Host '========================================' `
                 -ForegroundColor Green
 
-            Write-Host ' Cleanup completed successfully.' `
+            Write-Host (Get-CleanupText 'Completed') `
                 -ForegroundColor Green
 
             Write-Host '========================================' `
@@ -2118,13 +2390,13 @@ try {
 
                 Write-Host ''
                 Write-Warn (
-                    'Windows 报告部分操作需要重启。'
+                    (Get-CleanupText 'RestartRequired')
                 )
             }
 
             Write-Host ''
             Write-Host (
-                "日志：$logPath"
+                (Get-CleanupText 'LogPath' -Values @($logPath))
             ) -ForegroundColor DarkGray
 
             Stop-Cleanup 0
@@ -2134,7 +2406,7 @@ try {
             -ForegroundColor Red
 
         Write-Host (
-            ' Cleanup finished with errors. Count: {0}' -f
+            (Get-CleanupText 'CompletedWithErrors') -f
             $script:Failures.Count
         ) -ForegroundColor Red
 
@@ -2150,7 +2422,7 @@ try {
 
         Write-Host ''
         Write-Host (
-            "日志：$logPath"
+            (Get-CleanupText 'LogPath' -Values @($logPath))
         ) -ForegroundColor DarkGray
 
         Stop-Cleanup 1
@@ -2179,7 +2451,7 @@ catch {
     Write-Host '========================================' `
         -ForegroundColor Red
 
-    Write-Host ' CLEANUP INTERNAL ERROR' `
+    Write-Host (Get-CleanupText 'InternalError') `
         -ForegroundColor Red
 
     Write-Host '========================================' `
@@ -2188,7 +2460,7 @@ catch {
     Write-Host ''
 
     Write-Host (
-        '错误：{0}' -f
+        (Get-CleanupText 'Error') -f
         $_.Exception.Message
     ) -ForegroundColor Red
 
@@ -2200,7 +2472,7 @@ catch {
         )
     ) {
 
-        Write-Host '位置：' `
+        Write-Host (Get-CleanupText 'Location') `
             -ForegroundColor Yellow
 
         Write-Host (
@@ -2216,7 +2488,7 @@ catch {
         )
     ) {
 
-        Write-Host '调用栈：' `
+        Write-Host (Get-CleanupText 'StackTrace') `
             -ForegroundColor Yellow
 
         Write-Host (
@@ -2248,7 +2520,7 @@ catch {
                 )
 
         @(
-            'iPhoneMirror Driver Cleanup Fatal Error'
+            (Get-CleanupText 'FatalError')
             ''
             ('Time: ' + (Get-Date))
             ('Message: ' + $_.Exception.Message)
@@ -2264,11 +2536,16 @@ catch {
                 -Encoding UTF8
 
         Write-Host (
-            "错误日志：$errorLog"
+            (Get-CleanupText 'ErrorLog' -Values @($errorLog))
         ) -ForegroundColor DarkGray
     }
     catch {
     }
 
     Stop-Cleanup 1
+}
+
+finally {
+    if ($cleanupLockTaken) { $cleanupMutex.ReleaseMutex() }
+    if ($null -ne $cleanupMutex) { $cleanupMutex.Dispose() }
 }

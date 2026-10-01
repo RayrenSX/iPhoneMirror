@@ -13,6 +13,7 @@ namespace IPhoneMirror.App.Services;
 internal sealed class AspectRatioWindowController : IDisposable
 {
     private const int WmSizing = 0x0214;
+    private const int WmGetMinMaxInfo = 0x0024;
     private const uint MonitorDefaultToNearest = 2;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoZOrder = 0x0004;
@@ -197,6 +198,22 @@ internal sealed class AspectRatioWindowController : IDisposable
     private nint WindowProcedure(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message == WmGetMinMaxInfo && lParam != 0 && _window is null)
+        {
+            // Raw HWNDs otherwise inherit the system caption's minimum tracking
+            // width, even when the preview draws no caption at all.
+            var limits = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+            var dpi = GetDpiForWindow(hwnd);
+            var scale = dpi == 0 ? 1.0 : dpi / 96.0;
+            limits.MinTrackSize = new NativePoint
+            {
+                X = Math.Max(1, (int)Math.Ceiling(_minWidthDips * scale)),
+                Y = Math.Max(1, (int)Math.Ceiling(_minHeightDips * scale)),
+            };
+            Marshal.StructureToPtr(limits, lParam, false);
+            handled = true;
+            return 0;
+        }
         if (message != WmSizing || lParam == 0 || !_canResize())
             return 0;
 
@@ -319,6 +336,19 @@ internal sealed class AspectRatioWindowController : IDisposable
             _window.DpiChanged -= OnDpiChanged;
             _window.Closed -= OnClosed;
         }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        internal int X;
+        internal int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        internal NativePoint Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize;
     }
 
     [StructLayout(LayoutKind.Sequential)]

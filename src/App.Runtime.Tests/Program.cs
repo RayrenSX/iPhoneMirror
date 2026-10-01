@@ -21,13 +21,55 @@ using WpfSymbolIcon = Wpf.Ui.Controls.SymbolIcon;
 
 namespace IPhoneMirror.App.Runtime.Tests;
 
-internal static class Program
+internal static partial class Program
 {
     [STAThread]
     private static int Main(string[] args)
     {
         try
         {
+            if (args is ["--tray-mode", var trayOutput])
+                return RunTrayModeTests(trayOutput);
+            if (args is ["--ui-performance", var performanceOutput])
+                return RunUiPerformanceAudit(performanceOutput);
+            if (args is ["--ui-regression"])
+            {
+                RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+                TestUpdateWindowThemeSwitch();
+                Console.WriteLine("UI theme, window and control runtime regressions passed.");
+                return 0;
+            }
+            if (args is ["--interaction-regression"])
+                return RunInteractionRegressionTests();
+            if (args is ["--control-states", var controlOutput])
+                return RunControlStateAudit(controlOutput);
+            if (args is ["--localization-audit"])
+                return LocalizationAuditTests.Run();
+            if (args is ["--language-display-audit", var displayOutput])
+                return RunLanguageDisplayAudit(displayOutput);
+            if (args is ["--language-display-audit", var focusedDisplayOutput, var displaySurface])
+                return RunLanguageDisplayAudit(focusedDisplayOutput, displaySurface);
+            if (args is ["--workspace-regression"])
+                return RunWorkspaceRegressionTests();
+            if (args is ["--keyboard-focus"])
+                return RunKeyboardFocusTests();
+            if (args is ["--driver-localization-audit", var localizedDriverAssembly])
+                return LocalizationAuditTests.RunDriver(localizedDriverAssembly);
+            if (args is ["--driver-ui-audit", var sourceRoot, var driverAssembly, var driverOutput])
+                return RunDriverConsistencyAudit(sourceRoot, driverAssembly, driverOutput);
+            if (args is ["--ui-audit", var auditOutput])
+                return RunConsistencyAudit(auditOutput);
+            if (args is ["--ui-audit", var cultureOutput, "--culture", var auditCulture] &&
+                auditCulture is "zh-CN" or "zh-HK" or "en-US")
+                return RunConsistencyAudit(cultureOutput, onlyCulture: auditCulture);
+            if (args is ["--ui-audit", var focusedOutput, var focusedSurface])
+                return RunConsistencyAudit(focusedOutput, focusedSurface);
+            if (args is ["--preview-shell-ui-audit", var previewOutput])
+                return RunPreviewShellAudit(previewOutput);
+            if (args is ["--reverse-control-countdown"])
+                return ReverseControlCountdownTests.Run();
+            if (args is ["--wired-control-live-countdown"])
+                return WiredControlLiveCountdownTest.Run();
             if (args is ["--live-record", .. var recordingArgs])
                 return RunLiveRecordingAsync(recordingArgs).GetAwaiter().GetResult();
             if (args is ["--protected-preview", .. var protectedPreviewArgs])
@@ -38,6 +80,9 @@ internal static class Program
                 return RunCaptureStatusPreview(statusArgs.FirstOrDefault());
             if (args is ["--ui-preview", var themeName, var surface])
                 return RunUiPreview(themeName, surface);
+            // Use deterministic WPF rendering; native preview checks still use their real HWNDs.
+            RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+            RunInteractionRegressionTests();
             TestWheelCancellationState();
             TestUsbPasteKeyboardState();
             TestReverseControlWorkflowStages();
@@ -696,6 +741,8 @@ internal static class Program
     private static void TestUpdateWindowThemeSwitch()
     {
         var application = new App();
+        typeof(App).GetProperty("IsUiPreviewMode", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(application, true);
         application.InitializeComponent();
         var assembly = typeof(App).Assembly;
         TestHongKongLocalizationSwitch(application, assembly);
@@ -748,7 +795,6 @@ internal static class Program
                 binder: null, args: [release, client, false, true], culture: null) as Window ??
                 throw new InvalidOperationException("Update window was not constructed.");
             window.Owner = owner;
-            ((FluentWindow)window).WindowBackdropType = WindowBackdropType.Acrylic;
             window.Show();
             try
             {
@@ -777,6 +823,7 @@ internal static class Program
                 window.Close();
             }
 
+            ReverseControlCountdownTests.Run(owner);
             TestProtectedContentOverlay(owner, assembly);
             TestProtectedContentNoticeWindow(owner, assembly);
             TestWorkspaceAnimations(application);
@@ -935,7 +982,7 @@ internal static class Program
                 if (window.Owner is not null || window.Topmost)
                     throw new InvalidOperationException(
                         "Developer tools window must be independent and non-topmost.");
-                AssertWindowsOwnOuterCorners(window, "Developer tools");
+                AssertSelfDrawnWindowCorners(window);
                 AssertCatalogCount(windowType, window, "WorkspaceItems", 6);
                 AssertCatalogCount(windowType, window, "WindowItems", 25);
                 foreach (var controlName in new[]
@@ -1023,13 +1070,14 @@ internal static class Program
 
     private static void TestWorkspaceAnimations(Application application)
     {
+        TestWindowWorkAreaPosition(application);
         var app = application as App ??
             throw new InvalidOperationException("Runtime test application is not iPhoneMirror.App.");
         var displayMode = GetApplicationDisplayMode(app);
         try
         {
             SetApplicationDisplayMode(app, ApplicationDisplayMode.Complete);
-            var full = CreateWorkspaceTestWindow(application);
+            var full = CreateWorkspaceTestWindow(application, includeNativePreview: false);
             try
             {
                 TestCompleteWorkspaceAnimation(full);
@@ -1040,7 +1088,7 @@ internal static class Program
             }
 
             SetApplicationDisplayMode(app, ApplicationDisplayMode.Lightweight);
-            var lightweight = CreateWorkspaceTestWindow(application);
+            var lightweight = CreateWorkspaceTestWindow(application, includeNativePreview: false);
             try
             {
                 TestLightweightWorkspaceAnimation(lightweight);
@@ -1049,6 +1097,7 @@ internal static class Program
             {
                 CloseWorkspaceTestWindow(lightweight);
             }
+            TestLightweightStartupWhileDispatcherBusy(application);
         }
         finally
         {
@@ -1056,7 +1105,8 @@ internal static class Program
         }
     }
 
-    private static MainWindow CreateWorkspaceTestWindow(Application application)
+    private static MainWindow CreateWorkspaceTestWindow(Application application,
+        bool includeNativePreview = true)
     {
         var window = new MainWindow
         {
@@ -1072,6 +1122,16 @@ internal static class Program
             throw new MissingMethodException(typeof(MainWindow).FullName, "OnLoaded");
         window.Loaded -= (RoutedEventHandler)Delegate.CreateDelegate(
             typeof(RoutedEventHandler), window, loaded);
+        if (!includeNativePreview)
+        {
+            // The localization/layout matrix does not render video. Remove only the
+            // native child before Show so it cannot initialize a GPU swap chain.
+            // The default smoke tests retain it and exercise native preview separately.
+            var host = (FrameworkElement)window.FindName("MainPreviewHost");
+            if (host.Parent is not System.Windows.Controls.Panel parent)
+                throw new InvalidOperationException("Native preview parent was not found.");
+            parent.Children.Remove(host);
+        }
         application.MainWindow = window;
         window.Show();
         var applyWorkspace = RequireMethod(typeof(MainWindow),
@@ -1125,6 +1185,16 @@ internal static class Program
         window.UpdateLayout();
         var controlPanel = window.FindName("ControlPanel") as FrameworkElement ??
             throw new InvalidOperationException("Workspace control panel was not found.");
+        // Rendering may start late while the UI audit is exercising other WPF
+        // windows. Wait for the actual end state without relaxing its geometry.
+        var settle = Stopwatch.StartNew();
+        while ((leftPanel.ActualWidth < 299 || leftGap.ActualWidth < 17 ||
+                controlPanel.Width < 335 || controlPanel.Visibility != Visibility.Visible) &&
+               settle.Elapsed < TimeSpan.FromSeconds(2))
+        {
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
+            window.UpdateLayout();
+        }
         if (leftPanel.ActualWidth < 299 || leftGap.ActualWidth < 17 ||
             controlPanel.Width < 335 || controlPanel.Visibility != Visibility.Visible)
             throw new InvalidOperationException(
@@ -1374,14 +1444,7 @@ internal static class Program
         if (!notice.IsVisible || !notice.Topmost || notice.Owner != owner)
             throw new InvalidOperationException(
                 "Bluetooth control waiting notice must be visible, topmost, and owned.");
-        var noticeSurface = notice.FindName("WindowSurface") as WpfBorder ??
-            throw new InvalidOperationException(
-                "Bluetooth control notice surface was not found.");
-        if (!notice.AllowsTransparency ||
-            noticeSurface.CornerRadius != new CornerRadius(20) ||
-            noticeSurface.BorderThickness != new Thickness(1))
-            throw new InvalidOperationException(
-                "Bluetooth control notice must use only its self-drawn outer corners.");
+        AssertSelfDrawnWindowCorners(notice);
         var waitingDetail = noticeType.GetProperty("DetailText")?.GetValue(notice) as string;
         if (string.IsNullOrWhiteSpace(waitingDetail) ||
             !waitingDetail.Contains("TEST-PC", StringComparison.Ordinal))
@@ -1396,6 +1459,7 @@ internal static class Program
             throw new InvalidOperationException(
                 "Bluetooth control waiting notice did not expose the complete pairing steps.");
         var waitingHeight = notice.ActualHeight;
+        var waitingWidth = notice.Width;
 
         showConnected.Invoke(null, [owner]);
         if (!notice.IsVisible ||
@@ -1410,7 +1474,7 @@ internal static class Program
                 "Bluetooth control pairing steps remained visible after connection.");
         DrainDispatcher();
         notice.UpdateLayout();
-        if (Math.Abs(notice.Width - 500) > 0.5 ||
+        if (Math.Abs(notice.Width - waitingWidth) > 0.5 ||
             notice.ActualHeight >= waitingHeight)
             throw new InvalidOperationException(
                 $"Bluetooth control confirmation did not retain its original width " +
@@ -1419,8 +1483,11 @@ internal static class Program
         if (notice.Content is not FrameworkElement content)
             throw new InvalidOperationException(
                 "Bluetooth control notice does not expose a measurable content surface.");
-        content.Measure(new Size(notice.Width, double.PositiveInfinity));
-        if (notice.ActualHeight - content.DesiredSize.Height > 12)
+        var frame = (WpfBorder)notice.Template.FindName("RoundedWindowSurface", notice);
+        var frameWidth = frame.Margin.Left + frame.Margin.Right + frame.BorderThickness.Left + frame.BorderThickness.Right;
+        var frameHeight = frame.Margin.Top + frame.Margin.Bottom + frame.BorderThickness.Top + frame.BorderThickness.Bottom;
+        content.Measure(new Size(notice.Width - frameWidth, double.PositiveInfinity));
+        if (notice.ActualHeight - content.DesiredSize.Height - frameHeight > 12)
             throw new InvalidOperationException(
                 "Bluetooth control confirmation retained excess space below its content.");
         if (notice.IsVisible && close.Invoke(null, null) is not true)
@@ -1490,27 +1557,12 @@ internal static class Program
         try
         {
             conflictWindow.UpdateLayout();
-            AssertWindowsOwnOuterCorners(conflictWindow, "Instance conflict window");
+            AssertSelfDrawnWindowCorners(conflictWindow);
         }
         finally
         {
             conflictWindow.Close();
         }
-    }
-
-    private static void AssertWindowsOwnOuterCorners(Window window, string label)
-    {
-        var windowSurface = window.FindName("WindowSurface") as WpfBorder ??
-            throw new InvalidOperationException($"{label} surface was not found.");
-        if (windowSurface.CornerRadius != new CornerRadius(0) ||
-            windowSurface.BorderThickness != new Thickness(0))
-            throw new InvalidOperationException(
-                $"{label} must leave outer corners and borders to Windows.");
-        var cornerPreference = window.GetType().GetProperty(
-            "WindowCornerPreference")?.GetValue(window)?.ToString();
-        if (!string.Equals(cornerPreference, "Round", StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"{label} must use Windows rounded corners.");
     }
 
     private static void TestDeveloperPreviewAction(Application application,
@@ -1572,8 +1624,14 @@ internal static class Program
     private static void AssertPrimaryButtonText(WpfButton button, Color expectedColor)
     {
         button.ApplyTemplate();
-        if (button.Template.FindName("PrimaryLabel", button) is not WpfTextBlock label ||
-            label.Foreground is not SolidColorBrush brush || brush.Color != expectedColor)
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
+        button.UpdateLayout();
+        var access = Visuals(button).OfType<System.Windows.Controls.AccessText>()
+            .FirstOrDefault(text => text.Text == button.Content?.ToString());
+        var label = access is not null
+            ? FindVisualDescendant<WpfTextBlock>(access, _ => true)
+            : FindVisualDescendant<WpfTextBlock>(button, text => text.Text == button.Content?.ToString());
+        if (label?.Foreground is not SolidColorBrush brush || brush.Color != expectedColor)
             throw new InvalidOperationException(
                 $"Primary button text did not use the expected theme color {expectedColor}.");
     }

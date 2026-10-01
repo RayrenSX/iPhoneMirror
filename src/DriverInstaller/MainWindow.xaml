@@ -5,7 +5,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource AppTitle}"
-        Icon="pack://application:,,,/Assets/iPhoneMirror.ico"
+        Icon="pack://application:,,,/iPhoneMirror.Driver;component/Assets/iPhoneMirror.ico"
         Width="1180" Height="760" MinWidth="980" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None" ResizeMode="CanResize"
@@ -17,33 +17,8 @@
                             CornerRadius="20" GlassFrameThickness="0"/>
     </shell:WindowChrome.WindowChrome>
     <Window.Resources>
-        <Style x:Key="DeviceItem" TargetType="ListBoxItem">
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="Margin" Value="0,0,0,6"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Root" Background="{TemplateBinding Background}"
-                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                                CornerRadius="12" Padding="14,12">
-                            <ContentPresenter/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource ControlHoverBrush}"/>
-                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource ComboBorderHoverBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource SelectionBrush}"/>
-                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+        <Style x:Key="DeviceItem" TargetType="ListBoxItem" BasedOn="{StaticResource SelectableListItem}">
+            <Setter Property="Padding" Value="14,12"/>
         </Style>
     </Window.Resources>
 
@@ -59,6 +34,7 @@
         </Grid.RowDefinitions>
 
         <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -67,40 +43,42 @@
                 <Border Width="42" Height="42" CornerRadius="11"
                         Background="{DynamicResource CardBrush}"
                         BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                    <Image Source="pack://application:,,,/Assets/iPhoneMirror.ico"
+                    <Image Source="pack://application:,,,/iPhoneMirror.Driver;component/Assets/iPhoneMirror.ico"
                            Width="32" Height="32"/>
                 </Border>
                 <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                     <TextBlock Text="{DynamicResource AppTitle}" FontSize="22" FontWeight="SemiBold"/>
                     <TextBlock Text="{DynamicResource AppSubtitle}"
-                               Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0"/>
+                               Foreground="{DynamicResource MutedBrush}" FontSize="{StaticResource CaptionFontSize}" Margin="0,3,0,0"/>
                 </StackPanel>
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+            <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource DialogActions}" Margin="-4,4,-4,-4"
                         shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                <ComboBox x:Name="ThemeComboBox"
+                <ComboBox Margin="{StaticResource DialogActionMargin}" x:Name="ThemeComboBox"
                           ItemsSource="{Binding ThemeChoices}" DisplayMemberPath="Label"
                           SelectedValuePath="Value" SelectedValue="{Binding SelectedTheme}"
-                          Width="154" Margin="0,0,10,0" ToolTip="{DynamicResource Appearance}"
+                          Width="154" ToolTip="{DynamicResource Appearance}"
                           PreviewMouseLeftButtonDown="OnThemePreviewMouseLeftButtonDown"/>
-                <Button Content="{DynamicResource ForceDriverCleanup}"
+                <Button Margin="{StaticResource DialogActionMargin}" Content="{DynamicResource ForceDriverCleanup}"
                         Click="OnForceDriverCleanupClick"
                         IsEnabled="{Binding CanInteract}"
                         Visibility="{Binding AdvancedVisibility}"
                         Style="{StaticResource DangerButton}"
                         MinWidth="146" MinHeight="32" Padding="10,5"
-                        FontSize="11" Margin="0,0,8,0"/>
-                <Button Style="{StaticResource IconButton}"
+                        FontSize="11"/>
+                <Button Margin="{StaticResource DialogActionMargin}" Style="{StaticResource IconButton}"
                         Click="OnOpenLogsClick" IsEnabled="{Binding CanInteract}"
                         ToolTip="{DynamicResource OpenLogs}"
-                        Visibility="{Binding AdvancedVisibility}" Margin="0,0,6,0">
+                        Visibility="{Binding AdvancedVisibility}">
                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Open20" FontSize="16"/>
                 </Button>
-                <Button Style="{StaticResource IconButton}"
+                <Button Margin="{StaticResource DialogActionMargin}" Style="{StaticResource IconButton}"
                         Click="OnRefreshClick" IsEnabled="{Binding CanInteract}"
-                        ToolTip="{DynamicResource Refresh}" Margin="0,0,10,0">
+                        ToolTip="{DynamicResource Refresh}">
                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ArrowClockwise20" FontSize="16"/>
                 </Button>
+            </WrapPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <Button Style="{StaticResource TitleBarButton}" Click="OnMinimizeClick"
                         AutomationProperties.Name="{DynamicResource Minimize}"
                         ToolTip="{DynamicResource Minimize}">
@@ -131,13 +109,13 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Margin="2,0,18,0">
-                    <TextBlock Text="{DynamicResource AppleUsbEnvironment}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+                    <TextBlock Text="{DynamicResource AppleUsbEnvironment}" FontSize="{StaticResource CaptionFontSize}" Foreground="{DynamicResource MutedBrush}"/>
                     <TextBlock Text="{Binding AppleStatusText}" Margin="0,5,0,0"
                                FontWeight="SemiBold" TextWrapping="Wrap"/>
                 </StackPanel>
                 <Border Grid.Column="1" Background="{DynamicResource BorderBrush}"/>
                 <StackPanel Grid.Column="2" Margin="18,0">
-                    <TextBlock Text="{DynamicResource CaptureFilterDriver}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+                    <TextBlock Text="{DynamicResource CaptureFilterDriver}" FontSize="{StaticResource CaptionFontSize}" Foreground="{DynamicResource MutedBrush}"/>
                     <TextBlock Text="{Binding LibUsbStatusText}" Margin="0,5,0,0"
                                FontWeight="SemiBold" TextWrapping="Wrap"/>
                 </StackPanel>
@@ -150,7 +128,7 @@
 
         <Border Grid.Row="2" Grid.RowSpan="3" Style="{StaticResource Section}"
                 Visibility="{Binding SimpleVisibility}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Center"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                         MaxWidth="620">
                 <TextBlock Text="{DynamicResource PrepareTitle}" FontSize="22" FontWeight="SemiBold"
                            HorizontalAlignment="Center"/>
@@ -160,19 +138,19 @@
                 <ComboBox ItemsSource="{Binding ConnectedDevices}"
                           SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
                           DisplayMemberPath="SelectionText"
-                          MinWidth="320" Height="38" Margin="0,0,0,12"
+                          MinWidth="320" MinHeight="40" Margin="0,0,0,12"
                           IsEnabled="{Binding CanInteract}"
                           PreviewMouseLeftButtonDown="OnConnectedDevicePreviewMouseLeftButtonDown"
                           SelectionChanged="OnConnectedDeviceSelectionChanged"/>
                 <Button Content="{DynamicResource InstallAll}" Style="{StaticResource PrimaryButton}"
                         Click="OnQuickInstallClick" IsEnabled="{Binding CanQuickInstall}"
-                        Height="54" MinWidth="250" FontSize="16" HorizontalAlignment="Center"/>
+                        MinHeight="54" MinWidth="250" FontSize="16" HorizontalAlignment="Center"/>
                 <TextBlock Text="{Binding SelectedDevice.DetailText}"
-                           Foreground="{DynamicResource MutedTextBrush}" FontSize="10"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
                            HorizontalAlignment="Center" Margin="0,8,0,0"/>
                 <TextBlock Text="{Binding OperationStatus}" Foreground="{DynamicResource MutedBrush}"
                            TextWrapping="Wrap" TextAlignment="Center" Margin="0,18,0,0"/>
-            </StackPanel>
+            </StackPanel></ScrollViewer>
         </Border>
 
         <Grid Grid.Row="4">
@@ -180,7 +158,7 @@
                 <Binding Path="AdvancedVisibility"/>
             </Grid.Visibility>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="360"/>
+                <ColumnDefinition Width="0.8*"/>
                 <ColumnDefinition Width="16"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
@@ -207,15 +185,16 @@
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <Grid>
-                                        <TextBlock Text="{Binding SelectionText}" FontWeight="SemiBold"
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock ToolTip="{Binding SelectionText}" Text="{Binding SelectionText}" FontWeight="SemiBold"
                                                    TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock Text="{Binding ConnectionText}" HorizontalAlignment="Right"
-                                                   Foreground="{DynamicResource MutedBrush}" FontSize="10"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding ConnectionText}" HorizontalAlignment="Right"
+                                                   Foreground="{DynamicResource MutedBrush}" FontSize="{StaticResource CaptionFontSize}"/>
                                     </Grid>
                                     <TextBlock Grid.Row="1" Text="{Binding DriverText}" Margin="0,5,0,0"
-                                               Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
-                                    <TextBlock Grid.Row="2" Text="{Binding DetailText}" Margin="0,5,0,0"
-                                               Foreground="{DynamicResource MutedTextBrush}" FontFamily="Consolas" FontSize="9"
+                                               Foreground="{DynamicResource MutedBrush}" FontSize="{StaticResource CaptionFontSize}"/>
+                                    <TextBlock Grid.Row="2" Text="{Binding DetailText}" ToolTip="{Binding DetailText}" Margin="0,5,0,0"
+                                               Foreground="{DynamicResource MutedTextBrush}" FontFamily="{StaticResource CodeFontFamily}" FontSize="{StaticResource CaptionFontSize}"
                                                TextTrimming="CharacterEllipsis"/>
                                 </Grid>
                             </DataTemplate>
@@ -225,7 +204,7 @@
             </Border>
 
             <Border Grid.Column="2" Style="{StaticResource Section}">
-                <Grid>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="18"/>
@@ -234,9 +213,12 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <StackPanel>
-                        <TextBlock Text="{DynamicResource CurrentDevice}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+                        <TextBlock Text="{DynamicResource CurrentDevice}" FontSize="{StaticResource CaptionFontSize}" Foreground="{DynamicResource MutedBrush}"/>
                         <TextBlock Text="{Binding SelectedDevice.DisplayName}"
                                    FontSize="20" FontWeight="SemiBold" Margin="0,5,0,0"/>
+                        <TextBlock Text="{Binding SelectedDevice.ParentStatusText}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                        <Button Content="{DynamicResource ParentManagerTitle}" Click="OnManageParentClick"
+                                IsEnabled="{Binding CanManageParent}" HorizontalAlignment="Left" Margin="0,10,0,0"/>
                     </StackPanel>
 
                     <Grid Grid.Row="2">
@@ -251,7 +233,7 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="{DynamicResource DeviceInstance}" Foreground="{DynamicResource MutedBrush}"/>
                         <TextBlock Grid.Column="1" Text="{Binding SelectedDevice.InstanceId}"
-                                   FontFamily="Consolas" TextWrapping="Wrap"/>
+                                   FontFamily="{StaticResource CodeFontFamily}" TextWrapping="Wrap"/>
                         <TextBlock Grid.Row="1" Text="{DynamicResource ConnectionStatus}" Foreground="{DynamicResource MutedBrush}"
                                    Margin="0,11,0,0"/>
                         <TextBlock Grid.Row="1" Grid.Column="1"
@@ -288,18 +270,19 @@
                         <Button Grid.Column="4" Content="{DynamicResource Uninstall}" Style="{StaticResource DangerButton}"
                                 Click="OnUninstallClick" IsEnabled="{Binding CanUninstallDriver}"/>
                     </Grid>
-                </Grid>
+                </Grid></ScrollViewer>
             </Border>
         </Grid>
 
         <Grid Grid.Row="6">
-            <TextBlock Text="{DynamicResource DriverChangeNotice}"
-                       Foreground="{DynamicResource MutedBrush}" FontSize="10"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="{DynamicResource DriverChangeNotice}" TextWrapping="Wrap"
+                       Foreground="{DynamicResource MutedBrush}" FontSize="{StaticResource CaptionFontSize}"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="12,0,0,0">
                 <Button Content="{Binding AdvancedButtonText}" Click="OnAdvancedClick"
                         MinHeight="28" Padding="12,4" FontSize="11"/>
                 <TextBlock Text="libusb-win32 1.2.6.0" VerticalAlignment="Center"
-                           Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="12,0,0,0"/>
+                           Foreground="{DynamicResource MutedBrush}" FontSize="{StaticResource CaptionFontSize}" Margin="12,0,0,0"/>
             </StackPanel>
         </Grid>
     </Grid>

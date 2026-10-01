@@ -24,18 +24,17 @@
 > 官方构建目前仅支持 Windows x64；Windows ARM64 因 USB 内核驱动和无线运行库缺少 ARM64
 > 版本而不受支持。
 
-> [!TIP]
-> ### 特别致谢：Linux 移植
->
-> 特别感谢 **[@furruka](https://github.com/furruka)** 基于本项目开展 Linux 原生移植，
-> 并维护了独立的 [Linux 适配分支](https://github.com/furruka/iPhoneMirror)。这项工作
-> 将 iPhoneMirror 的 USB 与 AirPlay 投屏链路向 Linux 平台延伸，针对 GUI、渲染、音频、
-> 视频解码、USB 通信和设备发现等 Windows 专有部分进行原生适配，同时尽力保持上游
-> 协议层与策略层行为一致。
->
-> 该移植仍在积极开发中，当前尚未提供可用的 Linux 发布包；具体进度、构建方式和已知限制
-> 请以 [Linux 适配说明](https://github.com/furruka/iPhoneMirror/blob/linux-port/docs/LINUX_PORT.md)
-> 为准。再次感谢 furruka 的投入与贡献，也欢迎 Linux 用户关注并支持这项工作。
+## 社区移植与特别致谢
+
+感谢社区开发者将 iPhoneMirror 带到更多平台！以下移植项目由各自作者独立维护，
+欢迎关注、体验并支持他们的工作。
+
+| 平台 | 贡献者 | 适配方向 | 项目与说明 |
+|---|---|---|---|
+| **Linux** | **[@furruka](https://github.com/furruka)** | Linux 原生界面、音视频与设备通信适配 | [项目仓库](https://github.com/furruka/iPhoneMirror) · [适配说明](https://github.com/furruka/iPhoneMirror/blob/linux-port/docs/LINUX_PORT.md) |
+| **HarmonyOS（鸿蒙 PC）** | **[@zhangziqizZ](https://github.com/zhangziqizZ)**<br>哔哩哔哩：**@Fantasy_zzq** | 面向 HarmonyOS NEXT / 2in1 的 USB、AirPlay 投屏与原生音视频适配 | [项目仓库](https://github.com/zhangziqizZ/iPhoneMirror) · [适配说明](https://github.com/zhangziqizZ/iPhoneMirror/blob/main/docs/移植说明.md) |
+
+各平台的功能范围、发布包、构建方式及已知限制，请以对应项目的 README 和适配说明为准。
 
 ## 社区交流
 
@@ -45,12 +44,13 @@ QQ群号：**1050045279**
 
 ## 项目描述
 
-当前最新正式版为 `v1.8.3`。iPhoneMirror 是一个面向 Windows 10/11 x64 的本地
+公开下载版本以 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 为准；
+当前工作区源码版本为 `1.8.4-test4`，不等同于已发布版本。iPhoneMirror 是一个面向 Windows 10/11 x64 的本地
 iPhone/iPad 投屏与蓝牙反向控制工具，目标是
 在不依赖云端中转的情况下，将 USB 有线采集和局域网 AirPlay 接收统一到同一套
 预览、音频、截图、独立窗口、OBS 和多设备会话能力中。
 
-项目由四个清晰边界组成：C++ 核心负责 Apple 私有 USB 协议、QuickTime/CoreMedia
+项目按职责划分：C++ 核心负责 Apple 私有 USB 协议、QuickTime/CoreMedia
 解析、H.264 解码、D3D11 渲染和 WASAPI 音频；WPF 主程序负责设备列表、会话控制
 和用户界面；独立无线宿主负责 AirPlay 协议与解码，并通过有界命名管道传递媒体帧；
 驱动安装、修复和卸载由单独的 `iPhoneMirror.Driver.exe` 负责，主程序只读检查
@@ -59,6 +59,9 @@ iPhone/iPad 投屏与蓝牙反向控制工具，目标是
 > [!TIP]
 > 从安装驱动到 USB、AirPlay、多设备、独立窗口和 OBS 的完整步骤，请阅读
 > [完整使用教程](docs/USER_GUIDE.md)。
+
+文档入口：[文档索引](docs/README.md) · [开发与测试](docs/DEVELOPMENT.md) ·
+[架构说明](docs/ARCHITECTURE.md)。
 
 ## 核心亮点
 
@@ -151,6 +154,7 @@ iPhoneMirror 的蓝牙控制受 iOS 辅助触控和 Windows 蓝牙外设模式�
 | 预览 | 主窗口、无标题独立窗口、全屏、横竖屏、等比例缩放、按型号匹配屏幕圆角 |
 | OBS | 独立窗口可直接使用 Window Capture，无重复的专用窗口入口 |
 | 蓝牙反向控制 | 按设备绑定 BLE HID 鼠标/键盘、系统导航和可配置全局快捷键 |
+| USB/无线反向控制 | 独立 CoreDevice 桥接器；需开发者模式、匹配 DDI 和设备 HID 服务验证，详见教程 |
 | 画面调节 | 仅本地预览的亮度、对比度、饱和度和伽马 |
 | 工具 | 截图、强制刷新、快捷键、实时日志、简体中文、繁体中文（香港）和英文界面 |
 | 驱动 | 有线开始投屏前按当前设备严格检查；异常时打开独立驱动管理器 |
@@ -342,12 +346,13 @@ OBS 30.1+ 还可以通过“应用程序音频捕获”选择 `iPhoneMirror.exe`
 
 ### GitHub Actions 与 USB 桥接器
 
-Windows 工作流使用 GitHub 托管的 `windows-latest` runner。构建时会自动拉取并构建
-[RayrenSX/iUsbBridge](https://github.com/RayrenSX/iUsbBridge)，不要求 runner 预先存在
-本地兄弟目录。若本地已有工作副本，可设置 `IPHONE_MIRROR_USB_BRIDGE_ROOT` 覆盖默认路径。
+Windows 工作流使用 GitHub 托管的 `windows-latest` runner。构建使用仓库内固定的
+`scripts/usb-bridge-recipe` 配方，打包当前 `tools/usb_touch_bridge.py` 和 `tools/iostouch`，
+不会克隆上游最新分支。配方来源见 [SOURCE.md](scripts/usb-bridge-recipe/SOURCE.md)。
+`IPHONE_MIRROR_USB_BRIDGE_ROOT` 可覆盖兼容的配方目录，不要求存在本地兄弟仓库。
 
-Actions 失败时，在日志中搜索 `Cloning USB touch bridge`、`USB touch bridge build failed`
-或 `USB touch bridge runtime`，可分别定位下载、编译和运行时载荷校验阶段。
+Actions 失败时，在日志中搜索 `USB touch bridge build failed` 或 `USB touch bridge runtime`，
+并结合 Python 依赖安装日志定位构建和运行时载荷校验阶段。
 如果失败发生在 `Set up MSYS2 UCRT64 for UxPlay` 且提示 `Operation too slow`，通常是
 MSYS2 镜像临时超时；工作流已关闭全量更新，只安装构建所需包，重新运行即可。
 
@@ -356,6 +361,7 @@ MSYS2 镜像临时超时；工作流已关闭全量更新，只安装构建所�
 - Windows 10/11 x64
 - Visual Studio Build Tools（含 MSVC、Windows SDK、CMake）
 - .NET 10 SDK 与 Windows Desktop 工作负载
+- Python 3.13 x64，用于构建反控桥接器
 - MSYS2 UCRT64：CMake、Ninja、UCRT64 工具链、GStreamer（base、good、bad、libav）、
   libplist 和 OpenSSL，用于构建随包提供的 UxPlay 备用接收端
 
@@ -371,6 +377,9 @@ cd iPhoneMirror
 outputs/iPhoneMirror/iPhoneMirror.exe
 outputs/iPhoneMirror/iPhoneMirror.Driver.exe
 outputs/iPhoneMirror/iPhoneMirror.Core.dll
+outputs/iPhoneMirror/iUsbBridge.exe
+outputs/iPhoneMirror/iUsbBridge.runtime.json
+outputs/iPhoneMirror/_internal/
 outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.dll
 outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.Admin.exe
 outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
@@ -379,12 +388,14 @@ outputs/iPhoneMirror/Wireless/UxPlay/iPhoneMirror.UxPlayHost.exe
 outputs/iPhoneMirror/Wireless/UxPlay/uxplay.exe
 ```
 
-`outputs/iPhoneMirror` 是内置 .NET/WPF 依赖的单文件便携版。安装器使用
+`outputs/iPhoneMirror` 的主程序和驱动管理器各自将 .NET/WPF 依赖打包进 EXE；
+整个便携目录仍包含原生库、无线组件及桥接运行时，必须完整保留。安装器使用
 `outputs/iPhoneMirror.Installer`，主程序和驱动管理器共享外置运行时 DLL，
 从而减少安装包下载体积。
 
 默认构建内置 FFmpeg 8.1.2 媒体输出运行时，录制及 RTMP/SRT/WHIP 推流可以
-开箱即用。仅在明确需要最小体积、并接受依赖系统 FFmpeg 时生成精简版：
+开箱即用。仅在明确需要最小体积时生成精简版；应用仍要求外部 FFmpeg 匹配固定 SHA-256，
+不能用任意系统版本替代，缺少可信运行时时相关输出不可用：
 
 ```powershell
 .\build.ps1 -Configuration Release -OmitMediaOutputRuntime
@@ -395,10 +406,11 @@ outputs/iPhoneMirror/Wireless/UxPlay/uxplay.exe
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.8.3 -GenerateSbom
+./scripts/package_release.ps1 -GenerateSbom
 ```
 
-正式生成待上传资产时传入 `-UpdateReleaseManifest`，发布脚本会同步
+脚本默认读取项目版本并检查主程序和驱动管理器版本一致。完整参数与专项测试见
+[开发与测试指南](docs/DEVELOPMENT.md)。正式生成待上传资产时传入 `-UpdateReleaseManifest`，发布脚本会同步
 `updates/releases.json` 中对应版本的文件大小和 SHA256，确保 GitHub API
 不可用时备用更新源仍能完成校验。普通本地打包默认不修改在线发布清单。
 
@@ -414,9 +426,9 @@ Inno Setup 6.7.3 及其简体中文、繁体中文翻译会按固定 SHA256 下�
 
 ```text
 iPhone/iPad
-  ├─ USB / QuickTime ─► H.264 / PCM decode ─┐
-  └─ AirPlay ─► WirelessHost ─► I420 / PCM ─┤
-                                              └─► native session
+  ├─ USB / QuickTime ─► H.264 / PCM decode ─────────────┐
+  └─ AirPlay ─► WirelessHost / UxPlayHost ─► I420 / PCM ─┤
+                                                     └─► native session
                                                    ├─► D3D11 main/detached/fullscreen preview
                                                    ├─► screenshot
                                                    ├─► WASAPI audio
@@ -426,6 +438,8 @@ iPhone/iPad
 ```
 
 - [协议说明](docs/PROTOCOL.md)
+- [文档总索引](docs/README.md)
+- [开发与测试指南](docs/DEVELOPMENT.md)
 - [软件架构](docs/ARCHITECTURE.md)
 - [D3D11 渲染](docs/D3D11_RENDERING.md)
 - [设备圆角配置](docs/DEVICE_CORNER_PROFILES.md)
@@ -434,7 +448,7 @@ iPhone/iPad
 
 ## 当前限制
 
-- 内建录制与 RTMP、SRT、WebRTC/WHIP 推流在源音频和对应编码器可用时会同时输出画面和声音；音频或编码器暂不可用时仍可立即输出纯视频。MP4、RTMP 和 SRT 使用 AAC，WHIP 使用 Opus。
+- 内建录制与 RTMP、SRT、WebRTC/WHIP 推流在源音频和对应编码器可用时同时输出画面和声音；未选择麦克风时，音频不可用仍可输出纯视频。可选麦克风混音要求可用音频管线。MP4、RTMP 和 SRT 使用 AAC，WHIP 使用 Opus。
 - 主程序尚未商业签名。
 - 外部采集驱动的干净 Win10/Win11 安装矩阵仍需更广泛验证。
 - QuickTime Screen Capture 并非 Apple 公开、稳定的第三方 API。

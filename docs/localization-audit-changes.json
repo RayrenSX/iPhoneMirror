@@ -1,0 +1,6738 @@
+{
+  "App/DeviceBindingBound": {
+    "categories": [
+      "错误翻译"
+    ],
+    "reasons": [
+      "调用条件为身份为空；英文 Bound 与实际未绑定状态相反"
+    ],
+    "before": {
+      "en-US": "Bound"
+    },
+    "locations": [
+      "src/App/Windows/DeviceBindingWindow.xaml.cs:61",
+      "src/App/Windows/DeviceBindingWindow.xaml.cs:63",
+      "src/App/Windows/DeviceBindingWindow.xaml.cs:65"
+    ]
+  },
+  "App/ShortcutSettingsWirelessControl": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "菜单和快捷键实际调用控制功能，不是开始投屏"
+    ],
+    "before": {
+      "zh-CN": "无线投屏",
+      "zh-HK": "無線投屏",
+      "en-US": "Wireless mirroring"
+    },
+    "locations": [
+      "src/App/Windows/ShortcutSettingsWindow.xaml.cs:223"
+    ]
+  },
+  "App/ShortcutSettingsWiredControl": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "菜单和快捷键实际调用控制功能，不是开始投屏"
+    ],
+    "before": {
+      "zh-CN": "有线投屏",
+      "zh-HK": "有線投屏",
+      "en-US": "Wired mirroring"
+    },
+    "locations": [
+      "src/App/Windows/ShortcutSettingsWindow.xaml.cs:224"
+    ]
+  },
+  "App/IndependentWindowWirelessProjection": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "菜单和快捷键实际调用控制功能，不是开始投屏"
+    ],
+    "before": {
+      "zh-CN": "无线投屏",
+      "zh-HK": "無線投屏",
+      "en-US": "Wireless projection"
+    },
+    "locations": [
+      "src/App/Windows/NativePreviewWindow.cs:949"
+    ]
+  },
+  "App/IndependentWindowWiredProjection": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "菜单和快捷键实际调用控制功能，不是开始投屏"
+    ],
+    "before": {
+      "zh-CN": "有线投屏",
+      "zh-HK": "有線投屏",
+      "en-US": "Wired projection"
+    },
+    "locations": [
+      "src/App/Windows/NativePreviewWindow.cs:943"
+    ]
+  },
+  "App/UsbControlPrerequisite": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "信任对象是电脑，不是 iPhone；同时统一有线控制名称"
+    ],
+    "before": {
+      "zh-CN": "请通过 USB 连接并在设备上信任一台 iPhone 或 iPad 后，再启用 USB 控制",
+      "zh-HK": "請透過 USB 連接並在裝置上信任一部 iPhone 或 iPad 後，再啟用 USB 控制",
+      "en-US": "Connect an iPhone or iPad by USB and trust this computer before enabling USB control"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:361"
+    ]
+  },
+  "App/UsbControlFailureDeviceNotFound": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "补齐英文缺少的保持解锁、与电脑位于同一局域网条件"
+    ],
+    "before": {
+      "en-US": "The Apple network-pairing session for this device was not found. Connect by cable once, enable “Sync with this iPhone over Wi-Fi” in Apple Devices or iTunes, and try again."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2717"
+    ]
+  },
+  "App/DeviceBindingBluetoothDescription": {
+    "categories": [
+      "语义不一致",
+      "术语不一致"
+    ],
+    "reasons": [
+      "补齐英文遗漏的“下一步”操作",
+      "统一反向控制正式名称"
+    ],
+    "before": {
+      "en-US": "Click “Connect device” to temporarily advertise a Bluetooth HID service. On the iPhone/iPad, open Settings → Bluetooth and pair with this computer, then choose the HID device in the waiting window. Only the binding is saved; reverse control is not started.",
+      "zh-CN": "点击“连接设备”后，电脑会临时广播 Bluetooth HID 服务。请在 iPhone/iPad 的“设置”→“蓝牙”中选择此电脑完成配对，再点击等待窗口中的“下一步”选择 HID 设备。完成后只保存绑定，不会启动反控。"
+    },
+    "locations": [
+      "src/App/Windows/DeviceBindingWindow.xaml:24"
+    ]
+  },
+  "App/MediaCastSpeedUnsupportedBody": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "参数已包含 x，避免显示 2x 倍速"
+    ],
+    "before": {
+      "zh-CN": "当前投屏视频不支持 {0} 倍速，已恢复到 1x 播放。",
+      "zh-HK": "目前投放影片不支援 {0} 倍速，已恢復至 1x 播放。"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:4841",
+      "src/App/MainWindow.xaml.cs:4848"
+    ]
+  },
+  "App/DeviceBindingBind": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "绑定选择设备"
+    },
+    "locations": [
+      "src/App/Windows/DeviceBindingWindow.xaml:22",
+      "src/App/Windows/DeviceBindingWindow.xaml:23"
+    ]
+  },
+  "App/DeviceBindingRenameTitle": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "修改的是应用内档案名，不是实体设备名称"
+    ],
+    "before": {
+      "zh-CN": "重命名设备",
+      "zh-HK": "重新命名裝置"
+    },
+    "locations": [
+      "src/App/Windows/DeviceBindingWindow.xaml.cs:127"
+    ]
+  },
+  "App/DeviceBindingModelUnknown": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "未知信息不应暗示正在读取"
+    ],
+    "before": {
+      "zh-CN": "型号信息待获取",
+      "zh-HK": "型號資料待取得"
+    },
+    "locations": [
+      "src/App/Windows/DeviceBindingWindow.xaml.cs:27"
+    ]
+  },
+  "App/DeviceBindingSubtitle": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "以真实设备档案管理 USB、AirPlay 和 Bluetooth 身份绑定。",
+      "zh-HK": "以真實裝置檔案管理 USB、AirPlay 和 Bluetooth 身份綁定。",
+      "en-US": "Manage USB, AirPlay, and Bluetooth identities for real device profiles."
+    },
+    "locations": [
+      "src/App/Windows/DeviceBindingWindow.xaml:18"
+    ]
+  },
+  "App/DeviceBindingProfileDescription": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "为此档案选择并管理三种连接身份。",
+      "zh-HK": "為此檔案選擇並管理三種連線身份。",
+      "en-US": "Choose and manage the three connection identities for this profile."
+    },
+    "locations": [
+      "src/App/Windows/DeviceBindingWindow.xaml:21"
+    ]
+  },
+  "App/DeviceBindingBluetoothWaitingStatus": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "等待设备订阅 HID 服务",
+      "zh-HK": "等待裝置訂閱 HID 服務",
+      "en-US": "Waiting for device to subscribe to HID service"
+    },
+    "locations": [
+      "src/App/Windows/BluetoothConnectionWindow.xaml:8"
+    ]
+  },
+  "App/BluetoothControlPromptShortcutFormat": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "补齐释放对象"
+    ],
+    "before": {
+      "en-US": "Press {0} to release"
+    },
+    "locations": [
+      "src/App/Windows/BluetoothControlNoticeWindow.xaml.cs:71"
+    ]
+  },
+  "App/DeviceCountFormat": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "使用数量标签，适用于单数与复数"
+    ],
+    "before": {
+      "en-US": "{0} source(s)"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:738"
+    ]
+  },
+  "App/BluetoothControlPromptAutoCloseFormat": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "秒使用单位 s，适用于倒计时 1 秒"
+    ],
+    "before": {
+      "en-US": "Closes automatically in {0} seconds"
+    },
+    "locations": [
+      "src/App/Windows/BluetoothControlNoticeWindow.xaml.cs:85"
+    ]
+  },
+  "App/ControlCloseCountdown": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "秒使用单位 s，适用于倒计时 1 秒"
+    ],
+    "before": {
+      "en-US": "This window closes in {0} seconds"
+    },
+    "locations": [
+      "src/App/Windows/ReverseControlStatusWindow.xaml.cs:35"
+    ]
+  },
+  "App/ControlTotalDuration": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "与倒计时单位保持一致"
+    ],
+    "before": {
+      "en-US": "Connection time: {0:0.0} seconds"
+    },
+    "locations": [
+      "src/App/Windows/ReverseControlStatusWindow.xaml.cs:37"
+    ]
+  },
+  "App/CloseOtherInstancesFailedFormat": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "数量可能大于 1，避免固定单数 instance/it"
+    ],
+    "before": {
+      "en-US": "{0} iPhoneMirror instance could not be closed. Close it from the taskbar or Task Manager, then try again."
+    },
+    "locations": [
+      "src/App/Windows/InstanceConflictWindow.xaml.cs:109"
+    ]
+  },
+  "App/CloseOtherInstances": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "操作针对其他全部实例"
+    ],
+    "before": {
+      "en-US": "Close other window"
+    },
+    "locations": [
+      "src/App/Windows/InstanceConflictWindow.xaml:94"
+    ]
+  },
+  "App/ClosingOtherInstances": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "操作针对其他全部实例"
+    ],
+    "before": {
+      "en-US": "Safely closing the other iPhoneMirror window…"
+    },
+    "locations": [
+      "src/App/Windows/InstanceConflictWindow.xaml:81"
+    ]
+  },
+  "App/InstanceConflictHint": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "en-US": "Closing the other window continues this launch. Closing this window leaves the active mirroring session untouched."
+    },
+    "locations": [
+      "src/App/Windows/InstanceConflictWindow.xaml:61"
+    ]
+  },
+  "App/DiagnosticsCleanedFormat": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "用数量标签兼容 0、1 和多个文件"
+    ],
+    "before": {
+      "en-US": "Cleanup complete: removed {0} files and freed {1}; {2} in-use or inaccessible files were skipped."
+    },
+    "locations": [
+      "src/App/Windows/AboutWindow.xaml.cs:214"
+    ]
+  },
+  "App/WirelessSettingsConnectedImpactFormat": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "消除 device(s) 表达并保留应用后断开的条件"
+    ],
+    "before": {
+      "en-US": "{0} wireless device(s) are connected and will all be disconnected."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:3722"
+    ]
+  },
+  "App/WirelessProfileDisconnectConfirmFormat": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "用数量标签兼容单复数"
+    ],
+    "before": {
+      "en-US": "{0} wireless device(s) are connected. Applying “{1}” will disconnect all wireless mirroring and restart the receiver. Continue?"
+    }
+  },
+  "App/StatusDefaultSettings": {
+    "categories": [
+      "错误翻译"
+    ],
+    "reasons": [
+      "Native 表示原始分辨率，不是默认设置"
+    ],
+    "before": {
+      "zh-HK": "預設 · 60 fps"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:191",
+      "src/App/ViewModels/MainViewModel.cs:1128",
+      "src/App/ViewModels/MainViewModel.cs:5966"
+    ]
+  },
+  "App/VideoPreferencesApplied": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "未重连与码流未改变不是同一含义"
+    ],
+    "before": {
+      "en-US": "Local rendering settings applied (source stream unchanged)"
+    },
+    "locations": [
+      "src/App/Interop/NativeCore.cs:954",
+      "src/App/Interop/NativeCore.cs:967",
+      "src/App/Interop/NativeCore.cs:1069",
+      "src/App/ViewModels/MainViewModel.cs:4336"
+    ]
+  },
+  "App/CheckingForUpdates": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "明确当前为更新检查状态"
+    ],
+    "before": {
+      "en-US": "Connecting to the update services…"
+    },
+    "locations": [
+      "src/App/Windows/AboutWindow.xaml.cs:117"
+    ]
+  },
+  "App/DeveloperOutputDescription": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "补齐虚拟摄像头含义"
+    ],
+    "before": {
+      "en-US": "Recording, streaming, and camera"
+    },
+    "locations": [
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:47",
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:124"
+    ]
+  },
+  "App/ControlBluetoothPairingTitle": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "阶段要求为配对，同时适用于 iPhone/iPad"
+    ],
+    "before": {
+      "zh-CN": "请在手机和 Windows 上完成蓝牙连接",
+      "zh-HK": "請在手機及 Windows 上完成藍牙連線",
+      "en-US": "Complete Bluetooth pairing on your phone and Windows"
+    },
+    "locations": [
+      "src/App/Windows/ReverseControlStatusWindow.xaml:59"
+    ]
+  },
+  "App/ControlStageSwitchingBluetoothPeripheral": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "与实际切换阶段及中文一致"
+    ],
+    "before": {
+      "en-US": "Preparing Bluetooth peripheral mode"
+    }
+  },
+  "App/ControlStagePreparingDeviceSupport": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "补齐准备对象为文件"
+    ],
+    "before": {
+      "en-US": "Preparing device support"
+    }
+  },
+  "App/ControlStageConnecting": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "en-US": "Connecting control"
+    }
+  },
+  "App/BluetoothControlReportMapChangedTitle": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "蓝牙控制需要刷新配对",
+      "en-US": "Bluetooth control needs pairing refresh"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1702",
+      "src/App/Windows/BluetoothControlNoticeWindow.xaml.cs:35"
+    ]
+  },
+  "App/BluetoothControlReportMapChangedStatus": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "en-US": "Re-pair required"
+    },
+    "locations": [
+      "src/App/Windows/BluetoothControlNoticeWindow.xaml.cs:83"
+    ]
+  },
+  "App/ShortcutSettingsReset": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "en-US": "Restore default"
+    },
+    "locations": [
+      "src/App/Windows/ShortcutSettingsWindow.xaml:32",
+      "src/App/Windows/ShortcutSettingsWindow.xaml:33"
+    ]
+  },
+  "App/ShortcutSettingsSaveFailed": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "en-US": "Could not save the keyboard shortcut."
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:578"
+    ]
+  },
+  "App/BluetoothLandscapeMouseLeft90": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "左90度",
+      "zh-HK": "左90度",
+      "en-US": "Left 90 degrees"
+    }
+  },
+  "App/BluetoothLandscapeMouseRight90": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "右90度",
+      "zh-HK": "右90度",
+      "en-US": "Right 90 degrees"
+    }
+  },
+  "App/BluetoothLandscapeMouseLeft90Reverse": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "左90度（反）",
+      "zh-HK": "左90度（反）",
+      "en-US": "Left 90 degrees (reversed)"
+    }
+  },
+  "App/BluetoothLandscapeMouseRight90Reverse": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "右90度（反）",
+      "zh-HK": "右90度（反）",
+      "en-US": "Right 90 degrees (reversed)"
+    }
+  },
+  "App/UsbModeDemoLabel": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "A 演示模式(推荐)"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:299"
+    ]
+  },
+  "App/UsbModeAirPlayLabel": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "B AirPlay(实验)"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:301"
+    ]
+  },
+  "App/UsbModeAirPlayNotice": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-HK": "需要自訂時，連續按一下右下角版本號 5 次開啟進階模式。自訂 HPD1 尺寸存在風險，錯誤參數可能導致黑畫面、裁切或 USB 重新連接失敗。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:302"
+    ]
+  },
+  "App/AdvancedUsbResolutionHelp": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "en-US": "Enter a value such as 1920×1080. Apply ignores normal preview presets; disabling advanced mode restores them."
+    },
+    "locations": [
+      "src/App/Windows/AdvancedSettingsWindow.xaml:22"
+    ]
+  },
+  "App/WirelessBackendUnavailableFormat": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "面向最终用户提供可执行的重新安装建议"
+    ],
+    "before": {
+      "zh-CN": "{0} 无线接收组件缺失，请重新构建发布包。",
+      "zh-HK": "{0} 無線接收元件遺失，請重新建構發佈套件。",
+      "en-US": "The {0} wireless receiver component is missing. Rebuild the release package."
+    },
+    "locations": [
+      "src/App/Services/WirelessReceiverController.cs:162",
+      "src/App/ViewModels/MainViewModel.cs:3690"
+    ]
+  },
+  "App/WirelessReceiverMissing": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "面向最终用户提供可执行的重新安装建议"
+    ],
+    "before": {
+      "zh-CN": "无线接收组件缺失，请重新构建发布包。",
+      "zh-HK": "無線接收元件遺失，請重新建構發佈套件。",
+      "en-US": "The wireless receiver component is missing. Rebuild the release package."
+    },
+    "locations": [
+      "src/App/Interop/NativeCore.cs:704"
+    ]
+  },
+  "App/MediaCastReceiverMissing": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "面向最终用户提供可执行的重新安装建议"
+    ],
+    "before": {
+      "zh-CN": "视频投放组件缺失，请重新构建发布包。",
+      "zh-HK": "影片投放元件遺失，請重新建構發佈套件。",
+      "en-US": "The video casting component is missing. Rebuild the release package."
+    },
+    "locations": [
+      "src/App/Interop/NativeCore.cs:721",
+      "src/App/Services/MediaCastReceiverController.cs:83"
+    ]
+  },
+  "App/MediaCastTitle": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "功能也支持 DLNA，不能仅标为 AirPlay"
+    ],
+    "before": {
+      "zh-HK": "影片 App AirPlay 播放"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml:1987"
+    ]
+  },
+  "App/MediaCastReady": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "功能也支持 DLNA，不能仅标为 AirPlay"
+    ],
+    "before": {
+      "zh-HK": "影片 AirPlay 接收端已就緒"
+    },
+    "locations": [
+      "src/App/Interop/NativeCore.cs:720",
+      "src/App/Services/MediaCastReceiverController.cs:86"
+    ]
+  },
+  "App/MediaCastStarting": {
+    "categories": [
+      "语义不一致",
+      "可读性问题"
+    ],
+    "reasons": [
+      "功能也支持 DLNA，不能仅标为 AirPlay",
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-HK": "正在啟動影片 AirPlay 接收端...",
+      "zh-CN": "正在启动视频投放接收端...",
+      "en-US": "Starting the video casting receiver..."
+    },
+    "locations": [
+      "src/App/Services/MediaCastReceiverController.cs:86"
+    ]
+  },
+  "App/MediaCastWindowTitle": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "功能也支持 DLNA，不能仅标为 AirPlay"
+    ],
+    "before": {
+      "zh-HK": "iPhoneMirror 影片 App AirPlay 播放"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:6790"
+    ]
+  },
+  "App/MediaCastWaitingVideo": {
+    "categories": [
+      "语义不一致",
+      "可读性问题"
+    ],
+    "reasons": [
+      "功能也支持 DLNA，不能仅标为 AirPlay",
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-HK": "等待影片 App AirPlay 播放內容...",
+      "zh-CN": "等待视频 App 投放内容...",
+      "en-US": "Waiting for a video app to cast content..."
+    },
+    "locations": [
+      "src/App/MainWindow.xaml:1431"
+    ]
+  },
+  "App/MediaCastStopped": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "功能也支持 DLNA，不能仅标为 AirPlay"
+    ],
+    "before": {
+      "zh-HK": "影片 App AirPlay 播放已停止"
+    },
+    "locations": [
+      "src/App/Interop/NativeCore.cs:753",
+      "src/App/MainWindow.xaml.cs:2843",
+      "src/App/MainWindow.xaml.cs:2950"
+    ]
+  },
+  "App/MediaCastPlayReceived": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "功能也支持 DLNA，不能仅标为 AirPlay"
+    ],
+    "before": {
+      "zh-HK": "已收到影片 App AirPlay 播放請求"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:2847"
+    ]
+  },
+  "App/MediaCastDeviceName": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "功能也支持 DLNA，不能仅标为 AirPlay"
+    ],
+    "before": {
+      "zh-HK": "影片 App AirPlay 播放"
+    },
+    "locations": [
+      "src/App/Models/DeviceViewModel.cs:45",
+      "src/App/Models/DeviceViewModel.cs:128"
+    ]
+  },
+  "App/AboutDescription": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "关于页沿用投屏、推流正式术语"
+    ],
+    "before": {
+      "zh-CN": "低延迟 iPhone 屏幕投射、录制、直播与虚拟摄像头。",
+      "zh-HK": "低延遲 iPhone 螢幕投射、錄製、直播與虛擬攝影機。"
+    },
+    "locations": [
+      "src/App/Windows/AboutWindow.xaml:69"
+    ]
+  },
+  "App/UsbControlOff": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制未启用",
+      "zh-HK": "USB 控制未啟用",
+      "en-US": "USB control is off"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1133"
+    ]
+  },
+  "App/UsbControlStopping": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "正在关闭 USB 控制",
+      "zh-HK": "正在關閉 USB 控制",
+      "en-US": "Stopping USB control"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:381"
+    ]
+  },
+  "App/UsbControlRetry": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "重试 USB 控制",
+      "zh-HK": "重試 USB 控制",
+      "en-US": "Retry USB control"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:383"
+    ]
+  },
+  "App/UsbControlDisable": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "关闭 USB 控制",
+      "zh-HK": "關閉 USB 控制",
+      "en-US": "Disable USB control"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:384"
+    ]
+  },
+  "App/ReverseControlUsbConnecting": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "正在连接 USB 控制",
+      "zh-HK": "正在連接 USB 控制",
+      "en-US": "Connecting USB control"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2433",
+      "src/App/ViewModels/MainViewModel.cs:2574",
+      "src/App/ViewModels/MainViewModel.cs:2624",
+      "src/App/ViewModels/MainViewModel.cs:2959"
+    ]
+  },
+  "App/ReverseControlUsbEnabledDirect": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制已启用（直接 HID）",
+      "zh-HK": "USB 控制已啟用（直接 HID）",
+      "en-US": "USB control enabled (direct HID)"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2462",
+      "src/App/ViewModels/MainViewModel.cs:2591",
+      "src/App/ViewModels/MainViewModel.cs:3001"
+    ]
+  },
+  "App/ReverseControlUsbEnabled": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制已启用",
+      "zh-HK": "USB 控制已啟用",
+      "en-US": "USB control enabled"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2464",
+      "src/App/ViewModels/MainViewModel.cs:2591",
+      "src/App/ViewModels/MainViewModel.cs:3003"
+    ]
+  },
+  "App/ReverseControlUsbConnected": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制已连接（设备认证状态需以实测为准）",
+      "zh-HK": "USB 控制已連接（裝置驗證狀態需以實測為準）",
+      "en-US": "USB control connected (device authentication status should be verified in practice)"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2465",
+      "src/App/ViewModels/MainViewModel.cs:3004"
+    ]
+  },
+  "App/ReverseControlUsbFailedFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制连接失败：{0}",
+      "zh-HK": "USB 控制連線失敗：{0}",
+      "en-US": "USB control connection failed: {0}"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2486",
+      "src/App/ViewModels/MainViewModel.cs:2607",
+      "src/App/ViewModels/MainViewModel.cs:2976",
+      "src/App/ViewModels/MainViewModel.cs:3023"
+    ]
+  },
+  "App/ReverseControlUsbStopping": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "正在关闭 USB 控制",
+      "zh-HK": "正在關閉 USB 控制",
+      "en-US": "Stopping USB control"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2871"
+    ]
+  },
+  "App/ReverseControlUsbOff": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制未启用",
+      "zh-HK": "USB 控制未啟用",
+      "en-US": "USB control is off"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2882",
+      "src/App/ViewModels/MainViewModel.cs:2938"
+    ]
+  },
+  "App/ReverseControlUsbStopFailedFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制关闭失败：{0}",
+      "zh-HK": "USB 控制關閉失敗：{0}",
+      "en-US": "USB control shutdown failed: {0}"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2888"
+    ]
+  },
+  "App/UsbControlOperationFailedFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制操作失败：{0}",
+      "zh-HK": "USB 控制操作失敗：{0}",
+      "en-US": "USB control operation failed: {0}"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:1314",
+      "src/App/MainWindow.xaml.cs:5492"
+    ]
+  },
+  "App/UsbControlTitle": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同功能统一为有线控制；USB 作为连接协议的说明予以保留"
+    ],
+    "before": {
+      "zh-CN": "USB 控制",
+      "zh-HK": "USB 控制",
+      "en-US": "USB control"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:5494"
+    ]
+  },
+  "App/UsbControlDisableWireless": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为无线控制"
+    ],
+    "before": {
+      "zh-CN": "关闭无线反控",
+      "zh-HK": "關閉無線反向控制",
+      "en-US": "Disable wireless reverse control"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:384"
+    ]
+  },
+  "App/ReverseControlWirelessEnabledDirect": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为无线控制"
+    ],
+    "before": {
+      "zh-CN": "无线反控已启用（直接 HID）",
+      "zh-HK": "無線反向控制已啟用（直接 HID）",
+      "en-US": "Wireless reverse control enabled (direct HID)"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2189",
+      "src/App/ViewModels/MainViewModel.cs:2331"
+    ]
+  },
+  "App/ReverseControlWirelessEnabled": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为无线控制"
+    ],
+    "before": {
+      "zh-CN": "无线反控已启用",
+      "zh-HK": "無線反向控制已啟用",
+      "en-US": "Wireless reverse control enabled"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2190",
+      "src/App/ViewModels/MainViewModel.cs:2332"
+    ]
+  },
+  "App/ReverseControlWirelessConnected": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为无线控制"
+    ],
+    "before": {
+      "zh-CN": "无线反控已连接",
+      "zh-HK": "無線反向控制已連接",
+      "en-US": "Wireless reverse control connected"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2190"
+    ]
+  },
+  "App/ReverseControlWirelessFailedFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为无线控制"
+    ],
+    "before": {
+      "zh-CN": "无线反控连接失败：{0}",
+      "zh-HK": "無線反向控制連線失敗：{0}",
+      "en-US": "Wireless reverse-control connection failed: {0}"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2206",
+      "src/App/ViewModels/MainViewModel.cs:2356"
+    ]
+  },
+  "App/ReverseControlWirelessOff": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为无线控制"
+    ],
+    "before": {
+      "zh-CN": "无线反控未启用",
+      "zh-HK": "無線反向控制未啟用",
+      "en-US": "Wireless reverse control is off"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2289",
+      "src/App/ViewModels/MainViewModel.cs:2309",
+      "src/App/ViewModels/MainViewModel.cs:2391"
+    ]
+  },
+  "App/ReverseControlWirelessStopFailedFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为无线控制"
+    ],
+    "before": {
+      "zh-CN": "无线反控关闭失败：{0}",
+      "zh-HK": "無線反向控制關閉失敗：{0}",
+      "en-US": "Wireless reverse-control shutdown failed: {0}"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2396"
+    ]
+  },
+  "App/WirelessControlOperationFailedFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为无线控制"
+    ],
+    "before": {
+      "zh-CN": "无线反控操作失败：{0}",
+      "zh-HK": "無線反向控制操作失敗：{0}",
+      "en-US": "Wireless reverse-control operation failed: {0}"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:1335",
+      "src/App/MainWindow.xaml.cs:5511"
+    ]
+  },
+  "App/StartBluetoothControl": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为蓝牙控制"
+    ],
+    "before": {
+      "zh-CN": "启用蓝牙反向控制",
+      "zh-HK": "啟用藍牙反向控制"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:353"
+    ]
+  },
+  "App/StopBluetoothControl": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为蓝牙控制"
+    ],
+    "before": {
+      "zh-CN": "关闭蓝牙反向控制",
+      "zh-HK": "關閉藍牙反向控制"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:353"
+    ]
+  },
+  "App/BluetoothControlOff": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为蓝牙控制"
+    ],
+    "before": {
+      "zh-CN": "蓝牙反向控制未启用",
+      "zh-HK": "藍牙反向控制未啟用"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1132"
+    ]
+  },
+  "App/BluetoothControlConnected": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为蓝牙控制"
+    ],
+    "before": {
+      "zh-CN": "iPhone/iPad 已连接蓝牙反向控制",
+      "zh-HK": "iPhone/iPad 已連接藍牙反向控制"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1582",
+      "src/App/ViewModels/MainViewModel.cs:2016"
+    ]
+  },
+  "App/BluetoothControlPromptTitle": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为蓝牙控制"
+    ],
+    "before": {
+      "zh-CN": "蓝牙反向控制已开启",
+      "zh-HK": "藍牙反向控制已啟用"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:3126",
+      "src/App/Windows/BluetoothControlNoticeWindow.xaml.cs:36"
+    ]
+  },
+  "App/BluetoothControlStartFailedFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "状态及操作标签统一为蓝牙控制"
+    ],
+    "before": {
+      "zh-CN": "蓝牙反控启动失败：{0}",
+      "zh-HK": "藍牙反向控制啟動失敗：{0}",
+      "en-US": "Bluetooth reverse-control startup failed: {0}"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:5474"
+    ]
+  },
+  "App/DeviceBindingBluetoothWaitingDescription": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称"
+    ],
+    "before": {
+      "zh-CN": "请在 iPhone/iPad 打开“设置”→“蓝牙”，在设备列表中选择此电脑并完成配对。配对成功后返回这里，点击“下一步”选择刚刚连接的 HID 设备。此流程只保存设备绑定，不会启动蓝牙反控。"
+    },
+    "locations": [
+      "src/App/Windows/BluetoothConnectionWindow.xaml:8"
+    ]
+  },
+  "App/ReverseControlUnknownError": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-CN": "反控桥接器报告未知错误。",
+      "zh-HK": "反控橋接器報告未知錯誤。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2779"
+    ]
+  },
+  "App/ReverseControlCheckingEnvironmentFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-CN": "正在检查{0}反控的开发者环境",
+      "zh-HK": "正在檢查{0}反控的開發者環境"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2736"
+    ]
+  },
+  "App/UsbControlFailureUnsupportedIos": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称"
+    ],
+    "before": {
+      "zh-CN": "设备拒绝了媒体流认证（9021），且没有可用的直接 Universal HID 触控通道。请重启 iPhone 后重试；若仍失败，请使用蓝牙反控。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2689"
+    ]
+  },
+  "App/UsbControlFailureWirelessPairingRequired": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-CN": "当前 Windows 帐户尚未完成此设备的无线 CoreDevice 配对。请先通过 USB 连接并解锁 iPhone，完成一次 USB 反控初始化后再试无线反控。",
+      "zh-HK": "目前 Windows 帳戶尚未完成此裝置的無線 CoreDevice 配對。請先透過 USB 連接並解鎖 iPhone，完成一次 USB 反控初始化後再試無線反控。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2695"
+    ]
+  },
+  "App/UsbControlFailureGateUnavailable": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-CN": "设备未确认 CoreDevice 触控认证已开启。为避免输入被系统静默丢弃，反控未启动。",
+      "zh-HK": "裝置未確認 CoreDevice 觸控驗證已開啟。為避免輸入被系統靜默丟棄，反控未啟動。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2704"
+    ]
+  },
+  "App/UsbControlFailureTouchService": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-CN": "设备暂未提供触控反控服务。请保持设备解锁并信任此电脑后重试；若仍失败，请改用蓝牙反控或无线反控。",
+      "zh-HK": "裝置暫未提供觸控反控服務。請保持裝置解鎖並信任此電腦後重試；若仍失敗，請改用藍牙反控或無線反控。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2711"
+    ]
+  },
+  "App/UsbControlFailureUnknown": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称"
+    ],
+    "before": {
+      "zh-CN": "USB 反控桥接器返回了无法识别的错误。请查看诊断日志后重试。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2726"
+    ]
+  },
+  "App/ReverseControlConnectingWireless": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称"
+    ],
+    "before": {
+      "zh-CN": "正在连接无线反控桥接器"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2158",
+      "src/App/ViewModels/MainViewModel.cs:2169"
+    ]
+  },
+  "App/ReverseControlWirelessDisconnected": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称"
+    ],
+    "before": {
+      "zh-CN": "无线反控桥接通道已断开"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2256"
+    ]
+  },
+  "App/ReverseControlBridgeNotReady": {
+    "categories": [
+      "术语不一致",
+      "缺失翻译"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": "当前设备的反控桥接器尚未就绪。",
+      "zh-HK": "目前裝置的反向控制橋接器尚未就緒。",
+      "en-US": "The reverse-control bridge for the current device is not ready."
+    },
+    "locations": [
+      "src/App/Services/UsbTouchBridgeHost.cs:117",
+      "src/App/ViewModels/MainViewModel.cs:1359"
+    ]
+  },
+  "App/ReverseControlNoticeErrorBadge": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-CN": "反控未能继续",
+      "zh-HK": "反控未能繼續"
+    },
+    "locations": [
+      "src/App/Windows/CaptureStatusNoticeWindow.xaml.cs:35"
+    ]
+  },
+  "App/BluetoothMouseSettingsTitle": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-CN": "蓝牙反控鼠标设置",
+      "zh-HK": "藍牙反控滑鼠設定"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml:1841"
+    ]
+  },
+  "App/BluetoothMouseSettingsSaveFailed": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一反向控制正式名称",
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-CN": "蓝牙反控鼠标设置保存失败",
+      "zh-HK": "藍牙反控滑鼠設定儲存失敗"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:584"
+    ]
+  },
+  "App/UsbProjectionModeRestarting": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在按新模式重新连接当前有线设备...",
+      "zh-HK": "正在按新模式重新連接目前有線裝置...",
+      "en-US": "Reconnecting the current USB device with the new mode..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:945"
+    ]
+  },
+  "App/DecoderStatusDetecting": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "解码器状态：正在读取实际解码链路...",
+      "zh-HK": "解碼器狀態：正在讀取實際解碼鏈路...",
+      "en-US": "Decoder status: detecting the active decode path..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5540"
+    ]
+  },
+  "App/VideoPipelineRestarting": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在按新的视频管线设置重新连接当前设备...",
+      "zh-HK": "正在按新的影片管線設定重新連接目前裝置...",
+      "en-US": "Reconnecting the current device with the new video pipeline..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:4625"
+    ]
+  },
+  "App/WirelessStarting": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在启动 AirPlay 接收端...",
+      "en-US": "Starting the AirPlay receiver..."
+    },
+    "locations": [
+      "src/App/Services/WirelessReceiverController.cs:166",
+      "src/App/ViewModels/MainViewModel.cs:5781"
+    ]
+  },
+  "App/WirelessConnecting": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "AirPlay 设备正在连接...",
+      "zh-HK": "AirPlay 裝置正在連接...",
+      "en-US": "An AirPlay device is connecting..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5783"
+    ]
+  },
+  "App/WirelessStopping": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在停止 AirPlay 接收端...",
+      "zh-HK": "正在停止 AirPlay 接收端...",
+      "en-US": "Stopping the AirPlay receiver..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5785"
+    ]
+  },
+  "App/MediaCastLoadingVideo": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在加载投放的视频...",
+      "zh-HK": "正在載入投放的影片...",
+      "en-US": "Loading the cast video..."
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:3068",
+      "src/App/MainWindow.xaml.cs:3371",
+      "src/App/MainWindow.xaml.cs:3465",
+      "src/App/MainWindow.xaml.cs:3567",
+      "src/App/MainWindow.xaml.cs:3651",
+      "src/App/MainWindow.xaml.cs:3750",
+      "src/App/MainWindow.xaml.cs:3889",
+      "src/App/MainWindow.xaml.cs:4969"
+    ]
+  },
+  "App/MediaOutputChecking": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在检测 FFmpeg 输出能力...",
+      "zh-HK": "正在偵測 FFmpeg 輸出能力...",
+      "en-US": "Checking FFmpeg output capabilities..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:6291"
+    ]
+  },
+  "App/MediaOutputStopping": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在停止输出并完成文件或推流收尾...",
+      "zh-HK": "正在停止輸出並完成檔案或串流收尾...",
+      "en-US": "Stopping output and finalizing the file or stream..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:6602"
+    ]
+  },
+  "App/VirtualCameraChecking": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在检测虚拟摄像头能力...",
+      "zh-HK": "正在偵測虛擬攝影機能力...",
+      "en-US": "Checking virtual camera support..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1131"
+    ]
+  },
+  "App/VirtualCameraInstalling": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在安装虚拟摄像头组件...",
+      "zh-HK": "正在安裝虛擬攝影機元件...",
+      "en-US": "Installing the virtual camera component..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:6429"
+    ]
+  },
+  "App/VirtualCameraUpdating": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在更新虚拟摄像头组件...",
+      "zh-HK": "正在更新虛擬攝影機元件...",
+      "en-US": "Updating the virtual camera component..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:6429"
+    ]
+  },
+  "App/VirtualCameraUninstalling": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "zh-CN": "正在卸载虚拟摄像头组件...",
+      "zh-HK": "正在解除安裝虛擬攝影機元件...",
+      "en-US": "Uninstalling the virtual camera component..."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:6468"
+    ]
+  },
+  "App/DriverManagerOpened": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "已開啟驅動程式管理工具"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5755"
+    ]
+  },
+  "App/DriverManagerOpenedAutomatically": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "偵測到有線裝置驅動程式異常，已自動開啟驅動程式管理工具"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5754"
+    ]
+  },
+  "App/DriverManagerLaunchFailedFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "無法開啟驅動程式管理工具：{0}"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5759"
+    ]
+  },
+  "App/ReverseControlCaptureMuxReady": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "正在透過與投屏共存的 USB 通道連接裝置"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2742"
+    ]
+  },
+  "App/UsbControlFailureWiredDeviceNotFound": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "未能在 USB 連線中找到此裝置的控制通道。投屏運行時系統可能暫時無法存取裝置：請先停止投屏再啟動反向控制，或重新插拔數據線、解鎖手機並確認已信任此電腦後重試。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2718"
+    ]
+  },
+  "App/CaptureNoticeUsbHint": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "請重新插拔傳輸線後重試"
+    },
+    "locations": [
+      "src/App/Windows/CaptureStatusNoticeWindow.xaml.cs:40"
+    ]
+  },
+  "App/ReverseControlDetails": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "查看詳細資訊"
+    }
+  },
+  "App/BluetoothClientBindingHint": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "首次使用此投屏裝置時，請確認清單中的藍牙用戶端就是目前裝置。之後切換分頁會自動使用此綁定。"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1821",
+      "src/App/Windows/BluetoothClientBindingWindow.xaml:34"
+    ]
+  },
+  "App/DeviceProfileGuidanceWiredBody": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "偵測到新的有線 iPhone/iPad。為了讓有線投屏、無線投屏和反向控制始終對應同一台真實裝置，請現在建立裝置檔案。\n\n請保持裝置解鎖並完成「信任此電腦」。點選「繼續」會開啟裝置綁定器，確認或管理此裝置檔案；點選「取消」亦可稍後從「反向控制」選單開啟。"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:6544"
+    ]
+  },
+  "App/DeviceProfileGuidanceWirelessBody": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "偵測到新的 AirPlay 無線裝置。為了讓無線投屏能夠配對對應的有線裝置並啟用反向控制，請現在建立裝置檔案。\n\n請確保手機和電腦處於同一區域網絡，並保持裝置名稱可識別。點選「繼續」會開啟裝置綁定器，選擇並綁定此 AirPlay 裝置；點選「取消」亦可稍後從「反向控制」選單開啟。"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:6543"
+    ]
+  },
+  "App/CaptureHandshaking": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "正在建立螢幕鏡像會話…"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5783"
+    ]
+  },
+  "App/CaptureNoPingRecovery": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "裝置已連接，但長時間沒有回應螢幕鏡像握手。\n\n請重新啟動 iPhone 或 iPad，然後使用 Apple 原裝或 MFi 認證傳輸線重新連接後重試。\n\n重試時請保持裝置解鎖。"
+    }
+  },
+  "App/CaptureNoPingCableAction": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "更換 Apple 原裝或 MFi 認證傳輸線"
+    },
+    "locations": [
+      "src/App/Windows/CaptureRecoveryWindow.xaml:79"
+    ]
+  },
+  "App/CaptureUsbConfigurationRecovery": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "未能切換 iPhone 或 iPad 的 USB 螢幕鏡像設定。\n\n請依序嘗試：\n1. 拔下傳輸線，等待幾秒後重新插入\n2. 重新啟動 iPhone 或 iPad 後再連接\n3. 更換 Apple 原裝或 MFi 認證傳輸線\n\n重新連接並開始螢幕鏡像時，請保持裝置處於解鎖狀態。"
+    }
+  },
+  "App/CaptureActionReconnectDevice": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "請保持裝置解鎖，重新插拔傳輸線後再試。"
+    },
+    "locations": [
+      "src/App/Services/CaptureErrorGuidance.cs:107",
+      "src/App/Services/CaptureErrorGuidance.cs:117",
+      "src/App/Services/CaptureErrorGuidance.cs:127",
+      "src/App/Services/CaptureErrorGuidance.cs:138",
+      "src/App/Windows/CaptureStatusNoticeWindow.xaml.cs:131"
+    ]
+  },
+  "App/CaptureActionVideoRetry": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "請停止螢幕鏡像後重新開始；仍無畫面時重新連接傳輸線。"
+    },
+    "locations": [
+      "src/App/Services/CaptureErrorGuidance.cs:120",
+      "src/App/Windows/CaptureStatusNoticeWindow.xaml.cs:112"
+    ]
+  },
+  "App/StopSessionReleased": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "螢幕鏡像已停止，會話資源已釋放"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:4723"
+    ]
+  },
+  "App/StopUsbRestoreWarningFormat": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "螢幕鏡像已停止，會話資源已釋放；但未能確認 iPhone 已還原普通 USB 設定。診斷：{0}"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:4724"
+    ]
+  },
+  "App/ReadDeviceInfoFailed": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "讀取裝置資訊失敗"
+    },
+    "locations": [
+      "src/App/Interop/NativeCore.cs:688",
+      "src/App/Interop/NativeCore.cs:690"
+    ]
+  },
+  "App/AboutSubtitle": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "應用程式資訊、更新和診斷"
+    },
+    "locations": [
+      "src/App/Windows/AboutWindow.xaml:34"
+    ]
+  },
+  "App/LicenseInformation": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "許可證資訊"
+    },
+    "locations": [
+      "src/App/Windows/AboutWindow.xaml:92"
+    ]
+  },
+  "App/DeveloperDriverDescription": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "開啟獨立驅動程式管理器"
+    },
+    "locations": [
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:48",
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:125"
+    ]
+  },
+  "App/DeveloperAboutDescription": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "版本、診斷和更新資訊"
+    },
+    "locations": [
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:49",
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:126"
+    ]
+  },
+  "App/DeveloperAdvancedSettingsDescription": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "解析度輸入驗證"
+    },
+    "locations": [
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:53"
+    ]
+  },
+  "App/DeveloperPromptDescription": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "標準確認和資訊版面"
+    },
+    "locations": [
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:61"
+    ]
+  },
+  "App/DeveloperUpdateDescription": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "版本資訊和發佈說明"
+    },
+    "locations": [
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:74"
+    ]
+  },
+  "App/UsbProjectionModeTitle": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "投屏统一为 mirroring，视频应用投放仍使用 casting"
+    ],
+    "before": {
+      "en-US": "USB projection protocol"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml:1683"
+    ]
+  },
+  "App/UsbModeDetailsTitle": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "投屏统一为 mirroring，视频应用投放仍使用 casting"
+    ],
+    "before": {
+      "en-US": "USB projection mode details"
+    },
+    "locations": [
+      "src/App/Windows/UsbProjectionModeInfoWindow.xaml:6",
+      "src/App/Windows/UsbProjectionModeInfoWindow.xaml:25"
+    ]
+  },
+  "App/ImageAdjustmentsBusy": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "投屏统一为 mirroring，视频应用投放仍使用 casting"
+    ],
+    "before": {
+      "en-US": "Another projection setting is being applied. Try again when it finishes."
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:4421",
+      "src/App/ViewModels/MainViewModel.cs:6090",
+      "src/App/ViewModels/MainViewModel.cs:6091",
+      "src/App/ViewModels/MainViewModel.cs:6156",
+      "src/App/ViewModels/MainViewModel.cs:6157",
+      "src/App/ViewModels/MainViewModel.cs:6274"
+    ]
+  },
+  "App/NavSettingsDescription": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "投屏统一为 mirroring，视频应用投放仍使用 casting"
+    ],
+    "before": {
+      "en-US": "Projection settings"
+    },
+    "locations": [
+      "src/App/MainWindow.xaml:756"
+    ]
+  },
+  "App/DeveloperSettings": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "投屏统一为 mirroring，视频应用投放仍使用 casting"
+    ],
+    "before": {
+      "en-US": "Projection settings"
+    },
+    "locations": [
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:46",
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:114"
+    ]
+  },
+  "App/DeveloperProjectionSettings": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "投屏统一为 mirroring，视频应用投放仍使用 casting"
+    ],
+    "before": {
+      "en-US": "Projection settings window"
+    },
+    "locations": [
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:70",
+      "src/App/Windows/DeveloperToolsWindow.xaml.cs:150"
+    ]
+  },
+  "DriverInstaller/UnplugTitle": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "請拔除傳輸線"
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:510"
+    ]
+  },
+  "DriverInstaller/UnplugBody": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "驅動程式更改已經完成。現在請拔除這部 iPhone 的傳輸線，等待裝置從清單中消失。"
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:510"
+    ]
+  },
+  "DriverInstaller/Unplugged": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一香港繁体中文既有用语"
+    ],
+    "before": {
+      "zh-HK": "已拔除傳輸線"
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:510"
+    ]
+  },
+  "DriverInstaller/AppleSupportPreparing": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Preparing Apple USB support..."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:210"
+    ]
+  },
+  "DriverInstaller/AppleSupportStartingService": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Starting Apple Mobile Device Service..."
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:145"
+    ]
+  },
+  "DriverInstaller/AppleSupportInstallingStore": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Installing or repairing Apple USB support from Microsoft Store..."
+    }
+  },
+  "DriverInstaller/AppleSupportDownloadingCompatibility": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Downloading the driver component from Apple Software Update..."
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:172",
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:220"
+    ]
+  },
+  "DriverInstaller/AppleSupportExtractingCompatibility": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Extracting the service component from the official Apple installer..."
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:246"
+    ]
+  },
+  "DriverInstaller/AppleSupportInstallingCompatibility": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Installing the Apple Mobile Device Service compatibility component..."
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:187",
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:221",
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:766"
+    ]
+  },
+  "DriverInstaller/AppleSupportVerifying": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Verifying the Apple USB driver and service..."
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:271"
+    ]
+  },
+  "DriverInstaller/RepairingParent": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Repairing the parent driver for {0}..."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:315"
+    ]
+  },
+  "DriverInstaller/InstallingDriver": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Installing the capture driver for {0}..."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:345"
+    ]
+  },
+  "DriverInstaller/RepairingDriver": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Repairing the capture driver for {0}..."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:345"
+    ]
+  },
+  "DriverInstaller/WaitingForDevice": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Waiting for an Apple device..."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:385"
+    ]
+  },
+  "DriverInstaller/Operating": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号",
+      "参数为 Install/Repair/Uninstall 基本形式，避免组成 Install device 的假进行时"
+    ],
+    "before": {
+      "en-US": "{0} {1}...",
+      "zh-CN": "正在{0} {1}…",
+      "zh-HK": "正在{0} {1}…"
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:430"
+    ]
+  },
+  "DriverInstaller/WaitingReconnect": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Waiting for the device to reconnect..."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:540"
+    ]
+  },
+  "DriverInstaller/WaitingDisconnect": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "统一进行中状态的省略号"
+    ],
+    "before": {
+      "en-US": "Waiting for the device to disconnect..."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:540"
+    ]
+  },
+  "App/UpdateVerified": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一校验算法显示名称"
+    ],
+    "before": {
+      "zh-CN": "下载完成，SHA256 校验通过。",
+      "en-US": "Download complete. SHA256 verification passed."
+    },
+    "locations": [
+      "src/App/Windows/UpdateWindow.xaml.cs:113"
+    ]
+  },
+  "App/UpdateDownloadedNoChecksum": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "统一校验算法显示名称"
+    ],
+    "before": {
+      "zh-CN": "下载完成；此 Release 未提供 SHA256 校验值。",
+      "en-US": "Download complete. This release did not provide a SHA256 value."
+    },
+    "locations": [
+      "src/App/Windows/UpdateWindow.xaml.cs:114"
+    ]
+  },
+  "DriverInstaller/ConfirmOperationBody": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "{0} 是操作名，不是设备信息"
+    ],
+    "before": {
+      "en-US": "The following device will be changed: {0}\n\n{1}\n{2}\n\nOnly this device's libusb0 filter is changed. Apple's official driver is not replaced. Windows may request administrator approval."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:417"
+    ]
+  },
+  "DriverInstaller/DevicesReady": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "用数量标签兼容单复数"
+    ],
+    "before": {
+      "en-US": "Detected {0} device(s); all mirroring drivers are ready."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:597"
+    ]
+  },
+  "DriverInstaller/DevicesMissing": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "用数量标签兼容单复数"
+    ],
+    "before": {
+      "en-US": "Detected {0} device(s); click the button to install missing drivers."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:598"
+    ]
+  },
+  "DriverInstaller/GroupCopiedBody": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "zh-CN": "QQ群号 1050045279 已复制。请在 QQ 中搜索并申请加入。"
+    },
+    "locations": [
+      "src/DriverInstaller/Windows/FailureHelpWindow.xaml.cs:26"
+    ]
+  },
+  "DriverInstaller/Retry": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "相同重新检测动作与 Recheck 按钮一致"
+    ],
+    "before": {
+      "en-US": "Check again"
+    },
+    "locations": [
+      "src/DriverInstaller/Windows/FailureHelpWindow.xaml:90"
+    ]
+  },
+  "DriverInstaller/DeviceReady": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "补齐全部驱动就绪含义"
+    ],
+    "before": {
+      "en-US": "The mirroring driver for {0} is ready."
+    },
+    "locations": [
+      "src/DriverInstaller/MainWindow.xaml.cs:338"
+    ]
+  },
+  "DriverInstaller/AisiBody": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "补齐官方下载来源"
+    ],
+    "before": {
+      "en-US": "Download Aisi Screen Mirroring, complete one normal wired mirroring session, then return and check again."
+    },
+    "locations": [
+      "src/DriverInstaller/Windows/FailureHelpWindow.xaml:63"
+    ]
+  },
+  "DriverInstaller/HistoricalDevice": {
+    "categories": [
+      "可读性问题"
+    ],
+    "reasons": [
+      "优化自然表达和可读性"
+    ],
+    "before": {
+      "en-US": "Historical device"
+    },
+    "locations": [
+      "src/DriverInstaller/Models/DriverModels.cs:27"
+    ]
+  },
+  "App/ControlReadyDescription": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "控制就绪默认提示改为运行时查找资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/ControlStatusService.cs:292"
+    ]
+  },
+  "App/ControlCheckingBluetoothBinding": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/ControlStatusService.cs:213",
+      "src/App/ViewModels/MainViewModel.cs:1485"
+    ]
+  },
+  "App/ControlBluetoothStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1491",
+      "src/App/ViewModels/MainViewModel.cs:1601"
+    ]
+  },
+  "App/ControlDeviceNotReady": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1491",
+      "src/App/ViewModels/MainViewModel.cs:2152",
+      "src/App/ViewModels/MainViewModel.cs:2422"
+    ]
+  },
+  "App/ControlBluetoothBindingRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1498"
+    ]
+  },
+  "App/ControlBluetoothBindingAdvice": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1499"
+    ]
+  },
+  "App/ControlBluetoothCancelled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1505"
+    ]
+  },
+  "App/ControlPrerequisiteCancelled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1505",
+      "src/App/ViewModels/MainViewModel.cs:2154",
+      "src/App/ViewModels/MainViewModel.cs:2424"
+    ]
+  },
+  "App/ControlCheckingBluetoothSupport": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1550"
+    ]
+  },
+  "App/ControlSwitchingBluetoothMode": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1551"
+    ]
+  },
+  "App/ControlBluetoothReadyToPair": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1574"
+    ]
+  },
+  "App/ControlCheckingHidChannel": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:1997"
+    ]
+  },
+  "App/ControlBluetoothDisconnected": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2004"
+    ]
+  },
+  "App/ControlBluetoothTouchFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2010"
+    ]
+  },
+  "App/ControlHidRouteFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2011"
+    ]
+  },
+  "App/ControlCheckingDeviceBinding": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/ControlStatusService.cs:214",
+      "src/App/ViewModels/MainViewModel.cs:2149",
+      "src/App/ViewModels/MainViewModel.cs:2420"
+    ]
+  },
+  "App/ControlWirelessStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2152"
+    ]
+  },
+  "App/ControlWirelessCancelled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2154"
+    ]
+  },
+  "App/ControlCheckingDevicePermissions": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2157",
+      "src/App/ViewModels/MainViewModel.cs:2430"
+    ]
+  },
+  "App/ControlConnectingChannel": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2170",
+      "src/App/ViewModels/MainViewModel.cs:2456"
+    ]
+  },
+  "App/ControlWirelessStartupDisconnected": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2181"
+    ]
+  },
+  "App/ControlInitializingInput": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2185",
+      "src/App/ViewModels/MainViewModel.cs:2458"
+    ]
+  },
+  "App/ControlPreparingInput": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2186",
+      "src/App/ViewModels/MainViewModel.cs:2459"
+    ]
+  },
+  "App/ControlWirelessStartupFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2197"
+    ]
+  },
+  "App/ControlReconnectingChannel": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2255"
+    ]
+  },
+  "App/ControlWirelessRecoveryDisconnected": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2327"
+    ]
+  },
+  "App/ControlWirelessRecoveryFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2359"
+    ]
+  },
+  "App/ControlWiredStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2422",
+      "src/App/ViewModels/MainViewModel.cs:2428"
+    ]
+  },
+  "App/ControlWiredCancelled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2424"
+    ]
+  },
+  "App/ControlBindingNotFound": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2428"
+    ]
+  },
+  "App/ControlPreparingSupportFiles": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2443"
+    ]
+  },
+  "App/ControlStageFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "en-US": "Unable to start reverse control"
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2483"
+    ]
+  },
+  "App/ControlAutoReconnectingChannel": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2572",
+      "src/App/ViewModels/MainViewModel.cs:2623"
+    ]
+  },
+  "App/ControlRecoveryFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2606",
+      "src/App/ViewModels/MainViewModel.cs:2978",
+      "src/App/ViewModels/MainViewModel.cs:3021"
+    ]
+  },
+  "App/ControlOperationFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2808",
+      "src/App/ViewModels/MainViewModel.cs:2810"
+    ]
+  },
+  "App/ControlCheckConnectionAdvice": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/ControlStatusService.cs:349"
+    ]
+  },
+  "App/ControlWirelessRetryFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "自动重连计数提示迁入三语格式资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2300"
+    ]
+  },
+  "App/ControlWiredRetryFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "自动重连计数提示迁入三语格式资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:2958"
+    ]
+  },
+  "App/TouchBridgeStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:136"
+    ]
+  },
+  "App/TouchBridgeNotReady": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:186",
+      "src/App/Services/DirectUsbInputBridge.cs:203",
+      "src/App/Services/DirectUsbInputBridge.cs:429",
+      "src/App/Services/DirectUsbInputBridge.cs:442",
+      "src/App/Services/DirectUsbInputBridge.cs:465",
+      "src/App/Services/DirectUsbInputBridge.cs:473",
+      "src/App/Services/DirectUsbInputBridge.cs:497",
+      "src/App/Services/DirectUsbInputBridge.cs:503",
+      "src/App/Services/DirectUsbInputBridge.cs:523",
+      "src/App/Services/DirectUsbInputBridge.cs:529"
+    ]
+  },
+  "App/TouchBridgeInvalidBatch": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:189"
+    ]
+  },
+  "App/TouchBridgeInvalidPointId": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:193"
+    ]
+  },
+  "App/TouchBridgeInvalidCoordinates": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:196"
+    ]
+  },
+  "App/TouchBridgeOutputClosed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:318"
+    ]
+  },
+  "App/TouchBridgeAuthenticationRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:371"
+    ]
+  },
+  "App/TouchBridgeReportedError": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:402"
+    ]
+  },
+  "App/TouchBridgeInvalidOutput": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:409"
+    ]
+  },
+  "App/TouchBridgeNotStarted": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:415"
+    ]
+  },
+  "App/TouchBridgeAlreadyStarted": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/UsbTouchBridgeHost.cs:43"
+    ]
+  },
+  "App/TouchBridgeTargetMismatch": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/UsbTouchBridgeHost.cs:54"
+    ]
+  },
+  "App/TouchBridgeRuntimeIncompleteFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "桥接错误提示迁入三语资源；原始诊断参数保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:78"
+    ]
+  },
+  "App/TouchBridgeTargetMismatchFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "桥接错误提示迁入三语资源；原始诊断参数保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:352"
+    ]
+  },
+  "App/TouchBridgeTransportMismatchFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "桥接错误提示迁入三语资源；原始诊断参数保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:359"
+    ]
+  },
+  "App/TouchBridgeTimeoutFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "桥接错误提示迁入三语资源；原始诊断参数保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:421"
+    ]
+  },
+  "App/TouchBridgeExitedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "桥接错误提示迁入三语资源；原始诊断参数保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:582"
+    ]
+  },
+  "App/TouchBridgeErrorCodeFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "桥接错误提示迁入三语资源；原始诊断参数保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:601"
+    ]
+  },
+  "App/TouchBridgeDiagnosticFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "桥接错误提示迁入三语资源；原始诊断参数保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DirectUsbInputBridge.cs:603"
+    ]
+  },
+  "App/FfmpegProbeFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:134"
+    ]
+  },
+  "App/FfmpegNotFound": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:140"
+    ]
+  },
+  "App/FfmpegEncoderSizeUnsupported": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:203"
+    ]
+  },
+  "App/FfmpegStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:241",
+      "src/App/Services/MediaOutputService.cs:1275"
+    ]
+  },
+  "App/FfmpegAudioStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaCastAudioDecoder.cs:61"
+    ]
+  },
+  "App/FfmpegAudioInputTimeout": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:263"
+    ]
+  },
+  "App/MediaOutputFrameTimeout": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:478",
+      "src/App/Services/VirtualCameraService.cs:466"
+    ]
+  },
+  "App/MediaOutputFrameStalled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/VirtualCameraService.cs:472"
+    ]
+  },
+  "App/MediaOutputAudioStalled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:605",
+      "src/App/Services/MediaOutputService.cs:756"
+    ]
+  },
+  "App/MediaOutputAudioUnsupported": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:641"
+    ]
+  },
+  "App/MediaOutputAudioInvalid": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:645"
+    ]
+  },
+  "App/MediaOutputFrameInvalid": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:771"
+    ]
+  },
+  "App/FfmpegEncoderUnavailable": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:1045"
+    ]
+  },
+  "App/FfmpegProtocolUnavailable": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:1047"
+    ]
+  },
+  "App/MediaOutputInvalidDimensions": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:1050"
+    ]
+  },
+  "App/MediaOutputDestinationRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:1054"
+    ]
+  },
+  "App/MediaOutputRtmpAddressRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:1057"
+    ]
+  },
+  "App/MediaOutputSrtAddressRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:1060"
+    ]
+  },
+  "App/MediaOutputWhipAddressRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:1063"
+    ]
+  },
+  "App/VirtualCameraInstallerStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/VirtualCameraService.cs:284"
+    ]
+  },
+  "App/VirtualCameraInstallCancelled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/VirtualCameraService.cs:317"
+    ]
+  },
+  "App/VirtualCameraPayloadMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/VirtualCameraService.cs:346"
+    ]
+  },
+  "App/VirtualCameraAlreadyRunning": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将代码中的用户可见硬编码文字迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/VirtualCameraService.cs:376"
+    ]
+  },
+  "App/FfmpegExitedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "输出错误详情迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:462",
+      "src/App/Services/MediaOutputService.cs:576"
+    ]
+  },
+  "App/FfmpegStartupExitedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "输出错误详情迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:1110"
+    ]
+  },
+  "App/VirtualCameraInstallerExitedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "输出错误详情迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/VirtualCameraService.cs:312"
+    ]
+  },
+  "App/VirtualCameraPayloadChangedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "输出错误详情迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/VirtualCameraService.cs:363"
+    ]
+  },
+  "App/UpdateEndpointsUnavailable": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:327"
+    ]
+  },
+  "App/UpdateInstallerPackageMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:398"
+    ]
+  },
+  "App/UpdatePortablePackageMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:399"
+    ]
+  },
+  "App/UpdateUnsafeFileName": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:406"
+    ]
+  },
+  "App/UpdatePackageTooLarge": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:408"
+    ]
+  },
+  "App/UpdateUntrustedAssetUrl": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:472"
+    ]
+  },
+  "App/UpdateUntrustedRedirect": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:380"
+    ]
+  },
+  "App/UpdateUntrustedNotesRedirect": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:345"
+    ]
+  },
+  "App/UpdateReleaseListTooLarge": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:383",
+      "src/App/Updater/GitHubReleaseClient.cs:385"
+    ]
+  },
+  "App/UpdateDownloadEndpointsUnavailable": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:465"
+    ]
+  },
+  "App/UpdateChecksumRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:699"
+    ]
+  },
+  "App/UpdateChecksumFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:710"
+    ]
+  },
+  "App/UpdateChecksumListTooLarge": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:732",
+      "src/App/Updater/GitHubReleaseClient.cs:735"
+    ]
+  },
+  "App/UpdateChecksumSizeMismatch": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:738"
+    ]
+  },
+  "App/UpdateChecksumListInvalid": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:746"
+    ]
+  },
+  "App/UpdateChecksumDownloadUnavailable": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:764"
+    ]
+  },
+  "App/UpdateResponseUrlMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:819"
+    ]
+  },
+  "App/UpdateDownloadUntrustedRedirect": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:822"
+    ]
+  },
+  "App/UpdatePackageNotVerified": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:160"
+    ]
+  },
+  "App/UpdateDigestMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:163"
+    ]
+  },
+  "App/UpdateFormatUnsupported": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:189",
+      "src/App/Updater/UpdateInstallerLauncher.cs:438"
+    ]
+  },
+  "App/UpdateHelperStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:258"
+    ]
+  },
+  "App/UpdateSetupRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:441"
+    ]
+  },
+  "App/UpdatePortableRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:444"
+    ]
+  },
+  "App/UpdateHelperMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:521"
+    ]
+  },
+  "App/UpdateDigestInvalid": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:544"
+    ]
+  },
+  "App/UpdatePackageChanged": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:552"
+    ]
+  },
+  "App/UpdateReleaseListInvalid": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/ReleaseParser.cs:45"
+    ]
+  },
+  "App/LocalTargetMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Windows/AboutWindow.xaml.cs:179"
+    ]
+  },
+  "App/HlsRestartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:3880"
+    ]
+  },
+  "App/DisplayBoundsUnavailable": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/MainWindow.xaml.cs:6677"
+    ]
+  },
+  "App/RecordingFinalizeTimeout": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:381"
+    ]
+  },
+  "App/StreamingStopTimeout": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:382"
+    ]
+  },
+  "App/UpdatePortableElevationUnsupported": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "更新启动失败提示补齐三语"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:194"
+    ]
+  },
+  "App/UpdatePortableDirectoryUnsafe": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "更新启动失败提示补齐三语"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/UpdateInstallerLauncher.cs:200"
+    ]
+  },
+  "App/UpdateChecksumEntryMissingFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "用户可见错误详情补齐三语"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/GitHubReleaseClient.cs:704"
+    ]
+  },
+  "App/UpdateReleaseFieldMissingFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "用户可见错误详情补齐三语"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Updater/ReleaseParser.cs:181"
+    ]
+  },
+  "App/FfmpegNoUsableEncoderFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "用户可见错误详情补齐三语"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/MediaOutputService.cs:939"
+    ]
+  },
+  "DriverInstaller/DriverOperationDetailsFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动操作详情标题"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverLocalization.cs:66"
+    ]
+  },
+  "DriverInstaller/DriverParentRemoved": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "管理员进程返回的操作结果在界面层本地化，保留原始技术详情"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverLocalization.cs:51"
+    ]
+  },
+  "DriverInstaller/DriverFilterRemovedReconnect": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "管理员进程返回的操作结果在界面层本地化，保留原始技术详情"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverLocalization.cs:52"
+    ]
+  },
+  "DriverInstaller/DriverFilterInstalledReconnect": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "管理员进程返回的操作结果在界面层本地化，保留原始技术详情"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverLocalization.cs:53"
+    ]
+  },
+  "DriverInstaller/DriverParentRepairStopped": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "管理员进程返回的操作结果在界面层本地化，保留原始技术详情"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverLocalization.cs:54"
+    ]
+  },
+  "DriverInstaller/DriverParentRepairRejected": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "管理员进程返回的操作结果在界面层本地化，保留原始技术详情"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverLocalization.cs:55"
+    ]
+  },
+  "DriverInstaller/DriverOperationRolledBack": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "管理员进程返回的操作结果在界面层本地化，保留原始技术详情"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverLocalization.cs:56"
+    ]
+  },
+  "DriverInstaller/DriverOperationRollbackIncomplete": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "管理员进程返回的操作结果在界面层本地化，保留原始技术详情"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverLocalization.cs:57"
+    ]
+  },
+  "DriverInstaller/DriverResultTargetMismatch": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverOperationClient.cs:168"
+    ]
+  },
+  "DriverInstaller/ApplePackageManagerStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:462"
+    ]
+  },
+  "DriverInstaller/AppleSupportProcessTimeout": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:477"
+    ]
+  },
+  "DriverInstaller/AppleInstallerStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:885"
+    ]
+  },
+  "DriverInstaller/AppleSupportInstallTimeout": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/AppleSupportInstaller.cs:914"
+    ]
+  },
+  "DriverInstaller/DriverResultExitCodeMismatchFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动验证失败提示补齐三语"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverOperationClient.cs:177"
+    ]
+  },
+  "App/DeviceRefreshFailedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "补齐面向用户的日志摘要；原始诊断详情保留"
+    ],
+    "before": {
+      "en-US": "$\"device refresh failed: {AppLog.Error(error.Message)}\""
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:3500"
+    ]
+  },
+  "App/DriverSafetyWarningFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "补齐面向用户的日志摘要；原始诊断详情保留"
+    ],
+    "before": {
+      "en-US": "$\"driver safety warning: {driverStatus.Diagnostic}\""
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5722"
+    ]
+  },
+  "App/DriverPreflightFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "补齐面向用户的日志摘要；原始诊断详情保留"
+    ],
+    "before": {
+      "en-US": "$\"driver preflight: {driverStatus.Diagnostic}\""
+    },
+    "locations": [
+      "src/App/ViewModels/MainViewModel.cs:5736"
+    ]
+  },
+  "App/DriverManagerExecutableMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DriverManagerLauncher.cs:28"
+    ]
+  },
+  "App/DriverManagerPathInvalid": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DriverManagerLauncher.cs:32"
+    ]
+  },
+  "App/DriverManagerActivated": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DriverManagerLauncher.cs:35"
+    ]
+  },
+  "App/DriverManagerProcessStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DriverManagerLauncher.cs:56"
+    ]
+  },
+  "App/DriverManagerStarted": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "将用户可见硬编码错误或状态提示迁入三语资源"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/App/Services/DriverManagerLauncher.cs:57"
+    ]
+  },
+  "App/BluetoothHidCharacteristicFailedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "补齐蓝牙启动失败详情中的第一方提示；保留系统错误码"
+    ],
+    "before": {
+      "en-US": "$\"Could not create HID characteristic {uuid}: {result.Error}\""
+    },
+    "locations": [
+      "src/App/Services/BluetoothHidMouseService.cs:1009"
+    ]
+  },
+  "App/BluetoothHidReportDescriptorFailedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "补齐蓝牙启动失败详情中的第一方提示；保留系统错误码"
+    ],
+    "before": {
+      "en-US": "$\"Could not create HID report descriptor: {result.Error}\""
+    },
+    "locations": [
+      "src/App/Services/BluetoothHidMouseService.cs:1028"
+    ]
+  },
+  "App/BluetoothHidWheelDescriptorFailedFormat": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "补齐蓝牙启动失败详情中的第一方提示；保留系统错误码"
+    ],
+    "before": {
+      "en-US": "$\"Could not create HID wheel feature descriptor: {result.Error}\""
+    },
+    "locations": [
+      "src/App/Services/BluetoothHidMouseService.cs:1889"
+    ]
+  },
+  "DriverInstaller/DriverCleanupProtectionFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "清理启动失败在已初始化的界面中使用三语提示；启动前的诊断回退保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverCleanupHost.cs:32"
+    ]
+  },
+  "DriverInstaller/DriverCleanupHostStartFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "清理启动失败在已初始化的界面中使用三语提示；启动前的诊断回退保留"
+    ],
+    "before": {
+      "zh-CN": null,
+      "zh-HK": null,
+      "en-US": null
+    },
+    "locations": [
+      "src/DriverInstaller/Services/DriverCleanupHost.cs:54"
+    ]
+  },
+  "Installer/Messages/ConfirmDeleteSharedFile2": {
+    "categories": [
+      "占位符问题",
+      "可读性问题"
+    ],
+    "reasons": [
+      "移除新版 Inno Setup 不再提供的 %1 参数；文件名已由独立标签显示",
+      "修复“已不有”错字并简化共享文件确认文字"
+    ],
+    "before": {
+      "zh-HK": "系統顯示下列共用檔案已不再被任何程式所使用，您要移除這些檔案嗎?%n%n%1%n%n倘若您移除了以上檔案但仍有程式需要使用它們，將造成這些程式無法正常執行，因此您若無法確定請選擇 [否]。保留這些檔案在您的系統中不會造成任何損害。",
+      "zh-CN": "系统表示下列共享的文件已不有其他程序使用。您希望卸载程序删除这些共享的文件吗？%n%n如果删除这些文件，但仍有程序在使用这些文件，则这些程序可能出现异常。如果您不能确定，请选择“否”，在系统中保留这些文件以免引发问题。"
+    }
+  },
+  "Installer/Messages/FinishedHeadingLabel": {
+    "categories": [
+      "占位符问题"
+    ],
+    "reasons": [
+      "补齐安装完成标题缺少的产品名占位符"
+    ],
+    "before": {
+      "zh-HK": "安裝完成"
+    }
+  },
+  "Installer/Messages/FileExistsOverwriteExisting": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "恢复覆盖操作缺失的 Alt+O 快捷键标记"
+    ],
+    "before": {
+      "zh-HK": "覆寫現有檔案"
+    }
+  },
+  "Installer/Messages/FileExistsKeepExisting": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "修复保留操作错误使用 Alt+O，应为 Alt+K"
+    ],
+    "before": {
+      "zh-HK": "保留現有檔案 (&O)"
+    }
+  },
+  "Installer/Messages/FileExistsOverwriteOrKeepAll": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "作用范围是所有冲突而非下次冲突"
+    ],
+    "before": {
+      "zh-HK": "對下次衝突執行相同操作 (&D)"
+    }
+  },
+  "Installer/Messages/ExistingFileNewerOverwriteOrKeepAll": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "作用范围是所有冲突而非下次冲突"
+    ],
+    "before": {
+      "zh-HK": "對下次衝突執行相同操作 (&D)"
+    }
+  },
+  "Installer/Messages/ErrorCloseApplications": {
+    "categories": [
+      "错误翻译"
+    ],
+    "reasons": [
+      "应关闭占用文件的应用，而不是关闭应用使用的文件"
+    ],
+    "before": {
+      "zh-HK": "安裝程式無法自動關閉所有應用程式。建議您在繼續前先關閉所有應用程式使用的檔案。"
+    }
+  },
+  "Installer/Messages/CloseApplications": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "补齐自动关闭的行为"
+    ],
+    "before": {
+      "zh-HK": "關閉應用程式 (&A)"
+    }
+  },
+  "Installer/Messages/InvalidPath": {
+    "categories": [
+      "错误翻译"
+    ],
+    "reasons": [
+      "盘符不是卷标"
+    ],
+    "before": {
+      "zh-CN": "您必须输入一个带驱动器卷标的完整路径，例如：%n%nC:\\APP%n%n或UNC路径：%n%n\\\\server\\share"
+    }
+  },
+  "Installer/Messages/ConfirmUninstall": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "卸载范围为所有组件，不只是相关文件"
+    ],
+    "before": {
+      "zh-HK": "您確定要完全移除 %1 及其相關的檔案嗎？"
+    }
+  },
+  "Installer/Messages/ReadyMemoUserInfo": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "与项目香港繁体用语及标签标点一致"
+    ],
+    "before": {
+      "zh-HK": "使用者資訊"
+    }
+  },
+  "Installer/Messages/WizardUserInfo": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "与项目香港繁体用语一致"
+    ],
+    "before": {
+      "zh-HK": "使用者資訊"
+    }
+  },
+  "Cleanup/Pause": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "按 Enter 键关闭窗口"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:19",
+      "scripts/remove_selected_iphone_drivers.ps1:109",
+      "scripts/remove_selected_iphone_drivers.ps1:199",
+      "scripts/remove_selected_iphone_drivers.ps1:467"
+    ]
+  },
+  "Cleanup/ScanPnp": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "扫描当前 PnP 设备..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:20",
+      "scripts/remove_selected_iphone_drivers.ps1:110",
+      "scripts/remove_selected_iphone_drivers.ps1:200",
+      "scripts/remove_selected_iphone_drivers.ps1:759"
+    ]
+  },
+  "Cleanup/PnpCached": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "PnP 缓存完成：$($script:DeviceCache.Count) 个设备"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:21",
+      "scripts/remove_selected_iphone_drivers.ps1:111",
+      "scripts/remove_selected_iphone_drivers.ps1:201",
+      "scripts/remove_selected_iphone_drivers.ps1:812"
+    ]
+  },
+  "Cleanup/PnpFallback": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Get-PnpDevice 扫描失败，切换到 pnputil："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:22",
+      "scripts/remove_selected_iphone_drivers.ps1:112",
+      "scripts/remove_selected_iphone_drivers.ps1:202",
+      "scripts/remove_selected_iphone_drivers.ps1:820"
+    ]
+  },
+  "Cleanup/PnpEnumerationFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "无法枚举 PnP 设备，pnputil ExitCode=$($result.ExitCode)"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:23",
+      "scripts/remove_selected_iphone_drivers.ps1:113",
+      "scripts/remove_selected_iphone_drivers.ps1:203",
+      "scripts/remove_selected_iphone_drivers.ps1:842"
+    ]
+  },
+  "Cleanup/PnpXmlEmpty": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "pnputil PnP XML 为空，无法枚举设备。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:24",
+      "scripts/remove_selected_iphone_drivers.ps1:114",
+      "scripts/remove_selected_iphone_drivers.ps1:204",
+      "scripts/remove_selected_iphone_drivers.ps1:847"
+    ]
+  },
+  "Cleanup/PnpXmlInvalid": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "pnputil PnP XML 解析失败："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:25",
+      "scripts/remove_selected_iphone_drivers.ps1:115",
+      "scripts/remove_selected_iphone_drivers.ps1:205",
+      "scripts/remove_selected_iphone_drivers.ps1:855"
+    ]
+  },
+  "Cleanup/NoConnectedPnp": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "pnputil PnP XML 中没有当前连接的设备。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:26",
+      "scripts/remove_selected_iphone_drivers.ps1:116",
+      "scripts/remove_selected_iphone_drivers.ps1:206",
+      "scripts/remove_selected_iphone_drivers.ps1:864"
+    ]
+  },
+  "Cleanup/NoCachedPnp": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "pnputil PnP 缓存完成：0 个设备"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:27",
+      "scripts/remove_selected_iphone_drivers.ps1:117",
+      "scripts/remove_selected_iphone_drivers.ps1:207",
+      "scripts/remove_selected_iphone_drivers.ps1:865"
+    ]
+  },
+  "Cleanup/NoAvailablePnp": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "pnputil PnP XML 中没有可用设备。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:28",
+      "scripts/remove_selected_iphone_drivers.ps1:118",
+      "scripts/remove_selected_iphone_drivers.ps1:208",
+      "scripts/remove_selected_iphone_drivers.ps1:901"
+    ]
+  },
+  "Cleanup/PnpUtilCached": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "pnputil PnP 缓存完成：$($script:DeviceCache.Count) 个设备"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:29",
+      "scripts/remove_selected_iphone_drivers.ps1:119",
+      "scripts/remove_selected_iphone_drivers.ps1:209",
+      "scripts/remove_selected_iphone_drivers.ps1:905"
+    ]
+  },
+  "Cleanup/IndexDriverStore": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "建立 Driver Store 驱动索引..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:30",
+      "scripts/remove_selected_iphone_drivers.ps1:120",
+      "scripts/remove_selected_iphone_drivers.ps1:210",
+      "scripts/remove_selected_iphone_drivers.ps1:1248"
+    ]
+  },
+  "Cleanup/DriverXmlUnavailable": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "无法使用 Driver Store XML，ExitCode=$($result.ExitCode)"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:31",
+      "scripts/remove_selected_iphone_drivers.ps1:121",
+      "scripts/remove_selected_iphone_drivers.ps1:211",
+      "scripts/remove_selected_iphone_drivers.ps1:1261"
+    ]
+  },
+  "Cleanup/DriverEnumerationFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "pnputil Driver Store 枚举失败，ExitCode=$($result.ExitCode)；"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:32",
+      "scripts/remove_selected_iphone_drivers.ps1:122",
+      "scripts/remove_selected_iphone_drivers.ps1:212",
+      "scripts/remove_selected_iphone_drivers.ps1:1265"
+    ]
+  },
+  "Cleanup/StopMissingPackages": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "已停止清理以避免遗漏驱动包。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:33",
+      "scripts/remove_selected_iphone_drivers.ps1:123",
+      "scripts/remove_selected_iphone_drivers.ps1:213",
+      "scripts/remove_selected_iphone_drivers.ps1:1266"
+    ]
+  },
+  "Cleanup/DriverXmlEmpty": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Driver Store XML 为空。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:34",
+      "scripts/remove_selected_iphone_drivers.ps1:124",
+      "scripts/remove_selected_iphone_drivers.ps1:214",
+      "scripts/remove_selected_iphone_drivers.ps1:1275"
+    ]
+  },
+  "Cleanup/DriverXmlEmptyStopped": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Driver Store XML 为空，已停止清理以避免遗漏驱动包。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:35",
+      "scripts/remove_selected_iphone_drivers.ps1:125",
+      "scripts/remove_selected_iphone_drivers.ps1:215",
+      "scripts/remove_selected_iphone_drivers.ps1:1277"
+    ]
+  },
+  "Cleanup/DriverXmlInvalid": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Driver Store XML 解析失败："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:36",
+      "scripts/remove_selected_iphone_drivers.ps1:126",
+      "scripts/remove_selected_iphone_drivers.ps1:216",
+      "scripts/remove_selected_iphone_drivers.ps1:1288"
+    ]
+  },
+  "Cleanup/DriverXmlInvalidStopped": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Driver Store XML 解析失败，已停止清理："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:37",
+      "scripts/remove_selected_iphone_drivers.ps1:127",
+      "scripts/remove_selected_iphone_drivers.ps1:217",
+      "scripts/remove_selected_iphone_drivers.ps1:1293"
+    ]
+  },
+  "Cleanup/DriverNodesMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Driver Store XML 中没有 Driver 节点，已停止清理以避免遗漏驱动包。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:38",
+      "scripts/remove_selected_iphone_drivers.ps1:128",
+      "scripts/remove_selected_iphone_drivers.ps1:218",
+      "scripts/remove_selected_iphone_drivers.ps1:1305"
+    ]
+  },
+  "Cleanup/DriverIndexReady": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Driver Store 索引完成：$($script:DriverInventory.Count) 个 OEM INF"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:39",
+      "scripts/remove_selected_iphone_drivers.ps1:129",
+      "scripts/remove_selected_iphone_drivers.ps1:219",
+      "scripts/remove_selected_iphone_drivers.ps1:1380"
+    ]
+  },
+  "Cleanup/ClosingProcesses": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "关闭 iPhoneMirror 相关进程..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:40",
+      "scripts/remove_selected_iphone_drivers.ps1:130",
+      "scripts/remove_selected_iphone_drivers.ps1:220",
+      "scripts/remove_selected_iphone_drivers.ps1:1508"
+    ]
+  },
+  "Cleanup/BluetoothExcluded": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "安全过滤 BTHLE：$InstanceId"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:41",
+      "scripts/remove_selected_iphone_drivers.ps1:131",
+      "scripts/remove_selected_iphone_drivers.ps1:221",
+      "scripts/remove_selected_iphone_drivers.ps1:1538"
+    ]
+  },
+  "Cleanup/DeviceNode": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "设备节点：$InstanceId"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:42",
+      "scripts/remove_selected_iphone_drivers.ps1:132",
+      "scripts/remove_selected_iphone_drivers.ps1:222",
+      "scripts/remove_selected_iphone_drivers.ps1:1555"
+    ]
+  },
+  "Cleanup/DeviceNodeRestart": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "设备节点已移除，重启后完成：$InstanceId"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:43",
+      "scripts/remove_selected_iphone_drivers.ps1:133",
+      "scripts/remove_selected_iphone_drivers.ps1:223",
+      "scripts/remove_selected_iphone_drivers.ps1:1567"
+    ]
+  },
+  "Cleanup/DeviceNodeFailedDetail": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "设备节点删除失败：$InstanceId "
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:44",
+      "scripts/remove_selected_iphone_drivers.ps1:134",
+      "scripts/remove_selected_iphone_drivers.ps1:224",
+      "scripts/remove_selected_iphone_drivers.ps1:1574"
+    ]
+  },
+  "Cleanup/DeviceNodeFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "设备节点删除失败：$InstanceId"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:45",
+      "scripts/remove_selected_iphone_drivers.ps1:135",
+      "scripts/remove_selected_iphone_drivers.ps1:225",
+      "scripts/remove_selected_iphone_drivers.ps1:1585"
+    ]
+  },
+  "Cleanup/DriverPackage": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "驱动包：$InfName"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:46",
+      "scripts/remove_selected_iphone_drivers.ps1:136",
+      "scripts/remove_selected_iphone_drivers.ps1:226",
+      "scripts/remove_selected_iphone_drivers.ps1:1619"
+    ]
+  },
+  "Cleanup/DriverPackageRestart": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "驱动包已删除，重启后完成：$InfName"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:47",
+      "scripts/remove_selected_iphone_drivers.ps1:137",
+      "scripts/remove_selected_iphone_drivers.ps1:227",
+      "scripts/remove_selected_iphone_drivers.ps1:1631"
+    ]
+  },
+  "Cleanup/DriverPackageFailedDetail": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "驱动包删除失败：$InfName "
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:48",
+      "scripts/remove_selected_iphone_drivers.ps1:138",
+      "scripts/remove_selected_iphone_drivers.ps1:228",
+      "scripts/remove_selected_iphone_drivers.ps1:1638"
+    ]
+  },
+  "Cleanup/DriverPackageFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "驱动包删除失败：$InfName"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:49",
+      "scripts/remove_selected_iphone_drivers.ps1:139",
+      "scripts/remove_selected_iphone_drivers.ps1:229",
+      "scripts/remove_selected_iphone_drivers.ps1:1649"
+    ]
+  },
+  "Cleanup/ManifestWriteFailed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "无法写入 manifest："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:50",
+      "scripts/remove_selected_iphone_drivers.ps1:140",
+      "scripts/remove_selected_iphone_drivers.ps1:230",
+      "scripts/remove_selected_iphone_drivers.ps1:1717"
+    ]
+  },
+  "Cleanup/ProtectedLaunchRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "请通过 iPhoneMirror.Driver.exe 或发布包中的清理入口运行此工具，以获得受保护的管理员权限。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:51",
+      "scripts/remove_selected_iphone_drivers.ps1:141",
+      "scripts/remove_selected_iphone_drivers.ps1:231",
+      "scripts/remove_selected_iphone_drivers.ps1:1732"
+    ]
+  },
+  "Cleanup/PnpUtilMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "找不到 pnputil.exe：$PnpUtil"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:52",
+      "scripts/remove_selected_iphone_drivers.ps1:142",
+      "scripts/remove_selected_iphone_drivers.ps1:232",
+      "scripts/remove_selected_iphone_drivers.ps1:1740"
+    ]
+  },
+  "Cleanup/ScopeWarning": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "将清除所选设备关联的所有设备节点和驱动包，包括 Apple 官方驱动。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:53",
+      "scripts/remove_selected_iphone_drivers.ps1:143",
+      "scripts/remove_selected_iphone_drivers.ps1:233",
+      "scripts/remove_selected_iphone_drivers.ps1:1769"
+    ]
+  },
+  "Cleanup/ReinstallAdvice": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "完成后可重新安装 Apple Devices 或 iTunes 以恢复所需驱动。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:54",
+      "scripts/remove_selected_iphone_drivers.ps1:144",
+      "scripts/remove_selected_iphone_drivers.ps1:234",
+      "scripts/remove_selected_iphone_drivers.ps1:1771"
+    ]
+  },
+  "Cleanup/ScanningDevices": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "开始设备扫描..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:55",
+      "scripts/remove_selected_iphone_drivers.ps1:145",
+      "scripts/remove_selected_iphone_drivers.ps1:235",
+      "scripts/remove_selected_iphone_drivers.ps1:1781"
+    ]
+  },
+  "Cleanup/MappingDevices": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "建立 Apple 设备关系..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:56",
+      "scripts/remove_selected_iphone_drivers.ps1:146",
+      "scripts/remove_selected_iphone_drivers.ps1:236",
+      "scripts/remove_selected_iphone_drivers.ps1:1785"
+    ]
+  },
+  "Cleanup/PhysicalDeviceCount": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Apple 物理设备分组完成：$($physicalDevices.Count) 台"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:57",
+      "scripts/remove_selected_iphone_drivers.ps1:147",
+      "scripts/remove_selected_iphone_drivers.ps1:237",
+      "scripts/remove_selected_iphone_drivers.ps1:1791"
+    ]
+  },
+  "Cleanup/NoAppleDevice": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "没有找到当前连接的 iPhone/iPad。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:58",
+      "scripts/remove_selected_iphone_drivers.ps1:148",
+      "scripts/remove_selected_iphone_drivers.ps1:238",
+      "scripts/remove_selected_iphone_drivers.ps1:1797"
+    ]
+  },
+  "Cleanup/CheckRequirements": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "请确认："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:59",
+      "scripts/remove_selected_iphone_drivers.ps1:149",
+      "scripts/remove_selected_iphone_drivers.ps1:239",
+      "scripts/remove_selected_iphone_drivers.ps1:1799"
+    ]
+  },
+  "Cleanup/RequirementUsb": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "  1. iPhone/iPad 已通过 USB 连接"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:60",
+      "scripts/remove_selected_iphone_drivers.ps1:150",
+      "scripts/remove_selected_iphone_drivers.ps1:240",
+      "scripts/remove_selected_iphone_drivers.ps1:1800"
+    ]
+  },
+  "Cleanup/RequirementUnlocked": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "  2. 设备已解锁"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:61",
+      "scripts/remove_selected_iphone_drivers.ps1:151",
+      "scripts/remove_selected_iphone_drivers.ps1:241",
+      "scripts/remove_selected_iphone_drivers.ps1:1801"
+    ]
+  },
+  "Cleanup/RequirementTrusted": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "  3. 已点击“信任此电脑”"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:62",
+      "scripts/remove_selected_iphone_drivers.ps1:152",
+      "scripts/remove_selected_iphone_drivers.ps1:242",
+      "scripts/remove_selected_iphone_drivers.ps1:1802"
+    ]
+  },
+  "Cleanup/RequirementCable": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "  4. 数据线支持数据传输"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:63",
+      "scripts/remove_selected_iphone_drivers.ps1:153",
+      "scripts/remove_selected_iphone_drivers.ps1:243",
+      "scripts/remove_selected_iphone_drivers.ps1:1803"
+    ]
+  },
+  "Cleanup/BluetoothNotListed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "BTHLE / Bluetooth LE 设备不会显示。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:64",
+      "scripts/remove_selected_iphone_drivers.ps1:154",
+      "scripts/remove_selected_iphone_drivers.ps1:244",
+      "scripts/remove_selected_iphone_drivers.ps1:1805"
+    ]
+  },
+  "Cleanup/MappingDrivers": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "建立驱动关系..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:65",
+      "scripts/remove_selected_iphone_drivers.ps1:155",
+      "scripts/remove_selected_iphone_drivers.ps1:245",
+      "scripts/remove_selected_iphone_drivers.ps1:1815"
+    ]
+  },
+  "Cleanup/MappingReady": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "设备关系建立完成。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:66",
+      "scripts/remove_selected_iphone_drivers.ps1:156",
+      "scripts/remove_selected_iphone_drivers.ps1:246",
+      "scripts/remove_selected_iphone_drivers.ps1:1855"
+    ]
+  },
+  "Cleanup/DetectedDevices": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "检测到以下物理 Apple 设备："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:67",
+      "scripts/remove_selected_iphone_drivers.ps1:157",
+      "scripts/remove_selected_iphone_drivers.ps1:247",
+      "scripts/remove_selected_iphone_drivers.ps1:1862"
+    ]
+  },
+  "Cleanup/PnpNodeCount": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "    PnP 节点：{0}"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:68",
+      "scripts/remove_selected_iphone_drivers.ps1:158",
+      "scripts/remove_selected_iphone_drivers.ps1:248",
+      "scripts/remove_selected_iphone_drivers.ps1:1879"
+    ]
+  },
+  "Cleanup/DriverStoreCount": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "    Driver Store 驱动包：{0}"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:69",
+      "scripts/remove_selected_iphone_drivers.ps1:159",
+      "scripts/remove_selected_iphone_drivers.ps1:249",
+      "scripts/remove_selected_iphone_drivers.ps1:1884"
+    ]
+  },
+  "Cleanup/ListOnly": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "仅列表模式，未修改系统。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:70",
+      "scripts/remove_selected_iphone_drivers.ps1:160",
+      "scripts/remove_selected_iphone_drivers.ps1:250",
+      "scripts/remove_selected_iphone_drivers.ps1:1901"
+    ]
+  },
+  "Cleanup/SelectDevice": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "请输入设备序号；输入 Q 取消"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:71",
+      "scripts/remove_selected_iphone_drivers.ps1:161",
+      "scripts/remove_selected_iphone_drivers.ps1:251",
+      "scripts/remove_selected_iphone_drivers.ps1:1915"
+    ]
+  },
+  "Cleanup/InvalidDeviceNumber": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "设备序号无效。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:72",
+      "scripts/remove_selected_iphone_drivers.ps1:162",
+      "scripts/remove_selected_iphone_drivers.ps1:252",
+      "scripts/remove_selected_iphone_drivers.ps1:1937"
+    ]
+  },
+  "Cleanup/CleanupPlan": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " 清理计划"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:73",
+      "scripts/remove_selected_iphone_drivers.ps1:163",
+      "scripts/remove_selected_iphone_drivers.ps1:253",
+      "scripts/remove_selected_iphone_drivers.ps1:2006"
+    ]
+  },
+  "Cleanup/SelectedDevice": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "设备：{0}"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:74",
+      "scripts/remove_selected_iphone_drivers.ps1:164",
+      "scripts/remove_selected_iphone_drivers.ps1:254",
+      "scripts/remove_selected_iphone_drivers.ps1:2015"
+    ]
+  },
+  "Cleanup/OnePhysicalDevice": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "物理设备：1 台"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:75",
+      "scripts/remove_selected_iphone_drivers.ps1:165",
+      "scripts/remove_selected_iphone_drivers.ps1:255",
+      "scripts/remove_selected_iphone_drivers.ps1:2020"
+    ]
+  },
+  "Cleanup/AssociatedNodes": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "关联 PnP 节点：{0}"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:76",
+      "scripts/remove_selected_iphone_drivers.ps1:166",
+      "scripts/remove_selected_iphone_drivers.ps1:256",
+      "scripts/remove_selected_iphone_drivers.ps1:2024"
+    ]
+  },
+  "Cleanup/AssociatedDrivers": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "关联全部驱动包：{0}"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:77",
+      "scripts/remove_selected_iphone_drivers.ps1:167",
+      "scripts/remove_selected_iphone_drivers.ps1:257",
+      "scripts/remove_selected_iphone_drivers.ps1:2029"
+    ]
+  },
+  "Cleanup/PreviewOnly": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " Preview only - 未修改系统"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:78",
+      "scripts/remove_selected_iphone_drivers.ps1:168",
+      "scripts/remove_selected_iphone_drivers.ps1:258",
+      "scripts/remove_selected_iphone_drivers.ps1:2071"
+    ]
+  },
+  "Cleanup/NoRemovableNodes": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "没有可删除的目标 PnP 节点。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:79",
+      "scripts/remove_selected_iphone_drivers.ps1:169",
+      "scripts/remove_selected_iphone_drivers.ps1:259",
+      "scripts/remove_selected_iphone_drivers.ps1:2086"
+    ]
+  },
+  "Cleanup/Irreversible": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "这是不可撤销的操作。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:80",
+      "scripts/remove_selected_iphone_drivers.ps1:170",
+      "scripts/remove_selected_iphone_drivers.ps1:260",
+      "scripts/remove_selected_iphone_drivers.ps1:2106"
+    ]
+  },
+  "Cleanup/Confirm": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "请输入 {0} 确认："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:81",
+      "scripts/remove_selected_iphone_drivers.ps1:171",
+      "scripts/remove_selected_iphone_drivers.ps1:261",
+      "scripts/remove_selected_iphone_drivers.ps1:2110"
+    ]
+  },
+  "Cleanup/ConfirmationMismatch": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "确认文字不匹配，未做任何修改。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:82",
+      "scripts/remove_selected_iphone_drivers.ps1:172",
+      "scripts/remove_selected_iphone_drivers.ps1:262",
+      "scripts/remove_selected_iphone_drivers.ps1:2119"
+    ]
+  },
+  "Cleanup/FinalDeviceCheck": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "执行删除前最终设备确认..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:83",
+      "scripts/remove_selected_iphone_drivers.ps1:173",
+      "scripts/remove_selected_iphone_drivers.ps1:263",
+      "scripts/remove_selected_iphone_drivers.ps1:2128"
+    ]
+  },
+  "Cleanup/SelectedDisconnected": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "所选 iPhone 已断开。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:84",
+      "scripts/remove_selected_iphone_drivers.ps1:174",
+      "scripts/remove_selected_iphone_drivers.ps1:264",
+      "scripts/remove_selected_iphone_drivers.ps1:2134"
+    ]
+  },
+  "Cleanup/RemovingNodes": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " 卸载设备节点"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:85",
+      "scripts/remove_selected_iphone_drivers.ps1:175",
+      "scripts/remove_selected_iphone_drivers.ps1:265",
+      "scripts/remove_selected_iphone_drivers.ps1:2205"
+    ]
+  },
+  "Cleanup/RemovingPackages": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " 删除 Driver Store 驱动包"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:86",
+      "scripts/remove_selected_iphone_drivers.ps1:176",
+      "scripts/remove_selected_iphone_drivers.ps1:266",
+      "scripts/remove_selected_iphone_drivers.ps1:2229"
+    ]
+  },
+  "Cleanup/WaitingWindows": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "等待 Windows 更新设备状态..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:87",
+      "scripts/remove_selected_iphone_drivers.ps1:177",
+      "scripts/remove_selected_iphone_drivers.ps1:267",
+      "scripts/remove_selected_iphone_drivers.ps1:2248"
+    ]
+  },
+  "Cleanup/FinalVerification": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "执行最终验证..."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:88",
+      "scripts/remove_selected_iphone_drivers.ps1:178",
+      "scripts/remove_selected_iphone_drivers.ps1:268",
+      "scripts/remove_selected_iphone_drivers.ps1:2289"
+    ]
+  },
+  "Cleanup/CleanupResults": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " 清理结果"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:89",
+      "scripts/remove_selected_iphone_drivers.ps1:179",
+      "scripts/remove_selected_iphone_drivers.ps1:269",
+      "scripts/remove_selected_iphone_drivers.ps1:2341"
+    ]
+  },
+  "Cleanup/NodesRemoved": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "目标 PnP 节点已清理。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:90",
+      "scripts/remove_selected_iphone_drivers.ps1:180",
+      "scripts/remove_selected_iphone_drivers.ps1:270",
+      "scripts/remove_selected_iphone_drivers.ps1:2351"
+    ]
+  },
+  "Cleanup/UnresolvedNodes": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "仍存在 $($unresolvedNodes.Count) 个目标 PnP 节点。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:91",
+      "scripts/remove_selected_iphone_drivers.ps1:181",
+      "scripts/remove_selected_iphone_drivers.ps1:271",
+      "scripts/remove_selected_iphone_drivers.ps1:2360"
+    ]
+  },
+  "Cleanup/RemainingNodes": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "仍存在 $($remainingNodes.Count) 个目标节点。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:92",
+      "scripts/remove_selected_iphone_drivers.ps1:182",
+      "scripts/remove_selected_iphone_drivers.ps1:272",
+      "scripts/remove_selected_iphone_drivers.ps1:2364"
+    ]
+  },
+  "Cleanup/PackagesHandled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "目标 Driver Store 驱动包已处理。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:93",
+      "scripts/remove_selected_iphone_drivers.ps1:183",
+      "scripts/remove_selected_iphone_drivers.ps1:273",
+      "scripts/remove_selected_iphone_drivers.ps1:2377"
+    ]
+  },
+  "Cleanup/UnresolvedPackages": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "仍存在 $($unresolvedDrivers.Count) 个目标 Driver Store 驱动包。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:94",
+      "scripts/remove_selected_iphone_drivers.ps1:184",
+      "scripts/remove_selected_iphone_drivers.ps1:274",
+      "scripts/remove_selected_iphone_drivers.ps1:2386"
+    ]
+  },
+  "Cleanup/RemainingPackages": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "仍存在 $($remainingDrivers.Count) 个驱动包。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:95",
+      "scripts/remove_selected_iphone_drivers.ps1:185",
+      "scripts/remove_selected_iphone_drivers.ps1:275",
+      "scripts/remove_selected_iphone_drivers.ps1:2390"
+    ]
+  },
+  "Cleanup/RestartRequired": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "Windows 报告部分操作需要重启。"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:96",
+      "scripts/remove_selected_iphone_drivers.ps1:186",
+      "scripts/remove_selected_iphone_drivers.ps1:276",
+      "scripts/remove_selected_iphone_drivers.ps1:2418"
+    ]
+  },
+  "Cleanup/LogPath": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "日志：$logPath"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:97",
+      "scripts/remove_selected_iphone_drivers.ps1:187",
+      "scripts/remove_selected_iphone_drivers.ps1:277",
+      "scripts/remove_selected_iphone_drivers.ps1:2424",
+      "scripts/remove_selected_iphone_drivers.ps1:2450"
+    ]
+  },
+  "Cleanup/Error": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "错误：{0}"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:98",
+      "scripts/remove_selected_iphone_drivers.ps1:188",
+      "scripts/remove_selected_iphone_drivers.ps1:278",
+      "scripts/remove_selected_iphone_drivers.ps1:2488"
+    ]
+  },
+  "Cleanup/Location": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "位置："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:99",
+      "scripts/remove_selected_iphone_drivers.ps1:189",
+      "scripts/remove_selected_iphone_drivers.ps1:279",
+      "scripts/remove_selected_iphone_drivers.ps1:2500"
+    ]
+  },
+  "Cleanup/StackTrace": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "调用栈："
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:100",
+      "scripts/remove_selected_iphone_drivers.ps1:190",
+      "scripts/remove_selected_iphone_drivers.ps1:280",
+      "scripts/remove_selected_iphone_drivers.ps1:2516"
+    ]
+  },
+  "Cleanup/ErrorLog": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "错误日志：$errorLog"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:101",
+      "scripts/remove_selected_iphone_drivers.ps1:191",
+      "scripts/remove_selected_iphone_drivers.ps1:281",
+      "scripts/remove_selected_iphone_drivers.ps1:2564"
+    ]
+  },
+  "Cleanup/Title": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " iPhone/iPad Remove All Drivers"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:102",
+      "scripts/remove_selected_iphone_drivers.ps1:192",
+      "scripts/remove_selected_iphone_drivers.ps1:282",
+      "scripts/remove_selected_iphone_drivers.ps1:1762"
+    ]
+  },
+  "Cleanup/Completed": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " Cleanup completed successfully."
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:103",
+      "scripts/remove_selected_iphone_drivers.ps1:193",
+      "scripts/remove_selected_iphone_drivers.ps1:283",
+      "scripts/remove_selected_iphone_drivers.ps1:2408"
+    ]
+  },
+  "Cleanup/CompletedWithErrors": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " Cleanup finished with errors. Count: {0}"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:104",
+      "scripts/remove_selected_iphone_drivers.ps1:194",
+      "scripts/remove_selected_iphone_drivers.ps1:284",
+      "scripts/remove_selected_iphone_drivers.ps1:2434"
+    ]
+  },
+  "Cleanup/InternalError": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": " CLEANUP INTERNAL ERROR"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:105",
+      "scripts/remove_selected_iphone_drivers.ps1:195",
+      "scripts/remove_selected_iphone_drivers.ps1:285",
+      "scripts/remove_selected_iphone_drivers.ps1:2479"
+    ]
+  },
+  "Cleanup/FatalError": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "驱动清理控制台硬编码提示补齐三语；操作和确认令牌不变"
+    ],
+    "before": {
+      "原始文字": "iPhoneMirror Driver Cleanup Fatal Error"
+    },
+    "locations": [
+      "scripts/remove_selected_iphone_drivers.ps1:106",
+      "scripts/remove_selected_iphone_drivers.ps1:196",
+      "scripts/remove_selected_iphone_drivers.ps1:286",
+      "scripts/remove_selected_iphone_drivers.ps1:2548"
+    ]
+  },
+  "Code/MainViewModel.ShowControlOperationError": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "补齐香港繁体的蓝牙/无线传输名称匹配，避免错误归类为有线控制"
+    ],
+    "before": {
+      "zh-HK": "藍牙／無線名称无法匹配，回落至 USB 状态"
+    },
+    "values": {
+      "zh-CN": "蓝牙 / 无线 → 对应控制模式",
+      "zh-HK": "藍牙 / 無線 → 對應控制模式",
+      "en-US": "Bluetooth / wireless → corresponding control mode"
+    }
+  },
+  "Code/ReverseControlStatusWindow.ModeSummary": {
+    "categories": [
+      "术语不一致"
+    ],
+    "reasons": [
+      "有线模式摘要复用 WiredControlLabel，与按钮和状态名称一致"
+    ],
+    "before": {
+      "所有语言": "USB"
+    },
+    "values": {
+      "zh-CN": "有线控制",
+      "zh-HK": "有線控制",
+      "en-US": "Wired control"
+    }
+  },
+  "Code/DriverCleanupHost.ExecutableMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "复用 DriverExecutableMissing；界面使用所选语言，字典加载前保留英文诊断回退"
+    ],
+    "before": {
+      "en-US": "The driver manager executable is missing."
+    },
+    "values": {
+      "zh-CN": "无法确定驱动管理器的可执行文件路径。",
+      "zh-HK": "無法確定驅動程式管理員的可執行檔路徑。",
+      "en-US": "The driver manager executable path could not be determined."
+    }
+  },
+  "Code/ControlStatusService.Cancelled": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "默认取消说明原为硬编码中文；调用时读取现有 ControlStageCancelled 资源"
+    ],
+    "before": {
+      "zh-CN": "已取消反向控制"
+    },
+    "values": {
+      "zh-CN": "已取消反向控制",
+      "zh-HK": "已取消反向控制",
+      "en-US": "Reverse control cancelled"
+    }
+  },
+  "Launcher/Title": {
+    "categories": [
+      "语义不一致"
+    ],
+    "reasons": [
+      "窗口标题保留产品名，避免暗示删除所有设备驱动；原设备范围不变"
+    ],
+    "before": {
+      "en-US": "iPhone/iPad Remove All Drivers"
+    }
+  },
+  "Launcher/ExecutableMissing": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "独立 CMD 无法加载语言字典，故障时显示简体、繁体和英文回退；UTF-8/CRLF 防止乱码"
+    ],
+    "before": {
+      "en-US": "iPhoneMirror.Driver.exe was not found next to this launcher."
+    }
+  },
+  "Launcher/OperationIncomplete": {
+    "categories": [
+      "缺失翻译"
+    ],
+    "reasons": [
+      "独立启动器异常结果补齐三语，保留退出代码变量"
+    ],
+    "before": {
+      "en-US": "Operation did not complete. Exit code: %EXIT_CODE%"
+    }
+  }
+}

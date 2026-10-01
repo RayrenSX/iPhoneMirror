@@ -4,7 +4,7 @@
     <system:String x:Key="AppTitle">iPhoneMirror 驅動程式管理員</system:String>
     <system:String x:Key="AppSubtitle">Apple USB 環境與按裝置擷取過濾驅動程式</system:String>
     <system:String x:Key="OpenLogs">開啟記錄檔</system:String>
-    <system:String x:Key="ForceDriverCleanup">強制清除所有驅動程式</system:String>
+    <system:String x:Key="ForceDriverCleanup">清理裝置驅動程式</system:String>
     <system:String x:Key="Refresh">重新整理</system:String>
     <system:String x:Key="AppleUsbEnvironment">Apple USB 環境</system:String>
     <system:String x:Key="CaptureFilterDriver">擷取過濾驅動程式</system:String>
@@ -21,7 +21,7 @@
     <system:String x:Key="Install">安裝</system:String>
     <system:String x:Key="Repair">修復</system:String>
     <system:String x:Key="Uninstall">解除安裝</system:String>
-    <system:String x:Key="DriverChangeNotice">驅動程式變更只套用至選取的 Apple USB 父裝置，不會取代 Apple 官方驅動程式。</system:String>
+    <system:String x:Key="DriverChangeNotice">擷取操作修改所選裝置的過濾器；父驅動程式管理可在你另行確認後取代該裝置的驅動程式綁定。</system:String>
     <system:String x:Key="AdvancedSettings">進階設定</system:String>
     <system:String x:Key="BackToSimple">返回簡易介面</system:String>
     <system:String x:Key="Installed">已安裝</system:String>
@@ -43,7 +43,7 @@
     <system:String x:Key="Recheck">重新偵測</system:String>
     <system:String x:Key="CannotOpenLogs">無法開啟記錄檔</system:String>
     <system:String x:Key="QuickInstallTitle">一按安裝全部驅動程式</system:String>
-    <system:String x:Key="QuickInstallBody">工具將自動檢查 Apple USB 支援、共用擷取驅動程式和目前選取的 iPhone。偵測到遺失項目時會自動安裝；如果偵測到明確屬於 WinUSB/libusb 的錯誤父驅動程式，會先將其移除，再提示重新連接。</system:String>
+    <system:String x:Key="QuickInstallBody">工具將檢查 Apple USB 支援、共用擷取驅動程式及目前選取的 iPhone，並安裝遺失項目。父驅動程式異常時，會顯示目前綁定及目標驅動程式，待你另行確認後修復。</system:String>
     <system:String x:Key="StartInstall">開始安裝</system:String>
     <system:String x:Key="ConnectPhoneTitle">請連接 iPhone</system:String>
     <system:String x:Key="ConnectPhoneBody">Apple USB 支援已準備就緒。請連接並解鎖 iPhone；手機出現提示時按一下「信任這部電腦」。偵測到裝置後會自動繼續。</system:String>
@@ -57,11 +57,11 @@
     <system:String x:Key="AisiTitle">使用愛思螢幕鏡像完成驅動程式準備</system:String>
     <system:String x:Key="AisiBody">從愛思官網下載並完成一次正常有線螢幕鏡像，然後返回重新偵測。</system:String>
     <system:String x:Key="OpenWebsite">開啟官網</system:String>
-    <system:String x:Key="DriverCleanupTitle">執行清除所有驅動程式指令碼</system:String>
-    <system:String x:Key="DriverCleanupBody">在獨立視窗中選擇裝置，清除其關聯的所有裝置節點和驅動程式套件，包括 Apple 官方驅動程式。指令碼會在修改系統前要求確認。</system:String>
-    <system:String x:Key="RunDriverCleanup">清除所有驅動程式</system:String>
-    <system:String x:Key="DriverCleanupScriptMissing">找不到清除所有驅動程式指令碼：{0}</system:String>
-    <system:String x:Key="DriverCleanupScriptStartFailed">無法啟動清除所有驅動程式指令碼：{0}</system:String>
+    <system:String x:Key="DriverCleanupTitle">清理裝置驅動程式</system:String>
+    <system:String x:Key="DriverCleanupBody">在獨立視窗中選擇裝置，清理其關聯裝置節點及可安全移除的驅動程式套件，可能包括 Apple 官方驅動程式。其他裝置仍在使用的驅動程式套件會保留；無法確定使用情況時只清理裝置節點。修改系統前需要確認。</system:String>
+    <system:String x:Key="RunDriverCleanup">清理裝置驅動程式</system:String>
+    <system:String x:Key="DriverCleanupScriptMissing">找不到驅動程式清理指令碼：{0}</system:String>
+    <system:String x:Key="DriverCleanupScriptStartFailed">無法啟動驅動程式清理指令碼：{0}</system:String>
     <system:String x:Key="Close">關閉</system:String>
     <system:String x:Key="Minimize">最小化</system:String>
     <system:String x:Key="Maximize">最大化或還原</system:String>
@@ -92,19 +92,14 @@
     <system:String x:Key="QuickInstallComplete">一按安裝完成，{0} 的螢幕鏡像驅動程式已就緒。</system:String>
     <system:String x:Key="WaitingForDevice">等待 Apple 裝置連接…</system:String>
     <system:String x:Key="ConfirmOperation">確認{0}</system:String>
-    <system:String x:Key="ConfirmOperationBody">將對以下裝置執行{0}：
-
-{1}
-{2}
-
-操作只修改這部裝置的 libusb0 過濾器，不替換 Apple 官方驅動程式。Windows 可能請求管理員授權。</system:String>
-    <system:String x:Key="Operating">正在{0} {1}…</system:String>
+    <system:String x:Key="ConfirmOperationBody" xml:space="preserve">將對以下裝置執行{0}：&#xA;&#xA;{1}&#xA;{2}&#xA;&#xA;操作只修改這部裝置的 libusb0 過濾器，不替換 Apple 官方驅動程式。Windows 可能請求管理員授權。</system:String>
+    <system:String x:Key="Operating">正在執行{0}：{1}…</system:String>
     <system:String x:Key="ReplugTimeout">等待裝置拔下或重新連接逾時。驅動程式操作本身已經復原或完成，請查看記錄後重試。</system:String>
     <system:String x:Key="DriverUninstalled">目前裝置的擷取過濾驅動程式已解除安裝。</system:String>
     <system:String x:Key="DriverInstalled">目前裝置的擷取過濾驅動程式已安裝並驗證。</system:String>
-    <system:String x:Key="UnplugTitle">請拔除傳輸線</system:String>
-    <system:String x:Key="UnplugBody">驅動程式更改已經完成。現在請拔除這部 iPhone 的傳輸線，等待裝置從清單中消失。</system:String>
-    <system:String x:Key="Unplugged">已拔除傳輸線</system:String>
+    <system:String x:Key="UnplugTitle">請拔除數據線</system:String>
+    <system:String x:Key="UnplugBody">驅動程式更改已經完成。現在請拔除這部 iPhone 的數據線，等待裝置從清單中消失。</system:String>
+    <system:String x:Key="Unplugged">已拔除數據線</system:String>
     <system:String x:Key="ReconnectTitle">請重新連接</system:String>
     <system:String x:Key="ReconnectBody">已偵測到裝置中斷連接。現在請重新連接 iPhone，解鎖裝置，並在手機出現提示時按一下「信任這部電腦」。</system:String>
     <system:String x:Key="Reconnected">已經連接</system:String>
@@ -143,21 +138,63 @@
     <system:String x:Key="ElevatedProcessNoResult">以系統管理員身分執行的驅動程式工具以代碼 {0} 退出，但沒有傳回結果。</system:String>
     <system:String x:Key="ElevatedInvalidResult">以系統管理員身分執行的驅動程式工具傳回了無效結果。</system:String>
     <system:String x:Key="UacCancelled">使用者取消了 Windows 系統管理員授權。</system:String>
-    <system:String x:Key="OfflineMsiFailed">離線 AppleMobileDeviceSupport MSI 安裝失敗，結束代碼 {0}。
-{1}
-記錄：{2}</system:String>
+    <system:String x:Key="OfflineMsiFailed" xml:space="preserve">離線 AppleMobileDeviceSupport MSI 安裝失敗，結束代碼 {0}。&#xA;{1}&#xA;記錄：{2}</system:String>
     <system:String x:Key="AppleDownloadUnavailable">無法自動取得 Apple 官方安裝套件，已開啟 Microsoft Store 中的 Apple Devices 頁面。</system:String>
     <system:String x:Key="AppleCompatibilityDownloadUnavailable">無法下載遺失的 Apple Mobile Device Service 相容元件。請檢查網絡後重試，詳細原因已寫入記錄。</system:String>
     <system:String x:Key="AppleSignatureInvalid">Apple 安裝套件簽名無法通過 Windows 驗證，已拒絕執行。</system:String>
-    <system:String x:Key="AppleInstallerFailed">Apple Mobile Device Support 元件安裝失敗，結束代碼 {0}。
-{1}
-記錄：{2}</system:String>
-    <system:String x:Key="AppleRestartRequired">Apple Mobile Device Support 已安裝，但 Windows 需要重新啟動才能完成驅動程式和服務註冊。請重新啟動電腦後重新偵測。
-記錄：{0}</system:String>
-    <system:String x:Key="AppleServiceNotReady">Apple USB 支援不完整：服務或 Apple USB 驅動程式包尚未就緒。請連接並解鎖 iPhone 後重新偵測。
-記錄：{0}</system:String>
+    <system:String x:Key="AppleInstallerFailed" xml:space="preserve">Apple Mobile Device Support 元件安裝失敗，結束代碼 {0}。&#xA;{1}&#xA;記錄：{2}</system:String>
+    <system:String x:Key="AppleRestartRequired" xml:space="preserve">Apple Mobile Device Support 已安裝，但 Windows 需要重新啟動才能完成驅動程式和服務註冊。請重新啟動電腦後重新偵測。&#xA;記錄：{0}</system:String>
+    <system:String x:Key="AppleServiceNotReady" xml:space="preserve">Apple USB 支援不完整：服務或 Apple USB 驅動程式包尚未就緒。請連接並解鎖 iPhone 後重新偵測。&#xA;記錄：{0}</system:String>
     <system:String x:Key="Appearance">外觀</system:String>
     <system:String x:Key="ThemeSystem">跟隨系統</system:String>
     <system:String x:Key="ThemeLight">淺色</system:String>
     <system:String x:Key="ThemeDark">深色</system:String>
+    <system:String x:Key="DriverOperationDetailsFormat">詳細資料：{0}</system:String>
+    <system:String x:Key="DriverParentRemoved">已移除錯誤的 Apple 父裝置。請重新連接 iPhone 以重新綁定 usbccgp。</system:String>
+    <system:String x:Key="DriverFilterRemovedReconnect">已移除所選裝置的擷取過濾驅動程式。請重新連接裝置以完成卸載。</system:String>
+    <system:String x:Key="DriverFilterInstalledReconnect">已安裝所選裝置的擷取過濾驅動程式。請重新連接裝置以完成啟用。</system:String>
+    <system:String x:Key="DriverParentRepairStopped">移除要求開始後，父驅動程式修復已停止。請重新連接 iPhone 並查看操作記錄。</system:String>
+    <system:String x:Key="DriverParentRepairRejected">父驅動程式修復已被拒絕，尚未修改系統。</system:String>
+    <system:String x:Key="DriverOperationRolledBack">驅動程式操作失敗，已還原所有已備份的狀態。</system:String>
+    <system:String x:Key="DriverOperationRollbackIncomplete">驅動程式操作失敗，復原未完成。請查看操作記錄。</system:String>
+    <system:String x:Key="DriverResultTargetMismatch">管理員驅動程式操作傳回了其他裝置的結果，已拒絕使用。</system:String>
+    <system:String x:Key="ApplePackageManagerStartFailed">無法啟動套件管理員。</system:String>
+    <system:String x:Key="AppleSupportProcessTimeout">Apple 支援元件操作逾時。</system:String>
+    <system:String x:Key="AppleInstallerStartFailed">無法啟動 Apple 安裝程式。</system:String>
+    <system:String x:Key="AppleSupportInstallTimeout">Apple USB 支援元件安裝逾時。</system:String>
+    <system:String x:Key="DriverResultExitCodeMismatchFormat">管理員驅動程式操作結果與程序結束代碼 {0} 不一致。</system:String>
+    <system:String x:Key="DriverCleanupProtectionFailed">無法驗證及保護驅動程式管理員檔案，已停止要求管理員權限。</system:String>
+    <system:String x:Key="DriverCleanupHostStartFailed">無法啟動管理員驅動程式清理程序。</system:String>
+    <system:String x:Key="ParentManagerTitle" xml:space="preserve">父驅動程式管理</system:String>
+    <system:String x:Key="ParentStatusFormat" xml:space="preserve">父驅動程式：{0} · INF：{1}&#xA;問題代碼：{2} · {3}</system:String>
+    <system:String x:Key="ParentNoService" xml:space="preserve">未綁定服務</system:String>
+    <system:String x:Key="ParentNoInf" xml:space="preserve">沒有驅動程式套件</system:String>
+    <system:String x:Key="ParentHealthy" xml:space="preserve">已正常啟動</system:String>
+    <system:String x:Key="ParentNeedsAttention" xml:space="preserve">未啟動或需要檢查</system:String>
+    <system:String x:Key="ParentManagerHelp" xml:space="preserve">可修改任何目前的父驅動程式，包括 Apple 官方驅動程式、第三方驅動程式或遺失的綁定。有線螢幕鏡像通常需要 USB Composite Device（usbccgp）。請選取目標驅動程式，下一步將確認變更。</system:String>
+    <system:String x:Key="ParentDriverSelection" xml:space="preserve">目標驅動程式（系統複合驅動程式及 Windows 提供的適用驅動程式）</system:String>
+    <system:String x:Key="ParentResetHelp" xml:space="preserve">「重建裝置」會移除選取的父裝置及其子介面，之後需重新連接手機。原驅動程式套件會保留，Windows 可能再次選取原驅動程式；變更綁定請選取上方驅動程式。</system:String>
+    <system:String x:Key="ParentReset" xml:space="preserve">重建裝置</system:String>
+    <system:String x:Key="ParentBind" xml:space="preserve">綁定所選驅動程式</system:String>
+    <system:String x:Key="ParentConfirmTitle" xml:space="preserve">確認修改 Apple 父驅動程式</system:String>
+    <system:String x:Key="ParentConfirmApply" xml:space="preserve">確認修改</system:String>
+    <system:String x:Key="ParentConfirmBody" xml:space="preserve">裝置：{0}&#xA;{1}&#xA;&#xA;目前狀態：&#xA;{2}&#xA;&#xA;執行操作／目標驅動程式：&#xA;{3}&#xA;&#xA;將修改這部手機的父驅動程式，可能取代 Apple 官方或第三方綁定，並暫時中斷此手機的 USB 連線、螢幕鏡像、控制及 Apple 軟件連線。子介面可能重新列舉。Windows 可能要求管理員授權、重新插拔或重新啟動。&#xA;&#xA;操作前會儲存驅動程式綁定及過濾器狀態快照；綁定失敗會嘗試還原原綁定，但無法保證還原成功。是否繼續？</system:String>
+    <system:String x:Key="ParentCompositeUnavailable" xml:space="preserve">無法讀取 Windows USB 複合驅動程式，請開啟父驅動程式管理查看其他選項。</system:String>
+    <system:String x:Key="ParentDeviceUnavailable" xml:space="preserve">所選手機已中斷連線，請重新連接後再操作。</system:String>
+    <system:String x:Key="ParentListUnavailable" xml:space="preserve">無法讀取驅動程式清單。可重建裝置後重試，詳細原因請參閱記錄。</system:String>
+    <system:String x:Key="ParentBackupFormat" xml:space="preserve">狀態快照：{0}</system:String>
+    <system:String x:Key="ParentBindingComplete" xml:space="preserve">父驅動程式已重新綁定，並已確認裝置正常啟動。</system:String>
+    <system:String x:Key="ParentBindingRestartRequired" xml:space="preserve">Windows 已接受父驅動程式綁定，請重新啟動電腦後再檢測；目前尚未驗證是否生效。</system:String>
+    <system:String x:Key="ParentResetRestartRequired" xml:space="preserve">Windows 要求重新啟動電腦以完成父裝置移除。重新啟動後重新連接手機並檢測。</system:String>
+    <system:String x:Key="ParentResetComplete" xml:space="preserve">已要求移除父裝置。請拔下並重新連接手機，讓 Windows 重新列舉，再檢查父驅動程式狀態。</system:String>
+    <system:String x:Key="ParentChangeRejected" xml:space="preserve">未執行變更：裝置狀態、確認資料或目標驅動程式已變更，或準備工作失敗。請重新整理後再次確認，詳細原因請參閱記錄。</system:String>
+    <system:String x:Key="ParentChangeRolledBack" xml:space="preserve">父驅動程式綁定失敗，已還原原驅動程式綁定。原有問題可能仍然存在，請查看記錄。</system:String>
+    <system:String x:Key="ParentRollbackRestartRequired" xml:space="preserve">父驅動程式綁定失敗；Windows 已接受還原原綁定，但需要重新啟動電腦。重新啟動後請再次檢測。</system:String>
+    <system:String x:Key="ParentChangeRecoveryNeeded" xml:space="preserve">父驅動程式操作未完成，無法確認已還原。請重新插拔手機並重新整理；必要時在父驅動程式管理或裝置管理員中重新綁定驅動程式。狀態快照及記錄保留了操作資料。</system:String>
+    <system:String x:Key="DriverWaitingSafeStop" xml:space="preserve">操作需時較長，已請求取消，正在等待目前步驟及還原完成。請保持視窗開啟。記錄：{0}</system:String>
+    <system:String x:Key="ParentListPartial" xml:space="preserve">部分驅動程式清單讀取失敗，以下仍列出可用選項。詳細資料：</system:String>
+    <system:String x:Key="ReconnectVerificationFailed" xml:space="preserve">裝置重新連接驗證未通過：請檢查連接、裝置錯誤代碼、父驅動程式綁定及擷取過濾器狀態。</system:String>
+    <system:String x:Key="DriverRefreshFailed" xml:space="preserve">狀態重新整理失敗，以上操作結果已保留。原因：{0}。記錄：{1}</system:String>
+    <system:String x:Key="HelpBrowserFailedTitle" xml:space="preserve">無法開啟說明網站</system:String>
+    <system:String x:Key="HelpBrowserFailed" xml:space="preserve">請手動開啟：{0}。原因：{1}</system:String>
 </ResourceDictionary>

@@ -1,24 +1,23 @@
-<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.AboutWindow"
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.AboutWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource AboutTitle}"
-        Width="760" Height="600" MinWidth="700" MinHeight="520"
+        Width="782" Height="622" MinWidth="722" MinHeight="542"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
-        ExtendsContentIntoTitleBar="True"
-        WindowBackdropType="Mica" WindowCornerPreference="Round"
-        Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}"
-        AutomationProperties.AutomationId="AboutWindow">
-    <ui:FluentWindow.Resources>
+        AutomationProperties.AutomationId="AboutWindow"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <chrome:RoundedWindow.Resources>
         <Style x:Key="AboutCheckUpdatesButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource PrimaryButton}">
             <Setter Property="Foreground"
                     Value="{DynamicResource AboutCheckUpdatesTextBrush}"/>
         </Style>
-    </ui:FluentWindow.Resources>
+    </chrome:RoundedWindow.Resources>
     <Grid Style="{StaticResource SubWindowPageRoot}"
           animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
@@ -41,6 +40,7 @@
         </Grid>
 
         <TabControl x:Name="AboutTabs" Grid.Row="2"
+                    SelectionChanged="OnAboutTabChanged"
                     Style="{StaticResource SubWindowTabControl}">
             <TabItem Header="{DynamicResource AboutTitle}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
@@ -65,7 +65,7 @@
                                                Style="{StaticResource SubWindowTitle}"/>
                                     <TextBlock Text="{Binding VersionText}"
                                                Foreground="{DynamicResource MutedTextBrush}"
-                                               FontSize="12" FontWeight="SemiBold"
+                                               FontSize="{StaticResource SecondaryFontSize}" FontWeight="SemiBold"
                                                Margin="0,4,0,0"/>
                                     <TextBlock Text="{DynamicResource AboutDescription}"
                                                Style="{StaticResource SubWindowSubtitle}"
@@ -153,18 +153,19 @@
                             <Border Height="1" Background="{DynamicResource BorderSoftBrush}"
                                     Margin="0,12,0,18"/>
                             <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="{DynamicResource LiveLogHeader}"
                                            Style="{StaticResource SubWindowSectionTitle}"
                                            VerticalAlignment="Center"/>
-                                <Button Content="{DynamicResource ClearView}"
+                                <Button Grid.Column="1" Margin="8,0,0,0" Content="{DynamicResource ClearView}"
                                         Command="{Binding MainViewModel.ClearLogCommand}"
                                         HorizontalAlignment="Right" Padding="10,5"
                                         MinHeight="32" FontSize="11"/>
                             </Grid>
                             <TextBlock Text="{Binding MainViewModel.LogPathDisplay, Mode=OneWay}"
-                                       FontFamily="Consolas" FontSize="10"
+                                       FontFamily="{StaticResource CodeFontFamily}" FontSize="{StaticResource CaptionFontSize}"
                                        Foreground="{DynamicResource MutedTextBrush}"
-                                       TextTrimming="CharacterEllipsis" Margin="0,10,0,7"/>
+                                       TextWrapping="Wrap" Margin="0,10,0,7"/>
                             <Border Background="{DynamicResource PreviewChromeBrush}"
                                     BorderBrush="{DynamicResource BorderBrush}"
                                     BorderThickness="1" CornerRadius="10"
@@ -178,7 +179,7 @@
                                          SelectionBrush="{DynamicResource AccentBrush}"
                                          SelectionOpacity="0.35"
                                          VerticalScrollBarVisibility="Auto"
-                                         HorizontalScrollBarVisibility="Disabled"
+                                         HorizontalScrollBarVisibility="Auto"
                                          TextChanged="OnLiveLogTextChanged"/>
                             </Border>
                     </StackPanel>
@@ -186,4 +187,4 @@
             </TabItem>
         </TabControl>
     </Grid>
-</ui:FluentWindow>
+</chrome:RoundedWindow>

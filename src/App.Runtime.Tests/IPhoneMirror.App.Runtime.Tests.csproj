@@ -14,8 +14,13 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\App\iPhoneMirror.App.csproj" />
+    <EmbeddedResource Include="..\App\Localization\Strings.*.xaml" WithCulture="false"
+                      LogicalName="TextSources.App.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\DriverInstaller\Localization\Strings.*.xaml" WithCulture="false"
+                      LogicalName="TextSources.DriverInstaller.%(Filename)%(Extension)" />
     <Content Include="..\App\Assets\iPhoneMirror.ico" Link="Assets\iPhoneMirror.ico"
              CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="..\App\Assets\iPhoneMirror.png" Link="Assets\iPhoneMirror.png" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

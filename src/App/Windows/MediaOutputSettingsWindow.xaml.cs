@@ -9,19 +9,36 @@ using Microsoft.Win32;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
+public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     private readonly MainViewModel _viewModel;
     private readonly bool _previewOnly;
     private bool _savePromptOpen;
     private (uint Width, uint Height)? _lastDefaultSize;
+    private readonly CancellationTokenSource _microphoneCancellation = new();
+    private bool _microphoneRefreshRunning;
 
     internal MediaOutputSettingsWindow(MainViewModel viewModel, bool previewOnly = false)
     {
         InitializeComponent();
         _viewModel = viewModel;
         _previewOnly = previewOnly;
+        MicrophoneBox.ItemsSource = new[] { new MicrophoneDevice(LocalizationService.Get("MicrophoneOff"), "") };
+        MicrophoneBox.SelectedIndex = 0;
         DataContext = viewModel;
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+        {
+            FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text);
+            if (MicrophoneBox.ItemsSource is IEnumerable<MicrophoneDevice> microphones)
+            {
+                var selected = MicrophoneBox.SelectedValue as string;
+                MicrophoneBox.ItemsSource = microphones.Select(device => device.Id.Length == 0
+                    ? device with { Name = LocalizationService.Get("MicrophoneOff") } : device).ToArray();
+                MicrophoneBox.SelectedValue = selected;
+            }
+            if (VirtualCameraCurrentResolutionItem.Content is string caption)
+                VirtualCameraCurrentResolutionItem.Content = LocalizationService.RefreshText(caption);
+        });
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -42,8 +59,11 @@ public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
         // Re-probe on each opening so a user can install FFmpeg or update PATH
         // without restarting the entire application.
         await RunAsync(() => _viewModel.EnsureMediaOutputCapabilitiesAsync(force: true));
+        if (_microphoneCancellation.IsCancellationRequested) return;
         SelectFirstSupportedProtocol();
         UpdateStartButtons();
+        await RefreshMicrophonesAsync();
+        if (_microphoneCancellation.IsCancellationRequested) return;
         if (!_viewModel.IsMediaOutputRunning &&
             _viewModel.PendingRecordingPath is not null)
             await PromptToSaveRecordingAsync();
@@ -54,6 +74,8 @@ public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
         Loaded -= OnLoaded;
         Closing -= OnClosing;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _microphoneCancellation.Cancel();
+        _microphoneCancellation.Dispose();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -197,8 +219,39 @@ public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
         };
         var result = await _viewModel.StartStreamingAsync(kind,
             StreamDestinationBox.Text.Trim(), StreamAuthorizationBox.Text.Trim(),
-            width, height, fps, bitrate);
+            width, height, fps, bitrate, MicrophoneBox.SelectedValue as string);
         FeedbackText.Text = result.Message;
+    }
+
+    private async void OnRefreshMicrophonesClick(object sender, RoutedEventArgs e) =>
+        await RefreshMicrophonesAsync();
+
+    private async Task RefreshMicrophonesAsync()
+    {
+        if (_previewOnly || _microphoneRefreshRunning || _microphoneCancellation.IsCancellationRequested) return;
+        _microphoneRefreshRunning = true;
+        RefreshMicrophonesButton.IsEnabled = false;
+        var selected = MicrophoneBox.SelectedValue as string ?? "";
+        try
+        {
+            var devices = await _viewModel.GetMicrophonesAsync(_microphoneCancellation.Token);
+            if (_microphoneCancellation.IsCancellationRequested) return;
+            MicrophoneBox.ItemsSource = new[] { new MicrophoneDevice(LocalizationService.Get("MicrophoneOff"), "") }
+                .Concat(devices).ToArray();
+            MicrophoneBox.SelectedValue = devices.Any(device => device.Id == selected) ? selected : "";
+            if (devices.Count == 0) FeedbackText.Text = LocalizationService.Get("MicrophoneNotFound");
+        }
+        catch (OperationCanceledException) when (_microphoneCancellation.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            FeedbackText.Text = LocalizationService.Format("MicrophoneEnumerationFailed", error.Message);
+        }
+        finally
+        {
+            _microphoneRefreshRunning = false;
+            if (!_microphoneCancellation.IsCancellationRequested)
+                RefreshMicrophonesButton.IsEnabled = true;
+        }
     }
 
     private async void OnStartVirtualCameraClick(object sender, RoutedEventArgs e)
@@ -248,9 +301,9 @@ public partial class MediaOutputSettingsWindow : Wpf.Ui.Controls.FluentWindow
     private void OnDiscardClick(object sender, RoutedEventArgs e)
     {
         if (_viewModel.PendingRecordingPath is null) return;
-        if (MessageBox.Show(this, LocalizationService.Get("DiscardRecordingConfirmation"),
-                LocalizationService.Get("DiscardRecording"), MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!AppPromptWindow.ConfirmDestructive(LocalizationService.Get("DiscardRecording"),
+                LocalizationService.Get("DiscardRecordingConfirmation"),
+                LocalizationService.Get("DiscardRecording"), this))
             return;
         FeedbackText.Text = _viewModel.DiscardPendingRecording()
             ? LocalizationService.Get("RecordingDiscarded")

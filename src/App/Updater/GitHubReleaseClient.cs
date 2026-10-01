@@ -1,3 +1,4 @@
+using IPhoneMirror.App.Localization;
 using System.Buffers;
 using System.Diagnostics;
 using System.IO;
@@ -323,7 +324,7 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
 
         throw new HttpRequestException(
-            "All configured update endpoints are unavailable.", lastError);
+            LocalizationService.Get("UpdateEndpointsUnavailable"), lastError);
     }
 
     internal async Task<ReleaseInfo> EnrichReleaseNotesAsync(ReleaseInfo release,
@@ -341,7 +342,7 @@ internal sealed class GitHubReleaseClient : IDisposable
             if (finalUri is null || finalUri.Scheme != Uri.UriSchemeHttps ||
                 !finalUri.Host.Equals(notesUri.Host, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException(
-                    "The release notes endpoint redirected to an untrusted host.");
+                    LocalizationService.Get("UpdateUntrustedNotesRedirect"));
             response.EnsureSuccessStatusCode();
             var notes = await ReadReleaseNotesAsync(response.Content, timeout.Token);
             if (!string.IsNullOrWhiteSpace(notes))
@@ -376,12 +377,12 @@ internal sealed class GitHubReleaseClient : IDisposable
         var finalUri = response.RequestMessage?.RequestUri;
         if (finalUri is null || finalUri.Scheme != Uri.UriSchemeHttps ||
             !finalUri.Host.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("The update endpoint redirected to an untrusted host.");
+            throw new InvalidDataException(LocalizationService.Get("UpdateUntrustedRedirect"));
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is > MaximumReleaseListCharacters)
-            throw new InvalidDataException("The update release list is unexpectedly large.");
+            throw new InvalidDataException(LocalizationService.Get("UpdateReleaseListTooLarge"));
         return await ReadBoundedTextAsync(response.Content,
-            MaximumReleaseListCharacters, "The update release list is unexpectedly large.",
+            MaximumReleaseListCharacters, LocalizationService.Get("UpdateReleaseListTooLarge"),
             timeout.Token);
     }
 
@@ -394,17 +395,17 @@ internal sealed class GitHubReleaseClient : IDisposable
         var useInstaller = preferInstaller ?? DeploymentLayout.UsesSharedRuntime();
         var asset = release.SelectAsset(useInstaller) ?? throw new InvalidOperationException(
             useInstaller
-                ? "This release does not provide a Windows installer package."
-                : "This release does not provide a portable ZIP package.");
+                ? LocalizationService.Get("UpdateInstallerPackageMissing")
+                : LocalizationService.Get("UpdatePortablePackageMissing"));
         DiagnosticLogger.Info("updater", "asset_selected",
             ("deployment", useInstaller ? "installer" : "portable"),
             ("asset", asset.Name));
         var fileName = Path.GetFileName(asset.Name);
         if (!string.Equals(fileName, asset.Name, StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(fileName))
-            throw new InvalidDataException("The update asset has an unsafe file name.");
+            throw new InvalidDataException(LocalizationService.Get("UpdateUnsafeFileName"));
         if (asset.Size > MaximumUpdateBytes)
-            throw new InvalidDataException("The update package is unexpectedly large.");
+            throw new InvalidDataException(LocalizationService.Get("UpdatePackageTooLarge"));
         var directory = Path.Combine(_downloadRoot,
             SanitizeDirectoryName(release.TagName));
         Directory.CreateDirectory(directory);
@@ -461,14 +462,14 @@ internal sealed class GitHubReleaseClient : IDisposable
         TryDelete(partial);
         if (lastError is InvalidDataException invalidData) throw invalidData;
         throw new HttpRequestException(
-            "All configured update download endpoints are unavailable.", lastError);
+            LocalizationService.Get("UpdateDownloadEndpointsUnavailable"), lastError);
     }
 
     internal static IReadOnlyList<Uri> BuildDownloadCandidates(
         ReleaseAsset asset, bool allowMirrorFallback)
     {
         if (!ReleaseParser.IsTrustedGitHubAssetUri(asset.DownloadUri))
-            throw new InvalidDataException("The update asset URL is not trusted.");
+            throw new InvalidDataException(LocalizationService.Get("UpdateUntrustedAssetUrl"));
         if (!allowMirrorFallback || asset.Sha256 is null)
             return [asset.DownloadUri];
         var candidates = DownloadMirrorPrefixes.Select(prefix =>
@@ -695,18 +696,18 @@ internal sealed class GitHubReleaseClient : IDisposable
         {
             var checksumAsset = release.ChecksumAsset ??
                 throw new InvalidDataException(
-                    "The release does not provide a trusted SHA256 value.");
+                    LocalizationService.Get("UpdateChecksumRequired"));
             var manifest = await ReadChecksumManifestAsync(checksumAsset,
                 allowMirrorFallback, cancellationToken);
             expected = ReleaseParser.FindExpectedSha256(manifest, asset.Name) ??
                 throw new InvalidDataException(
-                    $"SHA256SUMS.txt does not contain {asset.Name}.");
+                    LocalizationService.Format("UpdateChecksumEntryMissingFormat", asset.Name));
         }
         await using var stream = File.OpenRead(path);
         var actual = Convert.ToHexString(
             await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
         if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("The downloaded update failed SHA256 verification.");
+            throw new InvalidDataException(LocalizationService.Get("UpdateChecksumFailed"));
         return actual;
     }
 
@@ -728,13 +729,13 @@ internal sealed class GitHubReleaseClient : IDisposable
                 response.EnsureSuccessStatusCode();
                 if (response.Content.Headers.ContentLength is > MaximumChecksumCharacters)
                     throw new InvalidDataException(
-                        "The checksum manifest is unexpectedly large.");
+                        LocalizationService.Get("UpdateChecksumListTooLarge"));
                 var bytes = await ReadBoundedBytesAsync(response.Content,
                     MaximumChecksumCharacters,
-                    "The checksum manifest is unexpectedly large.", timeout.Token);
+                    LocalizationService.Get("UpdateChecksumListTooLarge"), timeout.Token);
                 if (checksumAsset.Size > 0 && bytes.LongLength != checksumAsset.Size)
                     throw new InvalidDataException(
-                        "The checksum manifest size does not match the release metadata.");
+                        LocalizationService.Get("UpdateChecksumSizeMismatch"));
                 if (checksumAsset.Sha256 is not null)
                 {
                     var actual = Convert.ToHexString(SHA256.HashData(bytes))
@@ -742,7 +743,7 @@ internal sealed class GitHubReleaseClient : IDisposable
                     if (!actual.Equals(checksumAsset.Sha256,
                             StringComparison.OrdinalIgnoreCase))
                         throw new InvalidDataException(
-                            "The checksum manifest failed SHA256 verification.");
+                            LocalizationService.Get("UpdateChecksumListInvalid"));
                 }
                 return Encoding.UTF8.GetString(bytes);
             }
@@ -760,7 +761,7 @@ internal sealed class GitHubReleaseClient : IDisposable
 
         if (lastError is InvalidDataException invalidData) throw invalidData;
         throw new HttpRequestException(
-            "All checksum download endpoints are unavailable.", lastError);
+            LocalizationService.Get("UpdateChecksumDownloadUnavailable"), lastError);
     }
 
     private static async Task<string> ReadBoundedTextAsync(HttpContent content,
@@ -815,10 +816,10 @@ internal sealed class GitHubReleaseClient : IDisposable
         HttpResponseMessage response)
     {
         var finalUri = response.RequestMessage?.RequestUri ??
-            throw new InvalidDataException("The update response has no final URL.");
+            throw new InvalidDataException(LocalizationService.Get("UpdateResponseUrlMissing"));
         if (!IsTrustedDownloadFinalUri(requestedUri, finalUri))
             throw new InvalidDataException(
-                "The update download redirected to an untrusted host.");
+                LocalizationService.Get("UpdateDownloadUntrustedRedirect"));
     }
 
     private static bool IsTrustedDownloadFinalUri(Uri requestedUri, Uri finalUri) =>

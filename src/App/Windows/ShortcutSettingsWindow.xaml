@@ -1,17 +1,16 @@
-<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.ShortcutSettingsWindow"
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.ShortcutSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="{DynamicResource ShortcutSettingsTitle}"
-        Width="560" Height="650" MinWidth="500" MinHeight="520"
+        Width="582" Height="672" MinWidth="522" MinHeight="542"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
-        ExtendsContentIntoTitleBar="True"
-        WindowBackdropType="Mica" WindowCornerPreference="Round"
-        Background="{DynamicResource AppBackgroundBrush}"
-        Foreground="{DynamicResource TextBrush}">
-    <ui:FluentWindow.Resources>
+        Foreground="{DynamicResource TextBrush}"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <chrome:RoundedWindow.Resources>
         <Style x:Key="ShortcutCaptureBox" TargetType="TextBox" BasedOn="{StaticResource RoundedTextBox}">
             <Setter Property="FontSize" Value="16"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -26,43 +25,14 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
-        <Style x:Key="ShortcutClearButton" TargetType="Button">
-            <Setter Property="Width" Value="32"/>
-            <Setter Property="Height" Value="32"/>
+        <Style x:Key="ShortcutClearButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="Width" Value="32"/><Setter Property="Height" Value="32"/>
+            <Setter Property="MinHeight" Value="32"/>
             <Setter Property="Margin" Value="8,0,0,0"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderBrush" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Focusable" Value="False"/>
-            <Setter Property="Foreground" Value="{DynamicResource ShortcutClearIconBrush}"/>
             <Setter Property="ToolTip" Value="{DynamicResource ShortcutSettingsReset}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="ClearRoot" Background="Transparent"
-                                BorderBrush="Transparent" BorderThickness="1"
-                                CornerRadius="6" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"
-                                              RecognizesAccessKey="True"
-                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="ClearRoot" Property="BorderBrush"
-                                        Value="{DynamicResource FocusStrokeBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.42"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+            <Setter Property="AutomationProperties.Name" Value="{DynamicResource ShortcutSettingsReset}"/>
         </Style>
-    </ui:FluentWindow.Resources>
+    </chrome:RoundedWindow.Resources>
 
     <Grid Style="{StaticResource SubWindowPageRoot}"
           animations:PageTransition.IsEnabled="True">
@@ -90,7 +60,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock Text="{DynamicResource ShortcutSettingsDescription}"
-                       Foreground="{DynamicResource MutedTextBrush}" FontSize="11"
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,0,0,12"/>
             <ScrollViewer Grid.Row="1" Margin="0,0,-25,0"
                           VerticalScrollBarVisibility="Auto"
@@ -99,7 +69,7 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <StackPanel Margin="0,0,0,14">
-                            <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold"
+                            <TextBlock Text="{Binding Title}" FontSize="{StaticResource CaptionFontSize}" FontWeight="SemiBold"
                                        Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,7"/>
                             <ItemsControl ItemsSource="{Binding Rows}">
                                 <ItemsControl.ItemTemplate>
@@ -113,7 +83,7 @@
                                             <TextBlock Text="{Binding Label}" VerticalAlignment="Center"
                                                        FontWeight="SemiBold" TextWrapping="Wrap"/>
                                             <TextBox Grid.Column="1" Text="{Binding ShortcutText, Mode=OneWay}"
-                                                      Style="{StaticResource ShortcutCaptureBox}" Height="40"
+                                                      Style="{StaticResource ShortcutCaptureBox}" MinHeight="40"
                                                       PreviewKeyDown="OnShortcutPreviewKeyDown"
                                                       PreviewMouseDown="OnShortcutPreviewMouseDown"
                                                       ToolTip="{DynamicResource ShortcutSettingsCaptureHint}"
@@ -134,11 +104,11 @@
             </ScrollViewer>
             <TextBlock Text="{DynamicResource ShortcutSettingsCaptureHint}"
                        Grid.Row="2"
-                       Foreground="{DynamicResource MutedTextBrush}" FontSize="11"
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,2,0,0"/>
             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource ErrorBrush}"
                        Grid.Row="3"
-                       FontSize="11" TextWrapping="Wrap" MinHeight="20" Margin="0,8,0,0"/>
+                       FontSize="{StaticResource CaptionFontSize}" TextWrapping="Wrap" MinHeight="20" Margin="0,8,0,0"/>
         </Grid>
 
         <Grid Grid.Row="4">
@@ -150,8 +120,8 @@
             </Grid.ColumnDefinitions>
             <Button Grid.Column="1" Content="{DynamicResource Cancel}" Click="OnCloseClick"
                     MinWidth="84"/>
-            <Button Grid.Column="3" Content="{DynamicResource Save}" Click="OnSaveClick"
+            <Button Grid.Column="3" Content="{DynamicResource Save}" IsDefault="True" Click="OnSaveClick"
                     Style="{StaticResource PrimaryButton}" MinWidth="96"/>
         </Grid>
     </Grid>
-</ui:FluentWindow>
+</chrome:RoundedWindow>

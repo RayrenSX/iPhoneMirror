@@ -1,19 +1,20 @@
-<Window x:Class="IPhoneMirror.DriverInstaller.Windows.PromptWindow"
+<chrome:RoundedWindow x:Class="IPhoneMirror.DriverInstaller.Windows.PromptWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         Title="{Binding PromptTitle}" Width="520" SizeToContent="Height"
         MinHeight="260" MaxHeight="520" ResizeMode="NoResize"
-        WindowStartupLocation="CenterOwner" WindowStyle="None"
-        AllowsTransparency="True" Background="Transparent"
-        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False">
-    <Border Style="{StaticResource ModernDialogSurface}" Margin="10">
+        WindowStartupLocation="CenterOwner"
+        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <Border Style="{StaticResource RoundedWindowContent}">
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="16"/>
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
                 <RowDefinition Height="20"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -26,18 +27,17 @@
                 </Button>
             </Grid>
             <Border Grid.Row="2" Style="{StaticResource SettingsSection}" Padding="16">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="280">
-                    <TextBlock Text="{Binding PromptBody}" TextWrapping="Wrap"
-                               FontSize="13" LineHeight="21"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="280">
+                    <TextBlock Text="{Binding PromptBody}" Style="{StaticResource BodyText}"/>
                 </ScrollViewer>
             </Border>
-            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="{Binding CancelText}" Click="OnCancelClick"
-                        MinWidth="92" Margin="0,0,8,0"
+            <WrapPanel Grid.Row="4" Style="{StaticResource DialogActions}">
+                <Button Margin="{StaticResource DialogActionMargin}" Content="{Binding CancelText}" IsDefault="{Binding CancelIsDefault}" Click="OnCancelClick"
+                        MinWidth="92"
                         Visibility="{Binding CancelVisibility}"/>
-                <Button Content="{Binding ConfirmText}" Click="OnConfirmClick"
+                <Button Margin="{StaticResource DialogActionMargin}" Content="{Binding ConfirmText}" IsDefault="{Binding ConfirmIsDefault}" Click="OnConfirmClick"
                         MinWidth="118" Style="{Binding ConfirmStyle}"/>
-            </StackPanel>
+            </WrapPanel>
         </Grid>
     </Border>
-</Window>
+</chrome:RoundedWindow>

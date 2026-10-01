@@ -7,7 +7,7 @@ using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class BluetoothClientBindingWindow : Wpf.Ui.Controls.FluentWindow,
+public partial class BluetoothClientBindingWindow : IPhoneMirror.UI.Controls.RoundedWindow,
     INotifyPropertyChanged
 {
     private BluetoothClientInfo? _selectedClient;
@@ -20,7 +20,8 @@ public partial class BluetoothClientBindingWindow : Wpf.Ui.Controls.FluentWindow
     private bool _resultCompleted;
 
     public ObservableCollection<BluetoothClientInfo> Clients { get; } = [];
-    public string TargetText { get; }
+    private readonly string _targetName;
+    public string TargetText => LocalizationService.Format("BluetoothClientBindingTargetFormat", _targetName);
     public BluetoothClientInfo? SelectedClient
     {
         get => _selectedClient;
@@ -43,12 +44,16 @@ public partial class BluetoothClientBindingWindow : Wpf.Ui.Controls.FluentWindow
         _unbind = unbind;
         _refresh = refresh;
         _suggestedId = suggestedId;
-        TargetText = LocalizationService.Format("BluetoothClientBindingTargetFormat",
-            targetName);
+        _targetName = targetName;
         ReplaceClients(clients, suggestedId);
         Owner = owner;
         DataContext = this;
         InitializeComponent();
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+        {
+            OnPropertyChanged(nameof(TargetText));
+            foreach (var client in Clients) client.NotifyLanguageChanged();
+        });
     }
 
     internal static string? Show(Window owner, string targetName,

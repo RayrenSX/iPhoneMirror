@@ -2083,4 +2083,21 @@ std::int32_t IM_CALL im_session_set_window_rotation(iPhoneMirror::SessionHandle 
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
+std::int32_t IM_CALL im_session_set_window_opacity(iPhoneMirror::SessionHandle handle,
+    void* hwnd, float opacity) {
+    if (!std::isfinite(opacity) || opacity < 0.1F || opacity > 1.0F)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid window opacity");
+    auto context = find_multi_session(handle);
+    if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    std::scoped_lock lock(context->renderers_mutex);
+    const auto window = static_cast<HWND>(hwnd);
+    const auto found = context->renderers.find(window);
+    if (found == context->renderers.end() ||
+        (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_NOREDIRECTIONBITMAP) == 0)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown composition preview window");
+    found->second->set_opacity(opacity);
+    last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
 const wchar_t* IM_CALL im_last_error() { return last_error.c_str(); }

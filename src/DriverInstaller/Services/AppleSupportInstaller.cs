@@ -10,7 +10,8 @@ namespace IPhoneMirror.DriverInstaller.Services;
 internal sealed record AppleSupportInstallResult(
     bool Success,
     bool RequiresStoreInteraction,
-    string Message);
+    string Message,
+    bool RequiresRestart = false);
 
 internal enum ServiceStartOutcome
 {
@@ -29,6 +30,8 @@ internal enum ServiceStartOutcome
 internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
 {
     private static readonly HttpClient Http = CreateHttpClient();
+    private AppleSupportInstallResult? _pendingRestart;
+    internal bool RequiresRestart => _pendingRestart is not null;
 
     internal async Task<AppleSupportInstallResult> RepairBonjourAsync()
     {
@@ -128,6 +131,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
     {
         var operationId = Guid.NewGuid().ToString("N");
         var timer = Stopwatch.StartNew();
+        if (_pendingRestart is not null) return _pendingRestart;
         var current = catalog.InspectAppleSupport();
         DriverLogger.WriteEvent("apple-support", "install_requested",
             ("operation", operationId), ("service_installed", current.ServiceInstalled),
@@ -268,6 +272,13 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             }
         }
 
+        if (installerExitCode is { } exitCode && IsRestartRequired(exitCode))
+        {
+            DriverLogger.WriteWarning("apple-support", "install_restart_required",
+                ("operation", operationId), ("exit_code", exitCode));
+            return _pendingRestart = RestartResult(exitCode, packageLog)!;
+        }
+
         ReportProgress(progress, "AppleSupportVerifying");
         var recovery = await WaitAndRecoverAppleSupportAsync(TimeSpan.FromSeconds(90),
             operationId);
@@ -290,13 +301,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             ("usb_driver_installed", ready.UsbDriverInstalled),
             ("usb_driver_inf", ready.UsbDriverInf),
             ("elapsed_ms", timer.ElapsedMilliseconds));
-        if (installerExitCode is { } exitCode && IsRestartRequired(exitCode))
-        {
-            DriverLogger.WriteWarning("apple-support", "install_restart_required",
-                ("operation", operationId), ("exit_code", exitCode));
-            return new AppleSupportInstallResult(false, false,
-                DriverLocalization.Format("AppleRestartRequired", packageLog));
-        }
+
         return new AppleSupportInstallResult(false, false,
             DriverLocalization.Format("AppleServiceNotReady", packageLog));
     }
@@ -459,7 +464,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
 
         using var process = Process.Start(start)
-            ?? throw new InvalidOperationException("The package manager did not start.");
+            ?? throw new InvalidOperationException(DriverLocalization.Get("ApplePackageManagerStartFailed"));
         var standardOutput = process.StandardOutput.ReadToEndAsync();
         var standardError = process.StandardError.ReadToEndAsync();
         using var cancellation = new CancellationTokenSource(timeout);
@@ -474,7 +479,7 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 if (!process.HasExited) process.Kill(entireProcessTree: true);
             }
             catch { }
-            throw new TimeoutException("The Apple support process timed out.");
+            throw new TimeoutException(DriverLocalization.Get("AppleSupportProcessTimeout"));
         }
         return new ProcessResult(process.ExitCode, await standardOutput, await standardError);
     }
@@ -548,14 +553,14 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                     ("segments", value.SegmentCount),
                     ("elapsed_ms", elapsedMilliseconds));
             });
-            var result = await SegmentedHttpDownloader.DownloadAsync(Http,
+            var result = await DownloadApplePackageAsync(Http,
                 package.DownloadUri, destination,
                 new SegmentedDownloadOptions(
                     AppleSoftwareUpdateCatalog.MaximumPackageBytes,
                     ExpectedBytes: package.Size,
                     MaximumConcurrency: 8,
                     MinimumSegmentBytes: 1024L * 1024),
-                IsTrustedAppleDownloadUri, downloadProgress);
+                downloadProgress);
             DriverLogger.WriteEvent("apple-support", "standalone_download_complete",
                 ("operation", operationId), ("bytes", result.BytesReceived),
                 ("segments", result.SegmentCount),
@@ -580,11 +585,14 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         }
     }
 
-    private static async Task<string> DownloadAppleUpdateCatalogAsync()
+    internal static async Task<string> DownloadAppleUpdateCatalogAsync(HttpClient? client = null,
+        TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
-        using var response = await Http.GetAsync(
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(timeout ?? TimeSpan.FromSeconds(45));
+        using var response = await (client ?? Http).GetAsync(
             AppleSoftwareUpdateCatalog.CatalogUrl,
-            HttpCompletionOption.ResponseHeadersRead);
+            HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         response.EnsureSuccessStatusCode();
         var finalUri = response.RequestMessage?.RequestUri ??
             throw new InvalidDataException(
@@ -599,12 +607,12 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
             throw new InvalidDataException(
                 "The Apple update catalog is unexpectedly large.");
 
-        await using var input = await response.Content.ReadAsStreamAsync();
+        await using var input = await response.Content.ReadAsStreamAsync(deadline.Token);
         using var output = new MemoryStream();
         var buffer = new byte[64 * 1024];
         while (true)
         {
-            var count = await input.ReadAsync(buffer);
+            var count = await input.ReadAsync(buffer, deadline.Token);
             if (count == 0) break;
             if (output.Length + count >
                 AppleSoftwareUpdateCatalog.MaximumCatalogBytes)
@@ -656,12 +664,12 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                     ("segments", value.SegmentCount),
                     ("elapsed_ms", elapsedMilliseconds));
             });
-            var result = await SegmentedHttpDownloader.DownloadAsync(Http,
+            var result = await DownloadApplePackageAsync(Http,
                 new Uri(DriverConstants.OfficialItunesDownloadUrl), destination,
                 new SegmentedDownloadOptions(512L * 1024 * 1024,
                     MaximumConcurrency: 12,
                     MinimumSegmentBytes: 2L * 1024 * 1024),
-                IsTrustedAppleDownloadUri, downloadProgress);
+                downloadProgress);
             DriverLogger.WriteEvent("apple-support", "download_body_complete",
                 ("operation", operationId), ("bytes", result.BytesReceived),
                 ("segments", result.SegmentCount),
@@ -685,6 +693,17 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                 ("operation", operationId), ("elapsed_ms", timer.ElapsedMilliseconds));
             throw;
         }
+    }
+
+    internal static async Task<SegmentedDownloadResult> DownloadApplePackageAsync(HttpClient client,
+        Uri uri, string destination, SegmentedDownloadOptions options,
+        IProgress<SegmentedDownloadProgress>? progress = null, TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(timeout ?? TimeSpan.FromMinutes(20));
+        return await SegmentedHttpDownloader.DownloadAsync(client, uri, destination, options,
+            IsTrustedAppleDownloadUri, progress, deadline.Token);
     }
 
     private static bool IsTrustedAppleMsi(string path) =>
@@ -797,6 +816,10 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
 
     private static bool IsInstallerSuccess(int exitCode) => exitCode is 0 or 1641 or 3010;
 
+    internal static AppleSupportInstallResult? RestartResult(int exitCode, string packageLog) =>
+        IsRestartRequired(exitCode) ? new(true, false,
+            DriverLocalization.Format("AppleRestartRequired", packageLog), RequiresRestart: true) : null;
+
     internal static bool IsRestartRequired(int exitCode) => exitCode is 1641 or 3010;
 
     internal static bool IsUserCancellation(int exitCode) => exitCode == 1223;
@@ -882,37 +905,11 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
         try
         {
             using var process = Process.Start(start)
-                ?? throw new InvalidOperationException("The Apple installer did not start.");
-            using var cancellation = new CancellationTokenSource(timeout);
-            try
-            {
-                await process.WaitForExitAsync(cancellation.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                var terminationRequested = false;
-                var terminated = false;
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(entireProcessTree: true);
-                        terminationRequested = true;
-                        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-                    }
-                    terminated = process.HasExited;
-                }
-                catch (Exception terminationError)
-                {
-                    DriverLogger.WriteException("apple-support", "elevated_timeout_termination_failed",
-                        terminationError, ("operation", operationId), ("process", processName));
-                }
-                DriverLogger.WriteError("apple-support", "elevated_process_timeout",
+                ?? throw new InvalidOperationException(DriverLocalization.Get("AppleInstallerStartFailed"));
+            await DriverOperationSafety.WaitForExitAsync(process, timeout, () =>
+                DriverLogger.WriteWarning("apple-support", "elevated_timeout_waiting_for_exit",
                     ("operation", operationId), ("process", processName),
-                    ("elapsed_ms", timer.ElapsedMilliseconds),
-                    ("termination_requested", terminationRequested), ("terminated", terminated));
-                throw new TimeoutException("Apple USB support installation timed out.");
-            }
+                    ("elapsed_ms", timer.ElapsedMilliseconds)));
             var result = new ProcessResult(process.ExitCode, string.Empty, string.Empty);
             DriverLogger.WriteEvent("apple-support", "elevated_process_exit",
                 ("operation", operationId), ("process", processName),

@@ -667,14 +667,14 @@ bool copy_nv12_frame_letterboxed_sdr(const DecodedFrame& frame,
 bool materialize_gpu_frame(DecodedFrame& frame) noexcept {
     if (!frame.nv12.empty()) return true;
     if (!frame.gpu_frame || !frame.gpu_frame->shared_handle) return false;
-    ComPtr<IDXGIKeyedMutex> keyed_mutex;
-    bool keyed_acquired = false;
+    static std::mutex materialize_mutex;
+    static ComPtr<ID3D11Device> device;
+    static ComPtr<ID3D11Device1> device1;
+    static ComPtr<ID3D11DeviceContext> context;
+    static ComPtr<ID3D11Texture2D> staging_texture;
+    static D3D11_TEXTURE2D_DESC staging_description{};
+    std::scoped_lock lock(materialize_mutex);
     try {
-        static std::mutex materialize_mutex;
-        static ComPtr<ID3D11Device> device;
-        static ComPtr<ID3D11Device1> device1;
-        static ComPtr<ID3D11DeviceContext> context;
-        std::scoped_lock lock(materialize_mutex);
         if (!device) {
             constexpr D3D_FEATURE_LEVEL levels[] = {
                 D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
@@ -688,47 +688,71 @@ bool materialize_gpu_frame(DecodedFrame& frame) noexcept {
         check(device1->OpenSharedResource1(
             static_cast<HANDLE>(frame.gpu_frame->shared_handle),
             IID_PPV_ARGS(&shared_texture)), "open CPU materialize shared texture");
+        ComPtr<IDXGIKeyedMutex> keyed_mutex;
         check(shared_texture.As(&keyed_mutex), "query CPU materialize keyed mutex");
         const auto acquire = keyed_mutex->AcquireSync(1, 1000);
         if (acquire != WAIT_OBJECT_0)
             throw std::runtime_error("CPU materialize shared texture acquire timed out");
-        keyed_acquired = true;
+        struct ReadbackLocks {
+            IDXGIKeyedMutex* mutex;
+            ID3D11DeviceContext* context;
+            ID3D11Texture2D* mapped_texture{};
+            ~ReadbackLocks() {
+                if (mapped_texture) context->Unmap(mapped_texture, 0);
+                (void)mutex->ReleaseSync(1);
+            }
+        } locks{keyed_mutex.Get(), context.Get()};
 
         D3D11_TEXTURE2D_DESC source_description{};
         shared_texture->GetDesc(&source_description);
+        if (source_description.Width != frame.width ||
+            source_description.Height != frame.height ||
+            source_description.MipLevels != 1 || source_description.ArraySize != 1 ||
+            source_description.SampleDesc.Count != 1 ||
+            source_description.Format != (frame.pixel_format == PixelFormat::P010
+                ? DXGI_FORMAT_P010 : DXGI_FORMAT_NV12)) return false;
         auto staging = source_description;
         staging.Usage = D3D11_USAGE_STAGING;
         staging.BindFlags = 0;
         staging.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         staging.MiscFlags = 0;
-        ComPtr<ID3D11Texture2D> staging_texture;
-        check(device->CreateTexture2D(&staging, nullptr, &staging_texture),
-            "create CPU materialize staging texture");
+        // CPU output runs at video cadence. Reuse the readback allocation
+        // until the source size/format changes; the mutex also protects Map.
+        if (!staging_texture || staging.Width != staging_description.Width ||
+            staging.Height != staging_description.Height ||
+            staging.Format != staging_description.Format ||
+            staging.SampleDesc.Quality != staging_description.SampleDesc.Quality) {
+            ComPtr<ID3D11Texture2D> replacement;
+            check(device->CreateTexture2D(&staging, nullptr, &replacement),
+                "create CPU materialize staging texture");
+            staging_texture = std::move(replacement);
+            staging_description = staging;
+        }
         context->CopyResource(staging_texture.Get(), shared_texture.Get());
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context->Map(staging_texture.Get(), 0, D3D11_MAP_READ, 0, &mapped),
             "map CPU materialize staging texture");
+        locks.mapped_texture = staging_texture.Get();
         const auto stride = static_cast<std::size_t>(mapped.RowPitch);
         const auto y_bytes = stride * frame.height;
         const auto uv_bytes = stride * ((static_cast<std::size_t>(frame.height) + 1U) / 2U);
         if (!mapped.pData || stride == 0 || y_bytes + uv_bytes >
             detail::MaxDxgiReadbackBytes)
-        {
-            context->Unmap(staging_texture.Get(), 0);
-            (void)keyed_mutex->ReleaseSync(1);
-            keyed_acquired = false;
             return false;
-        }
         frame.nv12.resize(y_bytes + uv_bytes);
         const auto* source = static_cast<const std::uint8_t*>(mapped.pData);
         std::memcpy(frame.nv12.data(), source, frame.nv12.size());
         frame.stride = static_cast<std::int32_t>(stride);
-        context->Unmap(staging_texture.Get(), 0);
-        (void)keyed_mutex->ReleaseSync(1);
-        keyed_acquired = false;
         return true;
     } catch (...) {
-        if (keyed_acquired && keyed_mutex) (void)keyed_mutex->ReleaseSync(1);
+        // A removed device cannot serve the next readback. Rebuild all cached
+        // resources together after RAII has unmapped/released the old ones.
+        if (device && (!device1 || FAILED(device->GetDeviceRemovedReason()))) {
+            staging_texture.Reset();
+            context.Reset();
+            device1.Reset();
+            device.Reset();
+        }
         return false;
     }
 }

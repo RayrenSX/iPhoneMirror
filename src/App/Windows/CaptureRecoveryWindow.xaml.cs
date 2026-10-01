@@ -2,7 +2,7 @@ using System.Windows;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class CaptureRecoveryWindow : Wpf.Ui.Controls.FluentWindow
+public partial class CaptureRecoveryWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     private CaptureRecoveryWindow() => InitializeComponent();
 

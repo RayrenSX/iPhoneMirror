@@ -5,7 +5,7 @@ using IPhoneMirror.DriverInstaller.Services;
 
 namespace IPhoneMirror.DriverInstaller.Windows;
 
-public partial class FailureHelpWindow : Window
+public partial class FailureHelpWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     public string ErrorMessage { get; }
 
@@ -33,8 +33,16 @@ public partial class FailureHelpWindow : Window
 
     private void OnOpenAisiClick(object sender, RoutedEventArgs e)
     {
-        Process.Start(new ProcessStartInfo(DriverConstants.AisiOfficialUrl)
-            { UseShellExecute = true });
+        try
+        {
+            Process.Start(new ProcessStartInfo(DriverConstants.AisiOfficialUrl) { UseShellExecute = true });
+        }
+        catch (Exception error)
+        {
+            DriverLogger.WriteException("ui", "help_browser_start_failed", error);
+            PromptWindow.Inform(this, DriverLocalization.Get("HelpBrowserFailedTitle"),
+                DriverLocalization.Format("HelpBrowserFailed", DriverConstants.AisiOfficialUrl, error.Message));
+        }
     }
 
     private void OnRunDriverCleanupClick(object sender, RoutedEventArgs e)

@@ -1,0 +1,86 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <!-- Extend the existing theme vocabulary; colors remain in Light/DarkTheme. -->
+    <FontFamily x:Key="AppFontFamily">Segoe UI, Microsoft YaHei UI</FontFamily>
+    <FontFamily x:Key="CodeFontFamily">Cascadia Mono, Consolas</FontFamily>
+    <sys:Double x:Key="PageTitleFontSize">24</sys:Double>
+    <sys:Double x:Key="DialogTitleFontSize">20</sys:Double>
+    <sys:Double x:Key="SectionTitleFontSize">14</sys:Double>
+    <sys:Double x:Key="BodyFontSize">13</sys:Double>
+    <sys:Double x:Key="SecondaryFontSize">12</sys:Double>
+    <sys:Double x:Key="CaptionFontSize">11</sys:Double>
+    <sys:Double x:Key="ButtonFontSize">14</sys:Double>
+    <sys:Double x:Key="ControlMinHeight">40</sys:Double>
+    <sys:Double x:Key="CompactControlMinHeight">32</sys:Double>
+    <sys:Double x:Key="BodyLineHeight">20</sys:Double>
+    <Thickness x:Key="PagePadding">24,20</Thickness>
+    <Thickness x:Key="DialogPadding">24</Thickness>
+    <Thickness x:Key="CardPadding">16</Thickness>
+    <Thickness x:Key="InputPadding">12,8</Thickness>
+    <!-- Four DIP per action gives an eight DIP gap in either wrap direction. -->
+    <Thickness x:Key="DialogActionMargin">4</Thickness>
+    <Thickness x:Key="DialogActionsInset">-4</Thickness>
+    <Thickness x:Key="ButtonPadding">16,8</Thickness>
+    <Thickness x:Key="CompactButtonPadding">12,4</Thickness>
+    <Thickness x:Key="SectionSpacing">0,16,0,0</Thickness>
+    <Thickness x:Key="ControlSpacing">0,8,0,0</Thickness>
+    <CornerRadius x:Key="ControlCornerRadius">8</CornerRadius>
+    <CornerRadius x:Key="ButtonCornerRadius">12</CornerRadius>
+    <CornerRadius x:Key="CardCornerRadius">16</CornerRadius>
+    <CornerRadius x:Key="DialogCornerRadius">20</CornerRadius>
+    <CornerRadius x:Key="PopupCornerRadius">12</CornerRadius>
+    <Thickness x:Key="WindowShadowMargin">10</Thickness>
+
+    <!-- AccessText creates an internal TextBlock; its font must follow the owning label. -->
+    <Style x:Key="ControlAccessTextLabel" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{Binding FontFamily, RelativeSource={RelativeSource AncestorType=AccessText}}"/>
+        <Setter Property="FontSize" Value="{Binding FontSize, RelativeSource={RelativeSource AncestorType=AccessText}}"/>
+        <Setter Property="FontWeight" Value="{Binding FontWeight, RelativeSource={RelativeSource AncestorType=AccessText}}"/>
+        <Setter Property="FontStyle" Value="{Binding FontStyle, RelativeSource={RelativeSource AncestorType=AccessText}}"/>
+        <Setter Property="FontStretch" Value="{Binding FontStretch, RelativeSource={RelativeSource AncestorType=AccessText}}"/>
+        <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=AccessText}}"/>
+    </Style>
+
+    <Style x:Key="ControlAccessText" TargetType="AccessText">
+        <Style.Resources>
+            <Style TargetType="TextBlock" BasedOn="{StaticResource ControlAccessTextLabel}"/>
+        </Style.Resources>
+        <Setter Property="FontFamily" Value="{Binding FontFamily, RelativeSource={RelativeSource AncestorType=Control}}"/>
+        <Setter Property="FontSize" Value="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Control}}"/>
+        <Setter Property="FontWeight" Value="{Binding FontWeight, RelativeSource={RelativeSource AncestorType=Control}}"/>
+        <Setter Property="FontStyle" Value="{Binding FontStyle, RelativeSource={RelativeSource AncestorType=Control}}"/>
+        <Setter Property="FontStretch" Value="{Binding FontStretch, RelativeSource={RelativeSource AncestorType=Control}}"/>
+        <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}"/>
+    </Style>
+
+    <Style x:Key="BodyText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
+        <Setter Property="FontSize" Value="{StaticResource BodyFontSize}"/>
+        <Setter Property="LineHeight" Value="{StaticResource BodyLineHeight}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+    <Style x:Key="SecondaryText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+        <Setter Property="FontSize" Value="{StaticResource SecondaryFontSize}"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+    </Style>
+    <Style x:Key="CaptionText" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+        <Setter Property="FontSize" Value="{StaticResource CaptionFontSize}"/>
+        <Setter Property="LineHeight" Value="16"/>
+    </Style>
+    <Style x:Key="StatusText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="AutomationProperties.LiveSetting" Value="Polite"/>
+    </Style>
+    <Style x:Key="KeyboardFocusVisual" TargetType="Control">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Control">
+                    <Border BorderBrush="{DynamicResource FocusStrokeBrush}" BorderThickness="2"
+                            CornerRadius="4" Margin="-2" IsHitTestVisible="False"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

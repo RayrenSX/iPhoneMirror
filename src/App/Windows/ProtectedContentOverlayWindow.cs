@@ -67,7 +67,7 @@ internal sealed class ProtectedContentOverlayWindow : Window
 
     internal void UpdateAudioDisplay(string audioDisplay)
     {
-        _audioText.Text = audioDisplay;
+        _audioText.Text = LocalizationService.RefreshText(audioDisplay);
     }
 
     private FrameworkElement BuildContent(string audioDisplay)
@@ -147,7 +147,7 @@ internal sealed class ProtectedContentOverlayWindow : Window
         audioPanel.Children.Add(audioIcon);
         _audioText = new TextBlock
         {
-            Text = audioDisplay,
+            Text = LocalizationService.RefreshText(audioDisplay),
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -184,6 +184,7 @@ internal sealed class ProtectedContentOverlayWindow : Window
         _titleText.Text = LocalizationService.Get("CaptureVideoProtectedTitle");
         _bodyText.Text = LocalizationService.Get(
             "CaptureVideoProtectedNoticeProtection");
+        UpdateAudioDisplay(_audioText.Text);
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)

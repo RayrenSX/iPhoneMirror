@@ -98,6 +98,8 @@ if(IPHONEMIRROR_BUILD_TESTS)
     enable_testing()
     add_executable(iPhoneMirror.Core.Tests
         tests/CoreTests.cpp
+        tests/PreviewOpacitySmoke.cpp
+        src/Renderer/D3D11PreviewRenderer.cpp
         src/Protocol/Plist.cpp
         src/Protocol/QuickTimePacket.cpp
         src/Protocol/QuickTimeSession.cpp
@@ -130,7 +132,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         iPhoneMirror.Core
         "${PROJECT_SOURCE_DIR}/third_party/libusb/lib/x64/libusb-1.0.lib"
         "${PROJECT_SOURCE_DIR}/third_party/libusb-win32/lib/x64/libusb0-dynamic.lib"
-        mfplat mf mfuuid wmcodecdspuuid d3d11 dxgi
+        mfplat mf mfuuid wmcodecdspuuid d3d11 dxgi dcomp d3dcompiler dwmapi
         ole32 advapi32 setupapi cfgmgr32 avrt winhttp
         ws2_32
         bcrypt

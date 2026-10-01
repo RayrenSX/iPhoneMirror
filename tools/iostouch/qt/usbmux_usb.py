@@ -255,6 +255,7 @@ class MuxDevice:
         self._conns: dict[int, MuxConnection] = {}
         self._next_sport = 1
         self._failure_reason: Optional[str] = None
+        self._resume_probe_pending = False
         self._assembler = PacketAssembler()
         self.on_control: Optional[Callable[[bytes], None]] = None
 
@@ -335,11 +336,16 @@ class MuxDevice:
             self._next_sport = (self._next_sport + 1) & 0xFFFF
             conn = MuxConnection(self, sport, dport)
             self._conns[sport] = conn
+            # The first SYN after reopening a reader can go unanswered on an
+            # otherwise live capture mux. Bound just this probe; Lockdown's
+            # existing retry uses a fresh source port and the normal budget.
+            connect_timeout = min(timeout, 0.75) if self._resume_probe_pending else timeout
+            self._resume_probe_pending = False
         try:
             self._send_tcp(conn, TH_SYN)
-            conn.wait_connected(timeout)
+            conn.wait_connected(connect_timeout)
         except Exception:
-            self._forget(conn)
+            conn.close()
             raise
         return conn
 
@@ -368,6 +374,16 @@ class UsbMuxTransport:
     """在已激活的隐藏配置上 claim usbmux 接口（子类 0xFE），跑 :class:`MuxDevice`。"""
 
     SUBCLASS_USBMUX = 0xFE
+
+    @property
+    def failure_reason(self) -> Optional[str]:
+        # A listener socket can remain open after the USB reader is gone.
+        # Its address and VERSION-ready event are not evidence of liveness.
+        if self.mux._failure_reason is not None:
+            return self.mux._failure_reason
+        if self._stop.is_set() or (self._thread is not None and not self._thread.is_alive()):
+            return 'usbmux USB reader stopped'
+        return None
 
     def __init__(self, dev, serial: str, *, timeout_ms: int = 200) -> None:
         import usb.util
@@ -401,12 +417,35 @@ class UsbMuxTransport:
         self._thread: Optional[threading.Thread] = None
         self.bytes_in = 0
         self.bytes_out = 0
+        self.resumed = False
         logger.info("usbmux interface %d claimed: IN=0x%02x OUT=0x%02x", intf.bInterfaceNumber,
                     self._ep_in.bEndpointAddress, self._ep_out.bEndpointAddress)
 
     def _write(self, data: bytes) -> None:
         self._ep_out.write(data, timeout=2000)
         self.bytes_out += len(data)
+
+    def resume_from(self, previous: "UsbMuxTransport") -> None:
+        """Reopen a failed reader without renegotiating the live device mux.
+
+        The caller verifies the same phone's active capture configuration.
+        VERSION is a one-shot handshake on that configuration. Keep its mux
+        sequence numbers and next source port; discard only dead TCP clients.
+        """
+        if previous._thread is not None and previous._thread.is_alive():
+            raise MuxError('cannot resume while the old USB reader is alive')
+        if previous.mux.version not in (1, 2):
+            raise MuxError('cannot resume an unnegotiated usbmux session')
+        mux = previous.mux
+        mux.abort_all('usbmux reader replaced')
+        with mux._lock:
+            mux._write_raw = self._write
+            mux.wmax = self._ep_out.wMaxPacketSize or 512
+            mux._assembler = PacketAssembler()
+            mux._failure_reason = None
+            mux._resume_probe_pending = True
+        self.mux = mux
+        self.resumed = True
 
     def start(self) -> None:
         from iostouch.qt.usb import _is_timeout
@@ -432,7 +471,11 @@ class UsbMuxTransport:
 
         self._thread = threading.Thread(target=run, name="usbmux-usb-reader", daemon=True)
         self._thread.start()
-        self.mux.start()
+        if self.resumed:
+            logger.info('usbmux reader resumed without VERSION: version=%d tx_seq=%d next_sport=%d',
+                        self.mux.version, self.mux.tx_seq, self.mux._next_sport)
+        else:
+            self.mux.start()
         if not self.mux.ready.wait(5.0):
             raise MuxError("device did not answer usbmux VERSION packet")
         if self.mux._failure_reason is not None:

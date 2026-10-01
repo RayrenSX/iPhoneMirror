@@ -11,7 +11,7 @@ namespace IPhoneMirror.DriverInstaller.Services;
 internal static class ElevatedDriverHost
 {
     private const uint CrSuccess = 0;
-    private const uint DevNodePresent = 0x00000008;
+    private const uint DevNodeStarted = 0x00000008;
     private const int MaximumLoggedProcessOutputLines = 80;
     private const int MaximumLoggedProcessLineCharacters = 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -25,12 +25,15 @@ internal static class ElevatedDriverHost
 
     internal static int Run(IReadOnlyList<string> arguments)
     {
-        if (arguments.Count != 5 || !IsRequested(arguments) ||
+        if (arguments.Count is not (5 or 6) || !IsRequested(arguments) ||
             !Enum.TryParse<DriverOperationKind>(arguments[1], ignoreCase: false, out var kind) ||
             !Enum.IsDefined(kind) ||
-            !DriverConstants.IsAllowedAppleParent(arguments[2]) ||
+            !DriverConstants.IsAppleMobileCaptureParent(arguments[2]) ||
             !DriverConstants.IsValidSerial(arguments[3]) ||
-            !DriverConstants.IsValidOperationId(arguments[4]))
+            !DriverConstants.IsValidOperationId(arguments[4]) ||
+            (kind == DriverOperationKind.ParentRepair
+                ? arguments.Count != 6 || ParentDriverConsent.Decode(arguments[5]) is null
+                : arguments.Count != 5))
         {
             DriverLogger.WriteWarning("elevated-host", "arguments_rejected",
                 ("argument_count", arguments.Count),
@@ -68,132 +71,118 @@ internal static class ElevatedDriverHost
         var replacedSystemFiles = new List<SystemFileBackup>();
         string? backupPath = null;
         bool? serviceExistedBefore = null;
-        var parentRemovalStarted = false;
+        Mutex? mutex = null;
+        var lockTaken = false;
         try
         {
             if (!IsAdministrator())
                 throw new InvalidOperationException("The driver operation is not elevated.");
             log.WriteEvent("privilege_verified", ("administrator", true));
 
-            using var mutex = new Mutex(false, @"Global\iPhoneMirror.Driver.Operation");
-            var lockTaken = false;
-            try
+            using var cancellation = DriverOperationCancellation.Open(operationId);
+            mutex = new Mutex(false, DriverOperationSafety.MutexName);
+            try { lockTaken = mutex.WaitOne(TimeSpan.Zero); }
+            catch (AbandonedMutexException) { lockTaken = true; }
+            if (!lockTaken)
+                throw new InvalidOperationException(
+                    "Another iPhone driver operation is already running.");
+            log.WriteEvent("operation_lock_acquired");
+            cancellation.Checkpoint();
+
+            var target = ValidateTarget(instanceId, expectedSerial,
+                requirePresent: kind is not DriverOperationKind.Uninstall,
+                allowParentChange: kind is DriverOperationKind.ParentRepair or DriverOperationKind.Uninstall);
+            log.WriteEvent("target_validated",
+                ("device", DriverLogger.DescribeDevice(target)));
+
+            if (kind == DriverOperationKind.ParentRepair)
             {
-                try { lockTaken = mutex.WaitOne(TimeSpan.Zero); }
-                catch (AbandonedMutexException) { lockTaken = true; }
-                if (!lockTaken)
-                    throw new InvalidOperationException(
-                        "Another iPhone driver operation is already running.");
-                log.WriteEvent("operation_lock_acquired");
+                var consent = ParentDriverConsent.Decode(arguments[5])!;
+                var parentResult = RunParentChange(target, consent, operationId, paths.LogPath, log, cancellation.Checkpoint);
+                WriteResult(paths.ResultPath, parentResult);
+                log.WriteEvent("parent_change_completed", ("success", parentResult.Success),
+                    ("requires_restart", parentResult.RequiresRestart), ("message", parentResult.Message));
+                return parentResult.Success ? 0 : 1;
+            }
 
-                var target = ValidateTarget(instanceId, expectedSerial,
-                    requirePresent: kind is not DriverOperationKind.Uninstall,
-                    allowKnownBadParent: kind == DriverOperationKind.ParentRepair);
-                log.WriteEvent("target_validated",
-                    ("device", DriverLogger.DescribeDevice(target)));
+            log.WriteEvent("payload_extract_start");
+            var payloadRoot = DriverPayload.ExtractRuntimeFiles(paths.Directory);
+            log.WriteEvent("payload_verified", ("files", 4),
+                ("payload", DriverLogger.DescribePath(payloadRoot)),
+                ("kernel_signature", "trusted"));
+            serviceExistedBefore = ServiceExists();
+            log.WriteEvent("service_snapshot", ("exists", serviceExistedBefore.Value));
+            if (serviceExistedBefore.Value)
+                ValidateInstalledServiceDefinition();
 
-                log.WriteEvent("payload_extract_start");
-                var payloadRoot = DriverPayload.ExtractRuntimeFiles(paths.Directory);
-                log.WriteEvent("payload_verified", ("files", 4),
-                    ("payload", DriverLogger.DescribePath(payloadRoot)),
-                    ("kernel_signature", "trusted"));
-                serviceExistedBefore = ServiceExists();
-                log.WriteEvent("service_snapshot", ("exists", serviceExistedBefore.Value));
-                if (serviceExistedBefore.Value && kind != DriverOperationKind.ParentRepair)
-                    ValidateInstalledServiceDefinition();
+            snapshot = CaptureSnapshot(instanceId);
+            log.WriteEvent("filter_snapshot_captured", ("entries", snapshot.Length));
+            backupPath = SaveSnapshot(kind, expectedSerial, operationId, snapshot,
+                serviceExistedBefore.Value);
+            log.WriteEvent("rollback_snapshot_saved",
+                ("snapshot", DriverLogger.DescribePath(backupPath)));
 
-                snapshot = CaptureSnapshot(instanceId);
-                log.WriteEvent("filter_snapshot_captured", ("entries", snapshot.Length));
-                backupPath = SaveSnapshot(kind, expectedSerial, operationId, snapshot,
-                    serviceExistedBefore.Value);
-                log.WriteEvent("rollback_snapshot_saved",
-                    ("snapshot", DriverLogger.DescribePath(backupPath)));
-
-                if (kind == DriverOperationKind.ParentRepair)
+            cancellation.Checkpoint();
+            if (kind is DriverOperationKind.Install or DriverOperationKind.Repair)
+            {
+                log.WriteEvent("filter_install_start", ("operation_kind", kind));
+                EnsureSystemFiles(payloadRoot, createdSystemFiles,
+                    replacedSystemFiles, paths.Directory, log);
+                cancellation.Checkpoint();
+                RunFilterTool(payloadRoot, "i", "-di=" + instanceId, log);
+                cancellation.Checkpoint();
+                var healthy = WaitForHealthyTarget(instanceId, TimeSpan.FromSeconds(20));
+                log.WriteEvent("target_health_checked", ("healthy", healthy));
+                if (!healthy)
+                    throw new TimeoutException("The target device did not become healthy in time.");
+                VerifyInstalled(instanceId, snapshot);
+                ValidateInstalledStack();
+                log.WriteEvent("installed_stack_verified", ("hashes", "trusted"));
+                log.WriteEvent("filter_install_verified",
+                    ("created_system_files", createdSystemFiles.Count));
+            }
+            else
+            {
+                log.WriteEvent("filter_uninstall_start");
+                RunFilterTool(payloadRoot, "u", "-di=" + instanceId, log);
+                cancellation.Checkpoint();
+                if (DriverOperationSafety.NeedsHealthCheck(kind, target.IsPresent))
                 {
-                    if (!DriverConstants.IsKnownReplaceableParentService(target.Service))
-                        throw new InvalidOperationException(
-                            $"The Apple parent service is not a known replaceable driver: {target.Service}.");
-                    parentRemovalStarted = true;
-                    log.WriteEvent("parent_repair_remove_start");
-                    RunPnPRemove(instanceId, log);
-                    snapshot = null;
-                    if (IsDevicePresent(instanceId))
-                        throw new InvalidOperationException(
-                            "Windows did not remove the incorrect Apple parent device.");
-                    var parentMessage =
-                        "The incorrect Apple parent device was removed. Reconnect the iPhone to rebind usbccgp.";
-                    WriteResult(paths.ResultPath, new DriverOperationResult(true, true,
-                        parentMessage, instanceId, backupPath, paths.LogPath));
-                    log.WriteEvent("completed", ("success", true),
-                        ("requires_replug", true), ("elapsed_ms", timer.ElapsedMilliseconds),
-                        ("message", parentMessage));
-                    return 0;
-                }
-
-                if (kind is DriverOperationKind.Install or DriverOperationKind.Repair)
-                {
-                    log.WriteEvent("filter_install_start", ("operation_kind", kind));
-                    EnsureSystemFiles(payloadRoot, createdSystemFiles,
-                        replacedSystemFiles, paths.Directory, log);
-                    RunFilterTool(payloadRoot, "i", "-di=" + instanceId, log);
                     var healthy = WaitForHealthyTarget(instanceId, TimeSpan.FromSeconds(20));
                     log.WriteEvent("target_health_checked", ("healthy", healthy));
                     if (!healthy)
                         throw new TimeoutException("The target device did not become healthy in time.");
-                    VerifyInstalled(instanceId, snapshot);
-                    ValidateInstalledStack();
-                    log.WriteEvent("installed_stack_verified", ("hashes", "trusted"));
-                    log.WriteEvent("filter_install_verified",
-                        ("created_system_files", createdSystemFiles.Count));
                 }
-                else
-                {
-                    log.WriteEvent("filter_uninstall_start");
-                    RunFilterTool(payloadRoot, "u", "-di=" + instanceId, log);
-                    var healthy = WaitForHealthyTarget(instanceId, TimeSpan.FromSeconds(20));
-                    log.WriteEvent("target_health_checked", ("healthy", healthy));
-                    if (!healthy)
-                        throw new TimeoutException("The target device did not become healthy in time.");
-                    VerifyUninstalled(instanceId, snapshot);
-                    log.WriteEvent("filter_uninstall_verified");
-                }
+                VerifyUninstalled(instanceId, snapshot);
+                log.WriteEvent("filter_uninstall_verified");
+            }
 
-                var message = kind == DriverOperationKind.Uninstall
-                    ? "Selected-device capture filter removed. Reconnect the device to complete unload."
-                    : "Selected-device capture filter installed. Reconnect the device to complete activation.";
-                var result = new DriverOperationResult(true, target.IsPresent, message,
-                    instanceId, backupPath, paths.LogPath);
-                WriteResult(paths.ResultPath, result);
-                log.WriteEvent("completed", ("success", true),
-                    ("requires_replug", target.IsPresent),
-                    ("elapsed_ms", timer.ElapsedMilliseconds), ("message", message));
-                return 0;
-            }
-            finally
-            {
-                if (lockTaken) mutex.ReleaseMutex();
-            }
+            var message = kind == DriverOperationKind.Uninstall
+                ? "Selected-device capture filter removed. Reconnect the device to complete unload."
+                : "Selected-device capture filter installed. Reconnect the device to complete activation.";
+            var result = new DriverOperationResult(true, target.IsPresent, message,
+                instanceId, backupPath, paths.LogPath);
+            WriteResult(paths.ResultPath, result);
+            log.WriteEvent("completed", ("success", true),
+                ("requires_replug", target.IsPresent),
+                ("elapsed_ms", timer.ElapsedMilliseconds), ("message", message));
+            return 0;
         }
         catch (Exception error)
         {
             log.WriteException("operation_failed", error,
-                ("elapsed_ms", timer.ElapsedMilliseconds),
-                ("parent_removal_started", parentRemovalStarted));
+                ("elapsed_ms", timer.ElapsedMilliseconds));
             log.WriteEvent("rollback_start", ("snapshot_entries", snapshot?.Length ?? 0),
                 ("created_system_files", createdSystemFiles.Count),
                 ("replaced_system_files", replacedSystemFiles.Count));
             var rollbackComplete = kind == DriverOperationKind.ParentRepair
-                ? !parentRemovalStarted
+                ? false
                 : RollBack(snapshot, serviceExistedBefore, createdSystemFiles,
                     replacedSystemFiles, log);
             log.WriteEvent("rollback_completed", ("complete", rollbackComplete),
                 ("elapsed_ms", timer.ElapsedMilliseconds));
             var message = kind == DriverOperationKind.ParentRepair
-                ? parentRemovalStarted
-                    ? "Parent driver repair stopped after the removal request began. " +
-                      "Reconnect the iPhone and review the operation log. " + error.Message
-                    : "Parent driver repair was rejected before any system change. " + error.Message
+                ? "ParentChangeRecoveryNeeded"
                 : rollbackComplete
                     ? "Driver operation failed and all captured state was restored. " + error.Message
                     : "Driver operation failed and rollback was incomplete. Review the operation log. " +
@@ -209,10 +198,15 @@ internal static class ElevatedDriverHost
             }
             return 1;
         }
+        finally
+        {
+            if (lockTaken) mutex!.ReleaseMutex();
+            mutex?.Dispose();
+        }
     }
 
     private static AppleDeviceRecord ValidateTarget(string instanceId, string expectedSerial,
-        bool requirePresent, bool allowKnownBadParent)
+        bool requirePresent, bool allowParentChange)
     {
         var actualSerial = DriverConstants.NormalizeSerial(
             instanceId[(instanceId.LastIndexOf('\\') + 1)..]);
@@ -223,14 +217,94 @@ internal static class ElevatedDriverHost
         var target = new DeviceCatalog().FindExact(instanceId, expectedSerial)
             ?? throw new InvalidOperationException("The selected Apple parent device no longer exists.");
         if (!string.Equals(target.Service, "usbccgp", StringComparison.OrdinalIgnoreCase) &&
-            !(allowKnownBadParent &&
-              DriverConstants.IsKnownReplaceableParentService(target.Service)))
+            !allowParentChange)
             throw new InvalidOperationException(
                 $"Unexpected Apple parent service: {target.Service}. No changes were made.");
         if (requirePresent && !target.IsPresent)
             throw new InvalidOperationException(
                 "The selected Apple device is not connected and healthy.");
         return target;
+    }
+
+    private static DriverOperationResult RunParentChange(AppleDeviceRecord target,
+        ParentDriverConsent consent, string operationId, string logPath, OperationLog log, Action checkpoint)
+    {
+        string? backup = null;
+        var removalStarted = false;
+        try
+        {
+            if (!consent.Matches(target))
+                throw new InvalidOperationException("Parent confirmation does not match the current device state.");
+            var catalog = new DeviceCatalog();
+            AppleDeviceRecord? ReadCurrent() => catalog.FindExact(target.InstanceId, target.Serial);
+            void SaveBackup()
+            {
+                var path = Path.Combine(DriverConstants.BackupsRoot, $"parent-{operationId}.json");
+                File.WriteAllText(path, JsonSerializer.Serialize(new
+                {
+                    CreatedUtc = DateTime.UtcNow, Device = target, Consent = consent,
+                    Filters = CaptureSnapshot(target.InstanceId),
+                }, JsonOptions), Encoding.UTF8);
+                backup = path;
+                log.WriteEvent("parent_backup_saved", ("path", path));
+            }
+
+            if (consent.Action == ParentDriverAction.Reenumerate)
+            {
+                SaveBackup();
+                if (ReadCurrent() is not { } current || !consent.Matches(current))
+                    throw new InvalidOperationException("Parent state changed after confirmation.");
+                checkpoint();
+                removalStarted = true;
+                var reboot = RunPnPRemove(target.InstanceId, log);
+                return new(true, !reboot, reboot ? "ParentResetRestartRequired" : "ParentResetComplete",
+                    target.InstanceId, backup, logPath, reboot);
+            }
+
+            ParentDriverNative? TryOpen(bool composite, bool installedOnly)
+            {
+                try { return new ParentDriverNative(target.InstanceId, composite, installedOnly); }
+                catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
+                {
+                    log.WriteException("parent_candidate_source_failed", error,
+                        ("composite", composite), ("installed_only", installedOnly));
+                    return null;
+                }
+            }
+            using var original = TryOpen(false, true);
+            using var candidates = TryOpen(consent.Driver!.IsComposite, false);
+            var selected = consent.Driver;
+            if (candidates?.Contains(selected) != true && original?.Contains(selected) != true)
+                throw new InvalidOperationException("The selected driver is no longer available for this device.");
+            var previous = original?.Choices.FirstOrDefault(choice => ParentDriverChange.BindingMatches(target, choice));
+            bool Install(ParentDriverChoice choice)
+            {
+                log.WriteEvent("parent_binding_start", ("inf", choice.InfPath),
+                    ("section", choice.Section), ("version", choice.VersionText));
+                var source = ReferenceEquals(choice, previous) ? original :
+                    candidates?.Contains(choice) == true ? candidates : original;
+                var restart = (source ?? throw new InvalidOperationException("Driver source is unavailable.")).Install(choice);
+                if (!restart)
+                {
+                    var deadline = DateTime.UtcNow.AddSeconds(20);
+                    do
+                    {
+                        if (ReadCurrent() is { } current && ParentDriverChange.BindingMatches(current, choice) &&
+                            (ReferenceEquals(choice, previous) || current.IsHealthy)) break;
+                        Thread.Sleep(250);
+                    } while (DateTime.UtcNow < deadline);
+                }
+                return restart;
+            }
+            var result = ParentDriverChange.Apply(consent, previous, ReadCurrent, Install, SaveBackup, log.Write, checkpoint);
+            return new(result.Success, false, result.Message, target.InstanceId, backup, logPath, result.RequiresRestart);
+        }
+        catch (Exception error)
+        {
+            log.WriteException("parent_change_failed", error);
+            return new(false, removalStarted, removalStarted ? "ParentChangeRecoveryNeeded" : "ParentChangeRejected",
+                target.InstanceId, backup, logPath);
+        }
     }
 
     private static string SaveSnapshot(DriverOperationKind kind, string serial,
@@ -586,7 +660,7 @@ internal static class ElevatedDriverHost
         {
             if (CM_Locate_DevNodeW(out var node, instanceId, 0) == CrSuccess &&
                 CM_Get_DevNode_Status(out var status, out var problem, node, 0) == CrSuccess &&
-                problem == 0 && (status & DevNodePresent) != 0) return true;
+                problem == 0 && (status & DevNodeStarted) != 0) return true;
             Thread.Sleep(250);
         } while (DateTime.UtcNow < deadline);
         return false;
@@ -616,22 +690,10 @@ internal static class ElevatedDriverHost
         var stderr = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(checked((int)timeout.TotalMilliseconds)))
         {
-            var terminationRequested = false;
-            try
-            {
-                process.Kill(entireProcessTree: true);
-                terminationRequested = true;
-                process.WaitForExit(5000);
-            }
-            catch (Exception error)
-            {
-                log?.WriteException("process_timeout_termination_failed", error,
-                    ("process", name));
-            }
-            log?.WriteError("process_timeout", ("process", name),
-                ("elapsed_ms", timer.ElapsedMilliseconds),
-                ("termination_requested", terminationRequested),
-                ("terminated", process.HasExited));
+            log?.WriteError("process_timeout_waiting_for_safe_exit", ("process", name),
+                ("elapsed_ms", timer.ElapsedMilliseconds));
+            // Do not roll back over a child that is still changing Windows state.
+            process.WaitForExit();
             throw new TimeoutException("The filter installer timed out.");
         }
         Task.WaitAll(stdout, stderr);
@@ -677,16 +739,17 @@ internal static class ElevatedDriverHost
         return service is not null;
     }
 
-    private static void RunPnPRemove(string instanceId, OperationLog log)
+    private static bool RunPnPRemove(string instanceId, OperationLog log)
     {
         var pnputil = Path.Combine(Environment.SystemDirectory, "pnputil.exe");
-        var result = RunProcess(pnputil, ["/remove-device", instanceId, "/force"],
+        var result = RunProcess(pnputil, DriverOperationSafety.RemoveDeviceArguments(instanceId, Environment.OSVersion.Version.Build),
             TimeSpan.FromMinutes(2), log, "pnputil");
         log.WriteEvent("pnp_remove_result", ("exit_code", result.ExitCode));
         WriteProcessOutput(log, "pnp_remove_output", result.CombinedOutput);
-        if (result.ExitCode != 0)
+        if (result.ExitCode is not (0 or 3010))
             throw new InvalidOperationException(
                 $"Windows failed to remove the incorrect Apple parent device (code {result.ExitCode}).");
+        return result.ExitCode == 3010;
     }
 
     private static void WriteProcessOutput(OperationLog log, string eventName, string output)
@@ -723,11 +786,6 @@ internal static class ElevatedDriverHost
             ("omitted_lines", lines.Length - loggedLines),
             ("truncated_lines", truncatedLines));
     }
-
-    private static bool IsDevicePresent(string instanceId) =>
-        CM_Locate_DevNodeW(out var node, instanceId, 0) == CrSuccess &&
-        CM_Get_DevNode_Status(out var status, out var problem, node, 0) == CrSuccess &&
-        problem == 0 && (status & DevNodePresent) != 0;
 
     private static bool IsAdministrator()
     {

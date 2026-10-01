@@ -62,7 +62,7 @@ class TestBridgeChannel(unittest.TestCase):
 
 
 class TestDirectHidLeaseRefresh(unittest.TestCase):
-    def test_lease_refresh_is_advisory(self):
+    def test_lease_refresh_reopens_hid_and_retries_after_failure(self):
         from usb_touch_bridge import TouchSession
 
         class Ipc:
@@ -74,23 +74,24 @@ class TestDirectHidLeaseRefresh(unittest.TestCase):
 
         async def run():
             ipc = Ipc()
-            session = TouchSession.__new__(TouchSession)
-            session.ipc = ipc
+            session = TouchSession(ipc, 120, 'test-device')
+            session.auth_mode = 'direct'
+            calls = []
+            async def refresh():
+                calls.append(True)
+                raise asyncio.CancelledError
+            session._refresh_direct_hid = refresh
             async def immediate_sleep(_):
                 return None
-            with patch("usb_touch_bridge.asyncio.sleep", new=immediate_sleep):
-                await session._request_direct_hid_rotation()
-            return ipc.events
+            with patch("usb_touch_bridge.asyncio.sleep", new=immediate_sleep), \
+                 patch("usb_touch_bridge.DIRECT_HID_ROTATION_SECONDS", 0):
+                with self.assertRaises(asyncio.CancelledError):
+                    await session._request_direct_hid_rotation()
+            return calls, ipc.events
 
-        events = asyncio.run(run())
-        self.assertEqual(
-            [{
-                "event": "warning",
-                "code": "direct_hid_rotation_deferred",
-                "message": "Direct Universal HID lease refresh deferred while the active session is healthy.",
-            }],
-            events,
-        )
+        calls, events = asyncio.run(run())
+        self.assertEqual([True], calls)
+        self.assertEqual([], events)
 
 
 class TestFiveSlotStateMachine(unittest.TestCase):
@@ -995,7 +996,9 @@ class TestDeveloperEnvironmentPreflight(unittest.IsolatedAsyncioTestCase):
         async def initialize_touch(*, open_media_gate=True):
             attempts.append(open_media_gate)
 
-        with patch.object(session, '_initialize_touch_with_retry', initialize_touch):
+        from unittest.mock import AsyncMock
+        with patch.object(session, '_initialize_touch_with_retry', initialize_touch), \
+             patch.object(session, '_probe_hid_sender', AsyncMock()):
             await session._enable_direct_hid_fallback(
                 RuntimeError('startmediastream returned 9021'))
             await session._emit_ready()

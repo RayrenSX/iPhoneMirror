@@ -15,11 +15,14 @@ build/
 dist/
 out/
 outputs/
+outputs-next/
 artifacts/
 release/
 work/
 src/**/bin/
 src/**/obj/
+tests/**/bin/
+tests/**/obj/
 src/App/native/
 CMakeUserPresets.json
 *.pdb

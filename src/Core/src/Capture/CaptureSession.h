@@ -103,6 +103,14 @@ private:
 // independent stream stall to recover within the same capture session.
 class FastStreamReconnectGate final {
 public:
+    [[nodiscard]] bool request_for_silence(std::chrono::milliseconds video,
+        std::chrono::milliseconds media) noexcept {
+        // Live audio proves the current protocol/USB session is still active.
+        // Resetting it loses the outstanding NEED and device video clock.
+        constexpr auto limit = std::chrono::milliseconds(2500);
+        return video >= limit && media >= limit && request();
+    }
+
     [[nodiscard]] bool request() noexcept {
         if (awaiting_video_frame_) return false;
         awaiting_video_frame_ = true;

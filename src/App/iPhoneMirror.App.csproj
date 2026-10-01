@@ -90,6 +90,12 @@
              Link="Controls\ModernCard.cs" />
     <Compile Include="..\SharedUI\Controls\ModernDialog.cs"
              Link="Controls\ModernDialog.cs" />
+    <Page Include="..\SharedUI\Themes\DesignTokens.xaml" Link="Themes\DesignTokens.xaml" />
+    <Page Include="..\SharedUI\Controls\Inputs.xaml" Link="Controls\Inputs.xaml" />
+    <Page Include="..\SharedUI\Controls\Buttons.xaml" Link="Controls\Buttons.xaml" />
+    <Compile Include="..\SharedUI\Controls\StatusAppearance.cs" Link="Controls\StatusAppearance.cs" />
+    <Compile Include="..\SharedUI\Controls\DialogKeyboard.cs" Link="Controls\DialogKeyboard.cs" />
+    <Compile Include="..\SharedUI\Controls\RoundedWindow.cs" Link="Controls\RoundedWindow.cs" />
     <Page Include="..\SharedUI\Themes\LightTheme.xaml"
           Link="Themes\LightTheme.xaml" />
     <Page Include="..\SharedUI\Themes\DarkTheme.xaml"

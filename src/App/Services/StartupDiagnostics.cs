@@ -133,6 +133,25 @@ internal static class StartupDiagnostics
             : "iPhoneMirror encountered an error during startup. Detailed diagnostics were written to the log below.";
     }
 
+    internal static string Label(string key, string language)
+    {
+        var labels = key switch
+        {
+            "StartupErrorHeading" => ("iPhoneMirror 无法启动", "iPhoneMirror 無法啟動", "iPhoneMirror could not start"),
+            "StartupErrorLogLabel" => ("诊断日志", "診斷記錄", "Diagnostic log"),
+            "StartupErrorDetails" => ("错误详情", "錯誤詳細資料", "Error details"),
+            "StartupErrorOpenLog" => ("打开日志位置", "開啟記錄位置", "Open log location"),
+            "StartupErrorClose" => ("关闭", "關閉", "Close"),
+            _ => throw new ArgumentOutOfRangeException(nameof(key)),
+        };
+        return Localization.LocalizationService.ResolveCultureName(language) switch
+        {
+            "zh-CN" => labels.Item1,
+            "zh-HK" => labels.Item2,
+            _ => labels.Item3,
+        };
+    }
+
     private static bool Find(Exception error, Func<Exception, bool> predicate)
     {
         for (Exception? current = error; current is not null; current = current.InnerException)

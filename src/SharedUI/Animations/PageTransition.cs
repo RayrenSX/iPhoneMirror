@@ -23,23 +23,39 @@ public static class PageTransition
     private static void OnIsEnabledChanged(DependencyObject target,
         DependencyPropertyChangedEventArgs args)
     {
-        if (target is not FrameworkElement element || args.NewValue is not true) return;
-        element.Loaded += Play;
+        if (target is not FrameworkElement element) return;
+        element.Loaded -= Play;
+        element.Unloaded -= Stop;
+        if (args.NewValue is true)
+        {
+            element.Loaded += Play;
+            element.Unloaded += Stop;
+        }
+        else Stop(element, new RoutedEventArgs());
+    }
+
+    private static void Stop(object sender, RoutedEventArgs args)
+    {
+        if (sender is FrameworkElement element &&
+            element.GetValue(EntranceTransformProperty) is TranslateTransform transform)
+        {
+            transform.BeginAnimation(TranslateTransform.YProperty, null);
+            transform.Y = 0;
+        }
     }
 
     private static void Play(object sender, RoutedEventArgs args)
     {
-        if (sender is not FrameworkElement element) return;
+        if (sender is not FrameworkElement element || !GetIsEnabled(element)) return;
         // A root can unload/reload when child surfaces open. Release stale
         // clocks before replaying the transition from its resting state.
-        element.BeginAnimation(UIElement.OpacityProperty, null);
-        element.Opacity = 1;
         var transform = GetEntranceTransform(element);
         transform.BeginAnimation(TranslateTransform.YProperty, null);
         transform.Y = 0;
         if (!SystemParameters.ClientAreaAnimation) return;
 
-        var duration = TimeSpan.FromMilliseconds(220);
+        var duration = element.TryFindResource("NormalAnimationDuration") is Duration { HasTimeSpan: true } sharedDuration
+            ? sharedDuration.TimeSpan : TimeSpan.FromMilliseconds(220);
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
         var translate = new DoubleAnimation(8, 0, duration)
         {

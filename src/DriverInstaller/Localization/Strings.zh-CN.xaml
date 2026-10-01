@@ -4,7 +4,7 @@
     <system:String x:Key="AppTitle">iPhoneMirror 驱动管理器</system:String>
     <system:String x:Key="AppSubtitle">Apple USB 环境与按设备采集过滤驱动</system:String>
     <system:String x:Key="OpenLogs">打开日志</system:String>
-    <system:String x:Key="ForceDriverCleanup">强制清除所有驱动</system:String>
+    <system:String x:Key="ForceDriverCleanup">清理设备驱动</system:String>
     <system:String x:Key="Refresh">刷新</system:String>
     <system:String x:Key="AppleUsbEnvironment">Apple USB 环境</system:String>
     <system:String x:Key="CaptureFilterDriver">采集过滤驱动</system:String>
@@ -21,7 +21,7 @@
     <system:String x:Key="Install">安装</system:String>
     <system:String x:Key="Repair">修复</system:String>
     <system:String x:Key="Uninstall">卸载</system:String>
-    <system:String x:Key="DriverChangeNotice">驱动更改仅作用于选中的 Apple USB 父设备；不会替换 Apple 官方驱动。</system:String>
+    <system:String x:Key="DriverChangeNotice">采集操作修改所选设备的过滤器；父驱动管理可在你单独确认后替换该设备的驱动绑定。</system:String>
     <system:String x:Key="AdvancedSettings">高级设置</system:String>
     <system:String x:Key="BackToSimple">返回简洁界面</system:String>
     <system:String x:Key="Installed">已安装</system:String>
@@ -43,7 +43,7 @@
     <system:String x:Key="Recheck">重新检测</system:String>
     <system:String x:Key="CannotOpenLogs">无法打开日志</system:String>
     <system:String x:Key="QuickInstallTitle">一键安装全部驱动</system:String>
-    <system:String x:Key="QuickInstallBody">工具将自动检查 Apple USB 支持、共享采集驱动和当前选中的 iPhone。发现缺失项会自动安装；发现明确属于 WinUSB/libusb 的错误父驱动会先移除，再提示重新连接。</system:String>
+    <system:String x:Key="QuickInstallBody">工具将检查 Apple USB 支持、共享采集驱动和当前选中的 iPhone，并安装缺失项。父驱动异常时，会显示当前绑定和目标驱动，待你单独确认后修复。</system:String>
     <system:String x:Key="StartInstall">开始安装</system:String>
     <system:String x:Key="ConnectPhoneTitle">请连接 iPhone</system:String>
     <system:String x:Key="ConnectPhoneBody">Apple USB 支持已准备好。请连接并解锁 iPhone；手机出现提示时点击“信任此电脑”。检测到设备后会自动继续。</system:String>
@@ -57,11 +57,11 @@
     <system:String x:Key="AisiTitle">使用爱思投屏完成驱动准备</system:String>
     <system:String x:Key="AisiBody">从爱思官网下载并完成一次正常有线投屏，然后返回重新检测。</system:String>
     <system:String x:Key="OpenWebsite">打开官网</system:String>
-    <system:String x:Key="DriverCleanupTitle">运行清除所有驱动脚本</system:String>
-    <system:String x:Key="DriverCleanupBody">在独立窗口中选择设备，清除其关联的所有设备节点和驱动包，包括 Apple 官方驱动。脚本会要求确认后才会修改系统。</system:String>
-    <system:String x:Key="RunDriverCleanup">清除所有驱动</system:String>
-    <system:String x:Key="DriverCleanupScriptMissing">找不到清除所有驱动脚本：{0}</system:String>
-    <system:String x:Key="DriverCleanupScriptStartFailed">无法启动清除所有驱动脚本：{0}</system:String>
+    <system:String x:Key="DriverCleanupTitle">清理设备驱动</system:String>
+    <system:String x:Key="DriverCleanupBody">在独立窗口中选择设备，清理其关联设备节点及可安全移除的驱动包，可能包括 Apple 官方驱动。其他设备仍在使用的驱动包会保留；无法确定使用情况时只清理设备节点。修改系统前需要确认。</system:String>
+    <system:String x:Key="RunDriverCleanup">清理设备驱动</system:String>
+    <system:String x:Key="DriverCleanupScriptMissing">找不到驱动清理脚本：{0}</system:String>
+    <system:String x:Key="DriverCleanupScriptStartFailed">无法启动驱动清理脚本：{0}</system:String>
     <system:String x:Key="Close">关闭</system:String>
     <system:String x:Key="Minimize">最小化</system:String>
     <system:String x:Key="Maximize">最大化或还原</system:String>
@@ -92,13 +92,8 @@
     <system:String x:Key="QuickInstallComplete">一键安装完成，{0} 的投屏驱动已就绪。</system:String>
     <system:String x:Key="WaitingForDevice">等待 Apple 设备连接…</system:String>
     <system:String x:Key="ConfirmOperation">确认{0}</system:String>
-    <system:String x:Key="ConfirmOperationBody">将对以下设备执行{0}：
-
-{1}
-{2}
-
-操作只修改该设备的 libusb0 过滤器，不替换 Apple 官方驱动。Windows 可能请求管理员授权。</system:String>
-    <system:String x:Key="Operating">正在{0} {1}…</system:String>
+    <system:String x:Key="ConfirmOperationBody" xml:space="preserve">将对以下设备执行{0}：&#xA;&#xA;{1}&#xA;{2}&#xA;&#xA;操作只修改该设备的 libusb0 过滤器，不替换 Apple 官方驱动。Windows 可能请求管理员授权。</system:String>
+    <system:String x:Key="Operating">正在执行{0}：{1}…</system:String>
     <system:String x:Key="ReplugTimeout">等待设备拔下或重新连接超时。驱动操作本身已经回滚或完成，请查看日志后重试。</system:String>
     <system:String x:Key="DriverUninstalled">当前设备的采集过滤驱动已卸载。</system:String>
     <system:String x:Key="DriverInstalled">当前设备的采集过滤驱动已安装并验证。</system:String>
@@ -113,7 +108,7 @@
     <system:String x:Key="DevicesReady">已检测到 {0} 台设备，投屏驱动均已就绪。</system:String>
     <system:String x:Key="DevicesMissing">已检测到 {0} 台设备，点击按钮自动安装缺失驱动。</system:String>
     <system:String x:Key="GroupCopiedTitle">群号已复制</system:String>
-    <system:String x:Key="GroupCopiedBody">QQ群号 1050045279 已复制。请在 QQ 中搜索并申请加入。</system:String>
+    <system:String x:Key="GroupCopiedBody">QQ 群号 1050045279 已复制。请在 QQ 中搜索并申请加入。</system:String>
     <system:String x:Key="CannotOpenQq">无法打开 QQ</system:String>
     <system:String x:Key="Connected">已连接</system:String>
     <system:String x:Key="HistoricalDevice">历史设备</system:String>
@@ -143,21 +138,63 @@
     <system:String x:Key="ElevatedProcessNoResult">管理员驱动进程以代码 {0} 退出，但没有返回结果。</system:String>
     <system:String x:Key="ElevatedInvalidResult">管理员驱动进程返回了无效结果。</system:String>
     <system:String x:Key="UacCancelled">用户取消了 Windows 管理员授权。</system:String>
-    <system:String x:Key="OfflineMsiFailed">离线 AppleMobileDeviceSupport MSI 安装失败，退出代码 {0}。
-{1}
-日志：{2}</system:String>
+    <system:String x:Key="OfflineMsiFailed" xml:space="preserve">离线 AppleMobileDeviceSupport MSI 安装失败，退出代码 {0}。&#xA;{1}&#xA;日志：{2}</system:String>
     <system:String x:Key="AppleDownloadUnavailable">无法自动获得 Apple 官方安装包，已打开 Microsoft Store 中的 Apple Devices 页面。</system:String>
     <system:String x:Key="AppleCompatibilityDownloadUnavailable">无法下载缺失的 Apple Mobile Device Service 兼容组件。请检查网络后重试，详细原因已写入日志。</system:String>
     <system:String x:Key="AppleSignatureInvalid">Apple 安装包签名无法通过 Windows 验证，已拒绝执行。</system:String>
-    <system:String x:Key="AppleInstallerFailed">Apple Mobile Device Support 组件安装失败，退出代码 {0}。
-{1}
-日志：{2}</system:String>
-    <system:String x:Key="AppleRestartRequired">Apple Mobile Device Support 已安装，但 Windows 需要重启才能完成驱动和服务注册。请重启电脑后重新检测。
-日志：{0}</system:String>
-    <system:String x:Key="AppleServiceNotReady">Apple USB 支持不完整：服务或 Apple USB 驱动包尚未就绪。请连接并解锁 iPhone 后重新检测。
-日志：{0}</system:String>
+    <system:String x:Key="AppleInstallerFailed" xml:space="preserve">Apple Mobile Device Support 组件安装失败，退出代码 {0}。&#xA;{1}&#xA;日志：{2}</system:String>
+    <system:String x:Key="AppleRestartRequired" xml:space="preserve">Apple Mobile Device Support 已安装，但 Windows 需要重启才能完成驱动和服务注册。请重启电脑后重新检测。&#xA;日志：{0}</system:String>
+    <system:String x:Key="AppleServiceNotReady" xml:space="preserve">Apple USB 支持不完整：服务或 Apple USB 驱动包尚未就绪。请连接并解锁 iPhone 后重新检测。&#xA;日志：{0}</system:String>
     <system:String x:Key="Appearance">外观</system:String>
     <system:String x:Key="ThemeSystem">跟随系统</system:String>
     <system:String x:Key="ThemeLight">浅色</system:String>
     <system:String x:Key="ThemeDark">深色</system:String>
+    <system:String x:Key="DriverOperationDetailsFormat">详细信息：{0}</system:String>
+    <system:String x:Key="DriverParentRemoved">已移除错误的 Apple 父设备。请重新连接 iPhone 以重新绑定 usbccgp。</system:String>
+    <system:String x:Key="DriverFilterRemovedReconnect">已移除所选设备的采集过滤驱动。请重新连接设备以完成卸载。</system:String>
+    <system:String x:Key="DriverFilterInstalledReconnect">已安装所选设备的采集过滤驱动。请重新连接设备以完成启用。</system:String>
+    <system:String x:Key="DriverParentRepairStopped">移除请求开始后，父驱动修复已停止。请重新连接 iPhone 并查看操作日志。</system:String>
+    <system:String x:Key="DriverParentRepairRejected">父驱动修复已被拒绝，尚未修改系统。</system:String>
+    <system:String x:Key="DriverOperationRolledBack">驱动操作失败，已还原所有已备份的状态。</system:String>
+    <system:String x:Key="DriverOperationRollbackIncomplete">驱动操作失败，回滚未完成。请查看操作日志。</system:String>
+    <system:String x:Key="DriverResultTargetMismatch">管理员驱动操作返回了其他设备的结果，已拒绝使用。</system:String>
+    <system:String x:Key="ApplePackageManagerStartFailed">无法启动软件包管理器。</system:String>
+    <system:String x:Key="AppleSupportProcessTimeout">Apple 支持组件操作超时。</system:String>
+    <system:String x:Key="AppleInstallerStartFailed">无法启动 Apple 安装程序。</system:String>
+    <system:String x:Key="AppleSupportInstallTimeout">Apple USB 支持组件安装超时。</system:String>
+    <system:String x:Key="DriverResultExitCodeMismatchFormat">管理员驱动操作结果与进程退出代码 {0} 不一致。</system:String>
+    <system:String x:Key="DriverCleanupProtectionFailed">无法验证并保护驱动管理器文件，已停止请求管理员权限。</system:String>
+    <system:String x:Key="DriverCleanupHostStartFailed">无法启动管理员驱动清理进程。</system:String>
+    <system:String x:Key="ParentManagerTitle" xml:space="preserve">父驱动管理</system:String>
+    <system:String x:Key="ParentStatusFormat" xml:space="preserve">父驱动：{0} · INF：{1}&#xA;故障代码：{2} · {3}</system:String>
+    <system:String x:Key="ParentNoService" xml:space="preserve">未绑定服务</system:String>
+    <system:String x:Key="ParentNoInf" xml:space="preserve">无驱动包</system:String>
+    <system:String x:Key="ParentHealthy" xml:space="preserve">已正常启动</system:String>
+    <system:String x:Key="ParentNeedsAttention" xml:space="preserve">未启动或需要检查</system:String>
+    <system:String x:Key="ParentManagerHelp" xml:space="preserve">可修改任意当前父驱动，包括 Apple 官方驱动、第三方驱动或缺失的绑定。有线投屏通常需要 USB Composite Device（usbccgp）。请选择目标驱动，下一步将确认修改。</system:String>
+    <system:String x:Key="ParentDriverSelection" xml:space="preserve">目标驱动（系统复合驱动及 Windows 提供的适用驱动）</system:String>
+    <system:String x:Key="ParentResetHelp" xml:space="preserve">“重建设备”会移除所选父设备及其子接口，随后需重新连接手机。原驱动包会保留，Windows 可能再次选择原驱动；更换绑定请选择上方驱动。</system:String>
+    <system:String x:Key="ParentReset" xml:space="preserve">重建设备</system:String>
+    <system:String x:Key="ParentBind" xml:space="preserve">绑定所选驱动</system:String>
+    <system:String x:Key="ParentConfirmTitle" xml:space="preserve">确认修改 Apple 父驱动</system:String>
+    <system:String x:Key="ParentConfirmApply" xml:space="preserve">确认修改</system:String>
+    <system:String x:Key="ParentConfirmBody" xml:space="preserve">设备：{0}&#xA;{1}&#xA;&#xA;当前状态：&#xA;{2}&#xA;&#xA;执行操作／目标驱动：&#xA;{3}&#xA;&#xA;将修改这台手机的父驱动，可能替换 Apple 官方或第三方绑定，并暂时中断该手机的 USB 连接、投屏、控制和 Apple 软件连接。子接口可能重新枚举。Windows 可能要求管理员授权、重新插拔或重启。&#xA;&#xA;操作前会保存驱动绑定和过滤器状态快照；绑定失败会尝试恢复原绑定，但无法保证恢复成功。是否继续？</system:String>
+    <system:String x:Key="ParentCompositeUnavailable" xml:space="preserve">无法读取 Windows USB 复合驱动，请打开父驱动管理查看其他选项。</system:String>
+    <system:String x:Key="ParentDeviceUnavailable" xml:space="preserve">所选手机已断开，请重新连接后再操作。</system:String>
+    <system:String x:Key="ParentListUnavailable" xml:space="preserve">无法读取驱动列表。可重建设备后重试，详细原因见日志。</system:String>
+    <system:String x:Key="ParentBackupFormat" xml:space="preserve">状态快照：{0}</system:String>
+    <system:String x:Key="ParentBindingComplete" xml:space="preserve">父驱动已重新绑定，并已确认设备正常启动。</system:String>
+    <system:String x:Key="ParentBindingRestartRequired" xml:space="preserve">Windows 已接受父驱动绑定，请重启电脑后重新检测；当前尚未验证生效。</system:String>
+    <system:String x:Key="ParentResetRestartRequired" xml:space="preserve">Windows 要求重启电脑以完成父设备移除。重启后重新连接手机并检测。</system:String>
+    <system:String x:Key="ParentResetComplete" xml:space="preserve">已请求移除父设备。请拔下并重新连接手机，让 Windows 重新枚举，再检查父驱动状态。</system:String>
+    <system:String x:Key="ParentChangeRejected" xml:space="preserve">修改未执行：设备状态、确认信息或目标驱动已变化，或准备工作失败。请刷新后重新确认，详细原因见日志。</system:String>
+    <system:String x:Key="ParentChangeRolledBack" xml:space="preserve">父驱动绑定失败，已恢复原驱动绑定。原有故障可能仍然存在，请查看日志。</system:String>
+    <system:String x:Key="ParentRollbackRestartRequired" xml:space="preserve">父驱动绑定失败；Windows 已接受恢复原绑定，但需要重启电脑。重启后请重新检测。</system:String>
+    <system:String x:Key="ParentChangeRecoveryNeeded" xml:space="preserve">父驱动操作未完成，无法确认已恢复。请重新插拔手机并刷新；必要时在父驱动管理或设备管理器中重新绑定驱动。状态快照和日志保留了操作信息。</system:String>
+    <system:String x:Key="DriverWaitingSafeStop" xml:space="preserve">操作用时较长，已请求取消，正在等待当前步骤和恢复完成。请保持窗口打开。日志：{0}</system:String>
+    <system:String x:Key="ParentListPartial" xml:space="preserve">部分驱动列表读取失败，以下仍列出可用选项。详细信息：</system:String>
+    <system:String x:Key="ReconnectVerificationFailed" xml:space="preserve">设备重连验证未通过：请检查连接、设备故障代码、父驱动绑定和采集过滤器状态。</system:String>
+    <system:String x:Key="DriverRefreshFailed" xml:space="preserve">状态刷新失败，以上操作结果已保留。原因：{0}。日志：{1}</system:String>
+    <system:String x:Key="HelpBrowserFailedTitle" xml:space="preserve">无法打开帮助网站</system:String>
+    <system:String x:Key="HelpBrowserFailed" xml:space="preserve">请手动打开：{0}。原因：{1}</system:String>
 </ResourceDictionary>

@@ -10,7 +10,7 @@ using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
+public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INotifyPropertyChanged
 {
     private readonly ReleaseInfo _release;
     private readonly GitHubReleaseClient _client;
@@ -24,20 +24,21 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
     private string _statusText;
     private string _speedText = string.Empty;
     private string _updateButtonText;
+    private string _displayedReleaseBody = string.Empty;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public string CurrentVersion => VersionManager.DisplayVersion;
     public string LatestVersion => _release.TagName;
-    public string ReleaseName => _release.Name;
+    public string ReleaseName => LocalizationService.RefreshText(_release.Name);
     public string PublishedAt => _release.PublishedAt.LocalDateTime.ToString("yyyy-MM-dd");
     public Visibility ProgressVisibility => _downloading || !string.IsNullOrWhiteSpace(StatusText)
         ? Visibility.Visible : Visibility.Collapsed;
     public bool CanUpdate => !_downloading && !_readOnlyPreview;
     public double ProgressValue { get => _progressValue; private set { _progressValue = value; OnPropertyChanged(); } }
     public bool IsIndeterminate { get => _isIndeterminate; private set { _isIndeterminate = value; OnPropertyChanged(); } }
-    public string StatusText { get => _statusText; private set { _statusText = value; OnPropertyChanged(); OnPropertyChanged(nameof(ProgressVisibility)); } }
+    public string StatusText { get => LocalizationService.RefreshText(_statusText); private set { _statusText = value; OnPropertyChanged(); OnPropertyChanged(nameof(ProgressVisibility)); } }
     public string SpeedText { get => _speedText; private set { _speedText = value; OnPropertyChanged(); } }
-    public string UpdateButtonText { get => _updateButtonText; private set { _updateButtonText = value; OnPropertyChanged(); } }
+    public string UpdateButtonText { get => LocalizationService.RefreshText(_updateButtonText); private set { _updateButtonText = value; OnPropertyChanged(); } }
 
     // Keep the historical constructor shape available to reflection-based
     // runtime tests and other in-process preview callers. Optional parameters
@@ -62,12 +63,27 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
         DataContext = this;
         InitializeComponent();
         ThemeService.Attach(this);
-        ReleaseNotesViewer.Document = MarkdownFlowDocumentRenderer.Render(release.Body);
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+        {
+            OnPropertyChanged(nameof(StatusText));
+            OnPropertyChanged(nameof(UpdateButtonText));
+            OnPropertyChanged(nameof(ReleaseName));
+            RefreshReleaseNotes();
+        });
+        RefreshReleaseNotes();
         Loaded += (_, _) =>
         {
             if (autoDownload) _ = DownloadAndInstallAsync();
         };
         Closing += OnClosing;
+    }
+
+    private void RefreshReleaseNotes()
+    {
+        var body = LocalizationService.RefreshText(_release.Body);
+        if (body == _displayedReleaseBody && ReleaseNotesViewer.Document is not null) return;
+        _displayedReleaseBody = body;
+        ReleaseNotesViewer.Document = MarkdownFlowDocumentRenderer.Render(body);
     }
 
     private async void OnUpdateClick(object sender, RoutedEventArgs e) =>
@@ -101,7 +117,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
             IsIndeterminate = value.Percentage is null;
             ProgressValue = value.Percentage ?? 0;
             StatusText = value.Percentage is double percentage
-                ? string.Format(LocalizationService.Get("DownloadProgressFormat"), percentage)
+                ? LocalizationService.Format("DownloadProgressFormat", percentage)
                 : LocalizationService.Get("DownloadingUpdate");
             SpeedText = FormatSpeed(value.BytesPerSecond);
         });
@@ -132,7 +148,7 @@ public partial class UpdateWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropert
         {
             DiagnosticLogger.Exception("updater", "update_workflow_failed", error,
                 ("release", _release.TagName));
-            StatusText = string.Format(LocalizationService.Get("UpdateDownloadFailedFormat"),
+            StatusText = LocalizationService.Format("UpdateDownloadFailedFormat",
                 FriendlyError(error));
             UpdateButtonText = LocalizationService.Get("RetryUpdate");
             IsIndeterminate = false;

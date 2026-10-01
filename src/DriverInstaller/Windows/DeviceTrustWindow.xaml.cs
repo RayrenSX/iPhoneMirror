@@ -10,7 +10,7 @@ internal enum DeviceTrustResponse
     NotHandled,
 }
 
-public partial class DeviceTrustWindow : Window
+public partial class DeviceTrustWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     private DeviceTrustResponse _response = DeviceTrustResponse.NotHandled;
 

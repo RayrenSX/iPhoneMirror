@@ -2,9 +2,9 @@
 
 ## Supported versions
 
-iPhoneMirror is currently a public preview. As of 2026-08-31, the latest
-release is `v1.8.3`. Security fixes are provided only for the latest release
-and the current `main` branch.
+iPhoneMirror is currently a public preview. Security fixes are provided only for
+the latest [published release](https://github.com/RayrenSX/iPhoneMirror/releases)
+and the current `main` branch. A source-tree test version is not necessarily published.
 
 | Version | Supported |
 |---|---|

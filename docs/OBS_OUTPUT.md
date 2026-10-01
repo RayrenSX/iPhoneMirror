@@ -56,7 +56,11 @@ ScreenshotService.CapturePng(_core.GetLatestVideoFrame, path);
 运行时，输出 MP4、RTMP、SRT 或 WebRTC/WHIP。输出尺寸范围为 160–3840 × 160–2160，
 且必须为偶数；帧率支持 10–60，码率支持 500–50000 kbps；横竖屏切换时以黑边保持比例，停止时会等待 FFmpeg 完成
 文件或网络输出收尾。投屏源的 PCM 音频和对应编码器可用时会送入输出管线，MP4/RTMP/SRT
-编码为 AAC，WHIP 编码为 Opus；没有可用音频或编码器时仍会立即开始纯视频输出。
+编码为 AAC，WHIP 编码为 Opus；未选择麦克风且没有可用音频或编码器时，仍可开始纯视频输出。
+
+当前工作区的输出设置支持显式选择麦克风并刷新设备列表，默认关闭。启用后由 FFmpeg
+将 DirectShow 麦克风与来源 PCM 混音；缺少音频管线时会要求关闭麦克风选项，不能启动
+麦克风混音。它不改变本地手机声音播放，也不为虚拟摄像头添加音轨。
 
 虚拟摄像头使用 Windows 11 Media Foundation 软件摄像头 API，名称为
 `iPhoneMirror Virtual Camera`。首次安装、更新或卸载媒体源需要管理员权限，安装完成

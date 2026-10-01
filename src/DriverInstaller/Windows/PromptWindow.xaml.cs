@@ -4,7 +4,7 @@ using IPhoneMirror.DriverInstaller.Services;
 
 namespace IPhoneMirror.DriverInstaller.Windows;
 
-public partial class PromptWindow : Window
+public partial class PromptWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     public string PromptTitle { get; }
     public string PromptBody { get; }
@@ -12,10 +12,13 @@ public partial class PromptWindow : Window
     public string CancelText { get; }
     public Visibility CancelVisibility { get; }
     public Style ConfirmStyle { get; }
+    public bool ConfirmIsDefault { get; }
+    public bool CancelIsDefault => !ConfirmIsDefault;
 
     private PromptWindow(string title, string body, string confirmText,
         string cancelText, bool showCancel, bool danger)
     {
+        ConfirmIsDefault = !danger;
         PromptTitle = title;
         PromptBody = body;
         ConfirmText = confirmText;

@@ -9,7 +9,7 @@ internal sealed class DeviceCatalog
 {
     private const string AppleVendorPrefix = "VID_05AC&PID_";
     private const uint CrSuccess = 0;
-    private const uint DevNodePresent = 0x00000008;
+    private const uint DevNodeStarted = 0x00000008;
 
     internal IReadOnlyList<AppleDeviceRecord> GetAppleDevices(bool includeMetadata = true)
     {
@@ -32,30 +32,27 @@ internal sealed class DeviceCatalog
                          StringComparison.OrdinalIgnoreCase) &&
                                     !name.Contains("&MI_", StringComparison.OrdinalIgnoreCase)))
         {
-            using var hardware = usb.OpenSubKey(hardwareName, writable: false);
-            if (hardware is null) continue;
-            foreach (var instanceName in hardware.GetSubKeyNames())
+            try
             {
-                var instanceId = $@"USB\{hardwareName}\{instanceName}";
-                if (!DriverConstants.IsAppleMobileCaptureParent(instanceId)) continue;
-                using var instance = hardware.OpenSubKey(instanceName, writable: false);
-                if (instance is null) continue;
-
-                var service = instance.GetValue("Service") as string ?? string.Empty;
-                var filters = ReadMultiString(instance, "UpperFilters");
-                var serial = DriverConstants.NormalizeSerial(instanceName);
-                metadata.TryGetValue(serial, out var deviceMetadata);
-                var productType = deviceMetadata?.ProductType ??
-                                  ResolveProductType(ReadMultiString(instance, "HardwareID"));
-                var modelName = AppleProductNames.Resolve(productType);
-                var displayName = ResolveDisplayName(
-                    instance.GetValue("FriendlyName") as string ??
-                    instance.GetValue("DeviceDesc") as string, instanceName);
-                devices.Add(new AppleDeviceRecord(instanceId, serial, displayName,
-                    productType, modelName, deviceMetadata?.DeviceName ?? string.Empty,
-                    deviceMetadata?.OsVersion ?? string.Empty, 0, service,
-                    IsDevicePresent(instanceId),
-                    filters.Contains("libusb0", StringComparer.OrdinalIgnoreCase), filters));
+                using var hardware = usb.OpenSubKey(hardwareName, writable: false);
+                if (hardware is null) continue;
+                foreach (var instanceName in hardware.GetSubKeyNames())
+                {
+                    var instanceId = $@"USB\{hardwareName}\{instanceName}";
+                    if (!DriverConstants.IsAppleMobileCaptureParent(instanceId)) continue;
+                    var device = ReadIsolated(instanceId, () =>
+                    {
+                        using var instance = hardware.OpenSubKey(instanceName, writable: false);
+                        metadata.TryGetValue(DriverConstants.NormalizeSerial(instanceName), out var deviceMetadata);
+                        return instance is null ? null : ReadRecord(instanceId, instance, deviceMetadata);
+                    });
+                    if (device is not null) devices.Add(device);
+                }
+            }
+            catch (Exception error) when (IsRegistryReadError(error))
+            {
+                DriverLogger.WriteException("device-catalog", "hardware_read_failed", error,
+                    ("hardware", hardwareName));
             }
         }
 
@@ -72,11 +69,53 @@ internal sealed class DeviceCatalog
         return result;
     }
 
-    internal AppleDeviceRecord? FindExact(string instanceId, string serial) =>
-        GetAppleDevices(includeMetadata: false).FirstOrDefault(device =>
-            string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(device.Serial, DriverConstants.NormalizeSerial(serial),
-                StringComparison.OrdinalIgnoreCase));
+    internal static bool IsRegistryReadError(Exception error) =>
+        error is IOException or UnauthorizedAccessException or System.Security.SecurityException;
+
+    internal static AppleDeviceRecord? ReadIsolated(string instanceId, Func<AppleDeviceRecord?> read)
+    {
+        try { return read(); }
+        catch (Exception error) when (IsRegistryReadError(error))
+        {
+            DriverLogger.WriteException("device-catalog", "device_read_failed", error,
+                ("instance", DriverLogger.Sanitize(instanceId)));
+            return null;
+        }
+    }
+
+    internal AppleDeviceRecord? FindExact(string instanceId, string serial)
+    {
+        if (!DriverConstants.IsAppleMobileCaptureParent(instanceId) ||
+            !DriverConstants.NormalizeSerial(instanceId[(instanceId.LastIndexOf('\\') + 1)..])
+                .Equals(DriverConstants.NormalizeSerial(serial), StringComparison.OrdinalIgnoreCase)) return null;
+        // Validation and recovery read only their target. Access failures propagate
+        // to the caller, rather than being mistaken for a disconnected device.
+        using var instance = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\" + instanceId);
+        return instance is null ? null : ReadRecord(instanceId, instance, null);
+    }
+
+    private static AppleDeviceRecord ReadRecord(string instanceId, RegistryKey instance,
+        AppleDeviceMetadata? deviceMetadata)
+    {
+        var instanceName = instanceId[(instanceId.LastIndexOf('\\') + 1)..];
+        var service = instance.GetValue("Service") as string ?? string.Empty;
+        var filters = ReadMultiString(instance, "UpperFilters");
+        var productType = deviceMetadata?.ProductType ??
+            ResolveProductType(ReadMultiString(instance, "HardwareID"));
+        var displayName = ResolveDisplayName(instance.GetValue("FriendlyName") as string ??
+            instance.GetValue("DeviceDesc") as string, instanceName);
+        var state = ReadDeviceState(instanceId);
+        var driverKey = instance.GetValue("Driver") as string;
+        using var driver = string.IsNullOrEmpty(driverKey) ? null :
+            Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\" + driverKey);
+        return new AppleDeviceRecord(instanceId, DriverConstants.NormalizeSerial(instanceName), displayName,
+            productType, AppleProductNames.Resolve(productType), deviceMetadata?.DeviceName ?? string.Empty,
+            deviceMetadata?.OsVersion ?? string.Empty, 0, service, state.Present,
+            filters.Contains("libusb0", StringComparer.OrdinalIgnoreCase), filters, state.Problem, state.Started,
+            driver?.GetValue("InfPath") as string ?? string.Empty,
+            driver?.GetValue("InfSection") as string ?? string.Empty,
+            driver?.GetValue("DriverVersion") as string ?? string.Empty, ReadMultiString(instance, "LowerFilters"));
+    }
 
     internal AppleSupportStatus InspectAppleSupport(bool writeLog = true)
     {
@@ -257,10 +296,16 @@ internal sealed class DeviceCatalog
         return string.Empty;
     }
 
-    private static bool IsDevicePresent(string instanceId) =>
-        CM_Locate_DevNodeW(out var node, instanceId, 0) == CrSuccess &&
-        CM_Get_DevNode_Status(out var status, out var problem, node, 0) == CrSuccess &&
-        problem == 0 && (status & DevNodePresent) != 0;
+    internal static (bool Present, uint? Problem, bool Started) ReadDeviceState(string instanceId)
+    {
+        // CM_LOCATE_DEVNODE_NORMAL finds connected nodes even with Code 10/28/31/43.
+        // DN_STARTED (0x8) is a health flag, not a presence flag.
+        if (CM_Locate_DevNodeW(out var node, instanceId, 0) != CrSuccess)
+            return (false, null, false);
+        return CM_Get_DevNode_Status(out var status, out var problem, node, 0) == CrSuccess
+            ? (true, problem, (status & DevNodeStarted) != 0)
+            : (true, null, false);
+    }
 
     private static bool TryQueryService(string name, out bool running)
     {

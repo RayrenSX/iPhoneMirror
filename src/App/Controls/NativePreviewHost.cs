@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Windows.Input;
 using System.Windows.Interop;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Interop;
@@ -28,6 +29,7 @@ internal sealed class NativePreviewHost : HwndHost
     private bool _isFullScreenPresentation;
     private DeviceCornerProfile _cornerProfile = DeviceCornerProfile.Rectangular;
     private bool _usesDeviceCornerProfile;
+    private (int Width, int Height, int Radius, double Curve)? _appliedRegion;
 
     internal bool CapturePointerInput { get; set; }
     internal bool SuppressMouseMove { get; set; }
@@ -39,11 +41,9 @@ internal sealed class NativePreviewHost : HwndHost
     internal void ReleasePointerCapture()
     {
         _capturedMouseButtons = 0;
-        // The child HWND can lose GetCapture() during a focus transition while
-        // the thread still owns capture. Releasing unconditionally is safe for
-        // this route reset and prevents the native preview from swallowing all
-        // subsequent clicks after Bluetooth control exits.
-        if (_window != 0) _ = ReleaseCapture();
+        // WM_CAPTURECHANGED may transfer capture to the title-bar move loop.
+        // Releasing the new owner's capture here would interrupt window dragging.
+        if (_window != 0 && GetCapture() == _window) _ = ReleaseCapture();
     }
     internal bool IsFullScreenPresentation
     {
@@ -71,6 +71,24 @@ internal sealed class NativePreviewHost : HwndHost
     public NativePreviewHost()
     {
     }
+
+    protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnGotKeyboardFocus(e);
+        // Keep WPF's HwndHost automation provider, which owns the interop
+        // child. Forward logical focus (including UIA SetFocus) to the HWND
+        // that actually receives keyboard input and focus-loss releases.
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,
+            new Action(() =>
+            {
+                // Finish WPF/UIA's focus transaction before handing focus to
+                // the HWND. Synchronous handoff makes UIA report a failure.
+                if (_window != 0 && IsKeyboardFocused) SetFocus(_window);
+            }));
+    }
+
+    [DllImport("user32.dll")]
+    private static extern nint SetFocus(nint window);
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
@@ -121,6 +139,7 @@ internal sealed class NativePreviewHost : HwndHost
 
     internal void SetPresentationVisible(bool visible)
     {
+        if (_presentationVisible == visible) return;
         _presentationVisible = visible;
         if (_window != 0) _ = ShowWindow(_window, visible ? SwShowNoActivate : SwHide);
     }
@@ -141,23 +160,20 @@ internal sealed class NativePreviewHost : HwndHost
     private void ApplyWindowRegion(int width, int height)
     {
         if (_window == 0) return;
-        if (_isFullScreenPresentation)
-        {
-            // The fullscreen parent is rectangular. Retaining the main
-            // preview's rounded child region exposes a light-theme sliver at
-            // the edge while the D3D surface itself is correctly black.
-            _ = SetWindowRgn(_window, 0, true);
-            return;
-        }
         var shortEdge = Math.Min(width, height);
         var dpi = GetDpiForWindow(_window);
-        var radius = _usesDeviceCornerProfile
+        var radius = _isFullScreenPresentation ? 0 : _usesDeviceCornerProfile
             ? _cornerProfile.GetGdiRadius(shortEdge, dpi == 0 ? 1.0 : dpi / 96.0)
             : Math.Max(2, (int)Math.Round(MainPreviewInnerCornerRadius *
                 (dpi == 0 ? 1.0 : dpi / 96.0)));
+        var shape = (width, height, radius,
+            _usesDeviceCornerProfile ? _cornerProfile.CurveExponent : 0.0);
+        // Position-only updates do not change the child silhouette. Avoid
+        // rebuilding a 260-point HRGN and forcing a repaint on every drag tick.
+        if (_appliedRegion == shape) return;
         if (radius == 0)
         {
-            _ = SetWindowRgn(_window, 0, true);
+            if (SetWindowRgn(_window, 0, true) != 0) _appliedRegion = shape;
             return;
         }
         // The D3D shader uses the device profile's superellipse and smooths
@@ -171,6 +187,7 @@ internal sealed class NativePreviewHost : HwndHost
         if (region == 0) return;
         // SetWindowRgn owns the region after success.
         if (SetWindowRgn(_window, region, true) == 0) _ = DeleteObject(region);
+        else _appliedRegion = shape;
     }
 
     private static nint CreateDeviceCornerRegion(int width, int height, int radius,
@@ -210,6 +227,7 @@ internal sealed class NativePreviewHost : HwndHost
         PreviewAttachmentCoordinator.Unregister(hwnd.Handle);
         if (hwnd.Handle != 0) DestroyWindow(hwnd.Handle);
         _window = 0;
+        _appliedRegion = null;
     }
 
     protected override nint WndProc(nint hwnd, int message, nint wParam, nint lParam,
@@ -229,6 +247,10 @@ internal sealed class NativePreviewHost : HwndHost
         }
         if (message == 0x0020 && CapturePointerInput) // WM_SETCURSOR
         {
+            // Consuming this message also owns the cursor shape. Otherwise a
+            // resize/hand cursor from the previous surface remains in use.
+            // Setting the shape leaves Bluetooth's visibility state intact.
+            NativeCursor.SetArrow();
             handled = true;
             return 1;
         }
@@ -236,8 +258,7 @@ internal sealed class NativePreviewHost : HwndHost
         {
             if (message is 0x0008 or 0x001F or 0x0215) // focus/capture lost
             {
-                _capturedMouseButtons = 0;
-                _ = ReleaseCapture();
+                ReleasePointerCapture();
                 PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                     PreviewPointerKind.Reset, 0, 0, 0, 0));
                 KeyboardInput?.Invoke(this, new PreviewKeyboardEventArgs(
@@ -355,7 +376,8 @@ internal sealed class NativePreviewHost : HwndHost
     {
         var latest = currentLParam;
         var queued = new NativeMessage();
-        while (PeekMessageW(ref queued, hwnd, WmMouseMove, WmMouseMove, PmRemove))
+        var drained = 0;
+        while (drained++ < 64 && PeekMessageW(ref queued, hwnd, WmMouseMove, WmMouseMove, PmRemove))
             latest = queued.LParam;
         return latest;
     }

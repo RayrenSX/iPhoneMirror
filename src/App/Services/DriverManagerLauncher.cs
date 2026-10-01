@@ -25,14 +25,14 @@ internal sealed class DriverManagerLauncher
                 Environment.GetEnvironmentVariable("IPHONE_MIRROR_DRIVER_MANAGER"),
                 Environment.CurrentDirectory);
             if (executablePath is null)
-                return new(false, null, "The driver manager executable could not be found.");
+                return new(false, null, LocalizationService.Get("DriverManagerExecutableMissing"));
             if (!string.Equals(Path.GetExtension(executablePath), ".exe",
                     StringComparison.OrdinalIgnoreCase))
                 return new(false, executablePath,
-                    "The driver manager path must point to an executable (.exe).");
+                    LocalizationService.Get("DriverManagerPathInvalid"));
 
             if (TryActivateExisting(executablePath))
-                return new(true, executablePath, "The running driver manager was activated.");
+                return new(true, executablePath, LocalizationService.Get("DriverManagerActivated"));
 
             DiagnosticLogger.Info("driver", "manager_launch_requested",
                 ("file", Path.GetFileName(executablePath)),
@@ -53,8 +53,8 @@ internal sealed class DriverManagerLauncher
             start.ArgumentList.Add(ThemeService.Preference.ToString());
             using var process = Process.Start(start);
             return process is null
-                ? new(false, executablePath, "Windows did not start the driver manager process.")
-                : new(true, executablePath, "The driver manager was started.");
+                ? new(false, executablePath, LocalizationService.Get("DriverManagerProcessStartFailed"))
+                : new(true, executablePath, LocalizationService.Get("DriverManagerStarted"));
         }
         catch (Exception error)
         {

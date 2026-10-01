@@ -449,6 +449,10 @@ IM_API std::int32_t IM_CALL im_session_set_window_corner_profile(
     float curve_exponent);
 IM_API std::int32_t IM_CALL im_session_set_window_rotation(
     iPhoneMirror::SessionHandle handle, void* hwnd, std::int32_t quarter_turns);
+// Local composition preview only; 0.1 = most transparent, 1 = opaque.
+// Does not modify captured frames, recordings, or other session windows.
+IM_API std::int32_t IM_CALL im_session_set_window_opacity(
+    iPhoneMirror::SessionHandle handle, void* hwnd, float opacity);
 
 
 IM_API const wchar_t* IM_CALL im_last_error();

@@ -1,9 +1,12 @@
-# Windows 低延迟解码与显示路径（v1.8.3）
+# Windows 低延迟解码与显示路径
+
+实现说明于 2026-10-01 对照工作区核对；下文真机数据保留原测试条件，不表示本次重新测量。
+模块关系见[架构说明](ARCHITECTURE.md)。
 
 ## 结论
 
-公开实现均将 USB 接收、H.264/HEVC 解码和显示拆成独立阶段。高性能实现不会把每帧转成
-BGRA/RGB 后交给 WPF/QImage，而是让系统解码器和 GPU sink 直接消费视频帧。
+本项目将 USB 接收、H.264/HEVC 解码和显示拆成独立阶段，避免在 USB 协议处理路径上
+逐帧转换 BGRA/RGB 并提交 WPF 位图；解码器与 GPU 渲染器通过有界队列交接视频帧。
 
 本项目当前生产路径：
 
@@ -27,9 +30,10 @@ WPF 不再逐帧调用 `im_copy_latest_video_frame_scaled`，也不再创建或�
 shader 做显示转换，截图和输出则走独立的 CPU 导出接口。
 
 独立窗口使用 `WS_EX_NOREDIRECTIONBITMAP` 与
-`CreateSwapChainForComposition`。像素着色器对 Apple 官方 iPhone 17 Pro Product
-Bezel 的 1:1 Screen 蒙版进行连续圆角覆盖（`R = 0.1784 × 短边`，
-`n = 2.36`），并输出 premultiplied alpha。因此透明边缘由 DWM 合成，
+`CreateSwapChainForComposition`。像素着色器使用按设备族拟合的圆角半径与曲线指数，
+由 `DeviceCornerProfileResolver` 按 ProductType/画面比例选择；不对所有设备固定使用
+同一组 iPhone 参数。拟合依据和边界见[设备圆角配置](DEVICE_CORNER_PROFILES.md)。
+着色器输出 premultiplied alpha，因此透明边缘由 DWM 合成，
 不再经过 1-bit `SetWindowRgn` 裁剪。
 
 ## 本地渲染分辨率上限

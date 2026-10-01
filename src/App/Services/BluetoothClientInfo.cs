@@ -4,8 +4,10 @@ using System.Globalization;
 namespace IPhoneMirror.App.Services;
 
 public sealed record BluetoothClientInfo(string Id, string Name, string Address,
-    DateTimeOffset ConnectedAt, string? BoundDeviceName = null)
+    DateTimeOffset ConnectedAt, string? BoundDeviceName = null) : System.ComponentModel.INotifyPropertyChanged
 {
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+    internal void NotifyLanguageChanged() => PropertyChanged?.Invoke(this, new(null));
     public string DisplayName => string.IsNullOrWhiteSpace(Name)
         ? LocalizationService.Get("BluetoothClientUnknownName") : Name;
     public string IdentifierText => string.IsNullOrWhiteSpace(Address)

@@ -11,11 +11,60 @@
                                 Path=Foreground}"/>
     </Style>
 
+    <Style x:Key="DialogActions" TargetType="WrapPanel">
+        <Setter Property="HorizontalAlignment" Value="Right"/>
+        <Setter Property="Margin" Value="{StaticResource DialogActionsInset}"/>
+    </Style>
+
+    <Style x:Key="ControlActions" TargetType="WrapPanel" BasedOn="{StaticResource DialogActions}">
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+    </Style>
+
+    <Style x:Key="SelectableListItem" TargetType="ListBoxItem">
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="MinHeight" Value="{StaticResource ControlMinHeight}"/>
+        <Setter Property="Padding" Value="12"/>
+        <Setter Property="Margin" Value="0,0,0,8"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource ControlFillBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="ItemRoot" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource ControlCornerRadius}" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ItemRoot" Property="Background" Value="{DynamicResource ControlHoverBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="ItemRoot" Property="Background" Value="{DynamicResource ComboItemSelectedBrush}"/>
+                            <Setter TargetName="ItemRoot" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="ItemRoot" Property="BorderBrush" Value="{DynamicResource FocusStrokeBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource DisabledTextBrush}"/>
+                            <Setter TargetName="ItemRoot" Property="Background" Value="{DynamicResource PrimaryActionDisabledBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="ModernWindowSurface" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="20"/>
+        <Setter Property="CornerRadius" Value="{StaticResource DialogCornerRadius}"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
     </Style>
 
@@ -23,14 +72,52 @@
         <Setter Property="Background" Value="{DynamicResource DialogSurfaceBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="20"/>
-        <Setter Property="Padding" Value="26"/>
+        <Setter Property="CornerRadius" Value="{StaticResource DialogCornerRadius}"/>
+        <Setter Property="Padding" Value="{StaticResource DialogPadding}"/>
         <Setter Property="Effect">
             <Setter.Value>
                 <DropShadowEffect BlurRadius="30" ShadowDepth="8" Direction="270"
                                   Color="{DynamicResource CardShadowColor}" Opacity="0.24"/>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- One alpha window, one rounded frame. Content borders only provide padding. -->
+    <Style TargetType="ui:RoundedWindow">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
+        <Setter Property="UseLayoutRounding" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ui:RoundedWindow">
+                    <Border x:Name="RoundedWindowSurface" Margin="{StaticResource WindowShadowMargin}"
+                            Background="{DynamicResource DialogSurfaceBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource DialogCornerRadius}">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="14" ShadowDepth="3" Direction="270"
+                                              Color="{DynamicResource CardShadowColor}" Opacity="0.18"/>
+                        </Border.Effect>
+                        <ui:RoundedContentClip x:Name="RoundedWindowContentClip"
+                            Radius="{Binding CornerRadius.TopLeft, ElementName=RoundedWindowSurface}">
+                            <AdornerDecorator><ContentPresenter/></AdornerDecorator>
+                        </ui:RoundedContentClip>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="WindowState" Value="Maximized">
+                            <Setter TargetName="RoundedWindowSurface" Property="Margin" Value="0"/>
+                            <Setter TargetName="RoundedWindowSurface" Property="CornerRadius" Value="0"/>
+                            <Setter TargetName="RoundedWindowSurface" Property="BorderThickness" Value="0"/>
+                            <Setter TargetName="RoundedWindowSurface" Property="Effect" Value="{x:Null}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="RoundedWindowContent" TargetType="Border">
+        <Setter Property="Padding" Value="{StaticResource DialogPadding}"/>
     </Style>
 
     <Style x:Key="InvisibleScrollRepeatButtonStyle" TargetType="{x:Type RepeatButton}">
@@ -278,8 +365,8 @@
         <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="16"/>
-        <Setter Property="Padding" Value="18"/>
+        <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}"/>
+        <Setter Property="Padding" Value="{StaticResource CardPadding}"/>
     </Style>
 
     <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
@@ -293,7 +380,7 @@
         <Setter Property="FontSize" Value="16"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -389,36 +476,37 @@
         <Setter Property="Margin" Value="0"/>
         <Setter Property="HorizontalAlignment" Value="Right"/>
         <Setter Property="VerticalAlignment" Value="Top"/>
+        <Setter Property="ui:DialogKeyboard.IsEscapeAction" Value="True"/>
         <Setter Property="ToolTip" Value="{DynamicResource Close}"/>
         <Setter Property="AutomationProperties.Name" Value="{DynamicResource Close}"/>
         <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
     </Style>
 
     <Style x:Key="SubWindowPageRoot" TargetType="Grid">
-        <Setter Property="Margin" Value="24,20"/>
+        <Setter Property="Margin" Value="{StaticResource PagePadding}"/>
     </Style>
 
     <Style x:Key="SubWindowHeader" TargetType="Grid">
         <Setter Property="MinHeight" Value="44"/>
     </Style>
 
-    <Style x:Key="SubWindowTitle" TargetType="TextBlock">
+    <Style x:Key="SubWindowTitle" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="FontSize" Value="21"/>
+        <Setter Property="FontSize" Value="{StaticResource DialogTitleFontSize}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
-    <Style x:Key="SubWindowSubtitle" TargetType="TextBlock">
+    <Style x:Key="SubWindowSubtitle" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
         <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="LineHeight" Value="18"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
-        <Setter Property="Margin" Value="0,5,0,0"/>
+        <Setter Property="Margin" Value="0,4,0,0"/>
     </Style>
 
-    <Style x:Key="SubWindowSectionTitle" TargetType="TextBlock">
+    <Style x:Key="SubWindowSectionTitle" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="FontSize" Value="14"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
@@ -433,7 +521,7 @@
         <Setter Property="Margin" Value="2"/>
         <Setter Property="FontSize" Value="14"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabItem">
@@ -518,7 +606,7 @@
         <Setter Property="Margin" Value="8,2"/>
         <Setter Property="Padding" Value="12,0"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -573,7 +661,7 @@
         <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="18"/>
+        <Setter Property="Padding" Value="{StaticResource CardPadding}"/>
         <Setter Property="RenderTransform"><Setter.Value><TranslateTransform/></Setter.Value></Setter>
         <Setter Property="Template">
             <Setter.Value>
@@ -622,5 +710,15 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+    <Style x:Key="DetailLabel" TargetType="TextBlock" BasedOn="{StaticResource CaptionText}">
+        <Setter Property="Margin" Value="0,12,0,4"/>
+    </Style>
+    <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource CompactButton}"/>
+    <Style x:Key="EmptyStateText" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Margin" Value="16"/>
     </Style>
 </ResourceDictionary>

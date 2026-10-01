@@ -1,19 +1,26 @@
+using System.ComponentModel;
 using System.Windows;
 using IPhoneMirror.App.Localization;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
+public partial class CaptureStatusNoticeWindow : IPhoneMirror.UI.Controls.RoundedWindow, INotifyPropertyChanged
 {
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     private static CaptureStatusNoticeWindow? _activeError;
     private enum NoticeKind { Error, UsbConfiguration, Stopped }
 
-    public string TitleText { get; }
-    public string BodyText { get; }
+    private readonly string _titleText;
+    public string TitleText => LocalizationService.RefreshText(_titleText);
+    private readonly string _bodyText;
+    public string BodyText => LocalizationService.RefreshText(_bodyText);
     public string? TechnicalDetails { get; }
     public bool HasTechnicalDetails => !string.IsNullOrWhiteSpace(TechnicalDetails);
-    public string BadgeText { get; }
-    public string HintText { get; }
+    private readonly string _badgeText;
+    public string BadgeText => LocalizationService.RefreshText(_badgeText);
+    private readonly string _hintText;
+    public string HintText => LocalizationService.RefreshText(_hintText);
     public bool IsStopped { get; }
     public bool IsUsbConfiguration { get; }
     public bool IsReverseControl { get; }
@@ -22,19 +29,19 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
     private CaptureStatusNoticeWindow(string title, string body, NoticeKind kind,
         bool reverseControl = false, bool previewOnly = false, string? technicalDetails = null)
     {
-        TitleText = title;
-        BodyText = body;
+        _titleText = title;
+        _bodyText = body;
         TechnicalDetails = technicalDetails;
         IsStopped = kind == NoticeKind.Stopped;
         IsUsbConfiguration = kind == NoticeKind.UsbConfiguration;
         IsReverseControl = reverseControl;
-        BadgeText = LocalizationService.Get(kind switch
+        _badgeText = LocalizationService.Get(kind switch
         {
             NoticeKind.Stopped => "CaptureNoticeStoppedBadge",
             NoticeKind.UsbConfiguration => "CaptureNoticeUsbBadge",
             _ => reverseControl ? "ReverseControlNoticeErrorBadge" : "CaptureNoticeErrorBadge",
         });
-        HintText = LocalizationService.Get(kind switch
+        _hintText = LocalizationService.Get(kind switch
         {
             NoticeKind.Stopped => "CaptureNoticeStoppedHint",
             NoticeKind.UsbConfiguration => "CaptureNoticeUsbHint",
@@ -42,6 +49,8 @@ public partial class CaptureStatusNoticeWindow : Wpf.Ui.Controls.FluentWindow
         });
         DataContext = this;
         InitializeComponent();
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+            PropertyChanged?.Invoke(this, new(null)));
     }
 
     internal static void ShowError(string title, string body) =>

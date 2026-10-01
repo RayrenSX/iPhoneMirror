@@ -8,8 +8,12 @@ JSON 消息，通过标准输出发送 JSON Lines 状态事件。
 ## 1. 基本位置
 
 ```text
-C:\Users\Ray\Documents\iphoneMirror\dist\iUsbBridge.exe
+dist/iUsbBridge.exe
 ```
+
+上述路径相对仓库根目录；发布包中的 EXE 位于应用目录。它必须与
+`iUsbBridge.runtime.json` 和 `_internal` 一起部署，不能只复制单个 EXE。
+构建来源和依赖版本见[开发指南](DEVELOPMENT.md#桥接器构建来源)。
 
 查看参数：
 
@@ -21,6 +25,7 @@ C:\Users\Ray\Documents\iphoneMirror\dist\iUsbBridge.exe
 
 ```text
 iUsbBridge.exe [--usb | --wireless] [--udid UDID] [--rate-hz HZ] [--ddi-dir DIRECTORY]
+iUsbBridge.exe --enable-wifi-sync --udid UDID
 ```
 
 参数说明：
@@ -31,6 +36,7 @@ iUsbBridge.exe [--usb | --wireless] [--udid UDID] [--rate-hz HZ] [--ddi-dir DIRE
 | `--wireless` | 优先连接 usbmuxd 的 `Network` 设备；若记录不存在，使用已完成配对的 RemotePairing mDNS 隧道，不会回退到 USB。 |
 | `--udid` | 指定目标设备 UDID；不指定时使用该传输类型发现到的第一个设备。 |
 | `--rate-hz` | 输入速率提示值，默认 `120`。它不会改变键盘报告格式。 |
+| `--enable-wifi-sync` | 为指定 UDID 通过 USB 启用 Apple Wi-Fi 同步后退出；会改变设备设置，不启动通常的输入会话。必须同时提供 `--udid`。 |
 | `--ddi-dir` | 可选的本地 Personalized DDI 目录，仅在设备尚未挂载镜像时使用；目录必须包含 `Image.dmg`、`BuildManifest.plist`、`Image.trustcache`。未传入时桥接器直接从 GitHub 官方 API 动态解析 commit 和文件清单，校验 Git blob 身份、文件大小及本地 SHA-256，并要求 manifest build 与当前运行时匹配。 |
 
 `--usb` 与 `--wireless` 互斥，必须最多指定一个。
@@ -39,7 +45,7 @@ iUsbBridge.exe [--usb | --wireless] [--udid UDID] [--rate-hz HZ] [--ddi-dir DIRE
 
 ```powershell
 .\dist\iUsbBridge.exe --usb
-.\dist\iUsbBridge.exe --usb --udid 00008150-001903580A9B401C
+.\dist\iUsbBridge.exe --usb --udid "替换为目标设备UDID"
 ```
 
 USB 模式要求 iPhone 通过数据线连接、已解锁并信任此电脑。
@@ -48,7 +54,7 @@ USB 模式要求 iPhone 通过数据线连接、已解锁并信任此电脑。
 
 ```powershell
 .\dist\iUsbBridge.exe --wireless
-.\dist\iUsbBridge.exe --wireless --udid 00008150-001903580A9B401C
+.\dist\iUsbBridge.exe --wireless --udid "替换为目标设备UDID"
 ```
 
 无线模式使用 Apple 的 usbmux `Network` 设备记录或 CoreDevice 的 RemotePairing
@@ -73,7 +79,7 @@ python -c "import asyncio; from pymobiledevice3.usbmux import list_devices; prin
 
 stdout 每行是一个 JSON 对象。常见事件如下：
 
-```json
+```jsonl
 {"event":"status","code":"connecting_device","message":"正在建立USB设备会话"}
 {"event":"status","code":"initializing_touch","message":"正在初始化触控通道"}
 {"event":"ready","protocol":2,"capabilities":["iphoneMirror.usb_touch.v2","iphoneMirror.usb_keyboard.v1"],"udid":"...","rateHz":120,"gateOpen":true,"authMode":"direct","transport":"usb"}
@@ -87,6 +93,7 @@ stdout 每行是一个 JSON 对象。常见事件如下：
 | `ready` | HID 会话已建立，可以发送输入帧。 |
 | `warning` | 认证 gate、媒体流等非致命问题。 |
 | `error` | 消息格式、连接或 HID 发送失败；进程通常随后退出。 |
+| `clipboard_text` | 显式读取或可用的剪贴板监测返回文本，字段为 `text`。 |
 
 桥接器只会在 `gateOpen=true` 且已验证 mainTouchscreen（Service ID `257`）时发布
 `ready`。`authMode` 为 `mediastream` 或 `direct`；后者表示媒体流认证被拒后，
@@ -102,7 +109,10 @@ stdout 每行是一个 JSON 对象。常见事件如下：
 长度字节的 UTF-8 JSON
 ```
 
-长度只表示 JSON 字节数，不包含前面的 4 字节。单帧最大约 64 KiB。
+长度只表示 JSON 字节数，不包含前面的 4 字节。当前 `MAX_FRAME_SIZE` 为
+`4 * 1024 * 1024` 字节（4 MiB）；长度为 0 或超限会被拒绝。
+stdout 始终按行读取，不能使用相同长度前缀解码。`ready.protocol=2` 与运行时清单
+schema `1` 是两个独立版本，不能混用。
 
 ## 5. 触控帧
 
@@ -164,7 +174,20 @@ stdout 每行是一个 JSON 对象。常见事件如下：
 键盘帧最多 30 个 usage，每个 usage 必须在 `0` 到 `239` 之间。桥接器会注册
 一个虚拟 Universal HID 键盘，并在退出前发送空列表释放所有按键。
 
-## 7. Python 调用示例
+## 7. 系统按键与剪贴板
+
+以下消息同样采用 `iphoneMirror.touch.v2` 封装，在收到并验证目标设备 `ready` 后发送。
+
+| kind | 字段与语义 |
+|---|---|
+| `button_event` | `seq` 非负；`usagePage` / `usageCode` 为 0–65535；`state` 为 `down`、`up` 或 `canceled`，按下与释放应配对 |
+| `paste_text` | `text` 为字符串；桥接器异步尝试向设备粘贴，实际可用性受设备服务限制 |
+| `read_clipboard` | 请求设备文本，结果通过 `clipboard_text` 事件返回；失败可报告 `clipboard_read_failed` |
+
+剪贴板是有超时的辅助功能，不能把未收到剪贴板结果当作 HID 已断开。
+恢复期间客户端应暂停发送旧会话输入，重新验证 `ready` 后恢复路由。
+
+## 8. Python 调用示例
 
 以下示例启动 USB 模式，等待 `ready`，发送一次 `A`，再释放键盘并退出。
 
@@ -172,8 +195,9 @@ stdout 每行是一个 JSON 对象。常见事件如下：
 import json
 import struct
 import subprocess
+from pathlib import Path
 
-exe = r"C:\Users\Ray\Documents\iphoneMirror\dist\iUsbBridge.exe"
+exe = str(Path("dist/iUsbBridge.exe").resolve())  # 从仓库根目录运行
 p = subprocess.Popen(
     [exe, "--usb"],
     stdin=subprocess.PIPE,
@@ -188,9 +212,13 @@ def send(message):
     p.stdin.flush()
 
 while True:
-    event = json.loads(p.stdout.readline())
+    line = p.stdout.readline()
+    if not line:
+        raise RuntimeError("bridge exited before ready; inspect stderr")
+    event = json.loads(line)
     print(event)
-    if event.get("event") == "ready":
+    if (event.get("event") == "ready" and event.get("protocol") == 2
+            and event.get("gateOpen") is True):
         break
     if event.get("event") == "error":
         raise RuntimeError(event)
@@ -207,7 +235,7 @@ p.wait(timeout=10)
 将启动参数替换为 `"--wireless"` 即可使用无线模式；也可以同时加入
 `"--udid", "设备UDID"`。
 
-## 8. 常见错误
+## 9. 常见错误
 
 | 错误/现象 | 处理方式 |
 | --- | --- |
@@ -224,8 +252,12 @@ p.wait(timeout=10)
 | `unsupported touch message schema` | 检查 `schema`、`kind`、字段名和长度前缀。 |
 | 按键卡住 | 发送 `keyboard_batch` 且 `usages: []`；关闭程序时桥接器也会尝试自动释放。 |
 
-## 9. 与 iPhoneMirror 主程序的关系
+## 10. 与 iPhoneMirror 主程序的关系
 
 iPhoneMirror 主程序通过同样的 stdin/stdout 协议启动 bridge。当前 USB 控制
 路径传入 `--usb`；无线设备传入 `--wireless`。无线桥接会先检查所选 UDID 的
 usbmux `Network` 记录，缺失时再通过相同 UDID 的 RemotePairing 记录发现设备。
+
+有线投屏激活 QuickTime 配置后，Apple usbmuxd 可能暂时看不到手机。桥接器会尝试
+接管该设备的 USBMux 接口，并在动态回环端口提供进程内兼容服务；视频仍走 C++ 核心。
+释放时只关闭自己持有的接口与监听器，USB 配置恢复由投屏核心负责。

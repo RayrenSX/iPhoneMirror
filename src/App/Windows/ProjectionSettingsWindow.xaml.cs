@@ -1,22 +1,24 @@
 using System.Windows;
+using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.ViewModels;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class ProjectionSettingsWindow : Wpf.Ui.Controls.FluentWindow
+public partial class ProjectionSettingsWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     private readonly Func<Task> _refresh;
     private readonly Func<Task> _fullScreen;
     private readonly Func<Task> _separateWindow;
     private readonly Func<Task> _screenshot;
     private readonly Action _mediaOutput;
+    private readonly bool _previewOnly;
 
     internal ProjectionSettingsWindow(object dataContext,
         Func<Task> refresh, Func<Task> fullScreen,
         Func<Task> separateWindow, Func<Task> screenshot,
-        Action mediaOutput)
+        Action mediaOutput, bool previewOnly = false)
     {
         InitializeComponent();
         DataContext = dataContext;
@@ -25,6 +27,7 @@ public partial class ProjectionSettingsWindow : Wpf.Ui.Controls.FluentWindow
         _separateWindow = separateWindow;
         _screenshot = screenshot;
         _mediaOutput = mediaOutput;
+        _previewOnly = previewOnly;
     }
 
     internal static void ShowDeveloperPreview(Window owner, object dataContext)
@@ -32,7 +35,7 @@ public partial class ProjectionSettingsWindow : Wpf.Ui.Controls.FluentWindow
         var window = new ProjectionSettingsWindow(dataContext,
             () => Task.CompletedTask, () => Task.CompletedTask,
             () => Task.CompletedTask, () => Task.CompletedTask,
-            () => { })
+            () => { }, previewOnly: true)
         {
             Owner = owner,
         };
@@ -48,6 +51,13 @@ public partial class ProjectionSettingsWindow : Wpf.Ui.Controls.FluentWindow
     private async void OnSeparateWindowClick(object sender, RoutedEventArgs e) =>
         await RunAsync(_separateWindow);
 
+    private async void OnStartClick(object sender, RoutedEventArgs e)
+    {
+        if (_previewOnly || DataContext is not MainViewModel viewModel) return;
+        if (viewModel.IsTrayApplicationMode) await RunAsync(_separateWindow);
+        else if (viewModel.StartCommand.CanExecute(null)) viewModel.StartCommand.Execute(null);
+    }
+
     private void OnApplyLightweightModeClick(object sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel)
@@ -56,6 +66,23 @@ public partial class ProjectionSettingsWindow : Wpf.Ui.Controls.FluentWindow
 
     private async void OnScreenshotClick(object sender, RoutedEventArgs e) =>
         await RunAsync(_screenshot);
+
+    private void OnCreateCompactShortcutClick(object sender, RoutedEventArgs e)
+    {
+        if (_previewOnly) return;
+        if (DataContext is not MainViewModel { SelectedDevice: { IsMediaCast: false } device }) return;
+        try
+        {
+            var path = CompactLaunchOptions.CreateDesktopShortcut(device.Udid, device.DisplayName);
+            AppPromptWindow.Inform(LocalizationService.Get("CompactLaunchTitle"),
+                LocalizationService.Format("CompactShortcutCreated", path), this);
+        }
+        catch (Exception error)
+        {
+            AppPromptWindow.Inform(LocalizationService.Get("CompactLaunchTitle"),
+                LocalizationService.Format("CompactLaunchFailed", error.Message), this);
+        }
+    }
 
     private void OnMediaOutputClick(object sender, RoutedEventArgs e) =>
         _mediaOutput();

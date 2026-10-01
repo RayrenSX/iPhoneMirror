@@ -59,33 +59,40 @@ Packet parse_payload(std::span<const std::uint8_t> payload) {
 }
 
 std::vector<Packet> StreamDecoder::push(std::span<const std::uint8_t> bytes) {
-    if (!bytes.empty()) buffer_.insert(buffer_.end(), bytes.begin(), bytes.end());
     std::vector<Packet> packets;
-    std::size_t consumed{};
-
-    while (buffer_.size() - consumed >= 4) {
-        const std::uint32_t packet_length = read_u32_le(buffer_.data() + consumed);
+    const auto checked_length = [this](const std::uint8_t* header) {
+        const auto packet_length = read_u32_le(header);
         if (packet_length < 8 || packet_length > MaxPacketBytes) {
             reset();
             throw std::runtime_error("invalid QuickTime USB packet length");
         }
-        if (buffer_.size() - consumed < packet_length) break;
-        const auto begin = buffer_.data() + consumed + 4;
-        packets.push_back(parse_payload(std::span(begin, packet_length - 4)));
-        consumed += packet_length;
-    }
+        return packet_length;
+    };
 
-    if (consumed != 0) {
-        // The decoder state requires buffer_.data() to start at the first
-        // unconsumed byte because `consumed` is local and reset to 0 on
-        // every push, so the compaction cannot be deferred with an offset.
-        // Clearing in the fully-consumed case avoids the element-wise move;
-        // the partial case remains O(buffer_.size()) by necessity.
-        if (consumed >= buffer_.size())
-            buffer_.clear();
-        else
-            buffer_.erase(buffer_.begin(),
-                buffer_.begin() + static_cast<std::ptrdiff_t>(consumed));
+    while (!bytes.empty()) {
+        // Complete USB packets need only the owned Packet payload copy.
+        // Keep the assembly buffer for fragments, not entire read batches.
+        if (buffer_.empty() && bytes.size() >= 4) {
+            const auto length = checked_length(bytes.data());
+            if (bytes.size() >= length) {
+                packets.push_back(parse_payload(bytes.subspan(4, length - 4)));
+                bytes = bytes.subspan(length);
+                continue;
+            }
+        }
+        if (buffer_.size() < 4) {
+            const auto count = std::min(4 - buffer_.size(), bytes.size());
+            buffer_.insert(buffer_.end(), bytes.begin(), bytes.begin() + count);
+            bytes = bytes.subspan(count);
+            if (buffer_.size() < 4) break;
+        }
+        const auto length = checked_length(buffer_.data());
+        const auto count = std::min(length - buffer_.size(), bytes.size());
+        buffer_.insert(buffer_.end(), bytes.begin(), bytes.begin() + count);
+        bytes = bytes.subspan(count);
+        if (buffer_.size() < length) break;
+        packets.push_back(parse_payload(std::span(buffer_).subspan(4)));
+        buffer_.clear();
     }
     return packets;
 }

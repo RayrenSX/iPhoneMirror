@@ -12,12 +12,15 @@ public partial class App : Application
 {
     internal bool IsSystemSessionEnding { get; private set; }
     internal bool IsUiPreviewMode { get; set; }
+    internal CompactLaunchOptions LaunchOptions { get; private set; } = new(false, null);
     private readonly UpdateSettingsStore _settingsStore = new();
     private readonly GitHubReleaseClient _releaseClient = new();
     private AboutWindow? _aboutWindow;
     private UpdateWindow? _updateWindow;
     private SingleInstanceCoordinator? _singleInstanceCoordinator;
+    private CompactLaunchChannel? _compactLaunchChannel;
     private int _remoteShutdownRequested;
+    private bool _startupUpdateCheckStarted;
 
     internal UpdateSettings UpdateSettings { get; private set; } = new();
 
@@ -59,6 +62,7 @@ public partial class App : Application
             DiagnosticLogger.Info("lifecycle", "startup_begin",
                 ("arguments", e.Args.Length));
             LocalizationService.Initialize();
+            LaunchOptions = CompactLaunchOptions.Parse(e.Args);
             AppIdentity.Initialize();
             UpdateSettings = _settingsStore.Load();
             ThemeService.Apply(UpdateSettings.Theme);
@@ -76,6 +80,11 @@ public partial class App : Application
             if (!_singleInstanceCoordinator.OwnsPrimaryInstance ||
                 _singleInstanceCoordinator.HasPreExistingInstance())
             {
+                if (LaunchOptions.Enabled && CompactLaunchChannel.ForwardAsync(LaunchOptions).GetAwaiter().GetResult())
+                {
+                    Shutdown(0);
+                    return;
+                }
                 DiagnosticLogger.Info("lifecycle", "instance_conflict_detected",
                     ("owns_primary", _singleInstanceCoordinator.OwnsPrimaryInstance));
                 ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -95,9 +104,19 @@ public partial class App : Application
             StartupDiagnostics.ValidateRequiredRuntime();
             GitHubReleaseClient.CleanupInterruptedDownloads();
             MainWindow = new MainWindow();
+            _compactLaunchChannel = new CompactLaunchChannel(options =>
+                Dispatcher.BeginInvoke(() =>
+                {
+                    if (MainWindow is MainWindow window)
+                        _ = window.OpenCompactRequestAsync(options);
+                }));
+            if (LaunchOptions.Enabled)
+            {
+                MainWindow.ShowActivated = false;
+                MainWindow.WindowState = WindowState.Minimized;
+            }
             AppIdentity.Attach(MainWindow);
-            MainWindow.ContentRendered += OnMainWindowContentRendered;
-            MainWindow.Show();
+            ShowInitialWindow();
             DiagnosticLogger.Info("lifecycle", "startup_complete");
         }
         catch (Exception error)
@@ -125,15 +144,27 @@ public partial class App : Application
         });
     }
 
-    private async void OnMainWindowContentRendered(object? sender, EventArgs e)
+    private void ShowInitialWindow()
     {
-        if (MainWindow is not null)
-            MainWindow.ContentRendered -= OnMainWindowContentRendered;
-        if (!UpdateSettings.CheckOnStartup) return;
+        if (MainWindow is MainWindow { IsTrayMode: true } trayWindow)
+            trayWindow.StartInTray();
+        else
+            MainWindow?.Show();
+        _ = CheckForStartupUpdatesAsync();
+    }
+
+    private async Task CheckForStartupUpdatesAsync()
+    {
+        if (_startupUpdateCheckStarted || !UpdateSettings.CheckOnStartup || LaunchOptions.Enabled) return;
+        _startupUpdateCheckStarted = true;
         try
         {
+            // Let the initial window or tray icon settle without depending on
+            // ContentRendered, which never fires for a hidden workspace.
+            await System.Windows.Threading.Dispatcher.Yield(
+                System.Windows.Threading.DispatcherPriority.Background);
             var release = await CheckForUpdatesAsync(manual: false);
-            if (release is not null && MainWindow is not null)
+            if (release is not null && MainWindow is not null && !Dispatcher.HasShutdownStarted)
                 ShowUpdateWindow(release, MainWindow, UpdateSettings.AutoDownload);
         }
         catch (Exception error)
@@ -218,6 +249,7 @@ public partial class App : Application
 
     internal bool SaveUpdateSettings()
     {
+        if (IsUiPreviewMode) return true;
         try
         {
             _settingsStore.Save(UpdateSettings);
@@ -253,6 +285,7 @@ public partial class App : Application
             DiagnosticLogger.Exception("updater", "client_dispose_failed", error);
         }
         _singleInstanceCoordinator?.Dispose();
+        _compactLaunchChannel?.Dispose();
         _singleInstanceCoordinator = null;
         DiagnosticLogger.Shutdown(e.ApplicationExitCode);
         base.OnExit(e);

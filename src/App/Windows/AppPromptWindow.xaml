@@ -1,20 +1,19 @@
-<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.AppPromptWindow"
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.AppPromptWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:design="clr-namespace:IPhoneMirror.UI.Controls"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-        Width="520" SizeToContent="Height" MinHeight="250" MaxHeight="540"
+        Title="{Binding PromptTitle}" Width="542" SizeToContent="Height" MinHeight="272" MaxHeight="562"
         ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
-        WindowStyle="None" ExtendsContentIntoTitleBar="True"
-        WindowBackdropType="None" WindowCornerPreference="Round"
-        Background="{DynamicResource WindowBackgroundBrush}"
-        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False">
-    <Border Style="{StaticResource ModernDialogSurface}" Margin="0"
-            Effect="{x:Null}" CornerRadius="0" BorderThickness="0">
+        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <Border Style="{StaticResource RoundedWindowContent}">
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/><RowDefinition Height="16"/>
-                <RowDefinition Height="Auto"/><RowDefinition Height="20"/>
+                <RowDefinition Height="*"/><RowDefinition Height="16"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid Style="{StaticResource SubWindowHeader}"
@@ -25,19 +24,22 @@
                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
                 </Button>
             </Grid>
-            <Border Grid.Row="2" Style="{StaticResource SettingsSection}" Padding="16">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="300">
-                    <TextBlock Text="{Binding PromptBody}" TextWrapping="Wrap"
-                               FontSize="13" LineHeight="21"/>
+            <Border Grid.Row="2" Style="{StaticResource SettingsSection}" Padding="16" design:StatusAppearance.Tone="{Binding Tone}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="300">
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <ui:SymbolIcon Symbol="{Binding PromptSymbol}" FontSize="20" VerticalAlignment="Top"
+                                       design:StatusAppearance.Tone="{Binding Tone}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding PromptBody}" Style="{StaticResource BodyText}"/>
+                    </Grid>
                 </ScrollViewer>
             </Border>
-            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="{Binding CancelText}" Click="OnCancelClick"
-                        MinWidth="92" Margin="0,0,8,0"
+            <WrapPanel Grid.Row="4" Style="{StaticResource DialogActions}">
+                <Button Margin="{StaticResource DialogActionMargin}" Content="{Binding CancelText}" Click="OnCancelClick"
+                        IsDefault="{Binding CancelIsDefault}" MinWidth="92"
                         Visibility="{Binding CancelVisibility}"/>
-                <Button Content="{Binding ConfirmText}" Click="OnConfirmClick"
-                        MinWidth="118" Style="{StaticResource PrimaryButton}"/>
-            </StackPanel>
+                <Button Margin="{StaticResource DialogActionMargin}" Content="{Binding ConfirmText}" Click="OnConfirmClick"
+                        IsDefault="{Binding ConfirmIsDefault}" MinWidth="118" Style="{Binding ConfirmStyle}"/>
+            </WrapPanel>
         </Grid>
     </Border>
-</ui:FluentWindow>
+</chrome:RoundedWindow>

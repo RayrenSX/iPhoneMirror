@@ -22,8 +22,21 @@ public sealed record AppleDeviceRecord(
     string Service,
     bool IsPresent,
     bool HasLibUsb0Filter,
-    string[] UpperFilters)
+    string[] UpperFilters,
+    uint? ProblemCode = 0,
+    bool IsStarted = true,
+    string DriverInf = "",
+    string DriverSection = "",
+    string DriverVersion = "",
+    string[]? LowerFilters = null)
 {
+    public bool IsHealthy => IsPresent && IsStarted && ProblemCode == 0;
+    public bool IsCaptureParent => Service.Equals("usbccgp", StringComparison.OrdinalIgnoreCase);
+    public string ParentStatusText => DriverLocalization.Format("ParentStatusFormat",
+        string.IsNullOrEmpty(Service) ? DriverLocalization.Get("ParentNoService") : Service,
+        string.IsNullOrEmpty(DriverInf) ? DriverLocalization.Get("ParentNoInf") : DriverInf,
+        ProblemCode?.ToString() ?? "?",
+        DriverLocalization.Get(IsHealthy ? "ParentHealthy" : "ParentNeedsAttention"));
     public string ConnectionText => DriverLocalization.Get(IsPresent ? "Connected" : "HistoricalDevice");
     public string DriverText => DriverLocalization.Get(HasLibUsb0Filter ? "CaptureInstalled" : "CaptureMissing");
     public string SelectionText
@@ -68,7 +81,8 @@ internal sealed record DriverOperationResult(
     string Message,
     string? InstanceId,
     string? BackupPath,
-    string LogPath);
+    string LogPath,
+    bool RequiresRestart = false);
 
 internal sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError)
 {

@@ -15,6 +15,7 @@ public enum ApplicationDisplayMode
 {
     Complete,
     Lightweight,
+    Tray,
 }
 
 internal sealed class UpdateSettings

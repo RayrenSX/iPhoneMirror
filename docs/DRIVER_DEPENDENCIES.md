@@ -2,7 +2,9 @@
 
 This document defines every driver-level dependency used by iPhoneMirror and
 whether it is bundled, supplied by Windows, or acquired from an official vendor.
-The inventory reflects the `v1.8.3` release layout.
+The inventory was checked against the `1.8.4-test4` source tree on 2026-10-01.
+See [parent-driver management](PARENT_DRIVER_MANAGEMENT.md) for the current
+per-device confirmation, rebinding and recovery rules.
 
 | Component | Purpose | Delivery | Verification |
 |---|---|---|---|
@@ -12,8 +14,8 @@ The inventory reflects the `v1.8.3` release layout.
 | Apple USB driver (`appleusb.inf`) | Modern Apple Devices USB transport | Supplied by a user-installed Microsoft Store Apple Devices package (product `9NP83LWLPZ9K`) | DriverStore inspection and Store/package provenance |
 | Apple USB driver (`usbaapl64.inf` / `usbaapl.inf`) | Desktop iTunes USB transport | Trusted local support MSI, Apple Software Update catalog, or Apple official HTTPS iTunes compatibility fallback | Windows Authenticode signer must be Apple Inc. |
 | Apple Mobile Device Service | Pairing and usbmux service | Installed with Apple Devices or Apple Mobile Device Support; the official package supplements Store installations that provide only the INF | Service presence/running state checked separately from the INF package |
-| `usbccgp.sys` | USB composite parent used by the per-device filter | Windows inbox driver | Never replaced or redistributed |
-| WinUSB | Recovery target when a third-party tool replaced the Apple parent | Windows inbox driver | Only known incorrect parent bindings are removed; no WinUSB payload is bundled |
+| `usbccgp.sys` | USB composite parent used by the per-device filter | Windows inbox driver | Its binary is not redistributed; binding the selected parent requires confirmation |
+| WinUSB | May be present as an incompatible existing parent binding | Windows inbox driver | Not the normal QuickTime capture target; the manager can rebind a confirmed device to a suitable listed driver |
 
 `applekis.inf` is an Apple recovery/DFU driver and does not by itself satisfy
 the normal wired-mirroring requirement. The driver manager therefore requires
@@ -51,7 +53,7 @@ An organization that holds Apple redistribution rights can produce a fully
 offline Setup by supplying its authorized MSI explicitly:
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.8.3 -GenerateSbom `
+./scripts/package_release.ps1 -GenerateSbom `
   -AppleSupportPackagePath C:\Authorized\AppleMobileDeviceSupport64.msi `
   -ConfirmAppleRedistributionRights
 ```

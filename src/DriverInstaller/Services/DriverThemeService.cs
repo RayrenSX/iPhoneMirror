@@ -89,13 +89,19 @@ internal static class DriverThemeService
         {
             SwapThemeDictionary(application.Resources,
                 IsDark ? DarkThemePath : LightThemePath);
+            Wpf.Ui.Appearance.ApplicationThemeManager.Apply(
+                IsDark ? Wpf.Ui.Appearance.ApplicationTheme.Dark : Wpf.Ui.Appearance.ApplicationTheme.Light,
+                Wpf.Ui.Controls.WindowBackdropType.None, updateAccent: false);
             foreach (Window window in application.Windows)
             {
                 ApplyBackdrop(window);
-                if (window.IsLoaded)
+                if (window.IsLoaded && SystemParameters.ClientAreaAnimation)
+                {
+                    var opacity = (double)window.GetAnimationBaseValue(UIElement.OpacityProperty);
                     window.BeginAnimation(UIElement.OpacityProperty,
-                        new DoubleAnimation(0.88, 1,
-                            TimeSpan.FromMilliseconds(180)));
+                        new DoubleAnimation(opacity * 0.88, opacity,
+                            TimeSpan.FromMilliseconds(180)) { FillBehavior = FillBehavior.Stop });
+                }
             }
         }
         if (persist) Save();
@@ -152,7 +158,7 @@ internal static class DriverThemeService
             return;
         var replacement = new ResourceDictionary
         {
-            Source = new Uri(path, UriKind.Relative),
+            Source = new Uri($"/{typeof(DriverThemeService).Assembly.GetName().Name};component/{path}", UriKind.Relative),
         };
         if (existing is null) resources.MergedDictionaries.Insert(0, replacement);
         else resources.MergedDictionaries[resources.MergedDictionaries.IndexOf(existing)] =

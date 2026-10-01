@@ -25,26 +25,24 @@
 > currently support Windows x64 only; Windows ARM64 is unsupported because the USB
 > kernel driver and wireless runtime are not available for ARM64.
 
-> [!TIP]
-> ### Special Thanks: Linux Port
->
-> A special thank-you to **[@furruka](https://github.com/furruka)** for creating and
-> maintaining a native Linux port based on this project in the dedicated
-> [Linux adaptation branch](https://github.com/furruka/iPhoneMirror). This work extends
-> iPhoneMirror's USB and AirPlay mirroring paths to Linux, replacing Windows-specific
-> GUI, rendering, audio, video-decoding, USB-communication and device-discovery layers
-> with native counterparts while aiming to preserve the upstream protocol and policy
-> behavior.
->
-> The port is still under active development and does not currently provide a usable
-> Linux release package. See the [Linux port notes](https://github.com/furruka/iPhoneMirror/blob/linux-port/docs/LINUX_PORT.md)
-> for its current status, build instructions and known limitations. We are deeply grateful
-> for furruka's time and contribution, and encourage Linux users to follow and support
-> this work.
+## Community Ports and Special Thanks
+
+Thank you to the community developers bringing iPhoneMirror to more platforms!
+Each port below is independently maintained by its author. We invite you to
+follow, try, and support their work.
+
+| Platform | Contributor | Adaptation focus | Project and documentation |
+|---|---|---|---|
+| **Linux** | **[@furruka](https://github.com/furruka)** | Native Linux UI, audio/video, and device communication | [Repository](https://github.com/furruka/iPhoneMirror) · [Port notes](https://github.com/furruka/iPhoneMirror/blob/linux-port/docs/LINUX_PORT.md) |
+| **HarmonyOS (PC)** | **[@zhangziqizZ](https://github.com/zhangziqizZ)**<br>Bilibili: **@Fantasy_zzq** | USB and AirPlay mirroring with native audio/video for HarmonyOS NEXT / 2in1 | [Repository](https://github.com/zhangziqizZ/iPhoneMirror) · [Port notes](https://github.com/zhangziqizZ/iPhoneMirror/blob/main/docs/移植说明.md) |
+
+See each project's README and port notes for feature coverage, release packages,
+build instructions, and known limitations.
 
 ## Download
 
-The current release is `v1.8.3`. Download `iPhoneMirror-Setup-v*-x64.exe` from
+See Releases for the published version; the current source tree declares
+`1.8.4-test4`, which is not a publication claim. Download `iPhoneMirror-Setup-v*-x64.exe` from
 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases). The three-language
 Setup wizard supports a custom destination, defaults to
 `C:\Program Files\iPhoneMirror` for an administrator install, creates Start menu
@@ -70,6 +68,9 @@ preferences in the main window. Network failures and timeouts never block normal
 startup.
 
 The [complete user guide (Chinese)](docs/USER_GUIDE.md) covers every main interface and workflow.
+
+See the [documentation index](docs/README.md), [development and testing guide](docs/DEVELOPMENT.md),
+and [architecture](docs/ARCHITECTURE.md) for source-level details (Chinese).
 
 The computer needs Apple USB support. If it is missing, the driver manager first
 uses a trusted local `AppleMobileDeviceSupport64.msi`, then downloads the
@@ -163,6 +164,7 @@ AirPlay implementation may require updates for future iOS releases.
 | Preview | Main, detached, full-screen, rotation, aspect lock and device-aware corners |
 | OBS | Clean per-device detached window for Window Capture |
 | Bluetooth control | Per-device BLE HID mouse/keyboard binding, system navigation, and configurable global shortcuts |
+| USB/wireless reverse control | Separate CoreDevice bridge; requires Developer Mode, a matching DDI and verified device HID services |
 | Image adjustments | Preview-only brightness, contrast, saturation, and gamma |
 | Tools | Screenshot, force refresh, shortcuts, live logs, Simplified Chinese, Traditional Chinese (Hong Kong), and English UI |
 | Driver | Strict per-device check before wired capture; opens the standalone driver manager on failure |
@@ -345,6 +347,7 @@ so both identities can be associated with the same phone.
 | AirPlayServer 1.1.2 | Wireless AirPlay, FairPlay, video and audio decode | GPL-3.0, LGPL-2.1-or-later and upstream terms, `third_party/airplay-server/` |
 | FFmpeg 4.4.2 runtime | AirPlayServer's bundled H.264/audio runtime | LGPL-2.1-or-later, distributed with AirPlayServer |
 | FFmpeg 8.1.2 runtime | Recording, live output and HLS media-cast bridge | GPL-3.0, bundled by default under `tools/ffmpeg/` |
+| iUsbBridge | USB/wireless CoreDevice reverse-control bridge | [iUsbBridge](https://github.com/RayrenSX/iUsbBridge) noncommercial license; see [component notices](docs/USB_TOUCH_THIRD_PARTY_LICENSES.md) for the recipe and USBMux source boundaries |
 | quicktime_video_hack fixtures | QuickTime protocol regression vectors | MIT, test fixtures only |
 
 Apple Devices, Apple Mobile Device Support, iTunes and Windows system
@@ -373,7 +376,12 @@ These are tested combinations, not a guarantee for every iPhone or iOS build.
 Requirements: Windows 10/11 x64, Visual Studio 2026 Build Tools with MSVC,
 Windows SDK and CMake, the .NET 10 SDK with Windows Desktop support, and MSYS2
 UCRT64 with CMake, Ninja, the UCRT64 toolchain, GStreamer (base, good, bad, libav),
-libplist and OpenSSL for the bundled UxPlay fallback.
+libplist and OpenSSL for the bundled UxPlay fallback. The USB bridge build uses Python 3.13 x64.
+
+The build packages this repository's `tools/usb_touch_bridge.py` and `tools/iostouch`
+using `scripts/usb-bridge-recipe`; it does not clone the latest upstream backend.
+`IPHONE_MIRROR_USB_BRIDGE_ROOT` may override the compatible recipe directory.
+See the pinned recipe's [source record](scripts/usb-bridge-recipe/SOURCE.md).
 
 ```powershell
 git clone https://github.com/RayrenSX/iPhoneMirror.git
@@ -388,6 +396,9 @@ self-contained WPF application under `outputs/iPhoneMirror`, including:
 outputs/iPhoneMirror/iPhoneMirror.exe
 outputs/iPhoneMirror/iPhoneMirror.Driver.exe
 outputs/iPhoneMirror/iPhoneMirror.Core.dll
+outputs/iPhoneMirror/iUsbBridge.exe
+outputs/iPhoneMirror/iUsbBridge.runtime.json
+outputs/iPhoneMirror/_internal/
 outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.dll
 outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.Admin.exe
 outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
@@ -403,7 +414,9 @@ size.
 
 The default build bundles the FFmpeg 8.1.2 media-output runtime so recording and
 RTMP/SRT/WHIP streaming work out of the box. Build the compact edition only
-when minimum size is required and a system FFmpeg dependency is acceptable:
+when minimum size is required. External FFmpeg candidates must still match the
+application's pinned SHA-256; an arbitrary system build is not accepted, and
+dependent output features remain unavailable without a trusted runtime:
 
 ```powershell
 .\build.ps1 -Configuration Release -OmitMediaOutputRuntime
@@ -415,9 +428,11 @@ publishing the compact edition.
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 
 ```powershell
-./scripts/package_release.ps1 -Version 1.8.3 -GenerateSbom
+./scripts/package_release.ps1 -GenerateSbom
 ```
 
+The script reads the project version and requires the app and driver manager to
+agree. See the [development guide](docs/DEVELOPMENT.md) for parameters and focused tests.
 Pass `-UpdateReleaseManifest` when producing the assets that will be uploaded.
 The release script then synchronizes sizes and SHA256 digests for the matching
 entry in `updates/releases.json`, keeping the fallback update endpoint valid.
@@ -437,9 +452,9 @@ Build and run the test suites without publishing the self-contained app:
 
 ```text
 iPhone/iPad
-  ├─ USB / QuickTime ─► H.264 / PCM decode ─┐
-  └─ AirPlay ─► WirelessHost ─► I420 / PCM ─┤
-                                              └─► native session
+  ├─ USB / QuickTime ─► H.264 / PCM decode ─────────────┐
+  └─ AirPlay ─► WirelessHost / UxPlayHost ─► I420 / PCM ─┤
+                                                     └─► native session
                                                    ├─► D3D11 previews
                                                    ├─► screenshot / OBS
                                                    ├─► FFmpeg MP4 / RTMP / SRT / WHIP

@@ -22,6 +22,18 @@ internal static class WindowWorkAreaController
     private const uint SwpNoActivate = 0x0010;
     private static readonly ConditionalWeakTable<Window, object> AttachedWindows = new();
 
+    internal static Size GetAvailableSize(Window window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
+        var info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == 0 || !GetMonitorInfoW(monitor, ref info)) return SystemParameters.WorkArea.Size;
+        var dpi = GetDpiForWindow(handle);
+        var scale = dpi == 0 ? 1d : dpi / 96d;
+        return new Size((info.WorkArea.Right - info.WorkArea.Left) / scale,
+            (info.WorkArea.Bottom - info.WorkArea.Top) / scale);
+    }
+
     internal static void EnableForApplication()
     {
         EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,

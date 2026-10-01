@@ -1,0 +1,63 @@
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.WindowStyleSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="{DynamicResource IndependentWindowStyleTitle}"
+        Width="482" Height="462" MinWidth="422" MinHeight="422"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
+        ShowInTaskbar="False" PreviewKeyDown="OnPreviewKeyDown"
+        Foreground="{DynamicResource TextBrush}"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="16"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
+            <StackPanel Margin="0,0,48,0">
+                <TextBlock Text="{DynamicResource IndependentWindowStyleTitle}" Style="{StaticResource SubWindowTitle}"/>
+                <TextBlock Text="{DynamicResource IndependentWindowStyleSubtitle}" Style="{StaticResource SubWindowSubtitle}"/>
+            </StackPanel>
+            <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
+                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
+            </Button>
+        </Grid>
+        <Border Grid.Row="2" Style="{StaticResource SettingsSection}" Padding="20,16">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock Text="{DynamicResource IndependentWindowOpacity}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding ElementName=OpacitySlider, Path=Value, StringFormat={}{0:F0}%}"
+                                   Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" Margin="12,0,0,0"/>
+                    </Grid>
+                    <Slider x:Name="OpacitySlider" Minimum="10" Maximum="100" Value="100"
+                            TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="10"
+                            Margin="0,14,0,12" ValueChanged="OnOpacityChanged"
+                            AutomationProperties.AutomationId="IndependentWindowOpacitySlider"
+                            AutomationProperties.Name="{DynamicResource IndependentWindowOpacity}"/>
+                    <TextBlock Text="{DynamicResource IndependentWindowOpacityHelp}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
+                    <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,18"/>
+                    <CheckBox x:Name="OpaqueOnHoverCheckBox" Checked="OnOpaqueOnHoverChanged" Unchecked="OnOpaqueOnHoverChanged"
+                              AutomationProperties.AutomationId="IndependentWindowOpaqueOnHover"
+                              Content="{DynamicResource IndependentWindowOpaqueOnHover}"/>
+                    <TextBlock Text="{DynamicResource IndependentWindowOpaqueOnHoverHelp}" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+        <TextBlock x:Name="FeedbackText" Grid.Row="3" Visibility="Collapsed" Margin="0,10,0,0"
+                   Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap"/>
+        <Grid Grid.Row="4" Margin="0,16,0,0">
+            <Button Content="{DynamicResource IndependentWindowOpacityReset}" HorizontalAlignment="Left" Click="OnResetClick"/>
+            <Button Content="{DynamicResource Close}" HorizontalAlignment="Right" MinWidth="88"
+                    Style="{StaticResource PrimaryButton}" Click="OnCloseClick"/>
+        </Grid>
+    </Grid>
+</chrome:RoundedWindow>

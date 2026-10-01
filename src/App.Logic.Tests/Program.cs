@@ -209,6 +209,7 @@ foreach (var localizationPath in Directory.GetFiles(
     Equal(true,
         usbRecovery.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
         usbRecovery.Contains("数据线", StringComparison.Ordinal) ||
+        usbRecovery.Contains("數據線", StringComparison.Ordinal) ||
         usbRecovery.Contains("傳輸線", StringComparison.Ordinal),
         $"USB recovery asks the user to replace/reconnect a cable in {Path.GetFileName(localizationPath)}");
     foreach (var numberedReminder in localization.Descendants()
@@ -243,8 +244,8 @@ Equal(LocalizationService.English,
 var captureRecoveryWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "Windows", "CaptureRecoveryWindow.xaml"));
 var captureRecoveryWindow = XDocument.Load(captureRecoveryWindowPath);
-Equal("Round", (string?)captureRecoveryWindow.Root?.Attribute("WindowCornerPreference"),
-    "capture-recovery window keeps the native Windows corner preference");
+Equal("RoundedWindow", captureRecoveryWindow.Root?.Name.LocalName,
+    "capture-recovery window uses the shared self-drawn rounded frame");
 Equal(false, captureRecoveryWindow.Descendants()
         .Any(element => string.Equals((string?)element.Attribute("Style"),
             "{StaticResource ModernDialogSurface}", StringComparison.Ordinal)),
@@ -270,6 +271,24 @@ foreach (var actionKey in new[]
 var mainWindowPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", "..", "App", "MainWindow.xaml"));
 var mainWindow = XDocument.Load(mainWindowPath);
+// Null-session queries return before touching native state. Do not initialize
+// the native runtime just to verify these managed early-return contracts.
+using (var noSessionCore = (NativeCore)System.Runtime.CompilerServices.RuntimeHelpers
+           .GetUninitializedObject(typeof(NativeCore)))
+{
+    Equal<VideoFrame?>(null, noSessionCore.GetDeviceOutputFrame(null, 320, 240),
+        "an absent session has no BGRA output frame");
+    Equal<Nv12VideoFrame?>(null, noSessionCore.GetDeviceOutputNv12Frame(null, 320, 240),
+        "an absent session has no NV12 output frame");
+    Equal<AudioPacket?>(null, noSessionCore.GetDeviceOutputAudioPacket(null, 0),
+        "an absent session has no audio packet");
+    Equal(0L, noSessionCore.GetDeviceSessionLatestFrameTimestamp(null),
+        "an absent session has no frame timestamp");
+    Equal(false, noSessionCore.TryGetDeviceVideoOutputStatus(null, out var noSessionStatus),
+        "an absent session has no decoder status");
+    Equal(true, noSessionStatus.StructSize > 0,
+        "unavailable decoder status still has an initialized native structure");
+}
 var defaultWindowLayout = WindowWorkAreaController.CalculateLayout(
     currentLeft: 0, currentTop: 0, currentWidth: 1540, currentHeight: 900,
     workLeft: 0, workTop: 0, workWidth: 2560, workHeight: 1400,
@@ -369,7 +388,7 @@ Equal(false, mainWindow.Descendants().Any(element =>
 var sourceDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
     "..", "..", "..", ".."));
 var mainViewModelSource = File.ReadAllText(Path.Combine(sourceDirectory,
-    "App", "ViewModels", "MainViewModel.cs"));
+    "App", "ViewModels", "MainViewModel.cs")).ReplaceLineEndings("\n");
 var mainWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "MainWindow.xaml.cs"));
 var previewWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
@@ -385,30 +404,30 @@ Equal(true,
         "!_usbControlEnabled && !_wirelessControlEnabled &&",
         StringComparison.Ordinal) &&
     mainViewModelSource.Contains(
-        "if (_bluetoothControlEnabled) await DisableBluetoothControlAsync();",
+        "if (_bluetoothControlEnabled && IsBluetoothControlTarget(device.Udid)) await DisableBluetoothControlAsync();",
         StringComparison.Ordinal) &&
     mainViewModelSource.Contains(
         "private UsbTouchBridgeHost? GetReadyUsbControlBridge(string? targetUdid)",
         StringComparison.Ordinal) &&
     mainWindowSource.Contains(
-        "SendUsbKeyboardAsync(usbUsages, routeUdid)",
+        "SendUsbKeyboardAsync(usbUsages, routeUdid, canSend)",
         StringComparison.Ordinal),
-    "wired, wireless, and Bluetooth control modes remain mutually exclusive");
+    "wired, wireless, and Bluetooth control modes remain mutually exclusive per device");
 Equal(true,
     (mainViewModelSource.Contains(
-        "if (!ReferenceEquals(_wirelessTouchBridge, bridge)) return;",
+        "if (!ReferenceEquals(control.WirelessBridge, bridge)) return;",
         StringComparison.Ordinal) ||
      mainViewModelSource.Contains(
-        "if (!ReferenceEquals(_wirelessTouchBridge, bridge) || _disposed) return;",
+        "if (!ReferenceEquals(control.WirelessBridge, bridge) || _disposed) return;",
         StringComparison.Ordinal)) &&
     mainViewModelSource.Contains(
-        "if (!ReferenceEquals(_usbTouchBridge, bridge) || _disposed ||",
+        "if (!ReferenceEquals(control.WiredBridge, bridge) || _disposed ||",
         StringComparison.Ordinal) &&
     mainViewModelSource.Contains(
         "dispatcher.BeginInvoke(new Action(() =>",
         StringComparison.Ordinal) &&
     mainViewModelSource.Contains(
-        "_usbControlStopping = true;",
+        "control.Stopping = true;",
         StringComparison.Ordinal),
     "reverse-control bridge callbacks and shutdowns are instance-safe");
 Equal(true,
@@ -620,7 +639,7 @@ Equal(true, mainViewModelSource.Contains(
         StringComparison.Ordinal),
     "unsafe Apple USB filter stacks have a dedicated visible driver state");
 Equal(true, mainViewModelSource.Contains(
-        "driver safety warning: {driverStatus.Diagnostic}", StringComparison.Ordinal) &&
+        "LocalizationService.Format(\"DriverSafetyWarningFormat\", driverStatus.Diagnostic)", StringComparison.Ordinal) &&
     mainViewModelSource.Contains(
         "CaptureErrorGuidance.StartFailureMessage(\n                            preflight.ErrorCode",
         StringComparison.Ordinal),
@@ -1073,25 +1092,24 @@ foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
     Equal(true, windowText.Contains("{DynamicResource", StringComparison.Ordinal),
         $"{windowName} uses dynamic theme resources");
     Equal(true,
-        windowText.Contains("AppBackgroundBrush", StringComparison.Ordinal) ||
-        windowText.Contains("ModernDialogSurface", StringComparison.Ordinal),
+        windowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal),
         $"{windowName} uses a shared themed window surface");
     Equal(true,
         windowText.Contains("WindowStyle=\"None\"", StringComparison.Ordinal) ||
-        windowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal),
+        windowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal),
         $"{windowName} uses custom or Fluent window chrome");
     Equal(true, windowText.Contains("SubWindowCloseButton", StringComparison.Ordinal),
         $"{windowName} provides the shared custom close button");
     Equal(true, windowText.Contains("SubWindowTitle", StringComparison.Ordinal),
         $"{windowName} uses the shared child-window title hierarchy");
     Equal(true,
-        windowText.Contains("ModernDialogSurface", StringComparison.Ordinal) ||
+        windowText.Contains("RoundedWindowContent", StringComparison.Ordinal) ||
         windowText.Contains("SubWindowPageRoot", StringComparison.Ordinal),
         $"{windowName} uses shared child-window spacing");
     Equal(true,
-        windowText.Contains("ModernDialogSurface", StringComparison.Ordinal) ||
+        windowText.Contains("RoundedWindowContent", StringComparison.Ordinal) ||
         windowText.Contains("WindowChrome.WindowChrome", StringComparison.Ordinal) ||
-        windowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal),
+        windowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal),
         $"{windowName} uses a draggable custom window surface");
     Equal(true,
         windowText.Contains("PageTransition.IsEnabled", StringComparison.Ordinal) ||
@@ -1102,12 +1120,10 @@ foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
 var appPromptWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "AppPromptWindow.xaml"));
 Equal(true,
-    appPromptWindowText.Contains("WindowBackdropType=\"None\"", StringComparison.Ordinal) &&
-    appPromptWindowText.Contains("Background=\"{DynamicResource WindowBackgroundBrush}\"",
-        StringComparison.Ordinal) &&
-    appPromptWindowText.Contains("Effect=\"{x:Null}\" CornerRadius=\"0\" BorderThickness=\"0\"",
-        StringComparison.Ordinal),
-    "application prompts use one native corner without an acrylic halo or outer shadow");
+    appPromptWindowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal) &&
+    appPromptWindowText.Contains("AllowsTransparency=\"True\"", StringComparison.Ordinal) &&
+    appPromptWindowText.Contains("RoundedWindowContent", StringComparison.Ordinal),
+    "application prompts share one self-drawn alpha frame");
 var appPromptWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "AppPromptWindow.xaml.cs"));
 var promptRenderedIndex = appPromptWindowSource.IndexOf("prompt.ContentRendered +=",
@@ -1157,6 +1173,11 @@ Equal(true,
     windowDragBehaviorText.Contains("ResizeMode.CanResizeWithGrip",
         StringComparison.Ordinal),
     "shared child-window drag behavior supports moving and title double-click");
+var mainWindowDragCode = File.ReadAllText(mainWindowPath + ".cs");
+Equal(true,
+    mainWindowDragCode.Contains("try { DragMove(); }", StringComparison.Ordinal) &&
+    !mainWindowDragCode.Contains("DwmSetWindowAttribute(", StringComparison.Ordinal),
+    "main-window dragging preserves the configured DWM backdrop without a black/white flash");
 
 var mainWindowText = File.ReadAllText(mainWindowPath);
 foreach (var navigationSymbol in new[]
@@ -1353,15 +1374,15 @@ Equal(true,
     bluetoothHidCode.Contains("private void HandleNotificationFailure(byte reportId",
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("if (reportId == 2)", StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("Never turn a transient mouse stall into a",
+    bluetoothHidCode.Contains("reportId == 2 ? MouseNotificationTimeout : NotificationTimeout",
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("RetireNotificationChannel(channel);",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("Task.WhenAny(notifyTask, Task.Delay(timeout))",
+    bluetoothHidCode.Contains("WaitForMouseNotificationAsync(notifyTask, timeout,",
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("ReleaseMouseNotificationGateAsync(notifyTask)",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("ScheduleMouseStallRecovery();", StringComparison.Ordinal),
+    bluetoothHidCode.Contains("ScheduleMouseStallRecovery(failedRouteGeneration);", StringComparison.Ordinal),
     "a timed-out mouse notification tears down the route while retaining its transport slot until the native call ends");
 Equal(true,
     mainWindowCode.Contains("ProcessLatestQueuedRawMouseInput", StringComparison.Ordinal) &&
@@ -1401,7 +1422,8 @@ var mainViewModelCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "ViewModels", "MainViewModel.cs"));
 Equal(true,
     statusWindowCode.Contains("System.Threading.Timer", StringComparison.Ordinal) &&
-    statusWindowCode.Contains("ShowWindow(handle, SwHide)", StringComparison.Ordinal) &&
+    statusWindowCode.Contains("new DispatcherTimer(DispatcherPriority.Send)", StringComparison.Ordinal) &&
+    statusWindowCode.Contains("Dispatcher.VerifyAccess();", StringComparison.Ordinal) &&
     statusWindowCode.Contains("TimeSpan.FromSeconds(5)", StringComparison.Ordinal) &&
     mainWindowCode.Contains("countdownElapsed: mode == ControlStatusMode.Bluetooth",
         StringComparison.Ordinal) &&
@@ -1410,6 +1432,17 @@ Equal(true,
     mainViewModelCode.Contains("_bluetoothControlInputEnabled = false;",
         StringComparison.Ordinal),
     "Bluetooth input remains gated until the independent five-second deadline");
+Equal(true,
+    statusWindowCode.Contains("CanBeginControlAfterClose", StringComparison.Ordinal) &&
+    statusWindowCode.Contains("if (beginControl) _countdownElapsed?.Invoke();", StringComparison.Ordinal) &&
+    !File.ReadAllText(Path.Combine(sourceDirectory,
+        "App", "Windows", "ReverseControlStatusWindow.xaml"))
+        .Contains("ReverseControlDetails", StringComparison.Ordinal),
+    "closing the Bluetooth status window at ready starts control immediately and the diagnostics details expander is removed");
+Equal(true,
+    mainWindowCode.Contains("var drained = 0;", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("drained++ < 64", StringComparison.Ordinal),
+    "continuous raw mouse input cannot starve the dispatcher countdown");
 Equal(true,
     mainViewModelCode.Contains("dispatcher.BeginInvoke(", StringComparison.Ordinal) &&
     mainViewModelCode.Contains("DispatcherPriority.Send", StringComparison.Ordinal) &&
@@ -1448,7 +1481,7 @@ Equal(true,
     bluetoothHidCode.Contains("mouse_stall_recovery_begin", StringComparison.Ordinal),
     "Bluetooth stop invalidates delayed mouse retries, aborts a stalled mouse route, and bounds release cleanup before restoring the main window");
 Equal(true,
-    mainWindowCode.Contains("await _viewModel.SendBluetoothAppSwitcherAsync(target)",
+    mainWindowCode.Contains("await _viewModel.SendBluetoothAppSwitcherAsync(target, canSend)",
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("0x0A, 0x9D, 0x02, 0x81, 0x02", StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("0x85, 0x05", StringComparison.Ordinal) &&
@@ -1651,7 +1684,7 @@ Equal(true,
     mainWindowCode.Contains("RequestLightweightWindowFit", StringComparison.Ordinal) &&
     mainWindowCode.Contains("AnimateLightweightWindowForWorkspace", StringComparison.Ordinal) &&
     mainWindowCode.Contains("FitLightweightWorkspaceImmediately", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("DispatcherPriority.ContextIdle", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("DispatcherPriority.Loaded", StringComparison.Ordinal) &&
     mainWindowCode.Contains("GetLightweightFixedChromeWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("TryGetLightweightContentPreviewWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("HasLightweightVideoPresentation", StringComparison.Ordinal) &&
@@ -1725,7 +1758,7 @@ Equal(true,
         "hwnd => _isReverseControlEnabledForWindow(device.Udid, hwnd)",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains(
-        "(udid, window) => _activeControlWindow == window &&",
+        "(_activeControlWindow == window && IsBluetoothControlActiveFor(udid))",
         StringComparison.Ordinal) &&
     nativePreviewWindowCode.Contains(
         "_isReverseControlEnabled?.Invoke(_handle)", StringComparison.Ordinal) &&
@@ -1748,6 +1781,14 @@ Equal(true,
         StringComparison.Ordinal) &&
     !nativePreviewHostCode.Contains("width + 1, height + 1", StringComparison.Ordinal),
     "main preview native child uses the same inner radius as the WPF frame without extending past its bounds");
+Equal(true,
+    mainWindowCode.Contains(
+        "var independentWindowOpen = _secondaryMirrors.IsOpen(_viewModel.SelectedDevice);",
+        StringComparison.Ordinal) &&
+    mainWindowCode.Contains(
+        "if (session != 0 && !independentWindowOpen)",
+        StringComparison.Ordinal),
+    "switching application mode does not reset the corner profile of an independent preview");
 var noticeWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "BluetoothControlNoticeWindow.xaml.cs"));
 Equal(true,
@@ -2043,15 +2084,10 @@ var aboutWindowText = File.ReadAllText(aboutWindowPath);
 var aboutWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "AboutWindow.xaml.cs"));
 Equal(true,
-    mainWindowText.Contains("Background=\"{DynamicResource AppBackgroundBrush}\"",
-        StringComparison.Ordinal) &&
-    aboutWindowText.Contains("Background=\"{DynamicResource AppBackgroundBrush}\"",
-        StringComparison.Ordinal),
-    "main and about windows share the same themed Mica background surface");
-Equal(true, aboutWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal) &&
-            aboutWindowText.Contains("WindowBackdropType=\"Mica\"",
-                StringComparison.Ordinal),
-    "about window uses FluentWindow with Mica");
+    mainWindowText.Contains("Background=\"{DynamicResource AppBackgroundBrush}\"", StringComparison.Ordinal) &&
+    aboutWindowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal) &&
+    aboutWindowText.Contains("AllowsTransparency=\"True\"", StringComparison.Ordinal),
+    "main keeps its native preview chrome while about uses the shared alpha frame");
 Equal(true, aboutWindowText.Contains("{DynamicResource CheckForUpdates}",
                 StringComparison.Ordinal) &&
             aboutWindowText.Contains(
@@ -2078,13 +2114,9 @@ Equal(true,
 var conflictWindowText = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "InstanceConflictWindow.xaml"));
 Equal(true,
-    conflictWindowText.StartsWith("<ui:FluentWindow", StringComparison.Ordinal) &&
-    conflictWindowText.Contains("WindowBackdropType=\"None\"",
-        StringComparison.Ordinal) &&
-    conflictWindowText.Contains("WindowCornerPreference=\"Round\"",
-        StringComparison.Ordinal) &&
-    conflictWindowText.Contains("Style=\"{StaticResource ModernDialogSurface}\"",
-        StringComparison.Ordinal) &&
+    conflictWindowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal) &&
+    conflictWindowText.Contains("AllowsTransparency=\"True\"", StringComparison.Ordinal) &&
+    conflictWindowText.Contains("RoundedWindowContent", StringComparison.Ordinal) &&
     conflictWindowText.Contains("CloseOtherInstancesButton",
         StringComparison.Ordinal) &&
     conflictWindowText.Contains("CloseCurrentInstanceButton",
@@ -2092,7 +2124,7 @@ Equal(true,
     conflictWindowText.Contains("Style=\"{StaticResource PrimaryButton}\"",
         StringComparison.Ordinal) &&
     conflictWindowText.Contains("IsDefault=\"True\"", StringComparison.Ordinal),
-    "instance conflict uses the shared DWM-rounded decision dialog");
+    "instance conflict uses the shared self-drawn decision dialog");
 Equal(false, aboutWindowText.Contains("SettingsSection", StringComparison.Ordinal),
     "about content uses lightweight unframed sections instead of a large nested card");
 Equal(true, aboutWindowText.Contains("DiagnosticPath, Mode=OneWay",
@@ -2123,7 +2155,7 @@ Equal(true, updateWindowText.Contains(
     "update progress does not write back to a read-only view-model property");
 var usbInfoWindowText = File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
     "UsbProjectionModeInfoWindow.xaml"));
-Equal(true, usbInfoWindowText.Contains("Height=\"620\"", StringComparison.Ordinal) &&
+Equal(true, (double?)XDocument.Parse(usbInfoWindowText).Root?.Attribute("Height") >= 620 &&
             usbInfoWindowText.Contains("ScrollViewer Grid.Row=\"2\"", StringComparison.Ordinal),
     "USB mode guidance is tall enough and scrolls long localized content");
 Equal(true, modernControlsText.Contains("FocusVisualStyle", StringComparison.Ordinal),
@@ -4415,6 +4447,69 @@ Sequence(["-movflags", "+faststart", "-y", "silent.mp4"],
     "video-only recording still finalizes a seekable MP4");
 
 var lateAudioNormalizer = new MediaOutputService.Pcm16AudioNormalizer(48000, 2);
+var microphones = MediaOutputMicrophone.ParseDevices("""
+    [dshow] "Camera" (video)
+    [dshow] Alternative name "@device:video"
+    [dshow] "Same microphone" (audio)
+    [dshow] Alternative name "@device:mic-one"
+    [dshow] "Same microphone" (audio)
+    [dshow] Alternative name "@device:mic-two"
+    """);
+Equal(2, microphones.Count, "microphone enumeration excludes camera and keeps same-name devices distinct");
+Equal("@device:mic-two", microphones[1].Id, "microphone selection uses its stable DirectShow alternative name");
+var microphoneArguments = MediaOutputService.BuildArguments(
+    new MediaOutputRequest(MediaOutputKind.Rtmp, "rtmp://localhost/live", 1280, 720, 30, 6000,
+        MicrophoneDevice: "microphone with spaces"), ffmpegCapabilities);
+Equal(true, microphoneArguments.Contains("audio=microphone with spaces"),
+    "microphone device name remains a single process argument");
+Equal(true, microphoneArguments.Contains(MediaOutputMicrophone.MixFilter),
+    "live output mixes phone and microphone with a bounded lifetime");
+Equal(true, microphoneArguments.Contains("-shortest"), "microphone capture stops when output pipes close");
+Throws<InvalidOperationException>(() => MediaOutputService.BuildArguments(
+    new MediaOutputRequest(MediaOutputKind.Rtmp, "rtmp://localhost/live", 1280, 720, 30, 6000,
+        MicrophoneDevice: "mic"), ffmpegCapabilities, includeAudio: false),
+    "microphone cannot be silently discarded when no audio encoder is available");
+var compactLaunch = CompactLaunchOptions.Parse(["--compact", "--device", "PHONE-B"]);
+var remoteMouse = new RawMouseDeltaTracker();
+Equal((0.0, 0.0), remoteMouse.Translate(1, 1, 30000, 30000, 1920, 1080),
+    "first absolute mouse position anchors without injecting a huge motion");
+var remoteDelta = remoteMouse.Translate(1, 1, 30655, 29345, 1920, 1080);
+Equal(true, remoteDelta.X > 19 && remoteDelta.X < 20 && remoteDelta.Y < -10 && remoteDelta.Y > -11,
+    "absolute mouse positions become signed desktop-pixel movement");
+Equal((0.0, 0.0), remoteMouse.Translate(2, 1, 60000, 1000, 1920, 1080),
+    "switching absolute pointing devices does not jump across the desktop");
+Equal((3.0, -4.0), remoteMouse.Translate(2, 0, 3, -4, 1920, 1080),
+    "ordinary relative mouse reports keep their original counts");
+Equal((0.0, 0.0), remoteMouse.Translate(2, 3, 32000, 1000, 3840, 1080),
+    "entering a virtual desktop reanchors absolute movement");
+var launchReceived = new TaskCompletionSource<CompactLaunchOptions>(TaskCreationOptions.RunContinuationsAsynchronously);
+var launchPipeName = "iPhoneMirror.test." + Guid.NewGuid().ToString("N");
+using (var launchChannel = new CompactLaunchChannel(options => launchReceived.TrySetResult(options), launchPipeName))
+{
+    using (var invalidClient = new System.IO.Pipes.NamedPipeClientStream(".", launchPipeName,
+        System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous))
+    {
+        await invalidClient.ConnectAsync(2000);
+        await invalidClient.WriteAsync(BitConverter.GetBytes(4097));
+        await invalidClient.FlushAsync();
+        Equal(0, await invalidClient.ReadAsync(new byte[1]).AsTask().WaitAsync(TimeSpan.FromSeconds(3)),
+            "oversized launch request is rejected before payload allocation");
+    }
+    Equal(true, await CompactLaunchChannel.ForwardAsync(compactLaunch, launchPipeName),
+        "a device shortcut forwards to the current app without closing its sessions");
+    Equal(compactLaunch, await launchReceived.Task.WaitAsync(TimeSpan.FromSeconds(3)),
+        "current-user launch IPC preserves the exact device selector");
+    launchChannel.Dispose();
+    launchChannel.Dispose();
+}
+Equal(1, compactLaunch.SelectDevice(["phone-a", "phone-b"]), "compact launch selects the exact requested device");
+Equal(-1, compactLaunch.SelectDevice(["phone-a"]), "compact launch never substitutes an unrelated device");
+Equal(-1, CompactLaunchOptions.Parse(["--compact"]).SelectDevice(["a", "b"]),
+    "compact launch asks for a target when multiple devices are present");
+Equal(0, CompactLaunchOptions.Parse(["--compact"]).SelectDevice(["a"]),
+    "compact launch automatically selects one connected device");
+Throws<ArgumentException>(() => CompactLaunchOptions.Parse(["--device"]), "compact launch rejects a missing target");
+Equal("\"a b\"", CompactLaunchOptions.QuoteArgument("a b"), "shortcut target containing spaces is quoted");
 var lateAudio = lateAudioNormalizer.Convert(
     new IPhoneMirror.App.Interop.AudioPacket(1, 44100, 1, 16,
         new byte[] { 0, 0, 0xFF, 0x7F }));
@@ -4445,8 +4540,16 @@ var boundedVideoSchedule = MediaOutputService.CalculateVideoWritePlan(
     TimeSpan.FromSeconds(10), 30, 0);
 Equal(60L, boundedVideoSchedule.FramesToWrite,
     "video output bounds catch-up to two seconds of repeated frames");
-Equal(240L, boundedVideoSchedule.FramesWrittenBaseline,
-    "video output discards the oldest backlog before resuming current output");
+Equal(0L, boundedVideoSchedule.FramesWrittenBaseline,
+    "video output never counts unwritten frames as encoded time");
+long recoveredFrames = 0;
+for (var pass = 0; pass < 5; ++pass)
+{
+    var plan = MediaOutputService.CalculateVideoWritePlan(TimeSpan.FromSeconds(10), 30, recoveredFrames);
+    recoveredFrames = plan.FramesWrittenBaseline + plan.FramesToWrite;
+}
+Equal(300L, recoveredFrames,
+    "bounded catch-up restores ten seconds of encoded video instead of permanently losing eight seconds");
 Throws<ArgumentOutOfRangeException>(() =>
         MediaOutputService.CalculateDueVideoFrames(
             TimeSpan.FromSeconds(1), 0, 0),
@@ -4570,6 +4673,74 @@ Equal((byte)1, writingFrame.Span[0], "published frame owns its bytes before nati
 frameLatch.Publish(nv12Payload);
 Equal((byte)1, writingFrame.Span[0], "an in-flight pipe write retains the preceding snapshot");
 Equal((byte)99, frameLatch.Get().Span[0], "the next snapshot receives the new frame");
+// The pipe can retain a frame across many producer ticks. Pending frames may
+// be replaced, but the consumer's bytes must stay unchanged until its next Get.
+var heldFrame = frameLatch.Get();
+await Task.Run(() =>
+{
+    for (var value = 0; value < 200; ++value)
+    {
+        nv12Pixels.AsSpan().Fill((byte)value);
+        frameLatch.Publish(nv12Pixels);
+    }
+});
+Equal((byte)99, heldFrame.Span[0],
+    "slow pipe writes are isolated from repeated producer buffer reuse");
+Equal((byte)199, frameLatch.Get().Span[0],
+    "slow consumers receive the newest frame without a historical queue");
+frameLatch.Publish(new byte[64]);
+Equal(64, frameLatch.Get().Length, "frame buffers grow after a resolution change");
+frameLatch.Publish(new byte[] { 5, 6 });
+Equal(true, frameLatch.Get().Span.SequenceEqual(new byte[] { 5, 6 }),
+    "smaller frames exclude stale bytes from retained buffer capacity");
+frameLatch.Publish(ReadOnlyMemory<byte>.Empty);
+Equal(2, frameLatch.Get().Length, "empty input preserves the last complete frame");
+
+var concurrentLatch = new MediaOutputService.FrameLatch();
+var concurrentSource = new byte[64 * 1024];
+concurrentLatch.Publish(concurrentSource);
+await Task.WhenAll(Task.Run(() =>
+{
+    for (var index = 0; index < 1000; ++index)
+    {
+        concurrentSource.AsSpan().Fill((byte)index);
+        concurrentLatch.Publish(concurrentSource);
+        Thread.Yield();
+    }
+}), Task.Run(() =>
+{
+    for (var index = 0; index < 1000; ++index)
+    {
+        var current = concurrentLatch.Get();
+        var expected = current.Span[0];
+        Thread.Yield();
+        if (current.Span.IndexOfAnyExcept(expected) >= 0)
+            throw new InvalidOperationException("Concurrent frame handoff produced torn pixels.");
+    }
+}));
+
+var allocationLatch = new MediaOutputService.FrameLatch();
+var fullHdNv12 = new byte[1920 * 1080 * 3 / 2];
+for (var index = 0; index < 8; ++index)
+{
+    allocationLatch.Publish(fullHdNv12);
+    _ = allocationLatch.Get();
+}
+var allocationStart = GC.GetAllocatedBytesForCurrentThread();
+for (var index = 0; index < 120; ++index)
+{
+    allocationLatch.Publish(fullHdNv12);
+    _ = allocationLatch.Get();
+}
+var latchAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+Equal(true, latchAllocatedBytes < 4096,
+    "steady-state 1080p frame handoff does not allocate a large array per frame");
+allocationStart = GC.GetAllocatedBytesForCurrentThread();
+for (var index = 0; index < 120; ++index)
+    GC.KeepAlive(fullHdNv12.AsMemory().ToArray());
+var snapshotAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+Console.WriteLine($"Frame handoff allocation (120 x 1080p NV12): " +
+    $"snapshot={snapshotAllocatedBytes:N0} bytes; reusable={latchAllocatedBytes:N0} bytes.");
 Throws<InvalidDataException>(() => MediaOutputService.GetNv12FramePayload(
         new IPhoneMirror.App.Interop.Nv12VideoFrame(4, 4, 8, 2, nv12Pixels),
         4, 4),
@@ -4640,6 +4811,8 @@ await using (var failedStartOutput = new MediaOutputService((_, _, _) => null,
 var installedFfmpegCapabilities = await MediaOutputService.ProbeAsync();
 if (installedFfmpegCapabilities.Supports(MediaOutputKind.Recording))
 {
+    if (installedFfmpegCapabilities.HasAacEncoder)
+        await IssueFixMediaTests.RunAsync(installedFfmpegCapabilities);
     var silentRecordingPath = Path.Combine(Path.GetTempPath(),
         $"iphone-mirror-silent-recording-{Guid.NewGuid():N}.mp4");
     long recordingTimestamp = 0;

@@ -16,7 +16,7 @@ public sealed record DeveloperSurfaceItem(string Key, SymbolRegular Icon,
 
 public sealed record DeveloperOpenWindowItem(string Title, Window Window);
 
-public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
+public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWindow,
     INotifyPropertyChanged
 {
     private readonly MainWindow _owner;
@@ -31,7 +31,7 @@ public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
     public IReadOnlyList<DeveloperSurfaceItem> WorkspaceItems { get; private set; }
     public IReadOnlyList<DeveloperSurfaceItem> WindowItems { get; private set; }
     public IReadOnlyList<DeveloperOpenWindowItem> OpenWindows { get; private set; } = [];
-    public string StatusText { get => _statusText; private set => Set(ref _statusText, value); }
+    public string StatusText { get => LocalizationService.RefreshText(_statusText); private set => Set(ref _statusText, value); }
     public string OpacityText => $"{_owner.Opacity:P0}";
     public string DiagnosticsText { get; private set; } = string.Empty;
 
@@ -170,7 +170,9 @@ public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
         }
         ReplaceCollection(nameof(WorkspaceItems), workspace);
         ReplaceCollection(nameof(WindowItems), windows);
+        OnPropertyChanged(nameof(StatusText));
         SyncControls();
+        RefreshDiagnostics();
     }
 
     private void ReplaceCollection(string propertyName, IReadOnlyList<DeveloperSurfaceItem> value)
@@ -228,7 +230,7 @@ public partial class DeveloperToolsWindow : Wpf.Ui.Controls.FluentWindow,
         }
         catch (Exception error)
         {
-            StatusText = $"{LocalizationService.Get("DeveloperSurfaceOpenFailed")}: {error.Message}";
+            StatusText = LocalizationService.Format("DeveloperSurfaceOpenFailedFormat", error.Message);
             DiagnosticLogger.Exception("ui", "developer_surface_open_failed", error,
                 ("surface", key));
         }

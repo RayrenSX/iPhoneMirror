@@ -9,12 +9,12 @@ using IPhoneMirror.App.Updater;
 namespace IPhoneMirror.App.Windows;
 
 public sealed partial class BluetoothControlNoticeWindow :
-    Window, INotifyPropertyChanged
+    IPhoneMirror.UI.Controls.RoundedWindow, INotifyPropertyChanged
 {
     private enum NoticeState { Waiting, Connected, Failed, ReportMapChanged, Prerequisite }
 
     private static BluetoothControlNoticeWindow? _active;
-    private const double WaitingWidth = 500;
+    private const double WaitingWidth = 520;
     private readonly DispatcherTimer _closeTimer;
     private readonly bool _previewOnly;
     private NoticeState _state = NoticeState.Waiting;
@@ -27,7 +27,7 @@ public sealed partial class BluetoothControlNoticeWindow :
     private DateTime _closeAtUtc;
 
     public string TitleText => _state == NoticeState.Prerequisite
-        ? _prerequisiteTitle ?? string.Empty
+        ? LocalizationService.RefreshText(_prerequisiteTitle ?? string.Empty)
         : LocalizationService.Get(_state switch
         {
             NoticeState.Waiting => "BluetoothControlWaitingTitle",
@@ -36,7 +36,7 @@ public sealed partial class BluetoothControlNoticeWindow :
             _ => "BluetoothControlPromptTitle",
         });
     public string BodyText => _state == NoticeState.Prerequisite
-        ? _prerequisiteBody ?? string.Empty
+        ? LocalizationService.RefreshText(_prerequisiteBody ?? string.Empty)
         : _state == NoticeState.Connected
         ? LocalizationService.Format("BluetoothControlPromptBodyFormat",
             GetConfiguredShortcut().DisplayText)
@@ -52,7 +52,7 @@ public sealed partial class BluetoothControlNoticeWindow :
         {
             if (_state == NoticeState.Prerequisite) return string.Empty;
             if (_state == NoticeState.Failed && !string.IsNullOrWhiteSpace(_failureDetail))
-                return _failureDetail;
+                return LocalizationService.RefreshText(_failureDetail);
             var detail = LocalizationService.Get(_state switch
             {
                 NoticeState.Waiting => "BluetoothControlWaitingDetail",
@@ -348,15 +348,16 @@ public sealed partial class BluetoothControlNoticeWindow :
         // checklist. Measure the live surface against the fixed dialog width
         // and set the outer height explicitly, so no stale lower area remains.
         SizeToContent = System.Windows.SizeToContent.Manual;
-        MinWidth = WaitingWidth;
+        var available = IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(this);
+        MinWidth = Math.Min(WaitingWidth, available.Width);
         MaxWidth = WaitingWidth;
-        Width = WaitingWidth;
+        Width = MinWidth;
         MinHeight = 0;
-        MaxHeight = double.PositiveInfinity;
+        MaxHeight = available.Height;
         content.InvalidateMeasure();
-        content.Measure(new Size(WaitingWidth, double.PositiveInfinity));
+        content.Measure(new Size(Math.Max(1, Width - 22), double.PositiveInfinity));
         var nonClientHeight = Math.Max(0, ActualHeight - content.ActualHeight);
-        Height = Math.Max(1, Math.Ceiling(content.DesiredSize.Height + nonClientHeight));
+        Height = Math.Min(MaxHeight, Math.Max(1, Math.Ceiling(content.DesiredSize.Height + nonClientHeight)));
         UpdateLayout();
         RecenterOverOwner();
     }

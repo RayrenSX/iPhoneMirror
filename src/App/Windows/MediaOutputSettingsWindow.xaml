@@ -1,28 +1,15 @@
-<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.MediaOutputSettingsWindow"
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.MediaOutputSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource MediaOutputTitle}"
-        Width="560" Height="660" MinWidth="500" MinHeight="560"
+        Width="582" Height="682" MinWidth="522" MinHeight="582"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
-        ExtendsContentIntoTitleBar="True"
-        WindowBackdropType="Mica" WindowCornerPreference="Round"
-        Background="{DynamicResource AppBackgroundBrush}"
-        Foreground="{DynamicResource TextBrush}">
-    <ui:FluentWindow.Resources>
-        <Style x:Key="DetailLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="Margin" Value="0,12,0,4"/>
-        </Style>
-        <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="MinHeight" Value="36"/>
-            <Setter Property="Padding" Value="10,7"/>
-        </Style>
+        Foreground="{DynamicResource TextBrush}"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <chrome:RoundedWindow.Resources>
         <Style x:Key="SectionCard" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
@@ -31,7 +18,7 @@
             <Setter Property="Padding" Value="16"/>
             <Setter Property="Margin" Value="0,12,0,0"/>
         </Style>
-    </ui:FluentWindow.Resources>
+    </chrome:RoundedWindow.Resources>
 
     <Grid Style="{StaticResource SubWindowPageRoot}"
           animations:PageTransition.IsEnabled="True">
@@ -49,7 +36,7 @@
                            Style="{StaticResource SubWindowTitle}"/>
                 <TextBlock Text="{Binding SelectedName}"
                            Style="{StaticResource SubWindowSubtitle}"/>
-                <TextBlock Text="{Binding MediaOutputCapabilitiesText}" FontSize="10"
+                <TextBlock Text="{Binding MediaOutputCapabilitiesText}" FontSize="{StaticResource CaptionFontSize}"
                            Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
@@ -63,7 +50,7 @@
                     <Border Style="{StaticResource SectionCard}">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource RecordDescription}" TextWrapping="Wrap"
-                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="12"/>
+                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource SecondaryFontSize}"/>
                             <Grid Margin="0,12,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -72,11 +59,11 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource OutputWidth}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox x:Name="RecordWidthBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                    <TextBox x:Name="RecordWidthBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="{DynamicResource OutputHeight}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox x:Name="RecordHeightBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                    <TextBox x:Name="RecordHeightBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                                 </StackPanel>
                             </Grid>
                             <Grid>
@@ -87,11 +74,11 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource OutputFps}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox x:Name="RecordFpsBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                    <TextBox x:Name="RecordFpsBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="{DynamicResource OutputBitrate}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox x:Name="RecordBitrateBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                    <TextBox x:Name="RecordBitrateBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                                 </StackPanel>
                             </Grid>
                             <Button x:Name="StartRecordingButton"
@@ -108,7 +95,7 @@
                     <Border Style="{StaticResource SectionCard}">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource StreamDescription}" TextWrapping="Wrap"
-                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="12"/>
+                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource SecondaryFontSize}"/>
                             <TextBlock Text="{DynamicResource StreamProtocol}" Style="{StaticResource DetailLabel}"/>
                             <ComboBox x:Name="StreamProtocolBox" SelectedIndex="0"
                                       SelectionChanged="OnStreamProtocolChanged">
@@ -120,9 +107,9 @@
                                               IsEnabled="{Binding DataContext.CanStreamWhip, RelativeSource={RelativeSource AncestorType=Window}}"/>
                             </ComboBox>
                             <TextBlock Text="{DynamicResource StreamDestination}" Style="{StaticResource DetailLabel}"/>
-                            <TextBox x:Name="StreamDestinationBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                            <TextBox x:Name="StreamDestinationBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                             <TextBlock Text="{DynamicResource StreamAuthorization}" Style="{StaticResource DetailLabel}"/>
-                            <TextBox x:Name="StreamAuthorizationBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                            <TextBox x:Name="StreamAuthorizationBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -131,11 +118,11 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource OutputWidth}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox x:Name="StreamWidthBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                    <TextBox x:Name="StreamWidthBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="{DynamicResource OutputHeight}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox x:Name="StreamHeightBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                    <TextBox x:Name="StreamHeightBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                                 </StackPanel>
                             </Grid>
                             <Grid>
@@ -146,13 +133,26 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource OutputFps}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox x:Name="StreamFpsBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                    <TextBox x:Name="StreamFpsBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="{DynamicResource OutputBitrate}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox x:Name="StreamBitrateBox" Style="{StaticResource RoundedTextBox}" Height="36"/>
+                                    <TextBox x:Name="StreamBitrateBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
                                 </StackPanel>
                             </Grid>
+                            <TextBlock Text="{DynamicResource StreamMicrophone}" Style="{StaticResource DetailLabel}" Margin="0,14,0,4"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="MicrophoneBox" DisplayMemberPath="Name" SelectedValuePath="Id"
+                                          IsEnabled="{Binding CanStartMediaOutput}"/>
+                                <Button x:Name="RefreshMicrophonesButton" Grid.Column="1" Margin="8,0,0,0"
+                                        Content="{DynamicResource RefreshMicrophones}" Click="OnRefreshMicrophonesClick"/>
+                            </Grid>
+                            <TextBlock Text="{DynamicResource StreamMicrophoneHint}" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,0"/>
                             <Button x:Name="StartStreamingButton"
                                     Content="{DynamicResource StartStreaming}" Click="OnStartStreamingClick"
                                     IsEnabled="False"
@@ -167,7 +167,7 @@
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="{DynamicResource VirtualCameraDescription}" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="12"/>
+                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource SecondaryFontSize}"/>
                         <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -196,7 +196,7 @@
                             </StackPanel>
                         </Grid>
                         <TextBlock Text="{Binding VirtualCameraStatusText}" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="12"
+                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource SecondaryFontSize}"
                                    Margin="0,14,0,0"/>
                         <Button Content="{Binding VirtualCameraInstallActionText}"
                                 Click="OnInstallVirtualCameraClick"
@@ -227,7 +227,7 @@
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="FeedbackText" Text="{Binding MediaOutputStatus}"
                        VerticalAlignment="Center" TextWrapping="Wrap"
-                       Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
             <StackPanel Grid.Column="2" Orientation="Horizontal">
                 <Button Content="{DynamicResource DiscardRecording}"
                         Click="OnDiscardClick" Style="{StaticResource ToolButton}"
@@ -238,4 +238,4 @@
             </StackPanel>
         </Grid>
     </Grid>
-</ui:FluentWindow>
+</chrome:RoundedWindow>

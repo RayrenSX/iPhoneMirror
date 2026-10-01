@@ -1,3 +1,4 @@
+using IPhoneMirror.App.Localization;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -156,10 +157,10 @@ internal static class UpdateInstallerLauncher
     {
         if (!update.HashVerified)
             throw new InvalidDataException(
-                "The update package was not verified and will not be executed.");
+                LocalizationService.Get("UpdatePackageNotVerified"));
         if (!IsSha256(update.VerifiedSha256))
             throw new InvalidDataException(
-                "The verified update digest is missing or invalid.");
+                LocalizationService.Get("UpdateDigestMissing"));
         DiagnosticLogger.Info("updater", "installer_launch_begin",
             ("release", update.Release.TagName), ("asset", update.Asset.Name),
             ("sha256_verified", update.HashVerified));
@@ -185,20 +186,18 @@ internal static class UpdateInstallerLauncher
         }
 
         if (!update.Asset.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The downloaded update format is unsupported.");
+            throw new InvalidOperationException(LocalizationService.Get("UpdateFormatUnsupported"));
         // Validate the integrity boundary before materializing a helper. A
         // rejected elevated portable update must not leave temporary files.
         if (IsCurrentProcessElevated())
             throw new InvalidOperationException(
-                "Portable updates must be started from a non-administrator " +
-                "iPhoneMirror process. Restart the application normally and try again.");
+                LocalizationService.Get("UpdatePortableElevationUnsupported"));
         var requiresElevation = !CanUpdateDirectoryWithoutElevation(
             AppContext.BaseDirectory);
         if (requiresElevation && !CanSafelyElevateDirectoryTree(
                 AppContext.BaseDirectory))
             throw new InvalidOperationException(
-                "The portable installation contains a writable or reparse-point " +
-                "subdirectory and cannot be updated safely with administrator privileges.");
+                LocalizationService.Get("UpdatePortableDirectoryUnsafe"));
         var helperBytes = ReadZipHelperBytes();
         var helperSha256 = Convert.ToHexString(SHA256.HashData(helperBytes));
         var helperDirectory = Path.Combine(Path.GetTempPath(), "iPhoneMirror",
@@ -256,7 +255,7 @@ internal static class UpdateInstallerLauncher
         {
             var error = Marshal.GetLastWin32Error();
             throw new Win32Exception(error,
-                "Windows could not start the update helper.");
+                LocalizationService.Get("UpdateHelperStartFailed"));
         }
 
         try
@@ -436,13 +435,13 @@ internal static class UpdateInstallerLauncher
             StringComparison.OrdinalIgnoreCase);
         if (!isInstaller && !isZip)
             throw new InvalidOperationException(
-                "The downloaded update format is unsupported.");
+                LocalizationService.Get("UpdateFormatUnsupported"));
         if (sharedRuntime && !isInstaller)
             throw new InvalidOperationException(
-                "An installed copy must be updated with the Windows Setup package.");
+                LocalizationService.Get("UpdateSetupRequired"));
         if (!sharedRuntime && !isZip)
             throw new InvalidOperationException(
-                "A portable copy must be updated with the portable ZIP package.");
+                LocalizationService.Get("UpdatePortableRequired"));
     }
 
     internal static string BuildInstallerArguments()
@@ -519,7 +518,7 @@ internal static class UpdateInstallerLauncher
     {
         using var input = typeof(UpdateInstallerLauncher).Assembly
             .GetManifestResourceStream(ZipHelperResourceName) ??
-            throw new FileNotFoundException("The embedded ZIP update helper is missing.");
+            throw new FileNotFoundException(LocalizationService.Get("UpdateHelperMissing"));
         using var output = new MemoryStream();
         input.CopyTo(output);
         return output.ToArray();
@@ -542,7 +541,7 @@ internal static class UpdateInstallerLauncher
         string expectedSha256)
     {
         if (!IsSha256(expectedSha256))
-            throw new InvalidDataException("The verified update digest is invalid.");
+            throw new InvalidDataException(LocalizationService.Get("UpdateDigestInvalid"));
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
             FileShare.Read, 128 * 1024, FileOptions.SequentialScan);
         try
@@ -550,7 +549,7 @@ internal static class UpdateInstallerLauncher
             var actual = Convert.ToHexString(SHA256.HashData(stream));
             if (!actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException(
-                    "The update package changed after verification.");
+                    LocalizationService.Get("UpdatePackageChanged"));
             stream.Position = 0;
             return stream;
         }

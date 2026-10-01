@@ -3,7 +3,7 @@ using System.Windows.Input;
 
 namespace IPhoneMirror.DriverInstaller.Windows;
 
-public partial class RequiredActionWindow : Window
+public partial class RequiredActionWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     public string ActionTitle { get; }
     public string ActionBody { get; }

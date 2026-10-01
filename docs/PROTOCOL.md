@@ -1,5 +1,9 @@
 # QuickTime iOS Screen Capture 协议分析（H.264/HEVC）
 
+本文聚焦 USB 音视频协议。当前反控与隐藏配置下的 USBMux 共存实现另见
+[软件架构](ARCHITECTURE.md#反向控制与-usbmux-共存)和[反控架构](USB_TOUCH_ARCHITECTURE.md)。
+下文真机/抓包数据保留原测试条件，不是对全部 iOS 版本的保证。
+
 ## 1. 结论摘要
 
 QuickTime 有线投屏不是 AirPlay，也不是一个普通 Lockdown 服务。它由两条不同的 USB

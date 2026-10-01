@@ -40,15 +40,35 @@ internal static class LocalizationService
 
     internal static string Get(string key)
     {
-        if (Application.Current?.TryFindResource(key) is string value) return value;
+        if (Application.Current?.TryFindResource(key) is string value)
+            return LocalizedText.Resource(key, value);
         return key;
     }
 
     internal static string GetOrDefault(string key, string fallback) =>
-        Application.Current?.TryFindResource(key) is string value ? value : fallback;
+        Application.Current?.TryFindResource(key) is string value
+            ? LocalizedText.Resource(key, value) : fallback;
 
     internal static string Format(string key, params object?[] arguments) =>
-        string.Format(_effectiveCulture, Get(key), arguments);
+        LocalizedText.Format(key, arguments);
+
+    internal static string RefreshText(string value) => LocalizedText.Refresh(value);
+
+    internal static string Join(string separator, IEnumerable<string?> values) =>
+        LocalizedText.Join(separator, values);
+
+    internal static void RefreshWhenLanguageChanges(Window window, Action refresh)
+    {
+        var closed = false;
+        void Changed(object? sender, EventArgs args)
+        {
+            if (closed || window.Dispatcher.HasShutdownStarted) return;
+            if (window.Dispatcher.CheckAccess()) refresh();
+            else window.Dispatcher.BeginInvoke(new Action(() => { if (!closed) refresh(); }));
+        }
+        LanguageChanged += Changed;
+        window.Closed += (_, _) => { closed = true; LanguageChanged -= Changed; };
+    }
 
     private static void ApplyLanguage(string language, bool persist, bool notify)
     {

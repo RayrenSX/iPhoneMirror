@@ -8,6 +8,7 @@ namespace IPhoneMirror.DriverInstaller;
 
 public partial class App : Application
 {
+    internal bool IsUiPreviewMode { get; set; }
     private readonly Exception? _elevationBoundaryError =
         DriverOperationClient.InitializeElevationBoundary();
     private readonly Stopwatch _sessionTimer = Stopwatch.StartNew();
@@ -17,6 +18,11 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        if (IsUiPreviewMode)
+        {
+            base.OnStartup(e);
+            return;
+        }
         DispatcherUnhandledException += (_, args) =>
             DriverLogger.WriteException("runtime", "dispatcher_unhandled_exception",
                 args.Exception);

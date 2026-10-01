@@ -1,25 +1,18 @@
-<ui:FluentWindow x:Class="IPhoneMirror.App.Windows.DeveloperToolsWindow"
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.DeveloperToolsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-        Title="{DynamicResource DeveloperToolsTitle}" Width="980" Height="760"
-        MinWidth="820" MinHeight="620" WindowStartupLocation="CenterScreen"
-        WindowStyle="None" ResizeMode="CanResize" ExtendsContentIntoTitleBar="True"
-        WindowBackdropType="None" WindowCornerPreference="Round"
-        Background="{DynamicResource DialogSurfaceBrush}"
-        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False" Topmost="False">
-    <ui:FluentWindow.Resources>
-        <Style x:Key="DetailLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="Margin" Value="0,13,0,3"/>
-        </Style>
-    </ui:FluentWindow.Resources>
-    <Border x:Name="WindowSurface" Style="{StaticResource ModernDialogSurface}" Margin="0"
-            BorderThickness="0" Effect="{x:Null}" CornerRadius="0"
-            SnapsToDevicePixels="True">
+        Title="{DynamicResource DeveloperToolsTitle}" Width="1002" Height="782"
+        MinWidth="842" MinHeight="642" WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
+        Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False" Topmost="False"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <chrome:RoundedWindow.Resources>
+    </chrome:RoundedWindow.Resources>
+    <Border x:Name="WindowSurface"
+            SnapsToDevicePixels="True" Style="{StaticResource RoundedWindowContent}">
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -40,7 +33,7 @@
                                 CornerRadius="8" Padding="8,3" Margin="12,0,0,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="{DynamicResource DeveloperToolsPreviewBadge}"
-                                       Foreground="{DynamicResource WarningBrush}" FontSize="11"
+                                       Foreground="{DynamicResource WarningBrush}" FontSize="{StaticResource CaptionFontSize}"
                                        FontWeight="SemiBold"/>
                         </Border>
                     </StackPanel>
@@ -68,7 +61,7 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Button Tag="{Binding Key}" Click="OnSurfaceClick"
-                                                MinWidth="180" Height="54" Margin="0,0,8,8"
+                                                MinWidth="180" MinHeight="54" Margin="0,0,8,8"
                                                 HorizontalContentAlignment="Stretch">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
@@ -78,9 +71,9 @@
                                                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="{Binding Icon}"
                                                                FontSize="16" VerticalAlignment="Center"/>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding Title}" FontSize="13"
+                                                    <TextBlock Text="{Binding Title}" FontSize="{StaticResource BodyFontSize}"
                                                                FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding Description}" FontSize="10"
+                                                    <TextBlock Text="{Binding Description}" FontSize="{StaticResource CaptionFontSize}"
                                                                Foreground="{DynamicResource MutedTextBrush}"
                                                                TextTrimming="CharacterEllipsis"/>
                                                 </StackPanel>
@@ -105,7 +98,7 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Button Tag="{Binding Key}" Click="OnSurfaceClick"
-                                                MinWidth="180" Height="54" Margin="0,0,8,8"
+                                                MinWidth="180" MinHeight="54" Margin="0,0,8,8"
                                                 HorizontalContentAlignment="Stretch">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
@@ -115,9 +108,9 @@
                                                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="{Binding Icon}"
                                                                FontSize="16" VerticalAlignment="Center"/>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding Title}" FontSize="13"
+                                                    <TextBlock Text="{Binding Title}" FontSize="{StaticResource BodyFontSize}"
                                                                FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding Description}" FontSize="10"
+                                                    <TextBlock Text="{Binding Description}" FontSize="{StaticResource CaptionFontSize}"
                                                                Foreground="{DynamicResource MutedTextBrush}"
                                                                TextTrimming="CharacterEllipsis"/>
                                                 </StackPanel>
@@ -167,20 +160,20 @@
                                             TickFrequency="0.01" IsSnapToTickEnabled="True"
                                             ValueChanged="OnOpacityChanged" Margin="0,8,0,0"/>
                                     <TextBlock Text="{Binding OpacityText}" Foreground="{DynamicResource MutedTextBrush}"
-                                               FontSize="11" Margin="0,2,0,0"/>
+                                               FontSize="{StaticResource CaptionFontSize}" Margin="0,2,0,0"/>
                                     <CheckBox x:Name="TopmostCheckBox" Content="{DynamicResource DeveloperParamTopmost}"
                                               Checked="OnTopmostChanged" Unchecked="OnTopmostChanged"
                                               Margin="0,14,0,0"/>
                                     <TextBlock Text="{DynamicResource DeveloperParamWindowPreset}"
                                                Style="{StaticResource DetailLabel}" Margin="0,14,0,0"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <WrapPanel Margin="0,6,0,0">
                                         <Button Content="{DynamicResource DeveloperPresetCompact}" Tag="compact"
                                                 Click="OnPresetClick" MinWidth="94" Margin="0,0,6,0"/>
                                         <Button Content="{DynamicResource DeveloperPresetDefault}" Tag="default"
                                                 Click="OnPresetClick" MinWidth="94" Margin="0,0,6,0"/>
                                         <Button Content="{DynamicResource DeveloperPresetMaximize}" Tag="maximize"
                                                 Click="OnPresetClick" MinWidth="94"/>
-                                    </StackPanel>
+                                    </WrapPanel>
                                 </StackPanel>
                             </Grid>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
@@ -197,7 +190,7 @@
                             <TextBlock Text="{DynamicResource DeveloperToolsInspectorSection}"
                                        Style="{StaticResource SubWindowSectionTitle}"/>
                             <TextBlock Text="{Binding DiagnosticsText}"
-                                       FontFamily="Cascadia Mono,Consolas" FontSize="11"
+                                       FontFamily="Cascadia Mono,Consolas" FontSize="{StaticResource CaptionFontSize}"
                                        Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"
                                        Margin="0,10,0,0"/>
                             <ItemsControl ItemsSource="{Binding OpenWindows}" Margin="0,10,0,0">
@@ -226,11 +219,12 @@
             </ScrollViewer>
 
             <Grid Grid.Row="2" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource MutedTextBrush}"
                            VerticalAlignment="Center" TextWrapping="Wrap"/>
-                <Button Content="{DynamicResource Close}" Style="{StaticResource PrimaryButton}"
+                <Button Grid.Column="1" Margin="8,0,0,0" Content="{DynamicResource Close}" Style="{StaticResource PrimaryButton}"
                         MinWidth="96" HorizontalAlignment="Right" Click="OnCloseClick"/>
             </Grid>
         </Grid>
     </Border>
-</ui:FluentWindow>
+</chrome:RoundedWindow>

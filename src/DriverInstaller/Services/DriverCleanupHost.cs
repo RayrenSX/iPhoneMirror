@@ -13,7 +13,7 @@ internal static class DriverCleanupHost
     private const string ScriptFileName = "remove_selected_iphone_drivers.ps1";
     private const string ScriptResourceName = "DriverCleanup.Script.ps1";
     private const string ScriptHash =
-        "1CC19CCE6F784729BB5AD7D025355C9A4B833C9032D1831D99D91C3B862625E6";
+        "A0E627747FBE5CE37EE5D7E65CD57AA843FB3F49157BADD72F839B35840A5BA0";
 
     internal static bool IsRequested(IReadOnlyList<string> arguments) =>
         arguments.Count >= 1 && string.Equals(arguments[0], Switch,
@@ -29,12 +29,14 @@ internal static class DriverCleanupHost
     {
         if (!DriverOperationClient.EnsureElevationBoundary(out var boundaryError))
             throw new InvalidOperationException(
-                "The driver manager executable could not be protected before elevation.",
+                DriverLocalization.GetOrDefault("DriverCleanupProtectionFailed",
+                    "The driver manager executable could not be protected before elevation."),
                 boundaryError);
 
         var executable = Environment.ProcessPath ??
             Process.GetCurrentProcess().MainModule?.FileName ??
-            throw new FileNotFoundException("The driver manager executable is missing.");
+            throw new FileNotFoundException(DriverLocalization.GetOrDefault(
+                "DriverExecutableMissing", "The driver manager executable is missing."));
         var start = new ProcessStartInfo(executable)
         {
             UseShellExecute = true,
@@ -49,7 +51,8 @@ internal static class DriverCleanupHost
                 System.Globalization.CultureInfo.InvariantCulture));
         }
         using var process = Process.Start(start) ?? throw new InvalidOperationException(
-            "The elevated driver cleanup host did not start.");
+            DriverLocalization.GetOrDefault("DriverCleanupHostStartFailed",
+                "The elevated driver cleanup host did not start."));
         if (!waitForExit) return 0;
         process.WaitForExit();
         return process.ExitCode;

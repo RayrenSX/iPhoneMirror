@@ -14,7 +14,7 @@ using IPhoneMirror.App.ViewModels;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
+public partial class AboutWindow : IPhoneMirror.UI.Controls.RoundedWindow, INotifyPropertyChanged
 {
     private readonly App _app;
     private readonly MainViewModel _mainViewModel;
@@ -27,7 +27,7 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
     public object MainViewModel => _mainViewModel;
     public string UpdateStatus
     {
-        get => _updateStatus;
+        get => LocalizationService.RefreshText(_updateStatus);
         private set { _updateStatus = value; OnPropertyChanged(); }
     }
     public bool CheckOnStartup
@@ -66,14 +66,41 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
         DataContext = this;
         InitializeComponent();
         ThemeService.Attach(this);
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+        {
+            OnPropertyChanged(nameof(UpdateStatus));
+            OnPropertyChanged(nameof(DiagnosticStatus));
+        });
         Loaded += OnLoaded;
+        IsVisibleChanged += OnVisibilityChanged;
+        StateChanged += OnWindowStateChanged;
         Closing += OnClosing;
+        Closed += OnClosed;
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private void OnLoaded(object sender, RoutedEventArgs e) => UpdateLogPolling();
+
+    private void OnVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) => UpdateLogPolling();
+
+    private void OnWindowStateChanged(object? sender, EventArgs e) => UpdateLogPolling();
+
+    private void OnAboutTabChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (ReferenceEquals(e.Source, AboutTabs)) UpdateLogPolling();
+    }
+
+    private void UpdateLogPolling()
+    {
+        if (!IsLoaded || !IsVisible || WindowState == WindowState.Minimized || AboutTabs.SelectedIndex != 2)
+        {
+            _logTimer.Stop();
+            return;
+        }
+        if (_logTimer.IsEnabled) return;
         _logTimer.Start();
-        await _mainViewModel.RefreshLogsAsync();
+        // Refresh immediately on entering diagnostics, through the same guard
+        // as timer ticks. Other tabs do not need file I/O or log text layout.
+        OnLogTimerTick(this, EventArgs.Empty);
     }
 
     private int _refreshInProgress;
@@ -100,11 +127,19 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        _app.SaveUpdateSettings();
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
         _logTimer.Stop();
         _logTimer.Tick -= OnLogTimerTick;
         Loaded -= OnLoaded;
+        IsVisibleChanged -= OnVisibilityChanged;
+        StateChanged -= OnWindowStateChanged;
+        AboutTabs.SelectionChanged -= OnAboutTabChanged;
         Closing -= OnClosing;
-        _app.SaveUpdateSettings();
+        Closed -= OnClosed;
     }
 
     private void OnLiveLogTextChanged(object sender, TextChangedEventArgs e) =>
@@ -123,7 +158,7 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
                 UpdateStatus = LocalizationService.Get("AlreadyUpToDate");
                 return;
             }
-            UpdateStatus = string.Format(LocalizationService.Get("UpdateAvailableFormat"),
+            UpdateStatus = LocalizationService.Format("UpdateAvailableFormat",
                 release.TagName);
             _app.ShowUpdateWindow(release, this, autoDownload: false);
         }
@@ -135,7 +170,7 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
         catch (Exception error)
         {
             DiagnosticLogger.Exception("updater", "manual_check_failed", error);
-            UpdateStatus = string.Format(LocalizationService.Get("UpdateCheckFailedFormat"),
+            UpdateStatus = LocalizationService.Format("UpdateCheckFailedFormat",
                 FriendlyError(error));
         }
     }
@@ -176,7 +211,7 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
                 return;
             }
 
-            throw new FileNotFoundException("The local target does not exist.", path);
+            throw new FileNotFoundException(LocalizationService.Get("LocalTargetMissing"), path);
         }
         catch (Exception error)
         {
@@ -210,8 +245,7 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
             var deletedFiles = logs.DeletedFiles + updates.DeletedFiles;
             var deletedBytes = logs.DeletedBytes + updates.DeletedBytes;
             var skipped = logs.SkippedFiles + updates.SkippedFiles;
-            DiagnosticStatus = string.Format(LocalizationService.Get(
-                "DiagnosticsCleanedFormat"), deletedFiles,
+            DiagnosticStatus = LocalizationService.Format("DiagnosticsCleanedFormat", deletedFiles,
                 FormatBytes(deletedBytes), skipped);
             DiagnosticLogger.Info("logging", "manual_cleanup_complete",
                 ("deleted_files", deletedFiles), ("deleted_bytes", deletedBytes),
@@ -220,15 +254,14 @@ public partial class AboutWindow : Wpf.Ui.Controls.FluentWindow, INotifyProperty
         catch (Exception error)
         {
             DiagnosticLogger.Exception("logging", "manual_cleanup_failed", error);
-            DiagnosticStatus = string.Format(LocalizationService.Get(
-                "DiagnosticsCleanupFailedFormat"), AppLog.Error(error));
+            DiagnosticStatus = LocalizationService.Format("DiagnosticsCleanupFailedFormat", AppLog.Error(error));
         }
     }
 
     private string _diagnosticStatus = string.Empty;
     public string DiagnosticStatus
     {
-        get => _diagnosticStatus;
+        get => LocalizationService.RefreshText(_diagnosticStatus);
         private set { _diagnosticStatus = value; OnPropertyChanged(); }
     }
 

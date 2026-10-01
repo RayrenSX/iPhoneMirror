@@ -67,6 +67,7 @@ class UsbmuxdServer:
         self.buid = _read_system_buid()
         self._server: Optional[asyncio.AbstractServer] = None
         self._listeners: set[asyncio.StreamWriter] = set()
+        self._clients: set[asyncio.StreamWriter] = set()
         self.connections = 0
 
     # ---------------------------------------------------------------- lifecycle
@@ -85,6 +86,10 @@ class UsbmuxdServer:
     async def stop(self) -> None:
         if self._server is not None:
             self._server.close()
+            # Python 3.13 waits for accepted sockets as well as the listener.
+            # Idle Lockdown/Listen clients otherwise keep retirement pending.
+            for writer in tuple(self._clients):
+                writer.close()
             await self._server.wait_closed()
             self._server = None
 
@@ -126,6 +131,7 @@ class UsbmuxdServer:
 
     # ---------------------------------------------------------------- client handling
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self._clients.add(writer)
         peer = writer.get_extra_info("peername")
         logger.info("usbmuxd: client connected from %s", peer)
         try:
@@ -174,6 +180,7 @@ class UsbmuxdServer:
         except Exception:  # noqa: BLE001
             logger.exception("usbmuxd client %s failed", peer)
         finally:
+            self._clients.discard(writer)
             self._listeners.discard(writer)
             with _suppress():
                 writer.close()
@@ -314,7 +321,15 @@ class UsbmuxdThread:
                 self.error = exc
                 self._started.set()
             finally:
+                # Retire accept and client tasks before closing the IOCP loop.
+                # Closing it with live tasks loses their socket cleanup.
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 loop.close()
+                self._loop = None
 
         self._thread = threading.Thread(target=run, name="usbmuxd-server", daemon=True)
         self._thread.start()
@@ -325,7 +340,7 @@ class UsbmuxdThread:
 
     def stop(self) -> None:
         loop = self._loop
-        if loop is None:
+        if loop is None or loop.is_closed():
             return
 
         async def _shutdown() -> None:

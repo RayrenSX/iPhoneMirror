@@ -41,7 +41,7 @@ internal static partial class DriverConstants
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "iPhoneMirror.Driver", "Packages");
 
-    [GeneratedRegex(@"^USB\\VID_05AC&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9][A-Za-z0-9-]{6,38}$",
+    [GeneratedRegex(@"^USB\\VID_05AC&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9][A-Za-z0-9-]{6,39}\z",
         RegexOptions.CultureInvariant)]
     private static partial Regex AppleParentPattern();
 
@@ -66,11 +66,6 @@ internal static partial class DriverConstants
 
     internal static bool IsValidOperationId(string value) =>
         Guid.TryParseExact(value, "N", out _);
-
-    internal static bool IsKnownReplaceableParentService(string service) =>
-        service.Equals("WinUSB", StringComparison.OrdinalIgnoreCase) ||
-        service.Equals("libusb0", StringComparison.OrdinalIgnoreCase) ||
-        service.Equals("libusbK", StringComparison.OrdinalIgnoreCase);
 
     internal static string NormalizeSerial(string value) => new(
         value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());

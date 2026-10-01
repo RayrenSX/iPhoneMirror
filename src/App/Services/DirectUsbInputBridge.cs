@@ -1,3 +1,4 @@
+using IPhoneMirror.App.Localization;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -36,6 +37,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     private string? _lastDiagnostic;
     private string? _lastErrorCode;
     private string? _lastStandardError;
+    private long _readyGeneration;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private long _sequence;
     private int _stopping;
@@ -74,7 +76,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 out var runtimeFailure))
         {
             throw new InvalidOperationException(
-                $"自研 USB 触控桥接器运行时不完整：{runtimeFailure}。请重新安装完整测试包。");
+                LocalizationService.Format("TouchBridgeRuntimeIncompleteFormat", runtimeFailure));
         }
         var launchFile = usePackagedBridge ? bridgeScript : pythonExe;
 
@@ -132,7 +134,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             psi.ArgumentList.Add(ddiDirectory);
         }
 
-        var startedProcess = Process.Start(psi) ?? throw new InvalidOperationException("无法启动 USB 触控桥接器。");
+        var startedProcess = Process.Start(psi) ?? throw new InvalidOperationException(LocalizationService.Get("TouchBridgeStartFailed"));
         _process = startedProcess;
         _stdin = startedProcess.StandardInput;
         _stdout = startedProcess.StandardOutput;
@@ -140,7 +142,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         _readySignal = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         _readerTask = Task.Run(() => ReadLoopAsync(_cts.Token));
-        _errorDrainTask = Task.Run(() => DrainErrorAsync(startedProcess.StandardError));
+        var bridgeProcessId = startedProcess.Id;
+        _errorDrainTask = Task.Run(() => DrainErrorAsync(startedProcess.StandardError, bridgeProcessId));
         startedProcess.EnableRaisingEvents = true;
         startedProcess.Exited += (_, _) => _ = HandleProcessExitAsync(startedProcess);
         if (startedProcess.HasExited)
@@ -180,32 +183,37 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     public async Task SendTouchBatchAsync(IReadOnlyList<TouchPoint> points, long timestampNs, long sequence, CancellationToken ct = default)
     {
+        var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
-            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+            throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
 
         if (points.Count == 0 || points.Count > CoreDeviceTouchProtocol.MaxSlots)
-            throw new ArgumentOutOfRangeException(nameof(points), "触控批次必须包含 1 到 5 个触点。");
+            throw new ArgumentOutOfRangeException(nameof(points), LocalizationService.Get("TouchBridgeInvalidBatch"));
         foreach (var point in points)
         {
             if (point.PointerId < 0)
-                throw new ArgumentOutOfRangeException(nameof(points), "触点编号必须为非负整数。");
+                throw new ArgumentOutOfRangeException(nameof(points), LocalizationService.Get("TouchBridgeInvalidPointId"));
             if (!CoreDeviceTouchProtocol.IsNormalizedCoordinate(point.NormalizedX) ||
                 !CoreDeviceTouchProtocol.IsNormalizedCoordinate(point.NormalizedY))
-                throw new ArgumentOutOfRangeException(nameof(points), "触点坐标必须是 0 到 1 之间的有限数值。");
+                throw new ArgumentOutOfRangeException(nameof(points), LocalizationService.Get("TouchBridgeInvalidCoordinates"));
         }
         await _sendLock.WaitAsync(ct);
         try
         {
+            // Recovery may close the gate while this packet waits for the writer.
+            if (generation != Interlocked.Read(ref _readyGeneration)) return;
+            if (!IsReady || _stdin is null)
+                throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
             var frameSequence = NextSequence();
-            var json = JsonSerializer.Serialize(new
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(new
                 {
                     schema = CoreDeviceTouchProtocol.MessageSchema,
+                    generation,
                     kind = CoreDeviceTouchProtocol.MessageKind,
                     seq = frameSequence,
                     timestampNs,
                     points,
                 });
-            var bytes = Encoding.UTF8.GetBytes(json);
             var header = BitConverter.GetBytes((uint)bytes.Length);
 
             await _stdin.BaseStream.WriteAsync(header, ct);
@@ -299,9 +307,18 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         }
         finally
         {
+            if (!ct.IsCancellationRequested && Volatile.Read(ref _stopping) == 0 &&
+                Interlocked.Exchange(ref _terminalEventReceived, 1) == 0)
+            {
+                IsReady = false;
+                GateOpen = false;
+                _lastErrorCode = "bridge_output_closed";
+                OnEvent?.Invoke(new BridgeEvent("error", _lastErrorCode,
+                    LocalizationService.Get("TouchBridgeOutputDisconnected")));
+            }
             if (!IsReady)
                 _readySignal?.TrySetException(new InvalidOperationException(
-                    "USB 触控桥接器在就绪前关闭了输出通道。"));
+                    LocalizationService.Get("TouchBridgeOutputClosed")));
         }
     }
 
@@ -317,29 +334,36 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             {
                 case "status":
                     var statusCode = root.TryGetProperty("code", out var c) ? c.GetString() : null;
+                    if (statusCode == "recovery_triggered")
+                    {
+                        IsReady = false;
+                        GateOpen = false;
+                    }
                     if (string.Equals(statusCode, "terminated", StringComparison.OrdinalIgnoreCase))
                     {
                         Interlocked.Exchange(ref _terminalEventReceived, 1);
                         IsReady = false;
+                        GateOpen = false;
                     }
                     OnEvent?.Invoke(new BridgeEvent("status",
-                        statusCode, null));
+                        statusCode, root.TryGetProperty("message", out var sm) ? sm.GetString() : null));
                     break;
                 case "ready":
-                    Udid = root.TryGetProperty("udid", out var u) ? u.GetString() : null;
+                    var readyUdid = root.TryGetProperty("udid", out var u) ? u.GetString() : null;
                     var transport = root.TryGetProperty("transport", out var t) ? t.GetString() : null;
-                    if (!string.Equals(Udid, _requestedUdid, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(readyUdid, _requestedUdid, StringComparison.OrdinalIgnoreCase))
                     {
-                        _readySignal?.TrySetException(new InvalidOperationException($"反控桥接目标不匹配：请求 {_requestedUdid}，实际 {Udid ?? "未知"}。"));
+                        RejectReady("device_identity_mismatch", LocalizationService.Format("TouchBridgeTargetMismatchFormat", _requestedUdid, readyUdid ?? LocalizationService.Get("Unavailable")));
                         return;
                     }
                     var expectedTransport = _requestedWireless ? "wireless" : "usb";
                     if (!string.Equals(transport, expectedTransport,
                             StringComparison.OrdinalIgnoreCase))
                     {
-                        _readySignal?.TrySetException(new InvalidOperationException($"反控桥接传输类型不匹配：请求 {expectedTransport}，实际 {transport}。"));
+                        RejectReady("bridge_transport_mismatch", LocalizationService.Format("TouchBridgeTransportMismatchFormat", expectedTransport, transport));
                         return;
                     }
+                    Udid = readyUdid;
                     RateHz = root.TryGetProperty("rateHz", out var r) ? r.GetInt32() : 0;
                     GateOpen = root.TryGetProperty("gateOpen", out var g) && g.GetBoolean();
                     AuthMode = root.TryGetProperty("authMode", out var am)
@@ -348,13 +372,17 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                     {
                         IsReady = false;
                         _lastErrorCode = "remote_control_gate_unavailable";
-                        const string gateMessage =
-                            "设备没有确认触控认证 gate 已打开，无法安全地开始反控。";
+                        var gateMessage =
+                            LocalizationService.Get("TouchBridgeAuthenticationRequired");
                         OnEvent?.Invoke(new BridgeEvent("error", _lastErrorCode, gateMessage));
                         _readySignal?.TrySetException(CreateStartupException(gateMessage));
                         return;
                     }
+                    Interlocked.Exchange(ref _readyGeneration,
+                        root.TryGetProperty("generation", out var generation) ? generation.GetInt64() : 0);
                     IsReady = true;
+                    Interlocked.Exchange(ref _terminalEventReceived, 0);
+                    _lastErrorCode = null;
                     OnEvent?.Invoke(new BridgeEvent("ready", null, "gate_open"));
                     _readySignal?.TrySetResult(true);
                     break;
@@ -369,42 +397,53 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                     break;
                 case "error":
                     Interlocked.Exchange(ref _terminalEventReceived, 1);
+                    IsReady = false;
+                    GateOpen = false;
                     _lastErrorCode = root.TryGetProperty("code", out var ec)
                         ? ec.GetString() : null;
                     var message = root.TryGetProperty("message", out var em)
                         ? em.GetString() : null;
                     OnEvent?.Invoke(new BridgeEvent("error",
                         _lastErrorCode, message));
-                    IsReady = false;
                     _readySignal?.TrySetException(CreateStartupException(
-                        "USB 触控桥接器报告错误。", message));
+                        LocalizationService.Get("TouchBridgeReportedError"), message));
                     break;
             }
         }
         catch
         {
-            _readySignal?.TrySetException(CreateStartupException(
-                "USB 触控桥接器输出格式无效。"));
+            RejectReady("bridge_invalid_output", LocalizationService.Get("TouchBridgeInvalidOutput"));
         }
+    }
+
+    private void RejectReady(string code, string message)
+    {
+        IsReady = false;
+        GateOpen = false;
+        _lastErrorCode = code;
+        Interlocked.Exchange(ref _terminalEventReceived, 1);
+        _readySignal?.TrySetException(CreateStartupException(message));
+        OnEvent?.Invoke(new BridgeEvent("error", code, message));
     }
 
     private async Task WaitForReadyAsync(CancellationToken ct)
     {
-        var readySignal = _readySignal ?? throw new InvalidOperationException("USB 触控桥接器未启动。");
+        var readySignal = _readySignal ?? throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotStarted"));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(InitialReadyTimeout);
         try { await readySignal.Task.WaitAsync(timeout.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new TimeoutException($"USB 触控桥接器在 {InitialReadyTimeout.TotalSeconds:0} 秒内未就绪。{(_lastDiagnostic is null ? string.Empty : $" 最近信息：{_lastDiagnostic}")}");
+            throw new TimeoutException(LocalizationService.Format("TouchBridgeTimeoutFormat", InitialReadyTimeout.TotalSeconds, _lastDiagnostic ?? LocalizationService.Get("ReverseControlNoDetail")));
         }
     }
 
     public async Task SendKeyboardAsync(IReadOnlyCollection<byte> usages,
-        CancellationToken ct = default)
+        CancellationToken ct = default, Func<bool>? canSend = null)
     {
+        var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
-            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+            throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
         if (usages.Count > CoreDeviceTouchProtocol.MaxKeyboardUsages)
             throw new ArgumentOutOfRangeException(nameof(usages));
         // System.Text.Json encodes byte[] as a base64 string. The bridge
@@ -415,15 +454,23 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
+            // Drop stale presses after waiting for the writer. Empty reports
+            // release held keys and must still pass after focus is lost.
+            if (normalized.Length != 0 && canSend?.Invoke() == false) return;
+            // Recovery may close the gate while this packet waits for the writer.
+            if (generation != Interlocked.Read(ref _readyGeneration)) return;
+            if (!IsReady || _stdin is null)
+                throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
             var frame = new
             {
                 schema = CoreDeviceTouchProtocol.MessageSchema,
+                generation,
                 kind = CoreDeviceTouchProtocol.KeyboardMessageKind,
                 seq = NextSequence(),
                 timestampNs = DateTimeOffset.UtcNow.ToUnixTimeNanoseconds(),
                 usages = normalized,
             };
-            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
             var header = BitConverter.GetBytes((uint)bytes.Length);
 
             await _stdin.BaseStream.WriteAsync(header, ct);
@@ -434,25 +481,32 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     }
 
     public async Task SendButtonAsync(ushort usagePage, ushort usageCode,
-        string state, CancellationToken ct = default)
+        string state, CancellationToken ct = default, Func<bool>? canSend = null)
     {
+        var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
-            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+            throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
         if (state is not ("down" or "up" or "canceled"))
             throw new ArgumentOutOfRangeException(nameof(state));
         await _sendLock.WaitAsync(ct);
         try
         {
+            if (state == "down" && canSend?.Invoke() == false) return;
+            // Recovery may close the gate while this packet waits for the writer.
+            if (generation != Interlocked.Read(ref _readyGeneration)) return;
+            if (!IsReady || _stdin is null)
+                throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
             var frame = new
             {
                 schema = CoreDeviceTouchProtocol.MessageSchema,
+                generation,
                 kind = CoreDeviceTouchProtocol.ButtonMessageKind,
                 seq = NextSequence(),
                 usagePage = (int)usagePage,
                 usageCode = (int)usageCode,
                 state,
             };
-            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
             var header = BitConverter.GetBytes((uint)bytes.Length);
 
             await _stdin.BaseStream.WriteAsync(header, ct);
@@ -463,21 +517,29 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     }
 
 
-    public async Task SendPasteTextAsync(string text, CancellationToken ct = default)
+    public async Task SendPasteTextAsync(string text, CancellationToken ct = default,
+        Func<bool>? canSend = null)
     {
+        var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
-            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+            throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
         await _sendLock.WaitAsync(ct);
         try
         {
+            if (canSend?.Invoke() == false) return;
+            // Recovery may close the gate while this packet waits for the writer.
+            if (generation != Interlocked.Read(ref _readyGeneration)) return;
+            if (!IsReady || _stdin is null)
+                throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
             var frame = new
             {
                 schema = CoreDeviceTouchProtocol.MessageSchema,
+                generation,
                 kind = CoreDeviceTouchProtocol.PasteTextMessageKind,
                 seq = NextSequence(),
                 text,
             };
-            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
             var header = BitConverter.GetBytes((uint)bytes.Length);
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);
@@ -488,18 +550,24 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     public async Task SendReadClipboardAsync(CancellationToken ct = default)
     {
+        var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
-            throw new InvalidOperationException("USB 触控桥接器尚未就绪。");
+            throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
         await _sendLock.WaitAsync(ct);
         try
         {
+            // Recovery may close the gate while this packet waits for the writer.
+            if (generation != Interlocked.Read(ref _readyGeneration)) return;
+            if (!IsReady || _stdin is null)
+                throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
             var frame = new
             {
                 schema = CoreDeviceTouchProtocol.MessageSchema,
+                generation,
                 kind = CoreDeviceTouchProtocol.ReadClipboardMessageKind,
                 seq = NextSequence(),
             };
-            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(frame));
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
             var header = BitConverter.GetBytes((uint)bytes.Length);
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);
@@ -509,7 +577,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     }
 
 
-    private async Task DrainErrorAsync(StreamReader reader)
+    private async Task DrainErrorAsync(StreamReader reader, int bridgeProcessId)
     {
         try
         {
@@ -517,6 +585,10 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             {
                 _lastStandardError = line;
                 _lastDiagnostic = line;
+                // Preserve transport failures and tracebacks before later cleanup
+                // messages overwrite the last-line startup diagnostic.
+                DiagnosticLogger.ReverseControl(_requestedWireless ? "wireless" : "usb",
+                    "bridge_stderr", ("bridge_pid", bridgeProcessId), ("message", line));
             }
         }
         catch (ObjectDisposedException) { }
@@ -541,7 +613,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             Interlocked.Exchange(ref _terminalEventReceived, 1) != 0) return;
 
         IsReady = false;
-        var message = $"USB 触控桥接器意外退出（代码 {exitCode}）。";
+        var message = LocalizationService.Format("TouchBridgeExitedFormat", exitCode);
+        GateOpen = false;
         _lastErrorCode ??= "bridge_exited";
         _readySignal?.TrySetException(CreateStartupException(message));
         OnEvent?.Invoke(new BridgeEvent("error", "bridge_exited", message));
@@ -557,13 +630,15 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     private InvalidOperationException CreateStartupException(string fallback,
         string? reportedMessage = null)
     {
-        var message = string.IsNullOrWhiteSpace(reportedMessage)
-            ? fallback : reportedMessage.Trim();
+        var parts = new List<string>
+        {
+            string.IsNullOrWhiteSpace(reportedMessage) ? fallback : reportedMessage.Trim(),
+        };
         if (!string.IsNullOrWhiteSpace(_lastErrorCode))
-            message += $"（错误代码：{_lastErrorCode}）";
+            parts.Add(LocalizationService.Format("TouchBridgeErrorCodeFormat", _lastErrorCode));
         if (!string.IsNullOrWhiteSpace(_lastStandardError))
-            message += $" 最近诊断：{_lastStandardError.Trim()}";
-        return new InvalidOperationException(message);
+            parts.Add(LocalizationService.Format("TouchBridgeDiagnosticFormat", _lastStandardError.Trim()));
+        return new InvalidOperationException(LocalizationService.Join(string.Empty, parts));
     }
 }
 

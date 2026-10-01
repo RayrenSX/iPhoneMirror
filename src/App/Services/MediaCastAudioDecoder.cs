@@ -1,3 +1,4 @@
+using IPhoneMirror.App.Localization;
 using System.Diagnostics;
 using System.Text;
 using IPhoneMirror.App.Interop;
@@ -57,7 +58,7 @@ internal sealed class MediaCastAudioDecoder : IDisposable
         {
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             if (!process.Start())
-                throw new InvalidOperationException("FFmpeg audio decoder could not start.");
+                throw new InvalidOperationException(LocalizationService.Get("FfmpegAudioStartFailed"));
             process.ErrorDataReceived += (_, args) =>
             {
                 if (!string.IsNullOrWhiteSpace(args.Data) &&

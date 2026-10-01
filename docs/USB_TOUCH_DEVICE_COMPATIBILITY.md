@@ -1,5 +1,9 @@
 # 设备兼容性
 
+本页保留早期设备/服务探测记录，不是按 iOS 大版本提供的兼容承诺。
+后续恢复实测另见[有线恢复复审](WIRED_RECOVERY_REAUDIT.md)和
+[恢复延迟记录](WIRED_RECOVERY_LATENCY.md)；不同记录的设备、DDI 和桥接版本不能互相替代。
+
 ## iOS 版本兼容性矩阵
 
 | iOS 版本 | 触控 (UniversalHID) | Indigo 按钮 | media stream gate | 说明 |
@@ -13,9 +17,9 @@
 ## 实测设备
 
 | 设备 | iOS 版本 | 结果 |
-|------|----------|------|------|
+|------|----------|------|
 | iPhone 13 mini (iPhone13,1) | 18.7.8 | 历史测试记录显示单指滑动可用；需以当前桥和当前 DDI 复验 |
-| iPhone18,1 | 26.6.1 | 当前日志仅枚举到 `Services=[]`，尚未触达 HID 帧发送；桥会自动刷新一次旧 DDI 后再验证 |
+| iPhone18,1 | 26.6.1 | 早期探测日志仅枚举到 `Services=[]`；该记录不能代表后续 DDI 刷新或当前桥的结果 |
 
 ## 9021 错误详情
 
@@ -29,7 +33,7 @@ NSLocalizedDescription: "Remote control requires iOS 27.0 or later on this devic
 - 影响: 仅凭 9021 不能推断触控一定失败或一定成功；必须检查 Universal HID 是否实际提供 `mainTouchscreen`（Service ID `257`）
 - 程序行为: 先尝试 direct Universal HID；只有验证到 `257` 才发 `ready`，否则会刷新一次旧 DDI 后重试
 
-## 可用功能 (iOS 18.x 实测)
+## 早期功能探测记录（iOS 18.x）
 
 | 功能 | 状态 | 路径 |
 |------|------|------|
@@ -47,5 +51,5 @@ NSLocalizedDescription: "Remote control requires iOS 27.0 or later on this devic
 ## 结论
 
 `9021` 是媒体流认证结果，不是版本兼容性的充分条件。自研桥在 `9021` 后会尝试
-direct Universal HID，但只在 `mainTouchscreen`（257）已枚举时允许反控。当前 iOS 26.6.1
-日志没有该服务，因此需要通过自动 DDI 刷新后的真机复验，而不是把“连接成功”误报成触控成功。
+direct Universal HID，但只在 `mainTouchscreen`（257）通过验证后允许反控。早期 iOS 26.6.1
+日志没有该服务，实际可用性仍需记录当前设备、DDI、桥接版本及真实输入结果。

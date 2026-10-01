@@ -419,6 +419,9 @@ struct D3D11PreviewRenderer::Impl {
     ComPtr<IDCompositionDevice> composition_device;
     ComPtr<IDCompositionTarget> composition_target;
     ComPtr<IDCompositionVisual> composition_visual;
+    ComPtr<IDCompositionEffectGroup> composition_effect;
+    std::atomic<float> opacity{1.0F};
+    float applied_opacity{1.0F};
     ComPtr<ID3D11RenderTargetView> target;
     ComPtr<ID3D11VertexShader> vertex_shader;
     ComPtr<ID3D11PixelShader> pixel_shader;
@@ -602,6 +605,13 @@ struct D3D11PreviewRenderer::Impl {
                 "IDCompositionDevice CreateVisual");
             check(composition_visual->SetContent(swap_chain.Get()),
                 "IDCompositionVisual SetContent");
+            check(composition_device->CreateEffectGroup(&composition_effect),
+                "IDCompositionDevice CreateEffectGroup");
+            applied_opacity = opacity.load(std::memory_order_relaxed);
+            check(composition_effect->SetOpacity(applied_opacity),
+                "IDCompositionEffectGroup SetOpacity");
+            check(composition_visual->SetEffect(composition_effect.Get()),
+                "IDCompositionVisual SetEffect");
             check(composition_target->SetRoot(composition_visual.Get()),
                 "IDCompositionTarget SetRoot");
             check(composition_device->Commit(), "IDCompositionDevice Commit");
@@ -687,6 +697,7 @@ struct D3D11PreviewRenderer::Impl {
         pixel_shader.Reset();
         vertex_shader.Reset();
         composition_visual.Reset();
+        composition_effect.Reset();
         composition_target.Reset();
         composition_device.Reset();
         swap_chain.Reset();
@@ -1509,6 +1520,16 @@ struct D3D11PreviewRenderer::Impl {
                 // Coalesce interactive WM_SIZE bursts independently of media
                 // FPS. A resize iteration bypasses the media deadline below
                 // and immediately presents the newest retained frame.
+                // Commit independently of frame arrival/FPS: paused and empty
+                // previews must respond to the opacity slider too. Rebuilds
+                // restore the atomic preference in initialize().
+                const auto requested_opacity = opacity.load(std::memory_order_relaxed);
+                if (composition_effect && requested_opacity != applied_opacity) {
+                    check(composition_effect->SetOpacity(requested_opacity),
+                        "IDCompositionEffectGroup SetOpacity");
+                    check(composition_device->Commit(), "Commit preview opacity");
+                    applied_opacity = requested_opacity;
+                }
                 const bool target_resized = resize_if_needed(
                     std::chrono::steady_clock::now());
                 if (clear_requested.exchange(false, std::memory_order_acq_rel)) {
@@ -1638,6 +1659,11 @@ void D3D11PreviewRenderer::set_corner_profile(float normalized_radius,
     impl_->corner_profile.store(pack_corner_profile(normalized_radius, curve_exponent),
         std::memory_order_relaxed);
     impl_->refresh_requested.store(true, std::memory_order_release);
+}
+
+void D3D11PreviewRenderer::set_opacity(float opacity) noexcept {
+    if (!impl_ || !std::isfinite(opacity)) return;
+    impl_->opacity.store(std::clamp(opacity, 0.1F, 1.0F), std::memory_order_relaxed);
 }
 
 void D3D11PreviewRenderer::set_rotation(std::int32_t quarter_turns) noexcept {

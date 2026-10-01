@@ -52,6 +52,8 @@ public:
     // previews remain rectangular because their WPF panel owns that shape.
     void set_corner_profile(float normalized_radius, float curve_exponent) noexcept;
     void set_rotation(std::int32_t quarter_turns) noexcept;
+    // Applies to this composition visual only, including its black background.
+    void set_opacity(float opacity) noexcept;
     void set_color_output_preference(media::ColorOutputPreference preference) noexcept;
     void set_image_adjustments(float brightness, float contrast,
         float saturation, float gamma) noexcept;

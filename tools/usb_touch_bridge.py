@@ -42,6 +42,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 from requests import RequestException
+from hyperframe.frame import DataFrame, GoAwayFrame, PingFrame, RstStreamFrame
 
 import pymobiledevice3.remote.tunnel_service as _ts
 _ts.USE_USERSPACE_TUNNEL = True
@@ -148,7 +149,7 @@ PASTEBOARD_POLL_INTERVAL_SECONDS = 0.8
 PASTEBOARD_OPERATION_TIMEOUT_SECONDS = 2.0
 # A CoreDevice HID request can remain pending after iOS has invalidated the
 # direct Universal HID session. Do not leave stdin's reader blocked forever:
-# exiting lets the host discard this stale bridge and reconnect cleanly.
+# the session supervisor rebuilds reverse control while retaining usbmux.
 # Touch motion is a high-rate best-effort stream. A multi-second retry here
 # freezes the host-side coalescing loop and is visible as a periodic pointer
 # stall. Lifecycle and keyboard operations retain their longer timeout below.
@@ -157,9 +158,14 @@ HID_TOUCH_MOTION_TIMEOUT_SECONDS = 0.35
 HID_CLEANUP_TIMEOUT_SECONDS = 2.0
 # On devices that reject media-stream authentication (9021), iOS can revoke a
 # direct Universal HID session without warning even while the USB mirror is
-# healthy. Keep the lease refresh timer advisory; rebuilding the process here
-# races the active QuickTime usbmux claim.
-DIRECT_HID_ROTATION_SECONDS = 12 * 60
+# healthy. Refresh only the HID RemoteService on the existing RSD tunnel.
+DIRECT_HID_ROTATION_SECONDS = 180
+# An idle HID can fail without ending the tunnel reader. Two small PINGs per
+# second bound that detection delay without changing the round-trip timeout.
+HID_HEALTH_INTERVAL_SECONDS = 0.5
+TRANSPORT_FAILURE_POLL_SECONDS = 0.1
+HID_RECOVERY_ATTEMPTS = 3
+HID_RECOVERY_READY_TIMEOUT_SECONDS = 45
 LOCKDOWN_RETRYABLE_ERRORS = (
     BadDevError,
     ConnectionFailedError,
@@ -1265,6 +1271,7 @@ class BridgeChannel:
         self._write_lock = asyncio.Lock()
         self._stdin = sys.stdin.buffer
         self._stdout = sys.stdout.buffer
+        self._pending_message = None
 
     async def emit(self, event: dict) -> None:
         line = json.dumps(event, ensure_ascii=False) + '\n'
@@ -1283,7 +1290,7 @@ class BridgeChannel:
             chunks.extend(chunk)
         return bytes(chunks)
 
-    async def read_messages(self):
+    async def _read_message(self):
         while True:
             header = await self._read_exactly(4)
             if header is None:
@@ -1297,9 +1304,22 @@ class BridgeChannel:
             if payload is None:
                 return
             try:
-                yield json.loads(payload.decode('utf-8'))
+                return json.loads(payload.decode('utf-8'))
             except (UnicodeDecodeError, json.JSONDecodeError) as e:
                 await self.emit({'event': 'error', 'code': 'bad_frame', 'message': str(e)})
+
+    async def read_messages(self):
+        while True:
+            # A cancelled executor read keeps consuming stdin on Windows.
+            # Retain the entire frame read across HID sessions, so recovery
+            # cannot leave two threads competing for a length/payload pair.
+            if self._pending_message is None:
+                self._pending_message = asyncio.create_task(self._read_message())
+            frame = await asyncio.shield(self._pending_message)
+            self._pending_message = None
+            if frame is None:
+                return
+            yield frame
 
 
 class TouchSession:
@@ -1331,12 +1351,29 @@ class TouchSession:
         self._usb_mux_transport = None
         self._usb_mux_server = None
         self._usb_mux_previous_env: Optional[str] = None
+        self._usb_mux_resume = None
         self._pasteboard_lock = asyncio.Lock()
         self._paste_sequence_lock = asyncio.Lock()
         self._keyboard_lock = asyncio.Lock()
         self._hid_operation_lock = asyncio.Lock()
+        # HID refresh must wait for an individual report, but must not share
+        # the keyboard/touch synchronization locks.
+        self._hid_lifecycle_lock = asyncio.Lock()
+        self._hid_recovery_lock = asyncio.Lock()
+        # Set when the input loop loses the HID transport.  The enclosing
+        # tunnel scope can then rebuild only CoreDevice/RSD/HID while keeping
+        # the existing lockdown and capture-mux ownership intact.
+        self._hid_transport_failed = False
+        self._serve_task: Optional[asyncio.Task] = None
+        self._recovering = False
+        self._recovery_attempt = 0
+        self._recovery_started = 0.0
+        self._session_ready = asyncio.Event()
+        self._generation = 0
+        self._input_verified = False
+        self._diagnostic_disconnect_count = 0
 
-    async def _start_capture_mux(self) -> None:
+    async def _start_capture_mux(self, *, attempts: int = CAPTURE_MUX_START_ATTEMPTS) -> None:
         """Prefer the active QuickTime configuration without making it fatal.
 
         A wired mirror temporarily exposes a second usbmux interface.  Some
@@ -1372,6 +1409,7 @@ class TouchSession:
         if device is None:
             # No active QuickTime configuration means standalone wired control;
             # Apple's normal usbmuxd remains the correct transport in that case.
+            self._usb_mux_resume = None
             overview = '; '.join(
                 f'serial={item.serial!r} activated={item.activated}'
                 for item in _find_usb_devices(backend, None)) or 'none'
@@ -1384,11 +1422,14 @@ class TouchSession:
                             'continuing with the Apple usbmuxd path.'),
             })
             return
-        for attempt in range(1, CAPTURE_MUX_START_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             mux = None
             server = None
             try:
                 mux = _UsbMuxTransport(device.dev, device.serial)
+                previous, self._usb_mux_resume = self._usb_mux_resume, None
+                if previous is not None and _udid_matches(previous.serial, device.serial):
+                    mux.resume_from(previous)
                 mux.start()
                 # Advertise the requested UDID verbatim: pymobiledevice3
                 # matches the usbmux serial case-sensitively, and the USB
@@ -1403,7 +1444,7 @@ class TouchSession:
                 with contextlib.suppress(Exception):
                     if mux is not None:
                         mux.close()
-                if attempt == CAPTURE_MUX_START_ATTEMPTS:
+                if attempt == attempts:
                     message = f'{type(error).__name__}: {str(error)[:180]}'
                     log.warning('capture usbmux handshake unavailable after %d attempts: %s',
                                 attempt, message)
@@ -1422,7 +1463,7 @@ class TouchSession:
                     'message': (
                         f'{type(error).__name__}: {str(error)[:180]}; '
                         f'retrying active wired-mirroring usbmux {attempt}/'
-                        f'{CAPTURE_MUX_START_ATTEMPTS - 1}'
+                        f'{attempts - 1}'
                     ),
                 })
                 await asyncio.sleep(CAPTURE_MUX_RETRY_DELAY_SECONDS * attempt)
@@ -1440,6 +1481,58 @@ class TouchSession:
             log.info('capture usbmux bridge active at %s (attempt %d)', address, attempt)
             await self._emit_status('capture_mux_ready')
             return
+
+    def _close_capture_mux(self) -> None:
+        # Release only this bridge's userspace interface/listener. Never change
+        # USB configuration, reset the device, or touch the capture interface.
+        if self._usb_mux_transport is None and self._usb_mux_server is None:
+            return
+        server, mux = self._usb_mux_server, self._usb_mux_transport
+        self._usb_mux_server = self._usb_mux_transport = None
+        if self._usb_mux_previous_env is None:
+            os.environ.pop('USBMUXD_SOCKET_ADDRESS', None)
+        else:
+            os.environ['USBMUXD_SOCKET_ADDRESS'] = self._usb_mux_previous_env
+        self._usb_mux_previous_env = None
+        if server is not None:
+            with contextlib.suppress(Exception):
+                server.stop()
+        if mux is not None:
+            with contextlib.suppress(Exception):
+                mux.close()
+
+    async def _reconnect_lockdown(self):
+        mux = self._usb_mux_transport
+        reason = getattr(mux, 'failure_reason', None) if mux is not None else None
+        if reason:
+            await self._recovery_event('capture_mux_retired', ConnectionError(reason))
+            self._usb_mux_resume = mux
+            self._close_capture_mux()
+        if self._usb_mux_transport is None:
+            # Re-enumerate on every bounded attempt: the device may now expose
+            # either the active capture interface or the normal Apple route.
+            await self._start_capture_mux(attempts=1)
+        connected = False
+        try:
+            # Preserve the owner's normal reconnect budget: an unanswered
+            # short SYN does not prove saved USB protocol state is invalid.
+            # Some live capture configurations refuse a second VERSION.
+            lockdown = await self._create_lockdown_with_retry('USB')
+            if getattr(self._usb_mux_transport, 'resumed', False) is True:
+                self._usb_mux_transport.resumed = False
+                await self._recovery_event('capture_mux_resume_verified')
+            connected = True
+            return lockdown
+        except DeviceNotFoundError as error:
+            lockdown = await self._recover_lockdown_via_capture_mux(error)
+            connected = True
+            return lockdown
+        finally:
+            if not connected and getattr(self._usb_mux_transport, 'resumed', False) is True:
+                # A changed device configuration can invalidate saved protocol
+                # state. Do not reuse an unverified resumed candidate forever.
+                await self._recovery_event('capture_mux_resume_rejected')
+                self._close_capture_mux()
 
     async def _recover_lockdown_via_capture_mux(self,
                                                 discovery_error: DeviceNotFoundError):
@@ -2058,26 +2151,214 @@ class TouchSession:
             self._remote_pairing_provision_attempted = True
             await self._provision_remote_pairing(lockdown)
         await self._preflight_developer_environment(lockdown)
-        try:
-            service = await CoreDeviceTunnelProxy.create(lockdown)
-        except InvalidServiceError as error:
-            # iOS 17.0-17.3 does not expose CoreDeviceProxy over lockdown.
-            # The supported root-free route on those releases is the same
-            # RemotePairing tunnel used by explicit wireless control.
-            await self.ipc.emit({
-                'event': 'warning',
-                'code': 'coredevice_proxy_unavailable',
-                'message': (
-                    'CoreDeviceProxy is unavailable; falling back to the '
-                    f'RemotePairing tunnel: {str(error)[:180]}'
-                ),
-            })
-            await self._connect_via_remote_pairing()
-            return
-        async with start_tunnel(service, protocol=TunnelProtocol.TCP) as tunnel_result:
-            await self._connect_with_tunnel_result(tunnel_result)
+        # This owner survives sender/health-task cancellation. The raw usbmux
+        # reader and sequence numbers belong to the whole wired session.
+        while True:
+            attempt_lockdown = lockdown
+            owns_lockdown = False
+            self._hid_transport_failed = False
+            self._session_ready.clear()
+            try:
+                if self._recovering:
+                    await self._recovery_event('transport_reconnect_started')
+                    attempt_lockdown = await asyncio.wait_for(
+                        self._reconnect_lockdown(), 15)
+                    owns_lockdown = True
+                    # Check actual device services; only mount if missing.
+                    await self._recovery_event('developer_image_check_started')
+                    try:
+                        await asyncio.wait_for(
+                            self._preflight_developer_environment(attempt_lockdown),
+                            HID_RECOVERY_READY_TIMEOUT_SECONDS)
+                    except Exception as error:
+                        await self._recovery_event('developer_image_check_failed', error)
+                        raise
+                await self._run_tunnel_attempt(attempt_lockdown)
+                if not self._hid_transport_failed:
+                    return  # stdin EOF / requested stop
+            except asyncio.CancelledError:
+                raise  # shutdown, never reinterpret it as a recovery request
+            except Exception as error:
+                if not self._session_ready.is_set() and not self._recovering:
+                    raise  # initial prerequisite/DDI failure belongs to caller
+                await self._mark_recovering(error)
+                await self._recovery_event('transport_reconnect_failed', error)
+            finally:
+                if owns_lockdown:
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(attempt_lockdown.close(), 2)
+            self._recovery_attempt += 1
+            if self._recovery_attempt > HID_RECOVERY_ATTEMPTS:
+                await self._recovery_event('recovery_failed')
+                raise BridgePrerequisiteError(
+                    'direct_hid_recovery_exhausted',
+                    'Reverse-control transport recovery failed after three attempts.')
+            await self._recovery_event('recovery_started')
+            # The first repair follows an established session: start now.
+            # Back off only after a reconstruction actually failed.
+            if self._recovery_attempt > 1:
+                await asyncio.sleep(self._recovery_attempt - 1)
 
-    async def _connect_with_tunnel_result(self, tunnel_result) -> None:
+    async def _run_tunnel_attempt(self, lockdown) -> None:
+        async def run():
+            try:
+                service = await CoreDeviceTunnelProxy.create(lockdown)
+            except InvalidServiceError:
+                if self._recovering:
+                    raise
+                await self.ipc.emit({'event': 'warning', 'code': 'coredevice_proxy_unavailable',
+                                     'message': 'CoreDeviceProxy unavailable; trying RemotePairing.'})
+                await self._connect_via_remote_pairing()
+                return
+            result = None
+            diagnostic_task = None
+            try:
+                async with start_tunnel(service, protocol=TunnelProtocol.TCP) as result:
+                    # Explicit opt-in for real-device recovery validation.
+                    # Close the actual CoreDevice socket once; do not fabricate
+                    # an exception/ready event or disturb the capture interface.
+                    delay = os.environ.get('IPHONE_MIRROR_TEST_DISCONNECT_AFTER_SECONDS', '')
+                    modes = os.environ.get('IPHONE_MIRROR_TEST_DISCONNECT_MODES', 'transport').split(',')
+                    valid_modes = 1 <= len(modes) <= 5 and all(mode in ('hid', 'transport', 'mux') for mode in modes)
+                    if (delay.isdecimal() and 1 <= int(delay) <= 3600 and valid_modes and
+                            self._diagnostic_disconnect_count < len(modes)):
+                        async def disconnect():
+                            while self._diagnostic_disconnect_count < len(modes):
+                                await self._session_ready.wait()
+                                await asyncio.sleep(int(delay))
+                                mode = modes[self._diagnostic_disconnect_count]
+                                self._diagnostic_disconnect_count += 1
+                                generation = self._generation
+                                await self.ipc.emit({'event': 'warning', 'code': f'diagnostic_{mode}_disconnect',
+                                    'message': f'Closing the real {mode} socket for requested test {self._diagnostic_disconnect_count}/{len(modes)}.'})
+                                if mode == 'transport':
+                                    await service.close()
+                                    return
+                                if mode == 'mux':
+                                    if self._usb_mux_transport is None:
+                                        raise RuntimeError('No capture mux available for requested fault')
+                                    self._usb_mux_transport.close()
+                                    return
+                                async with self._hid_lifecycle_lock:
+                                    await self._close_remote_service(self.hid, 'diagnostic_hid')
+                                # Wait for genuine recovery before scheduling
+                                # the next fault in the same transport session.
+                                while self._generation == generation:
+                                    await asyncio.sleep(0.1)
+                        diagnostic_task = asyncio.create_task(disconnect())
+                    await self._run_observed_tunnel(result)
+            finally:
+                if diagnostic_task is not None:
+                    diagnostic_task.cancel()
+                    await asyncio.gather(diagnostic_task, return_exceptions=True)
+                # pymobiledevice3 stop_tunnel awaits its socket reader first.
+                # If that reader already failed, it raises before closing the
+                # userspace stack. Finish that cleanup before the next attempt.
+                if result is not None and result.client.tun is not None:
+                    reader = result.client._tun_read_task
+                    if reader is not None:
+                        reader.cancel()
+                        await asyncio.gather(reader, return_exceptions=True)
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(result.client.tun.close(), 3)
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(service.close(), 2)
+
+        task = asyncio.create_task(run(), name='hid-transport-session')
+        ready = asyncio.create_task(self._session_ready.wait())
+        try:
+            done, _ = await asyncio.wait(
+                (task, ready), timeout=HID_RECOVERY_READY_TIMEOUT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                raise TimeoutError('CoreDevice/RSD/HID did not become ready in time')
+            await task  # the session may run indefinitely AFTER real readiness
+        finally:
+            ready.cancel()
+            task.cancel()
+            await asyncio.gather(ready, task, return_exceptions=True)
+
+    def _transport_failure_reason(self, client=None) -> Optional[str]:
+        mux = self._usb_mux_transport
+        reason = getattr(mux, 'failure_reason', None) if mux is not None else None
+        if reason:
+            return f'capture mux: {reason}'
+        client = client if client is not None else getattr(self, '_active_tunnel_client', None)
+        for name in ('_sock_read_task', '_tun_read_task'):
+            task = getattr(client, name, None)
+            if isinstance(task, asyncio.Future) and task.done():
+                return f'CoreDevice {name} ended'
+        return None
+
+    async def _wait_transport_failure(self, client) -> str:
+        # SDK readers can return normally on EOF/OSError. Their completion is
+        # still a terminal transport event, even while HID and stdin are idle.
+        # asyncio.wait observes them without taking cancellation ownership.
+        readers = [task for name in ('_sock_read_task', '_tun_read_task')
+                   if isinstance(task := getattr(client, name, None), asyncio.Future)]
+        while True:
+            reason = self._transport_failure_reason(client)
+            if reason:
+                return reason
+            if readers:
+                await asyncio.wait(readers, timeout=TRANSPORT_FAILURE_POLL_SECONDS,
+                                   return_when=asyncio.FIRST_COMPLETED)
+            else:
+                await asyncio.sleep(TRANSPORT_FAILURE_POLL_SECONDS)
+
+    async def _run_observed_tunnel(self, result) -> None:
+        self._active_tunnel_client = result.client
+        session = asyncio.create_task(self._connect_with_tunnel_result(
+            result, preserve_capture_mux=True), name='hid-observed-session')
+        failure = asyncio.create_task(self._wait_transport_failure(result.client),
+                                      name='hid-transport-monitor')
+        try:
+            done, _ = await asyncio.wait((session, failure), return_when=asyncio.FIRST_COMPLETED)
+            if session in done:
+                await session  # requested EOF/stop or an existing HID recovery
+                return
+            error = ConnectionError(await failure)
+            if not self._session_ready.is_set() and not self._recovering:
+                raise error  # preserve initial-start failure semantics
+            session.cancel()
+            await self._mark_recovering(error)
+            await self._recovery_event('transport_failure_detected', error)
+            # No HID request can repair a dead tunnel. Cancel its consumers,
+            # finish cleanup, then let the independent owner reconstruct it.
+        finally:
+            failure.cancel()
+            session.cancel()
+            await asyncio.gather(failure, session, return_exceptions=True)
+            self._active_tunnel_client = None
+
+    async def _recovery_event(self, code: str, error: Optional[Exception] = None) -> None:
+        message = (f'attempt={self._recovery_attempt}/{HID_RECOVERY_ATTEMPTS} '
+                   f'generation={self._generation} '
+                   f'elapsed_ms={int((time.monotonic() - self._recovery_started) * 1000)} '
+                   f'capture_mux_preserved={self._usb_mux_transport is not None}')
+        if error is not None:
+            message += f' error={type(error).__name__}: {str(error)[:160]}'
+        await self.ipc.emit({'event': 'status', 'code': code, 'message': message})
+
+    async def _mark_recovering(self, error: Exception) -> None:
+        self._hid_transport_failed = True
+        self._session_ready.clear()
+        if not self._recovering:
+            self._recovering = True
+            self._recovery_started = time.monotonic()
+            await self._recovery_event('recovery_triggered', error)
+
+    async def _run_serve(self) -> None:
+        # Rotation may interrupt a blocked sender, never its supervisor.
+        task = asyncio.create_task(self._serve(), name='hid-input-sender')
+        try:
+            await task
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling() or not self._hid_transport_failed:
+                raise
+
+    async def _connect_with_tunnel_result(self, tunnel_result,
+                                          *, preserve_capture_mux: bool = False) -> None:
         """Open RSD and HID using either a USB or RemotePairing TCP tunnel."""
         from pymobiledevice3.remote.userspace_tunnel import UserspaceDialPlane
 
@@ -2095,7 +2376,16 @@ class TouchSession:
                 (tunnel_result.address, tunnel_result.port),
                 open_connection=self.dial_plane.dial,
             )
-            await self.rsd.__aenter__()
+            if self._recovering:
+                await self._recovery_event('rsd_reconnect_started')
+            try:
+                await self.rsd.__aenter__()
+            except Exception as error:
+                if self._recovering:
+                    await self._recovery_event('rsd_reconnect_failed', error)
+                raise
+            if self._recovering:
+                await self._recovery_event('hid_reinit_started')
             # HID reports are accepted only while the media-stream auth gate
             # is held. Some recent systems instead expose a verified direct
             # Universal HID service, handled below.
@@ -2108,12 +2398,12 @@ class TouchSession:
                     self.auth_mode = 'mediastream'
                     self.gate_open = True
                     await self._emit_ready()
-                    await self._serve()
+                    await self._run_serve()
             except Exception as error:
                 if self._can_fallback_to_direct_hid(error):
                     await self._enable_direct_hid_fallback(error)
                     await self._emit_ready()
-                    await self._serve()
+                    await self._run_serve()
                     return
                 # Some supported iOS builds do not publish DisplayService at
                 # first, and touch_session can also report a late HID service
@@ -2126,9 +2416,9 @@ class TouchSession:
                 await self._initialize_touch_with_retry()
                 self.auth_mode = 'mediastream' if self.gate_open else None
                 await self._emit_ready()
-                await self._serve()
+                await self._run_serve()
         finally:
-            await self._cleanup()
+            await self._cleanup(preserve_capture_mux=preserve_capture_mux)
 
     async def _init_touch(self) -> None:
         await self._emit_status('initializing_touch')
@@ -2329,18 +2619,78 @@ class TouchSession:
             self.auth_mode = 'direct'
             self.gate_open = True
 
-    async def _emit_ready(self) -> None:
+    async def _emit_ready(self, *, probe_sender: bool = True) -> None:
         if not self.gate_open and self.hid is None:
             raise BridgePrerequisiteError(
                 'remote_control_gate_closed',
                 'The media-stream authentication gate is closed; the bridge will not claim ready.',
             )
+        # A service inventory alone does not prove that its sender works.
+        # Send a harmless release and fence it with a response on the SAME HID.
+        if probe_sender:
+            await self._probe_hid_sender()
+        self._generation += 1
+        self._input_verified = False
+        recovered = self._recovering
+        if recovered:
+            await self._recovery_event('hid_ready')
+            await self._recovery_event('sender_restored')
         await self.ipc.emit({
             'event': 'ready', 'protocol': PROTOCOL_VERSION,
             'capabilities': CAPABILITIES, 'udid': self.udid, 'rateHz': self.rate_hz,
             'gateOpen': self.gate_open, 'authMode': self.auth_mode,
             'transport': self.transport_mode,
+            'generation': self._generation,
         })
+        self._session_ready.set()
+        self._hid_transport_failed = False
+        self._recovering = False
+        self._recovery_attempt = 0
+        if recovered:
+            await self._recovery_event('recovery_completed')
+
+    async def _probe_hid_sender(self) -> None:
+        if self.hid is None:
+            raise RuntimeError('HID sender is unavailable')
+        async with self._hid_lifecycle_lock:
+            for slot in range(MAX_SLOTS):
+                report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_RELEASE, 0, 0)
+                await asyncio.wait_for(self.hid.send_report(
+                    DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report), HID_OPERATION_TIMEOUT_SECONDS)
+            if self.keyboard_service_id is not None:
+                await asyncio.wait_for(self.hid.send_keyboard(self.keyboard_service_id, []),
+                                       HID_OPERATION_TIMEOUT_SECONDS)
+            await self._ping_hid()
+
+    async def _ping_hid(self, hid=None) -> None:
+        """Fence HID writes without repeating the one-shot service inventory.
+
+        This device closes Universal HID on a second connectedServices request.
+        HTTP/2 PING is acknowledged on the same live socket, does not alter HID
+        state, and leaves XPC responses available for their original caller.
+        The caller holds _hid_lifecycle_lock throughout.
+        """
+        service = (hid if hid is not None else self.hid).service
+        async with service._request_lock:
+            ping = PingFrame(0, opaque_data=os.urandom(8))
+            service.writer.write(ping.serialize())
+            await asyncio.wait_for(service.writer.drain(), HID_OPERATION_TIMEOUT_SECONDS)
+            async def receive_ack():
+                while True:
+                    frame = await service._receive_frame()
+                    service._apply_flow_control_frame(frame)
+                    if isinstance(frame, (GoAwayFrame, RstStreamFrame)):
+                        raise ConnectionError(f'HID transport closed: {frame}')
+                    if isinstance(frame, DataFrame):
+                        service._buffered_data_frames.append(frame)
+                    elif isinstance(frame, PingFrame):
+                        if 'ACK' in frame.flags and frame.opaque_data == ping.opaque_data:
+                            return
+                        if 'ACK' not in frame.flags:
+                            service.writer.write(PingFrame(0, flags=['ACK'],
+                                opaque_data=frame.opaque_data).serialize())
+                            await service.writer.drain()
+            await asyncio.wait_for(receive_ack(), HID_OPERATION_TIMEOUT_SECONDS)
 
     async def _drain(self) -> None:
         try:
@@ -2350,7 +2700,10 @@ class TouchSession:
             pass
 
     async def _serve(self) -> None:
+        self._serve_task = asyncio.current_task()
         sm = FiveSlotStateMachine()
+        sm_generation = self._generation
+        last_stale_generation = None
         # Universal HID over the wired CoreDevice tunnel is single-session on
         # affected iOS builds. Periodic pasteboard service connections can
         # reset that HID session while a user is actively controlling the
@@ -2360,7 +2713,7 @@ class TouchSession:
         pasteboard_task = (asyncio.create_task(self._poll_device_pasteboard())
                            if self.transport_mode == 'wireless' else None)
         rotation_task = (asyncio.create_task(self._request_direct_hid_rotation())
-                         if self.transport_mode == 'usb' and self.auth_mode == 'direct'
+                         if self.transport_mode == 'usb'
                          else None)
         paste_tasks: set[asyncio.Task[None]] = set()
 
@@ -2397,29 +2750,75 @@ class TouchSession:
         try:
             async for frame in self.ipc.read_messages():
                 try:
-                    if frame.get('kind') == KEYBOARD_MESSAGE_KIND:
-                        _, ts, usages = decode_keyboard_batch(frame)
-                        await self._apply_keyboard(frame, ts, usages)
-                    elif frame.get('kind') == PASTE_TEXT_MESSAGE_KIND:
-                        text = frame.get('text')
-                        if not isinstance(text, str):
-                            raise ValueError('paste text must be a string')
-                        paste_task = asyncio.create_task(run_paste(text))
-                        paste_tasks.add(paste_task)
-                        paste_task.add_done_callback(track_paste_task)
-                    elif frame.get('kind') == READ_CLIPBOARD_MESSAGE_KIND:
-                        read_task = asyncio.create_task(run_clipboard_read())
-                        paste_tasks.add(read_task)
-                        read_task.add_done_callback(track_paste_task)
-                    elif frame.get('kind') == BUTTON_MESSAGE_KIND:
-                        _, page, code, state = decode_button_event(frame)
-                        await self._apply_button(page, code, state)
-
-                    else:
-                        _, _, points = decode_touch_batch(frame)
-                        await self._apply_frame(sm, frame, points)
+                    # A background health repair owns recovery until it emits
+                    # verified ready. Do not drain queued input into that repair.
+                    if self._recovering:
+                        await self._session_ready.wait()
+                    if sm_generation != self._generation:
+                        sm.clear()
+                        sm_generation = self._generation
+                    frame_generation = frame.get('generation')
+                    if frame_generation is not None and frame_generation != self._generation:
+                        if frame_generation != last_stale_generation:
+                            await self.ipc.emit({'event': 'status', 'code': 'stale_input_dropped',
+                                'message': f'frame_generation={frame_generation} active_generation={self._generation}'})
+                            last_stale_generation = frame_generation
+                        continue
+                    for attempt in range(2):
+                        attempted_hid = self.hid
+                        try:
+                            if frame.get('kind') == KEYBOARD_MESSAGE_KIND:
+                                _, ts, usages = decode_keyboard_batch(frame)
+                                await self._apply_keyboard(frame, ts, usages)
+                            elif frame.get('kind') == PASTE_TEXT_MESSAGE_KIND:
+                                text = frame.get('text')
+                                if not isinstance(text, str):
+                                    raise ValueError('paste text must be a string')
+                                paste_task = asyncio.create_task(run_paste(text))
+                                paste_tasks.add(paste_task)
+                                paste_task.add_done_callback(track_paste_task)
+                            elif frame.get('kind') == READ_CLIPBOARD_MESSAGE_KIND:
+                                read_task = asyncio.create_task(run_clipboard_read())
+                                paste_tasks.add(read_task)
+                                read_task.add_done_callback(track_paste_task)
+                            elif frame.get('kind') == BUTTON_MESSAGE_KIND:
+                                _, page, code, state = decode_button_event(frame)
+                                await self._apply_button(page, code, state)
+                            else:
+                                _, _, points = decode_touch_batch(frame)
+                                await self._apply_frame(sm, frame, points)
+                            keyboard_release = (frame.get('kind') == KEYBOARD_MESSAGE_KIND
+                                                and not usages)
+                            if not self._input_verified or keyboard_release:
+                                async with self._hid_lifecycle_lock:
+                                    await self._ping_hid()
+                                self._input_verified = True
+                                await self.ipc.emit({'event': 'status', 'code': 'input_verified',
+                                    'message': f'kind={frame.get("kind")} seq={frame.get("seq")} generation={self._generation}'})
+                            break
+                        except Exception as error:
+                            if (attempt != 0 or self.transport_mode != 'usb' or
+                                    self.auth_mode != 'direct' or
+                                    frame.get('kind') in {PASTE_TEXT_MESSAGE_KIND,
+                                                          READ_CLIPBOARD_MESSAGE_KIND}):
+                                raise
+                            if not await self._repair_hid(error, attempted_hid):
+                                raise
+                            await self.ipc.emit({
+                                'event': 'warning',
+                                'code': 'direct_hid_recovered',
+                                'message': 'Direct HID service recovered; waiting for input from the new generation.',
+                            })
+                            # Recovery already released all held state. Replaying
+                            # the old press can stick a key whose release was
+                            # gated off while disconnected. Accept fresh input.
+                            sm.clear()
+                            break
                 except Exception as e:
-                    await self.ipc.emit({'event': 'error', 'code': 'send_failed',
+                    await self._mark_recovering(e)
+                    log.exception('HID command failed kind=%s seq=%s',
+                                  frame.get('kind'), frame.get('seq'))
+                    await self.ipc.emit({'event': 'warning', 'code': 'send_failed',
                                          'message': f'{type(e).__name__}: {str(e)[:200]}'})
                     break
         finally:
@@ -2427,7 +2826,7 @@ class TouchSession:
                 pasteboard_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await pasteboard_task
-            if rotation_task is not None:
+            if rotation_task is not None and rotation_task is not asyncio.current_task():
                 rotation_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await rotation_task
@@ -2435,24 +2834,114 @@ class TouchSession:
                 task.cancel()
             if paste_tasks:
                 await asyncio.gather(*paste_tasks, return_exceptions=True)
+            self._serve_task = None
+
+    async def _repair_hid(self, error: Exception, failed_hid) -> bool:
+        """One transaction owns inline repair, including verification/ready.
+
+        Sender and watchdog errors can refer to the same failed connection.
+        A waiter reuses the completed repair instead of closing the new HID;
+        failed repair leaves transport reconstruction to the supervisor.
+        Enter only after the failed operation releases its lifecycle lock.
+        """
+        async with self._hid_recovery_lock:
+            if failed_hid is not self.hid and self._session_ready.is_set():
+                return True
+            if self._recovering and self._hid_transport_failed:
+                return False
+            await self._mark_recovering(error)
+            reason = self._transport_failure_reason()
+            if reason:
+                await self._recovery_event('hid_repair_skipped_transport_dead', ConnectionError(reason))
+                return False
+            if self.auth_mode != 'direct':
+                return False
+            await self.ipc.emit({'event': 'warning', 'code': 'direct_hid_recovery_begin',
+                'message': 'Repairing and verifying the failed HID service.'})
+            try:
+                await self._refresh_direct_hid()
+                await self._emit_ready()
+                return True
+            except asyncio.CancelledError:
+                raise
+            except Exception as refresh_error:
+                await self._recovery_event('hid_reinit_failed', refresh_error)
+                return False
 
     async def _request_direct_hid_rotation(self) -> None:
-        """Report the lease refresh window without tearing down a live HID session.
-
-        Rebuilding the whole bridge here races the active QuickTime usbmux
-        claim and can make an otherwise healthy mirror lose control.  A real
-        HID operation failure still emits ``send_failed`` and follows the
-        normal recovery path; this timer must remain advisory only.
-        """
+        """Watch every wired HID; rotate only direct-auth HID proactively."""
+        refresh_due = time.monotonic() + DIRECT_HID_ROTATION_SECONDS
         try:
-            await asyncio.sleep(DIRECT_HID_ROTATION_SECONDS)
-            await self.ipc.emit({
-                'event': 'warning',
-                'code': 'direct_hid_rotation_deferred',
-                'message': 'Direct Universal HID lease refresh deferred while the active session is healthy.',
-            })
+            while True:
+                await asyncio.sleep(HID_HEALTH_INTERVAL_SECONDS)
+                attempted_hid = self.hid
+                try:
+                    if self.auth_mode == 'direct' and time.monotonic() >= refresh_due:
+                        await self._refresh_direct_hid()
+                        refresh_due = time.monotonic() + DIRECT_HID_ROTATION_SECONDS
+                    else:
+                        # Round-trip on the active HID, also when input is idle.
+                        async with self._hid_lifecycle_lock:
+                            attempted_hid = self.hid
+                            await self._ping_hid()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    log.warning('direct HID health/refresh failed: %s', error)
+                    await self.ipc.emit({'event': 'warning', 'code': 'hid_health_failed',
+                                         'message': f'{type(error).__name__}: {str(error)[:200]}'})
+                    if await self._repair_hid(error, attempted_hid):
+                        refresh_due = time.monotonic() + DIRECT_HID_ROTATION_SECONDS
+                        continue
+                    serve_task = self._serve_task
+                    if serve_task is not None and serve_task is not asyncio.current_task():
+                        serve_task.cancel()
+                    return
         except asyncio.CancelledError:
             raise
+
+    async def _refresh_direct_hid(self) -> None:
+        """Reopen only Universal HID over the existing CoreDevice tunnel."""
+        if not hasattr(self, '_hid_lifecycle_lock'):
+            self._hid_lifecycle_lock = asyncio.Lock()
+        async with self._hid_lifecycle_lock:
+            await self.ipc.emit({'event': 'warning', 'code': 'direct_hid_refresh_begin',
+                                 'message': 'Refreshing the direct Universal HID session.'})
+            old_hid = self.hid
+            hid_type = (LegacyUniversalHIDServiceService
+                        if old_hid is not None and
+                        old_hid.SERVICE_NAME == LEGACY_UNIVERSAL_HID_SERVICE
+                        else UniversalHIDServiceService)
+            if self.indigo is not None:
+                await self._close_remote_service(self.indigo, 'refresh_indigo')
+                self.indigo = None
+            new_hid = hid_type(self.rsd)
+            old_keyboard_service_id = self.keyboard_service_id
+            self.keyboard_service_id = None
+            try:
+                await asyncio.wait_for(new_hid.__aenter__(), 8)
+                await self._verify_touch_surface(new_hid)
+                # Inventory may succeed just before iOS closes the socket.
+                # Fence the candidate on its own connection before adoption.
+                await self._ping_hid(new_hid)
+                if old_hid is not None:
+                    await self._close_remote_service(old_hid, 'replaced_hid')
+                await self._ping_hid(new_hid)
+            except BaseException as error:
+                self.keyboard_service_id = old_keyboard_service_id
+                await self._close_remote_service(new_hid, 'rejected_hid')
+                if isinstance(error, asyncio.CancelledError):
+                    raise
+                await self.ipc.emit({'event': 'warning', 'code': 'direct_hid_refresh_failed',
+                                     'message': f'{type(error).__name__}: {str(error)[:200]}'})
+                raise
+            self.hid = new_hid
+            # _verify_touch_surface selected this session's device-owned
+            # keyboard. Clearing it registers a duplicate and iOS resets HID.
+            self._owns_hid = True
+            self._input_verified = False
+            await self.ipc.emit({'event': 'warning', 'code': 'direct_hid_refreshed',
+                                 'message': 'Direct Universal HID session refreshed.'})
 
     async def _read_device_pasteboard(self):
         if self.rsd is None:
@@ -2512,44 +3001,50 @@ class TouchSession:
 
     async def _send_keyboard_report(self, usages: list[int],
                                     timestamp: Optional[int] = None) -> None:
-        if self.keyboard_service_id is None:
-            # Register the virtual keyboard through the same public API used by
-            # The service ID is device-specific; do not assume that a requested
-            # value was accepted until the device confirms it.
-            # accepted: dtuhidd may allocate a different ID per session/device.
-            self.keyboard_service_id = await self.hid.create_keyboard_service(
-                product='iPhoneMirror virtual keyboard', manufacturer='iPhoneMirror')
-            await self.ipc.emit({'event': 'status', 'code': 'keyboard_service_ready',
-                                 'message': str(self.keyboard_service_id)})
-        # send_keyboard builds the report using the active pymobiledevice3
-        # implementation and addresses the registered service consistently.
-        async with self._hid_operation_lock:
-            await asyncio.wait_for(
-                self.hid.send_keyboard(self.keyboard_service_id, usages, timestamp),
-                timeout=HID_OPERATION_TIMEOUT_SECONDS)
+        async with self._hid_lifecycle_lock:
+            if self.hid is None:
+                raise RuntimeError('Universal HID service is unavailable')
+            if self.keyboard_service_id is None:
+                # Register the virtual keyboard through the same public API used by
+                # The service ID is device-specific; do not assume that a requested
+                # value was accepted until the device confirms it.
+                self.keyboard_service_id = await asyncio.wait_for(
+                    self.hid.create_keyboard_service(
+                        product='iPhoneMirror virtual keyboard', manufacturer='iPhoneMirror'),
+                    HID_OPERATION_TIMEOUT_SECONDS)
+                await self.ipc.emit({'event': 'status', 'code': 'keyboard_service_ready',
+                                     'message': str(self.keyboard_service_id)})
+            async with self._hid_operation_lock:
+                await asyncio.wait_for(
+                    self.hid.send_keyboard(self.keyboard_service_id, usages, timestamp),
+                    timeout=HID_OPERATION_TIMEOUT_SECONDS)
 
     async def _send_touch_report(self, report: bytes, *, motion: bool = False) -> None:
-        if self.hid is None:
-            raise RuntimeError('Universal HID service is unavailable')
-        # send_report uses send_request (not send_receive_request), so it
-        # is fire-and-forget at the XPC level. The _hid_operation_lock is
-        # unnecessary here — it serializes reports at the writer.drain()
-        # boundary, capping the send rate at the device's HID processing
-        # speed. Without the lock, multiple reports fill the transport
-        # buffer back-to-back and the device drains them at its own pace.
+        # RemoteXPC sends bytes before drain(), then increments its message
+        # ID. Cancelling drain and continuing on that socket reuses the ID.
+        # Give a slow motion write its remaining operation budget without
+        # cancelling it; a real timeout must escape to HID recovery.
         timeout = (HID_TOUCH_MOTION_TIMEOUT_SECONDS if motion
                    else HID_OPERATION_TIMEOUT_SECONDS)
-        try:
-            await asyncio.wait_for(
-                self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report),
-                timeout=timeout)
-        except asyncio.TimeoutError:
-            if motion:
-                # Drop one stale move. The next coalesced sample supersedes it.
-                return
-            await asyncio.wait_for(
-                self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report),
-                timeout=HID_OPERATION_TIMEOUT_SECONDS)
+        async with self._hid_lifecycle_lock:
+            if self.hid is None:
+                raise RuntimeError('Universal HID service is unavailable')
+            send = asyncio.create_task(self.hid.send_report(
+                DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report))
+            try:
+                try:
+                    await asyncio.wait_for(asyncio.shield(send), timeout)
+                except asyncio.TimeoutError:
+                    if not motion or send.done():
+                        raise
+                    await self.ipc.emit({'event': 'warning', 'code': 'hid_write_slow',
+                        'message': 'Waiting for the same in-flight motion write; no duplicate XPC request sent.'})
+                    await asyncio.wait_for(asyncio.shield(send),
+                        max(0.001, HID_OPERATION_TIMEOUT_SECONDS - timeout))
+            finally:
+                if not send.done():
+                    send.cancel()
+                await asyncio.gather(send, return_exceptions=True)
 
     async def _apply_paste_text(self, text: str) -> None:
         if self.rsd is None:
@@ -2578,19 +3073,22 @@ class TouchSession:
                         await self._send_keyboard_report([])
 
     async def _apply_button(self, usage_page: int, usage_code: int, state: str) -> None:
-        if self.indigo is None:
-            self.indigo = IndigoHIDService(self.rsd)
-            await self.indigo.__aenter__()
-        state_code = {'down': 1, 'up': 2, 'canceled': 3}[state]
-        await asyncio.wait_for(
-            self.indigo.send_button(usage_page, usage_code, state_code),
-            timeout=HID_OPERATION_TIMEOUT_SECONDS)
+        async with self._hid_lifecycle_lock:
+            if self.indigo is None:
+                indigo = IndigoHIDService(self.rsd)
+                await asyncio.wait_for(indigo.__aenter__(), HID_OPERATION_TIMEOUT_SECONDS)
+                self.indigo = indigo
+            state_code = {'down': 1, 'up': 2, 'canceled': 3}[state]
+            await asyncio.wait_for(
+                self.indigo.send_button(usage_page, usage_code, state_code),
+                timeout=HID_OPERATION_TIMEOUT_SECONDS)
 
 
     async def _apply_frame(self, sm: FiveSlotStateMachine, frame: dict, points: list[dict]) -> None:
-        ts = frame.get('timestampNs')
-        if ts is not None:
-            ts = int(ts) & ((1 << 48) - 1)
+        # The HID report field is device-monotonic time, not host wall-clock
+        # time. Generate it at send time so delayed frames cannot move time
+        # backwards after a refresh or clock adjustment.
+        ts = None
         for touch_point in points:
             pointer_id = int(touch_point['pointerId'])
             action = touch_point['action']
@@ -2609,13 +3107,26 @@ class TouchSession:
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_CONTACT, x, y, ts)
                 await self._send_touch_report(report, motion=True)
             elif action == 'up':
-                slot = sm.release(pointer_id)
+                slot = sm.slot_for(pointer_id)
                 if slot is None:
                     continue
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_RELEASE, x, y, ts)
                 await self._send_touch_report(report)
+                sm.release(pointer_id)
 
-    async def _cleanup(self) -> None:
+    async def _close_remote_service(self, service, stage: str) -> None:
+        # RemoteXPC.close awaits writer.wait_closed. A failed peer must not
+        # leave refresh holding the lifecycle lock or prevent RSD teardown.
+        try:
+            await asyncio.wait_for(service.__aexit__(None, None, None),
+                                   HID_CLEANUP_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            await self.ipc.emit({'event': 'warning', 'code': 'cleanup_stage_failed',
+                'message': f'stage={stage} error={type(error).__name__}: {str(error)[:160]}'})
+
+    async def _cleanup(self, *, preserve_capture_mux: bool = False) -> None:
         # 强制释放所有触点（异常清理）。失效 HID 可能不响应；不要让
         # 逐个释放报告阻塞 usbmux 接口的释放，否则下一次控制重连会在
         # 旧桥仍持有接口时开始 VERSION 握手。
@@ -2635,27 +3146,12 @@ class TouchSession:
             await asyncio.wait_for(
                 release_hid_state(), timeout=HID_CLEANUP_TIMEOUT_SECONDS)
         if self.hid is not None and self._owns_hid:
-            with contextlib.suppress(Exception):
-                await self.hid.__aexit__(None, None, None)
+            await self._close_remote_service(self.hid, 'hid')
         if self.indigo is not None:
-            try:
-                await self.indigo.__aexit__(None, None, None)
-            except Exception:
-                pass
+            await self._close_remote_service(self.indigo, 'indigo')
             self.indigo = None
-        if self._usb_mux_server is not None:
-            with contextlib.suppress(Exception):
-                self._usb_mux_server.stop()
-            self._usb_mux_server = None
-        if self._usb_mux_transport is not None:
-            with contextlib.suppress(Exception):
-                self._usb_mux_transport.close()
-            self._usb_mux_transport = None
-        if self._usb_mux_previous_env is None:
-            os.environ.pop('USBMUXD_SOCKET_ADDRESS', None)
-        else:
-            os.environ['USBMUXD_SOCKET_ADDRESS'] = self._usb_mux_previous_env
-        self._usb_mux_previous_env = None
+        if not preserve_capture_mux:
+            self._close_capture_mux()
         if self.drain_task is not None:
             self.drain_task.cancel()
             try:
@@ -2673,7 +3169,8 @@ class TouchSession:
                 if not isinstance(csid, _uuid.UUID):
                     csid = _uuid.UUID(csid)
                 with __import__('contextlib').suppress(Exception):
-                    await self.display.stop_media_stream(csid)
+                    await asyncio.wait_for(self.display.stop_media_stream(csid),
+                                           HID_CLEANUP_TIMEOUT_SECONDS)
             except Exception:
                 pass
         if self.transport is not None:
@@ -2682,20 +3179,11 @@ class TouchSession:
             except Exception:
                 pass
         if self.display is not None:
-            try:
-                await self.display.__aexit__(None, None, None)
-            except Exception:
-                pass
+            await self._close_remote_service(self.display, 'display')
         if self.rsd is not None:
-            try:
-                await self.rsd.__aexit__(None, None, None)
-            except Exception:
-                pass
+            await self._close_remote_service(self.rsd, 'rsd')
         if self.dial_plane is not None:
-            try:
-                await self.dial_plane.__aexit__(None, None, None)
-            except Exception:
-                pass
+            await self._close_remote_service(self.dial_plane, 'dial_plane')
         self.hid = None
         self._owns_hid = False
         self.rsd = None

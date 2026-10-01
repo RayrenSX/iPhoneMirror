@@ -391,6 +391,21 @@ internal sealed class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_set_preview_corner_profile(float normalizedRadius, float curveExponent);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_window_opacity(ulong handle, nint hwnd, float opacity);
+
+    internal static bool SetDeviceWindowOpacity(ulong handle, nint hwnd, double opacity)
+    {
+        if (handle == 0 || hwnd == 0 || !double.IsFinite(opacity)) return false;
+        try { return im_session_set_window_opacity(handle, hwnd, (float)Math.Clamp(opacity, 0.1, 1.0)) == 0; }
+        catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
+        {
+            DiagnosticLogger.ExceptionOnce("native-window-opacity", "native",
+                "window_opacity_unavailable", error);
+            return false;
+        }
+    }
+
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     private static extern int im_session_create([MarshalAs(UnmanagedType.LPWStr)] string udid,
         ref NativeCaptureOptions options, out ulong handle);
@@ -866,8 +881,7 @@ internal sealed class NativeCore : IDisposable
         if (handle is null || handle.IsInvalid) return;
         var result = im_session_stop(handle.RawHandle);
         if (result == 0) return;
-        var message = GetLastError(
-            $"{LocalizationService.Get("StopFailedFormat")} (error {result})");
+        var message = GetLastError(LocalizationService.Format("StopFailedFormat", result));
         if (result == (int)NativeResult.UsbConfigurationRestoreWarning)
             throw new UsbConfigurationRestoreWarningException(message, result);
         throw new InvalidOperationException(message);
@@ -897,7 +911,7 @@ internal sealed class NativeCore : IDisposable
         return status;
     }
 
-    public long GetDeviceSessionLatestFrameTimestamp(NativeSessionHandle handle)
+    public long GetDeviceSessionLatestFrameTimestamp(NativeSessionHandle? handle)
     {
         if (handle is null || handle.IsInvalid) return 0;
         bool added = false;
@@ -917,7 +931,7 @@ internal sealed class NativeCore : IDisposable
         finally { if (added) handle.DangerousRelease(); }
     }
 
-    public bool TryGetDeviceVideoOutputStatus(NativeSessionHandle handle,
+    public bool TryGetDeviceVideoOutputStatus(NativeSessionHandle? handle,
         out NativeVideoOutputStatus status)
     {
         status = new NativeVideoOutputStatus
@@ -1110,7 +1124,7 @@ internal sealed class NativeCore : IDisposable
         return new VideoFrame(info.Width, info.Height, info.Stride, info.Timestamp100Ns, _frameBuffer);
     }
 
-    internal VideoFrame? GetDeviceOutputFrame(NativeSessionHandle handle, uint width, uint height)
+    internal VideoFrame? GetDeviceOutputFrame(NativeSessionHandle? handle, uint width, uint height)
     {
         if (handle is null || handle.IsInvalid) return null;
         bool added = false;
@@ -1138,7 +1152,7 @@ internal sealed class NativeCore : IDisposable
         finally { if (added) handle.DangerousRelease(); }
     }
 
-    internal Nv12VideoFrame? GetDeviceOutputNv12Frame(NativeSessionHandle handle, uint width,
+    internal Nv12VideoFrame? GetDeviceOutputNv12Frame(NativeSessionHandle? handle, uint width,
         uint height)
     {
         if (handle is null || handle.IsInvalid) return null;
@@ -1169,7 +1183,7 @@ internal sealed class NativeCore : IDisposable
         finally { if (added) handle.DangerousRelease(); }
     }
 
-    internal AudioPacket? GetDeviceOutputAudioPacket(NativeSessionHandle handle,
+    internal AudioPacket? GetDeviceOutputAudioPacket(NativeSessionHandle? handle,
         ulong afterSequence)
     {
         if (handle is null || handle.IsInvalid) return null;

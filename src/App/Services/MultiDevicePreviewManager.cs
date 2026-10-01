@@ -29,6 +29,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal event Action<string>? PreviewClosed;
     internal event Action<string, PreviewPointerEventArgs>? PointerInput;
     internal event Action<string, PreviewKeyboardEventArgs>? KeyboardInput;
+    internal event Action<string, nint, bool>? KeyboardFocusChanged;
 
     internal MultiDevicePreviewManager(MainViewModel viewModel,
         Func<bool>? isReverseControlHotkeyRegistered = null,
@@ -48,6 +49,10 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal bool IsOpen(DeviceViewModel? device) => device is not null &&
         _windows.ContainsKey(device.Udid);
     internal bool HasAnyOpen => _windows.Count != 0;
+
+    internal nint GetWindowHandle(string? udid) =>
+        !string.IsNullOrWhiteSpace(udid) && _windows.TryGetValue(udid, out var window)
+            ? window.Handle : 0;
 
     internal bool Activate(string? udid)
     {
@@ -176,6 +181,9 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             return (false, LocalizationService.Get("PreviewRendererAttachFailed"));
         }
         _windows[device.Udid] = window;
+        window.ActivationChanged += active =>
+            KeyboardFocusChanged?.Invoke(device.Udid, window.Handle, active);
+        KeyboardFocusChanged?.Invoke(device.Udid, window.Handle, true);
         if (_protectionStates.TryGetValue(device.Udid, out var protection))
             window.SetProtectedContent(protection.IsProtected,
                 protection.AudioDisplay);
@@ -195,13 +203,14 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                 ("handle", AppLog.Handle(closingHandle)),
                 ("created_session", started.Created),
                 ("disposing", _disposing)));
-            if (_disposing || !started.Created) return;
+            if (_disposing || (!started.Created && !viewModel.IsTrayApplicationMode)) return;
             try
             {
                 // The selected-main check is performed under the same core
                 // gate that revokes the handle, closing the selection race.
                 await viewModel.StopDeviceSessionAsync(
-                    device.Udid, closingHandle, preserveIfSelected: true);
+                    device.Udid, closingHandle, preserveIfSelected: true,
+                    pauseWireless: viewModel.IsTrayApplicationMode);
             }
             catch (Exception error)
             {

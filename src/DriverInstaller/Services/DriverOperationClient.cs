@@ -42,13 +42,16 @@ internal sealed class DriverOperationClient
         }
     }
 
+    internal event Action<string>? StatusChanged;
+
     internal async Task<DriverOperationResult> RunAsync(DriverOperationKind kind,
-        AppleDeviceRecord device)
+        AppleDeviceRecord device, ParentDriverConsent? parentConsent = null)
     {
         var operationId = Guid.NewGuid().ToString("N");
         var timer = Stopwatch.StartNew();
         var deviceFingerprint = DriverLogger.DeviceFingerprint(device.Serial);
-        if (!DriverConstants.IsAllowedAppleParent(device.InstanceId) ||
+        if (!DriverConstants.IsAppleMobileCaptureParent(device.InstanceId) ||
+            (kind == DriverOperationKind.ParentRepair ? parentConsent?.Matches(device) != true : parentConsent is not null) ||
             !string.Equals(DriverConstants.NormalizeSerial(device.Serial), device.Serial,
                 StringComparison.OrdinalIgnoreCase))
         {
@@ -91,6 +94,7 @@ internal sealed class DriverOperationClient
         start.ArgumentList.Add(device.InstanceId);
         start.ArgumentList.Add(device.Serial);
         start.ArgumentList.Add(operationId);
+        if (parentConsent is not null) start.ArgumentList.Add(parentConsent.Encode());
 
         try
         {
@@ -98,6 +102,7 @@ internal sealed class DriverOperationClient
                 ("operation", operationId), ("kind", kind),
                 ("process", Path.GetFileName(executable)),
                 ("timeout_ms", OperationTimeout.TotalMilliseconds));
+            using var cancellation = DriverOperationCancellation.Create(operationId);
             using var process = Process.Start(start);
             if (process is null)
             {
@@ -105,35 +110,13 @@ internal sealed class DriverOperationClient
                     ("operation", operationId), ("kind", kind));
                 return Failure(DriverLocalization.Get("ElevatedProcessStartFailed"), paths.LogPath);
             }
-            using var cancellation = new CancellationTokenSource(OperationTimeout);
-            try
+            await DriverOperationSafety.WaitForExitAsync(process, OperationTimeout, () =>
             {
-                await process.WaitForExitAsync(cancellation.Token);
-            }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-            {
-                var terminationRequested = false;
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(entireProcessTree: true);
-                        terminationRequested = true;
-                        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-                    }
-                }
-                catch (Exception terminationError)
-                {
-                    DriverLogger.WriteException("driver-operation", "timeout_termination_failed",
-                        terminationError, ("operation", operationId), ("kind", kind));
-                }
-                DriverLogger.WriteError("driver-operation", "elevated_process_timeout",
-                    ("operation", operationId), ("kind", kind),
-                    ("elapsed_ms", timer.ElapsedMilliseconds),
-                    ("termination_requested", terminationRequested),
-                    ("terminated", process.HasExited));
-                return Failure(DriverLocalization.Get("ElevatedProcessTimeout"), paths.LogPath);
-            }
+                cancellation.Request();
+                DriverLogger.WriteWarning("driver-operation", "safe_cancellation_requested",
+                    ("operation", operationId), ("kind", kind), ("log", paths.LogPath));
+                StatusChanged?.Invoke(DriverLocalization.Format("DriverWaitingSafeStop", paths.LogPath));
+            });
 
             DriverLogger.WriteEvent("driver-operation", "elevated_process_exit",
                 ("operation", operationId), ("kind", kind), ("exit_code", process.ExitCode),
@@ -165,7 +148,7 @@ internal sealed class DriverOperationClient
                     ("expected", deviceFingerprint),
                     ("actual", DriverLogger.DeviceFingerprint(result.InstanceId)));
                 return Failure(
-                    "The elevated driver operation result did not match the requested device instance id.",
+                    DriverLocalization.Get("DriverResultTargetMismatch"),
                     paths.LogPath);
             }
             if (!IsResultConsistentWithExitCode(process.ExitCode, completed))
@@ -174,7 +157,7 @@ internal sealed class DriverOperationClient
                     ("operation", operationId), ("kind", kind),
                     ("exit_code", process.ExitCode), ("result_success", completed.Success));
                 return Failure(
-                    $"The elevated driver operation result did not match process exit code {process.ExitCode}.",
+                    DriverLocalization.Format("DriverResultExitCodeMismatchFormat", process.ExitCode),
                     paths.LogPath);
             }
             DriverLogger.WriteEvent("driver-operation", "completed",
@@ -183,7 +166,7 @@ internal sealed class DriverOperationClient
                 ("elapsed_ms", timer.ElapsedMilliseconds),
                 ("message", completed.Message),
                 ("operation_log", DriverLogger.DescribePath(completed.LogPath)));
-            return completed;
+            return completed with { Message = DriverLocalization.LocalizeOperationResult(completed.Message) };
         }
         catch (Win32Exception error) when (error.NativeErrorCode == 1223)
         {

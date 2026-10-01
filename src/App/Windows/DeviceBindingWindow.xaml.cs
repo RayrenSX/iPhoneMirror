@@ -33,7 +33,7 @@ public sealed class ProfileListItem : INotifyPropertyChanged
         !string.IsNullOrWhiteSpace(value))?.Trim() ?? L("DeviceBindingUnnamedDevice");
 }
 
-public partial class DeviceBindingWindow : Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
+public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindow, INotifyPropertyChanged
 {
     private readonly MainViewModel _viewModel;
     private readonly bool _previewOnly;
@@ -238,6 +238,7 @@ public partial class DeviceBindingWindow : Wpf.Ui.Controls.FluentWindow, INotify
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         foreach (var profile in Profiles) profile.NotifyLanguageChanged();
+        foreach (var client in BluetoothClients) client.NotifyLanguageChanged();
         NotifyAll();
     }
     private void OnDevicesChanged(object? sender, NotifyCollectionChangedEventArgs e) => Dispatcher.InvokeAsync(() => { if (!_previewOnly) { CreateProfilesForConnectedUsbDevices(); SynchronizeProfiles(); } Notify(nameof(WiredDevices)); Notify(nameof(AirPlayDevices)); });

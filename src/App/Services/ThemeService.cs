@@ -109,11 +109,13 @@ internal static class ThemeService
 
     private static void AnimateThemeTransition(Window window)
     {
-        if (!window.IsLoaded) return;
+        if (!window.IsLoaded || !SystemParameters.ClientAreaAnimation) return;
+        var opacity = (double)window.GetAnimationBaseValue(UIElement.OpacityProperty);
         window.BeginAnimation(UIElement.OpacityProperty,
-            new DoubleAnimation(0.88, 1, TimeSpan.FromMilliseconds(180))
+            new DoubleAnimation(opacity * 0.88, opacity, TimeSpan.FromMilliseconds(180))
             {
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop,
             });
     }
 

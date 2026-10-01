@@ -20,17 +20,25 @@ function Get-ReferencedResourceKeys([string]$Path) {
     $used = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
     Get-ChildItem -LiteralPath $Path -Recurse -File -Include *.xaml,*.cs |
-        Where-Object { $_.Name -notlike 'Strings.*.xaml' } |
+        Where-Object { $_.Name -notlike 'Strings.*.xaml' -and
+            $_.FullName -notmatch '[\\/](bin|obj|native)[\\/]' } |
         ForEach-Object {
             $content = Get-Content -Raw -LiteralPath $_.FullName -Encoding utf8
             if ($null -eq $content) { return }
             [regex]::Matches($content, 'DynamicResource\s+([A-Za-z0-9_]+)') |
                 ForEach-Object { [void]$used.Add($_.Groups[1].Value) }
             [regex]::Matches($content,
-                '(?:LocalizationService|DriverLocalization)\.(?:Get|Format)\(\s*"([A-Za-z0-9_]+)"') |
+                '(?:LocalizationService|DriverLocalization)\.(?:Get|GetOrDefault|Format)\(\s*"([A-Za-z0-9_]+)"(?!\s*\+)') |
                 ForEach-Object { [void]$used.Add($_.Groups[1].Value) }
+            # Include both resource names selected by a boolean property.
+            [regex]::Matches($content,
+                '(?:LocalizationService|DriverLocalization)\.(?:Get|GetOrDefault|Format)\(\s*[A-Za-z_][A-Za-z0-9_.]*\s*\?\s*"([A-Za-z0-9_]+)"\s*:\s*"([A-Za-z0-9_]+)"(?=\s*[,\)])') |
+                ForEach-Object {
+                    [void]$used.Add($_.Groups[1].Value)
+                    [void]$used.Add($_.Groups[2].Value)
+                }
         }
-    return $used
+    return ,$used
 }
 
 function Get-ResourceValues([string]$Path) {
@@ -119,6 +127,16 @@ Assert-FormatPlaceholders $EnglishPath $HongKongPath
 Assert-HongKongTerminology $HongKongPath
 
 $used = Get-ReferencedResourceKeys $App
+# These resource names are constructed from enum values at runtime. A partial
+# prefix such as ControlProgress is not itself a resource reference.
+$controlSource = Get-Content -Raw -LiteralPath (Join-Path $App 'Services\ControlStatusService.cs')
+foreach ($enum in @('ControlStage', 'ControlStageProgress')) {
+    $body = [regex]::Match($controlSource, "enum $enum\s*\{([^}]+)\}").Groups[1].Value
+    $prefix = if ($enum -eq 'ControlStageProgress') { 'ControlProgress' } else { 'ControlStage' }
+    foreach ($name in ($body -split ',')) {
+        if ($name.Trim()) { [void]$used.Add($prefix + $name.Trim()) }
+    }
+}
 
 $missing = @($used | Where-Object {
     $_ -notin $Chinese -and $_ -notin $ApplicationResources

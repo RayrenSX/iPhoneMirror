@@ -1,3 +1,4 @@
+using IPhoneMirror.App.Localization;
 using System.IO;
 using System.Text.Json;
 
@@ -41,7 +42,7 @@ internal static class ReleaseParser
             MaxDepth = 32,
         });
         if (document.RootElement.ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException("GitHub returned an invalid release list.");
+            throw new InvalidDataException(LocalizationService.Get("UpdateReleaseListInvalid"));
         var releases = new List<ReleaseInfo>();
         foreach (var element in document.RootElement.EnumerateArray())
         {
@@ -177,7 +178,7 @@ internal static class ReleaseParser
 
     private static string GetRequiredString(JsonElement element, string name) =>
         GetOptionalString(element, name) ??
-        throw new InvalidDataException($"GitHub release is missing {name}.");
+        throw new InvalidDataException(LocalizationService.Format("UpdateReleaseFieldMissingFormat", name));
 
     private static string? GetOptionalString(JsonElement element, string name) =>
         element.TryGetProperty(name, out var property) &&

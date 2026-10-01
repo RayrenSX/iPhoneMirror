@@ -8,7 +8,7 @@ using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class ShortcutSettingsWindow : Wpf.Ui.Controls.FluentWindow,
+public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWindow,
     INotifyPropertyChanged
 {
     private readonly Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, string?> _apply;
@@ -52,7 +52,7 @@ public partial class ShortcutSettingsWindow : Wpf.Ui.Controls.FluentWindow,
 
     public string StatusText
     {
-        get => _statusText;
+        get => LocalizationService.RefreshText(_statusText);
         private set
         {
             if (string.Equals(_statusText, value, StringComparison.Ordinal)) return;
@@ -134,7 +134,7 @@ public partial class ShortcutSettingsWindow : Wpf.Ui.Controls.FluentWindow,
     {
         foreach (var section in Sections) section.RefreshTitle();
         foreach (var row in Rows) row.RefreshLabel();
-        StatusText = string.Empty;
+        OnPropertyChanged(nameof(StatusText));
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>

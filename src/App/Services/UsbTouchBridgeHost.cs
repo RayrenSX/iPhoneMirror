@@ -1,7 +1,8 @@
+using IPhoneMirror.App.Localization;
 namespace IPhoneMirror.App.Services;
 
 internal enum UsbTouchTransport { Usb, Wireless }
-internal enum ReverseControlState { Idle, BindingRequired, DeviceUnavailable, Connecting, Ready, Controlling, Error }
+internal enum ReverseControlState { Idle, BindingRequired, DeviceUnavailable, Connecting, Ready, Controlling, Error, Recovering }
 
 internal sealed class BridgeStatusEventArgs(string eventName, string? code, string? message, string? text = null) : EventArgs
 {
@@ -39,7 +40,7 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
         lock (_gate)
         {
             if (Interlocked.Exchange(ref _started, 1) != 0)
-                throw new InvalidOperationException("USB 触控桥接器已经启动。");
+                throw new InvalidOperationException(LocalizationService.Get("TouchBridgeAlreadyStarted"));
             _requestedUdid = udid;
             _transport = transport;
             State = ReverseControlState.Connecting;
@@ -50,7 +51,7 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
             await _bridge.StartAsync(bridgePath, bridgePath, udid, 120,
                 transport == UsbTouchTransport.Wireless, cancellationToken);
             if (!string.Equals(_bridge.Udid, udid, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("反控桥接目标 UDID 不匹配。");
+                throw new InvalidOperationException(LocalizationService.Get("TouchBridgeTargetMismatch"));
             State = ReverseControlState.Ready;
             Raise("ready", null, $"{transport}:{udid}");
         }
@@ -71,27 +72,27 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     }
 
     internal Task SendKeyboardAsync(IReadOnlyCollection<byte> usages,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Func<bool>? canSend = null)
     {
         EnsureReady();
         State = ReverseControlState.Controlling;
-        return _bridge.SendKeyboardAsync(usages, cancellationToken);
+        return _bridge.SendKeyboardAsync(usages, cancellationToken, canSend);
     }
 
     internal Task SendButtonAsync(ushort usagePage, ushort usageCode,
-        string state, CancellationToken cancellationToken = default)
+        string state, CancellationToken cancellationToken = default, Func<bool>? canSend = null)
     {
         EnsureReady();
         State = ReverseControlState.Controlling;
-        return _bridge.SendButtonAsync(usagePage, usageCode, state, cancellationToken);
+        return _bridge.SendButtonAsync(usagePage, usageCode, state, cancellationToken, canSend);
     }
 
     internal Task SendPasteTextAsync(string text,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Func<bool>? canSend = null)
     {
         EnsureReady();
         State = ReverseControlState.Controlling;
-        return _bridge.SendPasteTextAsync(text, cancellationToken);
+        return _bridge.SendPasteTextAsync(text, cancellationToken, canSend);
     }
 
     internal Task SendReadClipboardAsync(
@@ -113,10 +114,18 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     private void EnsureReady()
     {
         if (!IsReady || State is not (ReverseControlState.Ready or ReverseControlState.Controlling))
-            throw new InvalidOperationException("反控桥接器尚未就绪。");
+            throw new InvalidOperationException(LocalizationService.Get("ReverseControlBridgeNotReady"));
     }
 
-    private void OnBridgeEvent(BridgeEvent e) => Raise(e.Event, e.Code, e.Message, e.Text);
+    private void OnBridgeEvent(BridgeEvent e)
+    {
+        if (e.Event == "ready") State = ReverseControlState.Ready;
+        else if (e.Event == "status" && e.Code == "recovery_triggered")
+            State = ReverseControlState.Recovering;
+        else if (e.Event == "error" || (e.Event == "status" && e.Code == "terminated"))
+            State = ReverseControlState.Error;
+        Raise(e.Event, e.Code, e.Message, e.Text);
+    }
     private void Raise(string name, string? code, string? message, string? text = null) =>
         StatusChanged?.Invoke(this, new BridgeStatusEventArgs(name, code, message, text));
 

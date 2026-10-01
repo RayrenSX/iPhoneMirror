@@ -8,6 +8,8 @@ using System.Text;
 [assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
 
 var failures = new List<string>();
+Run("confirmed parent driver changes and recovery", ParentDriverTests.Run);
+Run("driver failure recovery and download deadlines", DriverFailureTests.Run);
 
 Run("localized culture mapping", () =>
 {
@@ -93,6 +95,24 @@ Run("Apple parent allowlist", () =>
         @"USB\VID_05AC&PID_110A\0000000000000000"));
     False(DriverConstants.IsAppleMobileCaptureParent(
         @"USB\VID_05AC&PID_200E\0000000000000000"));
+});
+
+Run("legacy 40-character UDID passes enumeration and elevated validation", () =>
+{
+    var serial = "0123456789abcdef0123456789abcdef01234567";
+    Equal(40, serial.Length);
+    var parent = @"USB\VID_05AC&PID_12A8\" + serial;
+    True(DriverConstants.IsValidSerial(serial));
+    True(DriverConstants.IsAllowedAppleParent(parent));
+    True(DriverConstants.IsAppleMobileCaptureParent(parent));
+    True(DriverConstants.IsAppleMobileCaptureParent(parent.ToUpperInvariant()));
+    False(DriverConstants.IsAllowedAppleParent(parent + "0"));
+    False(DriverConstants.IsAllowedAppleParent(parent + "\n"));
+    False(DriverConstants.IsAllowedAppleParent(parent + @"\child"));
+    False(DriverConstants.IsAppleMobileCaptureParent(
+        @"USB\VID_05AC&PID_110A\" + serial));
+    False(DriverConstants.IsAppleMobileCaptureParent(
+        @"USB\VID_05AC&PID_12A8&MI_00\" + serial));
 });
 
 Run("Apple capture PID sources stay aligned", () =>
@@ -518,16 +538,6 @@ Run("operation log rotation is bounded", () =>
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
     }
-});
-
-Run("replaceable parent driver allowlist", () =>
-{
-    True(DriverConstants.IsKnownReplaceableParentService("WinUSB"));
-    True(DriverConstants.IsKnownReplaceableParentService("libusb0"));
-    True(DriverConstants.IsKnownReplaceableParentService("libusbK"));
-    False(DriverConstants.IsKnownReplaceableParentService("usbccgp"));
-    False(DriverConstants.IsKnownReplaceableParentService("usbaapl64"));
-    False(DriverConstants.IsKnownReplaceableParentService("unknown"));
 });
 
 Run("friendly product names", () =>

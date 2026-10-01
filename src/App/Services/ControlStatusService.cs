@@ -1,3 +1,4 @@
+using IPhoneMirror.App.Localization;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 
@@ -100,7 +101,13 @@ internal sealed record ControlPromptOption(
     string Id,
     string Title,
     string? Detail = null,
-    bool IsEnabled = true);
+    bool IsEnabled = true) : System.ComponentModel.INotifyPropertyChanged
+{
+    public string DisplayTitle => LocalizationService.RefreshText(Title);
+    public string DisplayDetail => LocalizationService.RefreshText(Detail ?? string.Empty);
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+    internal void NotifyLanguageChanged() => PropertyChanged?.Invoke(this, new(null));
+}
 
 internal sealed record ControlPrompt(
     ControlPromptType Type,
@@ -209,8 +216,8 @@ internal sealed class ControlStatusService
             ? ControlStage.CheckingBinding
             : ControlStage.CheckingDevice;
         var description = mode == ControlStatusMode.Bluetooth
-            ? "正在检查设备绑定器中的蓝牙绑定…"
-            : "正在检查设备和绑定状态…";
+            ? LocalizationService.Get("ControlCheckingBluetoothBinding")
+            : LocalizationService.Get("ControlCheckingDeviceBinding");
         Report(mode, initialStage, deviceName, description, true);
     }
 
@@ -286,8 +293,9 @@ internal sealed class ControlStatusService
         }
     }
 
-    internal void Ready(ControlStatusMode mode, string deviceName, string description = "反向控制已经准备就绪")
+    internal void Ready(ControlStatusMode mode, string deviceName, string? description = null)
     {
+        description ??= LocalizationService.Get("ControlReadyDescription");
         TimeSpan duration;
         ControlStage? completed = null;
         TimeSpan completedDuration = default;
@@ -318,6 +326,8 @@ internal sealed class ControlStatusService
         DiagnosticLogger.ReverseControl(mode.ToString().ToLowerInvariant(),
             "stage_ready", ("duration_ms", (long)duration.TotalMilliseconds),
             ("description", description));
+        if (mode == ControlStatusMode.Usb)
+            DiagnosticLogger.ReverseControl("usb", "wired_control_connected");
         StatusChanged?.Invoke(this, snapshot);
     }
 
@@ -342,7 +352,7 @@ internal sealed class ControlStatusService
             AddDiagnosticUnsafe(error, technical ?? error, "Error");
         }
         var snapshot = new ControlStatusSnapshot(mode, ControlStage.Failed, deviceName,
-            "请检查设备连接状态，然后重试。", false, true, error, null);
+            LocalizationService.Get("ControlCheckConnectionAdvice"), false, true, error, null);
         lock (_gate) _current = snapshot;
         DiagnosticLogger.ReverseControlError(mode.ToString().ToLowerInvariant(),
             "stage_failed", ("stage", failedStage),
@@ -352,8 +362,9 @@ internal sealed class ControlStatusService
     }
 
     internal void Cancelled(ControlStatusMode mode, string deviceName,
-        string description = "已取消反向控制", string? technical = null)
+        string? description = null, string? technical = null)
     {
+        description ??= LocalizationService.Get("ControlStageCancelled");
         ControlStage? cancelledStage;
         lock (_gate)
         {

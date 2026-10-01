@@ -1,3 +1,4 @@
+using IPhoneMirror.App.Localization;
 using System.Diagnostics;
 using System.Buffers.Binary;
 using System.IO;
@@ -22,7 +23,8 @@ internal sealed record MediaOutputRequest(
     uint Height,
     int FrameRate,
     int BitrateKbps,
-    string Authorization = "");
+    string Authorization = "",
+    string? MicrophoneDevice = null);
 
 internal sealed record MediaOutputCapabilities(
     bool FfmpegAvailable,
@@ -130,13 +132,13 @@ internal sealed class MediaOutputService : IAsyncDisposable
         if (best is not null) return best;
 
         return new(false, false, false, false, false, false, false, string.Empty,
-            candidates[0], lastError?.Message ?? "FFmpeg capability probing failed.");
+            candidates[0], lastError?.Message ?? LocalizationService.Get("FfmpegProbeFailed"));
     }
 
     private static MediaOutputCapabilities MissingFfmpegCapabilities() =>
         new(false, false, false, false, false, false, false, string.Empty,
             string.Empty,
-            "FFmpeg was not found. Install FFmpeg 8 or place it in the application directory.");
+            LocalizationService.Get("FfmpegNotFound"));
 
     internal static int CapabilityScore(MediaOutputCapabilities capabilities) =>
         (capabilities.HasH264Encoder ? 16 : 0) +
@@ -194,12 +196,12 @@ internal sealed class MediaOutputService : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken);
         try
         {
-            if (IsRunning) throw new InvalidOperationException("A media output is already active.");
+            if (IsRunning) throw new InvalidOperationException(LocalizationService.Get("MediaOutputAlreadyRunning"));
             capabilities = await ResolveWorkingEncoderAsync(capabilities,
                 request.Width, request.Height, cancellationToken);
             if (!capabilities.HasH264Encoder)
                 throw new InvalidOperationException(
-                    "No installed FFmpeg H.264 encoder could encode at the requested size.");
+                    LocalizationService.Get("FfmpegEncoderSizeUnsupported"));
             _lastError = string.Empty;
             var firstAudio = await TryWaitForAudioAsync(sessionHandle, cancellationToken);
             string? recordingStagingPath = null;
@@ -237,7 +239,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
                     if (!string.IsNullOrWhiteSpace(args.Data)) _lastError = args.Data;
                 };
                 if (!process.Start())
-                    throw new InvalidOperationException("FFmpeg could not be started.");
+                    throw new InvalidOperationException(LocalizationService.Get("FfmpegStartFailed"));
                 process.BeginErrorReadLine();
                 using var pipeTimeout = CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken);
@@ -259,7 +261,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
                         when (!cancellationToken.IsCancellationRequested)
                     {
                         throw new TimeoutException(
-                            "FFmpeg did not connect to the projection audio input within 5 seconds.");
+                            LocalizationService.Get("FfmpegAudioInputTimeout"));
                     }
                 }
 
@@ -328,12 +330,13 @@ internal sealed class MediaOutputService : IAsyncDisposable
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
         {
+            var outputClock = Stopwatch.StartNew();
             videoTask = PumpVideoAsync(process, sessionHandle, request,
-                pumpCancellation.Token);
+                outputClock, pumpCancellation.Token);
             audioTask = audioPipe is not null
                 ? PumpAudioAsync(process, audioPipe, sessionHandle,
                     firstAudio, audioSampleRate, audioChannels,
-                    pumpCancellation.Token)
+                    outputClock, pumpCancellation.Token)
                 : Task.Delay(Timeout.InfiniteTimeSpan, pumpCancellation.Token);
             var completed = await Task.WhenAny(videoTask, audioTask);
             await completed;
@@ -377,8 +380,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
             catch (OperationCanceledException)
             {
                 failure ??= new TimeoutException(request.Kind == MediaOutputKind.Recording
-                    ? "FFmpeg did not finalize the recording within 2 minutes."
-                    : "FFmpeg did not stop the live output within 15 seconds.");
+                    ? LocalizationService.Get("RecordingFinalizeTimeout")
+                    : LocalizationService.Get("StreamingStopTimeout"));
                 await KillProcessAsync(process);
             }
             catch (Exception error)
@@ -433,11 +436,10 @@ internal sealed class MediaOutputService : IAsyncDisposable
     }
 
     private async Task PumpVideoAsync(Process process, ulong sessionHandle,
-        MediaOutputRequest request, CancellationToken cancellationToken)
+        MediaOutputRequest request, Stopwatch outputClock, CancellationToken cancellationToken)
     {
         var frameInterval = TimeSpan.FromSeconds(1.0 / request.FrameRate);
         var firstFrameWait = Stopwatch.StartNew();
-        var outputClock = Stopwatch.StartNew();
         long framesWritten = 0;
         ReadOnlyMemory<byte> lastFrame = default;
         // Decouple the GPU->CPU frame readback from the pump timer. The
@@ -449,8 +451,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
         var latch = new FrameLatch();
         using var readerCts = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
-        var readerTask = FrameReaderAsync(sessionHandle, request.Width,
-            request.Height, latch, frameInterval, readerCts.Token);
+        var readerTask = Task.Run(() => FrameReaderAsync(sessionHandle, request.Width,
+            request.Height, latch, frameInterval, readerCts.Token), CancellationToken.None);
         try
         {
             using var timer = new PeriodicTimer(frameInterval);
@@ -458,7 +460,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
             {
                 if (process.HasExited)
                     throw new InvalidOperationException(string.IsNullOrWhiteSpace(_lastError)
-                        ? $"FFmpeg exited with code {process.ExitCode}." : _lastError);
+                        ? LocalizationService.Format("FfmpegExitedFormat", process.ExitCode) : _lastError);
                 // The rawvideo input has a fixed frame rate and therefore assigns
                 // one frame interval to every frame received. A slow frame copy,
                 // resize, encode, or pipe write can make a timer tick miss its
@@ -474,7 +476,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
                 else if (lastFrame.IsEmpty)
                 {
                     if (firstFrameWait.Elapsed > TimeSpan.FromSeconds(5))
-                        throw new TimeoutException("No projection frame was received for 5 seconds.");
+                        throw new TimeoutException(LocalizationService.Get("MediaOutputFrameTimeout"));
                     continue;
                 }
                 var schedule = CalculateVideoWritePlan(outputClock.Elapsed,
@@ -536,33 +538,31 @@ internal sealed class MediaOutputService : IAsyncDisposable
         if (framesToWrite <= maximumCatchUpFrames)
             return (framesToWrite, framesWritten);
 
-        // Raw video has no timestamps. Drop the oldest backlog and advance the
-        // logical schedule so the next tick follows current wall time instead
-        // of repeatedly trying to drain an unbounded historical queue.
-        return (maximumCatchUpFrames,
-            checked(framesWritten + framesToWrite - maximumCatchUpFrames));
+        // Raw video timestamps count bytes actually written. Advancing only
+        // this counter drops time from video while PCM keeps its full duration,
+        // permanently delaying the sound after a stall. Bound each write burst,
+        // retain the debt and reuse the latest frame without allocating a queue.
+        return (maximumCatchUpFrames, framesWritten);
     }
 
     private async Task PumpAudioAsync(Process process, Stream output,
         ulong sessionHandle, AudioPacket? firstAudio, uint outputSampleRate,
-        ushort outputChannels, CancellationToken cancellationToken)
+        ushort outputChannels, Stopwatch audioClock, CancellationToken cancellationToken)
     {
         var blockAlign = checked(outputChannels * sizeof(short));
         var bytesPerSecond = checked((long)outputSampleRate * blockAlign);
         var normalizer = new Pcm16AudioNormalizer(outputSampleRate, outputChannels);
         var sequence = firstAudio?.Sequence ?? 0;
         long emittedBytes = 0;
-        long initialBytes = 0;
         if (firstAudio is not null)
         {
             var pcm = normalizer.Convert(firstAudio);
             if (pcm.Length != 0)
             {
                 await output.WriteAsync(pcm, cancellationToken);
-                emittedBytes = initialBytes = pcm.Length;
+                emittedBytes = pcm.Length;
             }
         }
-        var audioClock = Stopwatch.StartNew();
         var lastRealPacket = Stopwatch.StartNew();
         var silenceChunkBytes = checked((int)Math.Max(blockAlign,
             bytesPerSecond / 50 / blockAlign * blockAlign));
@@ -572,7 +572,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
         {
             if (process.HasExited)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(_lastError)
-                    ? $"FFmpeg exited with code {process.ExitCode}." : _lastError);
+                    ? LocalizationService.Format("FfmpegExitedFormat", process.ExitCode) : _lastError);
             var packet = insertedSilence
                 ? ReadNewestAvailableAudioPacket(
                     cursor => _audioProvider(sessionHandle, cursor), sequence)
@@ -581,7 +581,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
             {
                 if (firstAudio is null || lastRealPacket.Elapsed >= AudioSilenceGrace)
                 {
-                    var targetBytes = checked(initialBytes +
+                    var targetBytes = checked(
                         (long)(audioClock.Elapsed.TotalSeconds * bytesPerSecond));
                     var missingBytes = targetBytes - emittedBytes;
                     var bytesToWrite = checked((int)Math.Min(
@@ -601,7 +601,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
             }
             if (packet.Sequence <= sequence)
                 throw new InvalidDataException(
-                    "The projection audio sequence did not advance.");
+                    LocalizationService.Get("MediaOutputAudioStalled"));
             var normalized = normalizer.Convert(packet);
             if (normalized.Length != 0)
             {
@@ -637,11 +637,11 @@ internal sealed class MediaOutputService : IAsyncDisposable
             if (packet.SampleRate is < 8000 or > 192000 ||
                 packet.Channels is < 1 or > 8 || packet.BitsPerSample != 16)
                 throw new InvalidDataException(
-                    "The projection audio packet has an unsupported PCM format.");
+                    LocalizationService.Get("MediaOutputAudioUnsupported"));
             var sourceBlockAlign = checked(packet.Channels * sizeof(short));
             if (packet.Pcm.Length == 0 || packet.Pcm.Length % sourceBlockAlign != 0)
                 throw new InvalidDataException(
-                    "The projection audio packet has an invalid PCM layout.");
+                    LocalizationService.Get("MediaOutputAudioInvalid"));
             if (packet.SampleRate == _targetSampleRate &&
                 packet.Channels == _targetChannels)
                 return packet.Pcm;
@@ -752,7 +752,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
             if (packet is null) break;
             if (packet.Sequence <= cursor)
                 throw new InvalidDataException(
-                    "The projection audio sequence did not advance.");
+                    LocalizationService.Get("MediaOutputAudioStalled"));
             newest = packet;
             cursor = packet.Sequence;
         }
@@ -767,7 +767,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
             (height & 1U) != 0 || frame.Width != width ||
             frame.Height != height || frame.Stride != width ||
             frame.Pixels.Length < targetBytes)
-            throw new InvalidDataException("The native output frame has an invalid layout.");
+            throw new InvalidDataException(LocalizationService.Get("MediaOutputFrameInvalid"));
         return frame.Pixels.AsMemory(0, targetBytes);
     }
 
@@ -797,6 +797,8 @@ internal sealed class MediaOutputService : IAsyncDisposable
         {
             "-hide_banner", "-loglevel", "warning", "-nostdin",
         };
+        if (!includeAudio && !string.IsNullOrWhiteSpace(request.MicrophoneDevice))
+            throw new InvalidOperationException(LocalizationService.Get("MicrophoneAudioRequired"));
         if (includeAudio)
         {
             if (string.IsNullOrWhiteSpace(audioPipePath))
@@ -821,7 +823,17 @@ internal sealed class MediaOutputService : IAsyncDisposable
             // FFmpeg opens inputs sequentially. Opening the named audio pipe
             // first lets StartAsync complete its handshake before video data
             // is pumped into stdin.
-            args.AddRange(["-map", "1:v:0", "-map", "0:a:0"]);
+            if (!string.IsNullOrWhiteSpace(request.MicrophoneDevice))
+            {
+                args.AddRange([
+                    "-thread_queue_size", "128", "-f", "dshow",
+                    "-audio_buffer_size", "50", "-i", "audio=" + request.MicrophoneDevice,
+                    "-filter_complex", MediaOutputMicrophone.MixFilter,
+                    "-map", "1:v:0", "-map", "[mixed]", "-shortest",
+                ]);
+            }
+            else
+                args.AddRange(["-map", "1:v:0", "-map", "0:a:0"]);
         }
         else
         {
@@ -935,7 +947,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
         {
             HasH264Encoder = false,
             PreferredH264Encoder = string.Empty,
-            Detail = $"{Path.GetFileName(capabilities.FfmpegPath)} / no usable H.264 encoder",
+            Detail = LocalizationService.Format("FfmpegNoUsableEncoderFormat", Path.GetFileName(capabilities.FfmpegPath)),
         };
     }
 
@@ -1041,25 +1053,25 @@ internal sealed class MediaOutputService : IAsyncDisposable
     private static void Validate(MediaOutputRequest request, MediaOutputCapabilities capabilities)
     {
         if (!capabilities.FfmpegAvailable || !capabilities.HasH264Encoder)
-            throw new InvalidOperationException("A compatible FFmpeg H.264 encoder is unavailable.");
+            throw new InvalidOperationException(LocalizationService.Get("FfmpegEncoderUnavailable"));
         if (!capabilities.Supports(request.Kind))
-            throw new InvalidOperationException("The requested FFmpeg output protocol is unavailable.");
+            throw new InvalidOperationException(LocalizationService.Get("FfmpegProtocolUnavailable"));
         if (request.Width is < 160 or > 3840 || request.Height is < 160 or > 2160 ||
             (request.Width & 1) != 0 || (request.Height & 1) != 0)
-            throw new ArgumentOutOfRangeException(nameof(request), "Output dimensions must be even and at most 3840x2160.");
+            throw new ArgumentOutOfRangeException(nameof(request), LocalizationService.Get("MediaOutputInvalidDimensions"));
         if (request.FrameRate is < 10 or > 60 || request.BitrateKbps is < 500 or > 50000)
             throw new ArgumentOutOfRangeException(nameof(request));
         if (string.IsNullOrWhiteSpace(request.Destination))
-            throw new ArgumentException("An output destination is required.", nameof(request));
+            throw new ArgumentException(LocalizationService.Get("MediaOutputDestinationRequired"), nameof(request));
         if (request.Kind == MediaOutputKind.Rtmp && (!capabilities.HasRtmp ||
             !HasScheme(request.Destination, "rtmp", "rtmps")))
-            throw new ArgumentException("Enter an rtmp:// or rtmps:// address.");
+            throw new ArgumentException(LocalizationService.Get("MediaOutputRtmpAddressRequired"));
         if (request.Kind == MediaOutputKind.Srt && (!capabilities.HasSrt ||
             !HasScheme(request.Destination, "srt")))
-            throw new ArgumentException("Enter an srt:// address.");
+            throw new ArgumentException(LocalizationService.Get("MediaOutputSrtAddressRequired"));
         if (request.Kind == MediaOutputKind.Whip && (!capabilities.HasWhip ||
             !HasScheme(request.Destination, "http", "https")))
-            throw new ArgumentException("Enter an HTTP(S) WHIP endpoint.");
+            throw new ArgumentException(LocalizationService.Get("MediaOutputWhipAddressRequired"));
     }
 
     private static bool HasScheme(string value, params string[] schemes) =>
@@ -1106,7 +1118,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
         process.WaitForExit();
         await Task.Yield();
         throw new InvalidOperationException(string.IsNullOrWhiteSpace(_lastError)
-            ? $"FFmpeg exited during startup with code {process.ExitCode}."
+            ? LocalizationService.Format("FfmpegStartupExitedFormat", process.ExitCode)
             : _lastError);
     }
 
@@ -1271,7 +1283,7 @@ internal sealed class MediaOutputService : IAsyncDisposable
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ??
-            throw new InvalidOperationException("FFmpeg could not be started.");
+            throw new InvalidOperationException(LocalizationService.Get("FfmpegStartFailed"));
         var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
@@ -1288,20 +1300,44 @@ internal sealed class MediaOutputService : IAsyncDisposable
 
     internal sealed class FrameLatch
     {
-        private ReadOnlyMemory<byte> _frame;
+        private readonly object _gate = new();
+        private byte[]? _producerBuffer;
+        private byte[]? _pendingBuffer;
+        private byte[]? _consumerBuffer;
+        private int _pendingLength;
+        private int _consumerLength;
+        private bool _hasPending;
 
+        // One producer and one consumer. Three owned buffers let readback
+        // replace pending frames while the consumer awaits a slow pipe write.
         internal void Publish(ReadOnlyMemory<byte> frame)
         {
-            // Native readback reuses its array. The writer may still be awaiting
-            // a pipe write when the next frame arrives, so publish an owned,
-            // immutable snapshot rather than a view of the producer's buffer.
-            var snapshot = frame.ToArray();
-            lock (this) { _frame = snapshot; }
+            if (frame.IsEmpty) return;
+            if (_producerBuffer is null || _producerBuffer.Length < frame.Length)
+                _producerBuffer = new byte[frame.Length];
+            frame.Span.CopyTo(_producerBuffer);
+            lock (_gate)
+            {
+                (_producerBuffer, _pendingBuffer) = (_pendingBuffer, _producerBuffer);
+                _pendingLength = frame.Length;
+                _hasPending = true;
+            }
         }
 
+        // Returned bytes remain stable until this consumer calls Get again.
+        // PumpVideoAsync finishes all writes before acquiring its next frame.
         internal ReadOnlyMemory<byte> Get()
         {
-            lock (this) { return _frame; }
+            lock (_gate)
+            {
+                if (_hasPending)
+                {
+                    (_consumerBuffer, _pendingBuffer) = (_pendingBuffer, _consumerBuffer);
+                    _consumerLength = _pendingLength;
+                    _hasPending = false;
+                }
+                return _consumerBuffer.AsMemory(0, _consumerLength);
+            }
         }
     }
 }

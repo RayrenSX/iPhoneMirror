@@ -1,3 +1,4 @@
+using IPhoneMirror.App.Localization;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -280,7 +281,7 @@ internal sealed class VirtualCameraService : IAsyncDisposable
             {
                 using var process = Process.Start(start) ??
                     throw new InvalidOperationException(
-                        "The virtual camera installer could not be started.");
+                        LocalizationService.Get("VirtualCameraInstallerStartFailed"));
                 try
                 {
                     await process.WaitForExitAsync(cancellationToken);
@@ -308,12 +309,12 @@ internal sealed class VirtualCameraService : IAsyncDisposable
                 }
                 if (process.ExitCode != 0)
                     throw new InvalidOperationException(
-                        $"The virtual camera installer exited with code {process.ExitCode}.");
+                        LocalizationService.Format("VirtualCameraInstallerExitedFormat", process.ExitCode));
             }
             catch (Win32Exception error) when (error.NativeErrorCode == 1223)
             {
                 throw new OperationCanceledException(
-                    "Virtual camera installation was cancelled.", error,
+                    LocalizationService.Get("VirtualCameraInstallCancelled"), error,
                     cancellationToken);
             }
         }
@@ -342,7 +343,7 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         using var input = typeof(VirtualCameraService).Assembly
             .GetManifestResourceStream(resourceName) ??
             throw new FileNotFoundException(
-                "The embedded virtual camera installation files are missing.", resourceName);
+                LocalizationService.Get("VirtualCameraPayloadMissing"), resourceName);
         using var memory = new MemoryStream();
         input.CopyTo(memory);
         var bytes = memory.ToArray();
@@ -359,7 +360,7 @@ internal sealed class VirtualCameraService : IAsyncDisposable
             FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
         if (!SHA256.HashData(stream).SequenceEqual(expectedHash))
             throw new InvalidDataException(
-                $"The staged virtual camera payload changed unexpectedly: {Path.GetFileName(path)}");
+                LocalizationService.Format("VirtualCameraPayloadChangedFormat", Path.GetFileName(path)));
     }
 
     internal async Task StartAsync(ulong sessionHandle, uint width, uint height,
@@ -372,7 +373,7 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         {
             if (IsRunning)
                 throw new InvalidOperationException(
-                    "The virtual camera is already running.");
+                    LocalizationService.Get("VirtualCameraAlreadyRunning"));
             // MFVirtualCamera::Start can synchronously activate Windows camera
             // infrastructure. Keep that work off WPF's dispatcher thread.
             var result = await Task.Run(
@@ -462,13 +463,13 @@ internal sealed class VirtualCameraService : IAsyncDisposable
                 {
                     if (firstFrameWait.Elapsed > FrameTimeout)
                         throw new TimeoutException(
-                            "No projection frame was received for 5 seconds.");
+                            LocalizationService.Get("MediaOutputFrameTimeout"));
                     continue;
                 }
                 else if (DateTime.UtcNow - lastFrameAdvanceAtUtc > FrameTimeout)
                 {
                     throw new TimeoutException(
-                        "The projection frame stopped advancing for 5 seconds.");
+                        LocalizationService.Get("MediaOutputFrameStalled"));
                 }
 
                 var currentFrame = lastFrame;

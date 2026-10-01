@@ -17,6 +17,9 @@
 #include "iPhoneMirror/CoreApi.h"
 
 #include <Windows.h>
+#include <d3d11_1.h>
+#include <dxgi1_2.h>
+#include <wrl/client.h>
 
 #include <algorithm>
 #include <array>
@@ -201,6 +204,126 @@ void test_quicktime_framing() {
 
     const std::vector<std::uint8_t> invalid{1, 0, 0, 0};
     check_throws([&] { (void)decoder.push(invalid); }, "invalid QuickTime length rejected");
+
+    std::vector<std::uint8_t> stream = ping;
+    stream.insert(stream.end(), need.begin(), need.end());
+    stream.insert(stream.end(), ping.begin(), ping.end());
+    for (std::size_t split = 0; split <= stream.size(); ++split) {
+        decoder.reset();
+        auto assembled = decoder.push(std::span(stream).first(split));
+        check(decoder.push({}).empty(), "empty USB read preserves incomplete state");
+        auto remainder = decoder.push(std::span(stream).subspan(split));
+        for (auto& packet : remainder) assembled.push_back(std::move(packet));
+        check(assembled.size() == 3 && decoder.buffered_bytes() == 0,
+            "coalesced packets survive every header/payload split");
+        if (assembled.size() == 3)
+            check(assembled[0].payload == std::vector<std::uint8_t>(ping.begin() + 4, ping.end()) &&
+                assembled[1].clock_ref == clock &&
+                assembled[2].payload == assembled[0].payload,
+                "fragment assembly preserves packet order and contents");
+    }
+    decoder.reset();
+    std::size_t assembled_count{};
+    for (const auto byte : stream)
+        assembled_count += decoder.push(std::span(&byte, 1)).size();
+    check(assembled_count == 3 && decoder.buffered_bytes() == 0,
+        "one-byte USB fragments assemble without losing packet boundaries");
+    auto owned_packet = decoder.push(stream);
+    std::fill(stream.begin(), stream.end(), std::uint8_t{0});
+    check(owned_packet.front().payload ==
+        std::vector<std::uint8_t>(ping.begin() + 4, ping.end()),
+        "complete packets own bytes independently of the USB read buffer");
+    for (const auto bad_length : {0U, 7U, iPhoneMirror::quicktime::StreamDecoder::MaxPacketBytes + 1U}) {
+        const std::array<std::uint8_t, 4> header{
+            static_cast<std::uint8_t>(bad_length),
+            static_cast<std::uint8_t>(bad_length >> 8U),
+            static_cast<std::uint8_t>(bad_length >> 16U),
+            static_cast<std::uint8_t>(bad_length >> 24U)};
+        (void)decoder.push(std::span(header).first(3));
+        check_throws([&] { (void)decoder.push(std::span(header).last(1)); },
+            "fragmented invalid length rejected before retaining payload");
+        check(decoder.buffered_bytes() == 0 && decoder.push(ping).size() == 1,
+            "invalid length clears decoder state for the next valid packet");
+    }
+}
+
+void test_gpu_frame_readback() {
+    using Microsoft::WRL::ComPtr;
+    using namespace iPhoneMirror::media;
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    const auto created = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE,
+        nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, nullptr, 0,
+        D3D11_SDK_VERSION, &device, nullptr, &context);
+    if (FAILED(created)) {
+        std::cout << "SKIP GPU readback: hardware D3D11 device unavailable\n";
+        return;
+    }
+    struct Case { UINT width; UINT height; PixelFormat format; };
+    for (const auto test : {Case{64, 48, PixelFormat::Nv12},
+            Case{128, 64, PixelFormat::Nv12}, Case{128, 64, PixelFormat::P010},
+            Case{64, 48, PixelFormat::Nv12}}) {
+        const auto row_bytes = test.width * (test.format == PixelFormat::P010 ? 2U : 1U);
+        D3D11_TEXTURE2D_DESC description{};
+        description.Width = test.width;
+        description.Height = test.height;
+        description.MipLevels = description.ArraySize = description.SampleDesc.Count = 1;
+        description.Format = test.format == PixelFormat::P010 ? DXGI_FORMAT_P010 : DXGI_FORMAT_NV12;
+        description.Usage = D3D11_USAGE_DEFAULT;
+        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        description.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
+            D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+        ComPtr<ID3D11Texture2D> texture;
+        if (FAILED(device->CreateTexture2D(&description, nullptr, &texture))) {
+            std::cout << "SKIP GPU readback format: " << pixel_format_name(test.format) << '\n';
+            continue;
+        }
+        ComPtr<IDXGIKeyedMutex> mutex;
+        ComPtr<IDXGIResource1> resource;
+        if (FAILED(texture.As(&mutex)) || FAILED(texture.As(&resource)))
+            throw std::runtime_error("GPU readback fixture cannot share texture");
+        auto shared = std::make_shared<DecodedFrame::SharedGpuFrame>();
+        HANDLE handle{};
+        if (FAILED(resource->CreateSharedHandle(nullptr,
+                DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &handle)))
+            throw std::runtime_error("GPU readback fixture cannot create shared handle");
+        shared->shared_handle = handle;
+        shared->width = test.width;
+        shared->height = test.height;
+        shared->pixel_format = test.format;
+        std::vector<std::uint8_t> pixels(static_cast<std::size_t>(row_bytes) * test.height * 3U / 2U);
+        for (std::uint8_t iteration = 0; iteration < 3; ++iteration) {
+            for (UINT row = 0; row < test.height * 3U / 2U; ++row)
+                std::fill_n(pixels.data() + static_cast<std::size_t>(row) * row_bytes,
+                    row_bytes, static_cast<std::uint8_t>(row + iteration * 31));
+            if (mutex->AcquireSync(iteration == 0 ? 0 : 1, 1000) != WAIT_OBJECT_0)
+                throw std::runtime_error("GPU readback fixture mutex timed out");
+            context->UpdateSubresource(texture.Get(), 0, nullptr, pixels.data(), row_bytes, 0);
+            if (FAILED(mutex->ReleaseSync(1)))
+                throw std::runtime_error("GPU readback fixture mutex release failed");
+            DecodedFrame frame;
+            frame.width = test.width;
+            frame.height = test.height;
+            frame.pixel_format = test.format;
+            frame.gpu_frame = shared;
+            if (iteration == 1) {
+                frame.height += 2;
+                check(!detail::materialize_gpu_frame(frame),
+                    "GPU readback rejects inconsistent texture dimensions");
+                frame.height = test.height;
+            }
+            const auto success = detail::materialize_gpu_frame(frame);
+            check(success, "GPU readback succeeds after reuse, resize, and format changes");
+            if (!success) continue;
+            bool matching = frame.stride >= static_cast<std::int32_t>(row_bytes);
+            for (UINT row = 0; matching && row < test.height * 3U / 2U; ++row) {
+                const auto* actual = frame.nv12.data() + static_cast<std::size_t>(row) * frame.stride;
+                matching = std::equal(actual, actual + row_bytes,
+                    pixels.data() + static_cast<std::size_t>(row) * row_bytes);
+            }
+            check(matching, "GPU readback retains luma/chroma rows without stale pixels");
+        }
+    }
 }
 
 void test_h264() {
@@ -1535,10 +1658,21 @@ void test_capture_media_safety_helpers() {
         "new video or audio media resets the streaming silence deadline");
 
     FastStreamReconnectGate reconnect_gate;
+    check(!reconnect_gate.request_for_silence(std::chrono::milliseconds(2565),
+            std::chrono::milliseconds(0)) && reconnect_gate.attempt_count() == 0,
+        "live audio prevents resetting a video-silent QuickTime session (11:09:50 regression)");
+    check(!reconnect_gate.request_for_silence(std::chrono::milliseconds(2500),
+            std::chrono::milliseconds(2499)),
+        "a video stall does not reset a recently active media session");
     check(reconnect_gate.request() && !reconnect_gate.request() &&
         reconnect_gate.attempt_count() == 1 && reconnect_gate.observe_video_frame() &&
         reconnect_gate.request() && reconnect_gate.attempt_count() == 2,
         "a recovered video stream permits a later fast reconnect attempt");
+    FastStreamReconnectGate silent_gate;
+    check(silent_gate.request_for_silence(std::chrono::milliseconds(2500),
+            std::chrono::milliseconds(2500)) &&
+        !silent_gate.request_for_silence(std::chrono::seconds(10), std::chrono::seconds(10)),
+        "a fully silent transport still gets one bounded reconnect attempt");
 
     ProtectedVideoDetector protected_video;
     static_assert(ProtectedVideoDetector::HoldLimit == std::chrono::seconds(8));
@@ -2058,7 +2192,11 @@ void test_logging_shutdown_boundary() {
 
 } // namespace
 
+int run_preview_opacity_smoke();
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-opacity-only")
+        return run_preview_opacity_smoke();
     if (argc == 2 && std::string_view(argv[1]) == "--usb-runtime-probe-only") {
         try {
             test_libusb_runtime();
@@ -2086,6 +2224,7 @@ int main(int argc, char** argv) {
     try {
         test_plist();
         test_quicktime_framing();
+        test_gpu_frame_readback();
         test_h264();
         test_coremedia();
         test_upstream_capture_fixtures();

@@ -1,4 +1,4 @@
-#ifndef MyAppVersion
+﻿#ifndef MyAppVersion
   #error MyAppVersion must be provided by scripts/build_installer.ps1
 #endif
 #ifndef MyNumericVersion
@@ -155,6 +155,32 @@ chinesetrad.ErrorReplacingExistingFile=取代現有檔案時發生錯誤：
 chinesetrad.ErrorRestartReplace=重新啟動電腦後取代檔案失敗：
 chinesetrad.ErrorRenamingTemp=在目的資料夾重新命名檔案時發生錯誤：
 chinesetrad.ErrorOpeningReadme=開啟說明檔案時發生錯誤。
+
+chinesetrad.ConfirmDeleteSharedFile2=系統顯示以下共用檔案已不再被任何程式使用。要移除此共用檔案嗎？%n%n若仍有程式使用此檔案，移除後可能導致程式無法正常運作。如不確定，請選擇「否」。保留此檔案不會損害系統。
+
+chinesesimp.ConfirmDeleteSharedFile2=系统显示以下共享文件已不再被任何程序使用。要删除此共享文件吗？%n%n如果仍有程序使用此文件，删除后可能导致程序无法正常运行。如不确定，请选择“否”。保留此文件不会损害系统。
+
+chinesetrad.FinishedHeadingLabel=[name] 安裝完成
+
+chinesetrad.FileExistsOverwriteExisting=覆寫現有檔案 (&O)
+
+chinesetrad.FileExistsKeepExisting=保留現有檔案 (&K)
+
+chinesetrad.FileExistsOverwriteOrKeepAll=對所有衝突檔案執行相同操作 (&D)
+
+chinesetrad.ExistingFileNewerOverwriteOrKeepAll=對所有衝突檔案執行相同操作 (&D)
+
+chinesetrad.ErrorCloseApplications=安裝程式無法自動關閉所有應用程式。繼續前，請關閉正在使用待更新檔案的應用程式。
+
+chinesetrad.CloseApplications=自動關閉應用程式 (&A)
+
+chinesesimp.InvalidPath=请输入包含驱动器盘符的完整路径。%n%n例如 C:\App，或 UNC 路径 \\server\share。
+
+chinesetrad.ConfirmUninstall=確定要完全移除 %1 及其所有元件嗎？
+
+chinesetrad.ReadyMemoUserInfo=使用者資料：
+
+chinesetrad.WizardUserInfo=使用者資料
 
 [CustomMessages]
 chinesesimp.DeleteUserDataPrompt=是否同时删除 iPhoneMirror 的用户配置和已下载更新？选择“否”将保留这些数据，以便以后重新安装。

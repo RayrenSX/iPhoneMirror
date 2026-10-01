@@ -20,7 +20,11 @@ Thanks for helping improve iPhone/iPad mirroring, audio and output workflows on 
 - .NET 10 SDK with Windows Desktop support
 - MSYS2 UCRT64 with CMake, Ninja, the UCRT64 toolchain, GStreamer (base, good,
   bad, libav), libplist and OpenSSL for the bundled UxPlay fallback
-- Python 3 for diagnostic scripts
+- Python 3.13 x64 for the versioned USB bridge packaging recipe and diagnostics
+
+See the [development and testing guide](docs/DEVELOPMENT.md) for dependency sources,
+build switches, artifact layouts, and focused tests, and the [documentation index](docs/README.md)
+for maintained references versus historical audit reports.
 
 Build, test and publish:
 
@@ -34,10 +38,11 @@ Build without publishing the self-contained app:
 ./build.ps1 -Configuration Debug -NoPublish
 ```
 
-The default build runs native CTest, application-logic, runtime (when an
-interactive desktop is available), driver-installer, Visual C++ runtime and
-Apple-support validation. CI skips only the interactive WPF runtime suite on
-headless runners. For media-output or wireless changes, also run the focused
+The default build runs native CTest, Python bridge tests, bridge source-staging
+checks, application-logic, WPF runtime, driver-installer, Visual C++ runtime and
+Apple-support validation. `CI=true` explicitly skips the WPF runtime suite;
+local runs need an interactive desktop. Localization is a separate workflow step.
+For media-output or wireless changes, also run the focused
 smoke scripts under `scripts/` or the loopback lab in `tools/srs-lab`.
 
 Real-device USB configuration/bulk probes are disabled by default
@@ -62,8 +67,8 @@ Localization verification:
 
 Changes to external-driver detection, USB activation/stop sequencing, vendored
 native libraries or third-party licensing require extra review. Driver
-installation, registry filter mutation, signing and rollback behavior now live
-outside this application package.
+installation, registry filter mutation and rollback behavior live in
+`src/DriverInstaller`, a separate executable shipped with the main application.
 
 ## Style
 
@@ -76,7 +81,6 @@ outside this application package.
 - Update the README, user guide, architecture/protocol notes, or release notes
   when a user-visible workflow, dependency, port, or output format changes.
 
-By contributing, you agree that your contribution is licensed under the
-project's GNU General Public License v3.0 only. By contributing, you agree that
-your contribution may be distributed under GPL-3.0-only. Third-party material
+By contributing, you agree that your contribution may be distributed under the
+project's GNU General Public License v3.0 only (GPL-3.0-only). Third-party material
 remains under its original license.

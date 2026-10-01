@@ -16,6 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="IssueFixMediaTests.cs" />
     <Compile Include="DotnetTestSmoke.cs" />
     <Compile Include="..\Shared\Networking\SegmentedHttpDownloader.cs" Link="Networking\SegmentedHttpDownloader.cs" />
     <Compile Include="..\App\Services\StableDeviceSelection.cs" Link="StableDeviceSelection.cs" />
@@ -35,6 +36,7 @@
     <Compile Include="..\App\Services\ThemeService.cs" Link="ThemeService.cs" />
     <Compile Include="..\SharedUI\Services\WindowWorkAreaController.cs" Link="WindowWorkAreaController.cs" />
     <Compile Include="..\App\Localization\LocalizationService.cs" Link="LocalizationService.cs" />
+    <Compile Include="..\App\Localization\LocalizedText.cs" Link="LocalizedText.cs" />
     <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
     <Compile Include="..\App\Services\WirelessStallRecoveryTracker.cs" Link="WirelessStallRecoveryTracker.cs" />
     <Compile Include="..\App\Services\NativeLogTailReader.cs" Link="NativeLogTailReader.cs" />
@@ -58,6 +60,10 @@
     <Compile Include="..\App\Services\BluetoothMouseReportCoalescer.cs" Link="BluetoothMouseReportCoalescer.cs" />
     <Compile Include="..\App\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />
     <Compile Include="..\App\Services\MediaOutputService.cs" Link="MediaOutputService.cs" />
+    <Compile Include="..\App\Services\MediaOutputMicrophone.cs" Link="MediaOutputMicrophone.cs" />
+    <Compile Include="..\App\Services\CompactLaunchOptions.cs" Link="CompactLaunchOptions.cs" />
+    <Compile Include="..\App\Services\CompactLaunchChannel.cs" Link="CompactLaunchChannel.cs" />
+    <Compile Include="..\App\Services\RawMouseDeltaTracker.cs" Link="RawMouseDeltaTracker.cs" />
     <Compile Include="..\App\Services\RuntimeBinaryIntegrity.cs" Link="RuntimeBinaryIntegrity.cs" />
     <Compile Include="..\App\Services\PendingRecordingStore.cs" Link="PendingRecordingStore.cs" />
     <Compile Include="..\App\Updater\SemanticVersion.cs" Link="Updater\SemanticVersion.cs" />

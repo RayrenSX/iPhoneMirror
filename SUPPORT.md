@@ -1,7 +1,9 @@
 # Support
 
-iPhoneMirror is a community-maintained public preview. The current release is
-`v1.8.3`; use the latest release or `main` build when reproducing a problem.
+iPhoneMirror is a community-maintained public preview. Use the latest
+[published release](https://github.com/RayrenSX/iPhoneMirror/releases) or `main`
+build when reproducing a problem, and include the exact version from About.
+Source-tree test versions and published releases may differ.
 
 ## Before requesting help
 
@@ -18,6 +20,15 @@ iPhoneMirror is a community-maintained public preview. The current release is
    release contains `tools/ffmpeg/ffmpeg.exe` and include the output status and
    timestamp in the report. The virtual camera requires Windows 11 and a
    one-time administrator installation.
+6. For USB/wireless reverse control, check Developer Mode, the DDI/HID status
+   and device binding in the [user guide](docs/USER_GUIDE.md#有线与无线反向控制).
+   Include the bridge error code; a media-stream `9021` response alone does not
+   establish HID compatibility. Keep `iUsbBridge.exe`, `_internal`, and its runtime
+   manifest together. Bluetooth control has separate BLE/AssistiveTouch requirements.
+
+Report Windows version, ProductType, iOS version, connection type, AirPlay backend
+(original/UxPlay), reproduction steps, expected/actual behavior, and the relevant timestamp.
+Start from the [documentation index](docs/README.md) for topic-specific guidance.
 
 Attach the relevant files from `%LOCALAPPDATA%\iPhoneMirror\Logs` and, for
 driver issues, `%LOCALAPPDATA%\iPhoneMirror.Driver\Logs\driver-ui.log`.

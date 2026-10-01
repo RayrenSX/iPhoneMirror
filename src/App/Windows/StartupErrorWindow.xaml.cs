@@ -6,13 +6,15 @@ using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class StartupErrorWindow : Wpf.Ui.Controls.FluentWindow
+public partial class StartupErrorWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     private readonly string _logPath;
+    private readonly Exception _error;
 
     internal StartupErrorWindow(Exception error, string logPath)
     {
         _logPath = logPath;
+        _error = error;
         InitializeComponent();
         try { ThemeService.Attach(this); }
         catch (Exception themeError)
@@ -21,20 +23,23 @@ public partial class StartupErrorWindow : Wpf.Ui.Controls.FluentWindow
                 themeError);
         }
 
-        var language = LocalizationService.StartupCultureName;
-        var hongKong = language.Equals("zh-HK", StringComparison.OrdinalIgnoreCase) ||
-            language.Equals("zh-Hant-HK", StringComparison.OrdinalIgnoreCase) ||
-            language.Equals("zh-MO", StringComparison.OrdinalIgnoreCase);
-        var chinese = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
-        HeadingText.Text = LocalizationService.Get("StartupErrorHeading");
-        SummaryText.Text = StartupDiagnostics.UserMessage(error,
-            hongKong ? "zh-HK" : chinese ? "zh-CN" : "en-US");
-        LogLabelText.Text = LocalizationService.Get("StartupErrorLogLabel");
         LogPathTextBox.Text = logPath;
-        DetailsExpander.Header = LocalizationService.Get("StartupErrorDetails");
         DetailsTextBox.Text = error.ToString();
-        OpenLogButton.Content = LocalizationService.Get("StartupErrorOpenLog");
-        CloseButton.Content = LocalizationService.Get("StartupErrorClose");
+        RefreshLanguage();
+        LocalizationService.RefreshWhenLanguageChanges(this, RefreshLanguage);
+    }
+
+    private void RefreshLanguage()
+    {
+        var language = LocalizationService.StartupCultureName;
+        // This window also handles dictionary-load failures. Its captions must
+        // remain readable when none of the localization resources are available.
+        HeadingText.Text = StartupDiagnostics.Label("StartupErrorHeading", language);
+        SummaryText.Text = StartupDiagnostics.UserMessage(_error, language);
+        LogLabelText.Text = StartupDiagnostics.Label("StartupErrorLogLabel", language);
+        DetailsExpander.Header = StartupDiagnostics.Label("StartupErrorDetails", language);
+        OpenLogButton.Content = StartupDiagnostics.Label("StartupErrorOpenLog", language);
+        CloseButton.Content = StartupDiagnostics.Label("StartupErrorClose", language);
     }
 
     private void OnOpenLogClick(object sender, RoutedEventArgs e)

@@ -7,7 +7,7 @@ using IPhoneMirror.App.Services;
 namespace IPhoneMirror.App.Windows;
 
 public partial class ProtectedContentNoticeWindow :
-    Wpf.Ui.Controls.FluentWindow, INotifyPropertyChanged
+    IPhoneMirror.UI.Controls.RoundedWindow, INotifyPropertyChanged
 {
     private bool _audioActive;
 

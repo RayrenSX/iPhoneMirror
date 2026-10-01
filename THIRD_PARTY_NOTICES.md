@@ -115,6 +115,26 @@ distributed with AirPlayServer.
   under GPLv3 terms. It encodes projection video and, when available, muxes the
   captured iPhone PCM audio into recordings and live-streaming output.
 
+## iUsbBridge and USBMux coexistence sources
+
+The current build packages the Python bridge source in `tools/usb_touch_bridge.py`
+and `tools/iostouch` using the versioned recipe in `scripts/usb-bridge-recipe`.
+It does not fetch the latest upstream backend. The recipe source commit is recorded
+in [SOURCE.md](scripts/usb-bridge-recipe/SOURCE.md).
+
+Based on [iUsbBridge by RayrenSX](https://github.com/RayrenSX/iUsbBridge).
+The included [iUsbBridge license](scripts/usb-bridge-recipe/LICENSE) restricts use
+to noncommercial purposes without separate permission; it is not an OSI-approved
+open-source license. This notice does not relicense the component under the main
+application's GPL-3.0-only license.
+
+The repository README also attributes `tools/iostouch/qt/usb.py`, `usbmux_usb.py`
+and `usbmuxd_server.py` to
+[iPhoneUsbTouch](https://gitee.com/xiaozai-van-liu/iPhoneUsbTouch) and records
+incomplete license documentation for that source. This documentation review does
+not resolve that permission gap. See the [bridge component inventory](docs/USB_TOUCH_THIRD_PARTY_LICENSES.md)
+for dependency details and the distinction between source, packaging recipe and runtime.
+
 ## Markdig Markdown processor
 
 The in-app update window uses Markdig 1.3.2 to parse GitHub Release notes into

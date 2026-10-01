@@ -127,4 +127,7 @@
     <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#85000000"/>
     <SolidColorBrush x:Key="ScrollThumbPressedBrush" Color="#A6000000"/>
     <Color x:Key="CardShadowColor">#FF000000</Color>
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="#FF59595D"/>
+    <SolidColorBrush x:Key="InfoBrush" Color="#FF0F6CBD"/>
+    <SolidColorBrush x:Key="InfoSurfaceBrush" Color="#140F6CBD"/>
 </ResourceDictionary>

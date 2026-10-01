@@ -3,7 +3,7 @@ using IPhoneMirror.App.Localization;
 
 namespace IPhoneMirror.App.Windows;
 
-public partial class AdvancedSettingsWindow : Wpf.Ui.Controls.FluentWindow
+public partial class AdvancedSettingsWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     private readonly bool _previewOnly;
 
@@ -15,6 +15,8 @@ public partial class AdvancedSettingsWindow : Wpf.Ui.Controls.FluentWindow
     {
         _previewOnly = previewOnly;
         InitializeComponent();
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+            ErrorText.Text = LocalizationService.RefreshText(ErrorText.Text));
         WidthBox.Text = width == 0 ? "" : width.ToString();
         HeightBox.Text = height == 0 ? "" : height.ToString();
     }
