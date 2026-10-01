@@ -44,8 +44,7 @@ QQ群号：**1050045279**
 
 ## 项目描述
 
-公开下载版本以 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 为准；
-当前工作区源码版本为 `1.8.4-test4`，不等同于已发布版本。iPhoneMirror 是一个面向 Windows 10/11 x64 的本地
+iPhoneMirror 是一个面向 Windows 10/11 x64 的本地
 iPhone/iPad 投屏与蓝牙反向控制工具，目标是
 在不依赖云端中转的情况下，将 USB 有线采集和局域网 AirPlay 接收统一到同一套
 预览、音频、截图、独立窗口、OBS 和多设备会话能力中。

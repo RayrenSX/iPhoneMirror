@@ -41,8 +41,7 @@ build instructions, and known limitations.
 
 ## Download
 
-See Releases for the published version; the current source tree declares
-`1.8.4-test4`, which is not a publication claim. Download `iPhoneMirror-Setup-v*-x64.exe` from
+Download `iPhoneMirror-Setup-v*-x64.exe` from
 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases). The three-language
 Setup wizard supports a custom destination, defaults to
 `C:\Program Files\iPhoneMirror` for an administrator install, creates Start menu
