@@ -3,39 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>iPhoneMirror Stream Lab</title>
+  <title data-i18n>iPhoneMirror Stream Lab</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <header class="topbar">
     <div>
-      <p class="eyebrow">LOCAL TEST BENCH</p>
-      <h1>iPhoneMirror Stream Lab</h1>
+      <p class="eyebrow" data-i18n>LOCAL TEST BENCH</p>
+      <h1 data-i18n>iPhoneMirror Stream Lab</h1>
     </div>
     <div class="server-state" id="server-state" aria-live="polite">
       <span class="status-dot pending"></span>
-      <span id="server-label">Checking media server</span>
+      <span id="server-label" data-i18n>Checking media server</span>
     </div>
-    <button id="refresh-status" class="quiet-button" type="button">Refresh</button>
+    <button id="refresh-status" class="quiet-button" type="button" data-i18n>Refresh</button>
   </header>
 
   <main>
     <section class="endpoint-band" aria-labelledby="endpoints-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">PUBLISH TARGETS</p>
-          <h2 id="endpoints-title">Use the same stream name in the app</h2>
+          <p class="eyebrow" data-i18n>PUBLISH TARGETS</p>
+          <h2 id="endpoints-title" data-i18n>Use the same stream name in the app</h2>
         </div>
-        <a id="player-link" class="text-link" href="http://127.0.0.1:8080/players/whep.html" target="_blank" rel="noreferrer">Open backend player</a>
+        <a id="player-link" class="text-link" href="http://127.0.0.1:8080/players/whep.html" target="_blank" rel="noreferrer" data-i18n>Open backend player</a>
       </div>
-      <div class="endpoint-table" role="table" aria-label="Media server publish and playback endpoints">
+      <div class="endpoint-table" role="table" data-i18n-label aria-label="Media server publish and playback endpoints">
         <div class="endpoint-row endpoint-head" role="row">
-          <span role="columnheader">Protocol</span><span role="columnheader">Endpoint</span><span role="columnheader">Role</span>
+          <span role="columnheader" data-i18n>Protocol</span><span role="columnheader" data-i18n>Endpoint</span><span role="columnheader" data-i18n>Role</span>
         </div>
-        <div class="endpoint-row" role="row"><strong role="cell">RTMP</strong><code id="rtmp-url" role="cell">rtmp://127.0.0.1:1935/live/iphone-mirror</code><span role="cell">Publish from iPhoneMirror</span></div>
-        <div class="endpoint-row" role="row"><strong role="cell">SRT</strong><code id="srt-url" role="cell">srt://127.0.0.1:10080?streamid=#!::r=live/iphone-mirror,m=publish</code><span role="cell">Publish from iPhoneMirror</span></div>
-        <div class="endpoint-row" role="row"><strong role="cell">WHIP</strong><code id="whip-url" role="cell">http://127.0.0.1:1985/rtc/v1/whip/?app=live&amp;stream=iphone-mirror</code><span role="cell">Publish from iPhoneMirror</span></div>
-        <div class="endpoint-row" role="row"><strong role="cell">WHEP</strong><code id="whep-url" role="cell">http://127.0.0.1:1985/rtc/v1/whep/?app=live&amp;stream=iphone-mirror</code><span role="cell">Browser playback</span></div>
+        <div class="endpoint-row" role="row"><strong role="cell">RTMP</strong><code id="rtmp-url" role="cell">rtmp://127.0.0.1:1935/live/iphone-mirror</code><span role="cell" data-i18n>Publish from iPhoneMirror</span></div>
+        <div class="endpoint-row" role="row"><strong role="cell">SRT</strong><code id="srt-url" role="cell">srt://127.0.0.1:10080?streamid=#!::r=live/iphone-mirror,m=publish</code><span role="cell" data-i18n>Publish from iPhoneMirror</span></div>
+        <div class="endpoint-row" role="row"><strong role="cell">WHIP</strong><code id="whip-url" role="cell">http://127.0.0.1:1985/rtc/v1/whip/?app=live&amp;stream=iphone-mirror</code><span role="cell" data-i18n>Publish from iPhoneMirror</span></div>
+        <div class="endpoint-row" role="row"><strong role="cell">WHEP</strong><code id="whep-url" role="cell">http://127.0.0.1:1985/rtc/v1/whep/?app=live&amp;stream=iphone-mirror</code><span role="cell" data-i18n>Browser playback</span></div>
       </div>
     </section>
 
@@ -43,43 +43,43 @@
       <div class="tool-panel player-panel">
         <div class="section-heading compact">
           <div>
-            <p class="eyebrow">WEBRTC PLAYBACK</p>
-            <h2>WHEP monitor</h2>
+            <p class="eyebrow" data-i18n>WEBRTC PLAYBACK</p>
+            <h2 data-i18n>WHEP monitor</h2>
           </div>
           <div class="button-set">
-            <button id="start-whep" class="primary-button" type="button">Start monitor</button>
-            <button id="stop-whep" class="quiet-button" type="button" disabled>Stop</button>
+            <button id="start-whep" class="primary-button" type="button" data-i18n>Start monitor</button>
+            <button id="stop-whep" class="quiet-button" type="button" disabled data-i18n>Stop</button>
           </div>
         </div>
         <div class="video-shell">
           <video id="whep-video" autoplay playsinline muted></video>
-          <p id="whep-message">Waiting for a live stream</p>
+          <p id="whep-message" data-i18n>Waiting for a live stream</p>
         </div>
       </div>
 
       <div class="tool-panel camera-panel">
         <div class="section-heading compact">
           <div>
-            <p class="eyebrow">VIRTUAL CAMERA</p>
-            <h2>Browser device check</h2>
+            <p class="eyebrow" data-i18n>VIRTUAL CAMERA</p>
+            <h2 data-i18n>Browser device check</h2>
           </div>
-          <button id="scan-cameras" class="quiet-button" type="button">Scan cameras</button>
+          <button id="scan-cameras" class="quiet-button" type="button" data-i18n>Scan cameras</button>
         </div>
-        <label for="camera-select">Video input</label>
-        <select id="camera-select"><option>Request camera access to list devices</option></select>
+        <label for="camera-select" data-i18n>Video input</label>
+        <select id="camera-select"><option data-i18n>Request camera access to list devices</option></select>
         <div class="button-set">
-          <button id="start-camera" class="primary-button" type="button">Open camera</button>
-          <button id="stop-camera" class="quiet-button" type="button" disabled>Stop</button>
+          <button id="start-camera" class="primary-button" type="button" data-i18n>Open camera</button>
+          <button id="stop-camera" class="quiet-button" type="button" disabled data-i18n>Stop</button>
         </div>
         <div class="camera-preview"><video id="camera-video" autoplay playsinline muted></video></div>
         <dl class="camera-diagnostics" aria-live="polite">
-          <div><dt>Device</dt><dd id="camera-device-value">Not open</dd></div>
-          <div><dt>Resolution</dt><dd id="camera-resolution-value">--</dd></div>
-          <div><dt>Actual FPS</dt><dd id="camera-fps-value">--</dd></div>
-          <div><dt>Longest frame gap</dt><dd id="camera-gap-value">--</dd></div>
-          <div><dt>Near-black frames</dt><dd id="camera-black-value">0</dd></div>
+          <div><dt data-i18n>Device</dt><dd id="camera-device-value" data-i18n>Not open</dd></div>
+          <div><dt data-i18n>Resolution</dt><dd id="camera-resolution-value">--</dd></div>
+          <div><dt data-i18n>Actual FPS</dt><dd id="camera-fps-value">--</dd></div>
+          <div><dt data-i18n>Longest frame gap</dt><dd id="camera-gap-value">--</dd></div>
+          <div><dt data-i18n>Near-black frames</dt><dd id="camera-black-value">0</dd></div>
         </dl>
-        <p id="camera-message" class="tool-message">Camera is not open.</p>
+        <p id="camera-message" class="tool-message" data-i18n>Camera is not open.</p>
         <canvas id="camera-analysis" width="32" height="18" hidden></canvas>
       </div>
     </section>
@@ -87,15 +87,16 @@
     <section class="stream-band" aria-labelledby="streams-title">
       <div class="section-heading compact">
         <div>
-          <p class="eyebrow">SERVER INVENTORY</p>
-          <h2 id="streams-title">Active media streams</h2>
+          <p class="eyebrow" data-i18n>SERVER INVENTORY</p>
+          <h2 id="streams-title" data-i18n>Active media streams</h2>
         </div>
-        <span id="stream-count" class="count">0 streams</span>
+        <span id="stream-count" class="count" data-i18n>0 streams</span>
       </div>
-      <div id="stream-list" class="stream-list" aria-live="polite"><p>Waiting for media server.</p></div>
+      <div id="stream-list" class="stream-list" aria-live="polite"><p data-i18n>Waiting for media server.</p></div>
     </section>
   </main>
 
+  <script src="./localize.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

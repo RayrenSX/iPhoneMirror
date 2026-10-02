@@ -181,7 +181,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         return true;
     }
 
-    public async Task SendTouchBatchAsync(IReadOnlyList<TouchPoint> points, long timestampNs, long sequence, CancellationToken ct = default)
+    public async Task SendTouchBatchAsync(IReadOnlyList<TouchPoint> points, long timestampNs,
+        long sequence, CancellationToken ct = default, Func<bool>? canSend = null)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
@@ -200,6 +201,9 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
+            // Pure releases must pass after focus loss. A queued contact or
+            // movement belongs to the focus snapshot that created it.
+            if (points.Any(point => point.Action != "up") && canSend?.Invoke() == false) return;
             // Recovery may close the gate while this packet waits for the writer.
             if (generation != Interlocked.Read(ref _readyGeneration)) return;
             if (!IsReady || _stdin is null)
@@ -540,6 +544,10 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 text,
             };
             var bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
+            // Validate the encoded payload before writing even the header;
+            // an oversized frame terminates the receiver's input loop.
+            if (bytes.Length > CoreDeviceTouchProtocol.MaxFrameSize)
+                throw new ArgumentException(LocalizationService.Get("ClipboardTextTooLarge"), nameof(text));
             var header = BitConverter.GetBytes((uint)bytes.Length);
             await _stdin.BaseStream.WriteAsync(header, ct);
             await _stdin.BaseStream.WriteAsync(bytes, ct);

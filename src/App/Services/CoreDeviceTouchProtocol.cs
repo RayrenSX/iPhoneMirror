@@ -7,6 +7,8 @@ namespace IPhoneMirror.App.Services;
 public static class CoreDeviceTouchProtocol
 {
     public const int ProtocolVersion = 2;
+    // Must match MAX_FRAME_SIZE in tools/usb_touch_bridge.py.
+    public const int MaxFrameSize = 4 * 1024 * 1024;
     public const string MessageSchema = "iphoneMirror.touch.v2";
     public const string MessageKind = "touch_batch";
     public const string KeyboardMessageKind = "keyboard_batch";

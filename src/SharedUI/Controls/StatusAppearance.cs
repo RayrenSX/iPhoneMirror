@@ -34,6 +34,7 @@ public static class StatusAppearance
                 _ => "ControlFillBrush",
             });
         }
+        else if (target is System.Windows.Shapes.Shape shape) shape.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brush);
         else if (target is TextBlock text) text.SetResourceReference(TextBlock.ForegroundProperty, brush);
         else if (target is FrameworkElement element) element.SetResourceReference(TextElement.ForegroundProperty, brush);
     }

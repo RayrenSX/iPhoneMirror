@@ -45,7 +45,7 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel>
                         <TextBlock Text="{DynamicResource HelpTitle}" FontWeight="SemiBold"/>
-                        <TextBlock Text="{DynamicResource HelpBody}"
+                        <TextBlock Text="{DynamicResource HelpBody}" TextWrapping="Wrap"
                                    Foreground="{DynamicResource MutedTextBrush}" Margin="0,4,0,0"/>
                     </StackPanel>
                     <Button Grid.Column="1" Content="{DynamicResource CopyGroup}" Click="OnCopyGroupClick"

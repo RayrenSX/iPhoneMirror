@@ -111,6 +111,7 @@ internal static partial class Program
 
     private static void AuditAllTabs(Window window, string name, HashSet<string> findings, string? renderPath = null)
     {
+        foreach (var issue in FindSystemBlackContent(window)) findings.Add($"{name}: {issue}");
         AuditAdaptiveLayout(window, name, findings);
         var expanderIndex = 0;
         foreach (var expander in Visuals(window).OfType<Expander>().Where(e => e.IsVisible).ToArray())
@@ -133,6 +134,7 @@ internal static partial class Program
                 tabs.SelectedIndex = index;
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(25));
                 window.UpdateLayout();
+                foreach (var issue in FindSystemBlackContent(window)) findings.Add($"{name}/tab-{index}: {issue}");
                 if (tabs.SelectedContent is FrameworkElement content && (!content.IsVisible || content.ActualHeight <= 0))
                     findings.Add($"{name}: tab {index} content is not visible");
                 AuditAdaptiveLayout(window, $"{name}/tab-{index}", findings);

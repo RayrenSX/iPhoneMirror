@@ -80,6 +80,7 @@
              Link="Networking\SegmentedHttpDownloader.cs" />
     <Compile Include="..\Shared\Security\ElevationPathLock.cs"
              Link="Security\ElevationPathLock.cs" />
+    <Compile Include="..\SharedUI\Services\AccessibilityAppearance.cs" Link="Services\AccessibilityAppearance.cs" />
     <Compile Include="..\SharedUI\Services\WindowWorkAreaController.cs"
              Link="Services\WindowWorkAreaController.cs" />
     <Compile Include="..\SharedUI\Animations\PageTransition.cs"
@@ -95,6 +96,8 @@
     <Page Include="..\SharedUI\Controls\Buttons.xaml" Link="Controls\Buttons.xaml" />
     <Compile Include="..\SharedUI\Controls\StatusAppearance.cs" Link="Controls\StatusAppearance.cs" />
     <Compile Include="..\SharedUI\Controls\DialogKeyboard.cs" Link="Controls\DialogKeyboard.cs" />
+    <Compile Include="..\SharedUI\Controls\ComboBoxTextLayout.cs" Link="Controls\ComboBoxTextLayout.cs" />
+    <Compile Include="..\SharedUI\Controls\DialogViewport.cs" Link="Controls\DialogViewport.cs" />
     <Compile Include="..\SharedUI\Controls\RoundedWindow.cs" Link="Controls\RoundedWindow.cs" />
     <Page Include="..\SharedUI\Themes\LightTheme.xaml"
           Link="Themes\LightTheme.xaml" />

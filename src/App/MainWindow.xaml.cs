@@ -91,6 +91,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         public bool PendingMoveQueued;
         public double PendingMoveX;
         public double PendingMoveY;
+        public Func<bool>? PendingMoveCanSend;
         public double WheelRemainder;
         public bool WheelActive;
         public double WheelY;
@@ -431,9 +432,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
-        _windowSource = (HwndSource?)PresentationSource.FromVisual(this);
+        // Tray startup creates the HWND before Show attaches the visual tree.
+        // FromVisual is null then, and SourceInitialized will not fire again
+        // when the workspace opens. Bind input to the already-created HWND.
+        _windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
         _windowSource?.AddHook(WindowMessageHook);
         RegisterBluetoothControlHotkey();
+        _viewModel.AddDiagnosticLog(AppLog.Event("main_window_input_source_initialized",
+            ("attached", _windowSource is not null), ("visible", IsVisible)));
     }
 
     private void RegisterBluetoothControlHotkey()
@@ -648,6 +654,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     state.LastY, sourceUdid);
             return;
         }
+        var canSend = CaptureKeyboardSendGuard(GetControlKeyboardWindow(sourceUdid));
         if (e.Kind == Controls.PreviewPointerKind.Wheel)
         {
             // Velocity-based wheel simulation: the whole scroll gesture is
@@ -690,7 +697,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (!state.WheelDraining)
             {
                 state.WheelDraining = true;
-                _ = DrainWheelAsync(state, sourceUdid);
+                _ = DrainWheelAsync(state, sourceUdid, canSend);
             }
             return;
         }
@@ -728,12 +735,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var action = e.Kind == Controls.PreviewPointerKind.ButtonDown ? "down" :
             e.Kind == Controls.PreviewPointerKind.ButtonUp ? "up" : "move";
         if (action == "up") state.Pressed = false;
-        if (action == "move")
-            await SendUsbMoveCoalescedAsync(state, position.X, position.Y, sourceUdid);
-        else
-            await _viewModel.SendUsbTouchAsync(action, position.X, position.Y, sourceUdid);
+        // Publish the sampled position before an asynchronous send, so a
+        // reset cannot release at coordinates from an older gesture.
         state.LastX = position.X;
         state.LastY = position.Y;
+        if (action == "move")
+            await SendUsbMoveCoalescedAsync(state, position.X, position.Y, sourceUdid, canSend);
+        else
+            await _viewModel.SendUsbTouchAsync(action, position.X, position.Y, sourceUdid,
+                canSend: canSend);
     }
 
     private UsbTouchPointerState GetUsbTouchPointerState(string udid)
@@ -760,27 +770,28 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     // to zero the gesture ends, with a minimum-distance tail so even a
     // single light tick travels far enough that iOS never reads it as a tap.
     private async Task DrainWheelAsync(UsbTouchPointerState state,
-        string? sourceUdid)
+        string? sourceUdid, Func<bool> canSend)
     {
         const double stopVelocity = 0.05;   // below this the gesture is over
         const double decayPerFrame = 0.9;   // velocity decay each frame
         const double maxFrameSeconds = 0.1; // clamp for pathological stalls
         const double minGesture = 0.08;     // total travel so iOS sees a drag
         const double tailStep = 0.008;      // per-frame distance while topping up
+        bool CanSendWheel() => !state.WheelCancelled && canSend();
         try
         {
             if (state.WheelNeedsDown)
             {
                 state.WheelNeedsDown = false;
                 await _viewModel.SendUsbTouchAsync("down", state.LastX,
-                    state.WheelY, sourceUdid);
+                    state.WheelY, sourceUdid, canSend: CanSendWheel);
             }
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var lastMs = 0.0;
-            while (!state.WheelCancelled)
+            while (CanSendWheel())
             {
                 await Task.Delay(16);
-                if (state.WheelCancelled) break;
+                if (!CanSendWheel()) break;
                 // Real elapsed time (not the nominal 16 ms) keeps the speed
                 // correct even when the HID tunnel backpressure stretches a
                 // frame beyond its target interval.
@@ -809,7 +820,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     state.WheelGestureDistance += tailTravel;
                     if (tailTravel > 0.0005)
                         await _viewModel.SendUsbTouchAsync("move",
-                            state.LastX, tailY, sourceUdid);
+                            state.LastX, tailY, sourceUdid, canSend: CanSendWheel);
                     // A tail clamped against the band can no longer move —
                     // bail out instead of spinning on the same position.
                     if (state.WheelGestureDistance >= minGesture ||
@@ -833,14 +844,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                             Math.Abs(newY - state.WheelY);
                         state.WheelY = newY;
                         await _viewModel.SendUsbTouchAsync("move",
-                            state.LastX, newY, sourceUdid);
+                            state.LastX, newY, sourceUdid, canSend: CanSendWheel);
                     }
                     break;
                 }
                 state.WheelY = newY;
                 state.WheelGestureDistance += Math.Abs(deltaY);
                 await _viewModel.SendUsbTouchAsync("move", state.LastX,
-                    newY, sourceUdid);
+                    newY, sourceUdid, canSend: CanSendWheel);
             }
             // Release the contact unless the user has taken it over with a
             // ButtonDown (race: the button's down must not be undone here).
@@ -869,10 +880,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     // the pointer was released, so the Pressed guard here is enough. All state
     // is per-device so concurrent preview windows cannot corrupt each other.
     private async Task SendUsbMoveCoalescedAsync(UsbTouchPointerState state,
-        double x, double y, string? sourceUdid)
+        double x, double y, string? sourceUdid, Func<bool> canSend)
     {
         state.PendingMoveX = x;
         state.PendingMoveY = y;
+        state.PendingMoveCanSend = canSend;
         state.PendingMoveQueued = true;
         if (state.MoveDraining) return;
         state.MoveDraining = true;
@@ -882,7 +894,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             {
                 state.PendingMoveQueued = false;
                 await _viewModel.SendUsbTouchAsync("move", state.PendingMoveX,
-                    state.PendingMoveY, sourceUdid);
+                    state.PendingMoveY, sourceUdid, canSend: state.PendingMoveCanSend);
             }
         }
         finally
@@ -1235,7 +1247,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         await _bluetoothRouteGate.WaitAsync();
         try
         {
-            ShowReverseControlStatus(ControlStatusMode.Bluetooth);
+            ShowReverseControlStatus(ControlStatusMode.Bluetooth, udid);
             ResetControlRouteState();
             if (_viewModel.IsBluetoothControlEnabled && _activeControlWindow == window)
             {
@@ -1405,12 +1417,25 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var keyboardWindow = sourceWindow ?? _windowSource?.Handle ?? 0;
         var isReset = e.Kind == Controls.PreviewKeyboardKind.Reset;
         if (isReset)
-            Interlocked.Increment(ref _keyboardInputGeneration);
+        {
+            // Late cleanup from an inactive device releases that device's
+            // keys, but must not invalidate the current device's queued input.
+            if (DeviceViewModel.UdidEquals(routeUdid, _keyboardStateUdid) ||
+                DeviceViewModel.UdidEquals(routeUdid, ActiveInputDeviceUdid))
+                Interlocked.Increment(ref _keyboardInputGeneration);
+        }
         else if (!CanForwardControlKeyboard(routeUdid, keyboardWindow))
             return;
         var generation = _keyboardInputGeneration;
         var canSend = isReset ? null : CaptureKeyboardSendGuard(keyboardWindow);
         await _bluetoothRouteGate.WaitAsync();
+        var routeHeld = true;
+        void ReleaseRoute()
+        {
+            if (!routeHeld) return;
+            routeHeld = false;
+            _bluetoothRouteGate.Release();
+        }
         try
         {
             if (Volatile.Read(ref _bluetoothRouteChanging) != 0) return;
@@ -1429,6 +1454,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (!usbTargetActive && !bluetoothTargetActive) return;
             if (isReset && !DeviceViewModel.UdidEquals(_keyboardStateUdid, routeUdid))
             {
+                ReleaseRoute();
                 if (bluetoothTargetActive) await _viewModel.SendBluetoothKeyboardAsync(0, [], routeUdid);
                 if (usbTargetActive) await _viewModel.SendUsbKeyboardAsync([], routeUdid);
                 return;
@@ -1449,6 +1475,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 _pasteVPending = false;
                 // The empty release report must pass even after focus is lost;
                 // otherwise the iPhone can retain a held key or modifier.
+                ReleaseRoute();
                 if (bluetoothTargetActive) await _viewModel.SendBluetoothKeyboardAsync(0, [], routeUdid);
                 if (usbTargetActive) await _viewModel.SendUsbKeyboardAsync([], routeUdid);
                 return;
@@ -1506,14 +1533,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 }
                 catch { /* Clipboard lock or bridge unavailable. */ }
             }
+            // Snapshot shared key state before releasing the route lock.
+            // Each transport serializes its own reports; waiting for one
+            // device's writer must not block another device's input.
+            var usbUsages = usages.Concat(ModifierUsages(_controlModifierKeys)).ToArray();
+            var bluetoothModifiers = _controlKeyboardModifiers;
+            ReleaseRoute();
             if (bluetoothTargetActive)
-                await _viewModel.SendBluetoothKeyboardAsync(_controlKeyboardModifiers,
+                await _viewModel.SendBluetoothKeyboardAsync(bluetoothModifiers,
                     bluetoothUsages, routeUdid, canSend);
             if (usbTargetActive && !pasteIntercepted &&
                 generation == _keyboardInputGeneration &&
                 CanForwardControlKeyboard(routeUdid, keyboardWindow))
             {
-                var usbUsages = usages.Concat(ModifierUsages(_controlModifierKeys)).ToArray();
                 await _viewModel.SendUsbKeyboardAsync(usbUsages, routeUdid, canSend);
             }
         }
@@ -1526,7 +1558,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         finally
         {
-            _bluetoothRouteGate.Release();
+            ReleaseRoute();
         }
     }
 
@@ -4462,7 +4494,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _mediaControlsHideTimer.Stop();
         if (!_mediaCastActive || !_mediaShouldPlay || _mediaBuffering ||
             _mediaWaitingForFirstFrame || _mediaSeekInteraction ||
-            MediaCastControlsPanel.IsMouseOver)
+            MediaCastControlsPanel.IsMouseOver || MediaCastControlsPanel.IsKeyboardFocusWithin)
         {
             if (_mediaCastActive && _mediaShouldPlay)
                 _mediaControlsHideTimer.Start();
@@ -4505,6 +4537,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             {
                 EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
             }, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void OnMediaControlsGotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        RevealMediaCastControls(scheduleAutoHide: false);
+
+    private void OnMediaControlsLostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (!MediaCastControlsPanel.IsKeyboardFocusWithin) ScheduleMediaCastControlsAutoHide();
     }
 
     private void OnMediaCastPlayerMouseEnter(object sender, MouseEventArgs e) =>
@@ -5132,6 +5172,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 new AdvancedSettingsWindow(1920, 1080, previewOnly: true)
                     { Owner = this }.Show();
                 break;
+            case "text-input":
+                TextInputWindow.ShowDeveloperPreview(this);
+                break;
             case "device-binding":
                 DeviceBindingWindow.ShowDeveloperPreview(this, _viewModel);
                 break;
@@ -5258,6 +5301,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 },
             },
         };
+        content.SetResourceReference(Border.BackgroundProperty, "PreviewPanelAltBrush");
+        var previewLabels = ((StackPanel)content.Child).Children.OfType<TextBlock>().ToArray();
+        previewLabels[0].SetResourceReference(TextBlock.TextProperty, "DeveloperNativePreviewBody");
+        previewLabels[0].SetResourceReference(TextBlock.FontSizeProperty, "FontSize22");
+        previewLabels[0].SetResourceReference(TextBlock.ForegroundProperty, "PreviewTextBrush");
+        previewLabels[0].TextWrapping = TextWrapping.Wrap;
+        previewLabels[1].SetResourceReference(TextBlock.FontSizeProperty, "BodyFontSize");
+        previewLabels[1].SetResourceReference(TextBlock.ForegroundProperty, "PreviewMutedTextBrush");
         NativePreviewWindow.TryCreateAndShowForContent(content, 1920, 1080,
             LocalizationService.Get("DeveloperNativePreviewTitle"),
             () => true, _ => { }, () => 1, () => { }, () => { },
@@ -6700,7 +6751,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // Entering full screen applies a temporary local Collapsed value.
             // Clear it on exit so the selected session controls toolbar visibility again.
             EnvironmentPanel.ClearValue(UIElement.VisibilityProperty);
-            ControlDeviceTabs.ClearValue(UIElement.VisibilityProperty);
             StatsPanel.Visibility = Visibility.Visible;
             FooterPanel.Visibility = Visibility.Visible;
             ApplyWorkspacePanelState();
@@ -6745,7 +6795,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: 336);
             HeaderPanel.Visibility = Visibility.Collapsed;
             EnvironmentPanel.Visibility = Visibility.Collapsed;
-            ControlDeviceTabs.Visibility = Visibility.Collapsed;
             StatsPanel.Visibility = Visibility.Collapsed;
             FooterPanel.Visibility = Visibility.Collapsed;
             DeviceColumn.Width = new GridLength(0);
@@ -7249,8 +7298,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void ToggleBluetoothControlFromHotkey()
     {
         BluetoothControlNoticeWindow.TryCloseActive();
-        ShowReverseControlStatus(ControlStatusMode.Bluetooth);
-        _ = _viewModel.ToggleBluetoothControlAsync();
+        HandleConfiguredShortcut(BluetoothShortcutAction.BluetoothControl);
     }
 
     private void ShowReverseControlStatus(ControlStatusMode mode, string? targetUdid = null)
@@ -7278,13 +7326,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         if (action == BluetoothShortcutAction.BluetoothControl)
         {
+            var target = ActiveInputDeviceUdid;
             // Restore the native/WPF input route synchronously before the
             // asynchronous HID teardown. A stalled WinRT notification must
             // never leave the main window with a captured or suppressed mouse.
             if (_viewModel.IsBluetoothControlEnabled)
                 ClearBluetoothControlInputState();
-            ShowReverseControlStatus(ControlStatusMode.Bluetooth);
-            _ = _viewModel.ToggleBluetoothControlAsync();
+            ShowReverseControlStatus(ControlStatusMode.Bluetooth, target);
+            _ = _viewModel.ToggleBluetoothControlAsync(target);
         }
         else if (action == BluetoothShortcutAction.WirelessControl)
         {

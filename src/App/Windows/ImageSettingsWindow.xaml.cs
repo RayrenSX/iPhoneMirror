@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using IPhoneMirror.App.Localization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -38,6 +39,8 @@ public partial class ImageSettingsWindow : IPhoneMirror.UI.Controls.RoundedWindo
         _save = save;
         _revert = revert;
         InitializeComponent();
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+            FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text));
         BrightnessSlider.Value = Math.Clamp(originalValues.Brightness, -100, 100);
         ContrastSlider.Value = Math.Clamp(originalValues.Contrast, 0, 200);
         SaturationSlider.Value = Math.Clamp(originalValues.Saturation, 0, 200);

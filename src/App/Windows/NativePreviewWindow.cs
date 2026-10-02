@@ -361,7 +361,7 @@ internal sealed class NativePreviewWindow : IDisposable
             var cornerPreference = DwmRound;
             _ = DwmSetWindowAttribute(_handle, DwmWindowCornerPreference,
                 ref cornerPreference, sizeof(int));
-            var darkTitleBar = 1;
+            var darkTitleBar = ThemeService.IsDark ? 1 : 0;
             _ = DwmSetWindowAttribute(_handle, DwmUseImmersiveDarkMode,
                 ref darkTitleBar, sizeof(int));
         }
@@ -375,6 +375,7 @@ internal sealed class NativePreviewWindow : IDisposable
         // initialized; HwndSource construction itself dispatches messages.
         _source.AddHook(WindowProcedure);
         OpenWindows.Add(this);
+        ThemeService.ThemeChanged += OnThemeChanged;
         if (managedContent is null)
         {
             // Preserve the original borderless DirectComposition window for
@@ -771,14 +772,12 @@ internal sealed class NativePreviewWindow : IDisposable
                 if (_capturedMouseButtons == 0) _ = ReleaseCapture();
                 handled = true;
                 return 0;
-            case WmRightButtonDown when IsReverseControlEnabledForWindow:
-                if (IsUsbControlEnabledForWindow) break;
+            case WmRightButtonDown when IsRightButtonForwardingEnabled:
                 if (IsReverseControlActive)
                     DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 2, 0);
                 handled = true;
                 return 0;
-            case WmRightButtonUp when IsReverseControlEnabledForWindow:
-                if (IsUsbControlEnabledForWindow) break;
+            case WmRightButtonUp when IsRightButtonForwardingEnabled:
                 if (IsReverseControlActive)
                     DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 2, 0);
                 handled = true;
@@ -847,9 +846,9 @@ internal sealed class NativePreviewWindow : IDisposable
                     (int)((lParam.ToInt64() >> 16) & 0x1FF)));
                 handled = true;
                 return 0;
-            case WmContextMenu when IsReverseControlEnabledForWindow:
-            case WmNcRightButtonDown when IsReverseControlEnabledForWindow:
-            case WmNcRightButtonUp when IsReverseControlEnabledForWindow:
+            case WmContextMenu when IsRightButtonForwardingEnabled:
+            case WmNcRightButtonDown when IsRightButtonForwardingEnabled:
+            case WmNcRightButtonUp when IsRightButtonForwardingEnabled:
                 handled = true;
                 return 0;
             case WmNcCalcSize when _managedContent is null:
@@ -1175,6 +1174,10 @@ internal sealed class NativePreviewWindow : IDisposable
         (_isReverseControlEnabled?.Invoke(_handle) ?? false);
     private bool IsUsbControlEnabledForWindow => _pointerInput is not null &&
         (_isUsbControlEnabled?.Invoke() ?? false);
+    // The reverse-control callback also includes wired/wireless touch targets.
+    // Only Bluetooth reserves right-click for phone input; touch keeps the menu.
+    private bool IsRightButtonForwardingEnabled =>
+        IsReverseControlEnabledForWindow && !IsUsbControlEnabledForWindow;
     private bool IsPointerInputEnabledForWindow =>
         IsReverseControlEnabledForWindow || IsUsbControlEnabledForWindow;
     private bool IsPointerInputActive =>
@@ -1313,6 +1316,13 @@ internal sealed class NativePreviewWindow : IDisposable
             _aspectController.SetSourceDimensions(_sourceWidth, _sourceHeight);
     }
 
+    private void OnThemeChanged(object? sender, EventArgs e)
+    {
+        if (_disposed || _managedContent is null || _handle == 0) return;
+        var dark = ThemeService.IsDark ? 1 : 0;
+        _ = DwmSetWindowAttribute(_handle, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -1322,6 +1332,7 @@ internal sealed class NativePreviewWindow : IDisposable
         _disposed = true;
         _hoverOpacityTimer.Stop();
         OpenWindows.Remove(this);
+        ThemeService.ThemeChanged -= OnThemeChanged;
         _styleWindow?.Close();
         _styleWindow = null;
         _protectedOverlay?.Close();

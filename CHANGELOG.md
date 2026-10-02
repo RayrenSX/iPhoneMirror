@@ -5,6 +5,25 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Isolate multi-device keyboard writes so a stalled device cannot block another
+  device's input. Drop queued touch gestures after focus changes, preserve
+  foreground input during inactive-device cleanup, and target Bluetooth startup
+  shortcuts at the focused preview device.
+- Compact preview toolbar labels from right to left according to the available
+  layout width, and restore them when space returns. Preserve icons, tooltips,
+  accessible names, theme styling and scrolling when even the icons cannot fit.
+- Keep navigation and button icon colors in sync with their controls when the
+  app starts in the system tray and first opens the complete or lightweight
+  workspace, including later theme and enabled-state changes.
+- Restore main-preview wired and wireless touch control after starting in the
+  system tray and opening the workspace. Initialize the input source from the
+  native window handle even while the WPF visual tree is still unattached.
+- Keep the last wireless mirroring frame visible when a static phone screen
+  stops sending video. Frame inactivity no longer restarts the session, and
+  resized or additional previews can reuse the retained frame.
+
 ## [1.8.4-test4] - 2026-09-07
 
 ### Changed

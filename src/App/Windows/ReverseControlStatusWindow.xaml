@@ -12,28 +12,29 @@
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/><RowDefinition Height="16"/>
-                <RowDefinition Height="*"/><RowDefinition Height="16"/>
+                <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/><RowDefinition Height="16"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid Grid.Row="0" Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
                 <StackPanel Margin="0,0,48,0">
                     <TextBlock Text="{DynamicResource ReverseControlTitle}" Style="{StaticResource SubWindowTitle}"/>
-                    <TextBlock Text="{Binding DeviceSummary}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource BodyFontSize}" Margin="0,4,0,0"/>
+                    <TextBlock Text="{Binding DeviceSummary}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource BodyFontSize}" Margin="0,4,0,0"/>
                 </StackPanel>
                 <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
                 </Button>
             </Grid>
-            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer x:Name="ControlContentScrollViewer" Grid.Row="2"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
             <StackPanel  HorizontalAlignment="Center">
                 <Border Width="46" Height="46" CornerRadius="23" Background="{DynamicResource AccentBrush}" HorizontalAlignment="Center">
                     <ui:SymbolIcon Symbol="Cursor20" FontSize="21" Foreground="{DynamicResource OnAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
                 <TextBlock Text="{Binding StageTitle}" AutomationProperties.AutomationId="ControlStageTitle" Style="{StaticResource SubWindowTitle}" TextAlignment="Center" HorizontalAlignment="Center" Margin="0,10,0,0"/>
-                <TextBlock Text="{Binding StageDescription}" FontSize="{StaticResource BodyFontSize}" Foreground="{DynamicResource MutedTextBrush}" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="430" Margin="0,4,0,0"/>
-            <TextBlock Text="{Binding CountdownText}" FontSize="{StaticResource SecondaryFontSize}" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" Margin="0,5,0,0"/>
-                <TextBlock Text="{Binding TotalDurationText}" FontSize="{StaticResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                <TextBlock Text="{Binding StageDescription}" FontSize="{DynamicResource BodyFontSize}" Foreground="{DynamicResource MutedTextBrush}" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="430" Margin="0,4,0,0"/>
+            <TextBlock TextWrapping="Wrap" Text="{Binding CountdownText}" FontSize="{DynamicResource SecondaryFontSize}" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                <TextBlock Text="{Binding TotalDurationText}" FontSize="{DynamicResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,3,0,0"/>
             </StackPanel>
             <Border  Style="{StaticResource SettingsSection}" Padding="14,10"
                     Margin="0,16,0,0" MinHeight="180">
@@ -46,8 +47,8 @@
                                                design:StatusAppearance.Tone="{Binding MarkerTone}"
                                                AutomationProperties.Name="{Binding MarkerDescription}"
                                                ToolTip="{Binding MarkerDescription}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1" Text="{Binding Title}" TextWrapping="Wrap" FontSize="{StaticResource SectionTitleFontSize}" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="2" Text="{Binding DurationText}" FontSize="{StaticResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Title}" TextWrapping="Wrap" FontSize="{DynamicResource SectionTitleFontSize}" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="2" Text="{Binding DurationText}" FontSize="{DynamicResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                             </Grid>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -56,36 +57,37 @@
             <Border  Style="{StaticResource SettingsSection}" Padding="14,12"
                     Margin="0,8,0,2" Visibility="{Binding BluetoothPairingStepsVisibility}">
                 <StackPanel>
-                    <TextBlock Text="{DynamicResource ControlBluetoothPairingTitle}" FontSize="{StaticResource BodyFontSize}"
+                    <TextBlock Text="{DynamicResource ControlBluetoothPairingTitle}" FontSize="{DynamicResource BodyFontSize}"
                                FontWeight="SemiBold" Margin="0,0,0,9"/>
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <TextBlock Text="1" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepOneText}" TextWrapping="Wrap" FontSize="{StaticResource CaptionFontSize}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepOneText}" TextWrapping="Wrap" FontSize="{DynamicResource CaptionFontSize}"/>
                     </Grid>
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <TextBlock Text="2" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepTwoText}" TextWrapping="Wrap" FontSize="{StaticResource CaptionFontSize}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepTwoText}" TextWrapping="Wrap" FontSize="{DynamicResource CaptionFontSize}"/>
                     </Grid>
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <TextBlock Text="3" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepThreeText}" TextWrapping="Wrap" FontSize="{StaticResource CaptionFontSize}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepThreeText}" TextWrapping="Wrap" FontSize="{DynamicResource CaptionFontSize}"/>
                     </Grid>
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <TextBlock Text="4" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepFourText}" TextWrapping="Wrap" FontSize="{StaticResource CaptionFontSize}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepFourText}" TextWrapping="Wrap" FontSize="{DynamicResource CaptionFontSize}"/>
                     </Grid>
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <TextBlock Text="5" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepFiveText}" TextWrapping="Wrap" FontSize="{StaticResource CaptionFontSize}"/>
+                        <TextBlock Grid.Column="1" Text="{Binding BluetoothPairStepFiveText}" TextWrapping="Wrap" FontSize="{DynamicResource CaptionFontSize}"/>
                     </Grid>
                 </StackPanel>
             </Border>
-            <Border  Style="{StaticResource SettingsSection}" Padding="14" Margin="0,0,0,2"
+            <Border x:Name="PromptCard" Style="{StaticResource SettingsSection}" Padding="14" Margin="0,8,0,2"
+                    IsVisibleChanged="OnPromptCardIsVisibleChanged"
                     Visibility="{Binding PromptVisibility}">
                 <StackPanel>
                     <Grid>
@@ -95,7 +97,7 @@
                             <ui:SymbolIcon Symbol="{Binding PromptSymbol}" design:StatusAppearance.Tone="{Binding PromptTone}"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
-                        <TextBlock Grid.Column="1" Text="{Binding PromptTitle}" TextWrapping="Wrap" FontSize="{StaticResource SectionTitleFontSize}" FontWeight="SemiBold"
+                        <TextBlock Grid.Column="1" Text="{Binding PromptTitle}" TextWrapping="Wrap" FontSize="{DynamicResource SectionTitleFontSize}" FontWeight="SemiBold"
                                    VerticalAlignment="Center" Margin="10,0,0,0"/>
                     </Grid>
                     <TextBlock Text="{Binding PromptMessage}" Style="{StaticResource BodyText}"
@@ -105,8 +107,14 @@
                              Background="Transparent" Margin="0,10,0,0" MaxHeight="150">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
+                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
                                 <Setter Property="IsEnabled" Value="{Binding IsEnabled}"/>
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Style.Triggers>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter Property="Foreground" Value="{DynamicResource DisabledTextBrush}"/>
+                                    </Trigger>
+                                </Style.Triggers>
                             </Style>
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
@@ -118,7 +126,7 @@
                                     <StackPanel>
                                         <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold"/>
                                         <TextBlock Text="{Binding DisplayDetail}" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
+                                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                                                    Margin="0,3,0,0"/>
                                     </StackPanel>
                                 </Border>
@@ -126,25 +134,35 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock Text="{Binding PromptTechnicalDetails}" Visibility="{Binding PromptTechnicalDetailsVisibility}"
-                               Foreground="{DynamicResource MutedTextBrush}" FontFamily="{StaticResource CodeFontFamily}" FontSize="{StaticResource CaptionFontSize}"
+                               Foreground="{DynamicResource MutedTextBrush}" FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource CaptionFontSize}"
                                TextWrapping="Wrap" Margin="0,9,0,0"/>
-                    <WrapPanel Style="{StaticResource DialogActions}" Margin="-4,8,-4,-4">
-                        <Button Margin="{StaticResource DialogActionMargin}" Content="{Binding PromptSecondaryText}" Click="OnPromptSecondaryClick"
-                                Visibility="{Binding PromptSecondaryVisibility}" MinWidth="84"/>
-                        <Button Margin="{StaticResource DialogActionMargin}" Content="{Binding PromptPrimaryText}" Click="OnPromptPrimaryClick" AutomationProperties.AutomationId="ControlPromptPrimaryButton"
-                                Visibility="{Binding PromptPrimaryVisibility}" IsEnabled="{Binding IsPromptPrimaryEnabled}"
-                                MinWidth="96" Style="{StaticResource PrimaryButton}"/>
-                    </WrapPanel>
                 </StackPanel>
             </Border>
                 </StackPanel>
             </ScrollViewer>
-            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <WrapPanel Grid.Row="4" Style="{StaticResource DialogActions}">
                 <Button Content="{DynamicResource ReverseControlRetry}" Click="OnRetryClick" Visibility="{Binding RetryVisibility}"
-                        MinWidth="88" Margin="0,0,8,0"/>
-                <Button Content="{DynamicResource Cancel}" Click="OnCancelClick" Visibility="{Binding CancelVisibility}" MinWidth="88" Margin="0,0,8,0"/>
-                <Button Content="{DynamicResource Close}" Click="OnCloseClick" AutomationProperties.AutomationId="ControlStatusCloseButton" Visibility="{Binding CloseVisibility}" MinWidth="88" Style="{StaticResource PrimaryButton}"/>
-            </StackPanel>
+                        MinWidth="88" Margin="{StaticResource DialogActionMargin}"/>
+                <Button Content="{DynamicResource Cancel}" Click="OnCancelClick" MinWidth="88" Margin="{StaticResource DialogActionMargin}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+                            <Setter Property="Visibility" Value="{Binding CancelVisibility}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding PromptSecondaryVisibility}" Value="Visible">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Margin="{StaticResource DialogActionMargin}" Content="{Binding PromptSecondaryText}" Click="OnPromptSecondaryClick"
+                        Visibility="{Binding PromptSecondaryVisibility}" MinWidth="84"/>
+                <Button Margin="{StaticResource DialogActionMargin}" Content="{Binding PromptPrimaryText}" Click="OnPromptPrimaryClick" AutomationProperties.AutomationId="ControlPromptPrimaryButton"
+                        Visibility="{Binding PromptPrimaryVisibility}" IsEnabled="{Binding IsPromptPrimaryEnabled}"
+                        MinWidth="96" Style="{StaticResource PrimaryButton}"/>
+                <Button Content="{DynamicResource Close}" Click="OnCloseClick" AutomationProperties.AutomationId="ControlStatusCloseButton" Visibility="{Binding CloseVisibility}"
+                        MinWidth="88" Margin="{StaticResource DialogActionMargin}" Style="{StaticResource PrimaryButton}"/>
+            </WrapPanel>
         </Grid>
     </Border>
 </chrome:RoundedWindow>

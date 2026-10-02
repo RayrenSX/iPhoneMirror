@@ -23,7 +23,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
         </Grid.RowDefinitions>
 
         <Grid Style="{StaticResource SubWindowHeader}"
@@ -65,7 +65,7 @@
                                                Style="{StaticResource SubWindowTitle}"/>
                                     <TextBlock Text="{Binding VersionText}"
                                                Foreground="{DynamicResource MutedTextBrush}"
-                                               FontSize="{StaticResource SecondaryFontSize}" FontWeight="SemiBold"
+                                               FontSize="{DynamicResource SecondaryFontSize}" FontWeight="SemiBold"
                                                Margin="0,4,0,0"/>
                                     <TextBlock Text="{DynamicResource AboutDescription}"
                                                Style="{StaticResource SubWindowSubtitle}"
@@ -160,10 +160,10 @@
                                 <Button Grid.Column="1" Margin="8,0,0,0" Content="{DynamicResource ClearView}"
                                         Command="{Binding MainViewModel.ClearLogCommand}"
                                         HorizontalAlignment="Right" Padding="10,5"
-                                        MinHeight="32" FontSize="11"/>
+                                        MinHeight="32" FontSize="{DynamicResource SecondaryFontSize}"/>
                             </Grid>
                             <TextBlock Text="{Binding MainViewModel.LogPathDisplay, Mode=OneWay}"
-                                       FontFamily="{StaticResource CodeFontFamily}" FontSize="{StaticResource CaptionFontSize}"
+                                       FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource CaptionFontSize}"
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        TextWrapping="Wrap" Margin="0,10,0,7"/>
                             <Border Background="{DynamicResource PreviewChromeBrush}"
@@ -172,7 +172,7 @@
                                     ClipToBounds="True">
                                 <TextBox x:Name="LiveLogTextBox"
                                          Text="{Binding MainViewModel.LogText, Mode=OneWay}"
-                                         IsReadOnly="True" FontFamily="Consolas" FontSize="10"
+                                         IsReadOnly="True" FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource SecondaryFontSize}"
                                          Foreground="{DynamicResource PreviewTextBrush}"
                                          Background="Transparent" BorderThickness="0"
                                          Height="180" Padding="10" TextWrapping="NoWrap"

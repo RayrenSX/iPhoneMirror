@@ -89,7 +89,7 @@ public partial class InstanceConflictWindow : IPhoneMirror.UI.Controls.RoundedWi
         CloseOtherInstancesButton.IsEnabled = !busy;
         CloseCurrentInstanceButton.IsEnabled = !busy;
         HeaderCloseButton.IsEnabled = !busy;
-        ErrorText.Visibility = Visibility.Collapsed;
+        if (busy) ErrorText.Visibility = Visibility.Collapsed;
         BusyPanel.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         if (busy)
         {

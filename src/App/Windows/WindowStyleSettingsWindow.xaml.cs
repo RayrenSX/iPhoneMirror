@@ -17,6 +17,8 @@ public partial class WindowStyleSettingsWindow : IPhoneMirror.UI.Controls.Rounde
         _apply = apply;
         _applyOpaqueOnHover = applyOpaqueOnHover;
         InitializeComponent();
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+            FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text));
         _appliedOpacity = Math.Clamp(opacity, 0.1, 1.0);
         OpacitySlider.Value = _appliedOpacity * 100;
         OpaqueOnHoverCheckBox.IsChecked = opaqueOnHover;

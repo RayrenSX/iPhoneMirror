@@ -343,7 +343,6 @@ void WirelessClientStream::reset_video_for_attach() noexcept {
     // This is deliberately different from a new device connection, where no
     // frame exists yet and the counters should start from zero.
     if (!latest_frame_) {
-        render_queue_.clear();
         snapshot_.width = snapshot_.height = 0;
         snapshot_.fps = snapshot_.latency_ms = 0;
         snapshot_.video_frames = snapshot_.audio_packets = 0;
@@ -380,13 +379,11 @@ std::shared_ptr<const media::DecodedFrame> WirelessClientStream::latest_frame() 
 }
 
 std::shared_ptr<const media::DecodedFrame> WirelessClientStream::next_render_frame() {
+    // AirPlay may send nothing while the phone screen is static. Every preview
+    // must retain access to the latest immutable frame for resize/repaint and
+    // newly opened windows, without another renderer consuming it first.
     std::scoped_lock lock(mutex_);
-    if (render_queue_.empty()) return nullptr;
-    auto frame = render_queue_.size() > 2 ? std::move(render_queue_.back())
-                                          : std::move(render_queue_.front());
-    if (render_queue_.size() > 2) render_queue_.clear();
-    else render_queue_.pop_front();
-    return frame;
+    return latest_frame_;
 }
 
 std::shared_ptr<const AudioPacket> WirelessClientStream::next_audio_packet(
@@ -467,28 +464,16 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     const bool format_changed = snapshot_.width != 0 && snapshot_.height != 0 &&
         (snapshot_.width != header.width || snapshot_.height != header.height);
     if (format_changed) {
-        // A rotation is delivered by AirPlay as a new SPS/PPS and therefore a
-        // new frame geometry. Do not let frames from the previous orientation
-        // survive the switch: at original quality they can retain tens of MB
-        // of NV12 data and the renderer may otherwise consume a stale-sized
-        // frame after its output buffers have been resized.
-        render_queue_.clear();
-        // Do not let the renderer hold on to a frame from the previous
-        // orientation while the new decoder geometry is being uploaded. This
-        // matters most for the maximum/original profile where a rotated frame
-        // can be several megabytes and texture recreation is asynchronous.
-        latest_frame_.reset();
+        // Replace the retained frame atomically below, so all previews see
+        // the new orientation without draining frames with old geometry.
         fps_sample_frames_ = snapshot_.video_frames;
         fps_sample_time_ = received_at;
         logging::write(std::format(
-            "wireless_video format_changed device_fp={} from={}x{} to={}x{} queue_reset=true",
+            "wireless_video format_changed device_fp={} from={}x{} to={}x{}",
             anonymous_label(id_), snapshot_.width, snapshot_.height,
             header.width, header.height));
     }
     latest_frame_ = frame;
-    render_queue_.push_back(frame);
-    const auto queue_limit = attachments_ == 0 ? 1U : 2U;
-    while (render_queue_.size() > queue_limit) render_queue_.pop_front();
     snapshot_.state = State::Streaming;
     snapshot_.message = L"Wireless mirroring";
     snapshot_.width = header.width;
@@ -582,7 +567,6 @@ void WirelessClientStream::clear_media() noexcept {
     {
         std::scoped_lock lock(mutex_);
         latest_frame_.reset();
-        render_queue_.clear();
         snapshot_.width = snapshot_.height = 0;
         snapshot_.fps = snapshot_.latency_ms = 0;
         snapshot_.audio_sample_rate = snapshot_.audio_channels = 0;

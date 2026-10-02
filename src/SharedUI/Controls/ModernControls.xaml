@@ -101,7 +101,13 @@
                         </Border.Effect>
                         <ui:RoundedContentClip x:Name="RoundedWindowContentClip"
                             Radius="{Binding CornerRadius.TopLeft, ElementName=RoundedWindowSurface}">
-                            <AdornerDecorator><ContentPresenter/></AdornerDecorator>
+                            <AdornerDecorator>
+                                <ui:DialogViewport VerticalScrollBarVisibility="Auto"
+                                                   HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                                    <ui:DialogLayoutPresenter Content="{TemplateBinding Content}"
+                                        ContentTemplate="{TemplateBinding ContentTemplate}"/>
+                                </ui:DialogViewport>
+                            </AdornerDecorator>
                         </ui:RoundedContentClip>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -351,6 +357,36 @@
     <Style TargetType="{x:Type ScrollBar}"
            BasedOn="{StaticResource ModernScrollBarStyle}"/>
 
+    <!-- Reserve a separate row for horizontal scrolling instead of overlaying content. -->
+    <Style x:Key="HorizontalContentScrollViewer" TargetType="ScrollViewer">
+        <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollViewer">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                                                Content="{TemplateBinding Content}"
+                                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                CanContentScroll="{TemplateBinding CanContentScroll}"
+                                                Margin="{TemplateBinding Padding}"/>
+                        <ScrollBar x:Name="PART_HorizontalScrollBar" Grid.Row="1"
+                                   Orientation="Horizontal" Margin="0,4,0,0"
+                                   Style="{StaticResource ModernScrollBarStyle}"
+                                   Maximum="{TemplateBinding ScrollableWidth}"
+                                   ViewportSize="{TemplateBinding ViewportWidth}"
+                                   Value="{Binding HorizontalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"
+                                   Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"/>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="ContentEdgeScrollBarStyle"
            TargetType="{x:Type ScrollBar}"
            BasedOn="{StaticResource ModernScrollBarStyle}">
@@ -377,7 +413,7 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="FontSize" Value="{DynamicResource FontSize16}"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
@@ -422,7 +458,7 @@
         <Setter Property="Width" Value="44"/>
         <Setter Property="Height" Value="38"/>
         <Setter Property="MinHeight" Value="38"/>
-        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="FontSize" Value="{DynamicResource FontSize16}"/>
         <Setter Property="Margin" Value="1,0"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
@@ -492,7 +528,7 @@
 
     <Style x:Key="SubWindowTitle" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="FontSize" Value="{StaticResource DialogTitleFontSize}"/>
+        <Setter Property="FontSize" Value="{DynamicResource DialogTitleFontSize}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
@@ -500,15 +536,16 @@
 
     <Style x:Key="SubWindowSubtitle" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
         <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
-        <Setter Property="FontSize" Value="12"/>
-        <Setter Property="LineHeight" Value="18"/>
+        <Setter Property="FontSize" Value="{DynamicResource FontSize12}"/>
+        <Setter Property="LineHeight" Value="{DynamicResource SubtitleLineHeight}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
         <Setter Property="Margin" Value="0,4,0,0"/>
     </Style>
 
     <Style x:Key="SubWindowSectionTitle" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+        <Setter Property="TextWrapping" Value="Wrap"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontSize" Value="{DynamicResource FontSize14}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
 
@@ -519,7 +556,7 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding" Value="14,8"/>
         <Setter Property="Margin" Value="2"/>
-        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontSize" Value="{DynamicResource FontSize14}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
         <Setter Property="Template">
@@ -533,8 +570,12 @@
                             Padding="{TemplateBinding Padding}">
                         <Grid>
                             <ContentPresenter ContentSource="Header"
-                                              HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
+                                              HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <ContentPresenter.Resources>
+                                    <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/>
+                                        <Setter Property="TextAlignment" Value="Center"/></Style>
+                                </ContentPresenter.Resources>
+                            </ContentPresenter>
                         </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -712,6 +753,7 @@
         </Setter>
     </Style>
     <Style x:Key="DetailLabel" TargetType="TextBlock" BasedOn="{StaticResource CaptionText}">
+        <Setter Property="TextWrapping" Value="Wrap"/>
         <Setter Property="Margin" Value="0,12,0,4"/>
     </Style>
     <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource CompactButton}"/>

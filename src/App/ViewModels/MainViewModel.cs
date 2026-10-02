@@ -195,6 +195,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private IPhoneFilterDriverStatus _filterDriverStatus = new(
         IPhoneFilterDriverState.NoDevice, null, string.Empty);
     private string _wirelessStatus = string.Empty;
+    private IPhoneMirror.UI.Controls.StatusTone _wirelessStatusTone = IPhoneMirror.UI.Controls.StatusTone.Info;
+    public IPhoneMirror.UI.Controls.StatusTone WirelessStatusTone
+    { get => _wirelessStatusTone; private set => Set(ref _wirelessStatusTone, value); }
+    public IPhoneMirror.UI.Controls.StatusTone MediaCastStatusTone => _mediaCast.Ready
+        ? IPhoneMirror.UI.Controls.StatusTone.Success : IPhoneMirror.UI.Controls.StatusTone.Warning;
     private WirelessReceiverBackend _selectedWirelessReceiverBackend =
         WirelessReceiverBackend.Original;
     private string _mediaCastStatus = string.Empty;
@@ -1376,6 +1381,12 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             AddDiagnosticLog(AppLog.Event("usb_paste_text_failed",
                 ("device", AppLog.Device(targetUdid)),
                 ("error", AppLog.Error(error))));
+            if (error is ArgumentException { ParamName: "text" } &&
+                FindControl(targetUdid) is { } control)
+            {
+                control.Status = LocalizationService.Get("ClipboardTextTooLarge");
+                NotifyUsbControlStateChanged();
+            }
         }
     }
 
@@ -2046,7 +2057,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     internal async Task SendUsbTouchAsync(string action, double normalizedX,
         double normalizedY, string? targetUdid,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Func<bool>? canSend = null)
     {
         var bridge = GetReadyUsbControlBridge(targetUdid);
         if (bridge is null ||
@@ -2057,7 +2068,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             await bridge.SendTouchBatchAsync([point],
                 DateTimeOffset.UtcNow.ToUnixTimeNanoseconds(),
-                Interlocked.Increment(ref _usbTouchSequence), cancellationToken);
+                Interlocked.Increment(ref _usbTouchSequence), cancellationToken, canSend);
         }
         catch (InvalidOperationException) when (!bridge.IsReady)
         {
@@ -3204,11 +3215,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _bluetoothControlDeviceUdid = null;
     }
 
-    internal async Task ToggleBluetoothControlAsync()
+    internal async Task ToggleBluetoothControlAsync(string? targetDeviceUdid = null)
     {
         if (!IsBluetoothControlEnabled)
         {
-            await EnableBluetoothControlAsync();
+            await EnableBluetoothControlAsync(targetDeviceUdid);
             return;
         }
         if (!_bluetoothControlInputEnabled)
@@ -3680,6 +3691,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             var unavailable = LocalizationService.Format(
                 "WirelessBackendUnavailableFormat", backendOption.Label);
             WirelessStatus = unavailable;
+            WirelessStatusTone = IPhoneMirror.UI.Controls.StatusTone.Error;
             AddDiagnosticLog(AppLog.Event("wireless_settings_backend_unavailable",
                 ("backend", backend.ToString()), ("error", unavailable)));
             AddUiLog(unavailable);
@@ -3758,6 +3770,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         catch (Exception error)
         {
             WirelessStatus = LocalizationService.Format("StartFailedFormat", error.Message);
+            WirelessStatusTone = IPhoneMirror.UI.Controls.StatusTone.Error;
             AddDiagnosticLog(AppLog.Event("wireless_settings_failed",
                 ("success", false), ("elapsed_ms", operation.ElapsedMilliseconds),
                 ("error", AppLog.Error(error))));
@@ -5240,8 +5253,16 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     // transition back to the normal configuration.
     private async Task DisableWiredControlForCaptureTeardownAsync(string udid)
     {
-        if (FindControl(udid) is not { } control) return;
-        await DisableUsbControlAsync(control);
+        // An AirPlay mirror can own the wired bridge to this physical USB
+        // device. Include startup/recovery, and leave Wi-Fi-only routes alone.
+        var controls = _deviceControls.Values.Where(control =>
+            (DeviceViewModel.UdidEquals(control.DeviceUdid, udid) ||
+             DeviceViewModel.UdidEquals(control.AppleUdid, udid)) &&
+            (control.WiredEnabled || control.WiredBridge is not null ||
+             (!control.RequestedWireless && (control.Starting || control.Stopping))))
+            .ToArray();
+        foreach (var control in controls)
+            await DisableUsbControlAsync(control);
     }
 
     internal async Task StopDeviceSessionAsync(string udid, ulong expectedHandle = 0,
@@ -5824,6 +5845,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private void RefreshWirelessStatus()
     {
         WirelessStatus = _wireless.GetStatusText();
+        WirelessStatusTone = !_wireless.IsAvailable || _wireless.StartError is not null
+            ? IPhoneMirror.UI.Controls.StatusTone.Error : _wireless.Ready
+            ? IPhoneMirror.UI.Controls.StatusTone.Success : IPhoneMirror.UI.Controls.StatusTone.Info;
         var signature = $"{_wireless.Backend}:{_wireless.AppliedBackend}:" +
             $"{_wireless.IsAvailable}:{_wireless.Running}:{_wireless.Ready}:" +
             AppLog.Sanitize(_wireless.StartError);
@@ -5846,6 +5870,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private void RefreshMediaCastStatus()
     {
         MediaCastStatus = _mediaCast.GetStatusText();
+        OnPropertyChanged(nameof(MediaCastStatusTone));
         var signature = $"{_mediaCast.SupportsCurrentWirelessBackend}:" +
             $"{_mediaCast.IsAvailable}:{_mediaCast.Running}:{_mediaCast.Ready}:" +
             AppLog.Sanitize(MediaCastStatus);
@@ -6848,6 +6873,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             gateHeld = true;
             if (_disposed) return;
             await StopMediaOutputForSessionAsync(state.Udid);
+            await DisableWiredControlForCaptureTeardownAsync(state.Udid);
             await _sessions.StopAndDestroyAsync(state);
             ClearSelectedSessionState(state.Udid);
             // Native start waits for the device to expose a stable QuickTime

@@ -259,7 +259,16 @@ foreach (var actionKey in new[]
         .SingleOrDefault(element => string.Equals((string?)element.Attribute("Text"),
             $"{{DynamicResource {actionKey}}}", StringComparison.Ordinal));
     Equal(true, action is not null, $"no-PING window contains {actionKey}");
-    Equal(true, double.TryParse((string?)action?.Attribute("FontSize"),
+    var actionFont = (string?)action?.Attribute("FontSize");
+    if (actionFont is not null && actionFont.StartsWith("{DynamicResource ", StringComparison.Ordinal))
+    {
+        var key = actionFont[17..^1];
+        var tokenPath = Path.Combine(Path.GetDirectoryName(captureRecoveryWindowPath)!,
+            "..", "..", "SharedUI", "Themes", "DesignTokens.xaml");
+        actionFont = XDocument.Load(tokenPath).Root!.Elements()
+            .Single(element => (string?)element.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")) == key).Value;
+    }
+    Equal(true, double.TryParse(actionFont,
                    System.Globalization.NumberStyles.Float,
                    System.Globalization.CultureInfo.InvariantCulture, out var fontSize) &&
                fontSize >= 18,
@@ -1767,12 +1776,12 @@ Equal(true,
     !nativePreviewWindowCode.Contains("ShowCursor(false);\n            return;",
         StringComparison.Ordinal) &&
     nativePreviewWindowCode.Contains(
-        "case WmRightButtonDown when IsReverseControlEnabledForWindow:",
+        "case WmRightButtonDown when IsRightButtonForwardingEnabled:",
         StringComparison.Ordinal) &&
     nativePreviewWindowCode.Contains(
-        "case WmNcRightButtonDown when IsReverseControlEnabledForWindow:",
+        "case WmNcRightButtonDown when IsRightButtonForwardingEnabled:",
         StringComparison.Ordinal),
-    "only the active independent control window hides the cursor and consumes right-click input");
+    "only the active independent Bluetooth control window hides the cursor and consumes right-click input");
 Equal(true,
     nativePreviewHostCode.Contains("MainPreviewInnerCornerRadius = 15.0",
         StringComparison.Ordinal) &&
@@ -2217,7 +2226,7 @@ Equal(true, mainWindowXaml.Contains("OpenShortcutSettingsButton",
          StringComparison.Ordinal) &&
      shortcutSettingsText.Contains("ShortcutClearButton",
          StringComparison.Ordinal) &&
-     shortcutSettingsText.Contains("Delete20",
+     shortcutSettingsText.Contains("ArrowCounterclockwise20",
          StringComparison.Ordinal) &&
      shortcutSettingsCode.Contains("ShortcutBindingCategory.Navigation",
          StringComparison.Ordinal) &&
@@ -5540,6 +5549,29 @@ var incompatible = bindings.Bind(profileA.Id, DeviceIdentityType.AirPlay,
 Equal(DeviceBindingCompatibility.Incompatible, incompatible.Compatibility,
     "different model fingerprint is rejected");
 Equal(false, incompatible.Success, "different model fingerprint cannot bind");
+var unknownAirPlay = new DeviceFingerprint(ProductType: " AirPlay ");
+var unknownNeedsConfirmation = bindings.Bind(profileA.Id, DeviceIdentityType.AirPlay,
+    "airplay://unknown-model", "Device A", unknownAirPlay);
+Equal(DeviceBindingCompatibility.Unknown, unknownNeedsConfirmation.Compatibility,
+    "AirPlay display labels are unknown model metadata");
+Equal(true, unknownNeedsConfirmation.RequiresConfirmation,
+    "missing AirPlay model requires explicit confirmation");
+Equal(false, unknownNeedsConfirmation.Success, "unknown model does not bind silently");
+Equal(true, bindings.Bind(profileA.Id, DeviceIdentityType.AirPlay,
+    "airplay://unknown-model", "Device A", unknownAirPlay, userConfirmed: true).Success,
+    "confirmed unknown-model AirPlay identity can bind");
+Equal(DeviceBindingCompatibility.Incompatible, bindings.ValidateCompatibility(profileA.Id,
+    new DeviceFingerprint(ProductType: "AirPlay", ModelIdentifier: "iPhone15,4")),
+    "a real fallback model still rejects an incompatible device");
+var unknownProfile = bindings.CreateProfileFromIdentity("Unknown model",
+    DeviceIdentityType.AirPlay, "airplay://legacy-unknown", unknownAirPlay).Profile!;
+var legacyBindings = new DeviceBindingManager(deviceBindingPath);
+Equal(DeviceBindingCompatibility.Unknown,
+    legacyBindings.ValidateCompatibility(unknownProfile.Id, phone17),
+    "persisted AirPlay placeholders are normalized on the profile side too");
+Equal(true, legacyBindings.Bind(unknownProfile.Id, DeviceIdentityType.Wired,
+    "UDID-UNKNOWN", "Unknown model", phone17, userConfirmed: true).Success,
+    "an AirPlay-first profile can bind a confirmed wired identity");
 Equal(true, bindings.Bind(profileA.Id, DeviceIdentityType.Bluetooth,
     "BluetoothLE#A", "Device A", null, userConfirmed: true).Success,
     "Bluetooth can bind after explicit user confirmation");
@@ -5579,42 +5611,59 @@ telemetryOnlyChange.LatencyMs = 900;
 Equal(WirelessStallRecoveryAction.None,
     stallTracker.Observe(77, telemetryOnlyChange, 1_010,
         stallStart.AddSeconds(1.5)),
-    "telemetry-only changes do not mask a frozen wireless video stream");
+    "telemetry-only changes do not count as a new wireless frame");
 Equal(WirelessStallRecoveryAction.RefreshPreview,
     stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
         stallStart.AddMilliseconds(2900)),
-    "frozen wireless telemetry first requests a preview refresh");
+    "an idle wireless preview can request one harmless redraw");
 Equal(WirelessStallRecoveryAction.None,
     stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
         stallStart.AddSeconds(6)),
-    "wireless recovery cooldown prevents an immediate restart");
-Equal(WirelessStallRecoveryAction.RestartSession,
+    "a static wireless screen does not trigger repeated redraws");
+Equal(WirelessStallRecoveryAction.None,
     stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
         stallStart.AddSeconds(8)),
-    "continued freeze after cooldown requests a session restart");
+    "a static wireless screen never escalates to a session restart");
 Equal(WirelessStallRecoveryAction.None,
     stallTracker.Observe(77, StreamingStatus(videoFrames: 101), 1_010,
         stallStart.AddSeconds(20)),
-    "wireless recovery is capped after the restart attempt");
+    "continued wireless inactivity preserves the session");
+foreach (var idleDuration in new[] { TimeSpan.FromMinutes(1), TimeSpan.FromHours(1) })
+{
+    foreach (var reportedFps in new[] { 0.0, 60.0 })
+    {
+        var idleStatus = StreamingStatus(videoFrames: 101);
+        idleStatus.Fps = reportedFps;
+        Equal(WirelessStallRecoveryAction.None,
+            stallTracker.Observe(77, idleStatus, 1_010, stallStart + idleDuration),
+            "long wireless inactivity retains the frame regardless of FPS telemetry");
+    }
+}
+Equal(1, stallTracker.RecoveryAttempts,
+    "long wireless inactivity only issues one harmless redraw");
+Equal(WirelessStallRecoveryAction.None,
+    stallTracker.Observe(77, StreamingStatus(videoFrames: 102), 1_020,
+        stallStart.AddHours(1).AddSeconds(1)),
+    "wireless frames resume normally after a long static screen");
 Equal(WirelessStallRecoveryAction.None,
     stallTracker.Observe(78, StreamingStatus(videoFrames: 1), 2_000,
-        stallStart.AddSeconds(20.5)),
+        stallStart.AddHours(2)),
     "a replacement wireless session starts a fresh recovery window");
 Equal(WirelessStallRecoveryAction.RefreshPreview,
     stallTracker.Observe(78, StreamingStatus(videoFrames: 1), 2_000,
-        stallStart.AddSeconds(23)),
+        stallStart.AddHours(2).AddSeconds(3)),
     "a frozen replacement session can request recovery independently");
 Equal(WirelessStallRecoveryAction.None,
     stallTracker.Observe(78, StreamingStatus(1080, 1920, 1),
-        2_000, stallStart.AddSeconds(24)),
+        2_000, stallStart.AddHours(2).AddSeconds(4)),
     "orientation size changes begin a fresh recovery window");
 Equal(WirelessStallRecoveryAction.RefreshPreview,
     stallTracker.Observe(78, StreamingStatus(1080, 1920, 1),
-        2_000, stallStart.AddSeconds(26)),
+        2_000, stallStart.AddHours(2).AddSeconds(6)),
     "a second frozen orientation can request one new refresh");
 Equal(WirelessStallRecoveryAction.None,
     stallTracker.Observe(77, StreamingStatus(state: CaptureState.Idle),
-        1_010, stallStart.AddSeconds(27)),
+        1_010, stallStart.AddHours(2).AddSeconds(7)),
     "stopped wireless sessions never trigger recovery");
 
 Console.WriteLine("App logic tests passed.");

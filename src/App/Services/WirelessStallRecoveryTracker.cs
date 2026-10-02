@@ -10,16 +10,14 @@ internal enum WirelessStallRecoveryAction
 }
 
 /// <summary>
-/// Detects an AirPlay stream whose decoded-frame identity stopped advancing.
-/// FPS and latency are diagnostic telemetry, not proof of a new frame; using
-/// them here would let a stalled decoder evade recovery. The tracker is
-/// deliberately independent of WPF so the timing and retry policy can be
-/// tested without a live receiver.
+/// Requests one harmless redraw when an AirPlay frame stops advancing.
+/// A static phone screen can legitimately stop producing frames indefinitely;
+/// neither frame age nor FPS/latency telemetry proves a failed connection.
+/// Silence alone must never restart the session and clear its last frame.
 /// </summary>
 internal sealed class WirelessStallRecoveryTracker
 {
     internal static readonly TimeSpan StallThreshold = TimeSpan.FromMilliseconds(1800);
-    internal static readonly TimeSpan RestartCooldown = TimeSpan.FromSeconds(5);
 
     private ulong _handle;
     private uint _width;
@@ -27,7 +25,6 @@ internal sealed class WirelessStallRecoveryTracker
     private long _timestamp;
     private ulong _videoFrames;
     private DateTimeOffset _lastProgressAt;
-    private DateTimeOffset _lastActionAt;
     private int _recoveryAttempts;
     private bool _initialized;
 
@@ -71,16 +68,11 @@ internal sealed class WirelessStallRecoveryTracker
             return WirelessStallRecoveryAction.None;
         }
 
-        if (now - _lastProgressAt < StallThreshold || _recoveryAttempts >= 2)
-            return WirelessStallRecoveryAction.None;
-        if (_recoveryAttempts == 1 && now - _lastActionAt < RestartCooldown)
+        if (now - _lastProgressAt < StallThreshold || _recoveryAttempts >= 1)
             return WirelessStallRecoveryAction.None;
 
         _recoveryAttempts++;
-        _lastActionAt = now;
-        return _recoveryAttempts == 1
-            ? WirelessStallRecoveryAction.RefreshPreview
-            : WirelessStallRecoveryAction.RestartSession;
+        return WirelessStallRecoveryAction.RefreshPreview;
     }
 
     internal void Reset()
@@ -90,7 +82,6 @@ internal sealed class WirelessStallRecoveryTracker
         _timestamp = 0;
         _videoFrames = 0;
         _lastProgressAt = default;
-        _lastActionAt = default;
         _recoveryAttempts = 0;
         _initialized = false;
     }

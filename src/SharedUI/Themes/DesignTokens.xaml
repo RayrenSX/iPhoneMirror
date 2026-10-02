@@ -11,9 +11,26 @@
     <sys:Double x:Key="SecondaryFontSize">12</sys:Double>
     <sys:Double x:Key="CaptionFontSize">11</sys:Double>
     <sys:Double x:Key="ButtonFontSize">14</sys:Double>
+    <sys:Double x:Key="FontSize10">10</sys:Double>
+    <sys:Double x:Key="FontSize11">11</sys:Double>
+    <sys:Double x:Key="FontSize12">12</sys:Double>
+    <sys:Double x:Key="FontSize13">13</sys:Double>
+    <sys:Double x:Key="FontSize14">14</sys:Double>
+    <sys:Double x:Key="FontSize15">15</sys:Double>
+    <sys:Double x:Key="FontSize16">16</sys:Double>
+    <sys:Double x:Key="FontSize18">18</sys:Double>
+    <sys:Double x:Key="FontSize19">19</sys:Double>
+    <sys:Double x:Key="FontSize20">20</sys:Double>
+    <sys:Double x:Key="FontSize21">21</sys:Double>
+    <sys:Double x:Key="FontSize22">22</sys:Double>
+    <sys:Double x:Key="FontSize24">24</sys:Double>
+    <sys:Double x:Key="DialogContentMinHeight">120</sys:Double>
     <sys:Double x:Key="ControlMinHeight">40</sys:Double>
     <sys:Double x:Key="CompactControlMinHeight">32</sys:Double>
+    <sys:Double x:Key="SubtitleLineHeight">18</sys:Double>
+    <sys:Double x:Key="ReleaseNotesLineHeight">21</sys:Double>
     <sys:Double x:Key="BodyLineHeight">20</sys:Double>
+    <sys:Double x:Key="CaptionLineHeight">16</sys:Double>
     <Thickness x:Key="PagePadding">24,20</Thickness>
     <Thickness x:Key="DialogPadding">24</Thickness>
     <Thickness x:Key="CardPadding">16</Thickness>
@@ -56,18 +73,18 @@
 
     <Style x:Key="BodyText" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
-        <Setter Property="FontSize" Value="{StaticResource BodyFontSize}"/>
-        <Setter Property="LineHeight" Value="{StaticResource BodyLineHeight}"/>
+        <Setter Property="FontSize" Value="{DynamicResource BodyFontSize}"/>
+        <Setter Property="LineHeight" Value="{DynamicResource BodyLineHeight}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
     </Style>
     <Style x:Key="SecondaryText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
-        <Setter Property="FontSize" Value="{StaticResource SecondaryFontSize}"/>
+        <Setter Property="FontSize" Value="{DynamicResource SecondaryFontSize}"/>
         <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
     </Style>
     <Style x:Key="CaptionText" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
-        <Setter Property="FontSize" Value="{StaticResource CaptionFontSize}"/>
-        <Setter Property="LineHeight" Value="16"/>
+        <Setter Property="FontSize" Value="{DynamicResource CaptionFontSize}"/>
+        <Setter Property="LineHeight" Value="{DynamicResource CaptionLineHeight}"/>
     </Style>
     <Style x:Key="StatusText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
         <Setter Property="FontWeight" Value="SemiBold"/>

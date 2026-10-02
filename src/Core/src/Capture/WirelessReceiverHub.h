@@ -116,7 +116,6 @@ private:
     std::uint32_t attachments_{};
     Snapshot snapshot_;
     std::shared_ptr<const media::DecodedFrame> latest_frame_;
-    std::deque<std::shared_ptr<const media::DecodedFrame>> render_queue_;
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
     std::atomic<float> local_audio_volume_{1.0F};

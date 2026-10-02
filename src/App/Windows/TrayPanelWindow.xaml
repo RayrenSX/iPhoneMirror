@@ -12,7 +12,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
@@ -51,7 +51,7 @@
                                 <DataTemplate>
                                     <StackPanel Margin="4,6">
                                         <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayName}"/>
-                                        <TextBlock Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
+                                        <TextBlock Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                                                    TextTrimming="CharacterEllipsis">
                                             <Run Text="{Binding ConnectionType, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding StatusDisplay, Mode=OneWay}"/>
                                         </TextBlock>
@@ -78,7 +78,7 @@
                         <Button Content="{DynamicResource StopMirroring}" Command="{Binding StopCommand}"
                                 Margin="0,8,0,0" Style="{StaticResource ToolButton}"/>
                         <TextBlock Text="{Binding WirelessStatus}" TextWrapping="Wrap" Margin="0,10,0,0"
-                                   FontSize="{StaticResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}"/>
+                                   FontSize="{DynamicResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}"/>
                     </StackPanel>
                 </Border>
                 <TextBlock x:Name="FeedbackText" Visibility="Collapsed" TextWrapping="Wrap"

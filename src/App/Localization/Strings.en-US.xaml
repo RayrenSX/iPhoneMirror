@@ -630,7 +630,7 @@
     <system:String x:Key="WirelessProfileReconnectInstructionsFormat">“{0}” is now advertised. On iPhone, open Control Center → Screen Mirroring and select “{1}” again. If the old connection remains listed, tap Stop Mirroring first, then select the receiver again.</system:String>
     <system:String x:Key="WirelessOriginalQualityWarningTitle">Original quality notice</system:String>
     <system:String x:Key="WirelessOriginalQualityWarningBody">Original quality may freeze on some devices or network conditions. 1080p is recommended. If you still need original quality, use a stable local network and connect from iPhone Control Center → Screen Mirroring.</system:String>
-    <system:String x:Key="WirelessServiceAlwaysOn">Always on</system:String>
+    <system:String x:Key="WirelessServiceAlwaysOn">Starts automatically</system:String>
     <system:String x:Key="WirelessConnected">AirPlay connected</system:String>
     <system:String x:Key="WirelessLocalNetwork">Local network</system:String>
     <system:String x:Key="WirelessReady">AirPlay receiver ready</system:String>
@@ -1011,6 +1011,7 @@
     <system:String x:Key="ControlWiredRetryFormat">Reconnecting wired control automatically (attempt {0})…</system:String>
     <system:String x:Key="TouchBridgeStartFailed">Could not start the USB touch bridge.</system:String>
     <system:String x:Key="TouchBridgeNotReady">The USB touch bridge is not ready.</system:String>
+    <system:String x:Key="ClipboardTextTooLarge">The text is too long to paste at once. Shorten it and try again.</system:String>
     <system:String x:Key="TouchBridgeInvalidBatch">A touch batch must contain 1 to 5 points.</system:String>
     <system:String x:Key="TouchBridgeInvalidPointId">Touch point IDs must be non-negative integers.</system:String>
     <system:String x:Key="TouchBridgeInvalidCoordinates">Touch coordinates must be finite numbers between 0 and 1.</system:String>
@@ -1167,4 +1168,9 @@
     <system:String x:Key="TrayUnavailable">Could not create the tray icon: {0}</system:String>
     <system:String x:Key="MultiDeviceControlHint">Enable control for each device, then switch tabs or focus its separate mirror window. Other device connections stay active.</system:String>
     <system:String x:Key="MultiDeviceControlAlreadyActive">This device is already controlled through another mirroring session. Use its existing window.</system:String>
+    <system:String x:Key="UiRefreshing">Refreshing…</system:String>
+    <system:String x:Key="UiBluetoothRefreshFailed">Could not refresh Bluetooth devices. Check Bluetooth and try again; the list may be out of date.</system:String>
+    <system:String x:Key="UiLogLocationFailed" xml:space="preserve">Could not open the log location. Copy this path and open it in File Explorer:
+{0}</system:String>
+    <system:String x:Key="UiProtectedContentShort">Protected content</system:String>
 </ResourceDictionary>

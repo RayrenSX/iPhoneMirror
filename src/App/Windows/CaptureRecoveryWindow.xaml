@@ -15,7 +15,7 @@
                 <RowDefinition Height="16"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="18"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
                 <RowDefinition Height="18"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -33,7 +33,7 @@
 
             <TextBlock Grid.Row="2" Text="{DynamicResource CaptureNoPingSummary}"
                        Foreground="{DynamicResource MutedTextBrush}"
-                       FontSize="{StaticResource SectionTitleFontSize}" LineHeight="22" TextWrapping="Wrap"/>
+                       FontSize="{DynamicResource SectionTitleFontSize}" TextWrapping="Wrap"/>
 
             <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto"><StackPanel>
                 <Border Background="{DynamicResource WarningSurfaceBrush}"
@@ -44,17 +44,16 @@
                             <ColumnDefinition Width="48"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border Width="34" Height="34" CornerRadius="17"
-                                Background="{DynamicResource WarningBrush}"
-                                VerticalAlignment="Center">
-                            <TextBlock Text="1" Foreground="{DynamicResource OnAccentBrush}" FontSize="18"
+                        <Border MinWidth="34" MinHeight="34" Padding="5,2" VerticalAlignment="Top" CornerRadius="17"
+                                Background="{DynamicResource WarningBrush}">
+                            <TextBlock Text="1" Foreground="{DynamicResource OnAccentBrush}" FontSize="{DynamicResource FontSize18}"
                                        FontWeight="Bold" HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="{DynamicResource CaptureNoPingRestartAction}"
                                    Foreground="{DynamicResource TextBrush}"
-                                   FontSize="19" FontWeight="SemiBold"
+                                   FontSize="{DynamicResource FontSize19}" FontWeight="SemiBold"
                                    TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
@@ -68,17 +67,16 @@
                             <ColumnDefinition Width="48"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border Width="34" Height="34" CornerRadius="17"
-                                Background="{DynamicResource WarningBrush}"
-                                VerticalAlignment="Center">
-                            <TextBlock Text="2" Foreground="{DynamicResource OnAccentBrush}" FontSize="18"
+                        <Border MinWidth="34" MinHeight="34" Padding="5,2" VerticalAlignment="Top" CornerRadius="17"
+                                Background="{DynamicResource WarningBrush}">
+                            <TextBlock Text="2" Foreground="{DynamicResource OnAccentBrush}" FontSize="{DynamicResource FontSize18}"
                                        FontWeight="Bold" HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="{DynamicResource CaptureNoPingCableAction}"
                                    Foreground="{DynamicResource TextBrush}"
-                                   FontSize="19" FontWeight="SemiBold"
+                                   FontSize="{DynamicResource FontSize19}" FontWeight="SemiBold"
                                    TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
@@ -88,7 +86,7 @@
                         BorderThickness="1" CornerRadius="12" Padding="14,11"
                         Margin="0,12,0,0">
                     <TextBlock Text="{DynamicResource CaptureNoPingUnlockHint}"
-                               FontSize="{StaticResource BodyFontSize}" FontWeight="SemiBold"
+                               FontSize="{DynamicResource BodyFontSize}" FontWeight="SemiBold"
                                TextWrapping="Wrap" TextAlignment="Center"/>
                 </Border>
             </StackPanel></ScrollViewer>

@@ -630,7 +630,7 @@
     <system:String x:Key="WirelessProfileReconnectInstructionsFormat">已重新声明“{0}”。请在 iPhone 打开“控制中心” → “屏幕镜像”，重新选择“{1}”。如果列表仍保留旧连接，请先点“停止镜像”，再重新选择接收端。</system:String>
     <system:String x:Key="WirelessOriginalQualityWarningTitle">原画模式提示</system:String>
     <system:String x:Key="WirelessOriginalQualityWarningBody">原画模式在部分设备或网络环境下可能出现画面停帧。建议优先使用 1080p；如仍需原画，请确保局域网稳定，并从 iPhone“控制中心” → “屏幕镜像”连接。</system:String>
-    <system:String x:Key="WirelessServiceAlwaysOn">常驻</system:String>
+    <system:String x:Key="WirelessServiceAlwaysOn">自动启动</system:String>
     <system:String x:Key="WirelessConnected">AirPlay 已连接</system:String>
     <system:String x:Key="WirelessLocalNetwork">本地网络</system:String>
     <system:String x:Key="WirelessReady">AirPlay 接收端已就绪</system:String>
@@ -1011,6 +1011,7 @@
     <system:String x:Key="ControlWiredRetryFormat">正在自动重新连接有线控制（第 {0} 次尝试）…</system:String>
     <system:String x:Key="TouchBridgeStartFailed">无法启动 USB 触控桥接器。</system:String>
     <system:String x:Key="TouchBridgeNotReady">USB 触控桥接器尚未就绪。</system:String>
+    <system:String x:Key="ClipboardTextTooLarge">文本过长，无法一次粘贴。请缩短文本后重试。</system:String>
     <system:String x:Key="TouchBridgeInvalidBatch">触控批次必须包含 1 到 5 个触点。</system:String>
     <system:String x:Key="TouchBridgeInvalidPointId">触点编号必须为非负整数。</system:String>
     <system:String x:Key="TouchBridgeInvalidCoordinates">触点坐标必须是 0 到 1 之间的有限数值。</system:String>
@@ -1167,4 +1168,9 @@
     <system:String x:Key="TrayUnavailable">无法创建托盘图标：{0}</system:String>
     <system:String x:Key="MultiDeviceControlHint">分别为各设备启用反控。切换选项卡或点击独立投屏窗口即可控制对应设备，连接会保持。</system:String>
     <system:String x:Key="MultiDeviceControlAlreadyActive">此设备已在另一个投屏会话中启用反控，请使用已有窗口。</system:String>
+    <system:String x:Key="UiRefreshing">正在刷新…</system:String>
+    <system:String x:Key="UiBluetoothRefreshFailed">无法刷新蓝牙设备。请检查蓝牙连接后重试；列表可能不是最新状态。</system:String>
+    <system:String x:Key="UiLogLocationFailed" xml:space="preserve">无法打开日志位置。你可以复制以下路径并在文件资源管理器中打开：
+{0}</system:String>
+    <system:String x:Key="UiProtectedContentShort">受保护内容</system:String>
 </ResourceDictionary>

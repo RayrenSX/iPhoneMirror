@@ -147,6 +147,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not ComboBox combo || !combo.IsEnabled) return;
+        // Popup input also routes through the ComboBox, but belongs to a separate
+        // visual tree. Let its items and scrollbars handle their own mouse input.
+        if (e.OriginalSource is not System.Windows.Media.Visual source ||
+            !combo.IsAncestorOf(source)) return;
         combo.Focus();
         combo.IsDropDownOpen = !combo.IsDropDownOpen;
         e.Handled = true;

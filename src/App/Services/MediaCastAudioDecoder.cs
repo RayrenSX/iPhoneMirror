@@ -67,12 +67,14 @@ internal sealed class MediaCastAudioDecoder : IDisposable
             };
             process.BeginErrorReadLine();
             var cancellation = new CancellationTokenSource();
+            var activeProcess = process;
+            var token = cancellation.Token;
             lock (_gate)
             {
-                _process = process;
+                _process = activeProcess;
                 _cancellation = cancellation;
-                _readTask = Task.Run(() => ReadLoopAsync(process,
-                    cancellation.Token, diagnostic), CancellationToken.None);
+                _readTask = Task.Run(() => ReadLoopAsync(activeProcess,
+                    token, diagnostic), CancellationToken.None);
                 process = null;
             }
             diagnostic?.Invoke("media_audio_started");

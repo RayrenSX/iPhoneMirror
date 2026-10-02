@@ -16,7 +16,7 @@
             </ResourceDictionary.MergedDictionaries>
 
         <Style TargetType="TextBlock">
-            <Setter Property="FontSize" Value="{StaticResource BodyFontSize}"/>
+            <Setter Property="FontSize" Value="{DynamicResource BodyFontSize}"/>
             <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
         </Style>
 

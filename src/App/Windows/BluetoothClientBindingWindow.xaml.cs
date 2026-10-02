@@ -33,7 +33,7 @@ public partial class BluetoothClientBindingWindow : IPhoneMirror.UI.Controls.Rou
             OnPropertyChanged(nameof(CanConfirm));
         }
     }
-    public bool CanConfirm => SelectedClient?.CanBind == true;
+    public bool CanConfirm => !_isRefreshing && SelectedClient?.CanBind == true;
     public bool CanRefresh => !_isRefreshing;
 
     private BluetoothClientBindingWindow(Window owner, string targetName,
@@ -49,9 +49,11 @@ public partial class BluetoothClientBindingWindow : IPhoneMirror.UI.Controls.Rou
         Owner = owner;
         DataContext = this;
         InitializeComponent();
+        Closed += OnClosed;
         LocalizationService.RefreshWhenLanguageChanges(this, () =>
         {
             OnPropertyChanged(nameof(TargetText));
+            FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text);
             foreach (var client in Clients) client.NotifyLanguageChanged();
         });
     }
@@ -63,7 +65,8 @@ public partial class BluetoothClientBindingWindow : IPhoneMirror.UI.Controls.Rou
     {
         var window = new BluetoothClientBindingWindow(owner, targetName, clients, suggestedId,
             refresh, unbind);
-        return window.ShowDialog() == true ? window.SelectedClient?.Id : null;
+        window.ShowDialog();
+        return window._result.Task.GetAwaiter().GetResult();
     }
 
     internal static void ShowDeveloperPreview(Window owner) =>
@@ -80,7 +83,6 @@ public partial class BluetoothClientBindingWindow : IPhoneMirror.UI.Controls.Rou
     {
         var window = new BluetoothClientBindingWindow(owner, targetName, clients,
             suggestedId, refresh, unbind);
-        window.Closed += window.OnClosed;
         window.Show();
         return window._result.Task;
     }
@@ -126,20 +128,29 @@ public partial class BluetoothClientBindingWindow : IPhoneMirror.UI.Controls.Rou
         if (_isRefreshing) return;
         var selectedId = SelectedClient?.Id;
         _isRefreshing = true;
+        FeedbackText.SetResourceReference(System.Windows.Controls.TextBlock.TextProperty, "UiRefreshing");
         OnPropertyChanged(nameof(CanRefresh));
+        OnPropertyChanged(nameof(CanConfirm));
         try
         {
             var clients = await _refresh();
-            if (IsLoaded) ReplaceClients(clients, selectedId ?? _suggestedId);
+            if (IsLoaded)
+            {
+                ReplaceClients(clients, selectedId ?? _suggestedId);
+                FeedbackText.Text = string.Empty;
+            }
         }
         catch (Exception error)
         {
             DiagnosticLogger.Exception("bluetooth", "binding_client_refresh_failed", error);
+            if (IsLoaded) FeedbackText.SetResourceReference(
+                System.Windows.Controls.TextBlock.TextProperty, "UiBluetoothRefreshFailed");
         }
         finally
         {
             _isRefreshing = false;
             OnPropertyChanged(nameof(CanRefresh));
+            OnPropertyChanged(nameof(CanConfirm));
         }
     }
 

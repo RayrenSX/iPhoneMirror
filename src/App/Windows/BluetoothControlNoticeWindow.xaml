@@ -14,7 +14,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="16"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
                 <RowDefinition Height="12"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -55,39 +55,39 @@
                                     Visibility="{Binding WaitingStepsVisibility}"
                                     Margin="0,14,0,0">
                             <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource AccentBrush}">
-                                    <TextBlock Text="1" Foreground="{DynamicResource OnAccentBrush}" FontSize="{StaticResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border MinWidth="20" MinHeight="20" Padding="5,2" VerticalAlignment="Top" CornerRadius="10" Background="{DynamicResource AccentBrush}">
+                                    <TextBlock Text="1" Foreground="{DynamicResource OnAccentBrush}" FontSize="{DynamicResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="{Binding PairStepOneText}" TextWrapping="Wrap" FontSize="{StaticResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
+                                <TextBlock Grid.Column="1" Text="{Binding PairStepOneText}" TextWrapping="Wrap" FontSize="{DynamicResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
                             </Grid>
                             <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
-                                    <TextBlock Text="2" Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border MinWidth="20" MinHeight="20" Padding="5,2" VerticalAlignment="Top" CornerRadius="10" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
+                                    <TextBlock Text="2" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="{Binding PairStepTwoText}" TextWrapping="Wrap" FontSize="{StaticResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
+                                <TextBlock Grid.Column="1" Text="{Binding PairStepTwoText}" TextWrapping="Wrap" FontSize="{DynamicResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
                             </Grid>
                             <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
-                                    <TextBlock Text="3" Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border MinWidth="20" MinHeight="20" Padding="5,2" VerticalAlignment="Top" CornerRadius="10" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
+                                    <TextBlock Text="3" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="{Binding PairStepThreeText}" TextWrapping="Wrap" FontSize="{StaticResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
+                                <TextBlock Grid.Column="1" Text="{Binding PairStepThreeText}" TextWrapping="Wrap" FontSize="{DynamicResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
                             </Grid>
                             <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
-                                    <TextBlock Text="4" Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border MinWidth="20" MinHeight="20" Padding="5,2" VerticalAlignment="Top" CornerRadius="10" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
+                                    <TextBlock Text="4" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="{Binding PairStepFourText}" TextWrapping="Wrap" FontSize="{StaticResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
+                                <TextBlock Grid.Column="1" Text="{Binding PairStepFourText}" TextWrapping="Wrap" FontSize="{DynamicResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
                             </Grid>
                             <Grid Margin="0,8,0,0">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
-                                    <TextBlock Text="5" Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border MinWidth="20" MinHeight="20" Padding="5,2" VerticalAlignment="Top" CornerRadius="10" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
+                                    <TextBlock Text="5" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="{Binding PairStepFiveText}" TextWrapping="Wrap" FontSize="{StaticResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
+                                <TextBlock Grid.Column="1" Text="{Binding PairStepFiveText}" TextWrapping="Wrap" FontSize="{DynamicResource SecondaryFontSize}" VerticalAlignment="Center" Margin="7,0,0,0"/>
                             </Grid>
                         </StackPanel>
                     </StackPanel>
@@ -100,41 +100,33 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <WrapPanel VerticalAlignment="Center" ItemHeight="30">
+                <WrapPanel VerticalAlignment="Center">
                     <Border x:Name="ShortcutBadge"
                             Background="{DynamicResource ControlFillBrush}"
                             BorderBrush="{DynamicResource BorderSoftBrush}"
                             BorderThickness="1" CornerRadius="15"
                             Padding="10,5" Margin="0,0,6,0"
                             Visibility="{Binding ShortcutVisibility}">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="KeyboardShift16"
+                        <DockPanel LastChildFill="True"><ui:SymbolIcon DockPanel.Dock="Left" Symbol="KeyboardShift16"
                                            Foreground="{DynamicResource MutedTextBrush}"
-                                           FontSize="14" Margin="0,0,5,0"/>
-                            <TextBlock Text="{Binding ShortcutText}"
+                                           FontSize="14" Margin="0,0,5,0"/><TextBlock TextWrapping="Wrap" Text="{Binding ShortcutText}"
                                        Foreground="{DynamicResource MutedTextBrush}"
-                                       FontSize="{StaticResource CaptionFontSize}" VerticalAlignment="Center"/>
-                        </StackPanel>
+                                       FontSize="{DynamicResource CaptionFontSize}" VerticalAlignment="Center"/></DockPanel>
                     </Border>
                     <Border Background="{DynamicResource ControlFillBrush}"
                             BorderBrush="{DynamicResource BorderSoftBrush}"
                             BorderThickness="1" CornerRadius="15"
                             Padding="10,5">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="ArrowClockwise20"
+                        <DockPanel LastChildFill="True"><ui:SymbolIcon DockPanel.Dock="Left" Symbol="ArrowClockwise20"
                                            Foreground="{DynamicResource MutedTextBrush}"
-                                           FontSize="14" Margin="0,0,5,0"/>
-                            <TextBlock Text="{Binding StatusText}"
+                                           FontSize="14" Margin="0,0,5,0"/><TextBlock TextWrapping="Wrap" Text="{Binding StatusText}"
                                        Foreground="{DynamicResource MutedTextBrush}"
-                                       FontSize="{StaticResource CaptionFontSize}" VerticalAlignment="Center"/>
-                        </StackPanel>
+                                       FontSize="{DynamicResource CaptionFontSize}" VerticalAlignment="Center"/></DockPanel>
                     </Border>
                 </WrapPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <Button Content="{Binding CloseButtonText}"
-                            Click="OnCloseClick" MinWidth="80" Background="{DynamicResource ControlFillBrush}"
-                            BorderBrush="{DynamicResource BorderSoftBrush}"
-                            Foreground="{DynamicResource TextBrush}"
+                            Click="OnCloseClick" MinWidth="80"
                             BorderThickness="1"/>
                     <Button Content="{DynamicResource BluetoothControlReportMapChangedConfirm}"
                             Click="OnReportMapAcknowledgedClick" MinWidth="150" Margin="8,0,0,0" Style="{StaticResource PrimaryButton}"

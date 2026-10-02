@@ -12,7 +12,7 @@
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
     <chrome:RoundedWindow.Resources>
         <Style x:Key="ShortcutCaptureBox" TargetType="TextBox" BasedOn="{StaticResource RoundedTextBox}">
-            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontSize" Value="{DynamicResource FontSize16}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -20,7 +20,7 @@
             <Setter Property="CaretBrush" Value="Transparent"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsBound}" Value="False">
-                    <Setter Property="FontSize" Value="13"/>
+                    <Setter Property="FontSize" Value="{DynamicResource FontSize13}"/>
                     <Setter Property="FontWeight" Value="Normal"/>
                 </DataTrigger>
             </Style.Triggers>
@@ -39,14 +39,14 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
             <RowDefinition Height="14"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid Style="{StaticResource SubWindowHeader}"
               animations:WindowDragBehavior.IsEnabled="True">
             <TextBlock Text="{DynamicResource ShortcutSettingsTitle}"
-                       Style="{StaticResource SubWindowTitle}"/>
+                       Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
@@ -60,7 +60,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock Text="{DynamicResource ShortcutSettingsDescription}"
-                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,0,0,12"/>
             <ScrollViewer Grid.Row="1" Margin="0,0,-25,0"
                           VerticalScrollBarVisibility="Auto"
@@ -69,7 +69,7 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <StackPanel Margin="0,0,0,14">
-                            <TextBlock Text="{Binding Title}" FontSize="{StaticResource CaptionFontSize}" FontWeight="SemiBold"
+                            <TextBlock Text="{Binding Title}" FontSize="{DynamicResource CaptionFontSize}" FontWeight="SemiBold"
                                        Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,7"/>
                             <ItemsControl ItemsSource="{Binding Rows}">
                                 <ItemsControl.ItemTemplate>
@@ -90,8 +90,8 @@
                                                      shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
                                             <Button Grid.Column="2" Click="OnResetRowClick"
                                                     Style="{StaticResource ShortcutClearButton}">
-                                                <ui:SymbolIcon Symbol="Delete20" FontSize="18"
-                                                               Foreground="{DynamicResource ShortcutClearIconBrush}"/>
+                                                <ui:SymbolIcon Symbol="ArrowCounterclockwise20" FontSize="18"
+                                                               Foreground="{DynamicResource MutedTextBrush}"/>
                                             </Button>
                                         </Grid>
                                     </DataTemplate>
@@ -104,11 +104,11 @@
             </ScrollViewer>
             <TextBlock Text="{DynamicResource ShortcutSettingsCaptureHint}"
                        Grid.Row="2"
-                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,2,0,0"/>
             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource ErrorBrush}"
                        Grid.Row="3"
-                       FontSize="{StaticResource CaptionFontSize}" TextWrapping="Wrap" MinHeight="20" Margin="0,8,0,0"/>
+                       FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" MinHeight="20" Margin="0,8,0,0"/>
         </Grid>
 
         <Grid Grid.Row="4">

@@ -18,7 +18,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="16"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
                 <RowDefinition Height="14"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="20"/>
@@ -57,11 +57,11 @@
                     </Border>
                     <StackPanel Grid.Column="1">
                         <TextBlock Text="{DynamicResource InstanceConflictBody}"
-                                   FontSize="{StaticResource BodyFontSize}" LineHeight="21"
+                                   FontSize="{DynamicResource BodyFontSize}"
                                    TextWrapping="Wrap"/>
                         <TextBlock Text="{DynamicResource InstanceConflictHint}"
                                    Foreground="{DynamicResource MutedTextBrush}"
-                                   FontSize="{StaticResource CaptionFontSize}" LineHeight="18"
+                                   FontSize="{DynamicResource CaptionFontSize}"
                                    TextWrapping="Wrap" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Grid>
@@ -82,15 +82,15 @@
                     </ui:SymbolIcon>
                     <TextBlock Text="{DynamicResource ClosingOtherInstances}"
                                Foreground="{DynamicResource MutedTextBrush}"
-                               FontSize="{StaticResource SecondaryFontSize}" VerticalAlignment="Center"
+                               FontSize="{DynamicResource SecondaryFontSize}" VerticalAlignment="Center"
                                Margin="7,0,0,0"/>
                 </StackPanel>
                 <TextBlock x:Name="ErrorText" Visibility="Collapsed"
                            Foreground="{DynamicResource ErrorBrush}"
-                           FontSize="{StaticResource SecondaryFontSize}" LineHeight="18" TextWrapping="Wrap"/>
+                           FontSize="{DynamicResource SecondaryFontSize}" TextWrapping="Wrap"/>
             </Grid>
 
-            <StackPanel Grid.Row="6" Orientation="Horizontal"
+            <WrapPanel Grid.Row="6" Orientation="Horizontal"
                         HorizontalAlignment="Right">
                 <Button x:Name="CloseOtherInstancesButton"
                         Content="{DynamicResource CloseOtherInstances}"
@@ -103,7 +103,7 @@
                         IsDefault="True"
                         AutomationProperties.AutomationId="CloseCurrentInstanceButton"
                         Click="OnCloseCurrentClick"/>
-            </StackPanel>
+            </WrapPanel>
         </Grid>
     </Border>
 </chrome:RoundedWindow>

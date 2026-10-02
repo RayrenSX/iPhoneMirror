@@ -44,15 +44,25 @@ internal static partial class Program
             {
                 language.Invoke(null, [culture, false, false]);
                 ApplyTheme(assembly, theme);
+                if (Environment.GetEnvironmentVariable("IPHONE_MIRROR_UI_AUDIT_HIGH_CONTRAST") == "1")
+                    Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.HighContrast,
+                        Wpf.Ui.Controls.WindowBackdropType.None, updateAccent: false);
+                if (Environment.GetEnvironmentVariable("IPHONE_MIRROR_UI_AUDIT_TEXT_SCALE") is { } scaleText &&
+                    double.TryParse(scaleText, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var textScale))
+                    assembly.GetType("IPhoneMirror.UI.Services.AccessibilityAppearance")!
+                        .GetMethod("Apply", BindingFlags.Static | BindingFlags.NonPublic)!
+                        .Invoke(null, [app, (double?)textScale,
+                            (bool?)(Environment.GetEnvironmentVariable("IPHONE_MIRROR_UI_AUDIT_HIGH_CONTRAST") == "1")]);
                 var owner = CreateWorkspaceTestWindow(app, includeNativePreview: false);
                 owner.ShowInTaskbar = false;
                 try
                 {
                     foreach (var surface in new[] {
                         "workspace-mirroring", "workspace-devices", "workspace-settings", "workspace-output", "workspace-toolbar",
-                        "developer-tools", "about", "advanced-settings", "device-binding", "airplay-device-selection",
+                        "developer-tools", "about", "advanced-settings", "text-input", "device-binding", "airplay-device-selection",
                         "bluetooth-connection", "bluetooth-client-binding", "bluetooth-control-notice",
-                        "shortcut-settings", "reverse-control-status", "reverse-control-prompt-long", "prompt", "prompt-long", "bluetooth-waiting", "bluetooth-failure-long",
+                        "shortcut-settings", "reverse-control-status", "reverse-control-prompt", "reverse-control-prompt-long", "prompt", "prompt-long", "bluetooth-waiting", "bluetooth-failure-long",
                         "reverse-control-wired-prerequisite", "reverse-control-wireless-prerequisite",
                         "reverse-control-error", "capture-error", "session-closed", "usb-config-error",
                         "capture-recovery", "image-settings", "projection-settings", "media-output",
@@ -81,7 +91,7 @@ internal static partial class Program
                                 prompt.Owner = owner;
                                 prompt.Show();
                             }
-                            else if (surface == "reverse-control-prompt-long")
+                            else if (surface is "reverse-control-prompt" or "reverse-control-prompt-long")
                             {
                                 var serviceType = assembly.GetType("IPhoneMirror.App.Services.ControlStatusService")!;
                                 var service = Activator.CreateInstance(serviceType, nonPublic: true)!;
@@ -90,8 +100,8 @@ internal static partial class Program
                                 var promptType = assembly.GetType("IPhoneMirror.App.Services.ControlPrompt")!;
                                 var prompt = Activator.CreateInstance(promptType, [
                                     Enum.Parse(assembly.GetType("IPhoneMirror.App.Services.ControlPromptType")!, "UserActionRequired"),
-                                    "Developer Mode and device trust must be confirmed before starting reverse control",
-                                    string.Join(" ", Enumerable.Repeat("Check the device and confirm that this computer is trusted.", 20)),
+                                    surface == "reverse-control-prompt" ? app.FindResource("ReverseControlPrerequisiteWiredTitle") : "Developer Mode and device trust must be confirmed before starting reverse control",
+                                    surface == "reverse-control-prompt" ? app.FindResource("ReverseControlPrerequisiteWiredBody") : string.Join(" ", Enumerable.Repeat("Check the device and confirm that this computer is trusted.", 20)),
                                     app.FindResource("Continue"), app.FindResource("Cancel"), true, null, null]);
                                 serviceType.GetMethod("RequestPromptAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(service, [prompt, CancellationToken.None]);
                                 assembly.GetType("IPhoneMirror.App.Windows.ReverseControlStatusWindow")!
@@ -119,7 +129,7 @@ internal static partial class Program
                                 SaveWindowRender(window, Path.Combine(output, name + ".png"));
                                 if (surface == "media-output")
                                     AssertMicrophoneReachable(window, Path.Combine(output, name + "-microphone.png"));
-                                if (surface == "reverse-control-prompt-long")
+                                if (surface is "reverse-control-prompt" or "reverse-control-prompt-long")
                                     AssertPromptActionsReachable(window, Path.Combine(output, name + "-scrolled.png"));
                                 ExerciseWorkAreaSizes(window, name, layoutFindings, Path.Combine(output, name));
                                 results.Add(new { culture, theme = theme.ToString(), surface,
@@ -234,14 +244,16 @@ internal static partial class Program
     {
         var primary = Visuals(window).OfType<Button>().Single(b =>
             System.Windows.Automation.AutomationProperties.GetAutomationId(b) == "ControlPromptPrimaryButton");
-        DependencyObject? parent = primary;
-        while ((parent = VisualTreeHelper.GetParent(parent)) is not null && parent is not ScrollViewer) { }
-        var scroll = parent as ScrollViewer ?? throw new InvalidOperationException("Prompt scroll area was not found.");
-        scroll.ScrollToEnd();
-        window.UpdateLayout();
-        var bounds = primary.TransformToAncestor(scroll).TransformBounds(new Rect(primary.RenderSize));
-        if (bounds.Top < -2 || bounds.Bottom > scroll.ActualHeight + 2 || bounds.Right > scroll.ActualWidth + 2)
-            throw new InvalidOperationException("Long prompt primary action cannot be reached by scrolling.");
+        var scroll = (ScrollViewer)window.FindName("ControlContentScrollViewer");
+        foreach (var offset in new[] { 0.0, scroll.ScrollableHeight })
+        {
+            scroll.ScrollToVerticalOffset(offset);
+            window.UpdateLayout();
+            var bounds = primary.TransformToAncestor(window).TransformBounds(new Rect(primary.RenderSize));
+            var scrollBounds = scroll.TransformToAncestor(window).TransformBounds(new Rect(scroll.RenderSize));
+            if (bounds.Top < scrollBounds.Bottom || bounds.Bottom > window.ActualHeight - 10 || bounds.Right > window.ActualWidth - 10)
+                throw new InvalidOperationException("Prompt primary action is not fully visible in the fixed footer.");
+        }
         SaveWindowRender(window, renderPath);
         scroll.ScrollToHome();
         window.UpdateLayout();

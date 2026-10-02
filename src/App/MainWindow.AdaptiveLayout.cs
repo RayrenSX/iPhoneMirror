@@ -27,6 +27,7 @@ public partial class MainWindow
         // A short work area keeps the stats in one horizontally scrollable row,
         // leaving height for video. Taller narrow windows use two rows instead.
         var shortArea = MainContentGrid.ActualHeight < 360;
+        StatsPanel.MaxHeight = shortArea ? 40 : Math.Max(120, MainContentGrid.ActualHeight * 0.35);
         StatisticsItems.Columns = shortArea || width >= 480 ? 4 : 2;
         StatisticsItems.Width = shortArea ? Math.Max(560, width) : width;
     }
@@ -40,6 +41,18 @@ public partial class MainWindow
     {
         if (!IsLoaded || MainContentGrid is null || ControlPanel is null) return;
         UpdateStatisticsLayout();
+        var compactHeader = !_viewModel.IsLightweightApplicationMode && RootLayout.ActualWidth < 1100;
+        // The shell already exposes the app title. In a very short work area,
+        // reserve the in-window heading's space for the preview and controls.
+        var shortHeader = compactHeader && RootLayout.ActualHeight < 480;
+        WorkspaceHeading.Visibility = shortHeader ? Visibility.Collapsed : Visibility.Visible;
+        Grid.SetColumnSpan(WorkspaceHeading, compactHeader ? 5 : 1);
+        WorkspaceSubtitle.Visibility = compactHeader ? Visibility.Collapsed : Visibility.Visible;
+        Grid.SetRow(DetectionStatus, compactHeader && !shortHeader ? 1 : 0);
+        Grid.SetColumn(DetectionStatus, compactHeader ? 0 : 1);
+        Grid.SetRow(CaptureActionButton, compactHeader && !shortHeader ? 1 : 0);
+        Grid.SetColumn(CaptureActionButton, compactHeader ? 1 : 3);
+        CaptureActionButton.Margin = compactHeader && !shortHeader ? new Thickness(0, 8, 0, 0) : new Thickness(0);
         var stack = !_viewModel.IsLightweightApplicationMode &&
             MainContentGrid.ActualWidth < 960 && LeftPanelHost.IsVisible && ControlPanel.IsVisible &&
             LeftPanelHost.ActualWidth > 1 && ControlPanel.ActualWidth > 1;

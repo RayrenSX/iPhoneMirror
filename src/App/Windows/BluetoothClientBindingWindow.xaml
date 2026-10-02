@@ -16,23 +16,23 @@
             <RowDefinition Height="16"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="12"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
             <RowDefinition Height="14"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid Style="{StaticResource SubWindowHeader}"
               animations:WindowDragBehavior.IsEnabled="True">
-            <TextBlock Text="{DynamicResource BluetoothClientBindingTitle}"
-                       Style="{StaticResource SubWindowTitle}"/>
+            <TextBlock TextWrapping="Wrap" Text="{DynamicResource BluetoothClientBindingTitle}"
+                       Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCancelClick"
                     ToolTip="{DynamicResource Cancel}">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
         <StackPanel Grid.Row="2">
-            <TextBlock Text="{Binding TargetText}" FontSize="15" FontWeight="SemiBold"/>
+            <TextBlock TextWrapping="Wrap" Text="{Binding TargetText}" FontSize="{DynamicResource FontSize15}" FontWeight="SemiBold"/>
             <TextBlock Text="{DynamicResource BluetoothClientBindingHint}"
-                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,5,0,0"/>
         </StackPanel>
         <Grid Grid.Row="4"><ListBox  ItemsSource="{Binding Clients}"
@@ -41,6 +41,7 @@
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemContainerStyle>
                 <Style TargetType="ListBoxItem">
+                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
                     <Setter Property="Padding" Value="0"/>
                     <Setter Property="Margin" Value="0,0,0,8"/>
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -50,7 +51,7 @@
                                 <Border x:Name="ItemRoot" Background="{DynamicResource ControlFillBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                         CornerRadius="10" Padding="0">
-                                    <ContentPresenter/>
+                                    <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
@@ -83,11 +84,11 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
-                                <TextBlock Text="{Binding ConnectionTimeText}" Foreground="{DynamicResource AccentHoverBrush}"
-                                           FontSize="{StaticResource CaptionFontSize}" Margin="0,4,0,0"/>
-                                <TextBlock Text="{Binding BindingText}" Foreground="{DynamicResource SuccessBrush}"
-                                           FontSize="{StaticResource CaptionFontSize}" Margin="0,3,0,0">
+                                <TextBlock TextWrapping="Wrap" Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                <TextBlock TextWrapping="Wrap" Text="{Binding ConnectionTimeText}" Foreground="{DynamicResource AccentHoverBrush}"
+                                           FontSize="{DynamicResource CaptionFontSize}" Margin="0,4,0,0"/>
+                                <TextBlock TextWrapping="Wrap" Text="{Binding BindingText}" Foreground="{DynamicResource SuccessBrush}"
+                                           FontSize="{DynamicResource CaptionFontSize}" Margin="0,3,0,0">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Collapsed"/>
@@ -100,7 +101,7 @@
                                 </TextBlock.Style>
                                 </TextBlock>
                                 <TextBlock Text="{Binding IdentifierText}" Foreground="{DynamicResource MutedTextBrush}"
-                                           FontFamily="{StaticResource CodeFontFamily}" FontSize="{StaticResource CaptionFontSize}" Margin="0,4,0,0"
+                                           FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,4,0,0"
                                            TextTrimming="CharacterEllipsis"/>
                             </StackPanel>
                             <Button Grid.Column="1" Content="{DynamicResource BluetoothClientBindingUnbind}"
@@ -123,7 +124,7 @@
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
-            <TextBlock Text="{DynamicResource BluetoothEmptyState}">
+            <TextBlock TextWrapping="Wrap" Text="{DynamicResource BluetoothEmptyState}">
                 <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource EmptyStateText}">
                     <Setter Property="Visibility" Value="Collapsed"/>
                     <Style.Triggers><DataTrigger Binding="{Binding Clients.Count}" Value="0">
@@ -132,7 +133,10 @@
                 </Style></TextBlock.Style>
             </TextBlock>
         </Grid>
-        <Grid Grid.Row="6">
+        <StackPanel Grid.Row="6">
+        <TextBlock x:Name="FeedbackText" TextWrapping="Wrap" Margin="0,0,0,8"
+                   Foreground="{DynamicResource WarningBrush}" AutomationProperties.LiveSetting="Polite"/>
+        <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -153,5 +157,6 @@
                     Click="OnConfirmClick" Style="{StaticResource PrimaryButton}"
                     IsEnabled="{Binding CanConfirm}" MinWidth="132"/>
         </Grid>
+        </StackPanel>
     </Grid>
 </chrome:RoundedWindow>

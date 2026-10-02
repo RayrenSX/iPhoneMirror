@@ -8,7 +8,7 @@
         xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
  <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
-  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="*"/><RowDefinition Height="16"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/><RowDefinition Height="16"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid Style="{StaticResource SubWindowHeader}"
         animations:WindowDragBehavior.IsEnabled="True">
    <StackPanel Margin="0,0,48,0"><TextBlock Text="{DynamicResource AdvancedSettingsTitle}" Style="{StaticResource SubWindowTitle}"/><TextBlock Text="{DynamicResource AdvancedSettingsIntro}" Style="{StaticResource SubWindowSubtitle}"/></StackPanel>
@@ -19,20 +19,20 @@
   <Border Grid.Row="2" Style="{StaticResource SettingsSection}">
    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
     <TextBlock Text="{DynamicResource AdvancedUsbResolution}" FontWeight="SemiBold"/>
-    <TextBlock Text="{DynamicResource AdvancedUsbResolutionHelp}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}" TextWrapping="Wrap" Margin="0,6,0,12"/>
+    <TextBlock Text="{DynamicResource AdvancedUsbResolutionHelp}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" Margin="0,6,0,12"/>
     <Grid Margin="0,5,0,0">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
      <StackPanel>
-      <TextBlock Text="{DynamicResource HeightLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
-      <TextBox x:Name="HeightBox" Style="{StaticResource RoundedTextBox}" Margin="0,5,0,0" FontSize="16" MinHeight="54"/>
+      <TextBlock Text="{DynamicResource HeightLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+      <TextBox x:Name="HeightBox" AutomationProperties.Name="{DynamicResource HeightLabel}" Style="{StaticResource RoundedTextBox}" Margin="0,5,0,0" FontSize="{DynamicResource FontSize16}" MinHeight="54"/>
      </StackPanel>
      <TextBlock Grid.Column="1" Text="×" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10"/>
      <StackPanel Grid.Column="2">
-      <TextBlock Text="{DynamicResource WidthLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
-      <TextBox x:Name="WidthBox" Style="{StaticResource RoundedTextBox}" Margin="0,5,0,0" FontSize="16" MinHeight="54"/>
+      <TextBlock Text="{DynamicResource WidthLabel}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+      <TextBox x:Name="WidthBox" AutomationProperties.Name="{DynamicResource WidthLabel}" Style="{StaticResource RoundedTextBox}" Margin="0,5,0,0" FontSize="{DynamicResource FontSize16}" MinHeight="54"/>
      </StackPanel>
     </Grid>
-    <TextBlock x:Name="ErrorText" Foreground="{DynamicResource ErrorBrush}" FontSize="{StaticResource CaptionFontSize}" Margin="0,10,0,0" TextWrapping="Wrap"/>
+    <TextBlock x:Name="ErrorText" Foreground="{DynamicResource ErrorBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,10,0,0" TextWrapping="Wrap"/>
    </StackPanel></ScrollViewer>
   </Border>
   <Grid Grid.Row="4"><Button Content="{DynamicResource DisableAdvancedMode}" MinWidth="150" HorizontalAlignment="Left" Click="OnDisableClick"/><Button Content="{DynamicResource Apply}" MinWidth="112" HorizontalAlignment="Right" Style="{StaticResource PrimaryButton}" IsDefault="True" Click="OnApplyClick"/></Grid>

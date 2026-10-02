@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>iPhoneMirror SRS Test</title>
+  <title data-i18n>iPhoneMirror SRS Test</title>
   <style>
     :root { color-scheme: dark; font-family: "Segoe UI", sans-serif; background: #14171b; color: #f2f5f7; }
     * { box-sizing: border-box; }
@@ -14,7 +14,7 @@
     .layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: 18px; margin-top: 22px; }
     section { border: 1px solid #303941; background: #1c2127; padding: 18px; border-radius: 8px; }
     h2 { margin: 0 0 14px; font-size: 15px; font-weight: 650; }
-    label { display: block; margin-top: 12px; color: #b9c3cd; font-size: 12px; }
+    label, .endpoint-label { display: block; margin-top: 12px; color: #b9c3cd; font-size: 12px; }
     input { width: 100%; margin-top: 5px; border: 1px solid #46515c; border-radius: 5px; background: #111519; color: #f2f5f7; padding: 9px; font: inherit; }
     button { margin-top: 14px; border: 1px solid #4275a5; border-radius: 5px; background: #23639a; color: #fff; padding: 9px 12px; font: inherit; cursor: pointer; }
     button.secondary { background: #252e36; border-color: #46515c; }
@@ -25,41 +25,59 @@
     .status.error { color: #ffaaa4; }
     .status.ok { color: #9dd9a6; }
     .hint { margin-top: 10px; font-size: 12px; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #75c1ff; outline-offset: 3px; }
+    @media (prefers-color-scheme: light) {
+      :root { color-scheme: light; background: #f3f3f5; color: #1d1d1f; }
+      body { background: #f3f3f5; }
+      section, input, button.secondary { background: #fff; color: #1d1d1f; border-color: #737373; }
+      p, label, .endpoint-label, .status { color: #5f5f65; }
+      code { color: #0f548c; }
+      .status.error { color: #b10e1e; }
+      .status.ok { color: #0e700e; }
+      button:focus-visible, input:focus-visible { outline-color: #0f6cbd; }
+    }
+    @media (forced-colors: active) {
+      :root, body, section { background: Canvas; color: CanvasText; }
+      button, input { border: 1px solid ButtonText; }
+      button:focus-visible, input:focus-visible { outline-color: Highlight; }
+    }
     @media (max-width: 760px) { main { width: min(100% - 24px, 1040px); padding-top: 20px; } .layout { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>iPhoneMirror SRS Test</h1>
-    <p>Publish from iPhoneMirror through RTMP, SRT, or WHIP, then verify the same stream through WHEP.</p>
+    <h1 data-i18n>iPhoneMirror SRS Test</h1>
+    <p data-i18n>Publish from iPhoneMirror through RTMP, SRT, or WHIP, then verify the same stream through WHEP.</p>
     <div class="layout">
       <section>
-        <h2>WHEP Playback</h2>
+        <h2 data-i18n>WHEP Playback</h2>
         <video id="player" autoplay playsinline controls muted></video>
-        <button id="play">Start WHEP playback</button>
-        <button id="stopPlay" class="secondary">Stop playback</button>
-        <p id="playStatus" class="status">Idle.</p>
+        <button id="play" data-i18n>Start WHEP playback</button>
+        <button id="stopPlay" class="secondary" data-i18n>Stop playback</button>
+        <p id="playStatus" class="status" data-i18n>Idle.</p>
       </section>
       <section>
-        <h2>Endpoints</h2>
-        <label>App</label>
+        <h2 data-i18n>Endpoints</h2>
+        <label for="app" data-i18n>App</label>
         <input id="app" value="live" autocomplete="off">
-        <label>Stream</label>
+        <label for="stream" data-i18n>Stream</label>
         <input id="stream" value="livestream" autocomplete="off">
-        <label>RTMP</label>
+        <div class="endpoint-label">RTMP</div>
         <code id="rtmp"></code>
-        <label>SRT</label>
+        <div class="endpoint-label">SRT</div>
         <code id="srt"></code>
-        <label>WHIP</label>
+        <div class="endpoint-label">WHIP</div>
         <code id="whip"></code>
-        <button id="publishCamera" class="secondary">Publish browser camera through WHIP</button>
-        <button id="stopCamera" class="secondary">Stop browser publish</button>
-        <p id="publishStatus" class="status">Browser camera is idle.</p>
-        <p class="hint">The page focuses on video delivery. iPhoneMirror may include source audio when available; browser camera publishing is an independent SRS check.</p>
+        <button id="publishCamera" class="secondary" data-i18n>Publish browser camera through WHIP</button>
+        <button id="stopCamera" class="secondary" data-i18n>Stop browser publish</button>
+        <p id="publishStatus" class="status" data-i18n>Browser camera is idle.</p>
+        <p class="hint" data-i18n>The page focuses on video delivery. iPhoneMirror may include source audio when available; browser camera publishing is an independent SRS check.</p>
       </section>
     </div>
   </main>
+  <script src="./localize.js"></script>
   <script>
+    const t = window.uiText;
     const player = document.getElementById('player');
     const appInput = document.getElementById('app');
     const streamInput = document.getElementById('stream');
@@ -88,7 +106,7 @@
 
     function setStatus(element, text, error = false) {
       element.textContent = text;
-      element.className = `status ${error ? 'error' : text === 'Connected.' ? 'ok' : ''}`;
+      element.className = `status ${error ? 'error' : text === t("Connected.") ? 'ok' : ''}`;
     }
 
     async function waitForIce(peer) {
@@ -110,20 +128,20 @@
         headers: { 'Content-Type': 'application/sdp' },
         body: peer.localDescription.sdp
       });
-      if (!response.ok) throw new Error(`${kind.toUpperCase()} returned ${response.status}`);
+      if (!response.ok) throw new Error(t("Request returned HTTP {0}", response.status));
       await peer.setRemoteDescription({ type: 'answer', sdp: await response.text() });
     }
 
     async function startPlayback() {
       stopPlayback();
-      setStatus(playStatus, 'Connecting to WHEP...');
+      setStatus(playStatus, t("Connecting to WHEP..."));
       const peer = new RTCPeerConnection();
       playbackPeer = peer;
       peer.addTransceiver('video', { direction: 'recvonly' });
       peer.ontrack = event => { player.srcObject = event.streams[0]; };
       peer.onconnectionstatechange = () => {
-        if (peer.connectionState === 'connected') setStatus(playStatus, 'Connected.');
-        if (['failed', 'disconnected', 'closed'].includes(peer.connectionState)) setStatus(playStatus, `Playback ${peer.connectionState}.`, peer.connectionState === 'failed');
+        if (peer.connectionState === 'connected') setStatus(playStatus, t("Connected."));
+        if (['failed', 'disconnected', 'closed'].includes(peer.connectionState)) setStatus(playStatus, t("Playback state: {0}", t(peer.connectionState)), peer.connectionState === 'failed');
       };
       try { await negotiate(peer, 'whep'); }
       catch (error) { if (playbackPeer === peer) { peer.close(); playbackPeer = null; } setStatus(playStatus, error.message, true); }
@@ -133,20 +151,20 @@
       if (playbackPeer) playbackPeer.close();
       playbackPeer = null;
       player.srcObject = null;
-      setStatus(playStatus, 'Idle.');
+      setStatus(playStatus, t("Idle."));
     }
 
     async function startCameraPublish() {
       stopCameraPublish();
-      setStatus(publishStatus, 'Requesting browser camera...');
+      setStatus(publishStatus, t("Requesting browser camera..."));
       try {
         cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         const peer = new RTCPeerConnection();
         publishPeer = peer;
         cameraStream.getTracks().forEach(track => peer.addTrack(track, cameraStream));
         peer.onconnectionstatechange = () => {
-          if (peer.connectionState === 'connected') setStatus(publishStatus, 'Connected.');
-          if (['failed', 'disconnected', 'closed'].includes(peer.connectionState)) setStatus(publishStatus, `Browser publish ${peer.connectionState}.`, peer.connectionState === 'failed');
+          if (peer.connectionState === 'connected') setStatus(publishStatus, t("Connected."));
+          if (['failed', 'disconnected', 'closed'].includes(peer.connectionState)) setStatus(publishStatus, t("Publish state: {0}", t(peer.connectionState)), peer.connectionState === 'failed');
         };
         await negotiate(peer, 'whip');
       } catch (error) {
@@ -160,7 +178,7 @@
       publishPeer = null;
       if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
       cameraStream = null;
-      setStatus(publishStatus, 'Browser camera is idle.');
+      setStatus(publishStatus, t("Browser camera is idle."));
     }
 
     document.getElementById('play').addEventListener('click', startPlayback);

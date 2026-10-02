@@ -13,7 +13,7 @@
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/><RowDefinition Height="16"/>
-                <RowDefinition Height="*"/><RowDefinition Height="16"/>
+                <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/><RowDefinition Height="16"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid Style="{StaticResource SubWindowHeader}"

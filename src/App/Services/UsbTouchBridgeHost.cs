@@ -64,11 +64,12 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     }
 
     internal Task SendTouchBatchAsync(IReadOnlyList<TouchPoint> points,
-        long timestampNs, long sequence, CancellationToken cancellationToken = default)
+        long timestampNs, long sequence, CancellationToken cancellationToken = default,
+        Func<bool>? canSend = null)
     {
         EnsureReady();
         State = ReverseControlState.Controlling;
-        return _bridge.SendTouchBatchAsync(points, timestampNs, sequence, cancellationToken);
+        return _bridge.SendTouchBatchAsync(points, timestampNs, sequence, cancellationToken, canSend);
     }
 
     internal Task SendKeyboardAsync(IReadOnlyCollection<byte> usages,

@@ -21,6 +21,8 @@ internal static class ThemeService
     private static readonly ConditionalWeakTable<Window, WindowBackdropState> AttachedWindows = new();
     private static bool _systemEventsAttached;
 
+    internal static event EventHandler? ThemeChanged;
+
     internal static bool IsDark { get; private set; } = true;
     internal static AppTheme Preference { get; private set; } = AppTheme.System;
 
@@ -42,11 +44,13 @@ internal static class ThemeService
         ApplicationThemeManager.Apply(
             applicationTheme, Wpf.Ui.Controls.WindowBackdropType.None,
             updateAccent: false);
+        IPhoneMirror.UI.Services.AccessibilityAppearance.Apply(application);
         foreach (Window window in application.Windows)
         {
             RefreshWindowTheme(window, applicationTheme);
             AnimateThemeTransition(window);
         }
+        ThemeChanged?.Invoke(null, EventArgs.Empty);
     }
 
     internal static void Attach(Window window)
@@ -120,6 +124,7 @@ internal static class ThemeService
     }
 
     private static ApplicationTheme CurrentApplicationTheme =>
+        SystemParameters.HighContrast ? ApplicationTheme.HighContrast :
         IsDark ? ApplicationTheme.Dark : ApplicationTheme.Light;
 
     private static void RefreshWindowTheme(Window window,
@@ -130,7 +135,9 @@ internal static class ThemeService
             var backdrop = window is Wpf.Ui.Controls.FluentWindow fluentWindow
                 ? fluentWindow.WindowBackdropType
                 : Wpf.Ui.Controls.WindowBackdropType.None;
-            WindowBackgroundManager.UpdateBackground(window, applicationTheme, backdrop);
+            if (SystemParameters.HighContrast)
+                window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
+            else WindowBackgroundManager.UpdateBackground(window, applicationTheme, backdrop);
         }
         ApplyBackdrop(window);
     }
@@ -145,8 +152,8 @@ internal static class ThemeService
     private static void OnSystemPreferenceChanged(object sender,
         UserPreferenceChangedEventArgs args)
     {
-        if (Preference != AppTheme.System || Application.Current is null) return;
-        _ = Application.Current.Dispatcher.BeginInvoke(() => Apply(AppTheme.System));
+        if (Application.Current is null) return;
+        _ = Application.Current.Dispatcher.BeginInvoke(() => Apply(Preference));
     }
 
     internal static void ApplyBackdrop(Window window)
@@ -163,7 +170,7 @@ internal static class ThemeService
         var acrylic = window is Wpf.Ui.Controls.FluentWindow fluentWindow &&
                       fluentWindow.WindowBackdropType ==
                           Wpf.Ui.Controls.WindowBackdropType.Acrylic;
-        var backdrop = edgeToEdge
+        var backdrop = SystemParameters.HighContrast || edgeToEdge
             ? DwmBackdropNone
             : acrylic ? DwmBackdropAcrylic : DwmBackdropMica;
         var border = flushToDisplayEdge ? DwmColorNone : DwmColorDefault;

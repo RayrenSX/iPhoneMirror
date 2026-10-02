@@ -14,13 +14,13 @@
     <chrome:RoundedWindow.Resources>
         <Style x:Key="AdjustmentLabel" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="{DynamicResource FontSize13}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
         <Style x:Key="AdjustmentValue" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="{DynamicResource FontSize12}"/>
             <Setter Property="HorizontalAlignment" Value="Right"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
@@ -33,7 +33,7 @@
             <RowDefinition Height="16"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="12"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -55,8 +55,8 @@
                 BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1"
                 CornerRadius="12" Padding="14,11">
             <TextBlock Text="{DynamicResource ImageAdjustmentsPreviewOnlyNotice}"
-                       Foreground="{DynamicResource WarningBrush}" FontSize="{StaticResource SecondaryFontSize}"
-                       LineHeight="18" TextWrapping="Wrap"/>
+                       Foreground="{DynamicResource WarningBrush}" FontSize="{DynamicResource SecondaryFontSize}"
+                       TextWrapping="Wrap"/>
         </Border>
 
         <Border x:Name="AdjustmentPanel" Grid.Row="4"
@@ -67,7 +67,7 @@
                     <TextBlock Text="{Binding ElementName=BrightnessSlider, Path=Value, StringFormat={}{0:F0}}"
                                Style="{StaticResource AdjustmentValue}"/>
                 </Grid>
-                <Slider x:Name="BrightnessSlider" Minimum="-100" Maximum="100"
+                <Slider x:Name="BrightnessSlider" AutomationProperties.Name="{DynamicResource BrightnessLabel}" Minimum="-100" Maximum="100"
                         TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
@@ -77,7 +77,7 @@
                     <TextBlock Text="{Binding ElementName=ContrastSlider, Path=Value, StringFormat={}{0:F0}%}"
                                Style="{StaticResource AdjustmentValue}"/>
                 </Grid>
-                <Slider x:Name="ContrastSlider" Minimum="0" Maximum="200"
+                <Slider x:Name="ContrastSlider" AutomationProperties.Name="{DynamicResource ContrastLabel}" Minimum="0" Maximum="200"
                         TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
@@ -87,7 +87,7 @@
                     <TextBlock Text="{Binding ElementName=SaturationSlider, Path=Value, StringFormat={}{0:F0}%}"
                                Style="{StaticResource AdjustmentValue}"/>
                 </Grid>
-                <Slider x:Name="SaturationSlider" Minimum="0" Maximum="200"
+                <Slider x:Name="SaturationSlider" AutomationProperties.Name="{DynamicResource SaturationLabel}" Minimum="0" Maximum="200"
                         TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
@@ -97,14 +97,14 @@
                     <TextBlock Text="{Binding ElementName=GammaSlider, Path=Value, StringFormat={}{0:F0}%}"
                                Style="{StaticResource AdjustmentValue}"/>
                 </Grid>
-                <Slider x:Name="GammaSlider" Minimum="50" Maximum="200"
+                <Slider x:Name="GammaSlider" AutomationProperties.Name="{DynamicResource GammaLabel}" Minimum="50" Maximum="200"
                         TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
             </StackPanel></ScrollViewer>
         </Border>
 
         <TextBlock x:Name="FeedbackText" Grid.Row="5"
-                   Foreground="{DynamicResource WarningBrush}" FontSize="{StaticResource CaptionFontSize}"
+                   Foreground="{DynamicResource WarningBrush}" FontSize="{DynamicResource CaptionFontSize}"
                    TextWrapping="Wrap" Margin="0,8,0,10"/>
 
         <Grid Grid.Row="6">

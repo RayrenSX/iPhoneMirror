@@ -102,21 +102,30 @@ internal sealed class TouchForm : Form
     public TouchForm(TouchBridge bridge, string bridgeName)
     {
         _bridge = bridge;
-        Text = "USB iPhone Touch Demo";
+        var culture = System.Globalization.CultureInfo.CurrentUICulture.Name;
+        var chinese = culture.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+        var traditional = culture.Contains("HK") || culture.Contains("TW") || culture.Contains("Hant");
+        Text = chinese ? traditional ? "USB iPhone 觸控測試" : "USB iPhone 触控测试" : "USB iPhone Touch Demo";
+        Font = SystemFonts.MessageBoxFont;
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(430, 820);
         MinimumSize = new Size(280, 460);
-        BackColor = Color.FromArgb(16, 19, 23);
-        ForeColor = Color.White;
+        BackColor = SystemColors.Window;
+        ForeColor = SystemColors.WindowText;
         DoubleBuffered = true;
         _status = new Label
         {
             Dock = DockStyle.Bottom,
-            Height = 34,
-            Text = $"USB touch bridge: {bridgeName} | click or drag in this window",
+            AutoSize = true,
+            MinimumSize = new Size(0, 34),
+            Text = chinese ? traditional
+                ? $"USB 觸控橋接：{bridgeName} | 在視窗內按一下或拖曳"
+                : $"USB 触控桥接：{bridgeName} | 在窗口内点击或拖动"
+                : $"USB touch bridge: {bridgeName} | click or drag in this window",
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(10, 0, 0, 0),
-            BackColor = Color.FromArgb(232, 238, 242),
-            ForeColor = Color.FromArgb(25, 35, 42),
+            BackColor = SystemColors.Control,
+            ForeColor = SystemColors.ControlText,
         };
         Controls.Add(_status);
         MouseDown += OnMouseDown;

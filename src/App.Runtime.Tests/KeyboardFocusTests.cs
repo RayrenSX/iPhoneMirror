@@ -44,12 +44,13 @@ internal static partial class Program
     private static object? KeyboardCall(object owner, string name, params object?[] args) =>
         owner.GetType().GetMethod(name, KeyboardTestMembers)!.Invoke(owner, args);
 
-    private static int RunKeyboardFocusTests()
+    private static int RunKeyboardFocusTests(bool initializeHiddenHandle = false)
     {
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         typeof(App).GetProperty("IsUiPreviewMode", KeyboardTestMembers)!.SetValue(app, true);
         app.InitializeComponent();
-        var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        var window = CreateWorkspaceTestWindow(app, includeNativePreview: initializeHiddenHandle,
+            initializeHiddenHandle: initializeHiddenHandle);
         var other = new Window { Width = 260, Height = 160, ShowInTaskbar = false, Owner = window };
         var vm = KeyboardField(window, "_viewModel");
         const string udid = "keyboard-focus-test-iphone";
@@ -88,6 +89,10 @@ internal static partial class Program
 
         try
         {
+            if (initializeHiddenHandle)
+                InteractionAssert(KeyboardField(window, "_windowSource") is HwndSource source &&
+                    source.Handle == new WindowInteropHelper(window).Handle,
+                    "Creating the main HWND before Show (tray startup) must retain its input source.");
             foreach (var mode in new[] { "Bluetooth", "Usb", "Wireless" })
             {
                 SetKeyboardField(vm, "_bluetoothControlEnabled", mode == "Bluetooth");
@@ -105,10 +110,13 @@ internal static partial class Program
                 KeyboardCall(KeyboardField(vm, "_reverseInputRouter"), "Begin", udid,
                     Enum.Parse(assembly.GetType("IPhoneMirror.App.Services.ReverseControlMode")!, mode));
                 TestKeyboardFocusRoute(window, other, udid, packets, mode != "Bluetooth");
+                if (initializeHiddenHandle && mode != "Bluetooth")
+                    TestMainPreviewPointerRoute(window, device, packets, mode);
                 Console.WriteLine($"{mode}: foreground routing, releases, queued input and independent-window checks passed.");
             }
             TestBluetoothKeyboardTransportGates();
-            TestMultipleDeviceControl(window, vm, device, host, packets, bindings);
+            TestMultipleDeviceControl(window, vm, device, host, packets, bindings,
+                testPointerInput: initializeHiddenHandle);
             Console.WriteLine("Keyboard focus runtime tests passed (USB/Wireless packets captured in memory; no device input sent).");
             return 0;
         }

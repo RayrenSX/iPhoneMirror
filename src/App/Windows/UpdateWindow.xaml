@@ -17,7 +17,7 @@
             <RowDefinition Height="16"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="18"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
             <RowDefinition Height="18"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -30,14 +30,14 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="{DynamicResource UpdateWindowTitle}"
+                <TextBlock TextWrapping="Wrap" Text="{DynamicResource UpdateWindowTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Text="{DynamicResource UpdateWindowSubtitle}"
+                <TextBlock TextWrapping="Wrap" Text="{DynamicResource UpdateWindowSubtitle}"
                            Style="{StaticResource SubWindowSubtitle}"/>
             </StackPanel>
             <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
                     Background="{DynamicResource AccentBrush}" CornerRadius="12" Padding="12,7">
-                <TextBlock Text="{Binding LatestVersion}" Foreground="{DynamicResource OnAccentBrush}"
+                <TextBlock TextWrapping="Wrap" Text="{Binding LatestVersion}" Foreground="{DynamicResource OnAccentBrush}"
                            FontWeight="SemiBold"/>
             </Border>
             <Button Grid.Column="3" Style="{StaticResource SubWindowCloseButton}"
@@ -54,21 +54,21 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="{DynamicResource CurrentVersionLabel}"
-                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
-                <TextBlock Text="{Binding CurrentVersion}" FontSize="16" FontWeight="SemiBold"
+                <TextBlock TextWrapping="Wrap" Text="{DynamicResource CurrentVersionLabel}"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                <TextBlock TextWrapping="Wrap" Text="{Binding CurrentVersion}" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold"
                            Margin="0,4,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="2">
-                <TextBlock Text="{DynamicResource LatestVersionLabel}"
-                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
-                <TextBlock Text="{Binding LatestVersion}" FontSize="16" FontWeight="SemiBold"
+                <TextBlock TextWrapping="Wrap" Text="{DynamicResource LatestVersionLabel}"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                <TextBlock TextWrapping="Wrap" Text="{Binding LatestVersion}" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold"
                            Margin="0,4,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="4">
-                <TextBlock Text="{DynamicResource PublishedAtLabel}"
-                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
-                <TextBlock Text="{Binding PublishedAt}" FontSize="16" FontWeight="SemiBold"
+                <TextBlock TextWrapping="Wrap" Text="{DynamicResource PublishedAtLabel}"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                <TextBlock TextWrapping="Wrap" Text="{Binding PublishedAt}" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold"
                            Margin="0,4,0,0"/>
             </StackPanel>
         </Grid>
@@ -84,14 +84,11 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding ReleaseName}" FontSize="18"
+                    <TextBlock Text="{Binding ReleaseName}" FontSize="{DynamicResource FontSize18}"
                                FontWeight="SemiBold" TextWrapping="Wrap"/>
                     <Button Grid.Column="1" Click="OnOpenReleaseClick"
                             ToolTip="{DynamicResource OpenReleasePage}" Margin="12,0,0,0">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Open20" Margin="0,0,6,0"/>
-                            <TextBlock Text="{DynamicResource OpenReleasePage}"/>
-                        </StackPanel>
+                        <DockPanel LastChildFill="True"><ui:SymbolIcon DockPanel.Dock="Left" Style="{StaticResource ButtonSymbolIcon}" Symbol="Open20" Margin="0,0,6,0"/><TextBlock TextWrapping="Wrap" Text="{DynamicResource OpenReleasePage}"/></DockPanel>
                     </Button>
                 </Grid>
                 <FlowDocumentScrollViewer Grid.Row="2" x:Name="ReleaseNotesViewer"
@@ -116,11 +113,11 @@
                              IsIndeterminate="{Binding IsIndeterminate}"/>
                 <Grid Margin="0,8,0,0">
                     <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap"/>
-                    <TextBlock Text="{Binding SpeedText}" HorizontalAlignment="Right"
+                    <TextBlock TextWrapping="Wrap" Text="{Binding SpeedText}" HorizontalAlignment="Right"
                                Foreground="{DynamicResource MutedTextBrush}"/>
                 </Grid>
             </StackPanel>
-            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"
+            <WrapPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"
                         Margin="0,16,0,0">
                 <Button Content="{DynamicResource RemindLater}" Click="OnLaterClick"
                         MinWidth="112" Margin="0,0,8,0"/>
@@ -128,7 +125,7 @@
                         Content="{Binding UpdateButtonText}" Click="OnUpdateClick"
                         IsEnabled="{Binding CanUpdate}" Style="{StaticResource PrimaryButton}"
                         MinWidth="132"/>
-            </StackPanel>
+            </WrapPanel>
         </Grid>
     </Grid>
 </chrome:RoundedWindow>

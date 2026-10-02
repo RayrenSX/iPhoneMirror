@@ -51,6 +51,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
         WindowItems =
         [
             Surface("advanced-settings", SymbolRegular.Settings20, "DeveloperAdvancedSettings", "DeveloperAdvancedSettingsDescription"),
+            Surface("text-input", SymbolRegular.Edit20, "DeviceBindingRenameTitle", "DeveloperReadOnlyPreview"),
             Surface("device-binding", SymbolRegular.Link20, "DeveloperDeviceBindingWindow", "DeveloperReadOnlyPreview"),
             Surface("airplay-device-selection", SymbolRegular.Phone20, "DeveloperAirPlaySelectionWindow", "DeveloperReadOnlyPreview"),
             Surface("bluetooth-connection", SymbolRegular.Bluetooth20, "DeveloperBluetoothConnectionWindow", "DeveloperReadOnlyPreview"),
@@ -131,6 +132,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
             var titleKey = windows[index].Key switch
             {
                 "advanced-settings" => "DeveloperAdvancedSettings",
+                "text-input" => "DeviceBindingRenameTitle",
                 "device-binding" => "DeveloperDeviceBindingWindow",
                 "airplay-device-selection" => "DeveloperAirPlaySelectionWindow",
                 "bluetooth-connection" => "DeveloperBluetoothConnectionWindow",

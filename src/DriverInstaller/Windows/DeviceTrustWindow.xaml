@@ -38,7 +38,7 @@
                 <StackPanel>
                     <TextBlock Text="{DynamicResource DeviceTrustAction}"
                                Foreground="{DynamicResource WarningBrush}"
-                               FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                               FontSize="{DynamicResource FontSize18}" FontWeight="SemiBold" TextWrapping="Wrap"/>
                     <TextBlock Text="{DynamicResource DeviceTrustExplanation}"
                                Style="{StaticResource BodyText}"
                                Margin="0,8,0,0"/>
@@ -47,7 +47,7 @@
 
             <StackPanel Margin="0,14,0,0">
                 <TextBlock Text="{DynamicResource DeviceTrustQuestion}" TextWrapping="Wrap"
-                           FontSize="15" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                           FontSize="{DynamicResource FontSize15}" FontWeight="SemiBold" Margin="0,0,0,12"/>
                 <Button Content="{DynamicResource DeviceTrustConfirmed}"
                         Style="{StaticResource PrimaryButton}" MinHeight="48"
                         HorizontalContentAlignment="Center" Click="OnTrustedClick"/>

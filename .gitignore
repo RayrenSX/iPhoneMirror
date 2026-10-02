@@ -23,6 +23,8 @@ src/**/bin/
 src/**/obj/
 tests/**/bin/
 tests/**/obj/
+tools/UsbTouchDemo/bin/
+tools/UsbTouchDemo/obj/
 src/App/native/
 CMakeUserPresets.json
 *.pdb

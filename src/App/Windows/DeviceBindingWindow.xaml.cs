@@ -124,8 +124,8 @@ public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindo
         if (_previewOnly) return;
         SelectProfileFromMenu(sender);
         if (Profile is null) return;
-        var name = Microsoft.VisualBasic.Interaction.InputBox(L("DeviceBindingRenamePrompt"), L("DeviceBindingRenameTitle"), Profile.DisplayName);
-        if (_manager.RenameProfile(Profile.Id, name)) SynchronizeProfiles();
+        var name = TextInputWindow.Show(this, "DeviceBindingRenameTitle", "DeviceBindingRenamePrompt", Profile.DisplayName);
+        if (name is not null && _manager.RenameProfile(Profile.Id, name)) SynchronizeProfiles();
     }
 
     private void DeleteProfileClick(object sender, RoutedEventArgs e)
@@ -143,10 +143,14 @@ public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindo
         if (_previewOnly) return;
         if (Profile is null || device is null) return;
         var result = _manager.Bind(Profile.Id, type, device.Udid, device.DisplayName, GetFingerprint(device));
-        if (!result.Success && result.Compatibility is DeviceBindingCompatibility.Compatible or DeviceBindingCompatibility.Unknown &&
-            AppPromptWindow.Confirm(L("DeviceBindingConfirmTitle"), F("DeviceBindingConfirmBodyFormat", result.Error), this))
+        if (result.RequiresConfirmation)
+        {
+            if (!AppPromptWindow.Confirm(L("DeviceBindingConfirmTitle"),
+                    F("DeviceBindingConfirmBodyFormat", result.Error), this)) return;
             result = _manager.Bind(Profile.Id, type, device.Udid, device.DisplayName, GetFingerprint(device), true);
+        }
         if (result.Success) SynchronizeProfiles();
+        else AppPromptWindow.Inform(L("DeviceBindingTitle"), result.Error ?? L("DeviceBindingCreateFailed"), this);
     }
 
     private async void ConnectBluetoothClick(object sender, RoutedEventArgs e)

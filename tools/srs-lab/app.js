@@ -1,3 +1,4 @@
+const t = window.uiText;
 let whepUrl = 'http://127.0.0.1:1985/rtc/v1/whep/?app=live&stream=iphone-mirror';
 
 const state = {
@@ -61,16 +62,16 @@ function describeError(error) {
 
 function renderStreams(payload) {
   const streams = payload.streams ?? [];
-  elements.streamCount.textContent = `${streams.length} stream${streams.length === 1 ? '' : 's'}`;
+  elements.streamCount.textContent = t("Streams: {0}", streams.length);
   if (!streams.length) {
-    elements.streamList.innerHTML = '<p>No active stream. Start RTMP, SRT, or WHIP from iPhoneMirror.</p>';
+    elements.streamList.innerHTML = '<p>' + t('No active stream. Start RTMP, SRT, or WHIP from iPhoneMirror.') + '</p>';
     return;
   }
   elements.streamList.innerHTML = streams.map(stream => {
     const name = stream.name ?? 'unknown';
     const clients = stream.clients ?? 0;
     const video = stream.video ?? 'video';
-    return `<div class="stream-row"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(video)}</span><span>${escapeHtml(clients)} clients</span></div>`;
+    return `<div class="stream-row"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(video)}</span><span>${escapeHtml(t("Clients: {0}", clients))}</span></div>`;
   }).join('');
 }
 
@@ -79,12 +80,12 @@ async function refreshStatus() {
     const response = await fetch('/api/status', { cache: 'no-store' });
     const payload = await response.json();
     if (!payload.ready) {
-      setServerState('failed', 'Media server unavailable');
-      elements.streamCount.textContent = '0 streams';
-      elements.streamList.innerHTML = `<p>${escapeHtml(payload.error ?? 'No response from media server')} at ${escapeHtml(payload.api)}.</p>`;
+      setServerState('failed', t("Media server unavailable"));
+      elements.streamCount.textContent = t("0 streams");
+      elements.streamList.innerHTML = `<p>${escapeHtml(payload.error ?? t("No response from media server"))} at ${escapeHtml(payload.api)}.</p>`;
       return;
     }
-    setServerState('ready', payload.label ?? 'Media server ready');
+    setServerState('ready', payload.label ?? t("Media server ready"));
     if (payload.endpoints) {
       elements.rtmpUrl.textContent = payload.endpoints.rtmp;
       elements.srtUrl.textContent = payload.endpoints.srt;
@@ -95,7 +96,7 @@ async function refreshStatus() {
     }
     renderStreams(payload);
   } catch (error) {
-    setServerState('failed', 'Dashboard request failed');
+    setServerState('failed', t("Dashboard request failed"));
     elements.streamList.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
   }
 }
@@ -116,7 +117,7 @@ function waitForIceGathering(connection) {
 async function startWhep() {
   await stopWhep();
   elements.startWhep.disabled = true;
-  elements.whepMessage.textContent = 'Negotiating WHEP playback';
+  elements.whepMessage.textContent = t("Negotiating WHEP playback");
   try {
     const connection = new RTCPeerConnection();
     connection.addTransceiver('video', { direction: 'recvonly' });
@@ -126,7 +127,7 @@ async function startWhep() {
     });
     connection.addEventListener('connectionstatechange', () => {
       if (connection.connectionState === 'failed')
-        elements.whepMessage.textContent = 'WebRTC connection failed';
+        elements.whepMessage.textContent = t("WebRTC connection failed");
     });
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
@@ -136,14 +137,14 @@ async function startWhep() {
       headers: { 'Content-Type': 'application/sdp' },
       body: connection.localDescription.sdp,
     });
-    if (!response.ok) throw new Error(`WHEP returned ${response.status}`);
+    if (!response.ok) throw new Error(t("Request returned HTTP {0}", response.status));
     const answer = await response.text();
     await connection.setRemoteDescription({ type: 'answer', sdp: answer });
     state.whepConnection = connection;
     state.whepResource = response.headers.get('location');
     elements.stopWhep.disabled = false;
     if (!elements.whepVideo.srcObject)
-      elements.whepMessage.textContent = 'Waiting for video frames';
+      elements.whepMessage.textContent = t("Waiting for video frames");
   } catch (error) {
     await stopWhep(false);
     elements.whepMessage.textContent = error.message;
@@ -164,19 +165,19 @@ async function stopWhep(resetMessage = true) {
     try { await fetch(new URL(resource, whepUrl), { method: 'DELETE' }); } catch { }
   }
   if (resetMessage)
-    elements.whepMessage.textContent = 'Waiting for a live stream';
+    elements.whepMessage.textContent = t("Waiting for a live stream");
 }
 
 function populateCameras(cameras) {
   const previous = elements.cameraSelect.value;
   elements.cameraSelect.replaceChildren();
   if (!cameras.length) {
-    elements.cameraSelect.add(new Option('No video input found', ''));
+    elements.cameraSelect.add(new Option(t("No video input found"), ''));
     return;
   }
   cameras.forEach((camera, index) => {
     elements.cameraSelect.add(new Option(
-      camera.label || `Camera ${index + 1}`, camera.deviceId));
+      camera.label || t("Camera {0}", index + 1), camera.deviceId));
   });
   const previousStillExists = cameras.some(
     camera => camera.deviceId === previous);
@@ -191,7 +192,7 @@ function populateCameras(cameras) {
 
 async function enumerateCameras() {
   if (!navigator.mediaDevices?.enumerateDevices)
-    throw new Error('Camera APIs are unavailable in this browser context.');
+    throw new Error(t("Camera APIs are unavailable in this browser context."));
   const devices = await navigator.mediaDevices.enumerateDevices();
   const cameras = devices.filter(device => device.kind === 'videoinput');
   populateCameras(cameras);
@@ -205,7 +206,7 @@ async function requestCameraStream(constraints) {
   const request = navigator.mediaDevices.getUserMedia(constraints).then(stream => {
     if (timedOut) {
       stream.getTracks().forEach(track => track.stop());
-      throw new Error('Camera permission request timed out.');
+      throw new Error(t("Camera permission request timed out."));
     }
     return stream;
   });
@@ -213,7 +214,7 @@ async function requestCameraStream(constraints) {
     timeoutId = window.setTimeout(() => {
       timedOut = true;
       reject(new Error(
-        'Camera permission request timed out. Allow camera access and scan again.'));
+        t("Camera permission request timed out. Allow camera access and scan again.")));
     }, timeoutMs);
   });
   try {
@@ -236,8 +237,8 @@ async function scanCameras(requestPermission = true) {
     const cameras = await enumerateCameras();
     const selected = elements.cameraSelect.selectedOptions[0]?.textContent || '';
     elements.cameraMessage.textContent = cameras.length
-      ? `${cameras.length} video input${cameras.length === 1 ? '' : 's'} found. Selected: ${selected}.`
-      : 'No video input was found.';
+      ? t("Video inputs: {0}. Selected: {1}.", cameras.length, selected)
+      : t("No video input was found.");
     return cameras;
   } catch (error) {
     elements.cameraMessage.textContent = describeError(error);
@@ -253,7 +254,7 @@ function resetCameraDiagnostics() {
   state.cameraLongestGap = 0;
   state.cameraBlackFrames = 0;
   state.cameraLastStatsRender = 0;
-  elements.cameraDeviceValue.textContent = 'Not open';
+  elements.cameraDeviceValue.textContent = t("Not open");
   elements.cameraResolutionValue.textContent = '--';
   elements.cameraFpsValue.textContent = '--';
   elements.cameraGapValue.textContent = '--';
@@ -300,7 +301,7 @@ function renderCameraDiagnostics(timestamp, force = false) {
     ? (times.length - 1) * 1000 / (times[times.length - 1] - times[0])
     : 0;
   elements.cameraDeviceValue.textContent = track?.label ||
-    elements.cameraSelect.selectedOptions[0]?.textContent || 'Video input';
+    elements.cameraSelect.selectedOptions[0]?.textContent || t("Video input");
   elements.cameraResolutionValue.textContent = width && height
     ? `${width} x ${height}` : '--';
   elements.cameraFpsValue.textContent = fps > 0 ? fps.toFixed(1) : '--';
@@ -326,7 +327,7 @@ function handleCameraFrame(timestamp) {
     if (sampleIsNearBlack()) ++state.cameraBlackFrames;
   } catch (error) {
     elements.cameraMessage.textContent =
-      `Frame analysis failed: ${describeError(error)}`;
+      t("Frame analysis failed: {0}", describeError(error));
   }
   renderCameraDiagnostics(timestamp);
   state.cameraFrameCallback = elements.cameraVideo.requestVideoFrameCallback(
@@ -378,7 +379,7 @@ async function startCamera() {
   try {
     await scanCameras(true);
     const deviceId = elements.cameraSelect.value;
-    if (!deviceId) throw new Error('No video input is available.');
+    if (!deviceId) throw new Error(t("No video input is available."));
     const stream = await requestCameraStream({
       video: { deviceId: { exact: deviceId } },
       audio: false,
@@ -390,7 +391,7 @@ async function startCamera() {
     startCameraDiagnostics();
     await enumerateCameras();
     renderCameraDiagnostics(performance.now(), true);
-    elements.cameraMessage.textContent = 'Camera is delivering frames.';
+    elements.cameraMessage.textContent = t("Camera is delivering frames.");
   } catch (error) {
     await stopCamera(false);
     elements.cameraMessage.textContent = describeError(error);
@@ -406,7 +407,7 @@ async function stopCamera(updateMessage = true) {
   elements.cameraVideo.srcObject = null;
   elements.stopCamera.disabled = true;
   resetCameraDiagnostics();
-  if (updateMessage) elements.cameraMessage.textContent = 'Camera is not open.';
+  if (updateMessage) elements.cameraMessage.textContent = t("Camera is not open.");
 }
 
 elements.refresh.addEventListener('click', refreshStatus);

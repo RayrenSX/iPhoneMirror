@@ -20,7 +20,7 @@ internal sealed record DeviceBindingProfile(Guid Id, string DisplayName,
     AirPlayDeviceIdentity? AirPlayIdentity, BluetoothDeviceIdentity? BluetoothIdentity,
     DateTime CreatedAt, DateTime UpdatedAt);
 internal sealed record BindIdentityResult(bool Success, DeviceBindingCompatibility Compatibility,
-    string? Error = null);
+    string? Error = null, bool RequiresConfirmation = false);
 internal sealed record CreateProfileResult(bool Success, DeviceBindingProfile? Profile,
     string? Error = null);
 
@@ -129,7 +129,8 @@ internal sealed class DeviceBindingManager
                     ? LocalizationService.GetOrDefault("DeviceBindingCompatibleNeedsConfirmation",
                         "The device model matches, but user confirmation is required.")
                     : LocalizationService.GetOrDefault("DeviceBindingUnknownNeedsConfirmation",
-                        "The device model could not be verified automatically; user confirmation is required."));
+                        "The device model could not be verified automatically; user confirmation is required."),
+                    RequiresConfirmation: true);
             var now = DateTime.UtcNow;
             var updated = type switch
             {
@@ -182,12 +183,20 @@ internal sealed class DeviceBindingManager
     private static DeviceBindingCompatibility ValidateCompatibilityUnsafe(DeviceBindingProfile profile, DeviceFingerprint? candidate)
     {
         if (profile.DeviceFingerprint is null || candidate is null) return DeviceBindingCompatibility.Unknown;
-        var left = profile.DeviceFingerprint.ProductType ?? profile.DeviceFingerprint.ModelIdentifier;
-        var right = candidate.ProductType ?? candidate.ModelIdentifier;
+        var left = KnownModel(profile.DeviceFingerprint.ProductType) ??
+            KnownModel(profile.DeviceFingerprint.ModelIdentifier);
+        var right = KnownModel(candidate.ProductType) ?? KnownModel(candidate.ModelIdentifier);
         if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return DeviceBindingCompatibility.Unknown;
         return string.Equals(left, right, StringComparison.OrdinalIgnoreCase)
             ? DeviceBindingCompatibility.Compatible : DeviceBindingCompatibility.Incompatible;
     }
+
+    // Native AirPlay discovery uses a display label when model metadata is
+    // absent. Normalize both sides, including fingerprints already on disk.
+    private static string? KnownModel(string? value) =>
+        string.IsNullOrWhiteSpace(value) ||
+        string.Equals(value.Trim(), "AirPlay", StringComparison.OrdinalIgnoreCase)
+            ? null : value.Trim();
 
     private void Load()
     {

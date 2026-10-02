@@ -19,8 +19,8 @@
     <system:String x:Key="DeviceBindingSubtitle">在同一裝置檔案中關聯 USB、AirPlay 和藍牙連線。</system:String>
     <system:String x:Key="DeviceBindingProfiles">我的裝置檔案</system:String>
     <system:String x:Key="DeviceBindingAddProfileToolTip">新增 AirPlay 裝置檔案</system:String>
-    <system:String x:Key="DeviceBindingRenameProfile">重新命名檔案</system:String>
-    <system:String x:Key="DeviceBindingDeleteProfile">刪除檔案</system:String>
+    <system:String x:Key="DeviceBindingRenameProfile">重新命名裝置檔案</system:String>
+    <system:String x:Key="DeviceBindingDeleteProfile">刪除裝置檔案</system:String>
     <system:String x:Key="DeviceBindingSelectProfile">選擇裝置檔案</system:String>
     <system:String x:Key="DeviceBindingProfileDescription">管理此裝置檔案的 USB、AirPlay 和藍牙綁定。</system:String>
     <system:String x:Key="DeviceBindingWired">有線 USB</system:String>
@@ -630,7 +630,7 @@
     <system:String x:Key="WirelessProfileReconnectInstructionsFormat">已重新宣告「{0}」。請在 iPhone 開啟「控制中心」 → 「螢幕鏡像」，重新選擇「{1}」。如果裝置清單仍保留舊連接，請先按一下「停止鏡像」，再重新選擇接收端。</system:String>
     <system:String x:Key="WirelessOriginalQualityWarningTitle">原畫模式提示</system:String>
     <system:String x:Key="WirelessOriginalQualityWarningBody">原畫模式在部分裝置或網絡環境下可能出現畫面停幀。建議優先使用 1080p；如仍需原畫，請確保區域網絡穩定，並從 iPhone「控制中心」 → 「螢幕鏡像」連接。</system:String>
-    <system:String x:Key="WirelessServiceAlwaysOn">常駐</system:String>
+    <system:String x:Key="WirelessServiceAlwaysOn">自動啟動</system:String>
     <system:String x:Key="WirelessConnected">AirPlay 已連接</system:String>
     <system:String x:Key="WirelessLocalNetwork">本機網絡</system:String>
     <system:String x:Key="WirelessReady">AirPlay 接收端已就緒</system:String>
@@ -1011,6 +1011,7 @@
     <system:String x:Key="ControlWiredRetryFormat">正在自動重新連接有線控制（第 {0} 次嘗試）…</system:String>
     <system:String x:Key="TouchBridgeStartFailed">無法啟動 USB 觸控橋接器。</system:String>
     <system:String x:Key="TouchBridgeNotReady">USB 觸控橋接器尚未就緒。</system:String>
+    <system:String x:Key="ClipboardTextTooLarge">文字過長，無法一次貼上。請縮短文字後重試。</system:String>
     <system:String x:Key="TouchBridgeInvalidBatch">觸控批次必須包含 1 至 5 個觸點。</system:String>
     <system:String x:Key="TouchBridgeInvalidPointId">觸點編號必須為非負整數。</system:String>
     <system:String x:Key="TouchBridgeInvalidCoordinates">觸點座標必須是 0 至 1 之間的有限數值。</system:String>
@@ -1167,4 +1168,9 @@
     <system:String x:Key="TrayUnavailable">無法建立系統匣圖示：{0}</system:String>
     <system:String x:Key="MultiDeviceControlHint">分別為各裝置啟用反控。切換分頁或點擊獨立投影視窗即可控制對應裝置，連線會保持。</system:String>
     <system:String x:Key="MultiDeviceControlAlreadyActive">此裝置已在另一個投影工作階段啟用反控，請使用現有視窗。</system:String>
+    <system:String x:Key="UiRefreshing">正在重新整理…</system:String>
+    <system:String x:Key="UiBluetoothRefreshFailed">無法重新整理藍牙裝置。請檢查藍牙連線後重試；清單可能不是最新狀態。</system:String>
+    <system:String x:Key="UiLogLocationFailed" xml:space="preserve">無法開啟記錄位置。你可以複製以下路徑並在檔案總管中開啟：
+{0}</system:String>
+    <system:String x:Key="UiProtectedContentShort">受保護內容</system:String>
 </ResourceDictionary>

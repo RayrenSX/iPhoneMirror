@@ -13,14 +13,14 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="16"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
                 <RowDefinition Height="12"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <Grid Style="{StaticResource SubWindowHeader}"
                   animations:WindowDragBehavior.IsEnabled="True">
-                <TextBlock Text="{Binding TitleText}"
+                <TextBlock TextWrapping="Wrap" Text="{Binding TitleText}"
                            Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
                 <Button Style="{StaticResource SubWindowCloseButton}"
                         Click="OnCloseClick">
@@ -116,9 +116,9 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                        <TextBlock Text="{Binding BadgeText}"
-                                   FontSize="{StaticResource SecondaryFontSize}" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding BodyText}"
+                        <TextBlock TextWrapping="Wrap" Text="{Binding BadgeText}"
+                                   FontSize="{DynamicResource SecondaryFontSize}" FontWeight="SemiBold"/>
+                        <TextBlock TextWrapping="Wrap" Text="{Binding BodyText}"
                                    Style="{StaticResource BodyText}" Margin="0,5,0,0"/>
                         <Expander Header="{DynamicResource ErrorTechnicalDetails}"
                                   Margin="0,8,0,0" MaxHeight="180">
@@ -133,7 +133,7 @@
                                 </Style>
                             </Expander.Style>
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                <TextBlock Text="{Binding TechnicalDetails}" FontSize="{StaticResource CaptionFontSize}"
+                                <TextBlock Text="{Binding TechnicalDetails}" FontSize="{DynamicResource CaptionFontSize}"
                                            TextWrapping="Wrap"/>
                             </ScrollViewer>
                         </Expander>
@@ -151,14 +151,11 @@
                         BorderBrush="{DynamicResource BorderSoftBrush}"
                         BorderThickness="1" CornerRadius="15"
                         Padding="10,5" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="ArrowClockwise20"
+                    <DockPanel LastChildFill="True"><ui:SymbolIcon DockPanel.Dock="Left" Symbol="ArrowClockwise20"
                                        Foreground="{DynamicResource MutedTextBrush}"
-                                       FontSize="14" Margin="0,0,5,0"/>
-                        <TextBlock Text="{Binding HintText}"
+                                       FontSize="14" Margin="0,0,5,0"/><TextBlock TextWrapping="Wrap" Text="{Binding HintText}"
                                    Foreground="{DynamicResource MutedTextBrush}"
-                                   FontSize="{StaticResource CaptionFontSize}" VerticalAlignment="Center"/>
-                    </StackPanel>
+                                   FontSize="{DynamicResource CaptionFontSize}" VerticalAlignment="Center"/></DockPanel>
                 </Border>
                 <Button Grid.Column="1" Content="{DynamicResource Close}"
                         Click="OnCloseClick" MinWidth="80" Margin="12,0,0,0"

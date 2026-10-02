@@ -67,6 +67,8 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
     {
         if ((sender as FrameworkElement)?.DataContext is not ShortcutBindingRow row) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        // Navigation and dismissal remain local to the settings window.
+        if (key is Key.Tab or Key.Escape) return;
         if (Keyboard.Modifiers == ModifierKeys.None && key is Key.Back or Key.Delete)
         {
             row.Shortcut = KeyboardShortcut.Unbound;

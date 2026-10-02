@@ -59,6 +59,8 @@ public partial class StartupErrorWindow : IPhoneMirror.UI.Controls.RoundedWindow
         catch (Exception error)
         {
             DiagnosticLogger.Exception("startup", "open_log_location_failed", error);
+            AppPromptWindow.Inform(Localization.LocalizationService.Get("StartupErrorOpenLog"),
+                Localization.LocalizationService.Format("UiLogLocationFailed", _logPath), this);
         }
     }
 

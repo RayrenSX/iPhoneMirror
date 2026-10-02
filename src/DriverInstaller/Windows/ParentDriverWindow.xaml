@@ -33,7 +33,7 @@
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              AutomationProperties.Name="{DynamicResource ParentDriverSelection}">
                         <ListBox.ItemTemplate>
-                            <DataTemplate><TextBlock Text="{Binding DisplayText}" FontSize="{StaticResource BodyFontSize}" TextWrapping="Wrap"/></DataTemplate>
+                            <DataTemplate><TextBlock Text="{Binding DisplayText}" FontSize="{DynamicResource BodyFontSize}" TextWrapping="Wrap"/></DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock Text="{Binding Diagnostic}" Style="{StaticResource SecondaryText}" Margin="0,12,0,0"/>

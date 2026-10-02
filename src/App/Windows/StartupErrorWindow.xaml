@@ -19,7 +19,7 @@
             <RowDefinition Height="20"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="14"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
             <RowDefinition Height="20"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -32,12 +32,12 @@
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
-        <TextBlock x:Name="SummaryText" Grid.Row="2" FontSize="{StaticResource SectionTitleFontSize}"
+        <TextBlock x:Name="SummaryText" Grid.Row="2" FontSize="{DynamicResource SectionTitleFontSize}"
                    Foreground="{DynamicResource MutedTextBrush}"
                    TextWrapping="Wrap"/>
 
         <StackPanel Grid.Row="4">
-            <TextBlock x:Name="LogLabelText" FontSize="{StaticResource SecondaryFontSize}" Margin="0,0,0,7"/>
+            <TextBlock x:Name="LogLabelText" FontSize="{DynamicResource SecondaryFontSize}" Margin="0,0,0,7"/>
             <TextBox x:Name="LogPathTextBox" Style="{StaticResource RoundedTextBox}"
                      IsReadOnly="True" MinHeight="38" VerticalContentAlignment="Center"/>
         </StackPanel>
@@ -49,7 +49,7 @@
                     Padding="0" Margin="0,8,0,0">
                 <TextBox x:Name="DetailsTextBox" IsReadOnly="True" MinHeight="100" MaxHeight="220"
                          Background="Transparent" Foreground="{DynamicResource MutedTextBrush}"
-                         BorderThickness="0" FontFamily="Consolas" FontSize="11"
+                         BorderThickness="0" FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource SecondaryFontSize}"
                          TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto"
                          VerticalScrollBarVisibility="Auto" Padding="10"/>
             </Border>

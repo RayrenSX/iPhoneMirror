@@ -25,6 +25,8 @@ public partial class TrayPanelWindow : IPhoneMirror.UI.Controls.RoundedWindow
         _settings = settings;
         _exit = exit;
         InitializeComponent();
+        LocalizationService.RefreshWhenLanguageChanges(this, () =>
+            FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text));
         DataContext = viewModel;
         DeviceList.ItemsSource = viewModel.Devices;
         viewModel.PropertyChanged += OnViewModelChanged;

@@ -130,4 +130,5 @@
     <SolidColorBrush x:Key="DisabledTextBrush" Color="#FFB8B8BD"/>
     <SolidColorBrush x:Key="InfoBrush" Color="#FF69B1F8"/>
     <SolidColorBrush x:Key="InfoSurfaceBrush" Color="#2269B1F8"/>
+    <SolidColorBrush x:Key="SelectedTextBrush" Color="{StaticResource ThemeTextColor}"/>
 </ResourceDictionary>

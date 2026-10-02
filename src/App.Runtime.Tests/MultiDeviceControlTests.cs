@@ -12,7 +12,8 @@ namespace IPhoneMirror.App.Runtime.Tests;
 internal static partial class Program
 {
     private static void TestMultipleDeviceControl(MainWindow window, object vm,
-        DeviceViewModel first, object firstHost, MemoryStream firstPackets, object bindings)
+        DeviceViewModel first, object firstHost, MemoryStream firstPackets, object bindings,
+        bool testPointerInput = false)
     {
         var assembly = typeof(App).Assembly;
         var constructor = typeof(DeviceViewModel).GetConstructors(KeyboardTestMembers).Single();
@@ -85,25 +86,12 @@ internal static partial class Program
             }
             Focus(first, 0);
             KeyboardCall(vm, "OnPropertyChanged", "SelectedDevice");
-            var tabs = (System.Windows.Controls.ListBox)window.FindName("ControlDeviceTabs");
+            var deviceList = (System.Windows.Controls.ListBox)window.FindName("DeviceListBox");
             window.UpdateLayout();
-            Require(tabs.Items.Count == 2 && tabs.IsVisible && tabs.ActualHeight > 0,
-                "Multiple connected devices did not expose the tab strip.");
-            var tabImage = new System.Windows.Media.Imaging.RenderTargetBitmap(
-                (int)Math.Ceiling(tabs.ActualWidth), (int)Math.Ceiling(tabs.ActualHeight),
-                96, 96, System.Windows.Media.PixelFormats.Pbgra32);
-            var tabVisual = new System.Windows.Media.DrawingVisual();
-            using (var drawing = tabVisual.RenderOpen())
-            {
-                var bounds = new Rect(0, 0, tabs.ActualWidth, tabs.ActualHeight);
-                drawing.DrawRectangle((System.Windows.Media.Brush)window.FindResource("WindowBackgroundBrush"), null, bounds);
-                drawing.DrawRectangle(new System.Windows.Media.VisualBrush(tabs), null, bounds);
-            }
-            tabImage.Render(tabVisual);
-            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
-            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(tabImage));
-            Directory.CreateDirectory("work");
-            using (var image = File.Create("work/multi-device-tabs.png")) encoder.Save(image);
+            Require(deviceList.Items.Count == 2,
+                "Multiple connected devices must remain available in the device sidebar.");
+            Require(window.FindName("ControlDeviceTabs") is null,
+                "The removed device tab strip must not appear above the toolbar.");
             firstPackets.SetLength(0);
             secondPackets.SetLength(0);
             Key(first.Udid, 0x11, main);
@@ -112,11 +100,14 @@ internal static partial class Program
                 "Device A keyboard leaked to B.");
             Focus(second, 0);
             Key(second.Udid, 0x42, main);
-            Require(Reports(firstPackets).Last().Length == 0, "Tab switch did not release A.");
+            Require(Reports(firstPackets).Last().Length == 0, "Device switch did not release A.");
             Require(Reports(secondPackets).Last().SequenceEqual(new[] { 5 }),
                 "Device B inherited A's Ctrl/key state.");
             Require((bool)KeyboardCall(vm, "IsUsbControlTarget", first.Udid)!,
                 "Selecting B disconnected A.");
+            if (testPointerInput) TestBothMainPreviewRoutes("two wired devices");
+            TestMultiDeviceInputIsolation(window, vm, first, firstHost, firstPackets,
+                second, secondPackets, main, "two wired devices");
 
             // Block A's transport, switch to B, then release the writer. The
             // queued A press must be dropped, while the A release still passes.
@@ -138,6 +129,27 @@ internal static partial class Program
             SetKeyboardField(vm, "_wirelessTouchBridge", secondHost);
             var secondControl = KeyboardCall(vm, "GetOrCreateControl", second.Udid)!;
             SetKeyboardField(secondControl, "RequestedWireless", true);
+            if (testPointerInput) TestBothMainPreviewRoutes("wired/wireless pair");
+            TestMultiDeviceInputIsolation(window, vm, first, firstHost, firstPackets,
+                second, secondPackets, main, "wired/wireless pair");
+            if (testPointerInput)
+            {
+                SetKeyboardField(vm, "_selectedDevice", first);
+                SetKeyboardField(vm, "_usbControlEnabled", false);
+                SetKeyboardField(vm, "_usbTouchBridge", null);
+                SetKeyboardField(vm, "_wirelessControlEnabled", true);
+                SetKeyboardField(vm, "_wirelessControlConnected", true);
+                SetKeyboardField(vm, "_wirelessTouchBridge", firstHost);
+                TestBothMainPreviewRoutes("two wireless devices");
+                TestMultiDeviceInputIsolation(window, vm, first, firstHost, firstPackets,
+                    second, secondPackets, main, "two wireless devices");
+                SetKeyboardField(vm, "_selectedDevice", first);
+                SetKeyboardField(vm, "_wirelessControlEnabled", false);
+                SetKeyboardField(vm, "_wirelessTouchBridge", null);
+                SetKeyboardField(vm, "_usbControlEnabled", true);
+                SetKeyboardField(vm, "_usbTouchBridge", firstHost);
+                Focus(second, 0);
+            }
 
             // Two actual independent HWNDs with a deterministic foreground
             // snapshot; selection stays on B while both receive fresh input.
@@ -152,6 +164,7 @@ internal static partial class Program
                 "Independent window switching failed to release A or route B.");
             Require(ReferenceEquals(KeyboardField(vm, "_selectedDevice"), second),
                 "Independent focus changed the main tab.");
+            TestIndependentBluetoothShortcutTarget(window, vm, first, second, hwndB);
 
             var mode = Enum.Parse(assembly.GetType("IPhoneMirror.App.Services.ControlStatusMode")!, "Usb");
             Require(!ReferenceEquals(KeyboardCall(vm, "GetControlStatus", mode, first.Udid),
@@ -199,6 +212,22 @@ internal static partial class Program
             SetKeyboardField(vm, "_wirelessTouchBridge", null);
             SetKeyboardField(vm, "_selectedDevice", first);
             nativeA.Close(); nativeB.Close();
+        }
+
+        void TestBothMainPreviewRoutes(string context)
+        {
+            foreach (var (device, packets, otherPackets) in new[]
+            {
+                (first, firstPackets, secondPackets),
+                (second, secondPackets, firstPackets),
+            })
+            {
+                Focus(device, 0);
+                var otherTouches = ReadPreviewTouchPackets(otherPackets).Length;
+                TestMainPreviewPointerRoute(window, device, packets, context);
+                Require(ReadPreviewTouchPackets(otherPackets).Length == otherTouches,
+                    $"{context}: main preview touch leaked into the other device.");
+            }
         }
     }
 }

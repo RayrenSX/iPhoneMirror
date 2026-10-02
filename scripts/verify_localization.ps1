@@ -98,6 +98,8 @@ $LightThemeResources = Get-ResourceKeys (Join-Path $SharedUI `
     'Themes\LightTheme.xaml')
 $DarkThemeResources = Get-ResourceKeys (Join-Path $SharedUI `
     'Themes\DarkTheme.xaml')
+$DesignResources = Get-ResourceKeys (Join-Path $SharedUI `
+    'Themes\DesignTokens.xaml')
 $themeDifference = @(Compare-Object $LightThemeResources $DarkThemeResources)
 if ($themeDifference.Count -ne 0) {
     $themeDifference | Format-Table | Out-String | Write-Error
@@ -113,6 +115,7 @@ $English = Get-ResourceKeys $EnglishPath
 $ApplicationResources = @(
     Get-ResourceKeys (Join-Path $App 'App.xaml')
     $LightThemeResources
+    $DesignResources
 )
 $difference = @(
     Compare-Object $Chinese $English
@@ -165,6 +168,7 @@ Assert-HongKongTerminology $DriverHongKongPath
 $DriverApplicationResources = @(
     Get-ResourceKeys (Join-Path $DriverInstaller 'App.xaml')
     $LightThemeResources
+    $DesignResources
 )
 $driverUsed = Get-ReferencedResourceKeys $DriverInstaller
 $driverMissing = @($driverUsed | Where-Object {

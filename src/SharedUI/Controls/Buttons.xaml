@@ -3,7 +3,7 @@
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
     <Style x:Key="SecondaryButton" TargetType="Button">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
-        <Setter Property="FontSize" Value="{StaticResource ButtonFontSize}"/>
+        <Setter Property="FontSize" Value="{DynamicResource ButtonFontSize}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="MinHeight" Value="{StaticResource ControlMinHeight}"/>
         <Setter Property="Padding" Value="{StaticResource ButtonPadding}"/>
@@ -15,6 +15,7 @@
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -110,6 +111,6 @@
     <Style x:Key="CompactButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
         <Setter Property="MinHeight" Value="{StaticResource CompactControlMinHeight}"/>
         <Setter Property="Padding" Value="{StaticResource CompactButtonPadding}"/>
-        <Setter Property="FontSize" Value="{StaticResource SecondaryFontSize}"/>
+        <Setter Property="FontSize" Value="{DynamicResource SecondaryFontSize}"/>
     </Style>
 </ResourceDictionary>

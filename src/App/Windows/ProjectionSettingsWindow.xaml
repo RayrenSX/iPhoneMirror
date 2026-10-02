@@ -20,8 +20,9 @@
             <Setter Property="Margin" Value="0,14,0,0"/>
         </Style>
         <Style x:Key="ControlSectionTitle" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="{DynamicResource FontSize13}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
     </chrome:RoundedWindow.Resources>
@@ -31,33 +32,28 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
         </Grid.RowDefinitions>
         <Grid Style="{StaticResource SubWindowHeader}"
               animations:WindowDragBehavior.IsEnabled="True">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="10"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="{DynamicResource ProjectionSettingsTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
                 <TextBlock Text="{Binding SelectedName}"
                            Style="{StaticResource SubWindowSubtitle}"/>
-                <TextBlock Text="{Binding SelectedConnection}" FontSize="{StaticResource CaptionFontSize}"
+                <TextBlock Text="{Binding SelectedConnection}" FontSize="{DynamicResource CaptionFontSize}"
                            Foreground="{DynamicResource MutedTextBrush}"/>
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+            <WrapPanel Grid.Row="1" Margin="0,10,0,0">
                 <Button Content="{DynamicResource StartMirroring}" Click="OnStartClick"
                         Style="{StaticResource ToolButton}" MinWidth="72" Margin="0,0,8,0"
                         shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
                 <Button Content="{DynamicResource StopMirroring}" Command="{Binding StopCommand}"
                         Style="{StaticResource ToolButton}" MinWidth="72"
                         shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
-            </StackPanel>
-            <Button Grid.Column="3" Style="{StaticResource SubWindowCloseButton}"
+            </WrapPanel>
+            <Button Style="{StaticResource SubWindowCloseButton}"
                     Click="OnCloseClick">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
@@ -70,7 +66,7 @@
                         <StackPanel>
                             <TextBlock Text="{DynamicResource ApplicationModeLabel}"
                                        Style="{StaticResource ControlSectionTitle}"/>
-                            <ComboBox SelectedValue="{Binding SelectedApplicationDisplayMode, Mode=TwoWay}"
+                            <ComboBox AutomationProperties.Name="{DynamicResource ApplicationModeLabel}" SelectedValue="{Binding SelectedApplicationDisplayMode, Mode=TwoWay}"
                                       SelectedValuePath="Tag" Margin="0,10,0,0">
                                 <ComboBoxItem Tag="{x:Static updater:ApplicationDisplayMode.Lightweight}"
                                               Content="{DynamicResource ApplicationModeLightweight}"/>
@@ -94,17 +90,17 @@
                                        Style="{StaticResource ControlSectionTitle}"/>
                             <TextBlock Text="{DynamicResource WirelessBackendLabel}"
                                        Style="{StaticResource DetailLabel}"/>
-                            <ComboBox ItemsSource="{Binding WirelessReceiverBackends}"
+                            <ComboBox AutomationProperties.Name="{DynamicResource WirelessBackendLabel}" ItemsSource="{Binding WirelessReceiverBackends}"
                                       DisplayMemberPath="Label"
                                       SelectedItem="{Binding SelectedWirelessReceiverBackend, Mode=TwoWay}"
                                       AutomationProperties.AutomationId="WirelessBackendComboBox"/>
                             <TextBlock Text="{Binding AppliedWirelessBackendDisplay}"
-                                       FontSize="{StaticResource CaptionFontSize}" TextWrapping="Wrap"
+                                       FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        Margin="0,5,0,0"/>
                             <TextBlock Text="{DynamicResource WirelessResolutionLabel}"
                                        Style="{StaticResource DetailLabel}"/>
-                            <ComboBox ItemsSource="{Binding WirelessDisplayProfiles}"
+                            <ComboBox AutomationProperties.Name="{DynamicResource WirelessResolutionLabel}" ItemsSource="{Binding WirelessDisplayProfiles}"
                                       DisplayMemberPath="Label"
                                       SelectedItem="{Binding SelectedWirelessDisplayProfile, Mode=TwoWay}"/>
                             <Grid Margin="0,10,0,0">
@@ -113,14 +109,13 @@
                                     <ColumnDefinition Width="8"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBox Text="{Binding WirelessReceiverName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                <TextBox AutomationProperties.Name="{DynamicResource WirelessResolutionLabel}" Text="{Binding WirelessReceiverName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          Style="{StaticResource RoundedTextBox}" MaxLength="63" MinHeight="40"/>
                                 <Button Grid.Column="2" Content="{DynamicResource ApplyWirelessSettings}"
                                         Command="{Binding ApplyWirelessSettingsCommand}"
                                         Style="{StaticResource ToolButton}"/>
                             </Grid>
-                            <TextBlock Text="{Binding WirelessStatus}" FontSize="{StaticResource CaptionFontSize}" TextWrapping="Wrap"
-                                       Foreground="{DynamicResource MutedTextBrush}" Margin="0,7,0,0"/>
+                            <TextBlock Text="{Binding WirelessStatus}" FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" chrome:StatusAppearance.Tone="{Binding WirelessStatusTone}" Margin="0,7,0,0"/>
                         </StackPanel>
                     </Border>
 
@@ -132,18 +127,18 @@
                             <StackPanel Visibility="{Binding WiredVideoLimitSettingsVisibility}">
                                 <TextBlock Text="{DynamicResource RenderResolutionLimit}"
                                            Style="{StaticResource DetailLabel}"/>
-                                <ComboBox ItemsSource="{Binding ResolutionPresets}" DisplayMemberPath="Label"
+                                <ComboBox AutomationProperties.Name="{DynamicResource RenderResolutionLimit}" ItemsSource="{Binding ResolutionPresets}" DisplayMemberPath="Label"
                                           IsEnabled="{Binding CanChangeVideoPipeline}"
                                           SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
                                 <TextBlock Text="{DynamicResource TargetFrameRate}"
                                            Style="{StaticResource DetailLabel}"/>
-                                <ComboBox ItemsSource="{Binding FrameRates}"
+                                <ComboBox AutomationProperties.Name="{DynamicResource TargetFrameRate}" ItemsSource="{Binding FrameRates}"
                                           IsEnabled="{Binding CanChangeVideoPipeline}"
                                           SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
                             </StackPanel>
                             <TextBlock Text="{DynamicResource DecoderPreferenceLabel}"
                                        Style="{StaticResource DetailLabel}"/>
-                            <ComboBox ItemsSource="{Binding DecoderPreferences}" DisplayMemberPath="Label"
+                            <ComboBox AutomationProperties.Name="{DynamicResource DecoderPreferenceLabel}" ItemsSource="{Binding DecoderPreferences}" DisplayMemberPath="Label"
                                       IsEnabled="{Binding CanChangeDecoderPipeline}"
                                       SelectedItem="{Binding SelectedDecoderPreference, Mode=TwoWay}"/>
                             <Grid Margin="0,11,0,0">
@@ -159,9 +154,9 @@
                                         Command="{Binding MoreImageSettingsCommand}"
                                         Style="{StaticResource ToolButton}"/>
                             </Grid>
-                            <TextBlock Text="{Binding SettingsStatus}" FontSize="{StaticResource CaptionFontSize}" TextWrapping="Wrap"
+                            <TextBlock Text="{Binding SettingsStatus}" FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedTextBrush}" Margin="0,7,0,0"/>
-                            <TextBlock Text="{Binding DecoderStatus}" FontSize="{StaticResource CaptionFontSize}" TextWrapping="Wrap"
+                            <TextBlock Text="{Binding DecoderStatus}" FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap"
                                        Visibility="{Binding DecoderStatusVisibility}"
                                        Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,0"/>
 
@@ -177,7 +172,7 @@
                                            Foreground="{DynamicResource MutedTextBrush}"/>
                                 <TextBlock Grid.Column="1" Text="{Binding PlaybackVolume, StringFormat={}{0:F0}%}"/>
                             </Grid>
-                            <Slider Minimum="0" Maximum="100"
+                            <Slider AutomationProperties.Name="{DynamicResource PlaybackVolume}" Minimum="0" Maximum="100"
                                     Value="{Binding PlaybackVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                     Margin="0,5,0,0"/>
                         </StackPanel>
@@ -215,7 +210,7 @@
                                     Click="OnMediaOutputClick"
                                     Style="{StaticResource ToolButton}"
                                     HorizontalAlignment="Stretch"
-                                    MinHeight="44" FontSize="13"
+                                    MinHeight="44" FontSize="{DynamicResource FontSize13}"
                                     Margin="0,10,0,0"/>
                         </StackPanel>
                     </Border>

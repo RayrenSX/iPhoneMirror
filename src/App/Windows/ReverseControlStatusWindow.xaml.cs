@@ -385,6 +385,19 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         _viewModel.CancelRequested?.Invoke();
         Close();
     }
+    private void OnPromptCardIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is not true) return;
+        // The prompt can arrive after the stage list has filled the viewport.
+        // Wait for layout, then reveal its heading without moving the fixed actions.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (!PromptCard.IsVisible) return;
+            PromptCard.BringIntoView(new Rect(0, 0, PromptCard.ActualWidth,
+                Math.Min(PromptCard.ActualHeight, ControlContentScrollViewer.ViewportHeight)));
+        }));
+    }
+
     private void OnPromptPrimaryClick(object sender, RoutedEventArgs e) => _viewModel.ResolvePrompt(ControlPromptAction.Primary);
     private void OnPromptSecondaryClick(object sender, RoutedEventArgs e) => _viewModel.ResolvePrompt(ControlPromptAction.Secondary);
     private void OnRetryClick(object sender, RoutedEventArgs e) => _viewModel.RetryRequested?.Invoke();

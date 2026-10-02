@@ -4,6 +4,12 @@ This folder provides a loopback media server and an operational browser page
 for verifying iPhoneMirror recording, RTMP, SRT, WHIP/WebRTC, WHEP playback,
 and the Windows virtual camera.
 
+The dashboard follows the browser language (English, Simplified Chinese, or
+Traditional Chinese) and the system light/dark or high-contrast appearance.
+For a language preview, append `?lang=en-US`, `?lang=zh-CN`, or `?lang=zh-HK`
+to the dashboard URL. Protocol names, device names, and raw server errors remain
+unchanged.
+
 Prerequisites:
 
 - Node.js 18 or later for the dashboard.

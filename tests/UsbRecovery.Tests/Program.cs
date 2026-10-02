@@ -54,7 +54,7 @@ var controls=(System.Collections.IDictionary)Activator.CreateInstance(controlsTy
 controls.Add("device-test",control);
 vmType.GetField("_deviceControls",flags)!.SetValue(vm,controls);
 await writerGate.WaitAsync();
-var queuedSend=(Task)vmType.GetMethod("SendUsbTouchAsync",flags)!.Invoke(vm,["down",0.5,0.5,"device-test",CancellationToken.None])!;
+var queuedSend=(Task)vmType.GetMethod("SendUsbTouchAsync",flags)!.Invoke(vm,["down",0.5,0.5,"device-test",CancellationToken.None,null])!;
 Assert(!queuedSend.IsCompleted,"touch waits for occupied writer");
 line.Invoke(queuedBridge,["""{"event":"status","code":"recovery_triggered"}"""]);
 writerGate.Release();

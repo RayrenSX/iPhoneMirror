@@ -14,7 +14,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -42,13 +42,13 @@
                             AutomationProperties.AutomationId="IndependentWindowOpacitySlider"
                             AutomationProperties.Name="{DynamicResource IndependentWindowOpacity}"/>
                     <TextBlock Text="{DynamicResource IndependentWindowOpacityHelp}" TextWrapping="Wrap"
-                               Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
+                               Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
                     <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,18"/>
                     <CheckBox x:Name="OpaqueOnHoverCheckBox" Checked="OnOpaqueOnHoverChanged" Unchecked="OnOpaqueOnHoverChanged"
                               AutomationProperties.AutomationId="IndependentWindowOpaqueOnHover"
                               Content="{DynamicResource IndependentWindowOpaqueOnHover}"/>
                     <TextBlock Text="{DynamicResource IndependentWindowOpaqueOnHoverHelp}" TextWrapping="Wrap" Margin="0,8,0,0"
-                               Foreground="{DynamicResource MutedTextBrush}" FontSize="{StaticResource CaptionFontSize}"/>
+                               Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
                 </StackPanel>
             </ScrollViewer>
         </Border>

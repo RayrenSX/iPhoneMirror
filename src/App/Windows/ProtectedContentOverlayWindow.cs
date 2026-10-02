@@ -23,6 +23,7 @@ internal sealed class ProtectedContentOverlayWindow : Window
     private TextBlock _titleText = null!;
     private TextBlock _bodyText = null!;
     private TextBlock _audioText = null!;
+    private bool _compact;
 
     private ProtectedContentOverlayWindow(nint owner, string audioDisplay)
     {
@@ -77,7 +78,7 @@ internal sealed class ProtectedContentOverlayWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             MaxWidth = 480,
-            Margin = new Thickness(28),
+            Width = 480,
         };
         var icon = new Border
         {
@@ -106,6 +107,7 @@ internal sealed class ProtectedContentOverlayWindow : Window
             FontSize = 19,
             FontWeight = FontWeights.SemiBold,
             TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 16, 0, 0),
         };
         _titleText.SetResourceReference(TextBlock.ForegroundProperty, "PreviewTextBrush");
@@ -121,6 +123,7 @@ internal sealed class ProtectedContentOverlayWindow : Window
             Margin = new Thickness(0, 8, 0, 0),
         };
         _bodyText.SetResourceReference(TextBlock.ForegroundProperty, "PreviewMutedTextBrush");
+        _bodyText.SetResourceReference(TextBlock.FontSizeProperty, "SecondaryFontSize");
         panel.Children.Add(_bodyText);
 
         var audioBadge = new Border
@@ -135,7 +138,9 @@ internal sealed class ProtectedContentOverlayWindow : Window
             "PreviewPanelAltBrush");
         audioBadge.SetResourceReference(Border.BorderBrushProperty,
             "PreviewBorderBrush");
-        var audioPanel = new StackPanel { Orientation = Orientation.Horizontal };
+        var audioPanel = new Grid();
+        audioPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        audioPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var audioIcon = new SymbolIcon
         {
             Symbol = SymbolRegular.Speaker220,
@@ -148,16 +153,35 @@ internal sealed class ProtectedContentOverlayWindow : Window
         _audioText = new TextBlock
         {
             Text = LocalizationService.RefreshText(audioDisplay),
+            TextWrapping = TextWrapping.Wrap,
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
         };
         _audioText.SetResourceReference(TextBlock.ForegroundProperty,
             "PreviewMutedTextBrush");
+        _audioText.SetResourceReference(TextBlock.FontSizeProperty, "CaptionFontSize");
+        Grid.SetColumn(_audioText, 1);
         audioPanel.Children.Add(_audioText);
         audioBadge.Child = audioPanel;
         panel.Children.Add(audioBadge);
 
-        var root = new Border { Child = panel };
+        var viewbox = new Viewbox
+        {
+            Child = panel, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly,
+            Margin = new Thickness(8),
+        };
+        var root = new Border { Child = viewbox };
+        root.SizeChanged += (_, _) =>
+        {
+            panel.Width = Math.Max(64, Math.Min(480, root.ActualWidth - 16));
+            _compact = root.ActualWidth < 300 || root.ActualHeight < 280;
+            icon.Visibility = root.ActualHeight < 360 || _compact ? Visibility.Collapsed : Visibility.Visible;
+            _bodyText.Visibility = _compact ? Visibility.Collapsed : Visibility.Visible;
+            audioBadge.Visibility = root.ActualHeight < 140 ? Visibility.Collapsed : Visibility.Visible;
+            _titleText.Margin = new Thickness(0, _compact ? 0 : 16, 0, 0);
+            RefreshTitle();
+        };
+        System.Windows.Automation.AutomationProperties.SetHelpText(root, _bodyText.Text);
         root.SetResourceReference(Border.BackgroundProperty, "PreviewChromeBrush");
         return root;
     }
@@ -179,11 +203,21 @@ internal sealed class ProtectedContentOverlayWindow : Window
         if (!IsVisible) Show();
     }
 
+    private void RefreshTitle()
+    {
+        _titleText.SetResourceReference(TextBlock.TextProperty,
+            _compact ? "UiProtectedContentShort" : "CaptureVideoProtectedTitle");
+        _titleText.SetResourceReference(TextBlock.FontSizeProperty,
+            _compact ? "BodyFontSize" : "DialogTitleFontSize");
+    }
+
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        _titleText.Text = LocalizationService.Get("CaptureVideoProtectedTitle");
+        RefreshTitle();
         _bodyText.Text = LocalizationService.Get(
             "CaptureVideoProtectedNoticeProtection");
+        if (Content is UIElement root)
+            System.Windows.Automation.AutomationProperties.SetHelpText(root, _bodyText.Text);
         UpdateAudioDisplay(_audioText.Text);
     }
 

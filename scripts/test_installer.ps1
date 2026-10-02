@@ -100,11 +100,16 @@ function Uninstall-TestVersion([string]$UserDataArgument, [string]$Description,
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
         throw "Test uninstaller is missing: $uninstaller"
     }
-    Invoke-Checked $uninstaller @(
+    # Inno's uninstaller can delegate to a temporary child process. Wait for
+    # the entire process tree before inspecting its final cleanup results.
+    $process = Start-Process -FilePath $uninstaller -ArgumentList @(
         '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', $UserDataArgument,
         "/LANG=$Language",
-        "/LOG=$(Join-Path $WorkRoot "$Description.log")"
-    ) $Description
+        "/LOG=`"$(Join-Path $WorkRoot "$Description.log")`""
+    ) -Wait -PassThru -WindowStyle Hidden
+    if ($process.ExitCode -ne 0) {
+        throw "$Description failed with exit code $($process.ExitCode)."
+    }
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     while ((Test-Path -LiteralPath $UninstallRegistryPath) -and
         [DateTime]::UtcNow -lt $deadline) {

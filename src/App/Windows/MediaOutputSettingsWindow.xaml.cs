@@ -1,3 +1,4 @@
+using IPhoneMirror.UI.Controls;
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
@@ -52,7 +53,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
         VirtualCameraFpsBox.SelectedIndex = 0;
         if (_previewOnly)
         {
-            FeedbackText.Text = LocalizationService.Get("DeveloperReadOnlyPreview");
+            SetFeedback(LocalizationService.Get("DeveloperReadOnlyPreview"));
             UpdateStartButtons();
             return;
         }
@@ -203,7 +204,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             return;
         var result = await _viewModel.StartRecordingAsync(
             width, height, fps, bitrate);
-        FeedbackText.Text = result.Message;
+        SetFeedback(result.Message, result.Success ? StatusTone.Success : StatusTone.Error);
     }
 
     private async void OnStartStreamingClick(object sender, RoutedEventArgs e)
@@ -220,7 +221,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
         var result = await _viewModel.StartStreamingAsync(kind,
             StreamDestinationBox.Text.Trim(), StreamAuthorizationBox.Text.Trim(),
             width, height, fps, bitrate, MicrophoneBox.SelectedValue as string);
-        FeedbackText.Text = result.Message;
+        SetFeedback(result.Message, result.Success ? StatusTone.Success : StatusTone.Error);
     }
 
     private async void OnRefreshMicrophonesClick(object sender, RoutedEventArgs e) =>
@@ -239,12 +240,12 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             MicrophoneBox.ItemsSource = new[] { new MicrophoneDevice(LocalizationService.Get("MicrophoneOff"), "") }
                 .Concat(devices).ToArray();
             MicrophoneBox.SelectedValue = devices.Any(device => device.Id == selected) ? selected : "";
-            if (devices.Count == 0) FeedbackText.Text = LocalizationService.Get("MicrophoneNotFound");
+            if (devices.Count == 0) SetFeedback(LocalizationService.Get("MicrophoneNotFound"), StatusTone.Warning);
         }
         catch (OperationCanceledException) when (_microphoneCancellation.IsCancellationRequested) { }
         catch (Exception error)
         {
-            FeedbackText.Text = LocalizationService.Format("MicrophoneEnumerationFailed", error.Message);
+            SetFeedback(LocalizationService.Format("MicrophoneEnumerationFailed", error.Message), StatusTone.Error);
         }
         finally
         {
@@ -263,12 +264,12 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             !TryParseResolution(resolution, out var width, out var height) ||
             !int.TryParse(frameRateText, out var frameRate))
         {
-            FeedbackText.Text = LocalizationService.Get("MediaOutputInvalidSettings");
+            SetFeedback(LocalizationService.Get("MediaOutputInvalidSettings"), StatusTone.Warning);
             return;
         }
         var result = await _viewModel.StartVirtualCameraAsync(
             width, height, frameRate);
-        FeedbackText.Text = result.Message;
+        SetFeedback(result.Message, result.Success ? StatusTone.Success : StatusTone.Error);
     }
 
     private static bool TryParseResolution(string value,
@@ -283,13 +284,13 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
     private async void OnInstallVirtualCameraClick(object sender, RoutedEventArgs e)
     {
         var result = await _viewModel.InstallVirtualCameraAsync();
-        FeedbackText.Text = result.Message;
+        SetFeedback(result.Message, result.Success ? StatusTone.Success : StatusTone.Error);
     }
 
     private async void OnUninstallVirtualCameraClick(object sender, RoutedEventArgs e)
     {
         var result = await _viewModel.UninstallVirtualCameraAsync();
-        FeedbackText.Text = result.Message;
+        SetFeedback(result.Message, result.Success ? StatusTone.Success : StatusTone.Error);
     }
 
     private async void OnStopClick(object sender, RoutedEventArgs e)
@@ -305,9 +306,9 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
                 LocalizationService.Get("DiscardRecordingConfirmation"),
                 LocalizationService.Get("DiscardRecording"), this))
             return;
-        FeedbackText.Text = _viewModel.DiscardPendingRecording()
-            ? LocalizationService.Get("RecordingDiscarded")
-            : LocalizationService.Get("RecordingDiscardFailed");
+        var discarded = _viewModel.DiscardPendingRecording();
+        SetFeedback(LocalizationService.Get(discarded ? "RecordingDiscarded" : "RecordingDiscardFailed"),
+            discarded ? StatusTone.Success : StatusTone.Error);
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
@@ -337,7 +338,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             };
             if (dialog.ShowDialog(this) != true)
             {
-                FeedbackText.Text = LocalizationService.Get("RecordingPendingSave");
+                SetFeedback(LocalizationService.Get("RecordingPendingSave"), StatusTone.Warning);
                 return;
             }
 
@@ -357,18 +358,24 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
                     File.Delete(pending);
                 }
                 _viewModel.MarkPendingRecordingSaved(pending);
-                FeedbackText.Text = LocalizationService.Format(
-                    "RecordingSavedFormat", dialog.FileName);
+                SetFeedback(LocalizationService.Format(
+                    "RecordingSavedFormat", dialog.FileName), StatusTone.Success);
             }
             catch (Exception error)
             {
                 DiagnosticLogger.Exception("recording", "save_failed", error,
                     ("file", Path.GetFileName(dialog.FileName)));
-                FeedbackText.Text = LocalizationService.Format(
-                    "RecordingSaveFailedFormat", error.Message);
+                SetFeedback(LocalizationService.Format(
+                    "RecordingSaveFailedFormat", error.Message), StatusTone.Error);
             }
         }
         finally { _savePromptOpen = false; }
+    }
+
+    private void SetFeedback(string message, StatusTone tone = StatusTone.Neutral)
+    {
+        FeedbackText.Text = message;
+        StatusAppearance.SetTone(FeedbackText, tone);
     }
 
     private async Task RunAsync(Func<Task> action)
@@ -377,7 +384,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
         catch (Exception error)
         {
             DiagnosticLogger.Exception("media_output", "settings_action_failed", error);
-            FeedbackText.Text = error.Message;
+            SetFeedback(error.Message, StatusTone.Error);
         }
     }
 
@@ -394,7 +401,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             width >= 160 && height >= 160 && fps is >= 10 and <= 60 &&
             bitrate is >= 500 and <= 50000)
             return true;
-        FeedbackText.Text = LocalizationService.Get("MediaOutputInvalidSettings");
+        SetFeedback(LocalizationService.Get("MediaOutputInvalidSettings"), StatusTone.Warning);
         return false;
     }
 }

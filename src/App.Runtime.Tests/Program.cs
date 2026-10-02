@@ -28,6 +28,23 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--logic-review"])
+            {
+                var reviewApp = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                typeof(App).GetProperty("IsUiPreviewMode", KeyboardTestMembers)!.SetValue(reviewApp, true);
+                reviewApp.InitializeComponent();
+                try { TestLogicReviewRegressions(); }
+                finally { reviewApp.Shutdown(); }
+                return 0;
+            }
+            if (args is ["--ui-audit-fixes", var fixesOutput])
+                return RunUiAuditFixTests(fixesOutput);
+            if (args is ["--adaptive-toolbar", var toolbarOutput])
+                return RunAdaptiveToolbarTests(toolbarOutput);
+            if (args is ["--tray-startup-theme", var trayThemeOutput])
+                return RunTrayStartupThemeTests(trayThemeOutput);
+            if (args is ["--theme-content", var themeContentOutput])
+                return RunThemeContentAudit(themeContentOutput);
             if (args is ["--tray-mode", var trayOutput])
                 return RunTrayModeTests(trayOutput);
             if (args is ["--ui-performance", var performanceOutput])
@@ -41,6 +58,8 @@ internal static partial class Program
             }
             if (args is ["--interaction-regression"])
                 return RunInteractionRegressionTests();
+            if (args is ["--preview-context-menu"])
+                return RunPreviewContextMenuTests();
             if (args is ["--control-states", var controlOutput])
                 return RunControlStateAudit(controlOutput);
             if (args is ["--localization-audit"])
@@ -53,8 +72,12 @@ internal static partial class Program
                 return RunWorkspaceRegressionTests();
             if (args is ["--keyboard-focus"])
                 return RunKeyboardFocusTests();
+            if (args is ["--preview-pointer"])
+                return RunKeyboardFocusTests(initializeHiddenHandle: true);
             if (args is ["--driver-localization-audit", var localizedDriverAssembly])
                 return LocalizationAuditTests.RunDriver(localizedDriverAssembly);
+            if (args is ["--driver-combobox", var comboDriverAssembly])
+                return RunDriverComboBoxTests(comboDriverAssembly);
             if (args is ["--driver-ui-audit", var sourceRoot, var driverAssembly, var driverOutput])
                 return RunDriverConsistencyAudit(sourceRoot, driverAssembly, driverOutput);
             if (args is ["--ui-audit", var auditOutput])
@@ -64,6 +87,9 @@ internal static partial class Program
                 return RunConsistencyAudit(cultureOutput, onlyCulture: auditCulture);
             if (args is ["--ui-audit", var focusedOutput, var focusedSurface])
                 return RunConsistencyAudit(focusedOutput, focusedSurface);
+            if (args is ["--ui-audit", var localizedOutput, var localizedSurface, "--culture", var localizedCulture] &&
+                localizedCulture is "zh-CN" or "zh-HK" or "en-US")
+                return RunConsistencyAudit(localizedOutput, localizedSurface, localizedCulture);
             if (args is ["--preview-shell-ui-audit", var previewOutput])
                 return RunPreviewShellAudit(previewOutput);
             if (args is ["--reverse-control-countdown"])
@@ -745,6 +771,7 @@ internal static partial class Program
             .SetValue(application, true);
         application.InitializeComponent();
         var assembly = typeof(App).Assembly;
+        TestLogicReviewRegressions();
         TestHongKongLocalizationSwitch(application, assembly);
 
         var parserType = assembly.GetType(
@@ -824,6 +851,7 @@ internal static partial class Program
             }
 
             ReverseControlCountdownTests.Run(owner);
+            TestPreviewContextMenus();
             TestProtectedContentOverlay(owner, assembly);
             TestProtectedContentNoticeWindow(owner, assembly);
             TestWorkspaceAnimations(application);
@@ -984,7 +1012,17 @@ internal static partial class Program
                         "Developer tools window must be independent and non-topmost.");
                 AssertSelfDrawnWindowCorners(window);
                 AssertCatalogCount(windowType, window, "WorkspaceItems", 6);
-                AssertCatalogCount(windowType, window, "WindowItems", 25);
+                AssertCatalogKeys(windowType, window, "WindowItems",
+                [
+                    "advanced-settings", "text-input", "device-binding",
+                    "airplay-device-selection", "bluetooth-connection", "bluetooth-client-binding",
+                    "bluetooth-control-notice", "shortcut-settings", "reverse-control-status",
+                    "prompt", "reverse-control-wired-prerequisite", "reverse-control-wireless-prerequisite",
+                    "reverse-control-error", "capture-error", "session-closed", "usb-config-error",
+                    "capture-recovery", "image-settings", "projection-settings", "media-output",
+                    "usb-mode", "startup-error", "update", "instance-conflict", "protected-content",
+                    "native-preview",
+                ]);
                 foreach (var controlName in new[]
                 {
                     "ThemeComboBox", "LanguageComboBox", "OpacitySlider",
@@ -1106,7 +1144,7 @@ internal static partial class Program
     }
 
     private static MainWindow CreateWorkspaceTestWindow(Application application,
-        bool includeNativePreview = true)
+        bool includeNativePreview = true, bool initializeHiddenHandle = false)
     {
         var window = new MainWindow
         {
@@ -1133,6 +1171,8 @@ internal static partial class Program
             parent.Children.Remove(host);
         }
         application.MainWindow = window;
+        if (initializeHiddenHandle)
+            new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle();
         window.Show();
         var applyWorkspace = RequireMethod(typeof(MainWindow),
             "ApplyWorkspacePanelState", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1600,6 +1640,18 @@ internal static partial class Program
         if (actual != expected)
             throw new InvalidOperationException(
                 $"Developer catalog {propertyName} expected {expected}, got {actual}.");
+    }
+
+    private static void AssertCatalogKeys(Type windowType, object window,
+        string propertyName, string[] expected)
+    {
+        var items = windowType.GetProperty(propertyName)?.GetValue(window) as IEnumerable ??
+            throw new InvalidOperationException($"Developer catalog was not found: {propertyName}");
+        var actual = items.Cast<object>().Select(item =>
+            (string)item.GetType().GetProperty("Key")!.GetValue(item)!).ToArray();
+        if (!actual.Order(StringComparer.Ordinal).SequenceEqual(expected.Order(StringComparer.Ordinal)))
+            throw new InvalidOperationException(
+                $"Developer catalog {propertyName} has unexpected keys: {string.Join(", ", actual)}.");
     }
 
     private static void ApplyTheme(Assembly assembly, AppTheme theme)

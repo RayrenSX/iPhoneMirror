@@ -84,8 +84,12 @@ public partial class MainWindow
         _localFullScreenEscapeDown = false;
         _localFullScreenF11Down = false;
         if (_activeControlWindow == 0)
+        {
             HandleControlKeyboardInput(new PreviewKeyboardEventArgs(
                 PreviewKeyboardKind.Reset, 0), _viewModel.SelectedDevice?.Udid);
+            _ = HandleUsbPointerInputAsync(new PreviewPointerEventArgs(
+                PreviewPointerKind.Reset, 0, 0, 0, 0), _viewModel.SelectedDevice?.Udid);
+        }
     }
 
     private void OnMainKeyboardActivated(object? sender, EventArgs e) =>
@@ -97,6 +101,10 @@ public partial class MainWindow
         {
             _viewModel.SetControlInputDevice(null);
             UnregisterDeviceHotkeys();
+            HandleControlKeyboardInput(new PreviewKeyboardEventArgs(
+                PreviewKeyboardKind.Reset, 0), udid);
+            _ = HandleUsbPointerInputAsync(new PreviewPointerEventArgs(
+                PreviewPointerKind.Reset, 0, 0, 0, 0), udid);
         }
         else FocusControlDevice(udid, hwnd);
     }
