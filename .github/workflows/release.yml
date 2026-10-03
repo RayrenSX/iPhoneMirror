@@ -88,15 +88,24 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Set up MSYS2 UCRT64 for UxPlay
+      - name: Set up MSYS2 UCRT64 for UxPlay and compact FFmpeg
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           # Avoid a full MSYS2 mirror upgrade on every run. The action still
-          # installs the pinned build dependencies below, while avoiding
+          # installs the required build dependencies below, while avoiding
           # unrelated mirror timeouts during database refresh.
           update: false
           install: >-
+            make
+            diffutils
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-libx264
+            mingw-w64-ucrt-x86_64-opus
+            mingw-w64-ucrt-x86_64-srt
+            mingw-w64-ucrt-x86_64-libvpl
+            mingw-w64-ucrt-x86_64-amf-headers
+            mingw-w64-ucrt-x86_64-ffnvcodec-headers
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-toolchain
@@ -150,12 +159,14 @@ jobs:
             "iPhoneMirror-v$env:RELEASE_VERSION-win-x64.zip",
             "iPhoneMirror-v$env:RELEASE_VERSION-win-x64-sbom.spdx.json",
             "SHA256SUMS.txt"
+            "iPhoneMirror-UxPlay-v$env:RELEASE_VERSION-win-x64.zip"
           )
           $descriptions = @{
             $expectedNames[0] = 'Windows x64 安装程序，支持覆盖升级与卸载。'
             $expectedNames[1] = '免安装便携版，完整解压后运行。'
             $expectedNames[2] = 'SPDX 2.2 软件物料清单。'
             $expectedNames[3] = '全部公开 Release 资产的 SHA-256 校验清单。'
+            $expectedNames[4] = 'UxPlay 可选无线组件，由应用通过镜像加速按需下载安装。'
           }
 
           $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'updates/releases.json'
@@ -319,6 +330,7 @@ jobs:
             "iPhoneMirror-v$env:RELEASE_VERSION-win-x64.zip",
             "iPhoneMirror-v$env:RELEASE_VERSION-win-x64-sbom.spdx.json",
             "SHA256SUMS.txt"
+            "iPhoneMirror-UxPlay-v$env:RELEASE_VERSION-win-x64.zip"
           )
           $assets = @($expectedNames | ForEach-Object {
             $path = Join-Path outputs/releases $_
@@ -350,6 +362,7 @@ jobs:
             "iPhoneMirror-v$env:RELEASE_VERSION-win-x64.zip",
             "iPhoneMirror-v$env:RELEASE_VERSION-win-x64-sbom.spdx.json",
             "SHA256SUMS.txt"
+            "iPhoneMirror-UxPlay-v$env:RELEASE_VERSION-win-x64.zip"
           )
           $localAssets = @($expectedNames | ForEach-Object {
             $path = Join-Path $env:GITHUB_WORKSPACE "outputs/releases/$_"
@@ -708,6 +721,7 @@ jobs:
             "iPhoneMirror-v$env:RELEASE_VERSION-win-x64.zip",
             "iPhoneMirror-v$env:RELEASE_VERSION-win-x64-sbom.spdx.json",
             "SHA256SUMS.txt"
+            "iPhoneMirror-UxPlay-v$env:RELEASE_VERSION-win-x64.zip"
           )
           $localAssets = @($expectedNames | ForEach-Object {
             $path = Join-Path $env:GITHUB_WORKSPACE "outputs/releases/$_"

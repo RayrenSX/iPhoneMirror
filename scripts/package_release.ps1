@@ -4,10 +4,14 @@ param(
     [string]$Version,
     [switch]$AllowVersionOverride,
     [switch]$SkipBuild,
+    [string]$ReleaseOutputDirectory,
     [switch]$GenerateSbom,
     [switch]$UpdateReleaseManifest,
+    [ValidateRange(1,2147483647)][long]$MaximumInstallerBytes = 100000000,
+    [switch]$EnforceInstallerSizeLimit,
     [switch]$IncludeMediaOutputRuntime,
     [switch]$OmitMediaOutputRuntime,
+    [string]$FfmpegRuntimeManifestPath,
     [switch]$IncludeUxPlayRuntime,
     [switch]$OmitUxPlayRuntime,
     [string]$AppleSupportPackagePath,
@@ -56,7 +60,9 @@ if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
 }
 $PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
 $InstallerPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Installer'
-$ReleaseRoot = Join-Path $Root 'outputs\releases'
+$ReleaseRoot = if ($ReleaseOutputDirectory) {
+    [IO.Path]::GetFullPath($ReleaseOutputDirectory)
+} else { Join-Path $Root 'outputs\releases' }
 $ReleaseManifestPath = Join-Path $Root 'updates\releases.json'
 $StagingBase = Join-Path $Root 'outputs\release-staging'
 $StagingRoot = Join-Path $StagingBase ([Guid]::NewGuid().ToString('N'))
@@ -75,10 +81,18 @@ $StagedInstaller = Join-Path $StagingRoot $InstallerName
 $LegacyArchive = Join-Path $Root 'outputs\iPhoneMirror-video-app-discovery-fix.zip'
 $PreserveStagingRoot = $false
 $MediaOutputManifestPath = Join-Path $Root 'scripts\ffmpeg-runtime-manifest.psd1'
+if ($FfmpegRuntimeManifestPath) { $MediaOutputManifestPath = [IO.Path]::GetFullPath($FfmpegRuntimeManifestPath) }
+# Match build.ps1: broad source-audio compatibility takes priority over size.
 if (-not (Test-Path -LiteralPath $MediaOutputManifestPath -PathType Leaf)) {
     throw "Media-output FFmpeg manifest is missing: $MediaOutputManifestPath"
 }
 $MediaOutputManifest = Import-PowerShellDataFile -LiteralPath $MediaOutputManifestPath
+if ($UseMediaOutputRuntime -and $MediaOutputManifest.PrebuiltDirectory) {
+    # Also reject an old incompatible custom manifest during -SkipBuild;
+    # hashing an old binary alone does not establish feature compatibility.
+    & (Join-Path $PSScriptRoot 'test_compact_ffmpeg.ps1') -Ffmpeg (
+        Join-Path $MediaOutputManifest.PrebuiltDirectory 'ffmpeg.exe')
+}
 $MediaOutputRuntimeHashes = [Collections.IDictionary]$MediaOutputManifest.Files
 $UxPlayRuntimeManifestPath = Join-Path $Root 'scripts\uxplay-runtime-manifest.psd1'
 if (-not (Test-Path -LiteralPath $UxPlayRuntimeManifestPath -PathType Leaf)) {
@@ -98,7 +112,10 @@ if ($UxPlayRuntimeFiles.Count -eq 0 -or
 # -OmitUxPlayRuntime mirrors the build switch for test payloads produced on
 # machines without MSYS2 UCRT64; the optional UxPlay fallback receiver is left
 # out of the package and its artifacts are no longer required.
-$UseUxPlayRuntime = -not $OmitUxPlayRuntime
+$UseUxPlayRuntime = [bool]$IncludeUxPlayRuntime
+if ($IncludeUxPlayRuntime -and $OmitUxPlayRuntime) {
+    throw '-IncludeUxPlayRuntime and -OmitUxPlayRuntime cannot be used together.'
+}
 
 $RequiredArtifacts = @(
     'iPhoneMirror.exe',
@@ -138,6 +155,7 @@ $RequiredArtifacts = @(
     'Wireless\licenses\LICENSE-MIT.txt',
     'Wireless\licenses\LICENSE-PLAYFAIR-GPL-3.0.md',
     'Wireless\licenses\NOTICE-FDK-AAC.txt',
+    'Wireless\licenses\NOTICE-FFMPEG-BUILD.txt',
     'Wireless\licenses\SOURCE.md',
     'Wireless\licenses\SHA256SUMS.txt'
 )
@@ -562,9 +580,8 @@ try {
         if ($OmitMediaOutputRuntime) {
             $buildArguments.OmitMediaOutputRuntime = $true
         }
-        # UxPlay is included by the standard build because it is exposed as a
-        # selectable fallback receiver. Keep forwarding the switch so existing
-        # release automation remains compatible.
+        if ($FfmpegRuntimeManifestPath) { $buildArguments.FfmpegRuntimeManifestPath = $FfmpegRuntimeManifestPath }
+        # The standard build produces UxPlay as a separate downloadable asset.
         if ($IncludeUxPlayRuntime) { $buildArguments.IncludeUxPlayRuntime = $true }
         if ($OmitUxPlayRuntime) { $buildArguments.OmitUxPlayRuntime = $true }
         if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
@@ -577,6 +594,8 @@ try {
     }
 
     Assert-PublishedOutput
+    . (Join-Path $PSScriptRoot 'CompactBuildRecord.ps1')
+    Assert-CompactBuildRecord $Root (-not $OmitUxPlayRuntime) $UseMediaOutputRuntime
     if (-not (Test-Path -LiteralPath $InstallerPublishRoot -PathType Container)) {
         throw "Shared-runtime installer output is missing: $InstallerPublishRoot"
     }
@@ -584,8 +603,7 @@ try {
         'iPhoneMirror.exe', 'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
         'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.exe',
         'iPhoneMirror.UsbConfigurationSwitch.exe',
-        'iPhoneMirror.Driver.dll', 'iPhoneMirror.Driver.deps.json',
-        'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
+        'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
         'tools\iUsbBridge.exe', 'tools\iUsbBridge.runtime.json'
@@ -630,13 +648,19 @@ try {
         SourceDirectory = $InstallerPublishRoot
         OutputDirectory = $StagingRoot
     }
-    if ($OmitUxPlayRuntime) {
+    if (-not $UseUxPlayRuntime) {
         $installerArguments.OmitUxPlayRuntime = $true
     }
+    else { $installerArguments.IncludeUxPlayRuntime = $true }
     & (Join-Path $Root 'scripts\build_installer.ps1') @installerArguments
     if ($LASTEXITCODE -ne 0 -or
         -not (Test-Path -LiteralPath $StagedInstaller -PathType Leaf)) {
         throw "Windows installer build failed: $LASTEXITCODE"
+    }
+    if ((Get-Item -LiteralPath $StagedInstaller).Length -ge $MaximumInstallerBytes) {
+        $sizeMessage = "Installer is $((Get-Item -LiteralPath $StagedInstaller).Length) bytes; size target is below $MaximumInstallerBytes bytes."
+        if ($EnforceInstallerSizeLimit) { throw "$sizeMessage Assets have not been published." }
+        Write-Warning "$sizeMessage Keeping the complete, verified runtime takes priority."
     }
 
     Copy-Item -LiteralPath $PublishRoot -Destination $PackageRoot -Recurse
@@ -747,14 +771,14 @@ try {
                 })
             },
             [PSCustomObject][ordered]@{
-                name = 'FFmpeg H.264 runtime'
-                SPDXID = 'SPDXRef-Package-FFmpeg-4.4.2'
-                downloadLocation = 'https://github.com/FFmpeg/FFmpeg/releases/tag/n4.4.2'
+                name = 'FFmpeg H.264 and ALAC runtime'
+                SPDXID = 'SPDXRef-Package-FFmpeg-63b2b0f47d'
+                downloadLocation = 'https://github.com/FFmpeg/FFmpeg/tree/63b2b0f47df420007c53888ce0e8383d24b8fb06'
                 filesAnalyzed = $false
                 licenseConcluded = 'LGPL-2.1-or-later'
                 licenseDeclared = 'LGPL-2.1-or-later'
                 copyrightText = 'NOASSERTION'
-                versionInfo = '4.4.2'
+                versionInfo = '63b2b0f47df420007c53888ce0e8383d24b8fb06'
                 supplier = 'Organization: FFmpeg project'
             },
             [PSCustomObject][ordered]@{
@@ -811,14 +835,14 @@ try {
         if ($UseMediaOutputRuntime) {
             $NativePackages.Add([PSCustomObject][ordered]@{
                 name = 'FFmpeg media-output runtime'
-                SPDXID = 'SPDXRef-Package-FFmpeg-8.1.2-Gyan'
-                downloadLocation = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip'
+                SPDXID = $(if ($MediaOutputManifest.PrebuiltDirectory) { 'SPDXRef-Package-FFmpeg-8.1.2-Compact' } else { 'SPDXRef-Package-FFmpeg-8.1.2-Gyan' })
+                downloadLocation = [string]$MediaOutputManifest.DownloadUrl
                 filesAnalyzed = $false
-                licenseConcluded = 'GPL-3.0-only'
-                licenseDeclared = 'GPL-3.0-only'
+                licenseConcluded = $(if ($MediaOutputManifest.PrebuiltDirectory) { 'GPL-3.0-or-later' } else { 'GPL-3.0-only' })
+                licenseDeclared = $(if ($MediaOutputManifest.PrebuiltDirectory) { 'GPL-3.0-or-later' } else { 'GPL-3.0-only' })
                 copyrightText = 'NOASSERTION'
                 versionInfo = '8.1.2'
-                supplier = 'Organization: gyan.dev'
+                supplier = $(if ($MediaOutputManifest.PrebuiltDirectory) { 'Organization: iPhoneMirror' } else { 'Organization: gyan.dev' })
             })
         }
         foreach ($NativePackage in $NativePackages) {
@@ -845,6 +869,17 @@ try {
         [PSCustomObject]@{ Path = $StagedInstaller; Name = $InstallerName },
         [PSCustomObject]@{ Path = $StagedArchive; Name = [IO.Path]::GetFileName($ArchivePath) }
     )
+    $componentPath = Join-Path $Root "outputs\components\iPhoneMirror-UxPlay-v$Version-win-x64.zip"
+    if (-not $OmitUxPlayRuntime) {
+        $descriptorPath = Join-Path $Root 'src\App\native\components\uxplay.json'
+        $descriptor = Get-Content -LiteralPath $descriptorPath -Raw | ConvertFrom-Json
+        if ($descriptor.version -ne $Version -or
+            (Get-Item -LiteralPath $componentPath).Length -ne $descriptor.size -or
+            (Get-FileHash -LiteralPath $componentPath -Algorithm SHA256).Hash -ine $descriptor.sha256) {
+            throw 'UxPlay component does not match its embedded download metadata.'
+        }
+        $assets += [PSCustomObject]@{ Path = $componentPath; Name = [IO.Path]::GetFileName($componentPath) }
+    }
     if ($GenerateSbom) {
         $assets += [PSCustomObject]@{
             Path = $StagedSbomAsset
@@ -862,6 +897,12 @@ try {
         [PSCustomObject]@{ Staged = $StagedInstaller; Final = $InstallerPath },
         [PSCustomObject]@{ Staged = $StagedArchive; Final = $ArchivePath }
     )
+    if (-not $OmitUxPlayRuntime) {
+        $publishAssets += [PSCustomObject]@{
+            Staged = $componentPath
+            Final = Join-Path $ReleaseRoot ([IO.Path]::GetFileName($componentPath))
+        }
+    }
     if ($GenerateSbom) {
         $publishAssets += [PSCustomObject]@{ Staged = $StagedSbomAsset; Final = $SbomAsset }
     }

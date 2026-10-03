@@ -33,23 +33,14 @@ internal static class DriverCleanupHost
                     "The driver manager executable could not be protected before elevation."),
                 boundaryError);
 
-        var executable = Environment.ProcessPath ??
-            Process.GetCurrentProcess().MainModule?.FileName ??
-            throw new FileNotFoundException(DriverLocalization.GetOrDefault(
-                "DriverExecutableMissing", "The driver manager executable is missing."));
-        var start = new ProcessStartInfo(executable)
-        {
-            UseShellExecute = true,
-            Verb = "runas",
-            WorkingDirectory = Path.GetDirectoryName(executable)!,
-        };
-        start.ArgumentList.Add(Switch);
+        var arguments = new List<string> { Switch };
         if (parentProcessId is > 0)
         {
-            start.ArgumentList.Add(ParentProcessIdSwitch);
-            start.ArgumentList.Add(parentProcessId.Value.ToString(
+            arguments.Add(ParentProcessIdSwitch);
+            arguments.Add(parentProcessId.Value.ToString(
                 System.Globalization.CultureInfo.InvariantCulture));
         }
+        var start = DriverOperationClient.BuildElevatedStartInfo(arguments);
         using var process = Process.Start(start) ?? throw new InvalidOperationException(
             DriverLocalization.GetOrDefault("DriverCleanupHostStartFailed",
                 "The elevated driver cleanup host did not start."));

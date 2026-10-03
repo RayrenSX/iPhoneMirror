@@ -14,6 +14,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\App\iPhoneMirror.App.csproj" />
+    <Compile Include="..\App.Logic.Tests\ComponentDownloadNetworkTests.cs" Link="ComponentDownloadNetworkTests.cs" />
+    <Compile Include="..\App.Logic.Tests\UxPlayComponentTests.cs" Link="UxPlayComponentTests.cs" />
     <EmbeddedResource Include="..\App\Localization\Strings.*.xaml" WithCulture="false"
                       LogicalName="TextSources.App.%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\DriverInstaller\Localization\Strings.*.xaml" WithCulture="false"

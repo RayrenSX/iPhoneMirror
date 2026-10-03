@@ -12,8 +12,12 @@ internal sealed partial class MainViewModel
         new(StringComparer.OrdinalIgnoreCase);
 
     private DeviceControlSession? SelectedControl => FindControl(SelectedDevice?.Udid);
-    private string? _clipboardInputDeviceUdid;
-    internal void SetControlInputDevice(string? udid) => _clipboardInputDeviceUdid = udid;
+    internal void SetControlInputDevice(string? udid)
+    {
+        if (_disposed) return;
+        ClipboardSync.SelectDevice(udid);
+        _ = FlushDeviceClipboardAsync();
+    }
     internal bool IsDeviceControlEnabled(string? udid) => FindControl(udid)?.Enabled == true;
 
     private DeviceControlSession? FindControl(string? udid) =>

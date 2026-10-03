@@ -44,6 +44,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     private int _terminalEventReceived;
 
     public bool IsReady { get; private set; }
+    internal long InputGeneration => Interlocked.Read(ref _readyGeneration);
     public bool GateOpen { get; private set; }
     public string? AuthMode { get; private set; }
     public string? Udid { get; private set; }
@@ -182,7 +183,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     }
 
     public async Task SendTouchBatchAsync(IReadOnlyList<TouchPoint> points, long timestampNs,
-        long sequence, CancellationToken ct = default, Func<bool>? canSend = null)
+        long sequence, CancellationToken ct = default, Func<bool>? canSend = null,
+        long? expectedGeneration = null)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
@@ -201,6 +203,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
+            if (expectedGeneration is { } expected && expected != Interlocked.Read(ref _readyGeneration))
+                throw new OperationCanceledException();
             // Pure releases must pass after focus loss. A queued contact or
             // movement belongs to the focus snapshot that created it.
             if (points.Any(point => point.Action != "up") && canSend?.Invoke() == false) return;

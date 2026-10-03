@@ -4,7 +4,9 @@ import sys
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 
 hiddenimports = []
-hiddenimports += collect_submodules('pymobiledevice3')
+# Analyse imports from our bridge, not every upstream CLI/service. Collecting
+# all of pymobiledevice3 pulls in screenshot/video tooling (PyAV and Pillow)
+# which the HID bridge does not use. Keep the lazy tunnel/media gate below.
 hiddenimports += collect_submodules('qh3')
 hiddenimports += collect_submodules('srptools')
 hiddenimports += collect_submodules('construct')
@@ -37,7 +39,6 @@ hiddenimports += [
     'pymobiledevice3.remote.core_device.hid_service',
     'pymobiledevice3.remote.core_device.display_service',
     'pymobiledevice3.remote.core_device.screen_stream',
-    'pymobiledevice3.remote.core_device.screen_capture_service',
     'pymobiledevice3.remote.core_device.core_device_service',
     'pymobiledevice3.remote.remote_service_discovery',
     'pymobiledevice3.remote.remotexpc',
@@ -72,7 +73,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['pytest', 'IPython', 'jedi', 'frida', 'py_spy'],
+    # The optional Pygments image formatter is the only Pillow consumer in
+    # this graph. The bridge uses text diagnostics, never image formatting.
+    excludes=['pytest', 'IPython', 'jedi', 'frida', 'py_spy', 'pygments.formatters.img'],
     noarchive=False,
 )
 

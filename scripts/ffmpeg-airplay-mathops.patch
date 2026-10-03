@@ -1,0 +1,20 @@
+--- a/libavcodec/x86/mathops.h
++++ b/libavcodec/x86/mathops.h
+@@ -125,7 +125,7 @@
+ static inline  int32_t NEG_SSR32( int32_t a, int8_t s){
+     __asm__ ("sarl %1, %0\n\t"
+          : "+r" (a)
+-         : "ic" ((uint8_t)(-s))
++         : "ic" ((uint8_t)(-s & 31))
+     );
+     return a;
+ }
+@@ -135,7 +135,7 @@
+ static inline uint32_t NEG_USR32(uint32_t a, int8_t s){
+     __asm__ ("shrl %1, %0\n\t"
+          : "+r" (a)
+-         : "ic" ((uint8_t)(-s))
++         : "ic" ((uint8_t)(-s & 31))
+     );
+     return a;
+ }

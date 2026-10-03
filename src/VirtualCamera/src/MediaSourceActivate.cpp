@@ -14,22 +14,32 @@ HRESULT MediaSourceActivate::ActivateObject(REFIID riid, void** object) {
     if (object == nullptr) return E_POINTER;
     *object = nullptr;
 
-    ComPtr<MediaSource> source;
-    HRESULT hr = Microsoft::WRL::MakeAndInitialize<MediaSource>(
-        &source, attributes_.Get());
-    if (FAILED(hr)) return hr;
-    if (FAILED(hr = source->QueryInterface(riid, object))) return hr;
+    std::lock_guard lock(source_mutex_);
+    if (source_ != nullptr) return source_->QueryInterface(riid, object);
+
+    // Hold the new object even if initialization fails so a partially built
+    // source/stream cycle and its worker can always be shut down.
+    auto source = Microsoft::WRL::Make<MediaSource>();
+    if (source == nullptr) return E_OUTOFMEMORY;
+    HRESULT hr = source->RuntimeClassInitialize(attributes_.Get());
+    if (SUCCEEDED(hr)) hr = source->QueryInterface(riid, object);
+    if (FAILED(hr)) {
+        source->Shutdown();
+        return hr;
+    }
     source_ = source;
     return S_OK;
 }
 
 HRESULT MediaSourceActivate::ShutdownObject() {
+    std::lock_guard lock(source_mutex_);
     ComPtr<IMFMediaSource> source = source_;
     source_.Reset();
     return source == nullptr ? S_OK : source->Shutdown();
 }
 
 HRESULT MediaSourceActivate::DetachObject() {
+    std::lock_guard lock(source_mutex_);
     source_.Reset();
     return S_OK;
 }

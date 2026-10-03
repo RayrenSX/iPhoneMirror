@@ -20,6 +20,9 @@
     <Compile Include="..\DriverInstaller\Services\DriverPayload.cs" Link="DriverPayload.cs" />
     <Compile Include="..\DriverInstaller\Services\DriverLogger.cs" Link="DriverLogger.cs" />
     <Compile Include="..\DriverInstaller\Services\DriverOperationClient.cs" Link="DriverOperationClient.cs" />
+    <Compile Include="..\DriverInstaller\Services\DriverElevationBootstrap.cs" Link="DriverElevationBootstrap.cs" />
+    <EmbeddedResource Include="..\DriverInstaller\Services\DriverElevation.Bootstrap.ps1"
+                      LogicalName="DriverElevation.Bootstrap.ps1" />
     <Compile Include="..\DriverInstaller\Services\DriverLocalization.cs" Link="DriverLocalization.cs" />
     <Compile Include="..\DriverInstaller\Services\DeviceCatalog.cs" Link="DeviceCatalog.cs" />
     <Compile Include="..\DriverInstaller\Services\AppleDeviceMetadataReader.cs" Link="AppleDeviceMetadataReader.cs" />

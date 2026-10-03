@@ -97,6 +97,8 @@ try {
         throw "PyInstaller did not produce the USB touch bridge: $Bridge"
     }
     Write-BridgeRuntimeManifest $BridgeDirectory
+    & $Bridge --check-runtime
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged USB bridge runtime dependency check failed.' }
 
     if (-not [string]::IsNullOrWhiteSpace($BridgeOutputPath)) {
         $BridgeOutputPath = [IO.Path]::GetFullPath($BridgeOutputPath)

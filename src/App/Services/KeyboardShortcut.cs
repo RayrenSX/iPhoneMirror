@@ -23,6 +23,11 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     internal static KeyboardShortcut BossKeyDefault { get; } = new(Control | Alt, 0x42); // Ctrl+Alt+B
     internal static KeyboardShortcut Unbound { get; } = new(0, 0);
     internal bool IsBound => VirtualKey != 0;
+    internal bool IsMouse => VirtualKey is MouseRight or MouseMiddle;
+
+    internal bool IsValidFor(BluetoothShortcutAction action) =>
+        IsValid((int)Modifiers, (int)VirtualKey) &&
+        (action != BluetoothShortcutAction.BossKey || !IsMouse);
 
     internal uint RegistrationModifiers => Modifiers | NoRepeat;
 
@@ -59,7 +64,7 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
                 HomeDefault),
             BluetoothShortcutAction.BossKey => FromStoredSettings(
                 settings.BluetoothBossShortcutModifiers,
-                settings.BluetoothBossShortcutVirtualKey, BossKeyDefault),
+                settings.BluetoothBossShortcutVirtualKey, BossKeyDefault, allowMouse: false),
             BluetoothShortcutAction.Dock => FromStoredSettings(
                 settings.BluetoothDockShortcutModifiers,
                 settings.BluetoothDockShortcutVirtualKey, Unbound),
@@ -73,14 +78,20 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
         };
 
     private static KeyboardShortcut FromStoredSettings(int modifiers, int virtualKey,
-        KeyboardShortcut fallback) => IsValid(modifiers, virtualKey)
-            ? new((uint)modifiers, (uint)virtualKey) : fallback;
+        KeyboardShortcut fallback, bool allowMouse = true)
+    {
+        var shortcut = IsValid(modifiers, virtualKey)
+            ? new KeyboardShortcut((uint)modifiers, (uint)virtualKey) : fallback;
+        // A mouse cannot restore hidden windows. Unbind old mouse boss keys
+        // without taking a default combination already assigned elsewhere.
+        return !allowMouse && shortcut.IsMouse ? Unbound : shortcut;
+    }
 
     internal static bool TryCreate(Key key, ModifierKeys modifiers,
         out KeyboardShortcut shortcut)
     {
         shortcut = default;
-        if (key is Key.None or Key.DeadCharProcessed ||
+        if (key is Key.None or Key.DeadCharProcessed or Key.F12 ||
             IsModifierKey(key) || modifiers.HasFlag(ModifierKeys.Windows))
             return false;
 

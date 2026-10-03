@@ -282,7 +282,7 @@ App 发送的播放地址进入主窗口内的专用播放界面，两条播放�
 | libusb 1.0.29 | 可选的 USB 传输兼容层 | LGPL-2.1-or-later，见 `third_party/libusb/` |
 | libusb-win32 1.2.6.0 | 独立驱动管理器的 `libusb0` 过滤驱动 | LGPL-3.0 及上游许可证，见 `src/DriverInstaller/Assets/` |
 | AirPlayServer 1.1.2 | 无线 AirPlay 接收、FairPlay/视频/音频解码 | GPL-3.0、LGPL-2.1-or-later 及上游许可证，见 `third_party/airplay-server/` |
-| FFmpeg 4.4.2 runtime | AirPlayServer 内置 H.264/音频运行库 | LGPL-2.1-or-later，随 AirPlayServer 发行物提供 |
+| FFmpeg 63b2b0f47d runtime | 原始 AirPlay 接收器的 H.264/ALAC 运行库，保持原 ABI 的精简构建 | LGPL-2.1-or-later，源码及构建说明随项目提供 |
 | FFmpeg 8.1.2 runtime | 录制、直播推流和视频投屏 HLS 桥接 | GPL-3.0，默认随 `tools/ffmpeg/` 发布 |
 | iUsbBridge | 当前构建与发布使用的 USBMux 有线/无线反向控制桥接器 | [RayrenSX/iUsbBridge](https://github.com/RayrenSX/iUsbBridge) 的 iUsbBridge 非商业使用许可；不是 OSI 定义的开源许可证 |
 | quicktime_video_hack fixtures | QuickTime 协议回归测试向量 | MIT，仅用于 `src/Core/tests/fixtures/` |
@@ -362,7 +362,8 @@ MSYS2 镜像临时超时；工作流已关闭全量更新，只安装构建所�
 - .NET 10 SDK 与 Windows Desktop 工作负载
 - Python 3.13 x64，用于构建反控桥接器
 - MSYS2 UCRT64：CMake、Ninja、UCRT64 工具链、GStreamer（base、good、bad、libav）、
-  libplist 和 OpenSSL，用于构建随包提供的 UxPlay 备用接收端
+  libplist 和 OpenSSL，用于构建 UxPlay 可选组件；定制 FFmpeg 还需要 x264、Opus、
+  SRT、oneVPL、AMF/NVENC 头文件与 nasm，完整列表见 Windows workflow
 
 ```powershell
 git clone https://github.com/RayrenSX/iPhoneMirror.git
@@ -383,24 +384,26 @@ outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.dll
 outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.Admin.exe
 outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
 outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
-outputs/iPhoneMirror/Wireless/UxPlay/iPhoneMirror.UxPlayHost.exe
-outputs/iPhoneMirror/Wireless/UxPlay/uxplay.exe
+outputs/components/iPhoneMirror-UxPlay-v<version>-win-x64.zip
 ```
 
 `outputs/iPhoneMirror` 的主程序和驱动管理器各自将 .NET/WPF 依赖打包进 EXE；
 整个便携目录仍包含原生库、无线组件及桥接运行时，必须完整保留。安装器使用
-`outputs/iPhoneMirror.Installer`，主程序和驱动管理器共享外置运行时 DLL，
-从而减少安装包下载体积。
+`outputs/iPhoneMirror.Installer`，主程序使用外置运行时 DLL，驱动管理器保持独立自包含；
+安装器统一压缩重复数据以减少下载体积。
 
-默认构建内置 FFmpeg 8.1.2 媒体输出运行时，录制及 RTMP/SRT/WHIP 推流可以
-开箱即用。仅在明确需要最小体积时生成精简版；应用仍要求外部 FFmpeg 匹配固定 SHA-256，
+默认构建内置完整的 FFmpeg 8.1.2 essentials 运行时，保留录制、媒体源音频及 RTMP/SRT/WHIP 推流。
+音频兼容性审查发现定制精简版缺少部分既有解码器，已撤销该项默认裁剪。
+UxPlay 作为独立可选组件，首次选用时通过镜像下载，弹窗显示进度、速度并支持取消与重试；
+`-IncludeUxPlayRuntime` 可生成内置 UxPlay 的离线包。组件完整可用优先于 100 MB 体积目标。
+仅在明确不需要媒体输出时省略 FFmpeg；应用仍要求外部 FFmpeg 匹配固定 SHA-256，
 不能用任意系统版本替代，缺少可信运行时时相关输出不可用：
 
 ```powershell
 .\build.ps1 -Configuration Release -OmitMediaOutputRuntime
 ```
 
-发布精简版资产时，同样向发布脚本传入 `-OmitMediaOutputRuntime`。
+发布省略媒体输出的资产时，同样向发布脚本传入 `-OmitMediaOutputRuntime`。
 
 生成完整 Release 资产（Setup、ZIP、SHA256 清单和 SBOM）：
 

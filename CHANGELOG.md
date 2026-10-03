@@ -23,6 +23,9 @@ All notable changes to iPhoneMirror are documented here. The project follows
 - Keep the last wireless mirroring frame visible when a static phone screen
   stops sending video. Frame inactivity no longer restarts the session, and
   resized or additional previews can reuse the retained frame.
+- Retry static preview redraws after a busy compositor or a transient GPU
+  upload failure, including when opening settings resizes the preview. Only
+  mark a frame as presented after success, and throttle retries while occluded.
 
 ## [1.8.4-test4] - 2026-09-07
 

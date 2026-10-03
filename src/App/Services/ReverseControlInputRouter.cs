@@ -9,6 +9,8 @@ internal sealed class ReverseControlInputRouter
     private readonly object _gate = new();
     private string? _appleUdid;
     private ReverseControlMode _mode;
+    private long _generation;
+    internal long Generation { get { lock (_gate) return _generation; } }
     private readonly HashSet<byte> _pressedKeys = [];
 
     internal string? AppleUdid { get { lock (_gate) return _appleUdid; } }
@@ -21,16 +23,18 @@ internal sealed class ReverseControlInputRouter
         lock (_gate)
         {
             _appleUdid = appleUdid;
+            ++_generation;
             _mode = mode;
             _pressedKeys.Clear();
             return true;
         }
     }
 
-    internal bool Owns(string appleUdid, ReverseControlMode mode)
+    internal bool Owns(string appleUdid, ReverseControlMode mode, long? generation = null)
     {
         lock (_gate)
-            return string.Equals(_appleUdid, appleUdid, StringComparison.OrdinalIgnoreCase) && _mode == mode;
+            return string.Equals(_appleUdid, appleUdid, StringComparison.OrdinalIgnoreCase) && _mode == mode &&
+                (generation is null || generation == _generation);
     }
 
     internal IReadOnlyCollection<byte> UpdateKey(byte usage, bool down)
@@ -48,6 +52,7 @@ internal sealed class ReverseControlInputRouter
         lock (_gate)
         {
             var released = _pressedKeys.ToArray();
+            ++_generation;
             _pressedKeys.Clear();
             _appleUdid = null;
             _mode = ReverseControlMode.None;

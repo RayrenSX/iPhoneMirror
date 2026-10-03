@@ -1,0 +1,81 @@
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.KeyboardMappingWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+    xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="{DynamicResource MappingTitle}" Width="740" Height="680" MinWidth="560" MinHeight="560"
+    WindowStartupLocation="CenterOwner" ResizeMode="CanResize" WindowStyle="None"
+    AllowsTransparency="True" Background="Transparent" Foreground="{DynamicResource TextBrush}">
+    <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
+            <StackPanel Margin="0,0,48,16">
+                <TextBlock Text="{DynamicResource MappingTitle}" Style="{StaticResource SubWindowTitle}"/>
+                <TextBlock Text="{DynamicResource MappingDescription}" Style="{StaticResource SubWindowSubtitle}" TextWrapping="Wrap"/>
+            </StackPanel>
+            <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
+                <ui:SymbolIcon Symbol="Dismiss20" Style="{StaticResource ButtonSymbolIcon}"/>
+            </Button>
+        </Grid>
+        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Padding="16" Margin="0,0,0,12">
+            <StackPanel>
+                <CheckBox x:Name="EnabledBox" Content="{DynamicResource MappingEnable}"
+                    Click="OnEnabledClick" AutomationProperties.AutomationId="MappingEnable"/>
+                <TextBlock x:Name="RuntimeStatus" TextWrapping="Wrap" Foreground="{DynamicResource AccentBrush}" Margin="0,8,0,0"/>
+                <CheckBox x:Name="SuppressBox" Margin="0,12,0,0" Click="OnSuppressClick"
+                          AutomationProperties.Name="{DynamicResource MappingSuppress}">
+                    <TextBlock Text="{DynamicResource MappingSuppress}" TextWrapping="Wrap"/>
+                </CheckBox>
+                <TextBlock Text="{DynamicResource MappingGlobalHelp}" TextWrapping="Wrap" Margin="0,6,0,0"
+                    Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+            </StackPanel>
+        </Border>
+        <Border Grid.Row="2" Style="{StaticResource CardBorder}" Padding="14">
+            <Grid>
+                <TextBlock x:Name="EmptyText" Text="{DynamicResource MappingEmpty}" TextWrapping="Wrap"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource MutedTextBrush}"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="MappingList" ItemsSource="{Binding Rows}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1" Padding="0,12">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,12,0">
+                                                <TextBlock Text="{Binding KeyText}" FontWeight="SemiBold" FontSize="{DynamicResource FontSize16}" TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding ActionText}" Margin="0,5,0,0"/>
+                                                <TextBlock Text="{Binding ParameterText}" Margin="0,4,0,0" TextWrapping="Wrap"
+                                                    Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                                            </StackPanel>
+                                            <CheckBox Grid.Column="1" IsChecked="{Binding Enabled, Mode=OneWay}"
+                                                Content="{DynamicResource MappingEnabled}" Click="OnRowEnabledClick" VerticalAlignment="Top"/>
+                                        </Grid>
+                                        <WrapPanel Margin="0,8,0,0" HorizontalAlignment="Right">
+                                            <Button Content="{DynamicResource MappingEdit}" Click="OnEditClick" MinWidth="76" Margin="0,0,8,0"/>
+                                            <Button Content="{DynamicResource MappingDelete}" Click="OnDeleteClick" MinWidth="76"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+        <StackPanel Grid.Row="3" Margin="0,12,0,0">
+            <TextBlock x:Name="ErrorText" TextWrapping="Wrap" Foreground="{DynamicResource ErrorBrush}"/>
+            <TextBlock Text="{DynamicResource MappingAutoSave}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}"
+                FontSize="{DynamicResource CaptionFontSize}" Margin="0,4,0,8"/>
+            <WrapPanel HorizontalAlignment="Right">
+                <Button Content="{DynamicResource Close}" Click="OnCloseClick" MinWidth="90" Margin="0,0,8,0"/>
+                <Button Content="{DynamicResource MappingAdd}" Click="OnAddClick" Style="{StaticResource PrimaryButton}"
+                    MinWidth="130" AutomationProperties.AutomationId="MappingAdd"/>
+            </WrapPanel>
+        </StackPanel>
+    </Grid>
+</chrome:RoundedWindow>

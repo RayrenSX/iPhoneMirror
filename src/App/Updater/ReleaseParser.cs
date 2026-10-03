@@ -60,6 +60,7 @@ internal static class ReleaseParser
             var zip = assets
                 .Where(asset => asset.Name.EndsWith(".zip",
                     StringComparison.OrdinalIgnoreCase) &&
+                    !asset.Name.Contains("-UxPlay-", StringComparison.OrdinalIgnoreCase) &&
                     !asset.Name.Contains("source", StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(ZipScore)
                 .FirstOrDefault();

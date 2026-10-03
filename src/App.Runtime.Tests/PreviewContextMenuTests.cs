@@ -19,6 +19,10 @@ internal static partial class Program
 
     private static void TestPreviewContextMenus()
     {
+        var settings = ((App)Application.Current).UpdateSettings;
+        var previousHomeKey = settings.BluetoothHomeShortcutVirtualKey;
+        var previousHomeModifiers = settings.BluetoothHomeShortcutModifiers;
+        settings.BluetoothHomeShortcutModifiers = 0;
         var type = typeof(App).Assembly.GetType("IPhoneMirror.App.Windows.NativePreviewWindow", true)!;
         var constructor = type.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic).Single();
         var parameters = constructor.GetParameters();
@@ -50,14 +54,18 @@ internal static partial class Program
             if (layout == "fullscreen") type.GetMethod("ToggleFullScreen", InteractionMembers)!.Invoke(preview, null);
             foreach (var route in new[]
             {
-                (Name: "wired/wireless touch", Control: true, Touch: true, Menu: true),
-                (Name: "touch-only callback", Control: false, Touch: true, Menu: true),
-                (Name: "Bluetooth", Control: true, Touch: false, Menu: false),
-                (Name: "view-only", Control: false, Touch: false, Menu: true),
+                (Name: "wired/wireless touch, unbound", Control: true, Touch: true, Menu: true, Bound: false),
+                (Name: "touch-only callback, unbound", Control: false, Touch: true, Menu: true, Bound: false),
+                (Name: "wired/wireless touch, Home binding", Control: true, Touch: true, Menu: false, Bound: true),
+                (Name: "touch-only callback, Home binding", Control: false, Touch: true, Menu: false, Bound: true),
+                (Name: "Bluetooth", Control: true, Touch: false, Menu: false, Bound: true),
+                (Name: "view-only", Control: false, Touch: false, Menu: true, Bound: true),
             })
             {
                 controlEnabled = route.Control;
                 touchEnabled = route.Touch;
+                ((App)Application.Current).UpdateSettings.BluetoothHomeShortcutVirtualKey =
+                    route.Bound ? (int)Services.KeyboardShortcut.MouseRight : 0;
                 foreach (var message in new[] { 0x0204, 0x0205, 0x007B, 0x00A4, 0x00A5 })
                 {
                     inputs.Clear();
@@ -79,6 +87,8 @@ internal static partial class Program
             controlEnabled = touchEnabled = false;
         }
         type.GetMethod("ToggleFullScreen", InteractionMembers)!.Invoke(preview, null);
+        settings.BluetoothHomeShortcutVirtualKey = previousHomeKey;
+        settings.BluetoothHomeShortcutModifiers = previousHomeModifiers;
         Console.WriteLine($"Preview context menu: {checks} routing checks passed across touch, Bluetooth and view-only modes.");
     }
 }

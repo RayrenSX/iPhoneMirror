@@ -323,6 +323,17 @@ class TestPersonalizedDdiMirrorDownloads(unittest.TestCase):
     def setUp(self):
         import usb_touch_bridge as bridge
         self.bridge = bridge
+        # The developer's supported proxy/token settings must not affect the
+        # no-proxy fixtures. Tests that exercise them set their own values.
+        self.enterContext(patch.dict(os.environ, {
+            name: '' for name in (
+                'IPHONE_MIRROR_GITHUB_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY',
+                'ALL_PROXY', 'IPHONE_MIRROR_GITHUB_TOKEN', 'GITHUB_TOKEN')
+        }))
+        # Fail at the transport boundary if a future fixture forgets its mock.
+        self.enterContext(patch.object(
+            bridge.requests.sessions.Session, 'request',
+            side_effect=AssertionError('DDI unit tests must not use the network')))
 
     def test_uses_only_official_github_endpoints(self):
         sources = self.bridge._personalized_ddi_download_sources()
@@ -332,10 +343,14 @@ class TestPersonalizedDdiMirrorDownloads(unittest.TestCase):
                          ['github-raw', 'github-api'])
 
     def test_rank_does_not_probe_or_reorder_github_endpoints(self):
-        sources = self.bridge.rank_personalized_ddi_download_sources()
+        candidates = self.bridge._personalized_ddi_download_sources()
+        mirrors = tuple(source for source in candidates if source.kind == 'mirror')
+        with patch.object(self.bridge, '_measure_ddi_sources', return_value=[
+                (mirrors[0], 10.0), (mirrors[1], 20.0)]) as measure:
+            sources = self.bridge.rank_personalized_ddi_download_sources()
+        self.assertEqual(measure.call_args.args[0], mirrors)
         self.assertEqual([source.kind for source in sources[:2]], ['raw', 'api'])
-        self.assertLessEqual(sum(source.kind == 'mirror' for source in sources), 115)
-        self.assertTrue(all(source.kind == 'mirror' for source in sources[2:]))
+        self.assertEqual(sources[2:], (mirrors[1], mirrors[0]))
 
     def test_rank_uses_current_resolved_asset_for_mirror_probe(self):
         asset = self.bridge.PersonalizedDdiAsset(
@@ -395,15 +410,20 @@ class TestPersonalizedDdiMirrorDownloads(unittest.TestCase):
             'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'})
 
     def test_download_source_phases_keep_direct_proxy_mirror_order(self):
-        sources = self.bridge._personalized_ddi_download_sources()
-        phases = [self.bridge._source_phase(source) for source in sources]
-        self.assertEqual(phases[:2], ['direct', 'direct'])
-        first_proxy = next((index for index, phase in enumerate(phases)
-                            if phase == 'proxy'), len(phases))
-        first_mirror = next(index for index, phase in enumerate(phases)
-                            if phase == 'mirror')
-        self.assertLessEqual(first_mirror, first_proxy)
-        self.assertTrue(all(phase == 'mirror' for phase in phases[first_mirror:]))
+        for proxy in ('', 'http://127.0.0.1:7890'):
+            with self.subTest(proxy=proxy), patch.dict(os.environ, {
+                    'IPHONE_MIRROR_GITHUB_PROXY': proxy}):
+                sources = self.bridge._personalized_ddi_download_sources()
+                expected = (['direct'] * 2 + (['proxy'] * 2 if proxy else []) +
+                            ['mirror'] * 115)
+                self.assertEqual([self.bridge._source_phase(source)
+                                  for source in sources], expected)
+                mirror = next(source for source in sources if source.kind == 'mirror')
+                with patch.object(self.bridge, '_measure_ddi_sources',
+                                  return_value=[(mirror, 1.0)]):
+                    ranked = self.bridge.rank_personalized_ddi_download_sources()
+                self.assertEqual([self.bridge._source_phase(source)
+                                  for source in ranked], expected[:-115] + ['mirror'])
 
     def test_github_token_is_never_sent_to_a_public_mirror(self):
         mirror = self.bridge.PersonalizedDdiDownloadSource(

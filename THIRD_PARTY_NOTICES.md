@@ -79,7 +79,8 @@ pipe. The application and native capture core do not link to the receiver DLL.
 - Version/commit: v1.1.2 / `34ba6cfd49b2432cf30e89913d66decb775763e4`
 - AirPlayServer wrapper: MIT
 - PlayFair implementation and receiver runtime: GPL version 3
-- FFmpeg 4.4.2 runtime: LGPL version 2.1 or later
+- FFmpeg `63b2b0f47d` H.264/ALAC runtime (avcodec 58.137.100): LGPL version 2.1 or later;
+  compact same-ABI rebuild, with source recipe and MinGW notices in the source record
 - Fraunhofer FDK AAC: Fraunhofer FDK AAC license
 - Exact hashes, source links and license files:
   `third_party/airplay-server/SOURCE.md`
@@ -96,21 +97,28 @@ the iPhoneMirror media-control IPC contract.
 
 ## FFmpeg 8.1.2 media-output runtime
 
-The default release uses an FFmpeg essentials build staged at `tools/ffmpeg/`.
-An explicitly requested compact edition may omit this runtime and use a
-user-installed FFmpeg from `PATH`. The bundled runtime is prepared by
-`scripts/prepare_ffmpeg.ps1`, which verifies the published archive SHA-256
-before copying `ffmpeg.exe`, the license, build README and source record into
-the application output. This runtime is independent of the older FFmpeg DLLs
-distributed with AirPlayServer.
+The default release uses a custom compact FFmpeg build staged at `tools/ffmpeg/`.
+It remains bundled and does not require a user-installed FFmpeg. The build pins
+the official source archive, verifies the resulting runtime files, and retains
+H.264 CPU/GPU encoding, AAC/Opus, recording and RTMP/SRT/WHIP output. This runtime
+is independent of the older FFmpeg DLLs distributed with AirPlayServer.
 
-- Binary package: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip
+- Build recipe: `scripts/build_compact_ffmpeg.ps1` and `scripts/ffmpeg-compact-build.sh`
 - Upstream FFmpeg source: https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
-- License for the distributed essentials build: GNU General Public License v3
+- License for the compact build: GNU General Public License v3 or later
 - Included license and build/source metadata: `tools/ffmpeg/LICENSE.txt`,
   `tools/ffmpeg/README.txt` and `tools/ffmpeg/SOURCE.txt`
-- Pinned archive and extracted-file hashes:
-  `scripts/ffmpeg-runtime-manifest.psd1`
+- Source SHA-256: `464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c`
+- The generated runtime manifest pins all distributed files; `SOURCE.txt` records
+  MSYS2 dependency versions and `LICENSE.txt` includes their license texts.
+- Dependencies include x264 (GPL-2.0-or-later), Opus (BSD), SRT (MPL-2.0),
+  OpenSSL/oneVPL (Apache-2.0), AMF/NVIDIA headers (MIT), and MinGW/GCC runtimes
+  under their respective runtime exceptions and permissive notices.
+- Distributors must provide corresponding sources, including matching dependency
+  build recipes and patches, with the binary release. MSYS2 dependency recipes:
+  https://github.com/msys2/MINGW-packages
+- The former Gyan essentials build remains an explicit fallback through
+  `scripts/ffmpeg-runtime-manifest.psd1`, not the default profile.
 - The build enables GPL components such as libx264 and is therefore distributed
   under GPLv3 terms. It encodes projection video and, when available, muxes the
   captured iPhone PCM audio into recordings and live-streaming output.

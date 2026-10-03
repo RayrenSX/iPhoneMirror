@@ -71,8 +71,7 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
         if (key is Key.Tab or Key.Escape) return;
         if (Keyboard.Modifiers == ModifierKeys.None && key is Key.Back or Key.Delete)
         {
-            row.Shortcut = KeyboardShortcut.Unbound;
-            StatusText = string.Empty;
+            TryAssignShortcut(row, KeyboardShortcut.Unbound);
             e.Handled = true;
             return;
         }
@@ -83,8 +82,7 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
             return;
         }
 
-        row.Shortcut = shortcut;
-        StatusText = string.Empty;
+        TryAssignShortcut(row, shortcut);
         e.Handled = true;
     }
 
@@ -100,16 +98,39 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
         if (!KeyboardShortcut.TryCreateMouse(button, Keyboard.Modifiers,
                 out var shortcut))
             return;
-        row.Shortcut = shortcut;
-        StatusText = string.Empty;
+        TryAssignShortcut(row, shortcut);
         e.Handled = true;
     }
 
     private void OnResetRowClick(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not ShortcutBindingRow row) return;
-        row.Shortcut = row.DefaultShortcut;
+        TryAssignShortcut(row, row.DefaultShortcut);
+    }
+
+    internal bool TryAssignShortcut(ShortcutBindingRow row, KeyboardShortcut shortcut)
+    {
+        if (row.Action == BluetoothShortcutAction.BossKey && shortcut.IsMouse)
+        {
+            StatusText = LocalizationService.Get("ShortcutSettingsBossKeyKeyboardOnly");
+            return false;
+        }
+        if (!shortcut.IsValidFor(row.Action))
+        {
+            StatusText = LocalizationService.Get("ShortcutSettingsInvalid");
+            return false;
+        }
+        var conflict = Rows.FirstOrDefault(other => other != row &&
+            shortcut.IsBound && other.Shortcut == shortcut);
+        if (conflict is not null)
+        {
+            StatusText = LocalizationService.Format("ShortcutSettingsDuplicateBindingFormat",
+                shortcut.DisplayText, conflict.Label);
+            return false;
+        }
+        row.Shortcut = shortcut;
         StatusText = string.Empty;
+        return true;
     }
 
     private void OnSaveClick(object sender, RoutedEventArgs e)

@@ -5,6 +5,7 @@
 #include <mfapi.h>
 #include <mfidl.h>
 #include <wrl.h>
+#include <mutex>
 
 namespace iPhoneMirror::virtual_camera {
 
@@ -62,6 +63,7 @@ public:
     IFACEMETHODIMP CopyAllItems(IMFAttributes* destination) override;
 
 private:
+    std::mutex source_mutex_;
     Microsoft::WRL::ComPtr<IMFAttributes> attributes_;
     Microsoft::WRL::ComPtr<IMFMediaSource> source_;
 };

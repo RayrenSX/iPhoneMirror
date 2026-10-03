@@ -63,10 +63,29 @@ The receiver includes or derives from the following components:
 
 - AirPlayServer wrapper and UI: MIT (`LICENSE-MIT.txt`).
 - PlayFair FairPlay implementation: GPL-3.0 (`LICENSE-PLAYFAIR-GPL-3.0.md`).
-- FFmpeg 4.4.2 H.264 decoder, resampling and scaling libraries: LGPL-2.1-or-later
-  (`LICENSE-FFMPEG-LGPL-2.1.txt`). The native Windows build avoids the MSYS2
-  runtime and reports only the libraries required by the receiver.
+- FFmpeg snapshot `63b2b0f47df420007c53888ce0e8383d24b8fb06`: LGPL-2.1-or-later
+  (`LICENSE-FFMPEG-LGPL-2.1.txt`). The original DLL identifies itself as
+  `N-102062-g63b2b0f47d`, with avcodec 58.137.100; the previous 4.4.2 label was
+  incorrect. The replacement preserves that source/ABI and enables only H.264
+  and ALAC decoding, the H.264 parser, swscale and swresample. SIMD assembly
+  and Windows threading remain enabled. GCC/winpthreads support is linked
+  statically; the DLLs require no MSYS2 runtime or developer-installed libraries.
+  Build dependency notices are in `NOTICE-FFMPEG-BUILD.txt`.
 - Fraunhofer FDK AAC: Fraunhofer FDK AAC license (`NOTICE-FDK-AAC.txt`).
+
+FFmpeg corresponding source:
+https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/63b2b0f47df420007c53888ce0e8383d24b8fb06
+
+Archive SHA-256: `2d6e9244be21b32756c481f4653d7f17ae08608dd2db1ba04e826cf0052df860`.
+Rebuild using `scripts/build_airplay_ffmpeg.ps1` and `scripts/ffmpeg-airplay-build.sh`
+with MSYS2 UCRT64 (the vendored build used GCC 16.2.0). The checked-in
+`scripts/ffmpeg-airplay-mathops.patch` preserves x86 five-bit shift semantics while
+making the operand acceptable to current binutils. This is the only source patch.
+`scripts/test_airplay_ffmpeg.ps1` verifies H.264 orientation changes, scaling and
+ALAC/PCM output against reference decoded bytes. Runtime hashes are pinned in
+`SHA256SUMS.txt` and the application's `RuntimeBinaryIntegrity.cs`; update both
+after validating a rebuild. Distributors must provide corresponding FFmpeg
+sources, this recipe/patch, and the MinGW dependency sources with their binaries.
 
 AirPlay is an Apple protocol and trademark. This is an unofficial compatible
 receiver. iPhoneMirror supplies its own Windows DNS-SD compatibility DLL and

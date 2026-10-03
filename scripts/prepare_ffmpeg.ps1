@@ -1,12 +1,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Destination
+    [string]$Destination,
+    [string]$RuntimeManifestPath
 )
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $ManifestPath = Join-Path $PSScriptRoot 'ffmpeg-runtime-manifest.psd1'
+if ($RuntimeManifestPath) { $ManifestPath = [IO.Path]::GetFullPath($RuntimeManifestPath) }
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
     throw "FFmpeg runtime manifest is missing: $ManifestPath"
 }
@@ -32,6 +34,28 @@ $FullRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\')
 if (-not $FullDestination.StartsWith($FullRoot + '\',
         [StringComparison]::OrdinalIgnoreCase)) {
     throw "FFmpeg destination is outside the workspace: $FullDestination"
+}
+
+if ($Manifest.PrebuiltDirectory) {
+    $prebuilt = [IO.Path]::GetFullPath([string]$Manifest.PrebuiltDirectory)
+    if ($ExpectedFiles.Count -ne 4 -or @('ffmpeg.exe','LICENSE.txt','README.txt','SOURCE.txt').Where({
+        -not $ExpectedFiles.Contains($_) -or $ExpectedFiles[$_] -notmatch '^[0-9A-Fa-f]{64}$'
+    }).Count) { throw 'Compact FFmpeg manifest must pin the executable and all three notice files.' }
+    foreach ($entry in $ExpectedFiles.GetEnumerator()) {
+        if ($entry.Key -notin @('ffmpeg.exe','LICENSE.txt','README.txt','SOURCE.txt')) {
+            throw 'Unexpected file in compact FFmpeg manifest.'
+        }
+        if ((Get-FileHash -LiteralPath (Join-Path $prebuilt $entry.Key) -Algorithm SHA256).Hash -ine $entry.Value) {
+            throw "Compact FFmpeg file hash mismatch: $($entry.Key)"
+        }
+    }
+    & (Join-Path $PSScriptRoot 'test_compact_ffmpeg.ps1') -Ffmpeg (Join-Path $prebuilt 'ffmpeg.exe')
+    New-Item -ItemType Directory -Force -Path $FullDestination | Out-Null
+    foreach ($name in @('ffmpeg.exe','LICENSE.txt','README.txt','SOURCE.txt')) {
+        Copy-Item -LiteralPath (Join-Path $prebuilt $name) -Destination $FullDestination -Force
+    }
+    Write-Output (Join-Path $FullDestination 'ffmpeg.exe')
+    return
 }
 
 New-Item -ItemType Directory -Force -Path $CacheRoot | Out-Null

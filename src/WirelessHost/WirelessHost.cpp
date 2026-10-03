@@ -203,33 +203,10 @@ public:
             }
 
             if (header.type == iPhoneMirror::wireless::MessageType::Video) {
-                // Original-quality AirPlay frames are commonly 5-8 MB.  If
-                // the pipe writer is still busy with the previous frame, do
-                // not copy another identical frame into the queue: that copy
-                // happens on AirPlay's decoder callback thread and can stall
-                // the sender long enough to look like an orientation freeze.
-                // A geometry change is always retained so a rotation can
-                // replace the old frame as soon as it arrives.
-                const auto same_device = [&header](const QueuedMessage& queued) {
-                    return queued.header.type ==
-                            iPhoneMirror::wireless::MessageType::Video &&
-                        std::strncmp(queued.header.device_id, header.device_id,
-                            iPhoneMirror::wireless::DeviceIdBytes) == 0;
-                };
-                const auto queued_video = std::ranges::find_if(queue_, same_device);
-                const auto writing_same_device =
-                    writing_video_device_ == std::string_view(header.device_id);
-                const auto writing_same_geometry = writing_same_device &&
-                    writing_video_width_ == header.width &&
-                    writing_video_height_ == header.height;
-                const auto queued_same_geometry = queued_video != queue_.end() &&
-                    queued_video->header.width == header.width &&
-                    queued_video->header.height == header.height;
-                if ((queued_same_geometry || writing_same_geometry) &&
-                    (queued_video != queue_.end() || writing_same_device)) {
-                    dropped_video_.fetch_add(1, std::memory_order_relaxed);
-                    return true;
-                }
+                // Keep one latest pending frame per device, including while
+                // another frame is inside WriteFile. Equal dimensions do not
+                // imply equal pixels; a static AirPlay screen may never send
+                // another frame after its final update.
                 for (auto position = queue_.begin(); position != queue_.end();) {
                     if (position->header.type == iPhoneMirror::wireless::MessageType::Video &&
                         std::strncmp(position->header.device_id, header.device_id,
@@ -405,16 +382,6 @@ private:
                 }
                 message = std::move(queue_.front());
                 queue_.pop_front();
-                if (message.header.type ==
-                    iPhoneMirror::wireless::MessageType::Video)
-                {
-                    writing_video_device_ = message.header.device_id;
-                    writing_video_width_ = message.header.width;
-                    writing_video_height_ = message.header.height;
-                } else {
-                    writing_video_device_.clear();
-                    writing_video_width_ = writing_video_height_ = 0;
-                }
             }
 
             // A large original-quality frame may still be in the writer's
@@ -450,11 +417,6 @@ private:
             std::scoped_lock lock(mutex_);
             buffered_bytes_ -= message.size();
             --buffered_messages_;
-            if (message.header.type == iPhoneMirror::wireless::MessageType::Video)
-            {
-                writing_video_device_.clear();
-                writing_video_width_ = writing_video_height_ = 0;
-            }
             if (!written) {
                 write_failures_.fetch_add(1, std::memory_order_relaxed);
                 last_write_error_.store(write_error, std::memory_order_relaxed);
@@ -477,9 +439,6 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     std::deque<QueuedMessage> queue_;
-    std::string writing_video_device_;
-    std::uint32_t writing_video_width_{};
-    std::uint32_t writing_video_height_{};
     std::size_t buffered_bytes_{};
     std::size_t buffered_messages_{};
     std::uint64_t sequence_{};

@@ -28,6 +28,57 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--component-audio-formats", var referenceFfmpeg])
+                return RunComponentAudioFormatTests(referenceFfmpeg);
+            if (args is ["--component-runtime"])
+                return RunComponentRuntimeTests();
+            if (args is ["--keyboard-mapping", var mappingOutput])
+                return RunKeyboardMappingTests(mappingOutput);
+            if (args is ["--keyboard-mapping-live-probe", var mappingLiveOutput])
+                return RunKeyboardMappingLiveProbe(mappingLiveOutput);
+            if (args is ["--keyboard-mapping-live-actions", var mappingActionsOutput, var mappingTransport])
+                return RunKeyboardMappingLiveProbe(mappingActionsOutput, true, mappingTransport == "wireless");
+            if (args is ["--component-public-large", var publicLargeOutput])
+            {
+                Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY", Path.GetFullPath(Path.Combine(publicLargeOutput, "logs")));
+                ComponentDownloadNetworkTests.RunPublicAsync(publicLargeOutput, "http://127.0.0.1:7897", mirrors: true, largeOnly: true).GetAwaiter().GetResult();
+                return 0;
+            }
+            if (args is ["--component-network", var archive, var metadata, var networkOutput])
+            {
+                Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY", Path.GetFullPath(Path.Combine(networkOutput, "logs")));
+                ComponentDownloadNetworkTests.RunAsync(archive, metadata, networkOutput).GetAwaiter().GetResult();
+                return 0;
+            }
+            if (args is ["--clipboard-sync"])
+                return RunClipboardSyncRegressionTests();
+            if (args is ["--media-bridge-idle"])
+            {
+                Console.In.ReadToEnd();
+                return 0;
+            }
+            if (args is ["--media-review"])
+            {
+                var mediaApp = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                typeof(App).GetProperty("IsUiPreviewMode", KeyboardTestMembers)!.SetValue(mediaApp, true);
+                mediaApp.InitializeComponent();
+                try { TestMediaReviewRegressions(); }
+                finally { mediaApp.Shutdown(); }
+                return 0;
+            }
+            if (args is ["--virtual-camera-regression"])
+                return RunVirtualCameraRegressionTests();
+            if (args is ["--updater-elevation-regression"])
+                return RunUpdaterElevationRegressionTests();
+            if (args is ["--capture-review"])
+            {
+                var captureApp = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                typeof(App).GetProperty("IsUiPreviewMode", KeyboardTestMembers)!.SetValue(captureApp, true);
+                captureApp.InitializeComponent();
+                try { TestCaptureReviewRegressions(); }
+                finally { captureApp.Shutdown(); }
+                return 0;
+            }
             if (args is ["--logic-review"])
             {
                 var reviewApp = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -56,6 +107,8 @@ internal static partial class Program
                 Console.WriteLine("UI theme, window and control runtime regressions passed.");
                 return 0;
             }
+            if (args is ["--component-download-ui", var componentOutput])
+                return RunComponentDownloadTests(componentOutput);
             if (args is ["--interaction-regression"])
                 return RunInteractionRegressionTests();
             if (args is ["--preview-context-menu"])
@@ -72,6 +125,8 @@ internal static partial class Program
                 return RunWorkspaceRegressionTests();
             if (args is ["--keyboard-focus"])
                 return RunKeyboardFocusTests();
+            if (args is ["--shortcuts"])
+                return RunKeyboardFocusTests(shortcutReview: true);
             if (args is ["--preview-pointer"])
                 return RunKeyboardFocusTests(initializeHiddenHandle: true);
             if (args is ["--driver-localization-audit", var localizedDriverAssembly])
@@ -602,15 +657,8 @@ internal static partial class Program
                 throw new InvalidOperationException("FFmpeg probe returned no capabilities.");
             Console.WriteLine($"Encoder: {ReadProperty<string>(capabilities,
                 "PreferredH264Encoder")}");
-            var requestType = RequireType(assembly,
-                "IPhoneMirror.App.Services.MediaOutputRequest");
-            var kindType = RequireType(assembly,
-                "IPhoneMirror.App.Services.MediaOutputKind");
-            var request = Activator.CreateInstance(requestType,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null, new object[] { Enum.Parse(kindType, "Recording"), destination,
-                    width, height, frameRate, bitrateKbps, string.Empty }, null) ??
-                throw new InvalidOperationException("Recording request could not be created.");
+            var request = CreateLiveRecordingRequest(assembly, destination,
+                width, height, frameRate, bitrateKbps);
             await InvokeAsyncResult(RequireMethod(serviceType, "StartAsync",
                 BindingFlags.Instance | BindingFlags.NonPublic).Invoke(service,
                     [sessionHandle, request, capabilities, CancellationToken.None]) ??
@@ -737,6 +785,17 @@ internal static partial class Program
         }
     }
 
+    private static object CreateLiveRecordingRequest(Assembly assembly,
+        string destination, uint width, uint height, int frameRate, int bitrateKbps)
+    {
+        var requestType = RequireType(assembly, "IPhoneMirror.App.Services.MediaOutputRequest");
+        var kindType = RequireType(assembly, "IPhoneMirror.App.Services.MediaOutputKind");
+        return Activator.CreateInstance(requestType, KeyboardTestMembers, null,
+            [Enum.Parse(kindType, "Recording"), destination, width, height,
+                frameRate, bitrateKbps, string.Empty, null], null) ??
+            throw new InvalidOperationException("Recording request could not be created.");
+    }
+
     private static async Task<object?> InvokeAsyncResult(object awaitable)
     {
         if (awaitable is not Task task)
@@ -766,7 +825,7 @@ internal static partial class Program
 
     private static void TestUpdateWindowThemeSwitch()
     {
-        var application = new App();
+        var application = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         typeof(App).GetProperty("IsUiPreviewMode", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(application, true);
         application.InitializeComponent();
@@ -1055,7 +1114,7 @@ internal static partial class Program
         }
         finally
         {
-            owner.Close();
+            CloseWorkspaceTestWindow(owner);
         }
     }
 
@@ -1102,7 +1161,7 @@ internal static partial class Program
         }
         finally
         {
-            window.Close();
+            CloseWorkspaceTestWindow(window);
         }
     }
 

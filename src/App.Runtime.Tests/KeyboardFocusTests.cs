@@ -44,7 +44,8 @@ internal static partial class Program
     private static object? KeyboardCall(object owner, string name, params object?[] args) =>
         owner.GetType().GetMethod(name, KeyboardTestMembers)!.Invoke(owner, args);
 
-    private static int RunKeyboardFocusTests(bool initializeHiddenHandle = false)
+    private static int RunKeyboardFocusTests(bool initializeHiddenHandle = false,
+        bool shortcutReview = false)
     {
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         typeof(App).GetProperty("IsUiPreviewMode", KeyboardTestMembers)!.SetValue(app, true);
@@ -110,6 +111,8 @@ internal static partial class Program
                 KeyboardCall(KeyboardField(vm, "_reverseInputRouter"), "Begin", udid,
                     Enum.Parse(assembly.GetType("IPhoneMirror.App.Services.ReverseControlMode")!, mode));
                 TestKeyboardFocusRoute(window, other, udid, packets, mode != "Bluetooth");
+                if (shortcutReview)
+                    TestShortcutReview(window, other, udid, packets, mode);
                 if (initializeHiddenHandle && mode != "Bluetooth")
                     TestMainPreviewPointerRoute(window, device, packets, mode);
                 Console.WriteLine($"{mode}: foreground routing, releases, queued input and independent-window checks passed.");

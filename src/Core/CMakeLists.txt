@@ -99,6 +99,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
     add_executable(iPhoneMirror.Core.Tests
         tests/CoreTests.cpp
         tests/PreviewOpacitySmoke.cpp
+        tests/PreviewStaticFrameSmoke.cpp
         src/Renderer/D3D11PreviewRenderer.cpp
         src/Protocol/Plist.cpp
         src/Protocol/QuickTimePacket.cpp
@@ -126,6 +127,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
     )
     target_compile_definitions(iPhoneMirror.Core.Tests PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+        IPHONEMIRROR_PREVIEW_TEST_HOOKS
     )
     target_compile_options(iPhoneMirror.Core.Tests PRIVATE /W4 /permissive- /utf-8 /EHsc)
     target_link_libraries(iPhoneMirror.Core.Tests PRIVATE
@@ -151,6 +153,19 @@ if(IPHONEMIRROR_BUILD_TESTS)
     set_tests_properties(CoreProtocolTests PROPERTIES
         WORKING_DIRECTORY $<TARGET_FILE_DIR:iPhoneMirror.Core.Tests>
     )
+
+    add_executable(iPhoneMirror.QtUsbTransport.Tests
+        tests/QtUsbTransportTests.cpp
+        src/Transport/QtUsbTransport.cpp
+        src/Protocol/QuickTimePacket.cpp)
+    target_include_directories(iPhoneMirror.QtUsbTransport.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/third_party/libusb/include)
+    target_compile_definitions(iPhoneMirror.QtUsbTransport.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.QtUsbTransport.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    add_test(NAME QtUsbTransportTests COMMAND iPhoneMirror.QtUsbTransport.Tests)
 
     add_executable(iPhoneMirror.OutputModeState.Tests
         tests/OutputModeStateTests.cpp)

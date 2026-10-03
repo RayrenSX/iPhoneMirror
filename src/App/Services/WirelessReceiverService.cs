@@ -207,14 +207,16 @@ internal readonly record struct WirelessRuntimeProbeResult(
 internal sealed class WirelessReceiverService
 {
     private readonly object _probeLock = new();
-    private readonly Dictionary<WirelessReceiverBackend, WirelessRuntimeProbeResult>
-        _successfulProbes = [];
 
     internal string? ExecutablePath => GetExecutablePath(WirelessReceiverBackend.Original);
 
     internal string? GetExecutablePath(WirelessReceiverBackend backend)
     {
         var runtime = WirelessReceiverConfiguration.GetRuntime(backend);
+        if (runtime.Backend == WirelessReceiverBackend.UxPlay &&
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(runtime.OverrideEnvironmentVariable)) &&
+            UxPlayComponent.FindInstalledExecutable() is { } installed)
+            return installed;
         return WirelessReceiverConfiguration.FindExecutable(runtime.Backend,
             AppContext.BaseDirectory,
             Environment.GetEnvironmentVariable(runtime.OverrideEnvironmentVariable));
@@ -246,10 +248,14 @@ internal sealed class WirelessReceiverService
         var runtime = WirelessReceiverConfiguration.GetRuntime(backend);
         lock (_probeLock)
         {
-            if (_successfulProbes.TryGetValue(runtime.Backend, out var cached)) return cached;
             var executable = GetExecutablePath(runtime.Backend);
             if (executable is null)
                 return new(WirelessRuntimeProbeStatus.LoadFailed, -1);
+            if (!UxPlayComponent.VerifyForLaunch(executable))
+                return new(WirelessRuntimeProbeStatus.CodeIntegrityBlocked, 40);
+            // A stopped receiver may have been upgraded or repaired since the
+            // last launch. A prior successful probe cannot attest to today's
+            // DLLs, executable or plugin set; each start gets a fresh preflight.
             var directory = Path.GetDirectoryName(executable);
             var integrityFailure = string.Empty;
             if (directory is null ||
@@ -285,7 +291,6 @@ internal sealed class WirelessReceiverService
                     return new(WirelessRuntimeProbeStatus.TimedOut, -1);
                 }
                 var result = WirelessRuntimeProbeResult.FromExitCode(process.ExitCode);
-                if (result.Success) _successfulProbes[runtime.Backend] = result;
                 return result;
             }
             catch (Win32Exception error) when (IsCodeIntegrityError(error.NativeErrorCode))

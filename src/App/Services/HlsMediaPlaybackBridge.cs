@@ -131,7 +131,7 @@ internal sealed class HlsMediaPlaybackBridge : IDisposable
             // TLS read. Use a Safari-like identity and bounded I/O waits so
             // the caller can restart the bridge instead of hanging forever.
             "-user_agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-            "-headers", "Accept: */*\\r\\nAccept-Language: zh-CN,zh;q=0.9,en;q=0.8\\r\\n",
+            "-headers", "Accept: */*\r\nAccept-Language: zh-CN,zh;q=0.9,en;q=0.8\r\n",
             "-rw_timeout", "15000000",
             "-protocol_whitelist", "http,https,tcp,tls,crypto",
             "-i", source.AbsoluteUri,
@@ -215,7 +215,7 @@ internal sealed class HlsMediaPlaybackBridge : IDisposable
                     string request;
                     try
                     {
-                        request = await ReadRequestLineAsync(stream,
+                        request = await ReadRequestHeadersAsync(stream,
                             requestTimeout.Token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (
@@ -256,20 +256,33 @@ internal sealed class HlsMediaPlaybackBridge : IDisposable
         catch (ObjectDisposedException) { }
     }
 
-    private static async Task<string> ReadRequestLineAsync(NetworkStream stream,
+    private static async Task<string> ReadRequestHeadersAsync(NetworkStream stream,
         CancellationToken cancellationToken)
     {
         var line = new StringBuilder();
+        string? request = null;
         var one = new byte[1];
-        while (line.Length < 4096)
+        // Consume the complete request header before streaming a response.
+        // Closing a Windows socket with unread request headers sends a reset,
+        // which truncates finite HLS playback even after all TS bytes were sent.
+        for (var total = 0; total < 32768; total++)
         {
             var count = await stream.ReadAsync(one, cancellationToken)
                 .ConfigureAwait(false);
             if (count == 0) return string.Empty;
-            if (one[0] == (byte)'\n') break;
-            if (one[0] != (byte)'\r') line.Append((char)one[0]);
+            if (one[0] == (byte)'\n')
+            {
+                if (request is null) request = line.ToString();
+                else if (line.Length == 0) return request;
+                line.Clear();
+            }
+            else if (one[0] != (byte)'\r')
+            {
+                if (line.Length >= 4096) return string.Empty;
+                line.Append((char)one[0]);
+            }
         }
-        return line.ToString();
+        return string.Empty;
     }
 
     public void Dispose()

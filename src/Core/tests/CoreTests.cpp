@@ -2221,10 +2221,15 @@ void test_logging_shutdown_boundary() {
 } // namespace
 
 int run_preview_opacity_smoke();
+int run_preview_static_frame_smoke(bool retry_only = false);
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--preview-opacity-only")
         return run_preview_opacity_smoke();
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-static-frame-only")
+        return run_preview_static_frame_smoke();
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-static-frame-retry-only")
+        return run_preview_static_frame_smoke(true);
     if (argc == 2 && std::string_view(argv[1]) == "--usb-runtime-probe-only") {
         try {
             test_libusb_runtime();

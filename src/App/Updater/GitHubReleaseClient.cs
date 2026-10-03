@@ -19,6 +19,7 @@ internal enum UpdateDownloadPhase
     Download,
     ConnectivityTest,
     ThroughputTest,
+    Verification,
 }
 
 internal sealed record UpdateDownloadProgress(
@@ -132,6 +133,7 @@ internal sealed class GitHubReleaseClient : IDisposable
     private static readonly TimeSpan CandidateThroughputWindow =
         TimeSpan.FromSeconds(12);
     private static readonly TimeSpan DownloadStallTimeout = TimeSpan.FromSeconds(30);
+    private const int MaximumRankedRoutes = 4;
     private static readonly (string Name, Uri Uri)[] ReleaseEndpoints =
     [
         ("github-api", new Uri(
@@ -416,8 +418,15 @@ internal sealed class GitHubReleaseClient : IDisposable
         Exception? lastError = null;
         var downloadCandidates = await RankDownloadCandidatesAsync(asset,
             allowMirrorFallback, progress, cancellationToken);
-        foreach (var downloadUri in downloadCandidates)
+        // Try at most three measured mirrors plus the official route. A second
+        // pass is only for transient failures; 404s and bad hashes are not retried.
+        var routes = downloadCandidates.Take(MaximumRankedRoutes - 1).ToList();
+        if (!routes.Contains(asset.DownloadUri)) routes.Add(asset.DownloadUri);
+        var attempts = new Queue<(Uri Uri, bool Retried)>(routes.Select(uri => (uri, false)));
+        while (attempts.TryDequeue(out var attempt))
         {
+            var downloadUri = attempt.Uri;
+            if (attempt.Retried) await Task.Delay(500, cancellationToken);
             TryDelete(partial);
             progress?.Report(new UpdateDownloadProgress(0,
                 asset.Size > 0 ? asset.Size : null, 0));
@@ -432,6 +441,8 @@ internal sealed class GitHubReleaseClient : IDisposable
                 var segmentCount = await DownloadFileAsync(asset, downloadUri, partial, progress,
                     stallTimeout, stallTimeout.Token);
                 stallTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
+                progress?.Report(new UpdateDownloadProgress(asset.Size, asset.Size, 0,
+                    UpdateDownloadPhase.Verification));
                 var verifiedSha256 = await VerifyAsync(release, asset, partial, allowMirrorFallback,
                     cancellationToken);
                 File.Move(partial, destination, overwrite: true);
@@ -449,6 +460,7 @@ internal sealed class GitHubReleaseClient : IDisposable
             }
             catch (Exception error) when (error is HttpRequestException or
                                            OperationCanceledException or
+                                           HttpIOException or
                                            EndOfStreamException or
                                            InvalidDataException)
             {
@@ -456,14 +468,26 @@ internal sealed class GitHubReleaseClient : IDisposable
                 DiagnosticLogger.Exception("updater", "download_endpoint_failed",
                     error, ("release", release.TagName), ("asset", asset.Name),
                     ("endpoint", downloadUri.Host));
+                if (!attempt.Retried && IsTransientDownloadFailure(error))
+                    attempts.Enqueue((downloadUri, true));
             }
         }
 
         TryDelete(partial);
         if (lastError is InvalidDataException invalidData) throw invalidData;
         throw new HttpRequestException(
-            LocalizationService.Get("UpdateDownloadEndpointsUnavailable"), lastError);
+            LocalizationService.Get("UpdateDownloadEndpointsUnavailable"), lastError,
+            (lastError as HttpRequestException)?.StatusCode);
     }
+
+    private static bool IsTransientDownloadFailure(Exception error) => error switch
+    {
+        OperationCanceledException or EndOfStreamException or HttpIOException => true,
+        HttpRequestException { StatusCode: null } => true,
+        HttpRequestException { StatusCode: var status } =>
+            status is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int?)status >= 500,
+        _ => false,
+    };
 
     internal static IReadOnlyList<Uri> BuildDownloadCandidates(
         ReleaseAsset asset, bool allowMirrorFallback)

@@ -14,6 +14,7 @@ try {
     $source = Join-Path $projectRoot 'tools'
     $stage = New-UsbBridgeBuildSource -RecipeRoot $recipe -SourceRoot $source -WorkRoot $workRoot
     $files = @((Get-Item -LiteralPath (Join-Path $source 'usb_touch_bridge.py'))) +
+        @((Get-Item -LiteralPath (Join-Path $source 'bridge_runtime_check.py'))) +
         @(Get-ChildItem -LiteralPath (Join-Path $source 'iostouch') -Recurse -File -Filter '*.py')
     foreach ($file in $files) {
         $relative = $file.FullName.Substring($source.Length + 1)

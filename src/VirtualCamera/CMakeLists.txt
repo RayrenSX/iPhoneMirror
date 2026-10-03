@@ -68,6 +68,21 @@ target_link_libraries(iPhoneMirror.VirtualCamera.SignalPublisher PRIVATE
     iPhoneMirror.VirtualCamera ole32)
 
 if(IPHONEMIRROR_BUILD_TESTS)
+    add_executable(iPhoneMirror.MediaSourceActivate.Tests
+        tests/MediaSourceActivateTests.cpp)
+    target_compile_definitions(iPhoneMirror.MediaSourceActivate.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.MediaSourceActivate.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_include_directories(iPhoneMirror.MediaSourceActivate.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(iPhoneMirror.MediaSourceActivate.Tests PRIVATE
+        mf mfplat mfuuid ole32)
+    add_dependencies(iPhoneMirror.MediaSourceActivate.Tests iPhoneMirror.VirtualCamera)
+    add_test(NAME MediaSourceActivateTests COMMAND iPhoneMirror.MediaSourceActivate.Tests
+        $<TARGET_FILE:iPhoneMirror.VirtualCamera>)
+    set_tests_properties(MediaSourceActivateTests PROPERTIES TIMEOUT 20)
+
     add_executable(iPhoneMirror.VirtualCamera.Component.Tests
         tests/VirtualCameraComponentTests.cpp
         src/FrameExchange.cpp)

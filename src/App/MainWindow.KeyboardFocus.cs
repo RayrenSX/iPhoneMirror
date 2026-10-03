@@ -79,6 +79,9 @@ public partial class MainWindow
 
     private void OnMainKeyboardDeactivated(object? sender, EventArgs e)
     {
+        _shortcutKeysDown.Clear();
+        _ordinaryKeysDown.Clear();
+        _mouseShortcutButtons.Clear();
         _viewModel.SetControlInputDevice(null);
         UnregisterDeviceHotkeys();
         _localFullScreenEscapeDown = false;
@@ -99,6 +102,9 @@ public partial class MainWindow
     {
         if (!active)
         {
+            _shortcutKeysDown.Clear();
+            _ordinaryKeysDown.Clear();
+            _mouseShortcutButtons.Clear();
             _viewModel.SetControlInputDevice(null);
             UnregisterDeviceHotkeys();
             HandleControlKeyboardInput(new PreviewKeyboardEventArgs(
@@ -115,7 +121,9 @@ public partial class MainWindow
             Services.BluetoothShortcutAction.WirelessControl or
             Services.BluetoothShortcutAction.WiredControl;
 
-    private bool ShouldRegisterDeviceHotkeys => IsControlKeyboardForeground &&
+    private readonly HashSet<int> _failedDeviceHotKeyIds = [];
+
+    private bool ShouldRegisterDeviceHotkeys => _shortcutSettingsWindow is null && IsControlKeyboardForeground &&
         (IsBluetoothControlActive || _viewModel.IsUsbControlTarget(ActiveInputDeviceUdid));
 
     private void UnregisterDeviceHotkeys()
@@ -148,7 +156,15 @@ public partial class MainWindow
             if (_registeredHotKeyIds.Contains(id)) continue;
             if (RegisterHotKey(_windowSource.Handle, id,
                     shortcut.RegistrationModifiers, shortcut.VirtualKey))
+            {
                 _registeredHotKeyIds.Add(id);
+                _failedDeviceHotKeyIds.Remove(id);
+            }
+            else if (_failedDeviceHotKeyIds.Add(id))
+            {
+                _viewModel.AddUiLog(Localization.LocalizationService.Format(
+                    "ShortcutRegistrationFailedFormat", shortcut.DisplayText));
+            }
         }
         _hotKeyRegistered = _registeredHotKeyIds.Count != 0;
     }

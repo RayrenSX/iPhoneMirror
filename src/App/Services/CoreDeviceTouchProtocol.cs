@@ -65,4 +65,5 @@ public static class CoreDeviceTouchProtocol
     public const ushort IndigoVolumeDown = 0xEA;
     public const ushort IndigoMute = 0xE2;
     public const ushort IndigoSiri = 0xCF;
+    public const ushort GlobeKeyboardLayoutUsage = 0x029D;
 }

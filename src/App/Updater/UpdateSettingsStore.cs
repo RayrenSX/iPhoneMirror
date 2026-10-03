@@ -20,6 +20,7 @@ public enum ApplicationDisplayMode
 
 internal sealed class UpdateSettings
 {
+    public KeyboardMappingSettings KeyboardMapping { get; set; } = new();
     public bool CheckOnStartup { get; set; } = true;
     public bool AutoDownload { get; set; }
     public bool AllowMirrorFallback { get; set; } = false;
@@ -99,6 +100,7 @@ internal sealed class UpdateSettings
 
     internal UpdateSettings Clone() => new()
     {
+        KeyboardMapping = KeyboardMapping.Clone(),
         CheckOnStartup = CheckOnStartup,
         AutoDownload = AutoDownload,
         AllowMirrorFallback = AllowMirrorFallback,
@@ -397,12 +399,14 @@ internal sealed class UpdateSettingsStore
                 settings.BluetoothSiriShortcutModifiers = 0;
                 settings.BluetoothShortcutSchema = 6;
             }
-            if (!KeyboardShortcut.IsValid(settings.BluetoothBossShortcutModifiers,
-                    settings.BluetoothBossShortcutVirtualKey))
+            var bossKey = KeyboardShortcut.FromSettings(settings, BluetoothShortcutAction.BossKey);
+            if (settings.BluetoothBossShortcutModifiers != (int)bossKey.Modifiers ||
+                settings.BluetoothBossShortcutVirtualKey != (int)bossKey.VirtualKey)
             {
-                settings.BluetoothBossShortcutVirtualKey = 0x42;
-                settings.BluetoothBossShortcutModifiers = 0x0003;
+                settings.BluetoothBossShortcutVirtualKey = (int)bossKey.VirtualKey;
+                settings.BluetoothBossShortcutModifiers = (int)bossKey.Modifiers;
                 settings.BluetoothShortcutSchema = 6;
+                migrationChanged = true;
             }
             settings.BluetoothWheelSensitivity = Math.Clamp(
                 double.IsFinite(settings.BluetoothWheelSensitivity)

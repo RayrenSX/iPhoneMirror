@@ -425,6 +425,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Activated += OnMainKeyboardActivated;
         Closed += OnClosed;
         Closing += OnClosing;
+        InitializeKeyboardMapping();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_created",
             ("thread", Environment.CurrentManagedThreadId),
             ("dpi", PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 0)));
@@ -489,11 +490,24 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private bool TryRegisterShortcutSet(
         IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
-        out BluetoothShortcutAction failedAction)
+        out BluetoothShortcutAction failedAction) =>
+        TryRegisterShortcutSetCore(shortcuts, out failedAction, validateAll: false);
+
+    private bool TryRegisterShortcutSetCore(
+        IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
+        out BluetoothShortcutAction failedAction, bool validateAll)
     {
         failedAction = BluetoothShortcutAction.BluetoothControl;
         if (!KeyboardShortcut.HaveUniqueBoundValues(shortcuts.Values))
             return false;
+        foreach (var action in Enum.GetValues<BluetoothShortcutAction>())
+        {
+            if (action == BluetoothShortcutAction.ReverseControl) continue;
+            failedAction = action;
+            if (!shortcuts.TryGetValue(action, out var shortcut) ||
+                !shortcut.IsValidFor(action))
+                return false;
+        }
         UnregisterConfiguredHotkeys();
         if (_windowSource is null) return true;
         foreach (var action in Enum.GetValues<BluetoothShortcutAction>().Where(
@@ -501,7 +515,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             failedAction = action;
             var shortcut = shortcuts[action];
-            if (!IsGlobalControlShortcut(action) && !ShouldRegisterDeviceHotkeys) continue;
+            if (!validateAll && (_shortcutSettingsWindow is not null ||
+                (!IsGlobalControlShortcut(action) && !ShouldRegisterDeviceHotkeys))) continue;
             if (!shortcut.IsBound || shortcut.VirtualKey is KeyboardShortcut.MouseRight or
                 KeyboardShortcut.MouseMiddle) continue;
             if (!RegisterHotKey(_windowSource.Handle, HotKeyId(action),
@@ -513,6 +528,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _registeredHotKeyIds.Add(HotKeyId(action));
         }
         _hotKeyRegistered = _registeredHotKeyIds.Count > 0;
+        // Saving probes every keyboard binding, even while the editor owns
+        // focus. A probe must never leave hotkeys active during recording.
+        if (validateAll) UnregisterConfiguredHotkeys();
         return true;
     }
 
@@ -531,10 +549,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             Owner = this,
         };
         _shortcutSettingsWindow = window;
+        UnregisterConfiguredHotkeys();
         window.Closed += (_, _) =>
         {
             if (ReferenceEquals(_shortcutSettingsWindow, window))
+            {
                 _shortcutSettingsWindow = null;
+                RegisterBluetoothControlHotkey();
+            }
         };
         window.Show();
     }
@@ -542,8 +564,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private string? ApplyBluetoothShortcuts(
         IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts)
     {
+        if (shortcuts.TryGetValue(BluetoothShortcutAction.BossKey, out var bossKey) && bossKey.IsMouse)
+            return LocalizationService.Get("ShortcutSettingsBossKeyKeyboardOnly");
+        if (_mappingSettings.Mappings.Any(mapping => mapping.Key is { } key &&
+                KeyboardMappingKeys.Conflict(key, shortcuts.Values) is not null))
+            return LocalizationService.Get("MappingShortcutConflict");
         var previous = GetConfiguredShortcuts();
-        if (!TryRegisterShortcutSet(shortcuts, out var failedAction))
+        if (!KeyboardShortcut.HaveUniqueBoundValues(shortcuts.Values))
+            return LocalizationService.Get("ShortcutSettingsDuplicate");
+        if (!TryRegisterShortcutSetCore(shortcuts, out var failedAction, validateAll: true))
         {
             _ = TryRegisterShortcutSet(previous, out _);
             return LocalizationService.Format("ShortcutRegistrationFailedFormat",
@@ -580,7 +609,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             app.UpdateSettings.BluetoothVolumeDownShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.VolumeDown].Modifiers;
             app.UpdateSettings.BluetoothLockScreenShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.LockScreen].VirtualKey;
             app.UpdateSettings.BluetoothLockScreenShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.LockScreen].Modifiers;
-            app.UpdateSettings.BluetoothShortcutSchema = 5;
+            app.UpdateSettings.BluetoothShortcutSchema = 6;
             if (!app.SaveUpdateSettings())
             {
                 app.RestoreUpdateSettings(snapshot);
@@ -591,6 +620,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         _bluetoothShortcuts.Clear();
         foreach (var pair in shortcuts) _bluetoothShortcuts[pair.Key] = pair.Value;
+        _failedDeviceHotKeyIds.Clear();
+        _ = TryRegisterShortcutSet(shortcuts, out _);
         BluetoothControlNoticeWindow.NotifyShortcutChanged();
         _viewModel.AddDiagnosticLog(AppLog.Event("bluetooth_hotkey_updated"));
         return null;
@@ -600,8 +631,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Controls.PreviewPointerEventArgs e)
     {
         if (_activeControlWindow != 0) return;
-        if (e.Kind == Controls.PreviewPointerKind.ButtonDown &&
-            TryHandleMouseShortcut(e.Button))
+        if (TryHandlePointerShortcut(e, _viewModel.SelectedDevice?.Udid))
         {
             return;
         }
@@ -615,6 +645,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private bool TryHandleMouseShortcut(byte button)
     {
+        if (_shortcutSettingsWindow is not null) return false;
         var shortcutButton = button switch
         {
             2 => ShortcutMouseButton.Right,
@@ -625,6 +656,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var modifiers = Keyboard.Modifiers;
         var match = _bluetoothShortcuts.FirstOrDefault(pair =>
             pair.Key != BluetoothShortcutAction.ReverseControl &&
+            pair.Value.IsValidFor(pair.Key) &&
             pair.Value.MatchesMouse(shortcutButton, modifiers));
         if (match.Key == default) return false;
         HandleConfiguredShortcut(match.Key);
@@ -1162,6 +1194,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void OnIndependentPointerInput(string udid,
         Controls.PreviewPointerEventArgs e)
     {
+        if (TryHandlePointerShortcut(e, udid)) return;
         if (_viewModel.IsUsbControlTarget(udid))
         {
             _ = HandleUsbPointerInputAsync(e, udid);
@@ -1422,10 +1455,16 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // keys, but must not invalidate the current device's queued input.
             if (DeviceViewModel.UdidEquals(routeUdid, _keyboardStateUdid) ||
                 DeviceViewModel.UdidEquals(routeUdid, ActiveInputDeviceUdid))
+            {
                 Interlocked.Increment(ref _keyboardInputGeneration);
+                _ordinaryKeysDown.Clear();
+            }
         }
         else if (!CanForwardControlKeyboard(routeUdid, keyboardWindow))
             return;
+        if (!isReset && TryHandleConfiguredKey(e.VirtualKey,
+                e.Kind == Controls.PreviewKeyboardKind.Down)) return;
+        if (!isReset && ShouldSkipMappedDeviceKey(e.VirtualKey, routeUdid)) return;
         var generation = _keyboardInputGeneration;
         var canSend = isReset ? null : CaptureKeyboardSendGuard(keyboardWindow);
         await _bluetoothRouteGate.WaitAsync();
@@ -1640,6 +1679,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        DisposeKeyboardMapping();
         DisposeTray();
         _compactLaunchCancellation.Cancel();
         _secondaryMirrors.PreviewClosed -= OnCompactPreviewClosed;
@@ -1693,7 +1733,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (message == WmHotKey &&
             TryGetShortcutActionByHotKeyId(wParam.ToInt32(), out var hotkeyAction))
         {
-            HandleConfiguredShortcut(hotkeyAction);
+            if (_shortcutSettingsWindow is null &&
+                _registeredHotKeyIds.Contains(wParam.ToInt32()))
+                HandleConfiguredShortcut(hotkeyAction);
             handled = true;
             return 0;
         }
@@ -1909,10 +1951,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void HandleRawButton(byte button, bool down)
     {
-        HandleControlPointerInput(new Controls.PreviewPointerEventArgs(
+        var input = new Controls.PreviewPointerEventArgs(
             down ? Controls.PreviewPointerKind.ButtonDown :
                 Controls.PreviewPointerKind.ButtonUp,
-            0, 0, button, 0));
+            0, 0, button, 0);
+        if (TryHandlePointerShortcut(input, _viewModel.SelectedDevice?.Udid)) return;
+        HandleControlPointerInput(input);
     }
 
     private void HandleRawWheel(short delta)
@@ -1951,12 +1995,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (isKeyUp) _localFullScreenF11Down = false;
             return;
         }
-        if (TryGetShortcutAction(virtualKey, out var shortcutAction))
-        {
-            if (!isKeyUp && !_registeredHotKeyIds.Contains(HotKeyId(shortcutAction)))
-                HandleConfiguredShortcut(shortcutAction);
-            return;
-        }
+        if (TryHandleConfiguredKey(virtualKey, !isKeyUp)) return;
         if (virtualKey == 0x7A)
         {
             if (!isKeyUp && !_localFullScreenF11Down)
@@ -2781,6 +2820,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         e.Cancel = true;
         if (_shutdownStarted) return;
         _shutdownStarted = true;
+        DisposeKeyboardMapping();
         DisposeTray();
         _compactLaunchCancellation.Cancel();
         var shutdownTimer = Stopwatch.StartNew();
@@ -3065,6 +3105,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         ResetMediaRecoveryCancellation();
         var generation = _mediaCastEvents.BeginGeneration();
         ++_mediaRecoveryRevision;
+        // Every new source owns a new bridge, including HLS -> native media
+        // and replacements whose backend fails to start.
+        DisposeHlsMediaBridge();
         _mediaProgramDuration = MediaSourceClassifier.IsLikelyLive(source) &&
             !MediaCastPlaybackControls.IsReliableDuration(true,
                 request.Duration) ? 0 : NormalizeMediaDuration(request.Duration);
@@ -4667,7 +4710,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var target = MediaCastPlaybackControls.ClampPosition(
             requestedPosition, duration);
         LogMediaSeekDiagnostic("seek_commit", target);
-        SeekMediaCastToPosition(target);
+        SeekMediaCastToPosition(target, allowCoalesce: false);
     }
 
     private bool IsLikelyMediaCastStartupSeek(double target)
@@ -5791,6 +5834,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        OnMappingContextChanged(e.PropertyName);
         if (e.PropertyName == nameof(MainViewModel.IsTrayApplicationMode))
             Dispatcher.BeginInvoke(ApplyTrayMode);
         if (e.PropertyName is nameof(MainViewModel.IsLightweightApplicationMode) or
@@ -6557,6 +6601,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void ResetControlRouteState()
     {
         Interlocked.Increment(ref _keyboardInputGeneration);
+        _ordinaryKeysDown.Clear();
         _controlPointerInitialized = false;
         _lastControlSourceX = 0;
         _lastControlSourceY = 0;
@@ -7145,11 +7190,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             e.Handled = true;
             return;
         }
-        if (TryGetShortcutAction(KeyInterop.VirtualKeyFromKey(key),
-                out var configuredAction))
+        if (TryHandleConfiguredKey(KeyInterop.VirtualKeyFromKey(key), down: true))
         {
-            if (!_registeredHotKeyIds.Contains(HotKeyId(configuredAction)))
-                HandleConfiguredShortcut(configuredAction);
             e.Handled = true;
             return;
         }
@@ -7213,6 +7255,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void OnPreviewKeyUp(object sender, KeyEventArgs e)
     {
         var key = ResolvePreviewKey(e);
+        if (TryHandleConfiguredKey(KeyInterop.VirtualKeyFromKey(key), down: false))
+        {
+            e.Handled = true;
+            return;
+        }
         if (key == Key.F11)
         {
             _localFullScreenF11Down = false;
@@ -7225,17 +7272,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             e.Handled = true;
             return;
         }
-        if (TryGetShortcutAction(KeyInterop.VirtualKeyFromKey(key), out _))
-        {
-            e.Handled = true;
-            return;
-        }
         if (TryRoutePreviewKeyboardEvent(key, Controls.PreviewKeyboardKind.Up))
             e.Handled = true;
     }
 
     private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (_rawMouseInputEnabled || _shortcutSettingsWindow is not null) return;
         var button = e.ChangedButton switch
         {
             MouseButton.Right => ShortcutMouseButton.Right,
@@ -7319,6 +7362,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void HandleConfiguredShortcut(BluetoothShortcutAction action)
     {
+        if (_shortcutSettingsWindow is not null) return;
         if (action == BluetoothShortcutAction.BossKey)
         {
             _ = ToggleBossKeyWindowsAsync();
@@ -7408,7 +7452,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool TryGetShortcutAction(int virtualKey,
         out BluetoothShortcutAction action)
     {
+        action = default;
         var modifiers = Keyboard.Modifiers;
+        if (modifiers.HasFlag(ModifierKeys.Windows)) return false;
         foreach (var candidate in Enum.GetValues<BluetoothShortcutAction>())
         {
             if (_bluetoothShortcuts.TryGetValue(candidate, out var shortcut) &&
@@ -7459,8 +7505,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             BluetoothShortcutAction.Siri => (byte)0x16, // S
             _ => (byte)0,
         };
+        await _systemShortcutGate.WaitAsync();
         try
         {
+            if (!canSend() || _shortcutSettingsWindow is not null) return;
             var bluetoothTarget = _viewModel.BluetoothControlIsConnected &&
                 _viewModel.IsBluetoothControlTarget(target);
             var usbTarget =
@@ -7470,6 +7518,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 await _viewModel.SendBluetoothAppSwitcherAsync(target, canSend);
             else if (usage != 0 && bluetoothTarget)
                 await _viewModel.SendBluetoothSystemShortcutAsync(usage, target, canSend);
+            else if (indigoButton is { } consumer && bluetoothTarget)
+                await _viewModel.SendBluetoothConsumerShortcutAsync(
+                    consumer.Code, consumer.HoldMs, target, canSend);
             if (action == BluetoothShortcutAction.AppSwitcher && usbTarget)
             {
                 // iPhone/iPad accepts the hardware Home button twice as the
@@ -7487,9 +7538,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             }
             else if (usage != 0 && usbTarget)
             {
-                await _viewModel.SendUsbKeyboardAsync([usage], target, canSend);
-                await Task.Delay(20);
-                await _viewModel.SendUsbKeyboardAsync([], target);
+                await SendUsbSystemShortcutAsync(usage, target, canSend);
             }
             _viewModel.AddDiagnosticLog(AppLog.Event("system_shortcut_sent",
                 ("action", action.ToString()), ("device", AppLog.Device(target)),
@@ -7502,15 +7551,22 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 ("action", action.ToString()), ("device", AppLog.Device(target)),
                 ("error", AppLog.Error(error))));
         }
+        finally { _systemShortcutGate.Release(); }
     }
 
     private async Task SendUsbButtonPulseAsync(
         (ushort Page, ushort Code, int HoldMs) button, string? targetUdid,
         Func<bool>? canSend = null)
     {
-        await _viewModel.SendUsbButtonAsync(button.Page, button.Code, "down", targetUdid, canSend);
-        await Task.Delay(button.HoldMs);
-        await _viewModel.SendUsbButtonAsync(button.Page, button.Code, "up", targetUdid);
+        try
+        {
+            await _viewModel.SendUsbButtonAsync(button.Page, button.Code, "down", targetUdid, canSend);
+            await Task.Delay(button.HoldMs);
+        }
+        finally
+        {
+            await _viewModel.SendUsbButtonAsync(button.Page, button.Code, "up", targetUdid);
+        }
     }
 
     private static (ushort Page, ushort Code, int HoldMs)? GetIndigoButton(
@@ -7649,20 +7705,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void SetSystemKeySuppression(bool enabled)
     {
-        if (enabled)
-        {
-            if (_keyboardHook == 0)
-                _keyboardHook = SetWindowsHookEx(13, _keyboardHookProc, 0, 0);
-        }
-        else if (_keyboardHook != 0)
-        {
-            UnhookWindowsHookEx(_keyboardHook);
-            _keyboardHook = 0;
-        }
+        _systemKeySuppressionRequested = enabled;
+        ReconcileKeyboardHook();
     }
 
     private nint KeyboardHookProcedure(int code, nint wParam, nint lParam)
     {
+        if (code >= 0 && ProcessMappingHook(Marshal.PtrToStructure<LowLevelKeyboardData>(lParam), wParam))
+            return 1;
         if (code >= 0 && IsBluetoothControlActive && IsControlKeyboardForeground)
         {
             var data = Marshal.PtrToStructure<LowLevelKeyboardData>(lParam);

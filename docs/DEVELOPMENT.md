@@ -12,7 +12,7 @@
 | CMake | 项目最低 3.25；优先使用 Visual Studio 随附版本 |
 | .NET | `global.json` 指定 10.0.301，允许 `latestFeature` 向前滚动，不启用预发布 SDK |
 | Python | 桥接配方和 CI 使用 Python 3.13 x64，构建时创建隔离虚拟环境 |
-| MSYS2 UCRT64 | 默认发布包含 UxPlay；需要 CMake、Ninja、toolchain、pkgconf、GStreamer base/good/bad/libav、libplist、OpenSSL；包名见 Windows workflow |
+| MSYS2 UCRT64 | 默认构建 UxPlay 可选组件和定制 FFmpeg；需要 CMake、Ninja、toolchain、pkgconf、GStreamer base/good/bad/libav、libplist、OpenSSL 及编解码依赖；完整包名见 Windows workflow |
 | 网络 | 首次还原 NuGet/Python 包以及准备 FFmpeg、VC Runtime、UxPlay、Inno Setup 等依赖时需要网络 |
 
 Apple USB 支持和实机信任是运行有线功能的条件，不是离线协议单元测试的条件。
@@ -46,13 +46,15 @@ Apple DDI 不随标准安装包分发；反控首次准备 DDI 的网络需求�
 
 `-NoPublish` 仍会构建桥接器并准备原生依赖，不是只编译 C# 的快捷入口。
 常规 Release 产物为 `outputs/iPhoneMirror`；安装器载荷为
-`outputs/iPhoneMirror.Installer`，主程序与驱动管理器共享外置 .NET 运行时。
+`outputs/iPhoneMirror.Installer`，主程序使用外置 .NET 运行时，驱动管理器独立自包含，
+安装器通过统一压缩减少重复数据。
 二者都包含独立桥接器的完整 onedir 载荷。
 
 | 参数 | 行为与限制 |
 |---|---|
 | `-SkipTests` | 跳过 `build.ps1` 的测试段；不能据此报告测试通过 |
 | `-OmitUxPlayRuntime` | 缺少 MSYS2 时可生成省略 UxPlay 的测试包；原始无线接收端仍保留 |
+| `-IncludeUxPlayRuntime` | 将默认独立下载的 UxPlay 组件也内置，适合离线包 |
 | `-OmitMediaOutputRuntime` | 省略内置 FFmpeg；应用仍校验候选 FFmpeg 的固定 SHA-256，任意系统 FFmpeg 不能替代 |
 | `-Version` | 显式覆盖此次构建的产品版本；常规构建默认取项目版本 |
 | `-TestBuild` | 根据源码、版本记录及已有输出递增 `-testN`，重新整理 `outputs` 并将测试版发布到其根目录；使用前保存需要保留的产物；不能与 `-NoPublish` 或 `-Version` 同用 |
@@ -78,6 +80,11 @@ VC Runtime 版本解析和 Apple 支持包验证。`CI=true` 时，脚本明确�
 `App.Runtime.Tests`；它并非自动检测所有无桌面环境。本地运行 WPF 测试会创建窗口。
 本地化校验由 Windows workflow 单独执行，不包含在 `build.ps1` 的测试段中。
 
+`build.ps1` 先编译托管测试，再直接执行测试程序集，并仅为测试子进程清除
+SDK/CI 注入的 CLR/.NET 环境覆盖。`dotnet run` 会注入 `DOTNET_ROOT_X64`，
+触发更新器和驱动的提权环境保护；单独运行涉及提权的测试时，应使用干净环境下的
+`dotnet <测试程序集.dll>`。应用的安全检查和拒绝注入的回归测试保持启用。
+
 若 `ctest` 不在 PATH 中，使用 Visual Studio 随附 `ctest.exe` 的绝对路径运行相同参数；
 `build.ps1` 会自动定位它，单独输入 `ctest` 的终端则需要正确的工具路径。
 
@@ -94,6 +101,21 @@ dotnet run --project src/DriverInstaller.Tests/iPhoneMirror.DriverInstaller.Test
 $env:PATH = (Join-Path $PWD 'third_party/libusb/bin/x64') + ';' + $env:PATH
 & ./work/usb-touch-bridge-python/Scripts/python.exe -m unittest discover -s tests -p '*test.py'
 ```
+
+静态预览回归使用合成 NV12 帧，不连接手机或启动无线接收器：
+
+```powershell
+# 需要可访问的交互桌面；验证静态画面、重绘、缩放、隐藏恢复和故障重试
+./build/native/src/Core/Release/iPhoneMirror.Core.Tests.exe --preview-static-frame-only
+
+# DXGI 可呈现但桌面像素不可读取时，仅验证 Present 和重试；不验证显示
+./build/native/src/Core/Release/iPhoneMirror.Core.Tests.exe --preview-static-frame-retry-only
+```
+
+测试为每个预览单独注入呈现繁忙、窗口遮挡和上传失败，始终保持同一帧时间戳。
+故障注入仅编入原生测试程序，不进入发布用 Core DLL。
+若运行环境使窗口始终处于 `DXGI_STATUS_OCCLUDED`，两种模式都需要改在可呈现的
+交互桌面运行；重试模式不会把被遮挡状态当作成功。
 
 | 测试 | 主要覆盖 |
 |---|---|
@@ -127,6 +149,9 @@ UI smoke、`Test-WiredRecoveryDevice.ps1`、`Test-WiredControlUia.ps1` 和
 ```
 
 脚本生成 `outputs/releases` 下的 Setup、ZIP、`SHA256SUMS.txt` 和 SPDX SBOM。
+标准包另附 UxPlay 可选组件 ZIP；应用首次选用时通过镜像下载并显示进度弹窗。
+安装包默认以 100,000,000 字节为优化目标，超出时只提醒，组件完整可用优先。
+需要强制限制的构建可显式传入 `-EnforceInstallerSizeLimit`。
 不指定旧的 `-Version 1.8.3`，可避免与当前源码版本冲突。`-SkipBuild` 仅适用于已有匹配
 载荷；它仍执行版本和完整性检查。构建与打包应使用一致的运行时省略选项。
 

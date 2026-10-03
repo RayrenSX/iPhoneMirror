@@ -344,7 +344,7 @@ so both identities can be associated with the same phone.
 | libusb 1.0.29 | Optional USB transport compatibility layer | LGPL-2.1-or-later, `third_party/libusb/` |
 | libusb-win32 1.2.6.0 | `libusb0` filter driver used by the standalone manager | LGPL-3.0 and upstream terms, `src/DriverInstaller/Assets/` |
 | AirPlayServer 1.1.2 | Wireless AirPlay, FairPlay, video and audio decode | GPL-3.0, LGPL-2.1-or-later and upstream terms, `third_party/airplay-server/` |
-| FFmpeg 4.4.2 runtime | AirPlayServer's bundled H.264/audio runtime | LGPL-2.1-or-later, distributed with AirPlayServer |
+| FFmpeg 63b2b0f47d runtime | Compact H.264/ALAC runtime preserving the original AirPlay receiver ABI | LGPL-2.1-or-later, source and build recipe recorded in this repository |
 | FFmpeg 8.1.2 runtime | Recording, live output and HLS media-cast bridge | GPL-3.0, bundled by default under `tools/ffmpeg/` |
 | iUsbBridge | USB/wireless CoreDevice reverse-control bridge | [iUsbBridge](https://github.com/RayrenSX/iUsbBridge) noncommercial license; see [component notices](docs/USB_TOUCH_THIRD_PARTY_LICENSES.md) for the recipe and USBMux source boundaries |
 | quicktime_video_hack fixtures | QuickTime protocol regression vectors | MIT, test fixtures only |
@@ -375,7 +375,9 @@ These are tested combinations, not a guarantee for every iPhone or iOS build.
 Requirements: Windows 10/11 x64, Visual Studio 2026 Build Tools with MSVC,
 Windows SDK and CMake, the .NET 10 SDK with Windows Desktop support, and MSYS2
 UCRT64 with CMake, Ninja, the UCRT64 toolchain, GStreamer (base, good, bad, libav),
-libplist and OpenSSL for the bundled UxPlay fallback. The USB bridge build uses Python 3.13 x64.
+libplist and OpenSSL for the optional UxPlay component. The compact FFmpeg build also
+needs x264, Opus, SRT, oneVPL, AMF/NVENC headers and nasm; see the Windows workflow
+for the full package list. The USB bridge build uses Python 3.13 x64.
 
 The build packages this repository's `tools/usb_touch_bridge.py` and `tools/iostouch`
 using `scripts/usb-bridge-recipe`; it does not clone the latest upstream backend.
@@ -402,18 +404,22 @@ outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.dll
 outputs/iPhoneMirror/iPhoneMirror.VirtualCamera.Admin.exe
 outputs/iPhoneMirror/tools/ffmpeg/ffmpeg.exe
 outputs/iPhoneMirror/Wireless/iPhoneMirror.WirelessHost.exe
-outputs/iPhoneMirror/Wireless/UxPlay/iPhoneMirror.UxPlayHost.exe
-outputs/iPhoneMirror/Wireless/UxPlay/uxplay.exe
+outputs/components/iPhoneMirror-UxPlay-v<version>-win-x64.zip
 ```
 
 `outputs/iPhoneMirror` is the portable build with .NET/WPF dependencies bundled
 inside its executables. The installer uses `outputs/iPhoneMirror.Installer`,
-where the app and driver manager share external runtime DLLs to reduce download
-size.
+where the app uses external runtime DLLs and the driver remains independently
+self-contained. Solid installer compression reduces repeated runtime data.
 
-The default build bundles the FFmpeg 8.1.2 media-output runtime so recording and
-RTMP/SRT/WHIP streaming work out of the box. Build the compact edition only
-when minimum size is required. External FFmpeg candidates must still match the
+The default build bundles the full FFmpeg 8.1.2 essentials runtime with recording,
+media-source audio and RTMP/SRT/WHIP streaming. The custom compact profile was
+withdrawn after audio compatibility tests found missing existing decoders.
+UxPlay is a separate optional component, downloaded through
+mirrors when first selected, with a progress/speed dialog supporting cancellation
+and retry. Use `-IncludeUxPlayRuntime` for an offline bundle. Working components
+take priority over the 100 MB size target. Omit FFmpeg only when media output is
+not required. External FFmpeg candidates must still match the
 application's pinned SHA-256; an arbitrary system build is not accepted, and
 dependent output features remain unavailable without a trusted runtime:
 
@@ -422,7 +428,7 @@ dependent output features remain unavailable without a trusted runtime:
 ```
 
 Pass `-OmitMediaOutputRuntime` to the release packaging script as well when
-publishing the compact edition.
+publishing an edition without the media-output runtime.
 
 Build all Release assets (Setup, ZIP, checksums, and SBOM):
 

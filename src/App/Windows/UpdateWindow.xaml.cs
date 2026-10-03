@@ -108,10 +108,12 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
                 IsIndeterminate = true;
                 ProgressValue = 0;
                 SpeedText = string.Empty;
-                StatusText = LocalizationService.Get(value.Phase ==
-                    UpdateDownloadPhase.ConnectivityTest
-                        ? "TestingUpdateRoutes"
-                        : "MeasuringUpdateRoutes");
+                StatusText = LocalizationService.Get(value.Phase switch
+                {
+                    UpdateDownloadPhase.ConnectivityTest => "TestingUpdateRoutes",
+                    UpdateDownloadPhase.Verification => "VerifyingDownload",
+                    _ => "MeasuringUpdateRoutes",
+                });
                 return;
             }
             IsIndeterminate = value.Percentage is null;

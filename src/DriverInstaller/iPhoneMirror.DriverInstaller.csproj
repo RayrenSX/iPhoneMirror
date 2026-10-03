@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- This WPF tool uses Win32 APIs, not WinRT projections. Avoid implicitly
+         shipping the unused 25 MB Windows SDK projection assembly. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -76,6 +78,8 @@
     </Content>
     <EmbeddedResource Include="..\..\scripts\remove_selected_iphone_drivers.ps1"
                       LogicalName="DriverCleanup.Script.ps1" />
+    <EmbeddedResource Include="Services\DriverElevation.Bootstrap.ps1"
+                      LogicalName="DriverElevation.Bootstrap.ps1" />
     <Content Include="$(NuGetPackageRoot)wpf-ui\4.3.0\LICENSE.md"
              Condition="Exists('$(NuGetPackageRoot)wpf-ui\4.3.0\LICENSE.md')">
       <Link>licenses\WPF-UI-LICENSE.md</Link>

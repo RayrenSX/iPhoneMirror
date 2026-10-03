@@ -7,6 +7,7 @@ param(
     [switch]$TestBuild,
     [switch]$IncludeMediaOutputRuntime,
     [switch]$OmitMediaOutputRuntime,
+    [string]$FfmpegRuntimeManifestPath,
     [switch]$IncludeUxPlayRuntime,
     [switch]$OmitUxPlayRuntime,
     [string]$AppleSupportPackagePath,
@@ -31,12 +32,13 @@ if ($IncludeMediaOutputRuntime -and $OmitMediaOutputRuntime) {
     throw '-IncludeMediaOutputRuntime and -OmitMediaOutputRuntime cannot be used together.'
 }
 $UseMediaOutputRuntime = -not $OmitMediaOutputRuntime
-# UxPlay is a selectable receiver in the shipped settings UI, so its runtime
-# belongs to the standard release payload. Keep the switch accepted for older
-# build invocations and explicit intent in automation. -OmitUxPlayRuntime
-# allows machines without MSYS2 UCRT64 to produce a test payload without the
-# optional UxPlay fallback receiver.
-$UseUxPlayRuntime = -not $OmitUxPlayRuntime
+if ($IncludeUxPlayRuntime -and $OmitUxPlayRuntime) {
+    throw '-IncludeUxPlayRuntime and -OmitUxPlayRuntime cannot be used together.'
+}
+# Standard releases publish UxPlay separately. Include is an explicit offline
+# bundle; Omit skips building the optional asset on development machines.
+$UseUxPlayRuntime = [bool]$IncludeUxPlayRuntime
+$BuildUxPlayComponent = -not $OmitUxPlayRuntime
 
 if ($TestBuild -and $NoPublish) {
     throw '-TestBuild requires publishing.'
@@ -188,7 +190,8 @@ function Resolve-CMakeTool([string]$Name) {
 
 function Invoke-NativeToolWithSanitizedEnvironment(
     [string]$FilePath,
-    [string[]]$ArgumentList
+    [string[]]$ArgumentList,
+    [switch]$CleanManagedTestEnvironment
 ) {
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $FilePath
@@ -214,6 +217,13 @@ function Invoke-NativeToolWithSanitizedEnvironment(
     foreach ($entry in $environment.GetEnumerator()) {
         $name = [string]$entry.Key
         if ($name -ieq 'Path' -or -not $seenEnvironmentNames.Add($name)) {
+            continue
+        }
+        # SDK/CI runtime overrides are not part of the installed application's
+        # environment. Keep them out of test children so elevation tests reach
+        # their intended checks; production rejection remains unchanged.
+        if ($CleanManagedTestEnvironment -and
+            $name -match '^(?i:COMPLUS_|COR_|CORECLR_|DOTNET_|DEVPATH$|APPDOMAIN_MANAGER_ASM$|APPDOMAIN_MANAGER_TYPE$|CLRConfigFile$)') {
             continue
         }
         $startInfo.Environment[$name] = [string]$entry.Value
@@ -272,12 +282,16 @@ $UxPlayRuntimeManifestPath = Join-Path $Root 'scripts\uxplay-runtime-manifest.ps
 $PrepareLibUsb0Runtime = Join-Path $Root 'scripts\prepare_libusb0_runtime.ps1'
 $AppleSupportPackageTools = Join-Path $Root 'scripts\AppleSupportPackage.ps1'
 $MediaOutputManifestPath = Join-Path $Root 'scripts\ffmpeg-runtime-manifest.psd1'
+if ($FfmpegRuntimeManifestPath) { $MediaOutputManifestPath = [IO.Path]::GetFullPath($FfmpegRuntimeManifestPath) }
+# Media URLs are not restricted to AAC/H.264. The compact allowlist broke
+# previously supported PCM/WMA/AIFF/MP2 inputs; retain the full pinned runtime
+# by default until a smaller profile passes the complete compatibility audit.
 if (-not (Test-Path -LiteralPath $MediaOutputManifestPath -PathType Leaf)) {
     throw "Media-output FFmpeg manifest is missing: $MediaOutputManifestPath"
 }
 $MediaOutputManifest = Import-PowerShellDataFile -LiteralPath $MediaOutputManifestPath
 $MediaOutputRuntimeHashes = [Collections.IDictionary]$MediaOutputManifest.Files
-$MediaOutputRuntimeFiles = @($MediaOutputRuntimeHashes.Keys) + @('SOURCE.txt')
+$MediaOutputRuntimeFiles = @(@($MediaOutputRuntimeHashes.Keys) + @('SOURCE.txt') | Select-Object -Unique)
 if (-not (Test-Path -LiteralPath $UxPlayRuntimeManifestPath -PathType Leaf)) {
     throw "UxPlay runtime manifest is missing: $UxPlayRuntimeManifestPath"
 }
@@ -511,6 +525,14 @@ try {
         $AppNative = Join-Path $Root 'src/App/native'
         $AppWireless = Join-Path $AppNative 'Wireless'
         $AppUxPlay = Join-Path $AppWireless 'UxPlay'
+        if (-not $UseUxPlayRuntime) {
+            if (Test-Path -LiteralPath $AppUxPlay) {
+                Assert-SafeWorkspaceDirectory $AppUxPlay
+                Assert-NoReparseChildren $AppUxPlay
+                Remove-Item -LiteralPath $AppUxPlay -Recurse -Force
+            }
+            $AppUxPlay = Join-Path $Root 'outputs\uxplay-component-runtime'
+        }
         $AppFfmpeg = Join-Path $AppNative 'tools\ffmpeg'
         Assert-SafeWorkspaceDirectory $AppNative
         Assert-SafeWorkspaceDirectory $AppWireless
@@ -518,19 +540,20 @@ try {
         Assert-SafeWorkspaceDirectory $AppFfmpeg
         New-Item -ItemType Directory -Force -Path $AppNative | Out-Null
         New-Item -ItemType Directory -Force -Path $AppWireless | Out-Null
-        if ($UseUxPlayRuntime) {
+        if ($BuildUxPlayComponent) {
             New-Item -ItemType Directory -Force -Path $AppUxPlay | Out-Null
-        } elseif (Test-Path -LiteralPath $AppUxPlay) {
-            Assert-NoReparseChildren $AppUxPlay
-            Remove-Item -LiteralPath $AppUxPlay -Recurse -Force
         }
         if ($UseMediaOutputRuntime) {
             if (-not (Test-Path -LiteralPath $PrepareMediaOutputRuntime -PathType Leaf)) {
                 throw "Media-output FFmpeg preparation script is missing: $PrepareMediaOutputRuntime"
             }
-            & $PrepareMediaOutputRuntime -Destination $AppFfmpeg
+            & $PrepareMediaOutputRuntime -Destination $AppFfmpeg -RuntimeManifestPath $MediaOutputManifestPath
             Assert-ExpectedRuntimeDirectory $AppFfmpeg $MediaOutputRuntimeFiles `
                 'Media-output FFmpeg runtime' $MediaOutputRuntimeHashes
+            $integrityDirectory = Join-Path $AppNative 'components'
+            New-Item -ItemType Directory -Force -Path $integrityDirectory | Out-Null
+            [IO.File]::WriteAllText((Join-Path $integrityDirectory 'ffmpeg.sha256'),
+                [string]$MediaOutputRuntimeHashes['ffmpeg.exe'], [Text.UTF8Encoding]::new($false))
         }
         Copy-Item $NativeDll (Join-Path $AppNative 'iPhoneMirror.Core.dll') -Force
         Copy-Item $UsbConfigurationSwitch `
@@ -541,7 +564,7 @@ try {
             (Join-Path $AppNative 'iPhoneMirror.VirtualCamera.Admin.exe') -Force
         Copy-Item $WirelessHost `
             (Join-Path $AppWireless 'iPhoneMirror.WirelessHost.exe') -Force
-        if ($UseUxPlayRuntime) {
+        if ($BuildUxPlayComponent) {
             Copy-Item $UxPlayHost `
                 (Join-Path $AppUxPlay 'iPhoneMirror.UxPlayHost.exe') -Force
             Copy-Item (Join-Path $Root 'third_party\uxplay\SOURCE.md') `
@@ -559,6 +582,8 @@ try {
                     throw "Prepared UxPlay runtime is missing: $relative"
                 }
             }
+            & (Join-Path $Root 'scripts\package_uxplay_component.ps1') `
+                -SourceDirectory $AppUxPlay -Version $(if ($Version) { $Version } else { $projectVersion })
         }
         # Ship the hash-pinned receiver runtime, not the build-local shim. The
         # latter is compiled for native tests and is not reproducible byte for byte.
@@ -585,6 +610,9 @@ try {
         & $UsbControlPython -m unittest discover -s tests -p '*test.py'
         if ($LASTEXITCODE -ne 0) { throw "USB touch bridge tests failed: $LASTEXITCODE" }
         & (Join-Path $Root 'scripts\test_usb_bridge_build_source.ps1') | Out-Host
+        & (Join-Path $Root 'tests\driver_elevation_bootstrap_test.ps1') | Out-Host
+        & (Join-Path $Root 'tests\virtual_camera_elevation_bootstrap_test.ps1') | Out-Host
+        & (Join-Path $Root 'tests\updater_elevation_bootstrap_test.ps1') | Out-Host
 
         $TestProjects = @(
             'src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj',
@@ -602,8 +630,20 @@ try {
         foreach ($Project in $TestProjects) {
             dotnet restore $Project -p:NuGetAudit=false
             if ($LASTEXITCODE -ne 0) { throw "Test restore failed: $Project ($LASTEXITCODE)" }
-            dotnet run --no-restore --project $Project --configuration $Configuration
-            if ($LASTEXITCODE -ne 0) { throw "Tests failed: $Project ($LASTEXITCODE)" }
+            dotnet build $Project --no-restore --configuration $Configuration
+            if ($LASTEXITCODE -ne 0) { throw "Test build failed: $Project ($LASTEXITCODE)" }
+            $testAssembly = dotnet msbuild $Project -nologo `
+                "-p:Configuration=$Configuration" -getProperty:TargetPath
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($testAssembly) -or
+                -not (Test-Path -LiteralPath $testAssembly.Trim() -PathType Leaf)) {
+                throw "Failed to resolve test assembly: $Project"
+            }
+            # dotnet run injects DOTNET_ROOT_X64 even when its parent is clean.
+            # Execute the built assembly directly using the resolved SDK host.
+            $testExitCode = Invoke-NativeToolWithSanitizedEnvironment `
+                (Get-Command dotnet -ErrorAction Stop).Source @($testAssembly.Trim()) `
+                -CleanManagedTestEnvironment
+            if ($testExitCode -ne 0) { throw "Tests failed: $Project ($testExitCode)" }
         }
         & (Join-Path $Root 'scripts\test_vc_runtime_version.ps1') | Out-Host
         if ($LASTEXITCODE -ne 0) {
@@ -642,6 +682,7 @@ try {
             --runtime win-x64 `
             --self-contained true `
             -p:IncludeBundledFfmpeg=$($UseMediaOutputRuntime.ToString().ToLowerInvariant()) `
+            -p:IncludeBundledUxPlay=$($UseUxPlayRuntime.ToString().ToLowerInvariant()) `
             -p:NuGetAudit=false `
             $VersionProperty `
             --output $PublishRoot
@@ -707,6 +748,7 @@ try {
             'Wireless\licenses\LICENSE-MIT.txt',
             'Wireless\licenses\LICENSE-PLAYFAIR-GPL-3.0.md',
             'Wireless\licenses\NOTICE-FDK-AAC.txt',
+            'Wireless\licenses\NOTICE-FFMPEG-BUILD.txt',
             'Wireless\licenses\SOURCE.md',
             'Wireless\licenses\SHA256SUMS.txt'
         )
@@ -900,8 +942,9 @@ try {
             throw "Unexpected files in compact application output: $($unexpected -join ', ')"
         }
 
-        # The installer uses framework files shared by both WPF entry points.
-        # The portable ZIP keeps the two compressed single-file executables.
+        # Only the main application uses the installer runtime directory. The
+        # driver stays self-contained so its complete elevation payload can be
+        # verified and staged without loading writable sidecars.
         if (-not $TestBuild) {
         $InstallerPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Installer'
         Assert-SafeWorkspaceDirectory $InstallerPublishRoot
@@ -916,23 +959,26 @@ try {
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:IncludeBundledFfmpeg=$($UseMediaOutputRuntime.ToString().ToLowerInvariant()) `
+            -p:IncludeBundledUxPlay=$($UseUxPlayRuntime.ToString().ToLowerInvariant()) `
             -p:NuGetAudit=false `
             $VersionProperty `
             --output $InstallerPublishRoot
         if ($LASTEXITCODE -ne 0) {
             throw "Shared-runtime app publish failed: $LASTEXITCODE"
         }
+        # Keep an independently verifiable, self-contained elevation payload.
+        # Inner compression prevents Inno's solid stream from deduplicating the
+        # shared .NET bytes; disable it only for the installer variant.
+        $InstallerDriverRoot = Join-Path $Root 'work\publish\iPhoneMirror.Driver.Installer'
+        Assert-SafeWorkspaceDirectory $InstallerDriverRoot
+        Assert-NoReparseChildren $InstallerDriverRoot
         dotnet publish src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj `
-            --configuration $Configuration `
-            --runtime win-x64 `
-            --self-contained true `
-            -p:PublishSingleFile=false `
-            -p:NuGetAudit=false `
-            $VersionProperty `
-            --output $InstallerPublishRoot
-        if ($LASTEXITCODE -ne 0) {
-            throw "Shared-runtime driver publish failed: $LASTEXITCODE"
-        }
+            --configuration $Configuration --runtime win-x64 --self-contained true `
+            -p:EnableCompressionInSingleFile=false -p:NuGetAudit=false `
+            $VersionProperty --output $InstallerDriverRoot
+        if ($LASTEXITCODE -ne 0) { throw "Installer driver publish failed: $LASTEXITCODE" }
+        Copy-Item -LiteralPath (Join-Path $InstallerDriverRoot 'iPhoneMirror.Driver.exe') `
+            -Destination (Join-Path $InstallerPublishRoot 'iPhoneMirror.Driver.exe') -Force
         if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
             . $AppleSupportPackageTools
             Copy-TrustedAppleSupportPackage $AppleSupportPackagePath `
@@ -947,8 +993,7 @@ try {
             'iPhoneMirror.exe', 'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
             'iPhoneMirror.UsbConfigurationSwitch.exe',
             'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.exe',
-            'iPhoneMirror.Driver.dll', 'iPhoneMirror.Driver.deps.json',
-            'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
+            'hostfxr.dll',
             'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
             'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll'
         )
@@ -989,6 +1034,8 @@ try {
             -ForegroundColor Green
     }
     else {
+        . (Join-Path $Root 'scripts\CompactBuildRecord.ps1')
+        Write-CompactBuildRecord $Root $BuildUxPlayComponent $UseMediaOutputRuntime
         Write-Host "Build complete: $Root\outputs\iPhoneMirror" -ForegroundColor Green
         Write-Host "Installer payload: $Root\outputs\iPhoneMirror.Installer" `
             -ForegroundColor Green

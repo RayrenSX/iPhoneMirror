@@ -30,6 +30,29 @@ var diagnosticTestRoot = Path.Combine(Path.GetTempPath(),
 Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY",
     diagnosticTestRoot, EnvironmentVariableTarget.Process);
 
+await UxPlayComponentTests.RunAsync();
+if (args is ["--uxplay-component"]) return;
+if (args is ["--component-network", var networkArchive, var networkMetadata, var networkOutput])
+{
+    await ComponentDownloadNetworkTests.RunAsync(networkArchive, networkMetadata, networkOutput);
+    return;
+}
+if (args is ["--component-public-network", var publicOutput, var publicProxy])
+{
+    await ComponentDownloadNetworkTests.RunPublicAsync(publicOutput, publicProxy);
+    return;
+}
+if (args is ["--component-public-mirrors", var mirrorOutput, var mirrorProxy])
+{
+    await ComponentDownloadNetworkTests.RunPublicAsync(mirrorOutput, mirrorProxy, mirrors: true);
+    return;
+}
+if (args is ["--uxplay-package", var componentArchive, var componentDescriptor, var componentCache])
+{
+    await UxPlayComponentTests.RunPackageAsync(componentArchive, componentDescriptor, componentCache);
+    return;
+}
+
 static void Equal<T>(T expected, T actual, string name)
 {
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
@@ -71,20 +94,8 @@ static async Task ThrowsAsync<TException>(Func<Task> action, string name)
     throw new InvalidOperationException($"{name}: expected {typeof(TException).Name}");
 }
 
-var clipboardSync = new ClipboardSyncState();
-Equal(true, clipboardSync.TryBegin("device text"),
-    "new clipboard text is accepted");
-Equal(false, clipboardSync.TryBegin("device text"),
-    "an in-flight clipboard update is coalesced");
-clipboardSync.Complete("device text", succeeded: false);
-Equal(true, clipboardSync.TryBegin("device text"),
-    "a failed Windows clipboard write allows the same text to retry");
-clipboardSync.Complete("device text", succeeded: true);
-Equal(false, clipboardSync.TryBegin("device text"),
-    "a successfully synchronized clipboard value is deduplicated");
-Equal(true, clipboardSync.TryBegin("new device text"),
-    "a changed device clipboard value is accepted");
-clipboardSync.Complete("new device text", succeeded: true);
+await ClipboardSyncTests.RunAsync();
+if (args is ["--clipboard-sync"]) return;
 
 
 static async Task<(int ExitCode, string Output)> RunWindowsPowerShellAsync(
@@ -801,7 +812,10 @@ Equal(true, zipUpdateScript.Contains("Rollback was incomplete", StringComparison
             zipUpdateScript.Contains("$changes", StringComparison.Ordinal) &&
             zipUpdateScript.Contains("$restartLock", StringComparison.Ordinal) &&
             zipUpdateScript.Contains("Start-RestartProcess", StringComparison.Ordinal) &&
-            zipUpdateScript.Contains("Shell.Application", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("Get-InteractiveDesktopShell", StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("FindWindowSW([ref]$location, [ref]$root",
+                StringComparison.Ordinal) &&
+            zipUpdateScript.Contains("8, [ref]$desktopHandle, 1)", StringComparison.Ordinal) &&
             zipUpdateScript.Contains("New-PrivilegedDirectory $destination",
                 StringComparison.Ordinal) &&
             zipUpdateScript.Contains("Enable-DirectoryInheritance $directory",
@@ -819,13 +833,18 @@ Equal(true, virtualCameraServiceCode.Contains("ElevationPathLock.Acquire(helper,
                 StringComparison.Ordinal) &&
             virtualCameraServiceCode.Contains("GetManifestResourceStream(resourceName)",
                 StringComparison.Ordinal) &&
-            virtualCameraServiceCode.Contains("CommonApplicationData",
+            virtualCameraServiceCode.Contains("[Environment]::SystemDirectory",
                 StringComparison.Ordinal) &&
             virtualCameraServiceCode.Contains("SetAccessRuleProtection($true, $false)",
                 StringComparison.Ordinal) &&
-            virtualCameraServiceCode.Contains("Copy-VerifiedPayload $payload.HelperPath",
+            virtualCameraServiceCode.Contains("$security.SetOwner($administrators)",
                 StringComparison.Ordinal) &&
-            virtualCameraServiceCode.Contains("Start-Process -FilePath $helper",
+            virtualCameraServiceCode.Contains("$start.EnvironmentVariables.Clear()",
+                StringComparison.Ordinal) &&
+            !virtualCameraServiceCode.Contains("ConvertFrom-Json", StringComparison.Ordinal) &&
+            virtualCameraServiceCode.Contains("Copy-VerifiedPayload $helperPath $helperHash $helper",
+                StringComparison.Ordinal) &&
+            virtualCameraServiceCode.Contains("[Diagnostics.Process]::Start($start)",
                 StringComparison.Ordinal) &&
             appProjectCode.Contains("IPhoneMirror.App.Payload.iPhoneMirror.VirtualCamera.Admin.exe",
                 StringComparison.Ordinal) &&
@@ -1492,7 +1511,7 @@ Equal(true,
 Equal(true,
     mainWindowCode.Contains("await _viewModel.SendBluetoothAppSwitcherAsync(target, canSend)",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("0x0A, 0x9D, 0x02, 0x81, 0x02", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("0x19, 0x00, 0x2A, 0xFF, 0x03, 0x81, 0x00", StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("0x85, 0x05", StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("0x0A, 0x24, 0x02, 0x09, 0x40", StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("SendIphoneAppSwitcherAsync", StringComparison.Ordinal) &&
@@ -3105,6 +3124,11 @@ Equal(false, controlShortcut.Matches(Key.F8, ModifierKeys.Control),
     "shortcut matching rejects incomplete modifiers");
 Equal(false, KeyboardShortcut.TryCreate(Key.F12, ModifierKeys.None, out _),
     "shortcut rejects F12");
+foreach (var modifiers in new[] { ModifierKeys.Control, ModifierKeys.Alt,
+    ModifierKeys.Shift, ModifierKeys.Control | ModifierKeys.Shift,
+    ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift })
+    Equal(false, KeyboardShortcut.TryCreate(Key.F12, modifiers, out _),
+        $"shortcut capture rejects modified F12 ({modifiers}) like persisted settings");
 Equal(false, KeyboardShortcut.TryCreate(Key.A, ModifierKeys.None, out _),
     "shortcut requires a modifier for regular keys");
 Equal(true, KeyboardShortcut.TryCreate(Key.F9, ModifierKeys.None, out _),
@@ -5331,38 +5355,22 @@ Equal(true, warningSession.Handle is null,
 Equal(false, warningSession.IsStopping,
     "USB restore warning clears the in-flight stop state");
 
-var backgroundReleaseIndex = mainViewModelSource.IndexOf(
-    "await ReleaseFailedSessionLockedAsync(state, status);",
-    StringComparison.Ordinal);
-var backgroundPromptIndex = mainViewModelSource.IndexOf(
-    "errorTitle, errorBody);",
-    backgroundReleaseIndex,
-    StringComparison.Ordinal);
-Equal(true, backgroundReleaseIndex >= 0 && backgroundPromptIndex > backgroundReleaseIndex,
-    "background capture errors release the failed session before showing a modal prompt");
-var selectedReleaseIndex = mainViewModelSource.IndexOf(
-    "await ReleaseFailedSessionLockedAsync(state, status);",
-    backgroundReleaseIndex + 1,
-    StringComparison.Ordinal);
-var selectedPromptIndex = mainViewModelSource.IndexOf(
-    "CaptureStatusNoticeWindow.ShowError(errorTitle, errorBody);",
-    selectedReleaseIndex,
-    StringComparison.Ordinal);
-Equal(true, selectedReleaseIndex >= 0 && selectedPromptIndex > selectedReleaseIndex,
-    "selected capture errors release the failed session before showing a modal prompt");
-var sessionClosedWarningMethodIndex = mainViewModelSource.IndexOf(
-    "private void ShowDeviceSessionClosedWarningThenRelease(",
-    StringComparison.Ordinal);
-var sessionClosedPromptIndex = mainViewModelSource.IndexOf(
-    "CaptureStatusNoticeWindow.ShowStoppedThen(errorTitle, errorBody,",
-    sessionClosedWarningMethodIndex, StringComparison.Ordinal);
-var sessionClosedCleanupIndex = mainViewModelSource.IndexOf(
-    "() => ReleaseFailedSessionLockedAsync(state, status)",
-    sessionClosedPromptIndex, StringComparison.Ordinal);
-Equal(true, sessionClosedWarningMethodIndex >= 0 &&
-    sessionClosedPromptIndex > sessionClosedWarningMethodIndex &&
-    sessionClosedCleanupIndex > sessionClosedPromptIndex,
-    "phone-side stop warnings are displayed before their teardown callback runs");
+var usbRestoreRecovery = new UsbRestoreRecoveryTracker();
+usbRestoreRecovery.MarkRecoveryRequired("iphone-17");
+Equal(true, usbRestoreRecovery.IsBlocked("IPHONE-17"),
+    "USB restore warning blocks immediate restart for the same device");
+Sequence([], usbRestoreRecovery.Observe(["iphone-17"]),
+    "a still-present device does not clear the USB restore block");
+Sequence([], usbRestoreRecovery.Observe([]),
+    "a missing observation only records the required disconnect");
+Sequence(["iphone-17"], usbRestoreRecovery.Observe(["IPHONE-17"]),
+    "a device re-enumeration clears the USB restore block");
+Equal(false, usbRestoreRecovery.IsBlocked("iphone-17"),
+    "re-enumerated device can start again");
+
+// Capture cleanup and modal-notice ordering are exercised by
+// App.Runtime.Tests/CaptureReviewRegressionTests.cs. Source-string ordering
+// cannot verify deferred callbacks or the identity of the session they release.
 
 var currentExecutable = Environment.ProcessPath!;
 Equal(true, SingleInstanceCoordinator.IsSameExecutable(currentExecutable,

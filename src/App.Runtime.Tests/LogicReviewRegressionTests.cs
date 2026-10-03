@@ -13,9 +13,14 @@ internal static partial class Program
 {
     private static void TestLogicReviewRegressions()
     {
+        TestClipboardSyncRegressions();
+        TestMediaReviewRegressions();
         TestDelayedAudioReader();
         WaitReviewTask(TestPasteFrameLimitsAsync());
         TestWiredCaptureTeardown();
+        TestCaptureReviewRegressions();
+        WaitReviewTask(TestVirtualCameraRegressionsAsync());
+        WaitReviewTask(TestUpdaterElevationRegressionsAsync());
         Console.WriteLine("Logic review regressions passed: audio lifetime, paste frame limits, physical-device teardown and restart ordering.");
     }
 

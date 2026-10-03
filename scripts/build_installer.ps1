@@ -5,6 +5,7 @@ param(
     [switch]$AllowVersionOverride,
     [switch]$SkipAppBuild,
     [switch]$OmitUxPlayRuntime,
+    [switch]$IncludeUxPlayRuntime,
     [string]$SourceDirectory,
     [string]$OutputDirectory
 )
@@ -81,7 +82,7 @@ $expectedPath = Join-Path $OutputDirectory $expectedName
 Push-Location $Root
 try {
     if (-not $SkipAppBuild) {
-        & (Join-Path $Root 'build.ps1') -Configuration Release -Version $Version -OmitUxPlayRuntime:$OmitUxPlayRuntime
+        & (Join-Path $Root 'build.ps1') -Configuration Release -Version $Version -OmitUxPlayRuntime:$OmitUxPlayRuntime -IncludeUxPlayRuntime:$IncludeUxPlayRuntime
         if ($LASTEXITCODE -ne 0) { throw "Release build failed: $LASTEXITCODE" }
     }
     $appExecutable = Join-Path $SourceDirectory 'iPhoneMirror.exe'
@@ -110,14 +111,12 @@ try {
             'vcruntime140.dll', 'vcruntime140_1.dll',
             'iPhoneMirror.Core.dll', 'iPhoneMirror.UsbConfigurationSwitch.exe',
             'iPhoneMirror.dll', 'iPhoneMirror.deps.json',
-            'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.dll',
-            'iPhoneMirror.Driver.exe', 'iPhoneMirror.Driver.deps.json',
-            'iPhoneMirror.Driver.runtimeconfig.json', 'hostfxr.dll',
+            'iPhoneMirror.runtimeconfig.json', 'iPhoneMirror.Driver.exe', 'hostfxr.dll',
             'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
             'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
             'Wireless\msvcp140.dll', 'Wireless\vcruntime140.dll',
             'Wireless\vcruntime140_1.dll')
-    if (-not $OmitUxPlayRuntime) {
+    if ($IncludeUxPlayRuntime -and -not $OmitUxPlayRuntime) {
         $requiredPayload += @($UxPlayRuntimeFiles | ForEach-Object {
             Join-Path 'Wireless\UxPlay' $_
         })

@@ -1951,6 +1951,23 @@
                             </StackPanel>
                         </Border>
 
+                        <Border Style="{StaticResource ControlSectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource MappingTitle}" Style="{StaticResource ControlSectionTitle}"/>
+                                <TextBlock Text="{DynamicResource MappingDescription}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                                <Button Command="{Binding ManageKeyboardMappingCommand}" Style="{StaticResource ToolButton}" Margin="0,10,0,0"
+                                        AutomationProperties.AutomationId="OpenKeyboardMappingButton">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Keyboard20" Style="{StaticResource ButtonSymbolIcon}" Margin="0,0,8,0"/>
+                                        <TextBlock Text="{DynamicResource MappingManage}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock Text="{Binding KeyboardMappingStatus}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                            </StackPanel>
+                        </Border>
+
                         <Border Style="{StaticResource ControlSectionCard}"
                                 Visibility="{Binding WirelessBottomSettingsVisibility}">
                             <StackPanel>

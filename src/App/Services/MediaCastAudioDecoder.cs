@@ -152,10 +152,15 @@ internal sealed class MediaCastAudioDecoder : IDisposable
                 if (read == 0) break;
                 filled += read;
                 if (filled != packetBuffer.Length) continue;
-                var packet = new AudioPacket(++_sequence, SampleRate, Channels,
-                    16, packetBuffer.ToArray());
                 lock (_gate)
                 {
+                    // A read can finish after Stop cleared the queue, or after
+                    // Start replaced this process. Never enqueue stale audio
+                    // into the stopped/new session.
+                    if (cancellationToken.IsCancellationRequested ||
+                        !ReferenceEquals(_process, process)) break;
+                    var packet = new AudioPacket(++_sequence, SampleRate, Channels,
+                        16, packetBuffer.ToArray());
                     _packets.Enqueue(packet);
                     while (_packets.Count > MaximumQueuedPackets)
                         _packets.Dequeue();

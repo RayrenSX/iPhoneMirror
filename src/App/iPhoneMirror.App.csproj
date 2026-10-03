@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <InternalsVisibleTo Include="IPhoneMirror.App.Runtime.Tests" />
+  </ItemGroup>
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
@@ -28,27 +31,34 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
+    <UsbBridgeRoot Condition="'$(UsbBridgeRoot)' == ''">$(MSBuildProjectDirectory)\..\..\dist</UsbBridgeRoot>
     <!-- Keep the framework resource satellites used by the supported UI
          cultures in addition to the neutral English fallback. -->
     <SatelliteResourceLanguages>en;zh-Hans;zh-Hant</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="..\..\dist\iUsbBridge.exe">
+    <EmbeddedResource Include="native\components\uxplay.json"
+                      LogicalName="IPhoneMirror.App.Components.UxPlay.json"
+                      Condition="Exists('native\components\uxplay.json')" />
+    <EmbeddedResource Include="native\components\ffmpeg.sha256"
+                      LogicalName="IPhoneMirror.App.Components.Ffmpeg.sha256"
+                      Condition="Exists('native\components\ffmpeg.sha256')" />
+    <Content Include="$(UsbBridgeRoot)\iUsbBridge.exe">
       <Link>tools\iUsbBridge.exe</Link>
       <TargetPath>tools\iUsbBridge.exe</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Content Include="..\..\dist\_internal\**\*">
+    <Content Include="$(UsbBridgeRoot)\_internal\**\*">
       <Link>tools\_internal\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <TargetPath>tools\_internal\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Content Include="..\..\dist\iUsbBridge.runtime.json">
+    <Content Include="$(UsbBridgeRoot)\iUsbBridge.runtime.json">
       <Link>tools\iUsbBridge.runtime.json</Link>
       <TargetPath>tools\iUsbBridge.runtime.json</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -67,11 +77,11 @@
   </ItemGroup>
 
   <Target Name="ValidateUsbTouchBridgePayload" BeforeTargets="PrepareForBuild">
-    <Error Condition="!Exists('..\..\dist\iUsbBridge.exe')"
+    <Error Condition="!Exists('$(UsbBridgeRoot)\iUsbBridge.exe')"
            Text="iUsbBridge.exe is missing. Run build.ps1 so the self-developed USB bridge is built first." />
-    <Error Condition="!Exists('..\..\dist\_internal')"
+    <Error Condition="!Exists('$(UsbBridgeRoot)\_internal')"
            Text="UsbTouchBridge runtime directory is missing. Run build.ps1 so the self-developed USB bridge is built first." />
-    <Error Condition="!Exists('..\..\dist\iUsbBridge.runtime.json')"
+    <Error Condition="!Exists('$(UsbBridgeRoot)\iUsbBridge.runtime.json')"
            Text="iUsbBridge runtime manifest is missing. Run build.ps1 so the self-developed USB bridge is built first." />
   </Target>
 
@@ -190,7 +200,7 @@
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Content Include="native\Wireless\UxPlay\**\*"
-             Condition="Exists('native\Wireless\UxPlay')">
+             Condition="'$(IncludeBundledUxPlay)' == 'true' and Exists('native\Wireless\UxPlay')">
       <Link>Wireless\UxPlay\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <TargetPath>Wireless\UxPlay\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

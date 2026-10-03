@@ -454,8 +454,10 @@ std::size_t QtUsbConnection::read(std::span<std::uint8_t> destination, unsigned 
     const int result = libusb_bulk_transfer(handle_, endpoints_.bulk_in, destination.data(),
         static_cast<int>(std::min<std::size_t>(destination.size(), static_cast<std::size_t>(INT_MAX))),
         &transferred, timeout_ms);
-    if (result == LIBUSB_ERROR_TIMEOUT) return 0;
-    if (result != LIBUSB_SUCCESS) throw UsbError("QuickTime bulk read", result);
+    // A timeout can consume part of a USB packet. Those bytes must reach the
+    // stream decoder before the next read or its framing will be corrupted.
+    if (result != LIBUSB_SUCCESS && result != LIBUSB_ERROR_TIMEOUT)
+        throw UsbError("QuickTime bulk read", result);
     return static_cast<std::size_t>(transferred);
 }
 

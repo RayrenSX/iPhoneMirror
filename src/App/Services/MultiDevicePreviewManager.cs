@@ -81,6 +81,9 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         return width != 0 && height != 0;
     }
 
+    internal bool IsFullScreen(string udid) =>
+        _windows.TryGetValue(udid, out var window) && window.IsFullScreen;
+
     internal Task<(bool Success, string Message)> ShowAsync(DeviceViewModel device)
     {
         viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_show_requested",

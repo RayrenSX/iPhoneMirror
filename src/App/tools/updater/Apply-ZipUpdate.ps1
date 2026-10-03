@@ -9,6 +9,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# This script can run elevated. Resolve standard commands only from protected
+# Windows modules, including when the script is invoked directly.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::SystemDirectory,
+    'WindowsPowerShell\v1.0\Modules')
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -16,7 +20,7 @@ $currentPrincipal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
 $isElevated = $currentPrincipal.IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 $privilegedTempRoot = if ($isElevated) {
-    [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
+    [Environment]::SystemDirectory
 }
 else { $env:TEMP }
 $stagingRoot = Join-Path $privilegedTempRoot (
@@ -94,6 +98,7 @@ function New-PrivilegedDirectory([string]$Path) {
     $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
     $security = [Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)
+    $security.SetOwner($administrators)
     $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
         [Security.AccessControl.InheritanceFlags]::ObjectInherit
     $propagation = [Security.AccessControl.PropagationFlags]::None
@@ -115,22 +120,45 @@ function Enable-DirectoryInheritance([string]$Path) {
     $directory.SetAccessControl($security)
 }
 
+function Get-InteractiveDesktopShell {
+    $shellWindows = $null
+    $desktopWindow = $null
+    $desktopView = $null
+    try {
+        # Obtain Explorer's existing desktop automation object. A freshly
+        # created Shell.Application is not evidence of an unelevated host.
+        $shellType = [Type]::GetTypeFromCLSID([Guid]'9BA05972-F6A8-11CF-A442-00A0C90A8F39')
+        $shellWindows = [Activator]::CreateInstance($shellType)
+        $location = 0
+        $root = 0
+        $desktopHandle = 0
+        $desktopWindow = $shellWindows.FindWindowSW([ref]$location, [ref]$root,
+            8, [ref]$desktopHandle, 1)
+        if ($null -eq $desktopWindow -or $desktopHandle -eq 0) {
+            throw 'The interactive desktop shell is unavailable.'
+        }
+        $desktopView = $desktopWindow.Document
+        $application = $desktopView.Application
+        if ($null -eq $application) { throw 'The desktop automation object is unavailable.' }
+        return $application
+    }
+    finally {
+        foreach ($instance in @($desktopView, $desktopWindow, $shellWindows)) {
+            if ($null -ne $instance -and [Runtime.InteropServices.Marshal]::IsComObject($instance)) {
+                [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($instance)
+            }
+        }
+    }
+}
+
 function Start-RestartProcess([string]$Path, [string]$WorkingDirectory) {
     if (-not $isElevated) {
         Start-Process -FilePath $Path -WorkingDirectory $WorkingDirectory
         return
     }
 
-    # Delegate process creation to the interactive desktop shell. Shell.Application
-    # is hosted by Explorer at the user's normal integrity level, so the updated
-    # GUI does not inherit this helper's administrator token.
-    $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
-    $desktopShell = Get-Process -Name explorer -ErrorAction SilentlyContinue |
-        Where-Object { $_.SessionId -eq $sessionId } | Select-Object -First 1
-    if ($null -eq $desktopShell) {
-        throw 'The updated application could not be restarted at normal user privileges.'
-    }
-    $shell = New-Object -ComObject Shell.Application
+    # Delegate creation to the actual Explorer desktop at its normal integrity.
+    $shell = Get-InteractiveDesktopShell
     try { $shell.ShellExecute($Path, '', $WorkingDirectory, 'open', 1) }
     finally {
         if ($null -ne $shell) {

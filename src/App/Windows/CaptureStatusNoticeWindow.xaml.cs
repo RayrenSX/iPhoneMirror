@@ -95,7 +95,7 @@ public partial class CaptureStatusNoticeWindow : IPhoneMirror.UI.Controls.Rounde
             Owner = Application.Current.MainWindow,
         };
         var started = false;
-        notice.ContentRendered += async (_, _) =>
+        async Task ReleaseAfterShownAsync()
         {
             if (started) return;
             started = true;
@@ -110,8 +110,15 @@ public partial class CaptureStatusNoticeWindow : IPhoneMirror.UI.Controls.Rounde
                 Services.DiagnosticLogger.Exception("capture",
                     "capture_notice_after_shown_failed", error);
             }
-        };
-        notice.ShowDialog();
+        }
+        notice.ContentRendered += async (_, _) => await ReleaseAfterShownAsync();
+        try { notice.ShowDialog(); }
+        finally
+        {
+            // Closing before ContentRendered (or failing to show) must not
+            // retain the failed capture. The once guard also covers re-entry.
+            if (!started) _ = ReleaseAfterShownAsync();
+        }
     }
 
     internal static void ShowDeveloperErrorPreview(Window owner) =>

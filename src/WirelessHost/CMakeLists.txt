@@ -52,6 +52,16 @@ install(TARGETS iPhoneMirror.WirelessHost iPhoneMirror.DnsSdShim
     RUNTIME DESTINATION Wireless)
 
 if(IPHONEMIRROR_BUILD_TESTS)
+    add_executable(iPhoneMirror.IpcWriter.Tests
+        tests/IpcWriterTests.cpp DlnaRenderer.cpp)
+    target_compile_definitions(iPhoneMirror.IpcWriter.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.IpcWriter.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.IpcWriter.Tests PRIVATE bcrypt ws2_32 winhttp)
+    add_test(NAME IpcWriterTests COMMAND iPhoneMirror.IpcWriter.Tests)
+    set_tests_properties(IpcWriterTests PROPERTIES TIMEOUT 15)
+
     add_executable(iPhoneMirror.DnsSdRegistrationPolicy.Tests
         tests/DnsSdRegistrationPolicyTests.cpp)
     target_include_directories(iPhoneMirror.DnsSdRegistrationPolicy.Tests PRIVATE

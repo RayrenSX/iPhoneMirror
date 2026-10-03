@@ -48,8 +48,9 @@ Run("advanced mode exposes forced driver cleanup", () =>
     False(code.Contains("Remove-Selected-iPhone-Drivers.cmd", StringComparison.Ordinal));
     True(code.Contains("ToggleComboBoxDropDown", StringComparison.Ordinal));
     True(cleanupHost.Contains("EnsureElevationBoundary", StringComparison.Ordinal));
-    True(cleanupHost.Contains("Verb = \"runas\"", StringComparison.Ordinal));
-    True(cleanupHost.Contains("start.ArgumentList.Add(Switch)", StringComparison.Ordinal));
+    True(cleanupHost.Contains("DriverOperationClient.BuildElevatedStartInfo(arguments)",
+        StringComparison.Ordinal));
+    True(cleanupHost.Contains("new List<string> { Switch }", StringComparison.Ordinal));
     True(cleanupHost.Contains("ExcludeProcessId", StringComparison.Ordinal));
     True(cleanupHost.Contains("ParentProcessIdSwitch", StringComparison.Ordinal));
     False(cleanupScript.Contains("Verb RunAs", StringComparison.Ordinal));
@@ -442,12 +443,45 @@ Run("elevated result matches process exit code", () =>
     False(DriverOperationClient.IsResultConsistentWithExitCode(0, failure));
 });
 
-Run("current driver executable is locked before elevation", () =>
+Run("unbundled driver builds cannot cross the elevation boundary", () =>
 {
     var success = DriverOperationClient.EnsureElevationBoundary(out var error);
-    True(success);
-    if (!success) throw error ?? new IOException(
-        "current process elevation boundary was not created");
+    False(success);
+    True(error is InvalidOperationException);
+});
+
+Run("driver bootstrap rejects CLR injection before launching PowerShell", () =>
+{
+    foreach (var name in new[] { "COR_ENABLE_PROFILING", "COMPLUS_InstallRoot",
+                 "DOTNET_STARTUP_HOOKS", "CORECLR_PROFILER", "DEVPATH",
+                 "APPDOMAIN_MANAGER_ASM", "APPDOMAIN_MANAGER_TYPE", "CLRConfigFile" })
+        Throws<InvalidOperationException>(() => DriverElevationBootstrap.ValidateEnvironment(
+            new System.Collections.Hashtable { [name.ToLowerInvariant()] = "untrusted" }));
+    DriverElevationBootstrap.ValidateEnvironment(new System.Collections.Hashtable {
+        ["PATH"] = "user tools", ["PSModulePath"] = "user modules", ["DOTNET_ROOT"] = "" });
+});
+
+Run("driver bootstrap verifies the bundle and isolates all runtime loading", () =>
+{
+    using var stream = typeof(DriverElevationBootstrap).Assembly.GetManifestResourceStream(
+        "DriverElevation.Bootstrap.ps1")!;
+    using var reader = new StreamReader(stream);
+    var script = reader.ReadToEnd();
+    True(script.Contains("$security.SetOwner($administrators)"));
+    True(script.Contains("$directoryInfo.Create($security)"));
+    True(script.Contains("$algorithm.ComputeHash($source)"));
+    True(script.Contains("$start.EnvironmentVariables.Clear()"));
+    True(script.Contains("DOTNET_BUNDLE_EXTRACT_BASE_DIR"));
+    False(script.Contains("ConvertFrom-Json"));
+    True(script.IndexOf("$actualHash.Equals", StringComparison.Ordinal) <
+        script.IndexOf("[Diagnostics.Process]::Start", StringComparison.Ordinal));
+});
+
+Run("driver bootstrap quotes Windows arguments without losing slashes", () =>
+{
+    Equal("\"\"", DriverElevationBootstrap.QuoteWindowsArgument(""));
+    Equal("\"USB\\VID_05AC\"", DriverElevationBootstrap.QuoteWindowsArgument(@"USB\VID_05AC"));
+    Equal("\"a\\\"b\\\\\"", DriverElevationBootstrap.QuoteWindowsArgument("a\"b\\"));
 });
 
 Run("log sanitization", () =>

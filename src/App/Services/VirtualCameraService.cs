@@ -1,11 +1,11 @@
 using IPhoneMirror.App.Localization;
+using System.Collections;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.Shared.Security;
 using Microsoft.Win32;
@@ -29,29 +29,16 @@ internal sealed class VirtualCameraService : IAsyncDisposable
     private const string AdminHelperResource =
         "IPhoneMirror.App.Payload.iPhoneMirror.VirtualCamera.Admin.exe";
     private const string VerifiedElevationBootstrap = """
+        # Use only .NET APIs and locally defined functions: inherited PSModulePath
+        # must never cause user modules to execute in the elevated process.
         $ErrorActionPreference = 'Stop'
-        $payloadJson = [Text.Encoding]::UTF8.GetString(
-            [Convert]::FromBase64String('$PAYLOAD_BASE64$'))
-        $payload = $payloadJson | ConvertFrom-Json
-        $commonData = [Environment]::GetFolderPath(
-            [Environment+SpecialFolder]::CommonApplicationData)
-        $directory = [IO.Path]::Combine($commonData,
-            'iPhoneMirror-VirtualCamera-' + [Guid]::NewGuid().ToString('N'))
-        $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
-        $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
-        $security = [Security.AccessControl.DirectorySecurity]::new()
-        $security.SetAccessRuleProtection($true, $false)
-        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
-            [Security.AccessControl.InheritanceFlags]::ObjectInherit
-        $allow = [Security.AccessControl.AccessControlType]::Allow
-        $rights = [Security.AccessControl.FileSystemRights]::FullControl
-        $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-            $administrators, $rights, $inheritance,
-            [Security.AccessControl.PropagationFlags]::None, $allow))
-        $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-            $system, $rights, $inheritance,
-            [Security.AccessControl.PropagationFlags]::None, $allow))
-        [IO.DirectoryInfo]::new($directory).Create($security)
+        $helperPath = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String('$HELPER_PATH_BASE64$'))
+        $mediaSourcePath = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String('$MEDIA_PATH_BASE64$'))
+        $helperHash = '$HELPER_SHA256$'
+        $mediaSourceHash = '$MEDIA_SHA256$'
+        $install = $INSTALL$
 
         function Copy-VerifiedPayload([string]$sourcePath, [string]$expectedHash,
             [string]$destinationPath) {
@@ -95,28 +82,77 @@ internal sealed class VirtualCameraService : IAsyncDisposable
             finally { $source.Dispose() }
         }
 
+        function New-IsolatedCameraStartInfo([string]$helper, [string]$directory,
+            [string]$mediaSource, [bool]$install) {
+            $start = [Diagnostics.ProcessStartInfo]::new()
+            $start.FileName = $helper
+            $start.Arguments = if ($install) { 'install "' + $mediaSource + '"' }
+                else { 'uninstall' }
+            $start.WorkingDirectory = $directory
+            $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
+            $start.EnvironmentVariables.Clear()
+            $windows = [IO.Directory]::GetParent([Environment]::SystemDirectory).FullName
+            $start.EnvironmentVariables['SystemRoot'] = $windows
+            $start.EnvironmentVariables['WINDIR'] = $windows
+            $start.EnvironmentVariables['PATH'] = [Environment]::SystemDirectory
+            $start.EnvironmentVariables['TEMP'] = $directory
+            $start.EnvironmentVariables['TMP'] = $directory
+            # The native helper uses these variables to choose its install path.
+            # Populate them from Windows known folders, never the inherited values.
+            $programFiles = [Environment]::GetFolderPath(
+                [Environment+SpecialFolder]::ProgramFiles)
+            if ([string]::IsNullOrEmpty($programFiles)) {
+                throw 'Windows did not provide the Program Files directory.'
+            }
+            $start.EnvironmentVariables['ProgramFiles'] = $programFiles
+            $start.EnvironmentVariables['ProgramW6432'] = $programFiles
+            return $start
+        }
+
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'The virtual camera bootstrap is not elevated.'
+        }
+        # OS-protected ancestors and an administrator owner prevent a medium
+        # integrity process from replacing the directory or changing its ACL.
+        $directory = [IO.Path]::Combine([Environment]::SystemDirectory,
+            'iPhoneMirror-VirtualCamera-' + [Guid]::NewGuid().ToString('N'))
+        $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+        $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+        $security = [Security.AccessControl.DirectorySecurity]::new()
+        $security.SetAccessRuleProtection($true, $false)
+        $security.SetOwner($administrators)
+        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+            [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $allow = [Security.AccessControl.AccessControlType]::Allow
+        $rights = [Security.AccessControl.FileSystemRights]::FullControl
+        foreach ($sid in @($administrators, $system)) {
+            $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                $sid, $rights, $inheritance,
+                [Security.AccessControl.PropagationFlags]::None, $allow))
+        }
+        $directoryInfo = [IO.DirectoryInfo]::new($directory)
+        if ($directoryInfo.Exists) { throw 'The virtual camera staging directory already exists.' }
+        $directoryInfo.Create($security)
         $exitCode = 1
         try {
             $helper = [IO.Path]::Combine($directory, 'iPhoneMirror.VirtualCamera.Admin.exe')
             $mediaSource = [IO.Path]::Combine($directory, 'iPhoneMirror.VirtualCamera.dll')
-            Copy-VerifiedPayload $payload.HelperPath $payload.HelperSha256 $helper
-            Copy-VerifiedPayload $payload.MediaSourcePath $payload.MediaSourceSha256 $mediaSource
-            Push-Location $directory
+            Copy-VerifiedPayload $helperPath $helperHash $helper
+            Copy-VerifiedPayload $mediaSourcePath $mediaSourceHash $mediaSource
+            $start = New-IsolatedCameraStartInfo $helper $directory $mediaSource $install
+            $helperProcess = [Diagnostics.Process]::Start($start)
+            if ($null -eq $helperProcess) { throw 'The virtual camera helper did not start.' }
             try {
-                $arguments = if ([bool]$payload.Install) {
-                    @([string]$payload.Command, ('"{0}"' -f $mediaSource))
-                } else {
-                    @([string]$payload.Command)
-                }
-                $helperProcess = Start-Process -FilePath $helper -ArgumentList $arguments `
-                    -WorkingDirectory $directory -PassThru
                 if (-not $helperProcess.WaitForExit(120000)) {
-                    try { $helperProcess.Kill() } catch { }
+                    try { $helperProcess.Kill(); $helperProcess.WaitForExit() } catch { }
                     throw 'The virtual camera helper timed out.'
                 }
                 $exitCode = [int]$helperProcess.ExitCode
             }
-            finally { Pop-Location }
+            finally { $helperProcess.Dispose() }
         }
         finally {
             try { [IO.Directory]::Delete($directory, $true) } catch { }
@@ -127,6 +163,9 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         @"Software\Classes\CLSID\{4C0D85FD-695A-491D-945B-21DDF7EEC1E2}\InprocServer32";
     private static readonly TimeSpan FrameTimeout = TimeSpan.FromSeconds(5);
     private readonly Func<ulong, uint, uint, VideoFrame?> _frameProvider;
+    private readonly Func<uint, uint, int, int> _startCamera;
+    private readonly Func<VideoFrame, int> _publishFrame;
+    private readonly Func<int> _stopCamera;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private CancellationTokenSource? _runCancellation;
     private Task? _runTask;
@@ -173,8 +212,25 @@ internal sealed class VirtualCameraService : IAsyncDisposable
 
     internal VirtualCameraService(
         Func<ulong, uint, uint, VideoFrame?> frameProvider)
+        : this(frameProvider,
+            (width, height, frameRate) => im_vcam_start_ex(
+                "iPhoneMirror Virtual Camera", width, height, checked((uint)frameRate)),
+            frame => im_vcam_publish_bgra(frame.Pixels,
+                frame.Width, frame.Height, frame.Stride, frame.Timestamp100Ns),
+            im_vcam_stop)
+    {
+    }
+
+    internal VirtualCameraService(
+        Func<ulong, uint, uint, VideoFrame?> frameProvider,
+        Func<uint, uint, int, int> startCamera,
+        Func<VideoFrame, int> publishFrame,
+        Func<int> stopCamera)
     {
         _frameProvider = frameProvider;
+        _startCamera = startCamera;
+        _publishFrame = publishFrame;
+        _stopCamera = stopCamera;
     }
 
     internal static VirtualCameraCapabilities Probe()
@@ -230,15 +286,16 @@ internal sealed class VirtualCameraService : IAsyncDisposable
     }
 
     internal static async Task InstallAsync(CancellationToken cancellationToken)
-        => await RunAdminAsync("install", install: true, cancellationToken);
+        => await RunAdminAsync(install: true, cancellationToken);
 
     internal static Task UninstallAsync(CancellationToken cancellationToken) =>
-        RunAdminAsync("uninstall", install: false, cancellationToken);
+        RunAdminAsync(install: false, cancellationToken);
 
-    private static async Task RunAdminAsync(string command, bool install,
+    private static async Task RunAdminAsync(bool install,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        ValidateElevationEnvironment(Environment.GetEnvironmentVariables());
         var stagingDirectory = Path.Combine(Path.GetTempPath(), "iPhoneMirror",
             "VirtualCameraAdmin", Guid.NewGuid().ToString("N"));
         var retainStagingDirectory = false;
@@ -253,30 +310,8 @@ internal sealed class VirtualCameraService : IAsyncDisposable
             ValidateStagedPayload(helper, helperHash);
             ValidateStagedPayload(mediaSource, mediaSourceHash);
 
-            var start = new ProcessStartInfo
-            {
-                FileName = Path.Combine(Environment.SystemDirectory,
-                    "WindowsPowerShell", "v1.0", "powershell.exe"),
-                Verb = "runas",
-                UseShellExecute = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                WorkingDirectory = Path.Combine(Environment.SystemDirectory,
-                    "WindowsPowerShell", "v1.0"),
-            };
-            var payload = new VerifiedElevationPayload(helper, mediaSource,
-                Convert.ToHexString(helperHash), Convert.ToHexString(mediaSourceHash),
-                command, install);
-            var payloadBase64 = Convert.ToBase64String(
-                JsonSerializer.SerializeToUtf8Bytes(payload));
-            var encodedCommand = VerifiedElevationBootstrap.Replace(
-                "$PAYLOAD_BASE64$", payloadBase64, StringComparison.Ordinal);
-            foreach (var argument in new[]
-                     {
-                         "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
-                         "-ExecutionPolicy", "Bypass", "-EncodedCommand",
-                         Convert.ToBase64String(Encoding.Unicode.GetBytes(encodedCommand)),
-                     })
-                start.ArgumentList.Add(argument);
+            var start = BuildAdminStartInfo(helper, mediaSource,
+                Convert.ToHexString(helperHash), Convert.ToHexString(mediaSourceHash), install);
             try
             {
                 using var process = Process.Start(start) ??
@@ -334,9 +369,58 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         }
     }
 
-    private sealed record VerifiedElevationPayload(string HelperPath,
-        string MediaSourcePath, string HelperSha256, string MediaSourceSha256,
-        string Command, bool Install);
+    internal static void ValidateElevationEnvironment(IDictionary environment)
+    {
+        foreach (DictionaryEntry entry in environment)
+        {
+            var name = (string)entry.Key;
+            if (string.IsNullOrEmpty(entry.Value?.ToString())) continue;
+            if (name.StartsWith("COMPLUS_", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith("COR_", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith("CORECLR_", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith("DOTNET_", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("DEVPATH", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("APPDOMAIN_MANAGER_ASM", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("APPDOMAIN_MANAGER_TYPE", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("CLRConfigFile", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Virtual camera elevation does not accept runtime overrides: {name}");
+        }
+    }
+
+    internal static ProcessStartInfo BuildAdminStartInfo(string helperPath,
+        string mediaSourcePath, string helperSha256, string mediaSourceSha256, bool install)
+    {
+        ValidateElevationEnvironment(Environment.GetEnvironmentVariables());
+        if (helperSha256.Length != 64 || !helperSha256.All(Uri.IsHexDigit) ||
+            mediaSourceSha256.Length != 64 || !mediaSourceSha256.All(Uri.IsHexDigit))
+            throw new ArgumentException("SHA256 digests are required for both camera payloads.");
+        var script = VerifiedElevationBootstrap
+            .Replace("$HELPER_PATH_BASE64$", Convert.ToBase64String(
+                Encoding.UTF8.GetBytes(Path.GetFullPath(helperPath))), StringComparison.Ordinal)
+            .Replace("$MEDIA_PATH_BASE64$", Convert.ToBase64String(
+                Encoding.UTF8.GetBytes(Path.GetFullPath(mediaSourcePath))), StringComparison.Ordinal)
+            .Replace("$HELPER_SHA256$", helperSha256, StringComparison.Ordinal)
+            .Replace("$MEDIA_SHA256$", mediaSourceSha256, StringComparison.Ordinal)
+            .Replace("$INSTALL$", install ? "$true" : "$false", StringComparison.Ordinal);
+        var start = new ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.SystemDirectory,
+                "WindowsPowerShell", "v1.0", "powershell.exe"),
+            Verb = "runas",
+            UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            WorkingDirectory = Environment.SystemDirectory,
+        };
+        foreach (var argument in new[]
+                 {
+                     "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                     "-ExecutionPolicy", "Bypass", "-EncodedCommand",
+                     Convert.ToBase64String(Encoding.Unicode.GetBytes(script)),
+                 })
+            start.ArgumentList.Add(argument);
+        return start;
+    }
 
     private static byte[] WriteEmbeddedPayload(string resourceName, string destination)
     {
@@ -369,16 +453,17 @@ internal sealed class VirtualCameraService : IAsyncDisposable
     {
         ArgumentOutOfRangeException.ThrowIfZero(sessionHandle);
         await _lifecycleGate.WaitAsync(cancellationToken);
+        var startAttempted = false;
         try
         {
             if (IsRunning)
                 throw new InvalidOperationException(
                     LocalizationService.Get("VirtualCameraAlreadyRunning"));
+            startAttempted = true;
             // MFVirtualCamera::Start can synchronously activate Windows camera
             // infrastructure. Keep that work off WPF's dispatcher thread.
             var result = await Task.Run(
-                () => im_vcam_start_ex("iPhoneMirror Virtual Camera",
-                    width, height, checked((uint)frameRate)),
+                () => _startCamera(width, height, frameRate),
                 cancellationToken);
             if (result < 0) throw new InvalidOperationException(HResultMessage(result));
 
@@ -394,10 +479,16 @@ internal sealed class VirtualCameraService : IAsyncDisposable
                 CancellationToken.None);
             StatusChanged?.Invoke("VirtualCamera", false);
         }
-        catch (Exception error)
+        catch (Exception error) when (startAttempted)
         {
             DiagnosticLogger.Exception("virtual_camera", "start_failed", error);
-            try { await Task.Run(im_vcam_stop); }
+            try
+            {
+                // Once the pump owns this run, let its finally block release
+                // the native camera. Startup observers can also throw.
+                if (_runTask is not null) _runCancellation?.Cancel();
+                else await Task.Run(_stopCamera);
+            }
             catch (Exception cleanupError)
             {
                 DiagnosticLogger.Exception("virtual_camera",
@@ -419,19 +510,21 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         {
             _runCancellation?.Cancel();
             task = _runTask;
+            if (task is null)
+            {
+                // Serialize even an idle native stop with StartAsync, otherwise
+                // a delayed stop can close a newly started camera.
+                try { await Task.Run(_stopCamera); }
+                catch (Exception error)
+                {
+                    DiagnosticLogger.Exception("virtual_camera", "idle_stop_failed", error);
+                }
+                return;
+            }
         }
         finally
         {
             _lifecycleGate.Release();
-        }
-        if (task is null)
-        {
-            try { await Task.Run(im_vcam_stop); }
-            catch (Exception error)
-            {
-                DiagnosticLogger.Exception("virtual_camera", "idle_stop_failed", error);
-            }
-            return;
         }
         try { await task; }
         catch (OperationCanceledException) { }
@@ -443,39 +536,36 @@ internal sealed class VirtualCameraService : IAsyncDisposable
     {
         Exception? failure = null;
         VideoFrame? lastFrame = null;
-        long lastSourceTimestamp = long.MinValue;
-        DateTime lastFrameAdvanceAtUtc = default;
-        var firstFrameWait = Stopwatch.StartNew();
+        var frameWait = Stopwatch.StartNew();
         try
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1.0 / frameRate));
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
                 var frame = _frameProvider(sessionHandle, width, height);
-                if (frame is not null &&
-                    (lastFrame is null || frame.Timestamp100Ns > lastSourceTimestamp))
+                if (frame is not null)
                 {
+                    // Static AirPlay screens can retain a valid frame indefinitely.
+                    // A successful read proves availability even when its source
+                    // timestamp repeats or resets; only missing reads time out.
                     lastFrame = frame;
-                    lastSourceTimestamp = frame.Timestamp100Ns;
-                    lastFrameAdvanceAtUtc = DateTime.UtcNow;
+                    frameWait.Restart();
                 }
                 else if (lastFrame is null)
                 {
-                    if (firstFrameWait.Elapsed > FrameTimeout)
+                    if (frameWait.Elapsed > FrameTimeout)
                         throw new TimeoutException(
                             LocalizationService.Get("MediaOutputFrameTimeout"));
                     continue;
                 }
-                else if (DateTime.UtcNow - lastFrameAdvanceAtUtc > FrameTimeout)
+                else if (frameWait.Elapsed > FrameTimeout)
                 {
                     throw new TimeoutException(
                         LocalizationService.Get("MediaOutputFrameStalled"));
                 }
 
                 var currentFrame = lastFrame;
-                var result = im_vcam_publish_bgra(currentFrame.Pixels,
-                    currentFrame.Width, currentFrame.Height, currentFrame.Stride,
-                    currentFrame.Timestamp100Ns);
+                var result = _publishFrame(currentFrame);
                 if (result < 0)
                     throw new InvalidOperationException(HResultMessage(result));
             }
@@ -489,7 +579,7 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         }
         finally
         {
-            try { im_vcam_stop(); } catch (Exception error) { failure ??= error; }
+            try { _stopCamera(); } catch (Exception error) { failure ??= error; }
             await _lifecycleGate.WaitAsync();
             try
             {

@@ -16,6 +16,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="ClipboardSyncTests.cs" />
+    <Compile Include="UxPlayComponentTests.cs" />
+    <Compile Include="ComponentDownloadNetworkTests.cs" />
     <Compile Include="IssueFixMediaTests.cs" />
     <Compile Include="DotnetTestSmoke.cs" />
     <Compile Include="..\Shared\Networking\SegmentedHttpDownloader.cs" Link="Networking\SegmentedHttpDownloader.cs" />
@@ -25,6 +28,7 @@
     <Compile Include="..\App\Services\DeviceBindingManager.cs" Link="DeviceBindingManager.cs" />
     <Compile Include="..\App\Services\CaptureShutdownCoordinator.cs" Link="CaptureShutdownCoordinator.cs" />
     <Compile Include="..\App\Services\DeviceSessionManager.cs" Link="DeviceSessionManager.cs" />
+    <Compile Include="..\App\Services\UsbRestoreRecoveryTracker.cs" Link="UsbRestoreRecoveryTracker.cs" />
     <Compile Include="..\App\Services\SingleInstanceCoordinator.cs" Link="SingleInstanceCoordinator.cs" />
     <Compile Include="..\App\Models\DeviceCornerProfile.cs" Link="DeviceCornerProfile.cs" />
     <Compile Include="..\App\Models\DeviceCaptureState.cs" Link="DeviceCaptureState.cs" />
@@ -39,6 +43,7 @@
     <Compile Include="..\App\Localization\LocalizationService.cs" Link="LocalizationService.cs" />
     <Compile Include="..\App\Localization\LocalizedText.cs" Link="LocalizedText.cs" />
     <Compile Include="..\App\Services\WirelessReceiverService.cs" Link="WirelessReceiverService.cs" />
+    <Compile Include="..\App\Services\UxPlayComponent.cs" Link="UxPlayComponent.cs" />
     <Compile Include="..\App\Services\WirelessStallRecoveryTracker.cs" Link="WirelessStallRecoveryTracker.cs" />
     <Compile Include="..\App\Services\NativeLogTailReader.cs" Link="NativeLogTailReader.cs" />
     <Compile Include="..\App\Services\AppLog.cs" Link="AppLog.cs" />
@@ -57,6 +62,7 @@
     <Compile Include="..\App\Services\BluetoothHidProtocol.cs" Link="BluetoothHidProtocol.cs" />
     <Compile Include="..\App\Services\BluetoothClientRouteTable.cs" Link="BluetoothClientRouteTable.cs" />
     <Compile Include="..\App\Services\KeyboardShortcut.cs" Link="KeyboardShortcut.cs" />
+    <Compile Include="..\App\Services\KeyboardMapping.cs" Link="KeyboardMapping.cs" />
     <Compile Include="..\App\Services\BluetoothMouseOrientationMapper.cs" Link="BluetoothMouseOrientationMapper.cs" />
     <Compile Include="..\App\Services\BluetoothMouseReportCoalescer.cs" Link="BluetoothMouseReportCoalescer.cs" />
     <Compile Include="..\App\Services\AppleProductNames.cs" Link="AppleProductNames.cs" />

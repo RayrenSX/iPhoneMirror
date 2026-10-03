@@ -16,8 +16,10 @@ function New-UsbBridgeBuildSource {
         }
     }
     $bridge = Join-Path $SourceRoot 'usb_touch_bridge.py'
+    $runtimeCheck = Join-Path $SourceRoot 'bridge_runtime_check.py'
     $package = Join-Path $SourceRoot 'iostouch'
     if (-not (Test-Path -LiteralPath $bridge -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $runtimeCheck -PathType Leaf) -or
         -not (Test-Path -LiteralPath $package -PathType Container)) {
         throw "Audited USB bridge source is incomplete: $SourceRoot"
     }
@@ -27,6 +29,7 @@ function New-UsbBridgeBuildSource {
         Copy-Item -LiteralPath (Join-Path $RecipeRoot $name) -Destination $stage
     }
     Copy-Item -LiteralPath $bridge -Destination $stageSource
+    Copy-Item -LiteralPath $runtimeCheck -Destination $stageSource
     # Copy source only: stale bytecode from either checkout must not ship.
     Get-ChildItem -LiteralPath $package -Recurse -File -Filter '*.py' | ForEach-Object {
         $relative = $_.FullName.Substring([IO.Path]::GetFullPath($SourceRoot).TrimEnd('\').Length + 1)

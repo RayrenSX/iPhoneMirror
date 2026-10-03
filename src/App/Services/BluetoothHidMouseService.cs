@@ -80,7 +80,9 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         0xB1, 0x02, 0xC0, 0xC0,
         0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x04,
         0x15, 0x00, 0x26, 0xFF, 0x03, 0x75, 0x10, 0x95, 0x01,
-        0x0A, 0x9D, 0x02, 0x81, 0x02, 0xC0,
+        // A Consumer usage array supports Globe and hardware volume/power
+        // keys. A single Variable field only describes the Globe usage.
+        0x19, 0x00, 0x2A, 0xFF, 0x03, 0x81, 0x00, 0xC0,
         // Navigation controls are separate from the Globe/Fn modifier report.
         // This mirrors standard external-keyboard Consumer Control usages used
         // by iPadOS for Back and Menu/recent-tasks.
@@ -996,6 +998,20 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 StringComparison.OrdinalIgnoreCase))
             return Task.CompletedTask;
         return SendIphoneAppSwitcherAsync(canSend);
+    }
+
+    internal async Task SendIphoneConsumerShortcutAsync(ushort usage, int holdMs,
+        string? expectedTargetDeviceUdid, Func<bool>? canSend = null)
+    {
+        if (expectedTargetDeviceUdid is not null &&
+            !string.Equals(_targetDeviceUdid, expectedTargetDeviceUdid,
+                StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            await SendConsumerAsync(usage, canSend).ConfigureAwait(false);
+            await Task.Delay(holdMs).ConfigureAwait(false);
+        }
+        finally { await SendConsumerAsync(0).ConfigureAwait(false); }
     }
 
     private async Task SendNavigationControlAsync(ushort controls, Func<bool>? canSend = null)

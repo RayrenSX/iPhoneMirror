@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using IPhoneMirror.DriverInstaller.Models;
 using IPhoneMirror.Shared.Security;
@@ -11,6 +12,7 @@ internal sealed class DriverOperationClient
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromMinutes(5);
     private static readonly object ElevationBoundarySync = new();
     private static ElevationPathLock? _processImageLock;
+    private static string? _processImageSha256;
 
     internal static Exception? InitializeElevationBoundary() =>
         EnsureElevationBoundary(out var error) ? null : error;
@@ -26,11 +28,26 @@ internal sealed class DriverOperationClient
             }
             try
             {
+                // A framework-dependent apphost does not contain its code or
+                // runtime configuration. Never elevate an unbundled build.
+#pragma warning disable IL3000 // Empty Location is the single-file deployment check.
+                if (!string.IsNullOrEmpty(typeof(DriverOperationClient).Assembly.Location) ||
+                    !string.IsNullOrEmpty(typeof(object).Assembly.Location))
+#pragma warning restore IL3000
+                    throw new InvalidOperationException(
+                        "Driver elevation requires the published self-contained single-file build.");
                 var executable = Environment.ProcessPath ??
                     Process.GetCurrentProcess().MainModule?.FileName ??
                     throw new FileNotFoundException(
                         "The driver manager executable path is unavailable.");
-                _processImageLock = ElevationPathLock.Acquire(executable);
+                var imageLock = ElevationPathLock.Acquire(executable);
+                try
+                {
+                    using var image = File.OpenRead(executable);
+                    _processImageSha256 = Convert.ToHexString(SHA256.HashData(image));
+                    _processImageLock = imageLock;
+                }
+                catch { imageLock.Dispose(); throw; }
                 error = null;
                 return true;
             }
@@ -43,6 +60,14 @@ internal sealed class DriverOperationClient
     }
 
     internal event Action<string>? StatusChanged;
+
+    internal static ProcessStartInfo BuildElevatedStartInfo(IReadOnlyList<string> arguments)
+    {
+        if (!EnsureElevationBoundary(out var error))
+            throw new InvalidOperationException("The driver bundle could not be protected.", error);
+        return DriverElevationBootstrap.BuildStartInfo(Environment.ProcessPath!,
+            _processImageSha256!, arguments);
+    }
 
     internal async Task<DriverOperationResult> RunAsync(DriverOperationKind kind,
         AppleDeviceRecord device, ParentDriverConsent? parentConsent = null)
@@ -82,22 +107,13 @@ internal sealed class DriverOperationClient
             return Failure(DriverLocalization.Get("DriverExecutableMissing"), paths.LogPath);
         }
 
-        var start = new ProcessStartInfo
-        {
-            FileName = executable,
-            UseShellExecute = true,
-            Verb = "runas",
-            WindowStyle = ProcessWindowStyle.Hidden,
-        };
-        start.ArgumentList.Add(DriverConstants.ElevatedSwitch);
-        start.ArgumentList.Add(kind.ToString());
-        start.ArgumentList.Add(device.InstanceId);
-        start.ArgumentList.Add(device.Serial);
-        start.ArgumentList.Add(operationId);
-        if (parentConsent is not null) start.ArgumentList.Add(parentConsent.Encode());
+        var arguments = new List<string> { DriverConstants.ElevatedSwitch,
+            kind.ToString(), device.InstanceId, device.Serial, operationId };
+        if (parentConsent is not null) arguments.Add(parentConsent.Encode());
 
         try
         {
+            var start = BuildElevatedStartInfo(arguments);
             DriverLogger.WriteEvent("driver-operation", "elevated_process_start",
                 ("operation", operationId), ("kind", kind),
                 ("process", Path.GetFileName(executable)),
