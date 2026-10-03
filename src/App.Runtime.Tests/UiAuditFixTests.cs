@@ -87,7 +87,7 @@ internal static partial class Program
             Check(((Button)conflict.FindName("CloseOtherInstancesButton")).IsEnabled, "Retry must be enabled after failure.");
             conflict.Close();
 
-            foreach (var culture in new[] { "zh-CN", "en-US", "zh-HK" })
+            foreach (var culture in new[] { "zh-CN", "en-US", "zh-HK", "zh-TW" })
             {
                 SetLanguage(culture);
                 AuditFixType("Windows.ImageSettingsWindow").GetMethod("ShowDeveloperPreview", InteractionMembers)!.Invoke(null, [main]);

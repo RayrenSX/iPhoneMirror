@@ -75,6 +75,25 @@ internal static class BluetoothMouseOrientationMapper
         return (Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1));
     }
 
+    // The inverse lives with the mouse converter so markers and capture use
+    // exactly the same orientation/calibration as ordinary mouse input.
+    internal static (double X, double Y) UnmapNormalized(
+        double x, double y, uint displayedWidth, uint displayedHeight,
+        int displayRotation, BluetoothMouseDirection portraitDirection,
+        BluetoothMouseDirection landscapeDirection, bool reverseHorizontal,
+        bool reverseVertical)
+    {
+        var turns = ((displayRotation % 4) + 4) % 4;
+        var sourceWidth = (turns & 1) == 0 ? displayedWidth : displayedHeight;
+        var sourceHeight = (turns & 1) == 0 ? displayedHeight : displayedWidth;
+        var direction = Detect(sourceWidth, sourceHeight) == BluetoothDeviceOrientation.Landscape
+            ? landscapeDirection : portraitDirection;
+        if (reverseHorizontal) x = 1 - x;
+        if (reverseVertical) y = 1 - y;
+        (x, y) = ApplyAbsoluteQuarterTurn(x, y, (4 - (int)direction) % 4);
+        return ApplyAbsoluteQuarterTurn(x, y, (4 - turns) % 4);
+    }
+
     private static (double X, double Y) ApplyQuarterTurn(double dx, double dy,
         int turns) => turns switch
     {

@@ -38,9 +38,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="native\components\uxplay.json"
-                      LogicalName="IPhoneMirror.App.Components.UxPlay.json"
-                      Condition="Exists('native\components\uxplay.json')" />
+    <EmbeddedResource Include="..\..\config\uxplay-component.json"
+                      LogicalName="IPhoneMirror.App.Components.UxPlay.json" />
     <EmbeddedResource Include="native\components\ffmpeg.sha256"
                       LogicalName="IPhoneMirror.App.Components.Ffmpeg.sha256"
                       Condition="Exists('native\components\ffmpeg.sha256')" />
@@ -95,6 +94,8 @@
              Link="Services\WindowWorkAreaController.cs" />
     <Compile Include="..\SharedUI\Animations\PageTransition.cs"
              Link="Animations\PageTransition.cs" />
+    <Compile Include="..\SharedUI\Animations\RevealTransition.cs"
+             Link="Animations\RevealTransition.cs" />
     <Compile Include="..\SharedUI\Controls\ModernButton.cs"
              Link="Controls\ModernButton.cs" />
     <Compile Include="..\SharedUI\Controls\ModernCard.cs"
@@ -264,6 +265,14 @@
     </Content>
     <Content Include="..\..\CHANGELOG.md">
       <Link>CHANGELOG.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <EmbeddedResource Include="..\..\CHANGELOG.zh-TW.md" WithCulture="false"
+                      LogicalName="Localization.CHANGELOG.zh-TW.md" />
+    <Content Include="..\..\CHANGELOG.zh-TW.md">
+      <Link>CHANGELOG.zh-TW.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>

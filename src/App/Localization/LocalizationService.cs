@@ -11,6 +11,7 @@ internal static class LocalizationService
     internal const string SystemLanguage = "system";
     internal const string SimplifiedChinese = "zh-CN";
     internal const string TraditionalChineseHongKong = "zh-HK";
+    internal const string TraditionalChineseTaiwan = "zh-TW";
     internal const string English = "en-US";
 
     private const string DictionaryPrefix = "Localization/Strings.";
@@ -73,7 +74,7 @@ internal static class LocalizationService
     private static void ApplyLanguage(string language, bool persist, bool notify)
     {
         if (language is not (SystemLanguage or SimplifiedChinese or
-            TraditionalChineseHongKong or English))
+            TraditionalChineseHongKong or TraditionalChineseTaiwan or English))
             language = SystemLanguage;
 
         var cultureName = language == SystemLanguage
@@ -123,6 +124,9 @@ internal static class LocalizationService
 
     internal static string ResolveCultureName(string cultureName)
     {
+        if (cultureName.Equals(TraditionalChineseTaiwan, StringComparison.OrdinalIgnoreCase) ||
+            cultureName.Equals("zh-Hant-TW", StringComparison.OrdinalIgnoreCase))
+            return TraditionalChineseTaiwan;
         if (IsHongKongTraditionalChinese(cultureName))
             return TraditionalChineseHongKong;
         return cultureName.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
@@ -135,15 +139,15 @@ internal static class LocalizationService
         cultureName.Equals("zh-CHT", StringComparison.OrdinalIgnoreCase) ||
         cultureName.Equals(TraditionalChineseHongKong,
             StringComparison.OrdinalIgnoreCase) ||
-        cultureName.Equals("zh-MO", StringComparison.OrdinalIgnoreCase) ||
-        cultureName.Equals("zh-TW", StringComparison.OrdinalIgnoreCase);
+        cultureName.Equals("zh-MO", StringComparison.OrdinalIgnoreCase);
 
-    private static string LoadLanguage()
+    private static string LoadLanguage(string? settingsPath = null)
     {
         try
         {
-            if (!File.Exists(SettingsPath)) return SystemLanguage;
-            return new UpdateSettingsStore(SettingsPath).Load().Language;
+            settingsPath ??= SettingsPath;
+            if (!File.Exists(settingsPath)) return SystemLanguage;
+            return new UpdateSettingsStore(settingsPath).Load().Language;
         }
         catch (Exception error)
         {
@@ -152,11 +156,11 @@ internal static class LocalizationService
         }
     }
 
-    private static void SaveLanguage(string language)
+    private static void SaveLanguage(string language, string? settingsPath = null)
     {
         try
         {
-            new UpdateSettingsStore(SettingsPath).Update(settings =>
+            new UpdateSettingsStore(settingsPath ?? SettingsPath).Update(settings =>
                 settings.Language = language);
         }
         catch (Exception error)

@@ -5,6 +5,11 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Add independent Traditional Chinese (Taiwan) localization across the app,
+  driver tools, installer, stream test pages and complete release history.
+
 ### Fixed
 
 - Isolate multi-device keyboard writes so a stalled device cannot block another

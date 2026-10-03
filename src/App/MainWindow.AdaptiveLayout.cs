@@ -6,6 +6,8 @@ namespace IPhoneMirror.App;
 public partial class MainWindow
 {
     private bool _workspacePanelsStacked;
+    private bool _retainWorkspaceStackDuringTransition;
+    private bool? _workspaceCompactHeader, _workspaceShortHeader;
 
     private void OnIdleSurfaceSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -32,8 +34,17 @@ public partial class MainWindow
         StatisticsItems.Width = shortArea ? Math.Max(560, width) : width;
     }
 
-    private void OnWorkspacePanelVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) =>
-        OnWorkspaceLayoutChanged(sender, new RoutedEventArgs());
+    private void OnWorkspacePanelVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        // A host can be hidden by full screen, tray mode or removal from the tree.
+        // Preserve an external Visibility value while settling its animation.
+        if (sender is FrameworkElement element && !element.IsVisible && !_settlingWorkspace)
+        {
+            var visibility = element.Visibility;
+            SettleWorkspaceForEnvironmentChange();
+            element.Visibility = visibility;
+        }
+    }
 
     // At small work-area widths, keep a usable preview and stack the two
     // independently scrollable side panels. Native preview stays in its own cell.
@@ -45,17 +56,23 @@ public partial class MainWindow
         // The shell already exposes the app title. In a very short work area,
         // reserve the in-window heading's space for the preview and controls.
         var shortHeader = compactHeader && RootLayout.ActualHeight < 480;
-        WorkspaceHeading.Visibility = shortHeader ? Visibility.Collapsed : Visibility.Visible;
-        Grid.SetColumnSpan(WorkspaceHeading, compactHeader ? 5 : 1);
-        WorkspaceSubtitle.Visibility = compactHeader ? Visibility.Collapsed : Visibility.Visible;
-        Grid.SetRow(DetectionStatus, compactHeader && !shortHeader ? 1 : 0);
-        Grid.SetColumn(DetectionStatus, compactHeader ? 0 : 1);
-        Grid.SetRow(CaptureActionButton, compactHeader && !shortHeader ? 1 : 0);
-        Grid.SetColumn(CaptureActionButton, compactHeader ? 1 : 3);
-        CaptureActionButton.Margin = compactHeader && !shortHeader ? new Thickness(0, 8, 0, 0) : new Thickness(0);
+        if (compactHeader != _workspaceCompactHeader || shortHeader != _workspaceShortHeader)
+        {
+            _workspaceCompactHeader = compactHeader;
+            _workspaceShortHeader = shortHeader;
+            WorkspaceHeading.Visibility = shortHeader ? Visibility.Collapsed : Visibility.Visible;
+            Grid.SetColumnSpan(WorkspaceHeading, compactHeader ? 5 : 1);
+            WorkspaceSubtitle.Visibility = compactHeader ? Visibility.Collapsed : Visibility.Visible;
+            Grid.SetRow(DetectionStatus, compactHeader && !shortHeader ? 1 : 0);
+            Grid.SetColumn(DetectionStatus, compactHeader ? 0 : 1);
+            Grid.SetRow(CaptureActionButton, compactHeader && !shortHeader ? 1 : 0);
+            Grid.SetColumn(CaptureActionButton, compactHeader ? 1 : 3);
+            CaptureActionButton.Margin = compactHeader && !shortHeader ? new Thickness(0, 8, 0, 0) : new Thickness(0);
+        }
         var stack = !_viewModel.IsLightweightApplicationMode &&
-            MainContentGrid.ActualWidth < 960 && LeftPanelHost.IsVisible && ControlPanel.IsVisible &&
-            LeftPanelHost.ActualWidth > 1 && ControlPanel.ActualWidth > 1;
+            MainContentGrid.ActualWidth < 960 &&
+            ((_leftWorkspacePanel != LeftWorkspacePanel.None && _isSettingsPanelVisible) ||
+             _retainWorkspaceStackDuringTransition);
         if (stack == _workspacePanelsStacked) return;
         _workspacePanelsStacked = stack;
         MainContentGrid.RowDefinitions.Clear();

@@ -8,6 +8,7 @@ internal static class DriverLocalization
 {
     internal const string Chinese = "zh-CN";
     internal const string TraditionalChineseHongKong = "zh-HK";
+    internal const string TraditionalChineseTaiwan = "zh-TW";
     internal const string English = "en-US";
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -93,6 +94,8 @@ internal static class DriverLocalization
 
     private static string ResolveLanguage(string? value)
     {
+        if (value is not null && IsTaiwanTraditionalChinese(value))
+            return TraditionalChineseTaiwan;
         if (string.Equals(value, Chinese, StringComparison.OrdinalIgnoreCase))
             return Chinese;
         if (value is not null && IsTraditionalChinese(value))
@@ -107,19 +110,24 @@ internal static class DriverLocalization
 
     internal static string ResolveCultureName(string cultureName)
     {
+        if (IsTaiwanTraditionalChinese(cultureName))
+            return TraditionalChineseTaiwan;
         if (IsTraditionalChinese(cultureName))
             return TraditionalChineseHongKong;
         return cultureName.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
             ? Chinese : English;
     }
 
+    private static bool IsTaiwanTraditionalChinese(string cultureName) =>
+        cultureName.Equals(TraditionalChineseTaiwan, StringComparison.OrdinalIgnoreCase) ||
+        cultureName.Equals("zh-Hant-TW", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsTraditionalChinese(string cultureName) =>
         cultureName.StartsWith("zh-Hant", StringComparison.OrdinalIgnoreCase) ||
         cultureName.Equals("zh-CHT", StringComparison.OrdinalIgnoreCase) ||
         cultureName.Equals(TraditionalChineseHongKong,
             StringComparison.OrdinalIgnoreCase) ||
-        cultureName.Equals("zh-MO", StringComparison.OrdinalIgnoreCase) ||
-        cultureName.Equals("zh-TW", StringComparison.OrdinalIgnoreCase);
+        cultureName.Equals("zh-MO", StringComparison.OrdinalIgnoreCase);
 
     private sealed record UserSettings(string Language);
 }

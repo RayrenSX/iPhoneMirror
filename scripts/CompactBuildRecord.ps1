@@ -4,7 +4,7 @@ function Get-CompactBuildInputs([string]$Workspace, [bool]$WithUxPlay, [bool]$Wi
     $paths = @('outputs\iPhoneMirror\iPhoneMirror.exe',
         'outputs\iPhoneMirror.Installer\iPhoneMirror.exe',
         'outputs\iPhoneMirror.Installer\iPhoneMirror.dll')
-    if ($WithUxPlay) { $paths += 'src\App\native\components\uxplay.json' }
+    $paths += 'config\uxplay-component.json'
     if ($WithFfmpeg) {
         $paths += @('src\App\native\components\ffmpeg.sha256',
             'outputs\iPhoneMirror\tools\ffmpeg\ffmpeg.exe',

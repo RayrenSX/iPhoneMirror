@@ -33,7 +33,7 @@ internal static partial class Program
         PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Warning;
         try
         {
-            foreach (var culture in new[] { "zh-CN", "en-US", "zh-HK" })
+            foreach (var culture in new[] { "zh-CN", "en-US", "zh-HK", "zh-TW" })
             foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
             foreach (var managed in new[] { false, true })
             {

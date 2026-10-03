@@ -26,7 +26,8 @@ internal sealed partial class MainViewModel
         var control = SelectedControl;
         if (control is { Starting: true } or { Stopping: true }) return "MappingConnecting";
         if (GetReadyUsbControlBridge(SelectedDevice.Udid) is null) return "MappingControlNotReady";
-        if (SourceVideoWidth == 0 || SourceVideoHeight == 0) return "MappingGeometryUnavailable";
+        if (!IsCapturing || CurrentSessionHandle == 0 || SourceVideoWidth == 0 || SourceVideoHeight == 0)
+            return "MappingGeometryUnavailable";
         return "MappingReady";
     }
 

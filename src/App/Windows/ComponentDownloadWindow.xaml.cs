@@ -16,10 +16,11 @@ public partial class ComponentDownloadWindow : IPhoneMirror.UI.Controls.RoundedW
     private readonly Func<IProgress<UpdateDownloadProgress>, Action, CancellationToken, Task> _install;
     private string _statusText = LocalizationService.Get("PreparingDownload");
     private string _detailText = string.Empty;
+    private string _failureDiagnostics = string.Empty;
     private double _percentage;
     private bool _isIndeterminate = true;
     public string StatusText { get => LocalizationService.RefreshText(_statusText); private set { _statusText = value; Changed(); } }
-    public string DetailText { get => LocalizationService.RefreshText(_detailText); private set { _detailText = value; Changed(); } }
+    public string DetailText { get => LocalizationService.RefreshText(_detailText) + _failureDiagnostics; private set { _detailText = value; Changed(); } }
     public double Percentage { get => _percentage; private set { _percentage = value; Changed(); } }
     public bool IsIndeterminate { get => _isIndeterminate; private set { _isIndeterminate = value; Changed(); } }
     public bool CanRetry => _failed && !_busy && !_closeRequested;
@@ -59,6 +60,7 @@ public partial class ComponentDownloadWindow : IPhoneMirror.UI.Controls.RoundedW
         var installing = false;
         var succeeded = false;
         Percentage = 0;
+        _failureDiagnostics = string.Empty;
         DetailText = string.Empty;
         IsIndeterminate = true;
         StatusText = LocalizationService.Get("PreparingDownload");
@@ -100,6 +102,11 @@ public partial class ComponentDownloadWindow : IPhoneMirror.UI.Controls.RoundedW
         {
             DiagnosticLogger.Exception("components", "uxplay_install_failed", error);
             _failed = true;
+            if (UxPlayComponent.Descriptor is { } descriptor)
+                _failureDiagnostics = "\n\n" +
+                    (error is System.Net.Http.HttpRequestException { StatusCode: { } status } ? $"HTTP: {(int)status}\n" : string.Empty) +
+                    $"Version: {descriptor.Version}\nArchitecture: x64\nRelease: {descriptor.ReleaseTag}\n" +
+                    $"Asset: {descriptor.Name}\nURL: {descriptor.Url}";
             StatusText = LocalizationService.Get("UxPlayDownloadFailed");
             DetailText = LocalizationService.Get(error switch
             {

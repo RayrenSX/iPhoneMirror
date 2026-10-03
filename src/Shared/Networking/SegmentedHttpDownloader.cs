@@ -39,7 +39,8 @@ internal static class SegmentedHttpDownloader
         SegmentedDownloadOptions options,
         Func<Uri, bool> isTrustedFinalUri,
         IProgress<SegmentedDownloadProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<Uri, HttpResponseMessage>? responseReceived = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(uri);
@@ -63,6 +64,7 @@ internal static class SegmentedHttpDownloader
         using var probeResponse = await client.SendAsync(probeRequest,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         var resolvedUri = ValidateFinalUri(probeResponse, isTrustedFinalUri);
+        responseReceived?.Invoke(uri, probeResponse);
 
         if (probeResponse.StatusCode == HttpStatusCode.OK)
             return await WriteSingleResponseAsync(probeResponse, destination,
@@ -81,20 +83,20 @@ internal static class SegmentedHttpDownloader
         {
             probeResponse.Dispose();
             return await DownloadSingleAsync(client, resolvedUri, destination, options,
-                isTrustedFinalUri, progress, cancellationToken);
+                isTrustedFinalUri, progress, cancellationToken, responseReceived);
         }
         probeResponse.Dispose();
 
         try
         {
             return await DownloadSegmentsAsync(client, resolvedUri, destination, totalBytes,
-                segmentCount, options, isTrustedFinalUri, progress, cancellationToken);
+                segmentCount, options, isTrustedFinalUri, progress, cancellationToken, responseReceived);
         }
         catch (RangeNotSupportedException)
         {
             TryDelete(destination);
             return await DownloadSingleAsync(client, resolvedUri, destination, options,
-                isTrustedFinalUri, progress, cancellationToken);
+                isTrustedFinalUri, progress, cancellationToken, responseReceived);
         }
     }
 
@@ -113,12 +115,14 @@ internal static class SegmentedHttpDownloader
         SegmentedDownloadOptions options,
         Func<Uri, bool> isTrustedFinalUri,
         IProgress<SegmentedDownloadProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<Uri, HttpResponseMessage>? responseReceived)
     {
         using var request = CreateRequest(uri);
         using var response = await client.SendAsync(request,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         ValidateFinalUri(response, isTrustedFinalUri);
+        responseReceived?.Invoke(uri, response);
         response.EnsureSuccessStatusCode();
         return await WriteSingleResponseAsync(response, destination, options,
             progress, cancellationToken);
@@ -188,7 +192,8 @@ internal static class SegmentedHttpDownloader
         SegmentedDownloadOptions options,
         Func<Uri, bool> isTrustedFinalUri,
         IProgress<SegmentedDownloadProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<Uri, HttpResponseMessage>? responseReceived)
     {
         try
         {
@@ -223,7 +228,7 @@ internal static class SegmentedHttpDownloader
                                     now, previous) == previous)
                                 Report(progress, aggregate, totalBytes, stopwatch,
                                     segmentCount);
-                        }, linked.Token);
+                        }, linked.Token, responseReceived);
                 }
                 catch
                 {
@@ -269,12 +274,14 @@ internal static class SegmentedHttpDownloader
         SegmentedDownloadOptions options,
         Func<Uri, bool> isTrustedFinalUri,
         Action<int> reportBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<Uri, HttpResponseMessage>? responseReceived)
     {
         using var request = CreateRequest(uri, start, end);
         using var response = await client.SendAsync(request,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         ValidateFinalUri(response, isTrustedFinalUri);
+        responseReceived?.Invoke(uri, response);
         if (response.StatusCode == HttpStatusCode.OK)
             throw new RangeNotSupportedException(
                 "The server ignored a segmented range request.");

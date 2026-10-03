@@ -14,7 +14,7 @@ internal sealed record MappedKey(int VirtualKey, int ScanCode, bool Extended)
     internal bool SamePhysicalKey(MappedKey other) => ScanCode != 0 && other.ScanCode != 0
         ? ScanCode == other.ScanCode && Extended == other.Extended
         : VirtualKey == other.VirtualKey && Extended == other.Extended;
-    internal string? Validate() => IsWindows ? "MappingWindowsKeyUnsupported" :
+    internal string? Validate() =>
         VirtualKey is < 0x08 or > 0xFE or 0xE5 or 0xE7 or 0xFF || ScanCode is < 0 or > 0x1FF
             ? "MappingUnsupportedKey" : null;
 }
@@ -32,10 +32,13 @@ internal sealed record KeyboardMappingEntry
     public double Distance { get; init; } = .25;
     public int DurationMs { get; init; } = 400;
     public int IntervalMs { get; init; } = 100;
+    // New visual picks store normalized device space; legacy entries retain
+    // their original preview-space interpretation until explicitly repicked.
+    public bool DeviceCoordinates { get; init; }
 
     internal bool IsSwipe => Action >= MappedTouchAction.Swipe;
     internal bool IsDirectional => Action >= MappedTouchAction.SwipeUp;
-    internal (double X, double Y) EndPoint => Action switch
+    internal (double X, double Y) EndPoint => DeviceCoordinates ? (EndX, EndY) : Action switch
     {
         MappedTouchAction.SwipeUp => (X, Y - Distance),
         MappedTouchAction.SwipeDown => (X, Y + Distance),

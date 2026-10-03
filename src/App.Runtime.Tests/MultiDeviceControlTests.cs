@@ -77,6 +77,13 @@ internal static partial class Program
             foreach (var (device, host) in new[] { (first, firstHost), (second, secondHost) })
             {
                 SetKeyboardField(vm, "_selectedDevice", device);
+                // A ready sender retains the binding snapshot captured at startup.
+                // Recovery validates it against the current device profile.
+                var control = (DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", device.Udid)!;
+                var resolver = (DeviceIdentityResolver)KeyboardField(vm, "_identityResolver");
+                control.Binding = resolver.ResolveControlBinding(device, ReverseControlMode.Usb)
+                    ?? throw new InvalidOperationException($"Missing test binding for {device.Udid}.");
+                control.AppleUdid = control.Binding.TargetStableId;
                 SetKeyboardField(vm, "_wirelessControlEnabled", false);
                 SetKeyboardField(vm, "_wirelessTouchBridge", null);
                 SetKeyboardField(vm, "_usbControlEnabled", true);

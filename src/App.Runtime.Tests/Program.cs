@@ -32,10 +32,28 @@ internal static partial class Program
                 return RunComponentAudioFormatTests(referenceFfmpeg);
             if (args is ["--component-runtime"])
                 return RunComponentRuntimeTests();
+            if (args is ["--component-uxplay-lifecycle", var lifecycleOutput])
+                return RunUxPlayLifecycleTests(lifecycleOutput);
+            if (args is ["--component-public-uxplay", var componentPublicOutput])
+            {
+                Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY", Path.GetFullPath(Path.Combine(componentPublicOutput, "logs")));
+                ComponentDownloadNetworkTests.RunPublicComponentAsync(componentPublicOutput).GetAwaiter().GetResult();
+                return 0;
+            }
             if (args is ["--keyboard-mapping", var mappingOutput])
                 return RunKeyboardMappingTests(mappingOutput);
+            if (args is ["--keyboard-mapping-interaction", var mappingInteractionOutput])
+                return RunKeyboardMappingInteractionTests(mappingInteractionOutput);
+            if (args is ["--keyboard-mapping-lifecycle", var mappingLifecycleOutput])
+                return RunKeyboardMappingInteractionTests(mappingLifecycleOutput, lifecycleOnly: true);
             if (args is ["--keyboard-mapping-live-probe", var mappingLiveOutput])
                 return RunKeyboardMappingLiveProbe(mappingLiveOutput);
+            if (args is ["--keyboard-mapping-live-interactive", var mappingInteractiveOutput])
+                return RunKeyboardMappingLiveProbe(mappingInteractiveOutput, interactive: true);
+            if (args is ["--keyboard-mapping-live-interactive-wireless", var mappingWirelessInteractiveOutput])
+                return RunKeyboardMappingLiveProbe(mappingWirelessInteractiveOutput, wireless: true, interactive: true);
+            if (args is ["--keyboard-mapping-capture-interactive", var mappingCaptureOutput])
+                return RunKeyboardMappingLiveProbe(mappingCaptureOutput, captureOnly: true);
             if (args is ["--keyboard-mapping-live-actions", var mappingActionsOutput, var mappingTransport])
                 return RunKeyboardMappingLiveProbe(mappingActionsOutput, true, mappingTransport == "wireless");
             if (args is ["--component-public-large", var publicLargeOutput])
@@ -117,12 +135,16 @@ internal static partial class Program
                 return RunControlStateAudit(controlOutput);
             if (args is ["--localization-audit"])
                 return LocalizationAuditTests.Run();
+            if (args is ["--taiwan-localization"])
+                return RunTaiwanLocalizationTests();
             if (args is ["--language-display-audit", var displayOutput])
                 return RunLanguageDisplayAudit(displayOutput);
             if (args is ["--language-display-audit", var focusedDisplayOutput, var displaySurface])
                 return RunLanguageDisplayAudit(focusedDisplayOutput, displaySurface);
             if (args is ["--workspace-regression"])
                 return RunWorkspaceRegressionTests();
+            if (args is ["--workspace-performance", var workspacePerformanceOutput])
+                return RunWorkspacePerformanceAudit(workspacePerformanceOutput);
             if (args is ["--keyboard-focus"])
                 return RunKeyboardFocusTests();
             if (args is ["--shortcuts"])
@@ -138,17 +160,19 @@ internal static partial class Program
             if (args is ["--ui-audit", var auditOutput])
                 return RunConsistencyAudit(auditOutput);
             if (args is ["--ui-audit", var cultureOutput, "--culture", var auditCulture] &&
-                auditCulture is "zh-CN" or "zh-HK" or "en-US")
+                auditCulture is "zh-CN" or "zh-HK" or "zh-TW" or "en-US")
                 return RunConsistencyAudit(cultureOutput, onlyCulture: auditCulture);
             if (args is ["--ui-audit", var focusedOutput, var focusedSurface])
                 return RunConsistencyAudit(focusedOutput, focusedSurface);
             if (args is ["--ui-audit", var localizedOutput, var localizedSurface, "--culture", var localizedCulture] &&
-                localizedCulture is "zh-CN" or "zh-HK" or "en-US")
+                localizedCulture is "zh-CN" or "zh-HK" or "zh-TW" or "en-US")
                 return RunConsistencyAudit(localizedOutput, localizedSurface, localizedCulture);
             if (args is ["--preview-shell-ui-audit", var previewOutput])
                 return RunPreviewShellAudit(previewOutput);
             if (args is ["--reverse-control-countdown"])
                 return ReverseControlCountdownTests.Run();
+            if (args is ["--control-binding", var bindingOutput])
+                return RunControlBindingTests(bindingOutput);
             if (args is ["--wired-control-live-countdown"])
                 return WiredControlLiveCountdownTest.Run();
             if (args is ["--live-record", .. var recordingArgs])
@@ -294,10 +318,10 @@ internal static partial class Program
         }
 
         AssertStages("Usb",
-            ["CheckingDevice", "CheckingPermissions", "PreparingDeviceSupport",
+            ["CheckingBinding", "CheckingPermissions", "PreparingDeviceSupport",
                 "Connecting", "InitializingServices", "StartingInputRouter"]);
         AssertStages("Wireless",
-            ["CheckingDevice", "CheckingPermissions", "Connecting",
+            ["CheckingBinding", "CheckingPermissions", "Connecting",
                 "InitializingServices", "StartingInputRouter"]);
         AssertStages("Bluetooth",
             ["CheckingBinding", "CheckingBluetooth", "SwitchingBluetoothPeripheral",

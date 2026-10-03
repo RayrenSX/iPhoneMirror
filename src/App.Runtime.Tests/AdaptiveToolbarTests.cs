@@ -66,7 +66,7 @@ internal static partial class Program
             };
             owner.Hide();
             host.Show(); DrainDispatcher();
-            foreach (var culture in new[] { "zh-CN", "en-US", "zh-HK" })
+            foreach (var culture in new[] { "zh-CN", "en-US", "zh-HK", "zh-TW" })
             foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
             foreach (var dpi in new[] { 1.0, 1.25, 1.5, 1.75, 2.0 })
             {

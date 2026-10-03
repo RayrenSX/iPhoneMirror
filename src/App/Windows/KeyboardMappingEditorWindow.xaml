@@ -28,29 +28,12 @@
                         SelectionChanged="OnActionChanged" AutomationProperties.Name="{DynamicResource MappingAction}"/>
                     <TextBlock Text="{DynamicResource MappingCoordinateHelp}" TextWrapping="Wrap" Margin="0,12,0,0"
                         Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
-                    <Grid>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <StackPanel><TextBlock Text="{DynamicResource MappingX}" Style="{StaticResource DetailLabel}"/>
-                            <TextBox x:Name="XBox" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingX}"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="2"><TextBlock Text="{DynamicResource MappingY}" Style="{StaticResource DetailLabel}"/>
-                            <TextBox x:Name="YBox" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingY}"/>
-                        </StackPanel>
-                    </Grid>
-                    <Grid x:Name="EndPanel">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <StackPanel><TextBlock Text="{DynamicResource MappingEndX}" Style="{StaticResource DetailLabel}"/>
-                            <TextBox x:Name="EndXBox" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingEndX}"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="2"><TextBlock Text="{DynamicResource MappingEndY}" Style="{StaticResource DetailLabel}"/>
-                            <TextBox x:Name="EndYBox" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingEndY}"/>
-                        </StackPanel>
-                    </Grid>
-                    <StackPanel x:Name="DistancePanel">
-                        <TextBlock Text="{DynamicResource MappingDistance}" Style="{StaticResource DetailLabel}"/>
-                        <TextBox x:Name="DistanceBox" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingDistance}"/>
-                    </StackPanel>
-                    <StackPanel x:Name="DurationPanel">
+                    <Button x:Name="PickButton" Content="{DynamicResource MappingPick}" Click="OnPickClick"
+                        Margin="0,12,0,0" MinHeight="44" AutomationProperties.AutomationId="MappingPick"/>
+                    <TextBlock x:Name="PositionSummary" TextWrapping="Wrap" Margin="0,8,0,0"
+                        Foreground="{DynamicResource MutedTextBrush}"/>
+                    <TextBlock x:Name="StateText" TextWrapping="Wrap" Margin="0,8,0,0"
+                        Foreground="{DynamicResource AccentBrush}"/>                    <StackPanel x:Name="DurationPanel">
                         <TextBlock Text="{DynamicResource MappingDuration}" Style="{StaticResource DetailLabel}"/>
                         <TextBox x:Name="DurationBox" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingDuration}"/>
                     </StackPanel>

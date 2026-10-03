@@ -982,6 +982,8 @@
     <system:String x:Key="ControlDeviceNotReady">The device is not ready or has not been bound.</system:String>
     <system:String x:Key="ControlBluetoothBindingRequired">Bluetooth device binding is incomplete</system:String>
     <system:String x:Key="ControlBluetoothBindingAdvice">Complete the Bluetooth binding for this device in the device binder, then start Bluetooth control.</system:String>
+    <system:String x:Key="ControlBindingRequired">This device is not correctly bound. Complete device binding before using reverse control.</system:String>
+    <system:String x:Key="ControlBindingAdvice">Close this window and open the device binder. Bind this device's wired USB identity; if using AirPlay mirroring, bind it to the same device profile. Then start wired or wireless control again.</system:String>
     <system:String x:Key="ControlBluetoothCancelled">Bluetooth control cancelled</system:String>
     <system:String x:Key="ControlPrerequisiteCancelled">The startup confirmation was cancelled.</system:String>
     <system:String x:Key="ControlCheckingBluetoothSupport">Checking that Bluetooth is on and supports BLE…</system:String>
@@ -1209,7 +1211,7 @@
     <system:String x:Key="MappingCapture">Record key</system:String>
     <system:String x:Key="MappingCaptureHint">Press the keyboard key to bind</system:String>
     <system:String x:Key="MappingWaiting">Waiting for a key… (click again to cancel)</system:String>
-    <system:String x:Key="MappingCaptureHelp">Binds a physical key position, including numbers, numpad and function keys. Ctrl / Shift / Alt trigger on release only when used alone. Windows keys and system combinations such as Win+D, Win+Tab and Win+L cannot be mapped.</system:String>
+    <system:String x:Key="MappingCaptureHelp">Press and release one physical key. Ctrl / Shift / Alt / Win trigger on standalone release; chords do not trigger a single-key mapping. A mapped Win key suppresses Start. Windows retains control of secure system shortcuts.</system:String>
     <system:String x:Key="MappingAction">Touch action</system:String>
     <system:String x:Key="MappingActionTap">Tap</system:String>
     <system:String x:Key="MappingActionLongPress">Long press</system:String>
@@ -1219,7 +1221,7 @@
     <system:String x:Key="MappingActionSwipeDown">Swipe down</system:String>
     <system:String x:Key="MappingActionSwipeLeft">Swipe left</system:String>
     <system:String x:Key="MappingActionSwipeRight">Swipe right</system:String>
-    <system:String x:Key="MappingCoordinateHelp">Coordinates use the current preview (0–100%). Swipe direction is the finger's movement. Uses the reverse-control orientation settings after portrait/landscape changes.</system:String>
+    <system:String x:Key="MappingCoordinateHelp">Click or drag directly on the current mirror to choose a position. No X/Y entry is needed. Swipe directions describe finger movement.</system:String>
     <system:String x:Key="MappingX">X / start X (%)</system:String>
     <system:String x:Key="MappingY">Y / start Y (%)</system:String>
     <system:String x:Key="MappingEndX">End X (%)</system:String>
@@ -1246,7 +1248,7 @@
     <system:String x:Key="MappingLimit">Up to 256 mappings are supported.</system:String>
     <system:String x:Key="MappingOff">Keyboard mapping is off</system:String>
     <system:String x:Key="MappingReady">Keyboard mapping is ready · targets the selected device</system:String>
-    <system:String x:Key="MappingPaused">Mapping is paused: settings, editing, text input, or input focus is not yet confirmed.</system:String>
+    <system:String x:Key="MappingPaused">Mapping is paused. Click the current mirror to resume; editing and text input pause execution.</system:String>
     <system:String x:Key="MappingNoDevice">Waiting for a device: select and connect an iPhone/iPad.</system:String>
     <system:String x:Key="MappingUnsupportedDevice">This device does not support touch control. Select an iPhone/iPad mirror.</system:String>
     <system:String x:Key="MappingBluetoothUnsupported">The current Bluetooth mode provides only a relative mouse, not reliable coordinate touch. Use USB or wireless touch control for keyboard mappings.</system:String>
@@ -1258,4 +1260,19 @@
     <system:String x:Key="MappingHookFailed">Could not start keyboard capture. Turn mapping off and on again.</system:String>
     <system:String x:Key="MappingSendFailed">Touch input could not be sent. Check the selected device's control connection.</system:String>
     <system:String x:Key="MappingTargetStatus">Target: {0} · {1}</system:String>
+    <system:String x:Key="LanguageTraditionalChineseTaiwan">Traditional Chinese (Taiwan)</system:String>
+    <system:String x:Key="DeveloperLanguageTaiwan">Traditional Chinese (Taiwan)</system:String>
+    <system:String x:Key="MappingPick">Choose position</system:String>
+    <system:String x:Key="MappingRepick">Pick again</system:String>
+    <system:String x:Key="MappingPickRequired">Choose a position on the current mirror.</system:String>
+    <system:String x:Key="MappingPickNoPreview">Start mirroring the current device before choosing a position.</system:String>
+    <system:String x:Key="MappingPicking">Choosing a position on the mirror</system:String>
+    <system:String x:Key="MappingPickInside">Move the pointer into the video content</system:String>
+    <system:String x:Key="MappingPickClick">Click the target. Esc cancels.</system:String>
+    <system:String x:Key="MappingPickDrag">Press, drag to the endpoint, then release. Esc cancels.</system:String>
+    <system:String x:Key="MappingStateIdle">Step 1: capture a Windows key</system:String>
+    <system:String x:Key="MappingStateWaitingForKey">Press and release a key; click again to cancel capture</system:String>
+    <system:String x:Key="MappingStateKeyCaptured">Step 2: choose an action, then a position</system:String>
+    <system:String x:Key="MappingStatePickingPosition">Choosing a position on the current mirror</system:String>
+    <system:String x:Key="MappingStateMappingReady">Key and position confirmed. Ready to save.</system:String>
 </ResourceDictionary>

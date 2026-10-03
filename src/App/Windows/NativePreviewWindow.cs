@@ -1184,14 +1184,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool IsUsbControlEnabledForWindow => _pointerInput is not null &&
         (_isUsbControlEnabled?.Invoke() ?? false);
     // The reverse-control callback also includes wired/wireless touch targets.
-    // Touch keeps the menu when right-click is unbound. A configured shortcut
-    // must reach the same dispatcher used by the main preview and Raw Input.
+    // Reserve their right-click for the window menu, even when a phone shortcut
+    // (including the default Home binding) uses it. Only Bluetooth forwards it.
     private bool IsRightButtonForwardingEnabled =>
-        IsPointerInputEnabledForWindow && (!IsUsbControlEnabledForWindow ||
-            Enum.GetValues<BluetoothShortcutAction>().Any(action =>
-                action != BluetoothShortcutAction.ReverseControl &&
-                GetConfiguredShortcut(action).MatchesMouse(ShortcutMouseButton.Right,
-                    System.Windows.Input.Keyboard.Modifiers)));
+        IsReverseControlEnabledForWindow && !IsUsbControlEnabledForWindow;
     private bool IsPointerInputEnabledForWindow =>
         IsReverseControlEnabledForWindow || IsUsbControlEnabledForWindow;
     private bool IsPointerInputActive =>

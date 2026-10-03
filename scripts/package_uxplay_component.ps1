@@ -3,12 +3,13 @@ param(
     [Parameter(Mandatory)][string]$SourceDirectory,
     [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')][string]$Version,
     [string]$OutputDirectory,
-    [string]$DescriptorPath
+    [string]$DescriptorPath,
+    [switch]$StandaloneRelease
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root 'outputs\components' }
-if (-not $DescriptorPath) { $DescriptorPath = Join-Path $root 'src\App\native\components\uxplay.json' }
+if (-not $DescriptorPath) { $DescriptorPath = Join-Path $root 'config\uxplay-component.json' }
 $source = (Resolve-Path -LiteralPath $SourceDirectory).Path.TrimEnd('\')
 $required = (Import-PowerShellDataFile (Join-Path $PSScriptRoot 'uxplay-runtime-manifest.psd1')).Files
 foreach ($relative in $required) {
@@ -21,6 +22,7 @@ if (@(Get-ChildItem -LiteralPath $source -Recurse -Force | Where-Object {
 }).Count) { throw 'UxPlay component contains a reparse point.' }
 New-Item -ItemType Directory -Force -Path $OutputDirectory,(Split-Path -Parent $DescriptorPath) | Out-Null
 $name = "iPhoneMirror-UxPlay-v$Version-win-x64.zip"
+$releaseTag = if ($StandaloneRelease) { "uxplay-v$Version" } else { "v$Version" }
 $archivePath = Join-Path $OutputDirectory $name
 $temporary = "$archivePath.$([Guid]::NewGuid().ToString('N')).tmp"
 Add-Type -AssemblyName System.IO.Compression
@@ -60,7 +62,8 @@ try {
         schema = 1
         version = $Version
         name = $name
-        url = "https://github.com/RayrenSX/iPhoneMirror/releases/download/v$Version/$name"
+        release = $releaseTag
+        url = "https://github.com/RayrenSX/iPhoneMirror/releases/download/$releaseTag/$name"
         size = (Get-Item -LiteralPath $archivePath).Length
         sha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
         files = $records

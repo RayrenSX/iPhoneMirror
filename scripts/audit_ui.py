@@ -55,7 +55,7 @@ def audit():
             result['contrast'][theme][f'{foreground}/{background}'] = round((b + .05) / (a + .05), 2)
     for project in ['App', 'DriverInstaller']:
         dictionaries = {}
-        for culture in ['zh-CN', 'en-US', 'zh-HK']:
+        for culture in ['zh-CN', 'en-US', 'zh-HK', 'zh-TW']:
             dictionaries[culture] = {e.attrib[X + 'Key'] for e in ET.parse(ROOT / f'src/{project}/Localization/Strings.{culture}.xaml').getroot() if X + 'Key' in e.attrib}
         union = set.union(*dictionaries.values())
         result['localization'][project] = {culture: sorted(union - keys) for culture, keys in dictionaries.items()}

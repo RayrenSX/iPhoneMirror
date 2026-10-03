@@ -30,7 +30,7 @@ internal static partial class Program
         var themeService = assembly.GetType("IPhoneMirror.DriverInstaller.Services.DriverThemeService")!;
         var themeMode = assembly.GetType("IPhoneMirror.DriverInstaller.Services.DriverThemeMode")!;
         ResourceDictionary? localization = null;
-        foreach (var culture in (QuickLayoutAudit ? new[] { "en-US" } : new[] { "zh-CN", "en-US", "zh-HK" }))
+        foreach (var culture in (QuickLayoutAudit ? new[] { "en-US" } : new[] { "zh-CN", "en-US", "zh-HK", "zh-TW" }))
         foreach (var theme in (QuickLayoutAudit ? new[] { "Light" } : new[] { "Light", "Dark" }))
         {
             if (localization != null) app.Resources.MergedDictionaries.Remove(localization);
@@ -82,6 +82,9 @@ internal static partial class Program
                               string.Format((string)app.FindResource(statusKey), diagnostic, logPath);
                         owner.GetType().GetProperty("OperationStatus")!.SetValue(owner, status);
                         owner.GetType().GetProperty("IsBusy")!.SetValue(owner, statusKey == "DriverWaitingSafeStop");
+                        // Process queued binding updates before checking rendered
+                        // captions after the preceding resize/scroll exercise.
+                        AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
                         owner.UpdateLayout();
                         if (FindVisualDescendant<System.Windows.Controls.TextBlock>(owner,
                                 block => block.IsVisible && block.Text == status) is null)

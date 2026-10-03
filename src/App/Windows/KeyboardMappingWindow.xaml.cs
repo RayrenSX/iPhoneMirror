@@ -15,20 +15,23 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
     private readonly Action _endCapture;
     private readonly Func<string> _runtimeStatus;
     private readonly Func<string?> _targetName;
+    private readonly Func<KeyboardMappingEntry, Action<KeyboardMappingEntry?>, string?>? _beginPick;
+    private readonly Action? _cancelPick;
     private KeyboardMappingEditorWindow? _editor;
     private string _statusKey = "MappingOff";
     public ObservableCollection<KeyboardMappingRow> Rows { get; } = [];
-    internal bool IsEditorActive => _editor?.IsActive == true;
-
     internal KeyboardMappingWindow(KeyboardMappingSettings settings,
         Func<KeyboardMappingSettings, string?> apply, Func<MappedKey, string?> conflict,
         Func<Action<MappedKey>, string?> beginCapture, Action endCapture, Func<string> runtimeStatus,
-        Func<string?>? targetName = null)
+        Func<string?>? targetName = null,
+        Func<KeyboardMappingEntry, Action<KeyboardMappingEntry?>, string?>? beginPick = null, Action? cancelPick = null)
     {
         _settings = settings.Clone();
         (_apply, _conflict, _beginCapture, _endCapture, _runtimeStatus) =
             (apply, conflict, beginCapture, endCapture, runtimeStatus);
         _targetName = targetName ?? (() => null);
+        _beginPick = beginPick;
+        _cancelPick = cancelPick;
         InitializeComponent();
         DataContext = this;
         Refresh();
@@ -111,10 +114,27 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
                 next.Mappings.RemoveAll(m => m.Id == edited.Id || m.Id == replacedId);
                 next.Mappings.Add(edited);
                 return Save(next, _settings.Mappings.Any(m => m.Id == edited.Id) ? "mapping_edited" : "mapping_created");
-            }) { Owner = this };
+            }, BeginPick) { Owner = this };
         _editor = editor;
-        try { editor.ShowDialog(); }
-        finally { _editor = null; _endCapture(); }
+        editor.Closed += (_, _) => { _editor = null; _endCapture(); _cancelPick?.Invoke(); };
+        editor.Show();
+    }
+
+    private string? BeginPick(KeyboardMappingEntry entry, Action<KeyboardMappingEntry?> completed)
+    {
+        if (_beginPick is null) return LocalizationService.Get("MappingPickNoPreview");
+        var editor = _editor;
+        editor?.Hide();
+        Hide();
+        void Restore(KeyboardMappingEntry? result)
+        {
+            if (editor is null || !ReferenceEquals(_editor, editor)) return;
+            Show(); editor.Show(); editor.Activate();
+            completed(result);
+        }
+        var error = _beginPick(entry, Restore);
+        if (error is not null) Restore(null);
+        return error;
     }
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 }

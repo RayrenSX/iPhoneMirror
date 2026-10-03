@@ -277,9 +277,11 @@ public partial class AboutWindow : IPhoneMirror.UI.Controls.RoundedWindow, INoti
 
     private void OnChangelogClick(object sender, RoutedEventArgs e)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "CHANGELOG.md");
+        var path = Path.Combine(AppContext.BaseDirectory, LocalizedReleaseNotes.ChangelogFileName);
         Open(File.Exists(path) ? path :
-            "https://github.com/RayrenSX/iPhoneMirror/releases");
+            LocalizationService.EffectiveCulture.Name == LocalizationService.TraditionalChineseTaiwan
+                ? "https://github.com/RayrenSX/iPhoneMirror/blob/main/CHANGELOG.zh-TW.md"
+                : "https://github.com/RayrenSX/iPhoneMirror/releases");
     }
 
     private void OnLicenseClick(object sender, RoutedEventArgs e)

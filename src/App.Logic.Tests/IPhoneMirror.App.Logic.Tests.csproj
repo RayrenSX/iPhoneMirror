@@ -19,6 +19,7 @@
     <Compile Include="ClipboardSyncTests.cs" />
     <Compile Include="UxPlayComponentTests.cs" />
     <Compile Include="ComponentDownloadNetworkTests.cs" />
+    <EmbeddedResource Include="..\..\config\uxplay-component.json" LogicalName="IPhoneMirror.App.Components.UxPlay.json" />
     <Compile Include="IssueFixMediaTests.cs" />
     <Compile Include="DotnetTestSmoke.cs" />
     <Compile Include="..\Shared\Networking\SegmentedHttpDownloader.cs" Link="Networking\SegmentedHttpDownloader.cs" />
@@ -77,6 +78,9 @@
     <Compile Include="..\App\Updater\ReleaseParser.cs" Link="Updater\ReleaseParser.cs" />
     <Compile Include="..\App\Updater\UpdateSettingsStore.cs" Link="Updater\UpdateSettingsStore.cs" />
     <Compile Include="..\App\Updater\GitHubReleaseClient.cs" Link="Updater\GitHubReleaseClient.cs" />
+    <Compile Include="..\App\Updater\LocalizedReleaseNotes.cs" Link="Updater\LocalizedReleaseNotes.cs" />
+    <EmbeddedResource Include="..\..\CHANGELOG.zh-TW.md" WithCulture="false"
+                      LogicalName="Localization.CHANGELOG.zh-TW.md" />
     <Compile Include="..\App\Updater\VersionManager.cs" Link="Updater\VersionManager.cs" />
     <Compile Include="..\App\Updater\UpdateInstallerLauncher.cs" Link="Updater\UpdateInstallerLauncher.cs" />
   </ItemGroup>

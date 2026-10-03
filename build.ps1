@@ -10,6 +10,7 @@ param(
     [string]$FfmpegRuntimeManifestPath,
     [switch]$IncludeUxPlayRuntime,
     [switch]$OmitUxPlayRuntime,
+    [switch]$PrepareUxPlayComponent,
     [string]$AppleSupportPackagePath,
     [switch]$ConfirmAppleRedistributionRights,
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
@@ -50,6 +51,14 @@ if ($NoPublish -and -not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath))
     throw '-AppleSupportPackagePath cannot be used with -NoPublish.'
 }
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ($PrepareUxPlayComponent -and ($TestBuild -or $OmitUxPlayRuntime -or -not $Version)) {
+    throw '-PrepareUxPlayComponent requires an explicit release -Version and cannot be used with -TestBuild or -OmitUxPlayRuntime.'
+}
+# Development/test app versions must keep the pinned component release. Only
+# the release transaction may generate metadata for an asset awaiting upload.
+if (-not $NoPublish -and -not $UseUxPlayRuntime -and -not $PrepareUxPlayComponent) {
+    & (Join-Path $Root 'scripts/verify_uxplay_publication.ps1')
+}
 $OutputsRoot = Join-Path $Root 'outputs'
 $TestVersionRecord = Join-Path $Root 'work\test-build-version.txt'
 [xml]$appProject = Get-Content -LiteralPath (Join-Path $Root 'src\App\iPhoneMirror.App.csproj') -Raw
@@ -582,8 +591,10 @@ try {
                     throw "Prepared UxPlay runtime is missing: $relative"
                 }
             }
-            & (Join-Path $Root 'scripts\package_uxplay_component.ps1') `
-                -SourceDirectory $AppUxPlay -Version $(if ($Version) { $Version } else { $projectVersion })
+            if ($PrepareUxPlayComponent) {
+                & (Join-Path $Root 'scripts\package_uxplay_component.ps1') `
+                    -SourceDirectory $AppUxPlay -Version $Version
+            }
         }
         # Ship the hash-pinned receiver runtime, not the build-local shim. The
         # latter is compiled for native tests and is not reproducible byte for byte.
@@ -728,7 +739,7 @@ try {
             'vcruntime140_1.dll',
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
-            'CHANGELOG.md',
+            'CHANGELOG.md', 'CHANGELOG.zh-TW.md',
             'DRIVER_DEPENDENCIES.md',
             'tools\iUsbBridge.exe',
             'tools\updater\Apply-ZipUpdate.ps1',
@@ -921,7 +932,7 @@ try {
             'vcruntime140_1.dll',
             'LICENSE',
             'THIRD_PARTY_NOTICES.md',
-            'CHANGELOG.md',
+            'CHANGELOG.md', 'CHANGELOG.zh-TW.md',
             'DRIVER_DEPENDENCIES.md'
         )
         if (Test-Path -LiteralPath (Join-Path $MainPublishRoot `

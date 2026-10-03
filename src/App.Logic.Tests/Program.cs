@@ -25,13 +25,19 @@ if (int.TryParse(Environment.GetEnvironmentVariable(delayedExitEnvironment),
     return;
 }
 
-var diagnosticTestRoot = Path.Combine(Path.GetTempPath(),
-    $"iPhoneMirror-test-logs-{Guid.NewGuid():N}");
+var diagnosticTestRoot = args is ["--component-public-uxplay", var componentPublicOutput]
+    ? Path.GetFullPath(Path.Combine(componentPublicOutput, "logs"))
+    : Path.Combine(Path.GetTempPath(), $"iPhoneMirror-test-logs-{Guid.NewGuid():N}");
 Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY",
     diagnosticTestRoot, EnvironmentVariableTarget.Process);
 
 await UxPlayComponentTests.RunAsync();
 if (args is ["--uxplay-component"]) return;
+if (args is ["--component-public-uxplay", var uxplayPublicOutput])
+{
+    await ComponentDownloadNetworkTests.RunPublicComponentAsync(uxplayPublicOutput);
+    return;
+}
 if (args is ["--component-network", var networkArchive, var networkMetadata, var networkOutput])
 {
     await ComponentDownloadNetworkTests.RunAsync(networkArchive, networkMetadata, networkOutput);
@@ -175,7 +181,8 @@ foreach (var localizationPath in Directory.GetFiles(
     var expectedNavigationFont = localizationFileName.Contains(
             "zh-CN", StringComparison.OrdinalIgnoreCase)
         ? "Microsoft YaHei UI"
-        : localizationFileName.Contains("zh-HK", StringComparison.OrdinalIgnoreCase)
+        : (localizationFileName.Contains("zh-HK", StringComparison.OrdinalIgnoreCase) ||
+           localizationFileName.Contains("zh-TW", StringComparison.OrdinalIgnoreCase))
             ? "Microsoft JhengHei UI"
             : "Segoe UI";
     Equal(expectedNavigationFont, navigationFont,
@@ -239,9 +246,12 @@ foreach (var localizationPath in Directory.GetFiles(
 Equal(LocalizationService.TraditionalChineseHongKong,
     LocalizationService.ResolveCultureName("zh-HK"),
     "Hong Kong system culture selects the Hong Kong dictionary");
-Equal(LocalizationService.TraditionalChineseHongKong,
+Equal(LocalizationService.TraditionalChineseTaiwan,
     LocalizationService.ResolveCultureName("zh-Hant-TW"),
-    "other Traditional Chinese cultures prefer the Hong Kong dictionary");
+    "Taiwan system cultures select the independent Taiwan dictionary");
+Equal(LocalizationService.TraditionalChineseTaiwan,
+    LocalizationService.ResolveCultureName("zh-TW"),
+    "zh-TW does not fall back to Hong Kong");
 Equal(LocalizationService.TraditionalChineseHongKong,
     LocalizationService.ResolveCultureName("zh-CHT"),
     "legacy Traditional Chinese culture selects the Hong Kong dictionary");
@@ -1593,9 +1603,8 @@ Equal(true,
     mainWindowCode.Contains("workspace_left_panel_auto_opened",
         StringComparison.Ordinal),
     "source auto-open telemetry is emitted only when the panel actually changes");
-Equal(true, mainWindowCode.Contains("AnimateWorkspaceSurface", StringComparison.Ordinal) &&
-            mainWindowCode.Contains("BeginAnimation(WidthProperty", StringComparison.Ordinal),
-    "workspace panels animate layout width so preview resizing stays continuous");
+// Continuous viewport geometry is checked on real WPF windows by
+// WorkspaceRevealTests, rather than requiring a particular animation method name.
 Equal(true,
     mainWindowCode.Contains(
         "SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: 300)",
@@ -1707,7 +1716,7 @@ Equal(true,
     mainWindowCode.Contains("currentWindowWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("CenterColumn.ActualWidth <= 0", StringComparison.Ordinal) &&
     !mainWindowCode.Contains("ActualWidth - CenterPanel.ActualWidth", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("_lightweightWorkspaceSurfaceAnimationActive) return;",
+    mainWindowCode.Contains("_workspaceSurfaceAnimationActive) return;",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("RequestLightweightWindowFit", StringComparison.Ordinal) &&
     mainWindowCode.Contains("AnimateLightweightWindowForWorkspace", StringComparison.Ordinal) &&
@@ -1729,7 +1738,7 @@ Equal(true,
     mainWindowCode.Contains("PreviewPanel.Width = double.NaN", StringComparison.Ordinal) &&
     !mainWindowCode.Contains("centerInsets", StringComparison.Ordinal) &&
     mainWindowCode.Contains("targetSideWidth", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("_lightweightLeftGapTargetWidth", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("_workspaceLeftGapTargetWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("_lightweightCenterTargetWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("PreviewPanel.ActualWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("targetPreviewWidth", StringComparison.Ordinal) &&
@@ -1751,17 +1760,13 @@ Equal(true,
     mainWindowCode.Contains("Keep the left navigation rail fixed",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("var anchoredMaximumWindowWidth", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("AnimateWorkspaceGap", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("GridLengthAnimation", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("Duration = new Duration(WorkspaceTransitionDuration)",
-        StringComparison.Ordinal) &&
-    mainWindowCode.Contains("_lightweightWindowLastAppliedProgress",
-        StringComparison.Ordinal) &&
+    // Animation timing, intermediate geometry, reversals and clock cleanup are
+    // exercised by WorkspaceRevealTests in App.Runtime.Tests. Do not require
+    // the obsolete independent gap/width clocks or Rendering-loop implementation.
     mainWindowCode.Contains("LockLightweightCenterWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("ReleaseLightweightCenterWidth", StringComparison.Ordinal) &&
     !mainWindowCode.Contains("SizeChanged += OnMainWindowSizeChanged", StringComparison.Ordinal) &&
     mainWindowCode.Contains("AnimateLightweightWindowWidth", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("OnLightweightWindowRendering", StringComparison.Ordinal) &&
     mainWindowCode.Contains("ApplyLightweightWindowAnimationFrame", StringComparison.Ordinal) &&
     mainWindowCode.Contains("SynchronizeLightweightWindowPosition", StringComparison.Ordinal) &&
     mainWindowCode.Contains("DispatcherPriority.Render", StringComparison.Ordinal) &&
@@ -2432,7 +2437,7 @@ Equal(true, CaptureErrorGuidance.IsDeviceSessionClosedWarning(deviceSessionClose
 Equal(false, CaptureErrorGuidance.IsDeviceSessionClosedWarning(
         deviceSessionClosedStatus with { ErrorCode = -2110 }),
     "USB disconnects do not use the phone-side stop warning presentation");
-foreach (var cultureFile in new[] { "Strings.zh-CN.xaml", "Strings.zh-HK.xaml", "Strings.en-US.xaml" })
+foreach (var cultureFile in new[] { "Strings.zh-CN.xaml", "Strings.zh-HK.xaml", "Strings.zh-TW.xaml", "Strings.en-US.xaml" })
 {
     Equal(true, File.ReadAllText(Path.Combine(sourceDirectory, "App", "Localization", cultureFile))
             .Contains("DeviceSessionClosedWarningTitleFormat", StringComparison.Ordinal) &&

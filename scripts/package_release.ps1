@@ -132,6 +132,7 @@ $RequiredArtifacts = @(
     'LICENSE',
     'THIRD_PARTY_NOTICES.md',
     'CHANGELOG.md',
+    'CHANGELOG.zh-TW.md',
     'DRIVER_DEPENDENCIES.md',
     'Assets\iPhoneMirror.ico',
     'licenses\WPF-UI-LICENSE.md',
@@ -584,6 +585,7 @@ try {
         # The standard build produces UxPlay as a separate downloadable asset.
         if ($IncludeUxPlayRuntime) { $buildArguments.IncludeUxPlayRuntime = $true }
         if ($OmitUxPlayRuntime) { $buildArguments.OmitUxPlayRuntime = $true }
+        else { $buildArguments.PrepareUxPlayComponent = $true }
         if (-not [string]::IsNullOrWhiteSpace($AppleSupportPackagePath)) {
             $buildArguments.AppleSupportPackagePath = $AppleSupportPackagePath
             $buildArguments.ConfirmAppleRedistributionRights =
@@ -871,7 +873,7 @@ try {
     )
     $componentPath = Join-Path $Root "outputs\components\iPhoneMirror-UxPlay-v$Version-win-x64.zip"
     if (-not $OmitUxPlayRuntime) {
-        $descriptorPath = Join-Path $Root 'src\App\native\components\uxplay.json'
+        $descriptorPath = Join-Path $Root 'config\uxplay-component.json'
         $descriptor = Get-Content -LiteralPath $descriptorPath -Raw | ConvertFrom-Json
         if ($descriptor.version -ne $Version -or
             (Get-Item -LiteralPath $componentPath).Length -ne $descriptor.size -or

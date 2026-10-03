@@ -1,0 +1,711 @@
+{
+  "schema": 1,
+  "version": "1.8.4-test45",
+  "name": "iPhoneMirror-UxPlay-v1.8.4-test45-win-x64.zip",
+  "release": "uxplay-v1.8.4-test45",
+  "url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/uxplay-v1.8.4-test45/iPhoneMirror-UxPlay-v1.8.4-test45-win-x64.zip",
+  "size": 70624550,
+  "sha256": "2818f767df228c660582c800e2c2ca17178fec36730a309fafd00454a859fa8b",
+  "files": [
+    {
+      "path": "bin/avcodec-63.dll",
+      "size": 20619275,
+      "sha256": "923c097c4a5d0e230128d6793c96812c971dff18d85dce9d82ded92102b77c75"
+    },
+    {
+      "path": "bin/avfilter-12.dll",
+      "size": 6797020,
+      "sha256": "76ca7494bf1f0edeb8314d5a4c459bb46d54051fcc10dd282c23ee6b0db96868"
+    },
+    {
+      "path": "bin/avformat-63.dll",
+      "size": 2991740,
+      "sha256": "b195d8dd6dbec91cf9742a62b7b808aeb39625b3d8725b84528624a47c635dde"
+    },
+    {
+      "path": "bin/avutil-61.dll",
+      "size": 1287901,
+      "sha256": "f64a705810cebe80b69dd2fbd7612c6992d65020e42bbadbc70cd1848dc81066"
+    },
+    {
+      "path": "bin/dnssd.dll",
+      "size": 433152,
+      "sha256": "003eeb7ea109df21e62d236e24937971bd9738b6648df81f6effb810524d92bd"
+    },
+    {
+      "path": "bin/ggml-0.dll",
+      "size": 55948,
+      "sha256": "15d8793fedcec0ea97f2c8c571f41f299d7c2f009e9d4dd7eb05f4ca91d6c89c"
+    },
+    {
+      "path": "bin/ggml-base-0.dll",
+      "size": 905115,
+      "sha256": "c09a6654c03bb0f571bbcb27794460d8092a55d43a7bf94f5dcf06a2d24b5f8b"
+    },
+    {
+      "path": "bin/libaom.dll",
+      "size": 9681044,
+      "sha256": "d4928dc8fa01e1c7b1cc66ff42caabc460b51d89a2c9b8efc7b9024c0e056aee"
+    },
+    {
+      "path": "bin/libass-9.dll",
+      "size": 345174,
+      "sha256": "cb2b46133b3bd9630384148bd7229e987af9703208d4329fc2215f4170b8dc6b"
+    },
+    {
+      "path": "bin/libbluray-4.dll",
+      "size": 373421,
+      "sha256": "24870a1b32ff8b36cfa94479d802dfabc55a12e7bbde8584606f7e2d44d3c6dd"
+    },
+    {
+      "path": "bin/libbrotlicommon.dll",
+      "size": 144565,
+      "sha256": "c62c08223e450dfc2fff33c752cc228505ffd9d755201958ba800d5d30481a2c"
+    },
+    {
+      "path": "bin/libbrotlidec.dll",
+      "size": 62619,
+      "sha256": "e270b6e576594ee8ee6e33ccc54e34a54304616dd6225652e11e49d6f17ef896"
+    },
+    {
+      "path": "bin/libbrotlienc.dll",
+      "size": 789189,
+      "sha256": "82573820fe9cc3f57004b6603428e2fa1bfc9d2048707bfcead3cfc5ef3ab284"
+    },
+    {
+      "path": "bin/libbz2-1.dll",
+      "size": 107741,
+      "sha256": "1790bf6473c9d48db14c1f0ee8124142327556d281299ea2a72ee361118ee01a"
+    },
+    {
+      "path": "bin/libcairo-2.dll",
+      "size": 1243422,
+      "sha256": "5d7ccdcf19d26f8f196ef5d66d2499a664d2df090dcb5f8e6aebc4b0cb2ffde5"
+    },
+    {
+      "path": "bin/libcairo-gobject-2.dll",
+      "size": 31536,
+      "sha256": "aeadf08e9be9e351982f1a6d5c335c251365d5055dc1f0b1b416953d25f36bd9"
+    },
+    {
+      "path": "bin/libcrypto-3-x64.dll",
+      "size": 5495100,
+      "sha256": "7d25614b72d98b1a280d50de253f395f4062058af8e22d2dc1ec44fb648f0028"
+    },
+    {
+      "path": "bin/libdatrie-1.dll",
+      "size": 35223,
+      "sha256": "40aee3ae9a62a77454dfe8419fe21b54c54d969e0471c9e817b65d4502a9949f"
+    },
+    {
+      "path": "bin/libdav1d-7.dll",
+      "size": 1929830,
+      "sha256": "bbe67862f77c22f6f509684207b5363542e5b52c1a1faa354e12a11d072ad766"
+    },
+    {
+      "path": "bin/libdeflate.dll",
+      "size": 97053,
+      "sha256": "61a60665da9fd15a0e8668c47424f325e1d74479c3f896fa7ae48ffcee4ca300"
+    },
+    {
+      "path": "bin/libdovi.dll",
+      "size": 1370861,
+      "sha256": "75988509f0d2166e2060ed548913bd7b34556bc16b3f9a02469de1dd2347a7fb"
+    },
+    {
+      "path": "bin/libexpat-1.dll",
+      "size": 236660,
+      "sha256": "3331b4d4a77cd21edc26518cbb818e17b49b2c1de34a79d2ef4dca4013670f19"
+    },
+    {
+      "path": "bin/libffi-8.dll",
+      "size": 39826,
+      "sha256": "f96cf79b75f33a10023d001673b564538023395c94b3c58e1db53114976a7c25"
+    },
+    {
+      "path": "bin/libfontconfig-1.dll",
+      "size": 505833,
+      "sha256": "be30a200fa4000d0a7a1d3911391969627440148f01d0028a319bcb9fa112202"
+    },
+    {
+      "path": "bin/libfreetype-6.dll",
+      "size": 791593,
+      "sha256": "a3271784f8366b3c6412e0c35474884fa12899c392bacb08bc8eac00f4be7e64"
+    },
+    {
+      "path": "bin/libfribidi-0.dll",
+      "size": 152541,
+      "sha256": "14bd0ed4c24d0068434bc23cd4f39e8dc0edcf56f2c9996b6fe39b39ffc54673"
+    },
+    {
+      "path": "bin/libgcc_s_seh-1.dll",
+      "size": 150537,
+      "sha256": "68ca4574b331402879dec403ba4f14491c9b8fc4aa3f4a41432008714b9bc5df"
+    },
+    {
+      "path": "bin/libgdk_pixbuf-2.0-0.dll",
+      "size": 359253,
+      "sha256": "ed9ab5fce358af212fbde9dac122b6f4b68ca45449a38444da61b0c3a11e328f"
+    },
+    {
+      "path": "bin/libgio-2.0-0.dll",
+      "size": 1919044,
+      "sha256": "6457697b77638c9cc20baa3c19228dcecc15aeea886e72815b2079cdb0b8d941"
+    },
+    {
+      "path": "bin/libglib-2.0-0.dll",
+      "size": 1568604,
+      "sha256": "642d4da7a378374a84b1edc30100b9e9c7b798e53347853aadd1c86691a81468"
+    },
+    {
+      "path": "bin/libgme.dll",
+      "size": 372192,
+      "sha256": "98e306bc1443f4f5a0744baf0477d2f856594bb3f8036440ad7cb1f30a1f5a72"
+    },
+    {
+      "path": "bin/libgmodule-2.0-0.dll",
+      "size": 23440,
+      "sha256": "4a3e1bf8b17425c58be37d0a2bda2340364e19d18320f414a6537a3069867ad4"
+    },
+    {
+      "path": "bin/libgmp-10.dll",
+      "size": 681231,
+      "sha256": "c2567ccf3f410c3411ba7cd4b7ba14f393a0e70a1d0c0593297df6706b5fba96"
+    },
+    {
+      "path": "bin/libgnutls-30.dll",
+      "size": 2315149,
+      "sha256": "f7f05c96572506c81f2ffa89b518234afa4af2603aad8903db257a4f1e97e9e6"
+    },
+    {
+      "path": "bin/libgobject-2.0-0.dll",
+      "size": 358171,
+      "sha256": "516bef266569d691924097224502e45ea04f6cd423bdfa23251f609007b9fb0e"
+    },
+    {
+      "path": "bin/libgomp-1.dll",
+      "size": 327456,
+      "sha256": "37d23888447afabf47b0d5c6a1ea79852c3d522315040230c4ed3e1705e90b61"
+    },
+    {
+      "path": "bin/libgraphite2.dll",
+      "size": 167857,
+      "sha256": "93953e4744bcfce9a7bc439b956544bc213095cb1349c3602a58370f32b25c18"
+    },
+    {
+      "path": "bin/libgsm.dll",
+      "size": 56666,
+      "sha256": "b3446b547f8894bcabf0aa98a78146c60b1cf6dba7ab55e6a726fb3739276bf4"
+    },
+    {
+      "path": "bin/libgstapp-1.0-0.dll",
+      "size": 98514,
+      "sha256": "d2b4cb10ea62112fa69ba9057973d5974c91da51beb828e6e36d4bdddfb7159b"
+    },
+    {
+      "path": "bin/libgstaudio-1.0-0.dll",
+      "size": 599450,
+      "sha256": "e5d2e7087846dc5a4fc56f04485a48f14564dd8656f602a4ef1db115cb950547"
+    },
+    {
+      "path": "bin/libgstbase-1.0-0.dll",
+      "size": 546120,
+      "sha256": "32ee68a1dd186e2a4c16ad34ca657871f157d4f49ff0c9e3aedecd238a3b0fe0"
+    },
+    {
+      "path": "bin/libgstcodecparsers-1.0-0.dll",
+      "size": 898052,
+      "sha256": "5cf9ae2b890af9c9837ea2827a12a149e6ff562c1847df5f92096d13cbeedbb8"
+    },
+    {
+      "path": "bin/libgstpbutils-1.0-0.dll",
+      "size": 320089,
+      "sha256": "4068ee62898c066a8761d216e9b5bfccd6e300ede5af9c99ed452245a30e507e"
+    },
+    {
+      "path": "bin/libgstreamer-1.0-0.dll",
+      "size": 1475464,
+      "sha256": "d15f3aa1430a09ac20a9c0b0377f2633753bce7dd8fdca7be01ad99b9f33cc09"
+    },
+    {
+      "path": "bin/libgsttag-1.0-0.dll",
+      "size": 311459,
+      "sha256": "d56b4428ead3f73858ada6754f19bdb3c3eae91d70e4e24f99ec866cc8b9beb2"
+    },
+    {
+      "path": "bin/libgstvideo-1.0-0.dll",
+      "size": 922234,
+      "sha256": "b1136531cf1dc894a0ede15b003cdc34680df6ad92f09de5b67b230886c81e9f"
+    },
+    {
+      "path": "bin/libharfbuzz-0.dll",
+      "size": 1593498,
+      "sha256": "255b36d87925a4fb59f4c906ca116cb48ac336c3cefcea8612c179dd56169eab"
+    },
+    {
+      "path": "bin/libhogweed-7.dll",
+      "size": 276571,
+      "sha256": "b48e33181b78d715ba310581f4c72376c959854638bf635e1703e5fc1b783498"
+    },
+    {
+      "path": "bin/libhwy.dll",
+      "size": 87628,
+      "sha256": "9ba0ac7bad82c4c88e9bb8d6ca8c6a83877adc1f71cc48590c65b8d26108a41c"
+    },
+    {
+      "path": "bin/libiconv-2.dll",
+      "size": 1141951,
+      "sha256": "94ec68fb8d342b6c91b6b48a8d95092819cdcd006a7166e0b68062f946afd08a"
+    },
+    {
+      "path": "bin/libidn2-0.dll",
+      "size": 246525,
+      "sha256": "a054a6bb69aaf4666157f968740412e9697085cbc1e48a78f8dd9622169c5aaf"
+    },
+    {
+      "path": "bin/libintl-8.dll",
+      "size": 298164,
+      "sha256": "0e5a178731e6be6d115442a6ade3df7f03265cd1fc4338f8b6f86a8001cbf582"
+    },
+    {
+      "path": "bin/libjbig-0.dll",
+      "size": 61598,
+      "sha256": "36b6155be36d24a19154a48177a09978ff6c26f48665d8c7bb5057aaace6b91c"
+    },
+    {
+      "path": "bin/libjpeg-8.dll",
+      "size": 967184,
+      "sha256": "c63acd5a3231725aa96aa35444b74cd8d607a6fbdab1dd18b0e0ada7e39476d4"
+    },
+    {
+      "path": "bin/libjxl_cms.dll",
+      "size": 140878,
+      "sha256": "cab882e05bda645fc5b87f2093960a8d6608d40917204b30b173ab132d13c73a"
+    },
+    {
+      "path": "bin/libjxl_threads.dll",
+      "size": 26420,
+      "sha256": "a5891f300a1733fe361ce708bee8841eee21b2bd3b7fc1f43510174c54e8bc6a"
+    },
+    {
+      "path": "bin/libjxl.dll",
+      "size": 6209591,
+      "sha256": "53bd8cfdf5138cb8f9d96d6459c480b9256d17036f840e59ff2ac2ac03f37685"
+    },
+    {
+      "path": "bin/liblc3-1.dll",
+      "size": 165946,
+      "sha256": "970f6d805e215cc17df962c64e21449af3da97e09cb4a14a5f943bbd0e9c0329"
+    },
+    {
+      "path": "bin/liblcms2-2.dll",
+      "size": 448202,
+      "sha256": "03314471fadd04cdd63c108472ff85d058903d236a0356c14eda363f0e1ccb65"
+    },
+    {
+      "path": "bin/libLerc.dll",
+      "size": 803103,
+      "sha256": "1ffee78579c25b073267bcac8d0a6045d9bd446e010c7953b569b2629ca8a58a"
+    },
+    {
+      "path": "bin/liblzma-5.dll",
+      "size": 190872,
+      "sha256": "d97a260b8bb4f6affc34ec47249429240068b94bb6f7dc30c4d64daaafb3ac69"
+    },
+    {
+      "path": "bin/libmodplug-1.dll",
+      "size": 397610,
+      "sha256": "d1425827ff8c5cc81dfc66d7d5660e9ea9bfda8ada71255a0c4847d0889ea62b"
+    },
+    {
+      "path": "bin/libmp3lame-0.dll",
+      "size": 329487,
+      "sha256": "7ae709bf841478222fc468d6aa08cdb47a683feb40ff13fe9fb36359333d4559"
+    },
+    {
+      "path": "bin/libnettle-9.dll",
+      "size": 359138,
+      "sha256": "9b9f8bffca94d3cca7d1afb77d9deb0fa34427eaa05f1832037f46bc9e3dc134"
+    },
+    {
+      "path": "bin/libogg-0.dll",
+      "size": 41748,
+      "sha256": "2f102fba6f2a49516be85cb2643f6a9ba394dc5657aedb3ea235b6603c12d3d2"
+    },
+    {
+      "path": "bin/libopencore-amrnb-0.dll",
+      "size": 178308,
+      "sha256": "9d36d5661fd002f8889d90e0a53f2c5d693c641c075ef55c26ade85d958d1369"
+    },
+    {
+      "path": "bin/libopencore-amrwb-0.dll",
+      "size": 95876,
+      "sha256": "54341e49eab692d77e0ff8534a40a3cce6d0d58b9cd157ed69c817c4b852bbdb"
+    },
+    {
+      "path": "bin/libopenjp2-7.dll",
+      "size": 517286,
+      "sha256": "94f9507828d391cf96d700d34918114f1c1e03f91dd1243a19275e0435690925"
+    },
+    {
+      "path": "bin/libopus-0.dll",
+      "size": 492271,
+      "sha256": "c12f9a671a106c649a5517d28061670aa57c805d242b80764853a7551099498d"
+    },
+    {
+      "path": "bin/liborc-0.4-0.dll",
+      "size": 590497,
+      "sha256": "c61ef2525f47cdddd0c4191cabe08287afaf3f32b1275587aed6c65783561a5d"
+    },
+    {
+      "path": "bin/libp11-kit-0.dll",
+      "size": 1590616,
+      "sha256": "c24fcbd4d67f6f837a1cc29bd37a2980670febfa64b1a424720e5768ff91cfa8"
+    },
+    {
+      "path": "bin/libpango-1.0-0.dll",
+      "size": 435180,
+      "sha256": "fd92503a3fcab12fcf555cf8a47610f23b203cf888b48b5628629987d68215b8"
+    },
+    {
+      "path": "bin/libpangocairo-1.0-0.dll",
+      "size": 82317,
+      "sha256": "0af768e57c0aaf8f1dbafdff21b95a21d9cff7ae5be2e3e5ffa366c9dbf4f5c8"
+    },
+    {
+      "path": "bin/libpangoft2-1.0-0.dll",
+      "size": 111100,
+      "sha256": "27620f9c842109690616393b3616c29d5dfda8f8a0a980c0a5e869d4f75be925"
+    },
+    {
+      "path": "bin/libpangowin32-1.0-0.dll",
+      "size": 109864,
+      "sha256": "152832e8add3031293fca8152ac8450db9122ee5b20561160e025a078954162d"
+    },
+    {
+      "path": "bin/libpcre2-8-0.dll",
+      "size": 706534,
+      "sha256": "752f04bb7a60d2a049788ffaec14b45602c4dec4c29534001dfcf434d26da19c"
+    },
+    {
+      "path": "bin/libpixman-1-0.dll",
+      "size": 737775,
+      "sha256": "12e693d94829f013e0bd7c042b30998b20e91ece7b6f4d5f075ddbb58b373c92"
+    },
+    {
+      "path": "bin/libplacebo-360.dll",
+      "size": 1235613,
+      "sha256": "8eb2c3fe24a124d9dbf0383d60ac7dde6c0dd5607b2451cad0d924271e46d5b8"
+    },
+    {
+      "path": "bin/libplist-2.0.dll",
+      "size": 173158,
+      "sha256": "b4fbf69fa5b0c585dab5a466ebda760e4cc5881b1c593585e75d9dafadd5dc7c"
+    },
+    {
+      "path": "bin/libpng16-16.dll",
+      "size": 258972,
+      "sha256": "5c1dd5410af563f4a3c4aee10d1f749aa71e0d7fb3b4fac240eb9e96cadebd26"
+    },
+    {
+      "path": "bin/librav1e.dll",
+      "size": 3522560,
+      "sha256": "bc549e2178589f371469d1bd23544859ff118e48218eae2bfca7126654988779"
+    },
+    {
+      "path": "bin/librsvg-2-2.dll",
+      "size": 11769390,
+      "sha256": "278bfe70d237c5e49fdde37e2b6e7fba1edf641c054798ec10dc79ccb97fab61"
+    },
+    {
+      "path": "bin/librtmp-1.dll",
+      "size": 117122,
+      "sha256": "f9fecc5ce88e647cdc5960f125a91d9ed2e66f1ff812ee4160da69b0d416e5e2"
+    },
+    {
+      "path": "bin/libshaderc_shared.dll",
+      "size": 10588655,
+      "sha256": "31a24d149f9c3f716eda4277abf6fff8023e2fe1c0f8dfa3ce9f83231fbe4bbe"
+    },
+    {
+      "path": "bin/libsharpyuv-0.dll",
+      "size": 48938,
+      "sha256": "d29380c7056383f3e7a80bf9e150f0b8c425c1cf2568d1336e88979ddc2307af"
+    },
+    {
+      "path": "bin/libsoxr.dll",
+      "size": 307200,
+      "sha256": "ac03eccb5567b2fabf6d58a7fb249316e688bdaa718763964d437b8fc887ee4e"
+    },
+    {
+      "path": "bin/libspeex-1.dll",
+      "size": 139325,
+      "sha256": "70517dd82e962c0956f0e8d3bb700cd7ecc62b8c08741b35d71f2e95d601621d"
+    },
+    {
+      "path": "bin/libspirv-cross-c-shared.dll",
+      "size": 3415384,
+      "sha256": "9c833af0fe70795d3635739fc3c279d1969b6c00dccd51161f48cea055db1bcc"
+    },
+    {
+      "path": "bin/libsrt.dll",
+      "size": 852770,
+      "sha256": "6ad77ab5b1a9dc3d2d0bb929bfe9c6a46eb119c5f81d32014176ab873abeebdc"
+    },
+    {
+      "path": "bin/libssh.dll",
+      "size": 622845,
+      "sha256": "dbaf4b60ccbcef6aa5d6385d8d1965d4f483999b9ced1d5a2afbf719028b3d1e"
+    },
+    {
+      "path": "bin/libstdc++-6.dll",
+      "size": 2659194,
+      "sha256": "b30dbd914d903992acb28b38455947153886656beafbd91c465c31aa258f9c45"
+    },
+    {
+      "path": "bin/libSvtAv1Enc-4.dll",
+      "size": 7566075,
+      "sha256": "34f015c70ac283ba90bf5bbe0fec6e6af0fcbd50762566826405c8ccfade6e75"
+    },
+    {
+      "path": "bin/libtasn1-6.dll",
+      "size": 111487,
+      "sha256": "9793128fa5028fe8d8b49407a6ed900a2315444f9f7444a146f0b62f08c1c5bb"
+    },
+    {
+      "path": "bin/libthai-0.dll",
+      "size": 71780,
+      "sha256": "d8d8b87e9089a811e088f6a01da57c19ed54d2b6613bb85697f1958473f63666"
+    },
+    {
+      "path": "bin/libtheoradec-2.dll",
+      "size": 97913,
+      "sha256": "0b9877e581421abe4090abacf2cd8c04df6de00520d7a34b9f41b46a11a02a80"
+    },
+    {
+      "path": "bin/libtheoraenc-2.dll",
+      "size": 247882,
+      "sha256": "ed0fb82d04220070d2f53832a9cb653546ddce2c704a53bfacae7597666db4d7"
+    },
+    {
+      "path": "bin/libtiff-6.dll",
+      "size": 618616,
+      "sha256": "ce0eb686a9b03a8586d7d1f833fadcbe67ad2f6ff8538c3f431d4edb072f935d"
+    },
+    {
+      "path": "bin/libunibreak-7.dll",
+      "size": 141442,
+      "sha256": "f1f4bb5b5bb3dbf8d142df3012f13e4b5b0246565496d43718a6f33321e96283"
+    },
+    {
+      "path": "bin/libunistring-5.dll",
+      "size": 2256134,
+      "sha256": "ee39258fa1086269674a8179d3cfaf7c4e380ada14441b5dd9ed53d82d15c4e3"
+    },
+    {
+      "path": "bin/libva_win32.dll",
+      "size": 17779,
+      "sha256": "2721e9c28099699b6d723d3d56671ca46db21a5bdb9e2c41df516da17d6539b7"
+    },
+    {
+      "path": "bin/libva.dll",
+      "size": 285777,
+      "sha256": "20591e45edfcbf7f4b5735f9096b19be9796b0f61d1ab041f39d2732357593ae"
+    },
+    {
+      "path": "bin/libvidstab.dll",
+      "size": 150415,
+      "sha256": "6980084b957f32cf13248d8b0160a698d75e1148f6b35af85f57f559242fb623"
+    },
+    {
+      "path": "bin/libvorbis-0.dll",
+      "size": 179630,
+      "sha256": "d1b40d7f33171ccb8cd2a238bea36c01176c54de5bf22afae332fb33f26a008f"
+    },
+    {
+      "path": "bin/libvorbisenc-2.dll",
+      "size": 577914,
+      "sha256": "971cfa7c8866653aae9760a317dc3838e821f3911d9c6a8a8ef90f4a13de798f"
+    },
+    {
+      "path": "bin/libvpl-2.dll",
+      "size": 480527,
+      "sha256": "88bd6fece68ebad05d3e78581455bb902cc1d3930018931d0830616097e74d73"
+    },
+    {
+      "path": "bin/libvpx-1.dll",
+      "size": 4405542,
+      "sha256": "759bb95b0cd6c75bfce910f003b26a2d95ed3c94ef1a20dcfd4c89a0569f2016"
+    },
+    {
+      "path": "bin/libwebp-7.dll",
+      "size": 746378,
+      "sha256": "8dfe40c4e0abc90ddf18f080898987e01253d099b2b2d6daf7db521e55c00446"
+    },
+    {
+      "path": "bin/libwebpmux-3.dll",
+      "size": 78875,
+      "sha256": "9bd85116a22923d648d6b0ad09f21d08df7bd3d8860b24a5b4a6d4ac788b7340"
+    },
+    {
+      "path": "bin/libwhisper-1.dll",
+      "size": 500147,
+      "sha256": "113d63b57a5a630f98fb995dc02bad95e101b07107051854440fd2087a10539f"
+    },
+    {
+      "path": "bin/libwinpthread-1.dll",
+      "size": 64574,
+      "sha256": "d1b3564a65a000a4eab341641d1f4f1a9c80ca91cc69b20e79999e55ef0b1613"
+    },
+    {
+      "path": "bin/libx264-165.dll",
+      "size": 2017572,
+      "sha256": "a58995b5af6d0fcf5d17f354bfa54bb05d99056ed167eec9c8e86a3a63478ec1"
+    },
+    {
+      "path": "bin/libx265-217.dll",
+      "size": 22658774,
+      "sha256": "48a6c942cab3196d740d7af3cfc8359dc7bd833c87c1ca24b8d231b70daa9e18"
+    },
+    {
+      "path": "bin/libxml2-16.dll",
+      "size": 1247552,
+      "sha256": "5cf84e4be1d9da56a6269b1bd18c8ab5fcce11087aa24002dfce57e46238455b"
+    },
+    {
+      "path": "bin/libzimg-2.dll",
+      "size": 631148,
+      "sha256": "99625f39de8de654a90077362aafaa4e565c97908b39c0e9614562f9dfb57200"
+    },
+    {
+      "path": "bin/libzstd.dll",
+      "size": 1217412,
+      "sha256": "48368ab0ca622d0ec12f41ce85d91f22866bf5da92c77a69a06483564c93816c"
+    },
+    {
+      "path": "bin/libzvbi-0.dll",
+      "size": 444296,
+      "sha256": "e8193ad6853c223f30cda1fa5a6d5e956b809f5fc09197954b49e20f65824fe1"
+    },
+    {
+      "path": "bin/swresample-7.dll",
+      "size": 184907,
+      "sha256": "ce78699da628392e262061142172a88bcae1cf29228f0bf45b00da8b454a519e"
+    },
+    {
+      "path": "bin/swscale-10.dll",
+      "size": 2206004,
+      "sha256": "c0cf17383bb87c686913508a1a5fb2a6d373b1060709bb9cf1b212f3a103fc10"
+    },
+    {
+      "path": "bin/vulkan-1.dll",
+      "size": 696636,
+      "sha256": "2286e6152a76b1f3283b3d274b7602b739cfeb41a8af670754b7688a198fca46"
+    },
+    {
+      "path": "bin/xvidcore.dll",
+      "size": 779670,
+      "sha256": "5107ab029f4f06a5a360ac769c20a150d4bd1a1922575517b9054768ff219611"
+    },
+    {
+      "path": "bin/zlib1.dll",
+      "size": 127291,
+      "sha256": "11cd91171765cd65f1c3362e3df67e5f5a618a6b88c8cdec899b802eaf1c7b0d"
+    },
+    {
+      "path": "iPhoneMirror.UxPlayHost.exe",
+      "size": 501760,
+      "sha256": "4dba647fda9775b07590406f8498d8739b719a9d07c33fb288cbd540ea2d199d"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstapp.dll",
+      "size": 12688,
+      "sha256": "f77db9aab613daf4eef5d3ac55f89d50f0832da5c4bb573002aa395c6903f45f"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstaudioconvert.dll",
+      "size": 44065,
+      "sha256": "2ecfaa3906401e4034da987726b53dd216067bd4dff9739f63d1696ebe33d1cd"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstaudioresample.dll",
+      "size": 39746,
+      "sha256": "44725c793cefa03bcd724507254f410a58c97928b61205a4dd0eaf59d5b225e4"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstautodetect.dll",
+      "size": 62331,
+      "sha256": "30dd9c1049664abfefc71e4f936637978c3845d16a2be55a3ef11b65063aba93"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstcoreelements.dll",
+      "size": 517887,
+      "sha256": "36fd59eacd00c3e1395c7c77894c693099ba1706ce8b58d4ee16bef6eff2d3c9"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstlevel.dll",
+      "size": 33111,
+      "sha256": "b3f929221e378512c8cb13b99343741d87584e682b777fe52b2d25473fa3ef51"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstlibav.dll",
+      "size": 350817,
+      "sha256": "5ed64d04dab289b1b867504c1c1f62bba5621c2025f1d05dd6cac0d1cbcab7fa"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstplayback.dll",
+      "size": 679887,
+      "sha256": "4a7be5e5815a5a0edc83865f99dd8fc8b54d422d31c61f062aed3458b7a85483"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstvideoconvertscale.dll",
+      "size": 62082,
+      "sha256": "adad6e09c5eff4cd512d23e61584caa3145f8507430f062e0110adfd0559d6c1"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstvideoparsersbad.dll",
+      "size": 378949,
+      "sha256": "701dbe09c2131a6a4277f32986bab94284d0f83a40aec5d605cb9b87e8fe24f0"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgstvolume.dll",
+      "size": 42165,
+      "sha256": "785fd43257b3f7a66c993752a4ab284fbeaa266ab5744621dc7b90c0813f0c03"
+    },
+    {
+      "path": "lib/gstreamer-1.0/libgsty4m.dll",
+      "size": 38926,
+      "sha256": "1b9410bb75a82f3e5876e907a2a4880c14fa76b235775e248c4c1b40b1f9ee32"
+    },
+    {
+      "path": "LICENSE",
+      "size": 35823,
+      "sha256": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809"
+    },
+    {
+      "path": "SOURCE.md",
+      "size": 743,
+      "sha256": "44c0f89205140dff7841420659e6984e25e16bea6f2718c4d84cde6ae6b854c6"
+    },
+    {
+      "path": "test2.err",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "test2.out",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "uxplay-windows-mdns-interface.patch",
+      "size": 6548,
+      "sha256": "eb3f715607595883e769c53d74c34902684849154e83d6d39641c92e58516bb7"
+    },
+    {
+      "path": "uxplay.exe",
+      "size": 696230,
+      "sha256": "5dbb533fc0a8e021d54021752be2ad3cc6d07103f7440c7fbd1fba92e037182a"
+    }
+  ]
+}

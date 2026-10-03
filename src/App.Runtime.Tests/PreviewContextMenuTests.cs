@@ -56,9 +56,10 @@ internal static partial class Program
             {
                 (Name: "wired/wireless touch, unbound", Control: true, Touch: true, Menu: true, Bound: false),
                 (Name: "touch-only callback, unbound", Control: false, Touch: true, Menu: true, Bound: false),
-                (Name: "wired/wireless touch, Home binding", Control: true, Touch: true, Menu: false, Bound: true),
-                (Name: "touch-only callback, Home binding", Control: false, Touch: true, Menu: false, Bound: true),
+                (Name: "wired/wireless touch, default Home binding", Control: true, Touch: true, Menu: true, Bound: true),
+                (Name: "touch-only callback, default Home binding", Control: false, Touch: true, Menu: true, Bound: true),
                 (Name: "Bluetooth", Control: true, Touch: false, Menu: false, Bound: true),
+                (Name: "Bluetooth, unbound", Control: true, Touch: false, Menu: false, Bound: false),
                 (Name: "view-only", Control: false, Touch: false, Menu: true, Bound: true),
             })
             {

@@ -15,8 +15,10 @@ Run("localized culture mapping", () =>
 {
     Equal(DriverLocalization.TraditionalChineseHongKong,
         DriverLocalization.ResolveCultureName("zh-HK"));
-    Equal(DriverLocalization.TraditionalChineseHongKong,
+    Equal(DriverLocalization.TraditionalChineseTaiwan,
         DriverLocalization.ResolveCultureName("zh-Hant-TW"));
+    Equal(DriverLocalization.TraditionalChineseTaiwan,
+        DriverLocalization.ResolveCultureName("zh-TW"));
     Equal(DriverLocalization.TraditionalChineseHongKong,
         DriverLocalization.ResolveCultureName("zh-CHT"));
     Equal(DriverLocalization.Chinese,

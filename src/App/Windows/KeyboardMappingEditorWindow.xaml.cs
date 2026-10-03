@@ -15,20 +15,26 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
     private readonly Func<Action<MappedKey>, string?> _beginCapture;
     private readonly Action _endCapture;
     private readonly Func<KeyboardMappingEntry, Guid?, string?> _save;
+    private readonly Func<KeyboardMappingEntry, Action<KeyboardMappingEntry?>, string?>? _beginPick;
     private KeyboardMappingEntry? _pending, _duplicate;
     private bool _capturing;
+    private bool _positionSet;
+    private bool _loading;
+    private long _captureGeneration;
+    internal MappingEditorState State { get; private set; }
 
     internal KeyboardMappingEditorWindow(KeyboardMappingEntry? entry, IReadOnlyList<KeyboardMappingEntry> mappings,
         Func<MappedKey, string?> conflict, Func<Action<MappedKey>, string?> beginCapture,
-        Action endCapture, Func<KeyboardMappingEntry, Guid?, string?> save)
+        Action endCapture, Func<KeyboardMappingEntry, Guid?, string?> save,
+        Func<KeyboardMappingEntry, Action<KeyboardMappingEntry?>, string?>? beginPick = null)
     {
         _entry = entry ?? new();
         (_mappings, _conflict, _beginCapture, _endCapture, _save) = (mappings, conflict, beginCapture, endCapture, save);
+        _beginPick = beginPick;
         InitializeComponent();
         RefreshActions();
         LoadEntry(_entry);
         Closed += (_, _) => StopCapture();
-        Deactivated += (_, _) => StopCapture();
         LocalizationService.RefreshWhenLanguageChanges(this, () =>
         {
             RefreshActions();
@@ -45,30 +51,47 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
     }
     private void LoadEntry(KeyboardMappingEntry entry)
     {
+        _loading = true;
         _entry = entry;
         _key = entry.Key;
+        _positionSet = entry.Key is not null;
         ActionBox.SelectedValue = entry.Action;
-        XBox.Text = Number(entry.X * 100); YBox.Text = Number(entry.Y * 100);
-        EndXBox.Text = Number(entry.EndX * 100); EndYBox.Text = Number(entry.EndY * 100);
-        DistanceBox.Text = Number(entry.Distance * 100);
         DurationBox.Text = Number(entry.DurationMs); IntervalBox.Text = Number(entry.IntervalMs);
         EntryEnabledBox.IsChecked = entry.Enabled;
+        _loading = false;
+        UpdateState();
         RefreshCapture();
         RefreshParameters();
     }
     private static string Number(double value) => value.ToString("0.##", CultureInfo.CurrentCulture);
-    private void RefreshCapture() => CaptureButton.Content = LocalizationService.Get(_capturing ? "MappingWaiting" : "MappingCapture") +
-        (_capturing ? string.Empty : " · " + KeyboardMappingKeys.Display(_key));
+    private void RefreshCapture()
+    {
+        CaptureButton.Content = LocalizationService.Get(_capturing ? "MappingWaiting" : "MappingCapture") +
+            (_capturing ? string.Empty : " · " + KeyboardMappingKeys.Display(_key));
+        PickButton.IsEnabled = _key is not null && !_capturing && State != MappingEditorState.PickingPosition;
+        PickButton.SetResourceReference(ContentControl.ContentProperty, _positionSet ? "MappingRepick" : "MappingPick");
+        SaveButton.IsEnabled = State == MappingEditorState.MappingReady;
+        PositionSummary.Text = _positionSet ? new KeyboardMappingRow(_entry).ParameterText : LocalizationService.Get("MappingPickRequired");
+        StateText.Text = LocalizationService.Get("MappingState" + State);
+    }
+
+    private void UpdateState()
+    {
+        State = _capturing ? MappingEditorState.WaitingForKey : _key is null ? MappingEditorState.Idle :
+            _positionSet ? MappingEditorState.MappingReady : MappingEditorState.KeyCaptured;
+    }
 
     private void OnCaptureClick(object sender, RoutedEventArgs e)
     {
         if (_capturing) { StopCapture(); return; }
         ConflictPanel.Visibility = Visibility.Collapsed;
         _capturing = true;
-        SaveButton.IsEnabled = false;
+        var generation = ++_captureGeneration;
+        UpdateState();
         RefreshCapture();
         var error = _beginCapture(key =>
         {
+            if (!_capturing || generation != _captureGeneration) return;
             StopCapture();
             if (key.Validate() is { } invalid)
             {
@@ -77,6 +100,7 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
                 return;
             }
             _key = key;
+            UpdateState();
             RefreshCapture();
             ErrorText.Text = _conflict(key) is { } conflict ? LocalizationService.Get(conflict) : string.Empty;
         });
@@ -84,21 +108,27 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
     }
     private void StopCapture()
     {
+        ++_captureGeneration;
         _endCapture();
         _capturing = false;
-        SaveButton.IsEnabled = true;
+        if (State != MappingEditorState.PickingPosition) UpdateState();
         RefreshCapture();
     }
     private void OnActionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (EndPanel is not null) RefreshParameters();
+        if (DurationPanel is not null) RefreshParameters();
         if (ConflictPanel is not null) ConflictPanel.Visibility = Visibility.Collapsed;
+        if (!_loading && ActionBox.SelectedValue is MappedTouchAction action && _entry.Action != action)
+        {
+            if (action >= MappedTouchAction.Swipe) _positionSet = false;
+            _entry = _entry with { Action = action };
+            UpdateState();
+            if (PickButton is not null) RefreshCapture();
+        }
     }
     private void RefreshParameters()
     {
         var action = ActionBox.SelectedValue is MappedTouchAction value ? value : MappedTouchAction.Tap;
-        EndPanel.Visibility = action == MappedTouchAction.Swipe ? Visibility.Visible : Visibility.Collapsed;
-        DistancePanel.Visibility = action >= MappedTouchAction.SwipeUp ? Visibility.Visible : Visibility.Collapsed;
         DurationPanel.Visibility = action >= MappedTouchAction.Swipe || action == MappedTouchAction.LongPress
             ? Visibility.Visible : Visibility.Collapsed;
         IntervalPanel.Visibility = action == MappedTouchAction.DoubleTap ? Visibility.Visible : Visibility.Collapsed;
@@ -109,23 +139,40 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
         var action = (MappedTouchAction)ActionBox.SelectedValue;
         bool TryNumber(TextBox box, out double number) => double.TryParse(box.Text,
             NumberStyles.Float, CultureInfo.CurrentCulture, out number) && double.IsFinite(number);
-        if (!TryNumber(XBox, out var x) || !TryNumber(YBox, out var y)) return Invalid("MappingInvalidCoordinates");
-        var endX = _entry.EndX * 100; var endY = _entry.EndY * 100;
-        var distance = _entry.Distance * 100; var duration = (double)_entry.DurationMs; var interval = (double)_entry.IntervalMs;
-        if (action == MappedTouchAction.Swipe && (!TryNumber(EndXBox, out endX) || !TryNumber(EndYBox, out endY)))
-            return Invalid("MappingInvalidCoordinates");
-        if (action >= MappedTouchAction.SwipeUp && !TryNumber(DistanceBox, out distance)) return Invalid("MappingInvalidDistance");
+        if (!_positionSet) return Invalid("MappingPickRequired");
+        var duration = (double)_entry.DurationMs; var interval = (double)_entry.IntervalMs;
         if ((action >= MappedTouchAction.Swipe || action == MappedTouchAction.LongPress) &&
             (!TryNumber(DurationBox, out duration) || duration != Math.Truncate(duration) || duration is < 50 or > 10000))
             return Invalid("MappingInvalidDuration");
         if (action == MappedTouchAction.DoubleTap && (!TryNumber(IntervalBox, out interval) ||
             interval != Math.Truncate(interval) || interval is < 40 or > 1000)) return Invalid("MappingInvalidInterval");
-        var entry = _entry with { Key = _key, Action = action, X = x / 100, Y = y / 100,
-            EndX = endX / 100, EndY = endY / 100, Distance = distance / 100,
+        var entry = _entry with { Key = _key, Action = action,
             DurationMs = (int)duration, IntervalMs = (int)interval, Enabled = EntryEnabledBox.IsChecked == true };
         if (entry.Validate() is { } error) return Invalid(error);
         if (_conflict(entry.Key!) is { } conflict) return Invalid(conflict);
         return entry;
+    }
+
+    private void OnPickClick(object sender, RoutedEventArgs e)
+    {
+        if (_capturing || _key is null || _beginPick is null) return;
+        ErrorText.Text = string.Empty;
+        var entry = _entry with { Key = _key, Action = (MappedTouchAction)ActionBox.SelectedValue };
+        StopCapture();
+        State = MappingEditorState.PickingPosition;
+        RefreshCapture();
+        var error = _beginPick(entry, result =>
+        {
+            if (result is not null)
+            {
+                _entry = result;
+                _positionSet = true;
+                DurationBox.Text = Number(result.DurationMs);
+            }
+            UpdateState();
+            RefreshCapture();
+        });
+        if (error is not null) { ErrorText.Text = error; UpdateState(); RefreshCapture(); }
     }
     private KeyboardMappingEntry? Invalid(string key)
     {

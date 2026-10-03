@@ -134,7 +134,7 @@ jobs:
 
       - name: Build and test
         shell: pwsh
-        run: ./build.ps1 -Configuration Release
+        run: ./build.ps1 -Configuration Release -Version '${{ steps.version.outputs.version }}' -PrepareUxPlayComponent
 
       - name: Package release assets
         shell: pwsh

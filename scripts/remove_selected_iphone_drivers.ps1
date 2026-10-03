@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('system', 'zh-CN', 'zh-HK', 'en-US')]
+    [ValidateSet('system', 'zh-CN', 'zh-HK', 'zh-TW', 'en-US')]
     [string]$Language = 'system',
     [switch]$ListOnly,
     [switch]$PreviewOnly,
@@ -293,6 +293,99 @@ $script:CleanupMessages = @'
     "SharedPackagePreserved": "Driver package {0} is used by other devices and has been preserved.",
     "PackagesPreservedUnsupported": "This Windows version cannot list all driver package users. Only selected device nodes will be removed; driver packages will be preserved.",
     "DriverOperationBusy": "Another driver operation or rollback is in progress. Wait for it to finish before retrying cleanup."
+  },
+  "zh-TW": {
+    "Pause": "按 Enter 鍵關閉視窗",
+    "ScanPnp": "正在掃描目前 PnP 裝置…",
+    "PnpCached": "PnP 快取完成：{0} 個裝置",
+    "PnpFallback": "Get-PnpDevice 掃描失敗，正在改用 pnputil：",
+    "PnpEnumerationFailed": "無法列舉 PnP 裝置，pnputil 結束代碼為 {0}",
+    "PnpXmlEmpty": "pnputil PnP XML 為空，無法列舉裝置。",
+    "PnpXmlInvalid": "pnputil PnP XML 解析失敗：",
+    "NoConnectedPnp": "pnputil PnP XML 中沒有目前連線的裝置。",
+    "NoCachedPnp": "pnputil PnP 快取完成：0 個裝置",
+    "NoAvailablePnp": "pnputil PnP XML 中沒有可用裝置。",
+    "PnpUtilCached": "pnputil PnP 快取完成：{0} 個裝置",
+    "IndexDriverStore": "正在建立 Driver Store 驅動程式索引…",
+    "DriverXmlUnavailable": "無法使用 Driver Store XML，結束代碼為 {0}",
+    "DriverEnumerationFailed": "pnputil Driver Store 列舉失敗，結束代碼為 {0}；",
+    "StopMissingPackages": "已停止清理，以免遺漏驅動程式套件。",
+    "DriverXmlEmpty": "Driver Store XML 為空。",
+    "DriverXmlEmptyStopped": "Driver Store XML 為空，已停止清理，以免遺漏驅動程式套件。",
+    "DriverXmlInvalid": "Driver Store XML 解析失敗：",
+    "DriverXmlInvalidStopped": "Driver Store XML 解析失敗，已停止清理：",
+    "DriverNodesMissing": "Driver Store XML 中沒有 Driver 節點，已停止清理，以免遺漏驅動程式套件。",
+    "DriverIndexReady": "Driver Store 索引完成：{0} 個 OEM INF",
+    "ClosingProcesses": "正在關閉 iPhoneMirror 相關程序…",
+    "BluetoothExcluded": "已安全排除 BTHLE 裝置：{0}",
+    "DeviceNode": "裝置節點：{0}",
+    "DeviceNodeRestart": "裝置節點已移除，重新啟動後完成：{0}",
+    "DeviceNodeFailedDetail": "裝置節點刪除失敗：{0} ",
+    "DeviceNodeFailed": "裝置節點刪除失敗：{0}",
+    "DriverPackage": "驅動程式套件：{0}",
+    "DriverPackageRestart": "驅動程式套件已刪除，重新啟動後完成：{0}",
+    "DriverPackageFailedDetail": "驅動程式套件刪除失敗：{0} ",
+    "DriverPackageFailed": "驅動程式套件刪除失敗：{0}",
+    "ManifestWriteFailed": "無法寫入清單：",
+    "ProtectedLaunchRequired": "請透過 iPhoneMirror.Driver.exe 或發布套件中的清理入口執行此工具，以取得受保護的管理員權限。",
+    "PnpUtilMissing": "找不到 pnputil.exe：{0}",
+    "ScopeWarning": "將清理所選裝置的關聯裝置節點及可安全移除的驅動程式套件，可能包括 Apple 官方驅動程式；其他裝置仍在使用的驅動程式套件會保留。",
+    "ReinstallAdvice": "完成後可重新安裝 Apple Devices 或 iTunes，以還原所需驅動程式。",
+    "ScanningDevices": "正在掃描裝置…",
+    "MappingDevices": "正在建立 Apple 裝置關係…",
+    "PhysicalDeviceCount": "Apple 實體裝置分組完成：{0} 部",
+    "NoAppleDevice": "找不到目前連線的 iPhone/iPad。",
+    "CheckRequirements": "請確認：",
+    "RequirementUsb": "  1. iPhone/iPad 已透過 USB 連線",
+    "RequirementUnlocked": "  2. 裝置已解鎖",
+    "RequirementTrusted": "  3. 已在裝置上選擇「信任此電腦」",
+    "RequirementCable": "  4. 傳輸線支援資料傳輸",
+    "BluetoothNotListed": "BTHLE / Bluetooth LE 裝置不會顯示。",
+    "MappingDrivers": "正在建立驅動程式關係…",
+    "MappingReady": "裝置關係建立完成。",
+    "DetectedDevices": "偵測到以下 Apple 實體裝置：",
+    "PnpNodeCount": "    PnP 節點：{0}",
+    "DriverStoreCount": "    Driver Store 驅動程式套件：{0}",
+    "ListOnly": "僅清單模式，未修改系統。",
+    "SelectDevice": "請輸入裝置編號；輸入 Q 取消",
+    "InvalidDeviceNumber": "裝置編號無效。",
+    "CleanupPlan": " 清理計劃",
+    "SelectedDevice": "裝置：{0}",
+    "OnePhysicalDevice": "實體裝置：1 部",
+    "AssociatedNodes": "關聯 PnP 節點：{0}",
+    "AssociatedDrivers": "關聯驅動程式套件總數：{0}",
+    "PreviewOnly": " 僅預覽，未修改系統",
+    "NoRemovableNodes": "沒有可刪除的目標 PnP 節點。",
+    "Irreversible": "此操作無法復原。",
+    "Confirm": "請輸入 {0} 確認：",
+    "ConfirmationMismatch": "確認文字不符，未作任何修改。",
+    "FinalDeviceCheck": "正在執行刪除前的最終裝置確認…",
+    "SelectedDisconnected": "所選 iPhone 已中斷連線。",
+    "RemovingNodes": " 正在卸載裝置節點",
+    "RemovingPackages": " 正在刪除 Driver Store 驅動程式套件",
+    "WaitingWindows": "正在等待 Windows 更新裝置狀態…",
+    "FinalVerification": "正在執行最終驗證…",
+    "CleanupResults": " 清理結果",
+    "NodesRemoved": "目標 PnP 節點已清理。",
+    "UnresolvedNodes": "仍存在 {0} 個目標 PnP 節點。",
+    "RemainingNodes": "仍存在 {0} 個目標節點。",
+    "PackagesHandled": "目標 Driver Store 驅動程式套件已處理。",
+    "UnresolvedPackages": "仍存在 {0} 個目標 Driver Store 驅動程式套件。",
+    "RemainingPackages": "仍存在 {0} 個驅動程式套件。",
+    "RestartRequired": "Windows 報告部分操作需要重新啟動。",
+    "LogPath": "記錄檔：{0}",
+    "Error": "錯誤：{0}",
+    "Location": "位置：",
+    "StackTrace": "呼叫堆疊：",
+    "ErrorLog": "錯誤記錄檔：{0}",
+    "Title": " 清除 iPhone/iPad 關聯驅動程式",
+    "Completed": " 清理完成。",
+    "CompletedWithErrors": " 清理結束，發生 {0} 個錯誤。",
+    "InternalError": " 清理工具內部錯誤",
+    "FatalError": "iPhoneMirror 驅動程式清理嚴重錯誤",
+    "SharedPackagePreserved": "驅動程式套件 {0} 正被其他裝置使用，已保留。",
+    "PackagesPreservedUnsupported": "此 Windows 版本無法完整列出驅動程式套件使用者；只會清理所選裝置節點，保留驅動程式套件。",
+    "DriverOperationBusy": "另一個驅動操作或復原仍在進行，請等待完成後重試清理。"
   }
 }
 '@ | ConvertFrom-Json
@@ -303,9 +396,10 @@ if ($Language -eq 'system') {
         $Language = $settings.Language
     } catch { $Language = 'system' }
 }
-if ($Language -notin @('zh-CN', 'zh-HK', 'en-US')) {
+if ($Language -notin @('zh-CN', 'zh-HK', 'zh-TW', 'en-US')) {
     $cultureName = [Globalization.CultureInfo]::InstalledUICulture.Name
-    $Language = if ($cultureName -match '^zh-(Hant|HK|MO|TW|CHT)') { 'zh-HK' }
+    $Language = if ($cultureName -match '^zh-(TW|Hant-TW)$') { 'zh-TW' }
+        elseif ($cultureName -match '^zh-(Hant|HK|MO|CHT)') { 'zh-HK' }
         elseif ($cultureName -match '^zh') { 'zh-CN' } else { 'en-US' }
 }
 function Get-CleanupText {

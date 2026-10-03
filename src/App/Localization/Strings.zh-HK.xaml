@@ -982,6 +982,8 @@
     <system:String x:Key="ControlDeviceNotReady">裝置未就緒或尚未完成綁定。</system:String>
     <system:String x:Key="ControlBluetoothBindingRequired">尚未完成藍牙裝置綁定</system:String>
     <system:String x:Key="ControlBluetoothBindingAdvice">請先在裝置綁定器中為目前裝置完成藍牙綁定，再啟動藍牙控制。</system:String>
+    <system:String x:Key="ControlBindingRequired">目前裝置尚未完成正確綁定，請先完成裝置綁定後再使用反向控制。</system:String>
+    <system:String x:Key="ControlBindingAdvice">請關閉此視窗，開啟「裝置綁定器」，為目前裝置綁定有線 USB 身分；如使用 AirPlay 鏡像，請將其綁定至同一台裝置的檔案，然後重新啟動有線或無線控制。</system:String>
     <system:String x:Key="ControlBluetoothCancelled">已取消藍牙控制</system:String>
     <system:String x:Key="ControlPrerequisiteCancelled">已取消啟動前的確認。</system:String>
     <system:String x:Key="ControlCheckingBluetoothSupport">正在檢查電腦藍牙是否已開啟並支援 BLE…</system:String>
@@ -1209,7 +1211,7 @@
     <system:String x:Key="MappingCapture">錄入按鍵</system:String>
     <system:String x:Key="MappingCaptureHint">請按下要綁定的鍵盤按鍵</system:String>
     <system:String x:Key="MappingWaiting">等候按鍵…（再次按下以取消）</system:String>
-    <system:String x:Key="MappingCaptureHelp">綁定實體按鍵位置，支援數字、小鍵盤及功能鍵。Ctrl / Shift / Alt 單獨放開時觸發，組成組合鍵時不觸發。Win 鍵不支援綁定；Win+D、Win+Tab、Win+L 等系統組合鍵不支援映射。</system:String>
+    <system:String x:Key="MappingCaptureHelp">錄入一個實體按鍵並放開。Ctrl / Shift / Alt / Win 單獨放開時觸發；組合鍵不觸發單鍵映射。Win 單鍵映射會阻止開始功能表；系統安全快捷鍵仍由 Windows 處理。</system:String>
     <system:String x:Key="MappingAction">觸控操作</system:String>
     <system:String x:Key="MappingActionTap">點按</system:String>
     <system:String x:Key="MappingActionLongPress">長按</system:String>
@@ -1219,7 +1221,7 @@
     <system:String x:Key="MappingActionSwipeDown">向下滑動</system:String>
     <system:String x:Key="MappingActionSwipeLeft">向左滑動</system:String>
     <system:String x:Key="MappingActionSwipeRight">向右滑動</system:String>
-    <system:String x:Key="MappingCoordinateHelp">座標以目前投屏畫面為準（0–100%），滑動方向代表手指移動方向。使用反向控制設定中的方向校正，切換橫直向後自動套用。</system:String>
+    <system:String x:Key="MappingCoordinateHelp">在目前投屏畫面點擊或拖曳選擇位置，毋須填寫 X/Y。滑動方向代表手指移動方向。</system:String>
     <system:String x:Key="MappingX">X / 起點 X（%）</system:String>
     <system:String x:Key="MappingY">Y / 起點 Y（%）</system:String>
     <system:String x:Key="MappingEndX">終點 X（%）</system:String>
@@ -1246,7 +1248,7 @@
     <system:String x:Key="MappingLimit">最多支援 256 項映射。</system:String>
     <system:String x:Key="MappingOff">鍵盤映射已關閉</system:String>
     <system:String x:Key="MappingReady">鍵盤映射已啟用 · 目標為目前選取的裝置</system:String>
-    <system:String x:Key="MappingPaused">鍵盤映射已暫停：正在設定、編輯或輸入文字，或無法確認輸入焦點。</system:String>
+    <system:String x:Key="MappingPaused">鍵盤映射已暫停。點擊目前投屏畫面後恢復；編輯或文字輸入期間不執行映射。</system:String>
     <system:String x:Key="MappingNoDevice">等候裝置：請選取並連接 iPhone/iPad。</system:String>
     <system:String x:Key="MappingUnsupportedDevice">目前裝置不支援觸控反控。請選取 iPhone/iPad 投屏裝置。</system:String>
     <system:String x:Key="MappingBluetoothUnsupported">目前藍牙模式僅支援相對滑鼠，無法可靠執行指定座標。請切換至 USB 或無線觸控反控後使用鍵盤映射。</system:String>
@@ -1258,4 +1260,19 @@
     <system:String x:Key="MappingHookFailed">無法啟動鍵盤監聽。請關閉並重新啟用鍵盤映射。</system:String>
     <system:String x:Key="MappingSendFailed">觸控傳送失敗。請檢查目前裝置的反向控制連線。</system:String>
     <system:String x:Key="MappingTargetStatus">目標：{0} · {1}</system:String>
+    <system:String x:Key="LanguageTraditionalChineseTaiwan">繁體中文（台灣）</system:String>
+    <system:String x:Key="DeveloperLanguageTaiwan">繁體中文（台灣）</system:String>
+    <system:String x:Key="MappingPick">選擇位置</system:String>
+    <system:String x:Key="MappingRepick">重新取點</system:String>
+    <system:String x:Key="MappingPickRequired">請在目前投屏畫面選擇位置。</system:String>
+    <system:String x:Key="MappingPickNoPreview">請先開始目前裝置的投屏，再選擇位置。</system:String>
+    <system:String x:Key="MappingPicking">正在投屏畫面取點</system:String>
+    <system:String x:Key="MappingPickInside">將滑鼠移入影片內容區域</system:String>
+    <system:String x:Key="MappingPickClick">點擊目標位置。Esc 取消。</system:String>
+    <system:String x:Key="MappingPickDrag">按下並拖曳到終點，放開完成。Esc 取消。</system:String>
+    <system:String x:Key="MappingStateIdle">第 1 步：錄入 Windows 按鍵</system:String>
+    <system:String x:Key="MappingStateWaitingForKey">請按下一個按鍵並放開；再次點擊可取消錄入</system:String>
+    <system:String x:Key="MappingStateKeyCaptured">第 2 步：選擇操作，然後選擇位置</system:String>
+    <system:String x:Key="MappingStatePickingPosition">正在目前投屏畫面選擇位置</system:String>
+    <system:String x:Key="MappingStateMappingReady">按鍵和位置已確認，可以儲存</system:String>
 </ResourceDictionary>

@@ -68,9 +68,9 @@ function renderStreams(payload) {
     return;
   }
   elements.streamList.innerHTML = streams.map(stream => {
-    const name = stream.name ?? 'unknown';
+    const name = stream.name ?? t('unknown');
     const clients = stream.clients ?? 0;
-    const video = stream.video ?? 'video';
+    const video = !stream.video || stream.video === 'video' ? t('video') : stream.video;
     return `<div class="stream-row"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(video)}</span><span>${escapeHtml(t("Clients: {0}", clients))}</span></div>`;
   }).join('');
 }
@@ -82,10 +82,10 @@ async function refreshStatus() {
     if (!payload.ready) {
       setServerState('failed', t("Media server unavailable"));
       elements.streamCount.textContent = t("0 streams");
-      elements.streamList.innerHTML = `<p>${escapeHtml(payload.error ?? t("No response from media server"))} at ${escapeHtml(payload.api)}.</p>`;
+      elements.streamList.innerHTML = `<p>${escapeHtml(t("{0} at {1}.", payload.error ?? t("No response from media server"), payload.api))}</p>`;
       return;
     }
-    setServerState('ready', payload.label ?? t("Media server ready"));
+    setServerState('ready', payload.label ? t(payload.label) : t("Media server ready"));
     if (payload.endpoints) {
       elements.rtmpUrl.textContent = payload.endpoints.rtmp;
       elements.srtUrl.textContent = payload.endpoints.srt;

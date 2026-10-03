@@ -20,8 +20,8 @@ public partial class MainWindow
     private KeyboardMappingFocusGuard? _mappingFocus;
     private KeyboardMappingWindow? _mappingWindow;
     private DispatcherTimer? _mappingTimer;
-    private Action<MappedKey>? _mappingCapture;
-    private readonly HashSet<(uint Scan, bool Extended)> _mappingCaptureKeys = [];
+    private readonly KeyboardMappingCapture _mappingCapture = new();
+    private readonly KeyboardMappingWindowsKey _mappingWindowsKey = new();
     private bool _systemKeySuppressionRequested;
     private bool _mappingClosing;
     private bool _mappingQueued;
@@ -36,7 +36,7 @@ public partial class MainWindow
         // UI preview must not install a system hook or read another app's focus.
         if (Application.Current is App { IsUiPreviewMode: true }) _mappingSettings.Enabled = false;
         _mappingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
-        _mappingTimer.Tick += (_, _) => RefreshMappingStatus();
+        _mappingTimer.Tick += (_, _) => { RefreshMappingStatus(); RefreshMappingOverlays(); };
         if (_mappingSettings.Enabled) StartMappingMonitoring();
         RefreshMappingStatus();
     }
@@ -55,7 +55,7 @@ public partial class MainWindow
         var window = new KeyboardMappingWindow(_mappingSettings, ApplyKeyboardMapping,
             key => KeyboardMappingKeys.Conflict(key, GetConfiguredShortcuts().Values),
             BeginMappingKeyCapture, EndMappingKeyCapture, () => MappingStatusKey(),
-            () => _viewModel.SelectedDevice?.DisplayName) { Owner = this };
+            () => _viewModel.SelectedDevice?.DisplayName, BeginMappingPositionPick, CancelMappingPositionPick) { Owner = this };
         _mappingWindow = window;
         window.Closed += (_, _) =>
         {
@@ -105,7 +105,7 @@ public partial class MainWindow
         if (next.Enabled) StartMappingMonitoring();
         else
         {
-            _mappingKeys.Reset();
+            _mappingKeys.Disable();
             _mappingFocus?.Dispose();
             _mappingFocus = null;
             _mappingTimer?.Stop();
@@ -114,29 +114,30 @@ public partial class MainWindow
         if (wasEnabled != next.Enabled)
             DiagnosticLogger.ReverseControl("keyboard_mapping", next.Enabled ? "enabled" : "disabled");
         RefreshMappingStatus();
+        RefreshMappingOverlays();
         return null;
     }
 
     private string? BeginMappingKeyCapture(Action<MappedKey> captured)
     {
         CancelMappedGesture();
-        _mappingCapture = captured;
+        _mappingCapture.Begin(captured);
         ReconcileKeyboardHook();
         if (_keyboardHook != 0) return null;
-        _mappingCapture = null;
+        _mappingCapture.Cancel();
         return LocalizationService.Get("MappingHookFailed");
     }
 
     private void EndMappingKeyCapture()
     {
-        _mappingCapture = null;
+        _mappingCapture.Cancel();
         ReconcileKeyboardHook();
     }
 
     private void ReconcileKeyboardHook()
     {
         var needed = !_mappingClosing && (_systemKeySuppressionRequested || _mappingSettings.Enabled ||
-            _mappingCapture is not null || _mappingCaptureKeys.Count != 0);
+            _mappingCapture.Waiting || _mappingCapture.HasHeldKeys || _mappingWindowsKey.HasHeldKey || _mappingKeys.HasSuppressedKeys);
         if (needed && _keyboardHook == 0)
             _keyboardHook = SetWindowsHookEx(13, _keyboardHookProc, 0, 0);
         else if (!needed && _keyboardHook != 0)
@@ -152,32 +153,35 @@ public partial class MainWindow
         var down = message is 0x100 or 0x104;
         if (!down && message is not (0x101 or 0x105)) return false;
         var key = new MappedKey((int)data.VirtualKey, (int)data.ScanCode, (data.Flags & 1) != 0);
-        var id = (data.ScanCode, key.Extended);
-        if (down && _mappingCaptureKeys.Contains(id)) return !key.IsWindows && !key.IsModifier;
-        if (!down && _mappingCaptureKeys.Remove(id))
+        // Capture is a global transaction. Once the editor starts waiting, it
+        // must keep accepting the physical key even if WPF focus moves to a
+        // preview or another window while the user completes the key press.
+        if (_mappingCapture.Process(key, down, _mappingCapture.Waiting,
+                action => Dispatcher.BeginInvoke(action, DispatcherPriority.Input)))
         {
             Dispatcher.BeginInvoke(ReconcileKeyboardHook);
-            return !key.IsWindows && !key.IsModifier;
+            return true;
         }
-        if (_mappingCapture is { } capture && _mappingWindow?.IsEditorActive == true)
-        {
-            if (down && _mappingCaptureKeys.Add(id))
-            {
-                _mappingCapture = null;
-                Dispatcher.BeginInvoke(() => capture(key));
-            }
-            // System modifiers retain their native behavior even during capture.
-            return !key.IsWindows && !key.IsModifier;
-        }
-        if (!_mappingSettings.Enabled) return false;
         var modifiers = AnyOtherModifierPressed(key);
-        var allowed = MappingFocusAllows() && !_mappingClosing;
+        var allowed = _mappingSettings.Enabled && MappingFocusAllows() && !_mappingClosing;
         if (key.VirtualKey == 0x1B && MappingIsFullScreen()) allowed = false;
         if (KeyboardMappingKeys.Conflict(key, _bluetoothShortcuts.Values) is not null) allowed = false;
         var canExecute = _viewModel.GetMappingTargetStatus() == "MappingReady";
+        var windowsResult = _mappingWindowsKey.Process(key, down, allowed && canExecute, modifiers || _mappingKeys.HasHeldKeys,
+            _mappingSettings.Mappings, KeyboardMappingWindowsKey.Replay);
+        if (windowsResult.Mapping is { } windowsMapping) QueueMappedGesture(windowsMapping);
+        if (!down) Dispatcher.BeginInvoke(ReconcileKeyboardHook);
+        if (windowsResult.Suppress) return true;
         var result = _mappingKeys.Process(key, down, false, allowed, modifiers,
             canExecute && _mappingSettings.SuppressOriginalKey, _mappingSettings.Mappings);
-        if (result.Mapping is { } mapping && !_mappingQueued && !_mappingExecutor.IsBusy)
+        if (!_mappingSettings.Enabled) _mappingKeys.Disable();
+        if (result.Mapping is { } mapping) QueueMappedGesture(mapping);
+        return result.Suppress;
+    }
+
+    private void QueueMappedGesture(KeyboardMappingEntry mapping)
+    {
+        if (!_mappingQueued && !_mappingExecutor.IsBusy)
         {
             _mappingQueued = true;
             var generation = _mappingGeneration;
@@ -187,7 +191,6 @@ public partial class MainWindow
                 if (generation == _mappingGeneration) await ExecuteMappedGestureAsync(mapping);
             }, DispatcherPriority.Input);
         }
-        return result.Suppress;
     }
 
     private bool MappingIsFullScreen() => _isFullScreen ||
@@ -202,19 +205,23 @@ public partial class MainWindow
 
     private bool MappingFocusAllows()
     {
-        if (_bossKeyHidden || _mappingWindow is not null || _mappingCapture is not null) return false;
+        if (_bossKeyHidden || _mappingCapture.Waiting || _mappingPick is not null) return false;
         var foreground = GetForegroundWindow();
-        // Every WPF subwindow (settings, prompts, text input) is a local pause.
-        foreach (Window window in Application.Current.Windows)
-            if (window != this && window.IsActive) return false;
+        if (_viewModel.SelectedDevice is { } device && foreground != 0 &&
+            foreground == _secondaryMirrors.GetWindowHandle(device.Udid)) return true;
         if (foreground == _windowSource?.Handle)
         {
+            // Native HWND focus is authoritative. WPF logical focus can stay
+            // on the settings button (or null) after clicking the D3D surface.
+            if (GetFocus() == MainPreviewHost.WindowHandle && MainPreviewHost.WindowHandle != 0) return true;
             if (_isSettingsPanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or
                     ComboBox or ButtonBase or Slider || Keyboard.FocusedElement is null) return false;
             return true;
         }
-        if (_viewModel.SelectedDevice is { } device && foreground == _secondaryMirrors.GetWindowHandle(device.Udid))
-            return true;
+        foreach (Window window in Application.Current.Windows)
+            if (window != this && foreground == new WindowInteropHelper(window).Handle) return false;
+        GetWindowThreadProcessId(foreground, out var processId);
+        if (processId == Environment.ProcessId) return false; // another device's native preview/menu
         return _mappingFocus?.Allows(foreground) == true;
     }
 
@@ -251,7 +258,7 @@ public partial class MainWindow
         var reverseY = _viewModel.AppliedBluetoothMouseReverseVertical;
         var route = _viewModel.CaptureMappingRoute(
             () => generation == _mappingGeneration && MappingFocusAllows() && geometry == MappingGeometry(),
-            (x, y) => BluetoothMouseOrientationMapper.MapNormalized(x, y, geometry.Width, geometry.Height,
+            (x, y) => entry.DeviceCoordinates ? (x, y) : BluetoothMouseOrientationMapper.MapNormalized(x, y, geometry.Width, geometry.Height,
                 geometry.Rotation, portrait, landscape, reverseX, reverseY));
         if (route is null) return;
         LogMappingLimited("mapping_matched", entry, route.Target);
@@ -280,7 +287,9 @@ public partial class MainWindow
             ("target", AppLog.Device(target)), ("error", error));
     }
 
-    private string MappingStatusKey() => !_mappingSettings.Enabled
+    private string MappingStatusKey() => _mappingCapture.Waiting ? "MappingWaiting"
+        : _mappingPick is not null ? "MappingPicking"
+        : !_mappingSettings.Enabled
         ? (_mappingSettings.HadInvalidEntries ? "MappingDamagedConfig" : "MappingOff")
         : _keyboardHook == 0 ? "MappingHookFailed"
         : _viewModel.GetMappingTargetStatus() is { } status && status != "MappingReady" ? status
@@ -303,12 +312,16 @@ public partial class MainWindow
         ++_mappingGeneration;
         _mappingExecutor.Cancel();
         _mappingKeys.CancelCandidates();
+        _mappingWindowsKey.Cancel();
     }
 
     private void OnMappingContextChanged(string? property)
     {
         if (property is nameof(ViewModels.MainViewModel.SelectedDevice) or
             nameof(ViewModels.MainViewModel.CurrentSessionHandle) or
+            nameof(ViewModels.MainViewModel.IsCapturing) or
+            nameof(ViewModels.MainViewModel.IsVideoProtected) or
+            nameof(ViewModels.MainViewModel.IsAudioOnlyAirPlay) or
             nameof(ViewModels.MainViewModel.SourceVideoHeight) or
             nameof(ViewModels.MainViewModel.UsbControlIsInputEnabled) or
             nameof(ViewModels.MainViewModel.BluetoothControlIsInputEnabled))
@@ -316,16 +329,22 @@ public partial class MainWindow
             CancelMappedGesture();
             RefreshMappingStatus();
             _mappingWindow?.SetRuntimeStatus(MappingStatusKey());
+            RefreshMappingOverlays();
         }
     }
 
     private void DisposeKeyboardMapping()
     {
         _mappingClosing = true;
+        CancelMappingPositionPick();
+        RefreshMappingOverlays();
         CancelMappedGesture();
         _mappingFocus?.Dispose();
         _mappingTimer?.Stop();
         _viewModel.KeyboardMappingRequested -= ShowKeyboardMapping;
         ReconcileKeyboardHook();
     }
+
+    [DllImport("user32.dll")] private static extern nint GetFocus();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);
 }

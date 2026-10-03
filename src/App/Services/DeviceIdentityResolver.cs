@@ -19,9 +19,35 @@ internal sealed record CanonicalDeviceIdentity(string DeviceKey, string? AppleUd
     internal bool IsResolved => !string.IsNullOrWhiteSpace(AppleUdid);
 }
 
+internal sealed record ControlDeviceBinding(Guid ProfileId, DeviceIdentityType SourceType,
+    string SourceStableId, string TargetStableId)
+{
+    internal bool Matches(ControlDeviceBinding? other) => other is not null &&
+        ProfileId == other.ProfileId && SourceType == other.SourceType &&
+        DeviceViewModel.UdidEquals(SourceStableId, other.SourceStableId) &&
+        DeviceViewModel.UdidEquals(TargetStableId, other.TargetStableId);
+}
+
 /// <summary>Maps a mirror-session identity to a real profile and never guesses.</summary>
 internal sealed class DeviceIdentityResolver(DeviceBindingManager bindings)
 {
+    // All control modes resolve the selected mirror's profile first. USB and
+    // network touch both target its Apple UDID; Bluetooth targets its HID peer.
+    // Never fall back to another profile or the first connected device.
+    internal ControlDeviceBinding? ResolveControlBinding(DeviceViewModel? device, ReverseControlMode mode)
+    {
+        var resolution = ResolveProfile(device);
+        if (resolution.State != DeviceIdentityResolutionState.Resolved ||
+            resolution.Profile is not { } profile) return null;
+        var targetType = mode == ReverseControlMode.Bluetooth
+            ? DeviceIdentityType.Bluetooth : DeviceIdentityType.Wired;
+        var target = mode == ReverseControlMode.Bluetooth
+            ? profile.BluetoothIdentity?.StableId : profile.WiredIdentity?.Udid;
+        if (mode == ReverseControlMode.None || string.IsNullOrWhiteSpace(target) ||
+            bindings.FindByIdentity(targetType, target)?.Id != profile.Id) return null;
+        return new(profile.Id, resolution.SourceType, resolution.SourceStableId, target);
+    }
+
     internal DeviceIdentityResolution ResolveProfile(DeviceViewModel? device)
     {
         // A wireless AirPlay mirror is also marked IsMediaCast while it is

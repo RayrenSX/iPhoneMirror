@@ -192,16 +192,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool _isSynchronizingWorkspacePanelControls;
     private bool _workspaceControlsReady;
     private bool _themeControlReady;
-    private int _workspaceTransitionRevision;
     private bool _lightweightModeApplied;
     private bool _lightweightPreviewWidthQueued;
     private bool _lightweightInitialWorkspaceFitQueued;
     private bool _lightweightWidthNeedsFit;
-    private bool _lightweightWindowRendering;
-    private TimeSpan _lightweightWindowLastRenderTime;
-    private TimeSpan _lightweightWindowLastAppliedTime;
-    private double _lightweightWindowAnimationProgress;
-    private double _lightweightWindowLastAppliedProgress;
+    private bool _lightweightWindowAnimationActive;
     private int _lightweightWindowWidthStartPixels;
     private int _lightweightWindowWidthTargetPixels;
     private int _lightweightWindowLastAppliedWidthPixels;
@@ -212,16 +207,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private int _lightweightWindowLastAppliedX;
     private int _lightweightWindowTopPixels;
     private bool _lightweightCenterWidthLocked;
-    private bool _lightweightWorkspaceSurfaceAnimationActive;
-    private double _lightweightLeftSurfaceStartWidth;
-    private double _lightweightLeftSurfaceTargetWidth;
-    private double _lightweightRightSurfaceStartWidth;
-    private double _lightweightRightSurfaceTargetWidth;
-    private double _lightweightLeftGapStartWidth;
-    private double _lightweightLeftGapTargetWidth;
-    private double _lightweightRightGapStartWidth;
-    private double _lightweightRightGapTargetWidth;
-    private double _lightweightCenterStartWidth;
+    private bool _workspaceSurfaceAnimationActive;
+    private double _workspaceLeftSurfaceStartWidth;
+    private double _workspaceLeftSurfaceTargetWidth;
+    private double _workspaceRightSurfaceStartWidth;
+    private double _workspaceRightSurfaceTargetWidth;
+    private double _workspaceLeftGapStartWidth;
+    private double _workspaceLeftGapTargetWidth;
+    private double _workspaceRightGapStartWidth;
+    private double _workspaceRightGapTargetWidth;
     private double _lightweightCenterTargetWidth;
     private double _lightweightTargetMinWidth;
     private double _completeModeWidth;
@@ -335,11 +329,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private static readonly TimeSpan DeviceDragHoldDuration = TimeSpan.FromMilliseconds(350);
     private static readonly TimeSpan AppSwitcherDoublePressInterval =
         TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan WorkspaceTransitionDuration = TimeSpan.FromMilliseconds(240);
-    private static readonly TimeSpan LightweightWorkspaceTransitionDuration =
-        TimeSpan.FromMilliseconds(260);
-    private static readonly TimeSpan LightweightWindowFrameInterval =
-        TimeSpan.FromMilliseconds(1000d / 60d);
     public MainWindow()
     {
         _keyboardHookProc = KeyboardHookProcedure;
@@ -423,6 +412,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         SourceInitialized += OnSourceInitialized;
         Deactivated += OnMainKeyboardDeactivated;
         Activated += OnMainKeyboardActivated;
+        SizeChanged += OnWorkspaceWindowSizeChanged;
+        IsVisibleChanged += OnWorkspaceWindowVisibilityChanged;
+        Unloaded += OnWorkspaceUnloaded;
         Closed += OnClosed;
         Closing += OnClosing;
         InitializeKeyboardMapping();
@@ -938,29 +930,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private static (double X, double Y)? MapPointerToNormalized(
         Controls.PreviewPointerEventArgs e, uint sourceWidth, uint sourceHeight)
     {
-        if (e.SurfaceWidth <= 0 || e.SurfaceHeight <= 0 || sourceWidth == 0 || sourceHeight == 0)
-            return null;
-        var sourceAspect = (double)sourceWidth / sourceHeight;
-        var surfaceAspect = (double)e.SurfaceWidth / e.SurfaceHeight;
-        double imageX = 0, imageY = 0, imageWidth = e.SurfaceWidth, imageHeight = e.SurfaceHeight;
-        if (surfaceAspect > sourceAspect)
-        {
-            imageWidth = e.SurfaceHeight * sourceAspect;
-            imageX = (e.SurfaceWidth - imageWidth) / 2;
-        }
-        else if (surfaceAspect < sourceAspect)
-        {
-            imageHeight = e.SurfaceWidth / sourceAspect;
-            imageY = (e.SurfaceHeight - imageHeight) / 2;
-        }
-        if (e.X < imageX || e.X >= imageX + imageWidth ||
-            e.Y < imageY || e.Y >= imageY + imageHeight)
-            return null;
-        return (
-            Math.Clamp((e.X - imageX) / imageWidth, 0, 1),
-            Math.Clamp((e.Y - imageY) / imageHeight, 0, 1));
+        return PreviewCoordinateMapper.Normalize(e.X, e.Y, e.SurfaceWidth, e.SurfaceHeight,
+            sourceWidth, sourceHeight);
     }
-
     private void HandleControlPointerInput(Controls.PreviewPointerEventArgs e,
         string? sourceUdid = null)
     {
@@ -2106,6 +2078,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
+        if (WindowState == WindowState.Minimized) SettleWorkspaceForEnvironmentChange();
         if (!_handlingNativeMaximize && !_isFullScreen &&
             WindowState == WindowState.Maximized)
         {
@@ -2128,6 +2101,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         ApplyWindowFramePolicy();
+        ResumeWorkspaceWindowFit();
     }
 
     private void ApplyWindowFramePolicy()
@@ -2239,11 +2213,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void ApplyWorkspacePanelState(bool animate = false)
     {
-        animate &= SystemParameters.ClientAreaAnimation;
+        animate &= SystemParameters.ClientAreaAnimation && IsVisible && IsLoaded &&
+            WindowState != WindowState.Minimized;
         var showMirroring = _leftWorkspacePanel == LeftWorkspacePanel.Mirroring;
         var showDevices = _leftWorkspacePanel == LeftWorkspacePanel.Devices;
         var showSettings = _isSettingsPanelVisible;
         var showLeftPanel = showMirroring || showDevices;
+        CancelLightweightWindowWidthAnimation(preserveLayout: true);
         ApplyLightweightPreviewFramePolicy();
         _isSynchronizingWorkspacePanelControls = true;
         try
@@ -2252,58 +2228,36 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             DevicePanelToggle.IsActive = showDevices;
             SettingsPanelToggle.IsActive = showSettings;
         }
-        finally
-        {
-            _isSynchronizingWorkspacePanelControls = false;
-        }
+        finally { _isSynchronizingWorkspacePanelControls = false; }
 
+        DeviceColumn.Width = GridLength.Auto;
+        ControlColumn.Width = GridLength.Auto;
+        PrepareWorkspacePages(showDevices, showMirroring);
+        // Keep outgoing cards in their existing rows until they have closed.
+        // Unstacking a still-wide card would temporarily consume a second column.
+        _retainWorkspaceStackDuringTransition = animate && _workspacePanelsStacked;
+        OnWorkspaceLayoutChanged(this, new RoutedEventArgs());
         if (!animate)
         {
-            if (_viewModel.IsLightweightApplicationMode)
-                CancelLightweightWindowWidthAnimation();
-            CancelWorkspaceGapAnimations();
-            DeviceColumn.Width = GridLength.Auto;
-            ControlColumn.Width = GridLength.Auto;
-            LeftGapColumn.Width = showLeftPanel ? new GridLength(18) : new GridLength(0);
-            RightGapColumn.Width = showSettings ? new GridLength(18) : new GridLength(0);
-            ++_workspaceTransitionRevision;
+            LeftGapColumn.Width = new GridLength(showLeftPanel ? 18 : 0);
+            RightGapColumn.Width = new GridLength(showSettings ? 18 : 0);
             SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, 300);
             SetWorkspacePageImmediate(DevicePanel, showDevices);
             SetWorkspacePageImmediate(MirroringPanel, showMirroring);
             SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, 336);
-            if (_viewModel.IsLightweightApplicationMode)
+            ReleaseLightweightCenterWidth();
+            if (_viewModel.IsLightweightApplicationMode && IsVisible)
                 QueueInitialLightweightWorkspaceFit();
-            else
-                RequestLightweightWindowFit();
             return;
         }
 
-        if (_viewModel.IsLightweightApplicationMode)
-        {
-            var lightweightRevision = ++_workspaceTransitionRevision;
+        if (_viewModel.IsLightweightApplicationMode && !_isWindowMaximized &&
+            !_isFullScreen && CenterColumn.ActualWidth > 0 &&
+            new WindowInteropHelper(this).Handle != 0)
             AnimateLightweightWindowForWorkspace(showLeftPanel, showSettings);
-            AnimateWorkspacePage(DevicePanel, showDevices, fromLeft: true,
-                lightweightRevision);
-            AnimateWorkspacePage(MirroringPanel, showMirroring, fromLeft: true,
-                lightweightRevision);
-            AnimateWorkspacePage(ControlPanel, showSettings, fromLeft: false,
-                lightweightRevision);
-            return;
-        }
-
-        DeviceColumn.Width = GridLength.Auto;
-        ControlColumn.Width = GridLength.Auto;
-        var revision = ++_workspaceTransitionRevision;
-        AnimateWorkspaceGap(LeftGapColumn, showLeftPanel ? 18 : 0, revision);
-        AnimateWorkspaceGap(RightGapColumn, showSettings ? 18 : 0, revision);
-        AnimateWorkspaceSurface(LeftPanelHost, showLeftPanel, 300,
-            fromLeft: true, revision);
-        AnimateWorkspacePage(DevicePanel, showDevices, fromLeft: true, revision);
-        AnimateWorkspacePage(MirroringPanel, showMirroring, fromLeft: true, revision);
-        AnimateWorkspaceSurface(ControlPanel, showSettings, 336,
-            fromLeft: false, revision);
+        else
+            AnimateCompleteWorkspace(showLeftPanel, showSettings);
     }
-
     private void AnimateLightweightWindowForWorkspace(bool showLeftPanel,
         bool showSettings)
     {
@@ -2313,7 +2267,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
 
         CancelLightweightWindowWidthAnimation(preserveLayout: true);
-        CancelWorkspaceGapAnimations();
         DeviceColumn.Width = GridLength.Auto;
         ControlColumn.Width = GridLength.Auto;
 
@@ -2331,19 +2284,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ? PreviewPanel.ActualWidth
             : currentCenterWidth;
 
-        _lightweightLeftSurfaceStartWidth = currentLeftWidth;
-        _lightweightLeftSurfaceTargetWidth = showLeftPanel ? 300 : 0;
-        _lightweightRightSurfaceStartWidth = currentRightWidth;
-        _lightweightRightSurfaceTargetWidth = showSettings ? 336 : 0;
-        _lightweightLeftGapStartWidth = currentLeftGap;
-        _lightweightLeftGapTargetWidth = showLeftPanel ? 18 : 0;
-        _lightweightRightGapStartWidth = currentRightGap;
-        _lightweightRightGapTargetWidth = showSettings ? 18 : 0;
-        _lightweightCenterStartWidth = currentCenterWidth;
+        _workspaceLeftSurfaceStartWidth = currentLeftWidth;
+        _workspaceLeftSurfaceTargetWidth = showLeftPanel ? 300 : 0;
+        _workspaceRightSurfaceStartWidth = currentRightWidth;
+        _workspaceRightSurfaceTargetWidth = showSettings ? 336 : 0;
+        _workspaceLeftGapStartWidth = currentLeftGap;
+        _workspaceLeftGapTargetWidth = showLeftPanel ? 18 : 0;
+        _workspaceRightGapStartWidth = currentRightGap;
+        _workspaceRightGapTargetWidth = showSettings ? 18 : 0;
         var baseChromeWidth = GetLightweightFixedChromeWidth(currentWindowWidth);
-        var targetSideWidth = _lightweightLeftSurfaceTargetWidth +
-            _lightweightLeftGapTargetWidth + _lightweightRightGapTargetWidth +
-            _lightweightRightSurfaceTargetWidth;
+        var targetSideWidth = _workspaceLeftSurfaceTargetWidth +
+            _workspaceLeftGapTargetWidth + _workspaceRightGapTargetWidth +
+            _workspaceRightSurfaceTargetWidth;
         var maximumWindowWidth = GetLightweightMaximumWindowWidth();
         var targetWindowLeft = bounds.Left;
         var anchoredMaximumWindowWidth = maximumWindowWidth;
@@ -2387,14 +2339,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // Keep the center column star-sized. Its rendered preview width then
         // follows the current HWND width on every frame while the side panels
         // and their gaps advance in lockstep with the outer window.
-        _lightweightWorkspaceSurfaceAnimationActive = true;
+        _workspaceSurfaceAnimationActive = true;
         ReserveLightweightWorkspaceSurface(LeftPanelHost,
             currentLeftWidth);
         ReserveLightweightWorkspaceSurface(ControlPanel,
             currentRightWidth);
-        if (_lightweightLeftSurfaceTargetWidth > 0)
+        if (_workspaceLeftSurfaceTargetWidth > 0)
             LeftPanelHost.Visibility = Visibility.Visible;
-        if (_lightweightRightSurfaceTargetWidth > 0)
+        if (_workspaceRightSurfaceTargetWidth > 0)
             ControlPanel.Visibility = Visibility.Visible;
         LeftGapColumn.Width = new GridLength(currentLeftGap);
         RightGapColumn.Width = new GridLength(currentRightGap);
@@ -2427,7 +2379,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void RequestLightweightWindowFit()
     {
         if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
-            _isWindowMaximized || _lightweightWorkspaceSurfaceAnimationActive) return;
+            _isWindowMaximized || _workspaceSurfaceAnimationActive) return;
         _lightweightWidthNeedsFit = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Render, QueueLightweightPreviewWidth);
     }
@@ -2472,7 +2424,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             _lightweightInitialWorkspaceFitQueued = false;
             if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
-                _isWindowMaximized) return;
+                _isWindowMaximized || !IsVisible || WindowState != WindowState.Normal ||
+                _shutdownStarted || _workspaceTransition?.IsRunning == true) return;
             MainContentGrid.UpdateLayout();
             FitLightweightWorkspaceImmediately();
         });
@@ -2489,6 +2442,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == 0 || !GetWindowRect(handle, out var bounds)) return;
 
+        _workspaceWindowFitOnResume = false;
         CancelLightweightWindowWidthAnimation(preserveLayout: true);
         var showLeftPanel = _leftWorkspacePanel != LeftWorkspacePanel.None;
         var showSettings = _isSettingsPanelVisible;
@@ -2579,7 +2533,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             transform.BeginAnimation(TranslateTransform.XProperty, null);
             transform.X = 0;
         }
-        element.Opacity = visible ? 1 : 0;
+        element.Opacity = 1;
+        element.IsHitTestVisible = visible;
         element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -2596,131 +2551,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         element.Width = visible ? width : 0;
-    }
-
-    private void CancelWorkspaceGapAnimations()
-    {
-        LeftGapColumn.BeginAnimation(ColumnDefinition.WidthProperty, null);
-        RightGapColumn.BeginAnimation(ColumnDefinition.WidthProperty, null);
-    }
-
-    private void AnimateWorkspaceGap(ColumnDefinition column, double target,
-        int revision)
-    {
-        var current = Math.Max(0, column.ActualWidth);
-        column.BeginAnimation(ColumnDefinition.WidthProperty, null);
-        column.Width = new GridLength(current);
-        if (Math.Abs(current - target) < 0.5)
-        {
-            column.Width = new GridLength(target);
-            return;
-        }
-
-        var animation = new GridLengthAnimation
-        {
-            From = new GridLength(current),
-            To = new GridLength(target),
-            Duration = new Duration(WorkspaceTransitionDuration),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-            FillBehavior = FillBehavior.Stop,
-        };
-        Timeline.SetDesiredFrameRate(animation, 60);
-        animation.Completed += (_, _) =>
-        {
-            if (revision != _workspaceTransitionRevision) return;
-            column.BeginAnimation(ColumnDefinition.WidthProperty, null);
-            column.Width = new GridLength(target);
-        };
-        column.BeginAnimation(ColumnDefinition.WidthProperty, animation,
-            HandoffBehavior.SnapshotAndReplace);
-    }
-
-    private void AnimateWorkspaceSurface(FrameworkElement element, bool visible,
-        double width, bool fromLeft, int revision)
-    {
-        if (_lightweightWorkspaceSurfaceAnimationActive) return;
-        var wasVisible = element.Visibility == Visibility.Visible;
-        var currentWidth = wasVisible
-            ? Math.Max(0, element.ActualWidth)
-            : 0;
-        var targetWidth = visible ? width : 0;
-        element.BeginAnimation(WidthProperty, null);
-        element.Width = currentWidth;
-        if (Math.Abs(currentWidth - targetWidth) < 0.5)
-        {
-            element.Width = targetWidth;
-            element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            if (!ReferenceEquals(element, LeftPanelHost))
-                AnimateWorkspacePage(element, visible, fromLeft, revision,
-                    startFromHidden: visible && !wasVisible);
-            return;
-        }
-        if (visible)
-        {
-            element.Visibility = Visibility.Visible;
-            if (ReferenceEquals(element, LeftPanelHost)) element.Opacity = 1;
-        }
-
-        var widthAnimation = CreateWorkspaceAnimation(currentWidth, targetWidth);
-        widthAnimation.Completed += (_, _) =>
-        {
-            if (revision != _workspaceTransitionRevision) return;
-            element.BeginAnimation(WidthProperty, null);
-            element.Width = visible ? width : 0;
-            if (!visible) element.Visibility = Visibility.Collapsed;
-        };
-        element.BeginAnimation(WidthProperty, widthAnimation);
-
-        if (!ReferenceEquals(element, LeftPanelHost))
-            AnimateWorkspacePage(element, visible, fromLeft, revision,
-                startFromHidden: visible && !wasVisible);
-    }
-
-    private void AnimateWorkspacePage(FrameworkElement element, bool visible,
-        bool fromLeft, int revision, bool startFromHidden = false)
-    {
-        if (!visible && element.Visibility != Visibility.Visible) return;
-        var transform = element.RenderTransform as TranslateTransform ?? new TranslateTransform();
-        element.RenderTransform = transform;
-        var wasVisible = !startFromHidden && element.Visibility == Visibility.Visible;
-        var direction = fromLeft ? -1d : 1d;
-        var currentOpacity = wasVisible ? Math.Clamp(element.Opacity, 0, 1) : 0;
-        var currentTranslation = wasVisible ? transform.X : direction * 16;
-        element.BeginAnimation(OpacityProperty, null);
-        transform.BeginAnimation(TranslateTransform.XProperty, null);
-        // Preserve the effective animated values before replacing their clocks.
-        // Without this, rapid open/close input jumps back to the base values.
-        element.Opacity = currentOpacity;
-        transform.X = currentTranslation;
-        if (visible) element.Visibility = Visibility.Visible;
-
-        var opacity = CreateWorkspaceAnimation(currentOpacity, visible ? 1 : 0);
-        var translation = CreateWorkspaceAnimation(currentTranslation,
-            visible ? 0 : direction * 12);
-        opacity.Completed += (_, _) =>
-        {
-            if (revision != _workspaceTransitionRevision) return;
-            element.BeginAnimation(OpacityProperty, null);
-            transform.BeginAnimation(TranslateTransform.XProperty, null);
-            element.Opacity = visible ? 1 : 0;
-            transform.X = 0;
-            if (!visible) element.Visibility = Visibility.Collapsed;
-        };
-        element.BeginAnimation(OpacityProperty, opacity);
-        transform.BeginAnimation(TranslateTransform.XProperty, translation);
-    }
-
-    private static DoubleAnimation CreateWorkspaceAnimation(double from, double to)
-    {
-        var animation = new DoubleAnimation(from, to, WorkspaceTransitionDuration)
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-            FillBehavior = FillBehavior.Stop,
-        };
-        // Width animations run a WPF layout pass. A 60 Hz cap remains fluid
-        // while avoiding duplicated layout work on high-refresh displays.
-        Timeline.SetDesiredFrameRate(animation, 60);
-        return animation;
     }
 
     private void OnThemeSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -6076,7 +5906,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _lightweightWidthNeedsFit = false;
             return;
         }
-        if (_lightweightWorkspaceSurfaceAnimationActive) return;
+        if (_workspaceSurfaceAnimationActive) return;
         if (_lightweightPreviewWidthQueued) return;
         _lightweightPreviewWidthQueued = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Render, () =>
@@ -6233,7 +6063,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (!IsLoaded || handle == 0 || !GetWindowRect(handle, out var bounds))
         {
             Width = targetWidth;
-            CompleteLightweightWorkspaceSurfaceAnimation();
+            CompleteWorkspaceSurfaceAnimation();
             if (preserveCenterWidth) ReleaseLightweightCenterWidth();
             return;
         }
@@ -6250,10 +6080,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _lightweightWindowTopPixels = bounds.Top;
         if (Math.Abs(currentPixels - targetPixels) <= 1 &&
             _lightweightWindowStartX == _lightweightWindowTargetX &&
-            !_lightweightWorkspaceSurfaceAnimationActive)
+            !_workspaceSurfaceAnimationActive)
         {
             Width = targetWidth;
-            CompleteLightweightWorkspaceSurfaceAnimation();
+            CompleteWorkspaceSurfaceAnimation();
             if (preserveCenterWidth) ReleaseLightweightCenterWidth();
             return;
         }
@@ -6263,97 +6093,50 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _lightweightWindowHeightPixels = Math.Max(1, bounds.Bottom - bounds.Top);
         _lightweightWindowWidthTargetDips = targetWidth;
         if (preserveCenterWidth) _lightweightCenterWidthLocked = true;
-        _lightweightWindowAnimationProgress = 0;
-        _lightweightWindowLastAppliedProgress = 0;
-        _lightweightWindowLastRenderTime = TimeSpan.Zero;
-        _lightweightWindowLastAppliedTime = TimeSpan.Zero;
         _lightweightWindowLastAppliedWidthPixels = currentPixels;
         _lightweightWindowLastAppliedX = bounds.Left;
-        if (!_lightweightWindowRendering)
-        {
-            _lightweightWindowRendering = true;
-            CompositionTarget.Rendering += OnLightweightWindowRendering;
-        }
-    }
-
-    private void OnLightweightWindowRendering(object? sender, EventArgs e)
-    {
-        if (e is not RenderingEventArgs rendering) return;
-        var handle = new WindowInteropHelper(this).Handle;
-        if (handle == 0)
-        {
-            StopLightweightWindowRendering();
-            return;
-        }
-
-        if (_lightweightWindowLastRenderTime == TimeSpan.Zero)
-        {
-            _lightweightWindowLastRenderTime = rendering.RenderingTime;
-            return;
-        }
-        var elapsed = rendering.RenderingTime - _lightweightWindowLastRenderTime;
-        _lightweightWindowLastRenderTime = rendering.RenderingTime;
-        var elapsedSeconds = Math.Max(0, elapsed.TotalSeconds);
-        _lightweightWindowAnimationProgress = Math.Min(1,
-            _lightweightWindowAnimationProgress +
-            elapsedSeconds / LightweightWorkspaceTransitionDuration.TotalSeconds);
-        var isComplete = _lightweightWindowAnimationProgress >= 1;
-        if (isComplete || _lightweightWindowLastAppliedTime == TimeSpan.Zero ||
-            rendering.RenderingTime - _lightweightWindowLastAppliedTime >=
-            LightweightWindowFrameInterval)
-        {
-            ApplyLightweightWindowAnimationFrame(handle,
-                _lightweightWindowAnimationProgress, force: isComplete);
-            _lightweightWindowLastAppliedProgress = _lightweightWindowAnimationProgress;
-            _lightweightWindowLastAppliedTime = rendering.RenderingTime;
-        }
-        if (!isComplete) return;
-
-        StopLightweightWindowRendering();
-        SynchronizeLightweightWindowPosition();
-        Width = _lightweightWindowWidthTargetDips;
-        CompleteLightweightWorkspaceSurfaceAnimation();
-        ReleaseLightweightCenterWidth();
+        _workspaceAnimationWindow = handle;
+        _lightweightWindowAnimationActive = true;
+        StartWorkspaceTransition();
     }
 
     private void CancelLightweightWindowWidthAnimation(bool preserveLayout = false)
     {
-        if (_lightweightWorkspaceSurfaceAnimationActive)
-            CommitLightweightWorkspaceSurface(_lightweightWindowLastAppliedProgress);
-        StopLightweightWindowRendering();
-        _lightweightWorkspaceSurfaceAnimationActive = false;
+        if (!preserveLayout) SettleWorkspaceForEnvironmentChange();
+        // Frame values are ordinary local values. Stopping the sole progress
+        // clock preserves the exact current widths/opacity for retargeting.
+        _workspaceTransition?.Stop();
+        _lightweightWindowAnimationActive = false;
+        _workspaceAnimationWindow = 0;
+        _workspaceSurfaceAnimationActive = false;
+        _retainWorkspaceStackDuringTransition = false;
         if (!preserveLayout)
         {
             SetLightweightCenterColumnFill();
             ReleaseLightweightCenterWidth();
         }
     }
-
-    private void StopLightweightWindowRendering()
-    {
-        if (!_lightweightWindowRendering) return;
-        CompositionTarget.Rendering -= OnLightweightWindowRendering;
-        _lightweightWindowRendering = false;
-        _lightweightWindowLastRenderTime = TimeSpan.Zero;
-        _lightweightWindowLastAppliedTime = TimeSpan.Zero;
-    }
-
     private void ApplyLightweightWindowAnimationFrame(nint handle, double progress,
         bool force = false)
     {
-        var eased = EaseWorkspaceProgress(progress);
+        var eased = progress;
         var width = (int)Math.Round(_lightweightWindowWidthStartPixels +
             (_lightweightWindowWidthTargetPixels - _lightweightWindowWidthStartPixels) * eased);
         var x = (int)Math.Round(_lightweightWindowStartX +
             (_lightweightWindowTargetX - _lightweightWindowStartX) * eased);
-        ApplyLightweightWorkspaceSurfaceWidths(eased);
+
         if (!force && width == _lightweightWindowLastAppliedWidthPixels &&
             x == _lightweightWindowLastAppliedX)
             return;
 
-        if (handle != 0)
-            _ = SetWindowPos(handle, 0, x, _lightweightWindowTopPixels, width,
-                _lightweightWindowHeightPixels, SwpNoZOrder | SwpNoActivate);
+        _applyingWorkspaceWindowBounds = true;
+        try
+        {
+            if (handle != 0)
+                _ = SetWindowPos(handle, 0, x, _lightweightWindowTopPixels, width,
+                    _lightweightWindowHeightPixels, SwpNoZOrder | SwpNoActivate);
+        }
+        finally { _applyingWorkspaceWindowBounds = false; }
         _lightweightWindowLastAppliedWidthPixels = width;
         _lightweightWindowLastAppliedX = x;
     }
@@ -6368,113 +6151,36 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Top = _lightweightWindowTopPixels / scale;
     }
 
-    private void ApplyLightweightWorkspaceSurfaceWidths(double progress)
+    private void ApplyWorkspaceSurfaceWidths(double progress)
     {
-        if (!_lightweightWorkspaceSurfaceAnimationActive) return;
-        LeftPanelHost.Width = Interpolate(_lightweightLeftSurfaceStartWidth,
-            _lightweightLeftSurfaceTargetWidth, progress);
-        ControlPanel.Width = Interpolate(_lightweightRightSurfaceStartWidth,
-            _lightweightRightSurfaceTargetWidth, progress);
-        LeftGapColumn.Width = new GridLength(Interpolate(_lightweightLeftGapStartWidth,
-            _lightweightLeftGapTargetWidth, progress));
-        RightGapColumn.Width = new GridLength(Interpolate(_lightweightRightGapStartWidth,
-            _lightweightRightGapTargetWidth, progress));
-        // CenterColumn stays star-sized so PreviewPanel.ActualWidth tracks the
-        // current window width rather than an animation-time cached width.
-        SetLightweightCenterColumnFill();
+        if (!_workspaceSurfaceAnimationActive) return;
+        var left = Interpolate(_workspaceLeftSurfaceStartWidth, _workspaceLeftSurfaceTargetWidth, progress);
+        var right = Interpolate(_workspaceRightSurfaceStartWidth, _workspaceRightSurfaceTargetWidth, progress);
+        var leftGap = Interpolate(_workspaceLeftGapStartWidth, _workspaceLeftGapTargetWidth, progress);
+        var rightGap = Interpolate(_workspaceRightGapStartWidth, _workspaceRightGapTargetWidth, progress);
+        if (LeftPanelHost.Width != left) LeftPanelHost.Width = left;
+        if (ControlPanel.Width != right) ControlPanel.Width = right;
+        if (LeftGapColumn.Width.Value != leftGap) LeftGapColumn.Width = new GridLength(leftGap);
+        if (RightGapColumn.Width.Value != rightGap) RightGapColumn.Width = new GridLength(rightGap);
     }
 
-    private void CompleteLightweightWorkspaceSurfaceAnimation()
+    private void CompleteWorkspaceSurfaceAnimation()
     {
-        if (!_lightweightWorkspaceSurfaceAnimationActive) return;
-        CommitLightweightWorkspaceSurface(1);
-        SetLightweightCenterColumnFill();
-        if (_lightweightTargetMinWidth > 0)
-            MinWidth = _lightweightTargetMinWidth;
-        _lightweightWorkspaceSurfaceAnimationActive = false;
-        ApplyLightweightPreviewFramePolicy();
-        if (_lightweightWidthNeedsFit)
-            RequestLightweightWindowFit();
+        if (!_workspaceSurfaceAnimationActive) return;
+        ApplyWorkspaceSurfaceWidths(1);
+        _workspaceSurfaceAnimationActive = false;
+        if (_workspaceLeftSurfaceTargetWidth == 0) LeftPanelHost.Visibility = Visibility.Collapsed;
+        if (_workspaceRightSurfaceTargetWidth == 0) ControlPanel.Visibility = Visibility.Collapsed;
+        if (_viewModel.IsLightweightApplicationMode)
+        {
+            SetLightweightCenterColumnFill();
+            if (_lightweightTargetMinWidth > 0) MinWidth = _lightweightTargetMinWidth;
+            ApplyLightweightPreviewFramePolicy();
+            if (_lightweightWidthNeedsFit) RequestLightweightWindowFit();
+        }
     }
-
-    private void CommitLightweightWorkspaceSurface(double progress)
-    {
-        var eased = EaseWorkspaceProgress(progress);
-        var leftWidth = Interpolate(_lightweightLeftSurfaceStartWidth,
-            _lightweightLeftSurfaceTargetWidth, eased);
-        var rightWidth = Interpolate(_lightweightRightSurfaceStartWidth,
-            _lightweightRightSurfaceTargetWidth, eased);
-        LeftPanelHost.Width = leftWidth;
-        ControlPanel.Width = rightWidth;
-        LeftGapColumn.Width = new GridLength(Interpolate(_lightweightLeftGapStartWidth,
-            _lightweightLeftGapTargetWidth, eased));
-        RightGapColumn.Width = new GridLength(Interpolate(_lightweightRightGapStartWidth,
-            _lightweightRightGapTargetWidth, eased));
-        SetLightweightCenterColumnFill();
-        if (leftWidth <= 0) LeftPanelHost.Visibility = Visibility.Collapsed;
-        if (rightWidth <= 0) ControlPanel.Visibility = Visibility.Collapsed;
-    }
-
     private static double Interpolate(double from, double to, double progress) =>
         from + (to - from) * progress;
-
-    private sealed class GridLengthAnimation : AnimationTimeline
-    {
-        public static readonly DependencyProperty FromProperty =
-            DependencyProperty.Register(nameof(From), typeof(GridLength),
-                typeof(GridLengthAnimation), new PropertyMetadata(new GridLength(0)));
-
-        public static readonly DependencyProperty ToProperty =
-            DependencyProperty.Register(nameof(To), typeof(GridLength),
-                typeof(GridLengthAnimation), new PropertyMetadata(new GridLength(0)));
-
-        public static readonly DependencyProperty EasingFunctionProperty =
-            DependencyProperty.Register(nameof(EasingFunction), typeof(IEasingFunction),
-                typeof(GridLengthAnimation), new PropertyMetadata(null));
-
-        public GridLength From
-        {
-            get => (GridLength)GetValue(FromProperty);
-            set => SetValue(FromProperty, value);
-        }
-
-        public GridLength To
-        {
-            get => (GridLength)GetValue(ToProperty);
-            set => SetValue(ToProperty, value);
-        }
-
-        public IEasingFunction? EasingFunction
-        {
-            get => (IEasingFunction?)GetValue(EasingFunctionProperty);
-            set => SetValue(EasingFunctionProperty, value);
-        }
-
-        public override Type TargetPropertyType => typeof(GridLength);
-
-        protected override Freezable CreateInstanceCore() => new GridLengthAnimation();
-
-        public override object GetCurrentValue(object defaultOriginValue,
-            object defaultDestinationValue, AnimationClock animationClock)
-        {
-            var progress = animationClock.CurrentProgress ?? 1;
-            if (EasingFunction is not null)
-                progress = EasingFunction.Ease(progress);
-            var origin = From.IsAbsolute
-                ? From.Value
-                : ((GridLength)defaultOriginValue).Value;
-            var destination = To.IsAbsolute
-                ? To.Value
-                : ((GridLength)defaultDestinationValue).Value;
-            return new GridLength(origin + (destination - origin) * progress);
-        }
-    }
-
-    private static double EaseWorkspaceProgress(double progress)
-    {
-        var remaining = 1 - Math.Clamp(progress, 0, 1);
-        return 1 - remaining * remaining * remaining;
-    }
 
     private void LockLightweightCenterWidth()
     {
@@ -6833,7 +6539,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             SizeToContent = SizeToContent.Manual;
             PreviewPanel.ClearValue(WidthProperty);
             SetNavigationPaneVisible(false);
-            ++_workspaceTransitionRevision;
             SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: 300);
             SetWorkspacePageImmediate(DevicePanel, visible: false);
             SetWorkspacePageImmediate(MirroringPanel, visible: false);

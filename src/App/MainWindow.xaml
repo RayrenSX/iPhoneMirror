@@ -910,9 +910,9 @@
                 <ColumnDefinition x:Name="ControlColumn" Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <Grid x:Name="LeftPanelHost" Grid.Column="0" Width="300" SizeChanged="OnWorkspaceLayoutChanged" IsVisibleChanged="OnWorkspacePanelVisibilityChanged"
+            <controls:WorkspaceRevealPanel x:Name="LeftPanelHost" Grid.Column="0" Width="300" ContentWidth="300" IsVisibleChanged="OnWorkspacePanelVisibilityChanged"
                   ClipToBounds="True">
-            <Border x:Name="DevicePanel"
+            <Border x:Name="DevicePanel" IsVisibleChanged="OnWorkspacePanelVisibilityChanged" Unloaded="OnWorkspaceUnloaded"
                     Style="{StaticResource WorkspaceCardBorder}" Padding="16">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <Grid MinHeight="300">
@@ -1026,7 +1026,7 @@
                 </ScrollViewer>
             </Border>
 
-            <Border x:Name="MirroringPanel"
+            <Border x:Name="MirroringPanel" IsVisibleChanged="OnWorkspacePanelVisibilityChanged" Unloaded="OnWorkspaceUnloaded"
                     Style="{StaticResource WorkspaceCardBorder}" Padding="16"
                     Visibility="Collapsed">
                 <Grid>
@@ -1083,7 +1083,7 @@
                     </StackPanel></ScrollViewer>
                 </Grid>
             </Border>
-            </Grid>
+            </controls:WorkspaceRevealPanel>
 
             <Grid x:Name="CenterPanel" Grid.Column="2">
                 <Grid.RowDefinitions>
@@ -1662,9 +1662,11 @@
 
             </Grid>
 
-            <Border x:Name="ControlPanel" Grid.Column="4" Width="0" SizeChanged="OnWorkspaceLayoutChanged" IsVisibleChanged="OnWorkspacePanelVisibilityChanged"
+            <controls:WorkspaceRevealPanel x:Name="ControlPanel" Grid.Column="4" Width="0" ContentWidth="336"
+                                           Visibility="Collapsed" IsVisibleChanged="OnWorkspacePanelVisibilityChanged">
+            <Border x:Name="ControlPanelContent"
                     Style="{StaticResource WorkspaceCardBorder}"
-                    Padding="16,16,1,16" Visibility="Collapsed"
+                    Padding="16,16,1,16"
                     ClipToBounds="True">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto"
@@ -2068,6 +2070,7 @@
                                     <ComboBoxItem Tag="system" Content="{DynamicResource LanguageSystem}"/>
                                     <ComboBoxItem Tag="zh-CN" Content="{DynamicResource LanguageChinese}"/>
                                     <ComboBoxItem Tag="zh-HK" Content="{DynamicResource LanguageTraditionalChineseHongKong}"/>
+                                    <ComboBoxItem Tag="zh-TW" Content="{DynamicResource LanguageTraditionalChineseTaiwan}"/>
                                     <ComboBoxItem Tag="en-US" Content="{DynamicResource LanguageEnglish}"/>
                                 </ComboBox>
                                 <TextBlock Text="{DynamicResource ThemeTitle}"
@@ -2090,6 +2093,7 @@
                     </StackPanel>
                 </ScrollViewer>
             </Border>
+            </controls:WorkspaceRevealPanel>
         </Grid>
 
         <Grid x:Name="FooterPanel" Grid.Row="3" Margin="0,16,0,0">

@@ -30,7 +30,7 @@ internal static class ControlStageWorkflow
 {
     private static readonly IReadOnlyList<ControlStage> UsbStages =
     [
-        ControlStage.CheckingDevice,
+        ControlStage.CheckingBinding,
         ControlStage.CheckingPermissions,
         ControlStage.PreparingDeviceSupport,
         ControlStage.Connecting,
@@ -40,7 +40,7 @@ internal static class ControlStageWorkflow
 
     private static readonly IReadOnlyList<ControlStage> WirelessStages =
     [
-        ControlStage.CheckingDevice,
+        ControlStage.CheckingBinding,
         ControlStage.CheckingPermissions,
         ControlStage.Connecting,
         ControlStage.InitializingServices,
@@ -212,9 +212,7 @@ internal sealed class ControlStatusService
             _promptCompletion = null;
             _diagnostics.Clear(); _timers.Clear(); _durations.Clear(); _progress.Clear(); _current = null;
         }
-        var initialStage = mode == ControlStatusMode.Bluetooth
-            ? ControlStage.CheckingBinding
-            : ControlStage.CheckingDevice;
+        var initialStage = ControlStage.CheckingBinding;
         var description = mode == ControlStatusMode.Bluetooth
             ? LocalizationService.Get("ControlCheckingBluetoothBinding")
             : LocalizationService.Get("ControlCheckingDeviceBinding");

@@ -45,7 +45,7 @@ internal static partial class Program
             ((FrameworkElement)owner.FindName("EnvironmentPanel")).Visibility = Visibility.Visible;
             actions.Visibility = Visibility.Visible;
             var buttons = actions.Children.OfType<Button>().ToArray();
-            foreach (var culture in new[] { "zh-CN", "en-US", "zh-HK" })
+            foreach (var culture in new[] { "zh-CN", "en-US", "zh-HK", "zh-TW" })
             {
                 DisplayLanguage(culture);
                 foreach (var theme in new[] { AppTheme.Dark, AppTheme.Light, AppTheme.Dark })

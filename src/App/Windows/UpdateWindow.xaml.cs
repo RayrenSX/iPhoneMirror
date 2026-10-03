@@ -12,7 +12,7 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INotifyPropertyChanged
 {
-    private readonly ReleaseInfo _release;
+    private ReleaseInfo _release;
     private readonly GitHubReleaseClient _client;
     private readonly bool _allowMirrorFallback;
     private readonly bool _readOnlyPreview;
@@ -25,6 +25,7 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
     private string _speedText = string.Empty;
     private string _updateButtonText;
     private string _displayedReleaseBody = string.Empty;
+    private bool _loadingTaiwanNotes;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public string CurrentVersion => VersionManager.DisplayVersion;
@@ -69,10 +70,12 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
             OnPropertyChanged(nameof(UpdateButtonText));
             OnPropertyChanged(nameof(ReleaseName));
             RefreshReleaseNotes();
+            _ = EnsureTaiwanReleaseNotesAsync();
         });
         RefreshReleaseNotes();
         Loaded += (_, _) =>
         {
+            _ = EnsureTaiwanReleaseNotesAsync();
             if (autoDownload) _ = DownloadAndInstallAsync();
         };
         Closing += OnClosing;
@@ -80,10 +83,32 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
 
     private void RefreshReleaseNotes()
     {
-        var body = LocalizationService.RefreshText(_release.Body);
+        var body = LocalizationService.RefreshText(_readOnlyPreview
+            ? _release.Body : LocalizedReleaseNotes.Body(_release));
         if (body == _displayedReleaseBody && ReleaseNotesViewer.Document is not null) return;
         _displayedReleaseBody = body;
         ReleaseNotesViewer.Document = MarkdownFlowDocumentRenderer.Render(body);
+    }
+
+    private async Task EnsureTaiwanReleaseNotesAsync()
+    {
+        if (_readOnlyPreview || !IsLoaded || _loadingTaiwanNotes || _release.TaiwanNotesChecked ||
+            LocalizationService.EffectiveCulture.Name != LocalizationService.TraditionalChineseTaiwan ||
+            LocalizedReleaseNotes.TaiwanBody(_release) is not null) return;
+        _loadingTaiwanNotes = true;
+        var token = _cancellation.Token;
+        try
+        {
+            _release = await _client.EnrichTaiwanReleaseNotesAsync(_release, token);
+            if (!token.IsCancellationRequested) RefreshReleaseNotes();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("updater", "taiwan_notes_refresh_failed", error,
+                ("release", _release.TagName));
+        }
+        finally { _loadingTaiwanNotes = false; }
     }
 
     private async void OnUpdateClick(object sender, RoutedEventArgs e) =>

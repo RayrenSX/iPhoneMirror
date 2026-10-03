@@ -107,7 +107,7 @@ iPhoneMirror 的蓝牙控制受 iOS 辅助触控和 Windows 蓝牙外设模式�
 ## 下载
 
 前往 [Releases](https://github.com/RayrenSX/iPhoneMirror/releases)，优先下载
-`iPhoneMirror-Setup-v*-x64.exe`。安装向导支持简体中文、繁体中文（香港）和 English，可选择安装目录，
+`iPhoneMirror-Setup-v*-x64.exe`。安装向导支持简体中文、繁体中文（香港）、繁體中文（台灣）和 English，可选择安装目录，
 管理员安装默认到 `C:\Program Files\iPhoneMirror`，并创建开始菜单入口；桌面快捷方式为可选项。
 选择按当前用户安装时，Inno Setup 会使用 Windows 的用户级程序目录。
 需要免安装版本时，也可以下载 `iPhoneMirror-v*-win-x64.zip`，完整解压后运行
@@ -155,7 +155,7 @@ iPhoneMirror 的蓝牙控制受 iOS 辅助触控和 Windows 蓝牙外设模式�
 | 蓝牙反向控制 | 按设备绑定 BLE HID 鼠标/键盘、系统导航和可配置全局快捷键 |
 | USB/无线反向控制 | 独立 CoreDevice 桥接器；需开发者模式、匹配 DDI 和设备 HID 服务验证，详见教程 |
 | 画面调节 | 仅本地预览的亮度、对比度、饱和度和伽马 |
-| 工具 | 截图、强制刷新、快捷键、实时日志、简体中文、繁体中文（香港）和英文界面 |
+| 工具 | 截图、强制刷新、快捷键、实时日志、简体中文、繁体中文（香港）、繁體中文（台灣）和英文界面 |
 | 驱动 | 有线开始投屏前按当前设备严格检查；异常时打开独立驱动管理器 |
 
 分辨率和 FPS 选项只限制本地渲染，不会降低 USB 上传输的原始画面质量。

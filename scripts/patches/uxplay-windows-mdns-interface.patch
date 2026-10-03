@@ -1,0 +1,154 @@
+--- a/lib/mdnsd/mdnsd.c
++++ b/lib/mdnsd/mdnsd.c
+@@ -20,9 +20,14 @@
+ #ifndef WIN32
+ #include <ifaddrs.h>
+ #include <net/if.h>
++#else
++#include <wctype.h>
+ #endif
+ 
+ #include "../compat.h"
++#ifdef WIN32
++#include <iphlpapi.h>
++#endif
+ #include "mdnsd.h"
+ 
+ #define MDNS_ADDR4 "224.0.0.251"
+@@ -347,6 +352,125 @@
+ 
+ static uint32_t mdns_get_default_ipv4(void)
+ {
++#ifdef WIN32
++    /* Prefer an active physical multicast-capable adapter. A default route
++     * can belong to a full-tunnel VPN or an isolated virtual switch, neither
++     * of which can receive the phone's link-local mDNS traffic. */
++    DWORD requested = 0;
++    (void) GetBestInterface(INADDR_ANY, &requested);
++    ULONG size = 16 * 1024;
++    PIP_ADAPTER_ADDRESSES adapters = malloc(size);
++    if (adapters) {
++        DWORD status = GetAdaptersAddresses(AF_INET,
++            GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_INCLUDE_GATEWAYS,
++            NULL, adapters, &size);
++        if (status == ERROR_BUFFER_OVERFLOW) {
++            free(adapters);
++            adapters = malloc(size);
++            if (adapters) {
++                status = GetAdaptersAddresses(AF_INET,
++                    GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_INCLUDE_GATEWAYS,
++                    NULL, adapters, &size);
++            }
++        }
++        if (adapters && status == NO_ERROR) {
++            const IP_ADAPTER_ADDRESSES *best = NULL;
++            const IP_ADAPTER_UNICAST_ADDRESS *best_unicast = NULL;
++            int best_requested = 0;
++            int best_non_virtual = 0;
++            int best_physical = 0;
++            int best_gateway = 0;
++            ULONG best_metric = ULONG_MAX;
++            for (const IP_ADAPTER_ADDRESSES *adapter = adapters;
++                 adapter; adapter = adapter->Next) {
++                if (adapter->OperStatus != IfOperStatusUp ||
++                    (adapter->Flags & IP_ADAPTER_NO_MULTICAST) ||
++                    adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK ||
++                    adapter->IfType == IF_TYPE_TUNNEL ||
++                    adapter->IfType == IF_TYPE_PPP) {
++                    continue;
++                }
++                int physical = adapter->IfType == IF_TYPE_IEEE80211 ||
++                    adapter->IfType == IF_TYPE_ETHERNET_CSMACD;
++                int non_virtual = 1;
++                static const wchar_t *virtual_markers[] = {
++                    L"virtual", L"veth", L"vmware", L"hyper-v", L"hyperv",
++                    L"virtualbox", L"tap", L"vpn", L"loopback", L"tunnel",
++                    L"wsl", L"docker", L"tailscale"
++                };
++                for (size_t marker = 0;
++                     marker < sizeof(virtual_markers) / sizeof(virtual_markers[0]);
++                     ++marker) {
++                    const wchar_t *name = adapter->FriendlyName;
++                    const wchar_t *needle = virtual_markers[marker];
++                    for (; name && *name && non_virtual; ++name) {
++                        const wchar_t *left = name;
++                        const wchar_t *right = needle;
++                        while (*left && *right &&
++                               towlower(*left) == towlower(*right)) {
++                            ++left;
++                            ++right;
++                        }
++                        if (!*right) non_virtual = 0;
++                    }
++                }
++                const IP_ADAPTER_UNICAST_ADDRESS *unicast =
++                    adapter->FirstUnicastAddress;
++                for (; unicast; unicast = unicast->Next) {
++                    if (!unicast->Address.lpSockaddr ||
++                        unicast->Address.lpSockaddr->sa_family != AF_INET ||
++                        unicast->DadState != IpDadStatePreferred) {
++                        continue;
++                    }
++                    const struct sockaddr_in *address =
++                        (const struct sockaddr_in *) unicast->Address.lpSockaddr;
++                    const uint32_t host = ntohl(address->sin_addr.s_addr);
++                    if (!host || (host >> 24U) == 127U ||
++                        (host >> 16U) == 0xA9FEU) {
++                        continue;
++                    }
++                    const DWORD index = adapter->IfIndex != 0
++                        ? adapter->IfIndex : adapter->Ipv6IfIndex;
++                    const int candidate_requested = index == requested &&
++                        non_virtual;
++                    const int candidate_gateway =
++                        adapter->FirstGatewayAddress != NULL;
++                    const ULONG metric = adapter->Ipv4Metric;
++                    int better = !best ||
++                        candidate_requested != best_requested
++                        ? candidate_requested > best_requested
++                        : non_virtual != best_non_virtual
++                            ? non_virtual > best_non_virtual
++                            : physical != best_physical
++                                ? physical > best_physical
++                                : candidate_gateway != best_gateway
++                                    ? candidate_gateway > best_gateway
++                                    : metric != best_metric
++                                        ? metric < best_metric
++                                        : index < (best->IfIndex != 0
++                                            ? best->IfIndex : best->Ipv6IfIndex);
++                    if (better) {
++                        best = adapter;
++                        best_unicast = unicast;
++                        best_requested = candidate_requested;
++                        best_non_virtual = non_virtual;
++                        best_physical = physical;
++                        best_gateway = candidate_gateway;
++                        best_metric = metric;
++                    }
++                }
++            }
++            if (best && best_unicast) {
++                const struct sockaddr_in *address =
++                    (const struct sockaddr_in *) best_unicast->Address.lpSockaddr;
++                const uint32_t selected = address->sin_addr.s_addr;
++                free(adapters);
++                return selected;
++            }
++        }
++        free(adapters);
++    }
++#endif
+     int fd;
+     uint32_t addr = 0;
+     struct sockaddr_in remote;
+--- a/lib/mdnsd/CMakeLists.txt
++++ b/lib/mdnsd/CMakeLists.txt
+@@ -5,5 +5,8 @@
+         STATIC
+         ${DIR_SRCS})
+ 
++if(WIN32)
++    target_link_libraries(dnssd PUBLIC iphlpapi)
++endif()
+ 
+ 

@@ -18,6 +18,12 @@ $expectedHongKongTitle = $hongKongResources.SelectSingleNode(
     '//*[@x:Key="WindowTitleConnectivity"]', $xamlNamespaces).InnerText
 $expectedHongKongStart = $hongKongResources.SelectSingleNode(
     '//*[@x:Key="StartMirroring"]', $xamlNamespaces).InnerText
+$taiwanResources = [xml](Get-Content -Raw -LiteralPath (
+    Join-Path $Root 'src\App\Localization\Strings.zh-TW.xaml') -Encoding utf8)
+$expectedTaiwanTitle = $taiwanResources.SelectSingleNode(
+    '//*[@x:Key="WindowTitleConnectivity"]', $xamlNamespaces).InnerText
+$expectedTaiwanStart = $taiwanResources.SelectSingleNode(
+    '//*[@x:Key="StartMirroring"]', $xamlNamespaces).InnerText
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -128,7 +134,7 @@ try {
     Start-Sleep -Milliseconds 500
     $language = Find-ById $window 'LanguageComboBox'
 
-    Select-Index $language 3
+    Select-Index $language 4
     $process.Refresh()
     $englishTitle = $process.MainWindowTitle
     $englishStart = (Find-ById $window 'CaptureActionButton').Current.Name
@@ -141,6 +147,13 @@ try {
     $hongKongStart = (Find-ById $window 'CaptureActionButton').Current.Name
     $hongKongImage = Join-Path $Output 'ui-monochrome-zh-HK.png'
     Save-Window $process.MainWindowHandle $hongKongImage
+
+    Select-Index $language 3
+    $process.Refresh()
+    $taiwanTitle = $process.MainWindowTitle
+    $taiwanStart = (Find-ById $window 'CaptureActionButton').Current.Name
+    $taiwanImage = Join-Path $Output 'ui-monochrome-zh-TW.png'
+    Save-Window $process.MainWindowHandle $taiwanImage
 
     Select-Index $language 1
     $process.Refresh()
@@ -162,6 +175,9 @@ try {
         $hongKongStart -ne $expectedHongKongStart) {
         throw "Hong Kong Chinese switch failed: title='$hongKongTitle', start='$hongKongStart'"
     }
+    if ($taiwanTitle -ne $expectedTaiwanTitle -or $taiwanStart -ne $expectedTaiwanStart) {
+        throw "Taiwan Chinese switch failed: title='$taiwanTitle', start='$taiwanStart'"
+    }
 
     [pscustomobject]@{
         EnglishTitle = $englishTitle
@@ -170,9 +186,12 @@ try {
         ChineseStart = $chineseStart
         HongKongTitle = $hongKongTitle
         HongKongStart = $hongKongStart
+        TaiwanTitle = $taiwanTitle
+        TaiwanStart = $taiwanStart
         EnglishScreenshot = $englishImage
         ChineseScreenshot = $chineseImage
         HongKongScreenshot = $hongKongImage
+        TaiwanScreenshot = $taiwanImage
     }
 }
 finally {

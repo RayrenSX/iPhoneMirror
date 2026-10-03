@@ -269,6 +269,21 @@ internal sealed class WirelessReceiverService
             }
             try
             {
+                if (runtime.Backend == WirelessReceiverBackend.UxPlay)
+                {
+                    // The component tree is immutable. The versioned variable
+                    // takes precedence over the packaged host's GST_REGISTRY;
+                    // keep GStreamer's mutable index outside the verified tree.
+                    // GST_REGISTRY_UPDATE=no does not prevent its first write.
+                    var registryRoot = Path.Combine(Updater.UpdateSettingsStore.UserDataDirectory,
+                        "Cache", "GStreamer");
+                    Directory.CreateDirectory(registryRoot);
+                    var runtimeKey = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                        System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(directory).ToUpperInvariant())));
+                    Environment.SetEnvironmentVariable("GST_REGISTRY_1_0",
+                        Path.Combine(registryRoot, "uxplay-" + runtimeKey + ".bin"),
+                        EnvironmentVariableTarget.Process);
+                }
                 var start = new ProcessStartInfo
                 {
                     FileName = executable,

@@ -103,7 +103,7 @@ try {
     if ($actualDriverVersion -ne $Version) {
         throw "Installer version $Version does not match driver version $actualDriverVersion."
     }
-    $requiredPayload = @('CHANGELOG.md', 'DRIVER_DEPENDENCIES.md', 'LICENSE',
+    $requiredPayload = @('CHANGELOG.md', 'CHANGELOG.zh-TW.md', 'DRIVER_DEPENDENCIES.md', 'LICENSE',
             'THIRD_PARTY_NOTICES.md',
             'tools\iUsbBridge.exe', 'tools\iUsbBridge.runtime.json',
             'tools\updater\Apply-ZipUpdate.ps1',

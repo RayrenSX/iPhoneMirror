@@ -8,6 +8,8 @@ internal sealed class KeyboardMappingKeyState
     private readonly Dictionary<(int, bool), MappedKey> _down = [];
     private readonly HashSet<(int, bool)> _suppressed = [];
     private readonly HashSet<(int, bool)> _modifierCandidates = [];
+    internal bool HasSuppressedKeys => _suppressed.Count != 0;
+    internal bool HasHeldKeys => _down.Count != 0;
 
     internal MappingKeyResult Process(MappedKey key, bool down, bool injected,
         bool allowed, bool modifierHeld, bool suppressOriginal, IReadOnlyList<KeyboardMappingEntry> mappings)
@@ -38,5 +40,12 @@ internal sealed class KeyboardMappingKeyState
     }
 
     internal void CancelCandidates() => _modifierCandidates.Clear();
+    internal void Disable()
+    {
+        _modifierCandidates.Clear();
+        // Keep only downs whose release we still owe Windows. Other ups may
+        // arrive after the shared hook is removed and must not poison re-enable.
+        foreach (var id in _down.Keys.Where(id => !_suppressed.Contains(id)).ToArray()) _down.Remove(id);
+    }
     internal void Reset() { _down.Clear(); _suppressed.Clear(); _modifierCandidates.Clear(); }
 }

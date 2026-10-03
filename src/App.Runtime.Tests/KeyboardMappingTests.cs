@@ -32,11 +32,17 @@ internal static partial class Program
         {
             TestMappingConfiguration(output);
             TestMappingKeys();
+            TestMappingCaptureTransactions();
+            TestMappingWindowsKeyChords();
+            TestMappingVisualCoordinates();
             AwaitMapping(TestMappingGesturesAsync());
             TestMappingRoutes(app);
             TestMappingHookAndEntry(app);
+            TestMappingNativePreviewFocus(app);
             TestMappingFocusGuard();
             TestMappingWindows(app, output);
+            TestMappingOverlayInteraction(app, output);
+            TestMappingSurfaceLifecycle(app);
             Console.WriteLine("PASS keyboard mapping: configuration, key families/chords/repeat, all gestures, cancellation, USB/wireless framed transport, device switching/reconnect, orientation, editor CRUD/conflicts, three languages, both themes, resized windows.");
             return 0;
         }
@@ -130,7 +136,8 @@ internal static partial class Program
         }
         MappingAssert(MappingTestKey.SamePhysicalKey(MappingTestKey with { VirtualKey = 0x5A }), "Layout changed physical binding.");
         MappingAssert(!new MappedKey(0x0D, 0x1C, false).SamePhysicalKey(new(0x0D, 0x1C, true)), "Numpad Enter collided.");
-        MappingAssert(new MappedKey(0x5B, 0x5B, true).Validate() == "MappingWindowsKeyUnsupported", "Win was accepted.");
+        MappingAssert(new MappedKey(0x5B, 0x5B, true).Validate() is null &&
+            new MappedKey(0x5C, 0x5C, true).Validate() is null, "Left/right Win capture was rejected.");
         MappingAssert(KeyboardMappingKeys.Conflict(new(0x78, 0x43, false), [KeyboardShortcut.Default]) is not null,
             "F9 shortcut collision was missed.");
         MappingAssert(KeyboardMappingKeys.Conflict(new(0x7B, 0x58, false), []) is null, "F12 cannot be mapped.");
@@ -296,6 +303,10 @@ internal static partial class Program
             MappingAssert(!(bool)KeyboardCall(main, "ShouldSkipMappedDeviceKey", MappingTestKey.VirtualKey, phone.Udid)!,
                 "Unsupported Bluetooth mapping swallowed the existing device keyboard.");
             SetKeyboardField(vm, "_bluetoothControlEnabled", false);
+            SetKeyboardField(vm, "_sourceVideoWidth", 1170u);
+            SetKeyboardField(vm, "_sourceVideoHeight", 2532u);
+            MappingAssert(vm.GetMappingTargetStatus() == "MappingGeometryUnavailable",
+                "A stopped preview with stale dimensions advertised executable mapping input.");
             MappingAssert(!(bool)KeyboardCall(main, "ShouldSkipMappedDeviceKey", MappingTestKey.VirtualKey, pad.Udid)!,
                 "A mapping for the selected device swallowed another preview's keyboard.");
             Console.WriteLine("PASS USB/wireless framed packets, iPhone/iPad dimensions, portrait/left/right rotation, selection changes, reconnect generations and Bluetooth capability gate.");
@@ -326,7 +337,7 @@ internal static partial class Program
     private static void TestMappingWindows(App app, string output)
     {
         var languageMethod = typeof(LocalizationService).GetMethod("ApplyLanguage", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
-        foreach (var language in new[] { "zh-CN", "zh-HK", "en-US" })
+        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
         foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
         {
             languageMethod.Invoke(null, [language, false, false]);
@@ -356,7 +367,9 @@ internal static partial class Program
                 Guid? replaced = null;
                 var editor = new KeyboardMappingEditorWindow(null, settings.Mappings, _ => null,
                     callback => { capture = callback; return null; }, () => { },
-                    (entry, replace) => { saved = entry; replaced = replace; return null; })
+                    (entry, replace) => { saved = entry; replaced = replace; return null; },
+                    (entry, completed) => { completed(entry with { X = .2, Y = .7, EndX = .8, EndY = .3,
+                        DeviceCoordinates = true }); return null; })
                     { Owner = manager, ShowInTaskbar = false };
                 editor.Show();
                 try
@@ -366,10 +379,10 @@ internal static partial class Program
                     MappingAssert(capture is not null && !((Button)editor.FindName("SaveButton")).IsEnabled, "Key capture did not start.");
                     capture!(MappingTestKey);
                     ((ComboBox)editor.FindName("ActionBox")).SelectedValue = MappedTouchAction.Swipe;
-                    ((TextBox)editor.FindName("XBox")).Text = "20";
-                    ((TextBox)editor.FindName("YBox")).Text = "70";
-                    ((TextBox)editor.FindName("EndXBox")).Text = "80";
-                    ((TextBox)editor.FindName("EndYBox")).Text = "30";
+                    MappingAssert(!((Button)editor.FindName("SaveButton")).IsEnabled &&
+                        editor.State == MappingEditorState.KeyCaptured, "Capture bypassed required visual picking.");
+                    ((Button)editor.FindName("PickButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    MappingAssert(editor.State == MappingEditorState.MappingReady, "Pick did not finish the editing transaction.");
                     AdvanceDispatcher(TimeSpan.FromMilliseconds(260));
                     SaveWindowRender(editor, Path.Combine(output, $"mapping-editor-{language}-{theme}.png"));
                     editor.Width = 480; editor.Height = 500;
@@ -392,13 +405,15 @@ internal static partial class Program
                 // A second editor exercises the third conflict resolution path.
                 var originalEditor = new KeyboardMappingEditorWindow(null, settings.Mappings, _ => null,
                     callback => { capture = callback; return null; }, () => { },
-                    (entry, replace) => { saved = entry; replaced = replace; return null; })
+                    (entry, replace) => { saved = entry; replaced = replace; return null; },
+                    (entry, completed) => { completed(entry); return null; })
                     { Owner = manager, ShowInTaskbar = false };
                 originalEditor.Show();
                 try
                 {
                     ((Button)originalEditor.FindName("CaptureButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     capture!(MappingTestKey);
+                    ((Button)originalEditor.FindName("PickButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     ((Button)originalEditor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     KeyboardCall(originalEditor, "OnEditOriginalClick", originalEditor, new RoutedEventArgs());
                     ((ComboBox)originalEditor.FindName("ActionBox")).SelectedValue = MappedTouchAction.LongPress;
@@ -458,6 +473,9 @@ internal static partial class Program
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
                 MappingAssert(((Button)editor.FindName("CaptureButton")).Content.ToString()!.Contains("J"),
                     "Native key data did not update the editor.");
+                // Transport-free test of saving a confirmed position. Real
+                // overlay mouse selection is covered by the interaction probe.
+                KeyboardCall(editor, "LoadEntry", MappingEntry());
                 ((Button)editor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             });
             KeyboardCall(manager, "OnAddClick", manager, new RoutedEventArgs());

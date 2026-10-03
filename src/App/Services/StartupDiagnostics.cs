@@ -110,6 +110,8 @@ internal static class StartupDiagnostics
 
     internal static string UserMessage(Exception error, string language)
     {
+        var taiwan = language.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ||
+            language.Equals("zh-Hant-TW", StringComparison.OrdinalIgnoreCase);
         var hongKong = language.Equals("zh-HK", StringComparison.OrdinalIgnoreCase) ||
             language.Equals("zh-Hant-HK", StringComparison.OrdinalIgnoreCase) ||
             language.Equals("zh-MO", StringComparison.OrdinalIgnoreCase);
@@ -120,12 +122,16 @@ internal static class StartupDiagnostics
                 FileNotFoundException);
         if (nativeLoadFailure)
         {
+            if (taiwan)
+                return "無法載入應用程式所需的原生元件。請重新安裝最新的完整安裝套件；詳細診斷資訊已寫入下方記錄檔。";
             if (hongKong)
                 return "無法載入應用程式所需的原生元件。請重新安裝最新的完整安裝程式；詳細診斷資料已寫入下方記錄。";
             return simplifiedChinese
                 ? "无法加载程序所需的原生组件。请重新安装最新的完整安装包；详细诊断已写入下方日志。"
                 : "A required native component could not be loaded. Reinstall the latest full Setup package; detailed diagnostics were written to the log below.";
         }
+        if (taiwan)
+            return "iPhoneMirror 啟動時發生錯誤。詳細診斷資訊已寫入下方記錄檔。";
         if (hongKong)
             return "iPhoneMirror 啟動時發生錯誤。詳細診斷資料已寫入下方記錄。";
         return simplifiedChinese
@@ -135,6 +141,16 @@ internal static class StartupDiagnostics
 
     internal static string Label(string key, string language)
     {
+        if (Localization.LocalizationService.ResolveCultureName(language) == "zh-TW")
+            return key switch
+            {
+                "StartupErrorHeading" => "iPhoneMirror 無法啟動",
+                "StartupErrorLogLabel" => "診斷記錄檔",
+                "StartupErrorDetails" => "錯誤詳細資料",
+                "StartupErrorOpenLog" => "開啟記錄檔位置",
+                "StartupErrorClose" => "關閉",
+                _ => throw new ArgumentOutOfRangeException(nameof(key)),
+            };
         var labels = key switch
         {
             "StartupErrorHeading" => ("iPhoneMirror 无法启动", "iPhoneMirror 無法啟動", "iPhoneMirror could not start"),

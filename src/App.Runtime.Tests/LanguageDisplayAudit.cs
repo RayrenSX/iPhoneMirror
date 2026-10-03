@@ -105,7 +105,7 @@ internal static partial class Program
                                 .Select(t => (Label: t, Keys: initial[t.Text])).ToArray();
                             var inputs = FindVisualDescendants<TextBox>(window).Where(t => t.IsVisible && !t.IsReadOnly)
                                 .Select(t => (Box: t, Value: t.Text)).ToArray();
-                            foreach (var language in new[] { "zh-HK", "en-US", "zh-CN" })
+                            foreach (var language in new[] { "zh-HK", "zh-TW", "en-US", "zh-CN" })
                             {
                                 DisplayLanguage(language);
                                 AdvanceDispatcher(TimeSpan.FromMilliseconds(90));
@@ -183,7 +183,7 @@ internal static partial class Program
         var cached = DisplayF("ReverseControlErrorBodyFormat", DisplayL("ReverseControlTransportWired"), rawName);
         var joined = (string)DisplayType("Localization.LocalizationService").GetMethod("Join", DisplayStatic)!
             .Invoke(null, [Environment.NewLine, new[] { DisplayL("WirelessSettingsReadyImpact"), cached }])!;
-        foreach (var language in new[] { "zh-HK", "en-US", "zh-CN" })
+        foreach (var language in new[] { "zh-HK", "zh-TW", "en-US", "zh-CN" })
         {
             DisplayLanguage(language);
             verify(DisplayRefresh(rawName) == rawName, "Raw device name matching a resource must remain unchanged");
@@ -194,7 +194,7 @@ internal static partial class Program
         }
         var service = DisplayType("Localization.LocalizationService");
         foreach (var (culture, expected) in new[] { ("zh-CN", "zh-CN"), ("zh-SG", "zh-CN"), ("zh-Hans", "zh-CN"),
-            ("zh-HK", "zh-HK"), ("zh-TW", "zh-HK"), ("zh-MO", "zh-HK"), ("zh-Hant-TW", "zh-HK"), ("zh-CHT", "zh-HK"),
+            ("zh-HK", "zh-HK"), ("zh-TW", "zh-TW"), ("zh-MO", "zh-HK"), ("zh-Hant-TW", "zh-TW"), ("zh-CHT", "zh-HK"),
             ("en-GB", "en-US"), ("ja-JP", "en-US"), ("fr-FR", "en-US") })
             verify((string)service.GetMethod("ResolveCultureName", DisplayStatic)!.Invoke(null, [culture])! == expected,
                 culture + ": wrong system-language fallback");
@@ -204,7 +204,7 @@ internal static partial class Program
 
     private static void TestBridgeOutputDisplay(Action<bool, string> verify)
     {
-        foreach (var language in new[] { "zh-CN", "zh-HK", "en-US" })
+        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
         foreach (var wasReady in new[] { false, true })
         {
             DisplayLanguage(language);
@@ -233,7 +233,7 @@ internal static partial class Program
         try
         {
             var error = (Exception)DisplayCall(startupBridge, "CreateStartupException", DisplayF("TouchBridgeExitedFormat", 7), null)!;
-            foreach (var language in new[] { "zh-HK", "en-US", "zh-CN" })
+            foreach (var language in new[] { "zh-HK", "zh-TW", "en-US", "zh-CN" })
             {
                 DisplayLanguage(language);
                 verify(DisplayRefresh(error.Message) == DisplayF("TouchBridgeExitedFormat", 7) +
@@ -253,7 +253,7 @@ internal static partial class Program
         try
         {
             var label = (TextBlock)overlay.GetType().GetField("_audioText", DisplayInstance)!.GetValue(overlay)!;
-            foreach (var language in new[] { "zh-HK", "en-US", "zh-CN" })
+            foreach (var language in new[] { "zh-HK", "zh-TW", "en-US", "zh-CN" })
             {
                 DisplayLanguage(language);
                 verify(label.Text == DisplayF("CaptureVideoProtectedAudioActiveFormat", 48, 2), language + ": overlay audio caption stale");
@@ -284,7 +284,7 @@ internal static partial class Program
         var label = DisplayBinding(vm, "BluetoothControlStatus");
         verify((string)DisplayGet(service, "Status")! == DisplayL("BluetoothControlOff"), "Initial Bluetooth status is hardcoded");
         DisplayCall(service, "SetStatus", DisplayL("BluetoothHidNotificationStalled"), DisplayL("BluetoothHidRouteResetting"));
-        foreach (var language in new[] { "zh-HK", "en-US", "zh-CN" })
+        foreach (var language in new[] { "zh-HK", "zh-TW", "en-US", "zh-CN" })
         {
             DisplayLanguage(language);
             verify(label.Text == DisplayL("BluetoothHidNotificationStalled") + " " + DisplayL("BluetoothHidRouteResetting"),
@@ -313,7 +313,7 @@ internal static partial class Program
                 var stages = ((IEnumerable)DisplayGet(vm, "Stages")!).Cast<object>().ToArray();
                 var stageLabels = stages.Select(s => DisplayBinding(s, "Title")).ToArray();
                 var deadline = vmType.GetField("_autoCloseAtUtc", DisplayInstance)!.GetValue(vm);
-                foreach (var language in new[] { "zh-HK", "en-US", "zh-CN" })
+                foreach (var language in new[] { "zh-HK", "zh-TW", "en-US", "zh-CN" })
                 {
                     DisplayLanguage(language);
                     AdvanceDispatcher(TimeSpan.FromMilliseconds(1));
@@ -344,7 +344,7 @@ internal static partial class Program
             vmType.GetProperty("SelectedPromptOption")!.SetValue(promptVm, options.GetValue(1));
             var body = DisplayBinding(promptVm, "PromptMessage");
             var choice = DisplayBinding(options.GetValue(1)!, "DisplayTitle");
-            foreach (var language in new[] { "zh-HK", "en-US", "zh-CN" })
+            foreach (var language in new[] { "zh-HK", "zh-TW", "en-US", "zh-CN" })
             {
                 DisplayLanguage(language);
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(1));
@@ -360,7 +360,7 @@ internal static partial class Program
 
     private static void TestStartupDisplayFallback(Application app, Action<bool, string> verify)
     {
-        foreach (var language in new[] { "zh-CN", "zh-HK", "en-US" })
+        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
         {
             DisplayLanguage(language);
             var labels = new[] { ("HeadingText", "StartupErrorHeading"), ("LogLabelText", "StartupErrorLogLabel"),
@@ -394,7 +394,7 @@ internal static partial class Program
             ("_mediaOutputCapabilitiesText", "MediaOutputCapabilitiesText", "MediaOutputCapabilitiesUnknown"),
             ("_virtualCameraStatusText", "VirtualCameraStatusText", "VirtualCameraInstallRequired") }
             .Select(x => { vm.GetType().GetField(x.Item1, DisplayInstance)!.SetValue(vm, DisplayL(x.Item3)); return (Label: DisplayBinding(vm, x.Item2), Key: x.Item3); }).ToArray();
-        foreach (var language in new[] { "zh-HK", "en-US", "zh-CN" })
+        foreach (var language in new[] { "zh-HK", "zh-TW", "en-US", "zh-CN" })
         {
             DisplayLanguage(language);
             AdvanceDispatcher(TimeSpan.FromMilliseconds(10));

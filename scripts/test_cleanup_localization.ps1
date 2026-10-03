@@ -20,7 +20,7 @@ if (!$assignment -or !$formatter) { throw 'Cleanup localization definitions are 
 . ([scriptblock]::Create($assignment.Extent.Text))
 . ([scriptblock]::Create($formatter.Extent.Text))
 $cases = 0
-foreach ($Language in @('zh-CN', 'zh-HK', 'en-US')) {
+foreach ($Language in @('zh-CN', 'zh-HK', 'zh-TW', 'en-US')) {
     foreach ($property in $script:CleanupMessages.$Language.PSObject.Properties) {
         if ([string]::IsNullOrWhiteSpace($property.Value)) { throw "Empty message: $Language/$($property.Name)" }
         foreach ($count in @(0, 1, 2, 5)) {

@@ -90,7 +90,7 @@ internal static class ComponentDownloadNetworkTests
         Check(!Directory.EnumerateFiles(recovery, "*.zip", SearchOption.AllDirectories).Any(), "Install cancellation removes archive");
         var before = server.PackageProbes;
         await Task.WhenAll(Install(CancellationToken.None), Install(CancellationToken.None));
-        Check(server.PackageProbes == before + 1, "Concurrent installs must share verified cache");
+        Check(server.PackageProbes == before + 2, "Concurrent installs must share verified cache (one availability check and one download probe)");
         var exe = Path.Combine(recovery, descriptor.Sha256, "uxplay.exe");
         var timestamp = File.GetLastWriteTimeUtc(exe);
         using (var file = new FileStream(exe, FileMode.Open, FileAccess.ReadWrite))
@@ -114,9 +114,29 @@ internal static class ComponentDownloadNetworkTests
             }
             catch (HttpRequestException error) { Check((int?)error.StatusCode == status, "Preserve HTTP error status"); }
             var attempts = server.PackageProbes - before;
-            Check(attempts is > 0 && attempts <= (status == 404 ? 4 : 8), "Bounded route retries");
+            Check(status == 404 ? attempts == 1 : attempts is > 0 and <= 9, "Official 404 stops before mirrors; 503 retries stay bounded");
             Console.WriteLine($"PASS HTTP {status}: {attempts} bounded attempts");
         }
+        server.PackageStatus = 0;
+        server.PackageStatus = 503;
+        server.OriginPackageStatus = 404;
+        server.FailuresRemaining = 1; // Availability check is inconclusive (503).
+        var mixedCache = Path.Combine(output, "origin-404-mirror-503");
+        before = server.PackageProbes;
+        using (var client = new GitHubReleaseClient(direct, Path.Combine(mixedCache, "Downloads")))
+        {
+            try
+            {
+                await UxPlayComponent.InstallAsync(descriptor, mixedCache, client,
+                    new ProgressSink(_ => { }), () => { }, CancellationToken.None);
+                throw new Exception("Missing official component accepted");
+            }
+            catch (HttpRequestException error)
+            { Check(error.StatusCode == HttpStatusCode.NotFound, "Official 404 must not be replaced by queued mirror retries"); }
+        }
+        Check(server.PackageProbes - before <= 5, "Official 404 must discard queued transient mirror retries");
+        Console.WriteLine("PASS official 404 preserved after inconclusive preflight and mirror 503 failures");
+        server.OriginPackageStatus = 0;
         server.PackageStatus = 0;
         server.FailuresRemaining = 1;
         var retryCache = Path.Combine(output, "transient-retry");
@@ -183,6 +203,31 @@ internal static class ComponentDownloadNetworkTests
         Check(failures == 0, $"Public network failures: {failures}");
     }
 
+    internal static async Task RunPublicComponentAsync(string output)
+    {
+        var descriptor = UxPlayComponent.Descriptor ?? throw new Exception("Missing embedded component descriptor");
+        Directory.CreateDirectory(output);
+        Console.WriteLine($"Version: {descriptor.Version}\nPlatform: Windows\nArchitecture: x64\nRelease: {descriptor.ReleaseTag}\nAsset: {descriptor.Name}\nURL: {descriptor.Url}");
+        using var client = new GitHubReleaseClient(downloadRoot: Path.Combine(output, "Downloads"));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        await UxPlayComponent.InstallAsync(descriptor, output, client, new ProgressSink(_ => { }),
+            () => Console.WriteLine("Download and SHA256 verification completed; extracting component."), timeout.Token);
+        var executable = UxPlayComponent.FindInstalledExecutable(descriptor, output);
+        Check(executable is not null, "Public component must install with all file hashes verified");
+        Console.WriteLine("PASS public UxPlay download, hash, extraction and runtime preparation: " + executable);
+        using var offline = new HttpClient(new OfflineHandler());
+        using var offlineClient = new GitHubReleaseClient(offline, Path.Combine(output, "Downloads"));
+        await UxPlayComponent.InstallAsync(descriptor, output, offlineClient, new ProgressSink(_ => { }),
+            () => throw new Exception("Unexpected reinstall"), timeout.Token);
+        Console.WriteLine("PASS verified component cache with network disabled");
+    }
+
+    private sealed class OfflineHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Verified cache must not make HTTP requests: " + request.RequestUri);
+    }
+
     // Real TLS origin + real CONNECT forwarding proxy. Only this test handler
     // reroutes sockets to loopback and pins its ephemeral certificate; production
     // HTTPS/host validation is unchanged and exercised with the original URLs.
@@ -202,7 +247,7 @@ internal static class ComponentDownloadNetworkTests
         internal int SegmentRequests => _segments;
         internal int MaximumActiveBodies => _maximumActive;
         internal volatile bool Slow, Corrupt, Truncate, NoRanges;
-        internal volatile int PackageStatus;
+        internal volatile int PackageStatus, OriginPackageStatus;
         internal int FailuresRemaining;
 
         internal DownloadServer(byte[] data)
@@ -280,6 +325,8 @@ internal static class ComponentDownloadNetworkTests
                 if (rangeLine is not null && end - start > 4 * 1024 * 1024) Interlocked.Increment(ref _segments);
                 if (packageProbe) Interlocked.Increment(ref _packageProbes);
                 var status = PackageStatus;
+                if (OriginPackageStatus != 0 && headers.Split("\r\n").Any(line => line.Equals("Host: github.com", StringComparison.OrdinalIgnoreCase)))
+                    status = OriginPackageStatus;
                 if (packageProbe && Interlocked.Decrement(ref FailuresRemaining) >= 0) status = 503;
                 if (packageProbe && status != 0)
                 { await tls.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {status} Failed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), _stop.Token); return; }

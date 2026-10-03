@@ -9,7 +9,10 @@ namespace IPhoneMirror.App.Services;
 
 internal sealed record ComponentFile(string Path, long Size, string Sha256);
 internal sealed record ComponentDescriptor(int Schema, string Version, string Name,
-    string Url, long Size, string Sha256, ComponentFile[] Files);
+    string Url, long Size, string Sha256, ComponentFile[] Files, string? Release = null)
+{
+    internal string ReleaseTag => Release ?? "v" + Version;
+}
 
 internal static class UxPlayComponent
 {
@@ -39,7 +42,8 @@ internal static class UxPlayComponent
         if (descriptor.Schema != 1 || !SemanticVersion.TryParse(descriptor.Version, out _) ||
             descriptor.Size is <= 0 or > 200_000_000 || !IsHash(descriptor.Sha256) ||
             descriptor.Name != $"iPhoneMirror-UxPlay-v{descriptor.Version}-win-x64.zip" ||
-            descriptor.Url != $"https://github.com/RayrenSX/iPhoneMirror/releases/download/v{descriptor.Version}/{descriptor.Name}" ||
+            (descriptor.ReleaseTag != $"v{descriptor.Version}" && descriptor.ReleaseTag != $"uxplay-v{descriptor.Version}") ||
+            descriptor.Url != $"https://github.com/RayrenSX/iPhoneMirror/releases/download/{descriptor.ReleaseTag}/{descriptor.Name}" ||
             descriptor.Files is null || descriptor.Files.Length is < 2 or > 1024)
             throw new InvalidDataException("Invalid UxPlay component metadata.");
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -185,24 +189,32 @@ internal static class UxPlayComponent
             using var cacheLock = await AcquireCacheLockAsync(cacheRoot, cancellationToken);
             // Explicit installation/repair must not reuse polling's metadata-only cache.
             // Hashing a complete runtime must not block the dialog's UI thread.
-            if (await Task.Run(() => FindInstalledExecutable(descriptor, cacheRoot), cancellationToken) is not null) return;
+            if (await Task.Run(() => FindInstalledExecutable(descriptor, cacheRoot), cancellationToken) is not null)
+            {
+                LogState("uxplay_runtime_ready", descriptor, ("source", "verified_cache"));
+                return;
+            }
             cancellationToken.ThrowIfCancellationRequested();
             EnsureNoLinks(cacheRoot);
             Directory.CreateDirectory(cacheRoot);
             var downloadRoot = Path.Combine(cacheRoot, "Downloads");
-            EnsureNoLinks(Path.Combine(downloadRoot, "v" + descriptor.Version));
+            EnsureNoLinks(Path.Combine(downloadRoot, descriptor.ReleaseTag));
             SemanticVersion.TryParse(descriptor.Version, out var version);
             var asset = new ReleaseAsset(descriptor.Name, new Uri(descriptor.Url), descriptor.Size, descriptor.Sha256);
-            var release = new ReleaseInfo("v" + descriptor.Version, "UxPlay", string.Empty,
+            var release = new ReleaseInfo(descriptor.ReleaseTag, "UxPlay", string.Empty,
                 DateTimeOffset.MinValue, version, version.IsPrerelease, null, asset, null);
+            LogState("uxplay_component_download_started", descriptor, ("retry_count", 0));
+            await client.CheckComponentAvailabilityAsync(asset, cancellationToken);
             var downloaded = await client.DownloadAsync(release, progress, cancellationToken,
-                allowMirrorFallback, preferInstaller: false);
+                allowMirrorFallback, preferInstaller: false, stopOnOfficialNotFound: true);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 installing();
+                LogState("uxplay_extraction_started", descriptor);
                 await Task.Run(() => ExtractVerifiedCoreAsync(downloaded.Path, descriptor, cacheRoot,
                     cancellationToken), cancellationToken);
+                LogState("uxplay_runtime_ready", descriptor, ("source", "download"));
             }
             finally
             {
@@ -211,8 +223,23 @@ internal static class UxPlayComponent
                 { DiagnosticLogger.Exception("components", "uxplay_archive_cleanup_failed", error); }
             }
         }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("components", "uxplay_component_failed", error,
+                ("version", descriptor.Version), ("architecture", "x64"),
+                ("release", descriptor.ReleaseTag), ("asset", descriptor.Name),
+                ("http_status", (error as System.Net.Http.HttpRequestException)?.StatusCode),
+                ("request_url", DiagnosticLogger.DownloadUrl(new Uri(descriptor.Url))));
+            throw;
+        }
         finally { InstallGate.Release(); }
     }
+
+    private static void LogState(string name, ComponentDescriptor descriptor,
+        params (string Key, object? Value)[] fields) => DiagnosticLogger.Info("components", name,
+            [("version", descriptor.Version), ("architecture", "x64"), ("platform", "Windows"),
+             ("release", descriptor.ReleaseTag), ("asset", descriptor.Name),
+             ("download_url", DiagnosticLogger.DownloadUrl(new Uri(descriptor.Url))), .. fields]);
 
     internal static async Task ExtractVerifiedAsync(string archivePath, ComponentDescriptor descriptor,
         string cacheRoot, CancellationToken cancellationToken)
@@ -232,6 +259,7 @@ internal static class UxPlayComponent
                 cancellationToken)).Equals(descriptor.Sha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("UxPlay package checksum failed.");
         input.Position = 0;
+        LogState("uxplay_hash_verified", descriptor, ("sha256", descriptor.Sha256), ("downloaded_bytes", input.Length));
         var target = Path.Combine(cacheRoot, descriptor.Sha256.ToLowerInvariant());
         var staging = Path.Combine(cacheRoot, ".install-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
@@ -276,6 +304,7 @@ internal static class UxPlayComponent
                 await MoveDirectoryWithRetryAsync(target, target + ".invalid-" + Guid.NewGuid().ToString("N"), cancellationToken);
             }
             await MoveDirectoryWithRetryAsync(staging, target, cancellationToken);
+            LogState("uxplay_runtime_installed", descriptor, ("verified_files", descriptor.Files.Length));
         }
         finally
         {

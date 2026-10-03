@@ -25,7 +25,7 @@ internal static partial class Program
         var assembly = typeof(App).Assembly;
         var localization = assembly.GetType("IPhoneMirror.App.Localization.LocalizationService", true)!;
         var languageMethod = localization.GetMethod("ApplyLanguage", BindingFlags.NonPublic | BindingFlags.Static)!;
-        foreach (var language in new[] { "zh-CN", "zh-HK", "en-US" })
+        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
         foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
         {
             languageMethod.Invoke(null, [language, false, false]);
@@ -139,15 +139,17 @@ internal static partial class Program
         window.Show();
         if (window.CanRetry) throw new Exception("Retry exposed before failure");
         var first = Start(); ComponentPumpUntil(() => first.IsCompleted);
-        if (!window.CanRetry || window.DetailText != LocalizationService.Get("UxPlayDownloadNotFound")) throw new Exception("404/retry state");
+        if (!window.CanRetry || window.IsIndeterminate || !window.DetailText.StartsWith(LocalizationService.Get("UxPlayDownloadNotFound")) ||
+            !window.DetailText.Contains("HTTP: 404") || !window.DetailText.Contains("Architecture: x64") ||
+            !window.DetailText.Contains(Services.UxPlayComponent.Descriptor!.Url)) throw new Exception("404/retry diagnostic state");
         typeof(LocalizationService).GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, ["zh-CN", false, true]);
-        if (window.StatusText != LocalizationService.Get("UxPlayDownloadFailed") || window.DetailText != LocalizationService.Get("UxPlayDownloadNotFound"))
+        if (window.StatusText != LocalizationService.Get("UxPlayDownloadFailed") || !window.DetailText.StartsWith(LocalizationService.Get("UxPlayDownloadNotFound")))
             throw new Exception("Open dialog did not refresh its language");
         typeof(LocalizationService).GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, ["en-US", false, true]);
         window.Width = 480; window.Height = 320; window.UpdateLayout();
         CheckComponentLayout(window);
         SaveWindowRender(window, Path.Combine(output, "uxplay-real-failure-retry.png"));
-        foreach (var language in new[] { "zh-CN", "zh-HK", "en-US" })
+        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
         foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
         {
             typeof(LocalizationService).GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!

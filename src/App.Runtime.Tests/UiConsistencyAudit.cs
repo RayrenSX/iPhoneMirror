@@ -39,7 +39,7 @@ internal static partial class Program
         try
         {
             foreach (var culture in (onlyCulture is not null ? new[] { onlyCulture } :
-                         QuickLayoutAudit ? new[] { "en-US" } : new[] { "zh-CN", "en-US", "zh-HK" }))
+                         QuickLayoutAudit ? new[] { "en-US" } : new[] { "zh-CN", "en-US", "zh-HK", "zh-TW" }))
             foreach (var theme in (QuickLayoutAudit ? new[] { AppTheme.Light } : new[] { AppTheme.Light, AppTheme.Dark }))
             {
                 language.Invoke(null, [culture, false, false]);

@@ -8,6 +8,7 @@ internal sealed class DeviceControlSession(string deviceUdid)
 {
     internal string DeviceUdid { get; } = deviceUdid;
     internal string? AppleUdid;
+    internal ControlDeviceBinding? Binding;
     internal UsbTouchBridgeHost? WiredBridge;
     internal UsbTouchBridgeHost? WirelessBridge;
     internal bool WiredEnabled;

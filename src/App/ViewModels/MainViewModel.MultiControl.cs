@@ -82,18 +82,31 @@ internal sealed partial class MainViewModel
                 LocalizationService.Get("ControlDeviceNotReady"));
             return Task.CompletedTask;
         }
-        var appleUdid = _identityResolver.Resolve(device).AppleUdid;
-        control.AppleUdid = appleUdid;
-        control.RequestedWireless = wireless;
-        control.Starting = true;
-        control.ControlStatus.Begin(wireless ? ControlStatusMode.Wireless : ControlStatusMode.Usb,
-            device!.Name);
-        NotifyUsbControlStateChanged();
         var operation = wireless ? control.WirelessOperation : control.WiredOperation;
         return operation.RunAsync(async token =>
         {
             try
             {
+                // Only the operation admitted by SingleFlight may change startup
+                // state. A request that joins recovery must leave its state intact.
+                control.AppleUdid = null;
+                control.Binding = null;
+                control.Failed = false;
+                control.RequestedWireless = wireless;
+                control.Starting = true;
+                control.ControlStatus.Begin(mode, device!.Name);
+                NotifyUsbControlStateChanged();
+                // Every entry (toolbar, shortcut, preview menu, command and retry)
+                // opens the same status surface before inspecting the binding.
+                if (Application.Current?.MainWindow is { } owner)
+                    ReverseControlStatusWindow.Show(owner, control.ControlStatus,
+                        () => _ = CancelReverseControlAsync(mode, target),
+                        () => _ = StartDeviceControlAsync(target, wireless));
+                token.ThrowIfCancellationRequested();
+                control.Binding = _identityResolver.ResolveControlBinding(device,
+                    wireless ? ReverseControlMode.Wireless : ReverseControlMode.Usb);
+                if (!ValidateControlBinding(control, device, mode)) return;
+                control.AppleUdid = control.Binding!.TargetStableId;
                 if (wireless) await EnableWirelessControlCoreAsync(control, token);
                 else await EnableUsbControlCoreAsync(control, token);
             }
@@ -104,6 +117,39 @@ internal sealed partial class MainViewModel
             }
         }, _shutdownCancellation.Token);
     }
+
+    private bool IsControlBindingCurrent(DeviceControlSession control, DeviceViewModel? device,
+        ControlStatusMode mode) => IsControlDeviceAvailable(device) &&
+        DeviceViewModel.UdidEquals(control.DeviceUdid, device!.Udid) &&
+        control.Binding?.Matches(_identityResolver.ResolveControlBinding(device,
+            mode == ControlStatusMode.Wireless ? ReverseControlMode.Wireless : ReverseControlMode.Usb)) == true;
+
+    private bool ValidateControlBinding(DeviceControlSession control,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] DeviceViewModel? device,
+        ControlStatusMode mode)
+    {
+        if (IsControlBindingCurrent(control, device, mode)) return true;
+        control.Router.Stop();
+        control.Failed = true;
+        control.Status = LocalizationService.Get("ControlBindingRequired");
+        control.ControlStatus.Failed(mode, device?.Name ?? "iPhone",
+            ControlBindingFailureMessage(),
+            LocalizationService.Get("ControlBindingAdvice"));
+        return false;
+    }
+
+    private void EnsureControlBindingCurrent(DeviceControlSession control, DeviceViewModel? device,
+        ControlStatusMode mode, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!IsControlBindingCurrent(control, device, mode))
+            throw new ControlBindingException(ControlBindingFailureMessage());
+    }
+
+    private sealed class ControlBindingException(string message) : InvalidOperationException(message);
+
+    private static string ControlBindingFailureMessage() => LocalizedText.Join("\n\n",
+        [LocalizationService.Get("ControlBindingRequired"), LocalizationService.Get("ControlBindingAdvice")]);
 
     private Task DisableDeviceControlAsync(string? udid, bool wireless)
     {

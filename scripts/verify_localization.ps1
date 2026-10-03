@@ -108,9 +108,11 @@ if ($themeDifference.Count -ne 0) {
 
 $ChinesePath = Join-Path $App 'Localization\Strings.zh-CN.xaml'
 $HongKongPath = Join-Path $App 'Localization\Strings.zh-HK.xaml'
+$TaiwanPath = Join-Path $App 'Localization\Strings.zh-TW.xaml'
 $EnglishPath = Join-Path $App 'Localization\Strings.en-US.xaml'
 $Chinese = Get-ResourceKeys $ChinesePath
 $HongKong = Get-ResourceKeys $HongKongPath
+$Taiwan = Get-ResourceKeys $TaiwanPath
 $English = Get-ResourceKeys $EnglishPath
 $ApplicationResources = @(
     Get-ResourceKeys (Join-Path $App 'App.xaml')
@@ -120,6 +122,8 @@ $ApplicationResources = @(
 $difference = @(
     Compare-Object $Chinese $English
     Compare-Object $English $HongKong
+    Compare-Object $Chinese $Taiwan
+    Compare-Object $HongKong $Taiwan
 )
 if ($difference.Count -ne 0) {
     $difference | Format-Table | Out-String | Write-Error
@@ -127,6 +131,7 @@ if ($difference.Count -ne 0) {
 }
 Assert-FormatPlaceholders $EnglishPath $ChinesePath
 Assert-FormatPlaceholders $EnglishPath $HongKongPath
+Assert-FormatPlaceholders $EnglishPath $TaiwanPath
 Assert-HongKongTerminology $HongKongPath
 
 $used = Get-ReferencedResourceKeys $App
@@ -150,13 +155,17 @@ if ($missing.Count -ne 0) {
 
 $DriverChinesePath = Join-Path $DriverInstaller 'Localization\Strings.zh-CN.xaml'
 $DriverHongKongPath = Join-Path $DriverInstaller 'Localization\Strings.zh-HK.xaml'
+$DriverTaiwanPath = Join-Path $DriverInstaller 'Localization\Strings.zh-TW.xaml'
 $DriverEnglishPath = Join-Path $DriverInstaller 'Localization\Strings.en-US.xaml'
 $DriverChinese = Get-ResourceKeys $DriverChinesePath
 $DriverHongKong = Get-ResourceKeys $DriverHongKongPath
+$DriverTaiwan = Get-ResourceKeys $DriverTaiwanPath
 $DriverEnglish = Get-ResourceKeys $DriverEnglishPath
 $driverDifference = @(
     Compare-Object $DriverChinese $DriverEnglish
     Compare-Object $DriverEnglish $DriverHongKong
+    Compare-Object $DriverChinese $DriverTaiwan
+    Compare-Object $DriverHongKong $DriverTaiwan
 )
 if ($driverDifference.Count -ne 0) {
     $driverDifference | Format-Table | Out-String | Write-Error
@@ -164,6 +173,7 @@ if ($driverDifference.Count -ne 0) {
 }
 Assert-FormatPlaceholders $DriverEnglishPath $DriverChinesePath
 Assert-FormatPlaceholders $DriverEnglishPath $DriverHongKongPath
+Assert-FormatPlaceholders $DriverEnglishPath $DriverTaiwanPath
 Assert-HongKongTerminology $DriverHongKongPath
 $DriverApplicationResources = @(
     Get-ResourceKeys (Join-Path $DriverInstaller 'App.xaml')
@@ -181,11 +191,13 @@ if ($driverMissing.Count -ne 0) {
 [pscustomobject]@{
     ChineseKeys = $Chinese.Count
     HongKongKeys = $HongKong.Count
+    TaiwanKeys = $Taiwan.Count
     EnglishKeys = $English.Count
     ReferencedKeys = $used.Count
     MissingKeys = 0
     DriverChineseKeys = $DriverChinese.Count
     DriverHongKongKeys = $DriverHongKong.Count
+    DriverTaiwanKeys = $DriverTaiwan.Count
     DriverEnglishKeys = $DriverEnglish.Count
     DriverReferencedKeys = $driverUsed.Count
     ThemeKeys = $LightThemeResources.Count

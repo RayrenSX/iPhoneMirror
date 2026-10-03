@@ -247,6 +247,17 @@ if ($head -ne $Commit -or
     if ($LASTEXITCODE -ne 0) { throw "Could not checkout UxPlay commit $Commit" }
 }
 
+# Apply the reviewed Windows interface fix to the pinned upstream source.
+# Reverse-check makes repeated builds idempotent without resetting local edits.
+$mdnsPatch = Join-Path $PSScriptRoot 'patches\uxplay-windows-mdns-interface.patch'
+& git -c "safe.directory=$safeSource" -C $SourceRoot apply --reverse --check $mdnsPatch 2>$null
+if ($LASTEXITCODE -ne 0) {
+    & git -c "safe.directory=$safeSource" -C $SourceRoot apply --check $mdnsPatch
+    if ($LASTEXITCODE -ne 0) { throw 'UxPlay Windows mDNS patch does not match the source.' }
+    & git -c "safe.directory=$safeSource" -C $SourceRoot apply $mdnsPatch
+    if ($LASTEXITCODE -ne 0) { throw 'Could not apply UxPlay Windows mDNS patch.' }
+}
+
 $buildRoot = Join-Path $Root "work\dependencies\uxplay-build-$Commit"
 Assert-SafeWorkspaceDirectory $buildRoot
 if (Test-Path -LiteralPath $buildRoot) {
@@ -344,11 +355,16 @@ Pinned commit: $Commit
 Build environment: MSYS2 UCRT64
 GStreamer version: $GStreamerVersion
 Service discovery: UxPlay bundled mdnsd implementation
+Local patch: uxplay-windows-mdns-interface.patch (included beside this file)
+Windows mDNS prefers an active physical multicast-capable Ethernet or Wi-Fi
+adapter and avoids tunnel and virtual interfaces.
 GStreamer plugins: app, coreelements, playback, autodetect, audioconvert, audioresample,
 level, volume, videoconvertscale, y4m, videoparsersbad, libav
 Video recovery: h264parse inserts SPS/PPS at every IDR; avdec_h264 discards
 corrupted output and waits for the next synchronization point.
 "@ | Set-Content -LiteralPath (Join-Path $Destination 'SOURCE.md') -Encoding utf8
+Copy-Item -LiteralPath $mdnsPatch -Destination (
+    Join-Path $Destination 'uxplay-windows-mdns-interface.patch') -Force
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') -Destination (
     Join-Path $Destination 'LICENSE') -Force
 

@@ -40,6 +40,11 @@ internal static class UxPlayComponentTests
 
     internal static async Task RunAsync()
     {
+        var entry = DiagnosticLogger.FormatEntry("INFO", "updater", "download_http_response",
+            ("final_url", DiagnosticLogger.DownloadUrl(new Uri("https://user:password@release-assets.githubusercontent.com/path/file.zip?token=secret#fragment"))));
+        Check(entry.Contains("https://release-assets.githubusercontent.com/path/file.zip") &&
+            !entry.Contains("password") && !entry.Contains("secret") && !entry.Contains("fragment") && !entry.Contains("user:"),
+            "Public download diagnostics preserve the path without redirect credentials");
         var root = Path.Combine(Path.GetTempPath(), "uxplay-component-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -153,6 +158,17 @@ internal static class UxPlayComponentTests
                 {"name":"iPhoneMirror-v1.2.3-win-x64.zip","browser_download_url":"https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.2.3/iPhoneMirror-v1.2.3-win-x64.zip","size":30}]}]
                 """, true, false);
             Check(release?.ZipAsset?.Name == "iPhoneMirror-v1.2.3-win-x64.zip", "updater never installs a component as the application");
+            var standalone = descriptor with { Release = "uxplay-v1.2.3",
+                Url = descriptor.Url.Replace("/v1.2.3/", "/uxplay-v1.2.3/") };
+            UxPlayComponent.ValidateDescriptor(standalone);
+            Check(UxPlayComponent.FindInstalledExecutable(standalone, cache) is not null,
+                "Changing release location preserves content-addressed cache");
+            await Reject(() => { UxPlayComponent.ValidateDescriptor(standalone with { Release = "uxplay-v9.9.9" }); return Task.CompletedTask; });
+            var componentOnly = ReleaseParser.ParseLatest("""
+                [{"tag_name":"uxplay-v1.2.3","name":"UxPlay","draft":false,"prerelease":true,"assets":[
+                {"name":"iPhoneMirror-UxPlay-v1.2.3-win-x64.zip","browser_download_url":"https://github.com/RayrenSX/iPhoneMirror/releases/download/uxplay-v1.2.3/iPhoneMirror-UxPlay-v1.2.3-win-x64.zip","size":20}]}]
+                """, true, true);
+            Check(componentOnly is null, "Standalone component releases never appear as application updates");
             Console.WriteLine("UxPlay extraction, cache integrity/links, concurrent installation, cancellation, repair, mirrors and release selection passed.");
         }
         finally { Directory.Delete(root, recursive: true); }

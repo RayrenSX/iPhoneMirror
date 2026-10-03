@@ -150,6 +150,7 @@
                                         <ComboBoxItem Tag="system" Content="{DynamicResource DeveloperLanguageSystem}"/>
                                         <ComboBoxItem Tag="zh-CN" Content="{DynamicResource DeveloperLanguageSimplified}"/>
                                         <ComboBoxItem Tag="zh-HK" Content="{DynamicResource DeveloperLanguageTraditional}"/>
+                                        <ComboBoxItem Tag="zh-TW" Content="{DynamicResource DeveloperLanguageTaiwan}"/>
                                         <ComboBoxItem Tag="en-US" Content="{DynamicResource DeveloperLanguageEnglish}"/>
                                     </ComboBox>
                                 </StackPanel>

@@ -126,7 +126,7 @@ internal static partial class Program
             var language = typeof(App).Assembly.GetType("IPhoneMirror.App.Localization.LocalizationService")!
                 .GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!;
             var layoutFindings = new HashSet<string>();
-            foreach (var culture in new[] { "zh-CN", "zh-HK", "en-US" })
+            foreach (var culture in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
             foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
             {
                 language.Invoke(null, [culture, false, true]);

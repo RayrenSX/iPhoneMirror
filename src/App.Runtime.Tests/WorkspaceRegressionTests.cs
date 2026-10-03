@@ -18,7 +18,9 @@ internal static partial class Program
         app.InitializeComponent();
         try
         {
+            TestWorkspaceRevealGeometry(app);
             TestWorkspaceAnimations(app);
+            TestWorkspaceRevealLifecycle(app);
             Console.WriteLine("Workspace position and animation regressions passed.");
             return 0;
         }

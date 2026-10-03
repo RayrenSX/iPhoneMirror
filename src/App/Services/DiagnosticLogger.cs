@@ -15,6 +15,10 @@ internal readonly record struct LogCleanupResult(
 /// </summary>
 internal static class DiagnosticLogger
 {
+    // Call only for public component/update transport URLs after trust checking.
+    // Signed redirect queries, fragments and user credentials are never retained.
+    private sealed record DownloadLocation(Uri? Uri);
+    internal static object DownloadUrl(Uri? uri) => new DownloadLocation(uri);
     internal const long MaximumLogBytes = 8L * 1024 * 1024;
     internal const int RetainedArchives = 4;
     internal const int RetentionDays = 14;
@@ -241,7 +245,9 @@ internal static class DiagnosticLogger
         {
             if (string.IsNullOrWhiteSpace(key)) continue;
             var raw = Convert.ToString(value, CultureInfo.InvariantCulture);
-            var rendered = IsVersionField(key, raw)
+            var rendered = value is DownloadLocation location
+                ? location.Uri?.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped) ?? "unknown"
+                : IsVersionField(key, raw)
                 ? raw!
                 : AppLog.Message(raw);
             builder.Append(' ').Append(Token(key)).Append('=');
