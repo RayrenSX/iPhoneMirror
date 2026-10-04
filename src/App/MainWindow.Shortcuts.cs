@@ -32,6 +32,7 @@ public partial class MainWindow
 
     private bool TryHandleConfiguredKey(int virtualKey, bool down)
     {
+        if (IsKeyboardMappingInputModeActive) return false;
         // A press keeps its original disposition until release, even if
         // modifiers change during auto-repeat or before key-up.
         if (!down)
@@ -53,26 +54,27 @@ public partial class MainWindow
         return true;
     }
 
-    private async Task SendUsbSystemShortcutAsync(byte usage, string? target,
+    private async Task SendUsbSystemShortcutAsync(byte usage, DirectKeyboardRoute route,
         Func<bool> canSend)
     {
         // Globe is a Consumer-page control, not a keyboard modifier bit.
         // Keep it pressed while the ordinary keyboard usage is delivered.
         const ushort page = CoreDeviceTouchProtocol.IndigoConsumerUsagePage;
         const ushort globe = CoreDeviceTouchProtocol.GlobeKeyboardLayoutUsage;
+        if (route.SendButtonAsync is null) return;
         try
         {
-            await _viewModel.SendUsbButtonAsync(page, globe, "down", target, canSend);
+            await route.SendButtonAsync(page, globe, "down", canSend);
             if (!canSend()) return;
-            await _viewModel.SendUsbKeyboardAsync([usage], target, canSend);
+            await route.SendAsync(0, [usage], canSend);
             await Task.Delay(20);
         }
         finally
         {
             // Both releases must be attempted even if either transport call
             // fails, and neither may inherit the expired focus guard.
-            var keyboardRelease = _viewModel.SendUsbKeyboardAsync([], target);
-            var globeRelease = _viewModel.SendUsbButtonAsync(page, globe, "up", target);
+            var keyboardRelease = route.SendAsync(0, [], null);
+            var globeRelease = route.SendButtonAsync(page, globe, "up", null);
             await Task.WhenAll(keyboardRelease, globeRelease);
         }
     }

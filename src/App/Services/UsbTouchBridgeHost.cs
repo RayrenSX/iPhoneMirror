@@ -4,12 +4,14 @@ namespace IPhoneMirror.App.Services;
 internal enum UsbTouchTransport { Usb, Wireless }
 internal enum ReverseControlState { Idle, BindingRequired, DeviceUnavailable, Connecting, Ready, Controlling, Error, Recovering }
 
-internal sealed class BridgeStatusEventArgs(string eventName, string? code, string? message, string? text = null) : EventArgs
+internal sealed class BridgeStatusEventArgs(string eventName, string? code, string? message, string? text = null,
+    long? clipboardReadId = null) : EventArgs
 {
     internal string EventName { get; } = eventName;
     internal string? Code { get; } = code;
     internal string? Message { get; } = message;
     internal string? Text { get; } = text;
+    internal long? ClipboardReadId { get; } = clipboardReadId;
 }
 
 /// <summary>
@@ -23,6 +25,13 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     private string? _requestedUdid;
     private UsbTouchTransport _transport;
     private int _started;
+
+    internal UsbTouchBridgeHost() : this(null) { }
+
+    internal UsbTouchBridgeHost(UsbMuxResumeContext? muxResume)
+    {
+        _bridge.MuxResumeContext = muxResume;
+    }
 
     internal bool IsReady => _bridge.IsReady;
     internal long InputGeneration => _bridge.InputGeneration;
@@ -74,19 +83,20 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     }
 
     internal Task SendKeyboardAsync(IReadOnlyCollection<byte> usages,
-        CancellationToken cancellationToken = default, Func<bool>? canSend = null)
+        CancellationToken cancellationToken = default, Func<bool>? canSend = null, bool releaseAll = false)
     {
         EnsureReady();
         State = ReverseControlState.Controlling;
-        return _bridge.SendKeyboardAsync(usages, cancellationToken, canSend);
+        return _bridge.SendKeyboardAsync(usages, cancellationToken, canSend, releaseAll);
     }
 
     internal Task SendButtonAsync(ushort usagePage, ushort usageCode,
-        string state, CancellationToken cancellationToken = default, Func<bool>? canSend = null)
+        string state, CancellationToken cancellationToken = default, Func<bool>? canSend = null,
+        bool guardRelease = false)
     {
         EnsureReady();
         State = ReverseControlState.Controlling;
-        return _bridge.SendButtonAsync(usagePage, usageCode, state, cancellationToken, canSend);
+        return _bridge.SendButtonAsync(usagePage, usageCode, state, cancellationToken, canSend, guardRelease);
     }
 
     internal Task SendPasteTextAsync(string text,
@@ -126,7 +136,7 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
             State = ReverseControlState.Recovering;
         else if (e.Event == "error" || (e.Event == "status" && e.Code == "terminated"))
             State = ReverseControlState.Error;
-        Raise(e.Event, e.Code, e.Message, e.Text);
+        StatusChanged?.Invoke(this, new BridgeStatusEventArgs(e.Event, e.Code, e.Message, e.Text, e.ClipboardReadId));
     }
     private void Raise(string name, string? code, string? message, string? text = null) =>
         StatusChanged?.Invoke(this, new BridgeStatusEventArgs(name, code, message, text));

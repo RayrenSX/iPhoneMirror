@@ -84,6 +84,7 @@ internal static partial class Program
                 control.Binding = resolver.ResolveControlBinding(device, ReverseControlMode.Usb)
                     ?? throw new InvalidOperationException($"Missing test binding for {device.Udid}.");
                 control.AppleUdid = control.Binding.TargetStableId;
+                control.Router.Begin(control.AppleUdid, ReverseControlMode.Usb);
                 SetKeyboardField(vm, "_wirelessControlEnabled", false);
                 SetKeyboardField(vm, "_wirelessTouchBridge", null);
                 SetKeyboardField(vm, "_usbControlEnabled", true);
@@ -91,6 +92,7 @@ internal static partial class Program
                 SetKeyboardField(vm, "_usbControlDeviceUdid", device.Udid);
                 SetKeyboardField(vm, "_usbTouchBridge", host);
             }
+            ReleaseTestPhysicalKeys(window);
             Focus(first, 0);
             KeyboardCall(vm, "OnPropertyChanged", "SelectedDevice");
             var deviceList = (System.Windows.Controls.ListBox)window.FindName("DeviceListBox");
@@ -135,6 +137,7 @@ internal static partial class Program
             SetKeyboardField(vm, "_wirelessControlConnected", true);
             SetKeyboardField(vm, "_wirelessTouchBridge", secondHost);
             var secondControl = KeyboardCall(vm, "GetOrCreateControl", second.Udid)!;
+            ((DeviceControlSession)secondControl).Router.Begin(second.Udid, ReverseControlMode.Wireless);
             SetKeyboardField(secondControl, "RequestedWireless", true);
             if (testPointerInput) TestBothMainPreviewRoutes("wired/wireless pair");
             TestMultiDeviceInputIsolation(window, vm, first, firstHost, firstPackets,

@@ -115,6 +115,7 @@ internal static partial class Program
         callbacks.Dequeue()();
         MappingAssert(observed.Count == before + 1 && observed[^1] == MappingTestKey && !capture.Waiting,
             "Capture did not complete after focus moved away from the editor.");
+        capture.Begin(observed.Add);
         capture.Process(MappingTestKey, true, true, callbacks.Enqueue);
         capture.Cancel();
         MappingAssert(capture.Process(MappingTestKey, false, false, callbacks.Enqueue) && !capture.HasHeldKeys,

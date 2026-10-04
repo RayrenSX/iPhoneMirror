@@ -226,6 +226,7 @@ internal static partial class Program
                 }
                 shortcutKeys.Clear();
                 ordinaryKeys.Clear();
+                ReleaseTestPhysicalKeys(window);
                 packets.SetLength(0);
                 Modifiers(false);
                 Key(true, 0x43);
@@ -425,6 +426,8 @@ internal static partial class Program
         var vm = KeyboardField(window, "_viewModel");
         var service = KeyboardField(vm, "_bluetoothControl");
         var oldTarget = KeyboardField(service, "_targetDeviceUdid");
+        var oldDisposed = KeyboardField(service, "_disposed");
+        SetKeyboardField(service, "_disposed", 0);
         SetKeyboardField(service, "_targetDeviceUdid", udid);
         SetKeyboardField(service, "_mousePumpRunning", true);
         var queue = KeyboardField(service, "_keyboardPriorityReports");
@@ -454,8 +457,8 @@ internal static partial class Program
                 if (failPress) completion.SetException(new IOException("Injected notification failure"));
                 else completion.SetResult(true);
                 var release = Dequeue();
-                InteractionAssert(((byte[])release[1]!).All(b => b == 0) && release[3] is null,
-                    $"{action}: missing unconditional release after press/failure.");
+                InteractionAssert(((byte[])release[1]!).All(b => b == 0) && release[3] is Func<bool> session && session(),
+                    $"{action}: missing session-bound release after press/failure.");
                 ((TaskCompletionSource<bool>)release[2]!).SetResult(true);
                 WaitShortcutTask(task);
             }
@@ -464,6 +467,7 @@ internal static partial class Program
         {
             SetKeyboardField(service, "_mousePumpRunning", false);
             SetKeyboardField(service, "_targetDeviceUdid", oldTarget);
+            SetKeyboardField(service, "_disposed", oldDisposed);
         }
     }
 }

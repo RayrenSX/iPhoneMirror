@@ -11,7 +11,7 @@ internal static partial class Program
 {
     // Opt-in hardware probe. Uses production enumeration, saved identity
     // bindings, capture and reverse-control startup. No ready state is faked.
-    private static int RunKeyboardMappingLiveProbe(string output, bool exercise = false, bool wireless = false, bool interactive = false, bool captureOnly = false)
+    private static int RunKeyboardMappingLiveProbe(string output, bool exercise = false, bool wireless = false, bool interactive = false, bool captureOnly = false, bool ownership = false, bool wiredRestart = false)
     {
         Directory.CreateDirectory(output);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
@@ -68,7 +68,32 @@ internal static partial class Program
             vm.CaptureScreenshot(path);
             Console.WriteLine($"HARDWARE READY: {vm.SourceVideoWidth}x{vm.SourceVideoHeight}, existing {(wireless ? "Wireless" : "USB")} mapping route ready. Frame: {path}");
             }
-            if (interactive || captureOnly)
+            if (wiredRestart)
+            {
+                var target = vm.SelectedDevice!.Udid;
+                foreach (var pause in new[] { 0, 1000, 5000, 0, 1000 })
+                {
+                    var stopControl = vm.CancelReverseControlAsync(ControlStatusMode.Usb, target);
+                    MappingAssert(Wait(() => stopControl.IsCompleted, 15), "Wired stop timed out.");
+                    stopControl.GetAwaiter().GetResult();
+                    AdvanceDispatcher(TimeSpan.FromMilliseconds(pause));
+                    var timer = Stopwatch.StartNew();
+                    var restart = vm.StartUsbControlAsync(target);
+                    MappingAssert(Wait(() => restart.IsCompleted, 45), "Wired restart timed out.");
+                    restart.GetAwaiter().GetResult();
+                    MappingAssert(vm.GetMappingTargetStatus() == "MappingReady", "Wired restart did not reach Ready.");
+                    // No synthetic touch/typing: readiness includes the real
+                    // HID handshake. Verify capture still provides a frame.
+                    vm.CaptureScreenshot(Path.GetFullPath(Path.Combine(output, $"restart-{pause}-{timer.ElapsedMilliseconds}.png")));
+                    Console.WriteLine($"RESTART PASS: pause_ms={pause}, ready_ms={timer.ElapsedMilliseconds}, capture={vm.SourceVideoWidth}x{vm.SourceVideoHeight}");
+                    AdvanceDispatcher(TimeSpan.FromSeconds(2));
+                }
+            }
+            else if (ownership)
+            {
+                ExerciseLiveKeyboardOwnership(main, vm, output);
+            }
+            else if (interactive || captureOnly)
             {
                 // Observe the real production callback only during this explicit
                 // hardware test; never synthesize input or log unrelated typing.

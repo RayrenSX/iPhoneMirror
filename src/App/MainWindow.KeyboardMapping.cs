@@ -37,7 +37,7 @@ public partial class MainWindow
         if (Application.Current is App { IsUiPreviewMode: true }) _mappingSettings.Enabled = false;
         _mappingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _mappingTimer.Tick += (_, _) => { RefreshMappingStatus(); RefreshMappingOverlays(); };
-        if (_mappingSettings.Enabled) StartMappingMonitoring();
+        if (_mappingSettings.Enabled && TryEnterKeyboardMappingInputMode()) StartMappingMonitoring();
         RefreshMappingStatus();
     }
 
@@ -82,12 +82,23 @@ public partial class MainWindow
                     next.Mappings[i].Key!.SamePhysicalKey(next.Mappings[j].Key!))
                     return LocalizationService.Get("MappingDuplicate");
         if (Application.Current is not App app) return LocalizationService.Get("MappingSaveFailed");
+        var enteredMappingMode = false;
+        if (next.Enabled && !IsKeyboardMappingInputModeActive)
+        {
+            if (!TryEnterKeyboardMappingInputMode())
+                return LocalizationService.Get("MappingDirectKeyboardActive");
+            enteredMappingMode = true;
+        }
         // Preflight capture before committing settings so a failed hook install
         // leaves both the editor and persisted configuration at the old value.
         if (next.Enabled && _keyboardHook == 0)
         {
-            _keyboardHook = SetWindowsHookEx(13, _keyboardHookProc, 0, 0);
-            if (_keyboardHook == 0) return LocalizationService.Get("MappingHookFailed");
+            _keyboardHook = InstallKeyboardHook();
+            if (_keyboardHook == 0)
+            {
+                if (enteredMappingMode) LeaveKeyboardMappingInputMode();
+                return LocalizationService.Get("MappingHookFailed");
+            }
         }
         var previous = app.UpdateSettings.Clone();
         app.UpdateSettings.KeyboardMapping = next.Clone();
@@ -95,6 +106,7 @@ public partial class MainWindow
         if (!app.SaveUpdateSettings())
         {
             app.RestoreUpdateSettings(previous);
+            if (enteredMappingMode) LeaveKeyboardMappingInputMode();
             ReconcileKeyboardHook();
             return LocalizationService.Get("MappingSaveFailed");
         }
@@ -105,6 +117,7 @@ public partial class MainWindow
         if (next.Enabled) StartMappingMonitoring();
         else
         {
+            LeaveKeyboardMappingInputMode();
             _mappingKeys.Disable();
             _mappingFocus?.Dispose();
             _mappingFocus = null;
@@ -120,31 +133,50 @@ public partial class MainWindow
 
     private string? BeginMappingKeyCapture(Action<MappedKey> captured)
     {
+        if (!IsKeyboardMappingInputModeActive && !TryEnterKeyboardMappingInputMode())
+            return LocalizationService.Get("MappingDirectKeyboardActive");
         CancelMappedGesture();
         _mappingCapture.Begin(captured);
         ReconcileKeyboardHook();
         if (_keyboardHook != 0) return null;
         _mappingCapture.Cancel();
+        if (!_mappingSettings.Enabled) LeaveKeyboardMappingInputMode();
         return LocalizationService.Get("MappingHookFailed");
     }
 
     private void EndMappingKeyCapture()
     {
         _mappingCapture.Cancel();
+        if (!_mappingSettings.Enabled) LeaveKeyboardMappingInputMode();
         ReconcileKeyboardHook();
     }
 
     private void ReconcileKeyboardHook()
     {
-        var needed = !_mappingClosing && (_systemKeySuppressionRequested || _mappingSettings.Enabled ||
-            _mappingCapture.Waiting || _mappingCapture.HasHeldKeys || _mappingWindowsKey.HasHeldKey || _mappingKeys.HasSuppressedKeys);
+        var needed = !_mappingClosing && (_systemKeySuppressionRequested || IsKeyboardMappingInputModeActive ||
+            _keyboardRouter.Mode != _keyboardRouter.RequestedMode ||
+            _keyboardRouter.HasRetiredKeys || _mappingCapture.Waiting || _mappingCapture.HasHeldKeys || _mappingWindowsKey.HasHeldKey || _mappingKeys.HasSuppressedKeys);
         if (needed && _keyboardHook == 0)
-            _keyboardHook = SetWindowsHookEx(13, _keyboardHookProc, 0, 0);
+            _keyboardHook = InstallKeyboardHook();
         else if (!needed && _keyboardHook != 0)
         {
             UnhookWindowsHookEx(_keyboardHook);
             _keyboardHook = 0;
         }
+    }
+
+    private nint InstallKeyboardHook()
+    {
+        // A global WH_KEYBOARD_LL hook must identify the module that owns the
+        // managed callback when dwThreadId is zero. Passing a null module can
+        // return a non-zero handle on some Windows/.NET combinations while
+        // silently failing to deliver physical keyboard events.
+        var module = GetModuleHandle(null);
+        var hook = SetWindowsHookEx(13, _keyboardHookProc, module, 0);
+        if (hook == 0)
+            DiagnosticLogger.ReverseControlWarning("keyboard_mapping", "hook_install_failed",
+                ("error", Marshal.GetLastWin32Error()));
+        return hook;
     }
 
     private bool ProcessMappingHook(LowLevelKeyboardData data, nint message)
@@ -153,17 +185,20 @@ public partial class MainWindow
         var down = message is 0x100 or 0x104;
         if (!down && message is not (0x101 or 0x105)) return false;
         var key = new MappedKey((int)data.VirtualKey, (int)data.ScanCode, (data.Flags & 1) != 0);
+        var routed = _keyboardRouter.Route(KeyboardInputMode.Mapping,
+            ModifierKeyIdentity(key.VirtualKey, key.ScanCode | (key.Extended ? 0x100 : 0)), down);
         // Capture is a global transaction. Once the editor starts waiting, it
         // must keep accepting the physical key even if WPF focus moves to a
         // preview or another window while the user completes the key press.
-        if (_mappingCapture.Process(key, down, _mappingCapture.Waiting,
+        if (_mappingCapture.Process(key, down, routed && _mappingCapture.Waiting,
                 action => Dispatcher.BeginInvoke(action, DispatcherPriority.Input)))
         {
             Dispatcher.BeginInvoke(ReconcileKeyboardHook);
             return true;
         }
         var modifiers = AnyOtherModifierPressed(key);
-        var allowed = _mappingSettings.Enabled && MappingFocusAllows() && !_mappingClosing;
+        var allowed = routed && IsKeyboardMappingInputModeActive && _mappingSettings.Enabled &&
+            MappingFocusAllows() && !_mappingClosing;
         if (key.VirtualKey == 0x1B && MappingIsFullScreen()) allowed = false;
         if (KeyboardMappingKeys.Conflict(key, _bluetoothShortcuts.Values) is not null) allowed = false;
         var canExecute = _viewModel.GetMappingTargetStatus() == "MappingReady";
@@ -174,7 +209,7 @@ public partial class MainWindow
         if (windowsResult.Suppress) return true;
         var result = _mappingKeys.Process(key, down, false, allowed, modifiers,
             canExecute && _mappingSettings.SuppressOriginalKey, _mappingSettings.Mappings);
-        if (!_mappingSettings.Enabled) _mappingKeys.Disable();
+        if (!IsKeyboardMappingInputModeActive || !_mappingSettings.Enabled) _mappingKeys.Disable();
         if (result.Mapping is { } mapping) QueueMappedGesture(mapping);
         return result.Suppress;
     }
@@ -225,13 +260,6 @@ public partial class MainWindow
         return _mappingFocus?.Allows(foreground) == true;
     }
 
-    private bool ShouldSkipMappedDeviceKey(int virtualKey, string? targetUdid) => _mappingSettings.Enabled &&
-        Models.DeviceViewModel.UdidEquals(targetUdid, _viewModel.SelectedDevice?.Udid) &&
-        _viewModel.GetMappingTargetStatus() == "MappingReady" && MappingFocusAllows() &&
-        !AnyOtherModifierPressed(new(virtualKey, 0, false)) &&
-        _mappingSettings.Mappings.Any(m => m.Enabled && !m.Key!.IsModifier &&
-            (m.Key.VirtualKey == virtualKey || KeyboardMappingKeys.CurrentVirtualKey(m.Key) == virtualKey));
-
     private (uint Width, uint Height, int Rotation) MappingGeometry()
     {
         return _secondaryMirrors.TryGetControlGeometry(_viewModel.SelectedDevice?.Udid,
@@ -241,7 +269,7 @@ public partial class MainWindow
 
     private async Task ExecuteMappedGestureAsync(KeyboardMappingEntry entry)
     {
-        if (!_mappingSettings.Enabled || !MappingFocusAllows()) return;
+        if (_keyboardRouter.Mode != KeyboardInputMode.Mapping || !_mappingSettings.Enabled || !MappingFocusAllows()) return;
         LogMappingLimited("key_pressed", entry);
         var status = _viewModel.GetMappingTargetStatus();
         if (status != "MappingReady")
@@ -289,7 +317,7 @@ public partial class MainWindow
 
     private string MappingStatusKey() => _mappingCapture.Waiting ? "MappingWaiting"
         : _mappingPick is not null ? "MappingPicking"
-        : !_mappingSettings.Enabled
+        : !IsKeyboardMappingInputModeActive || !_mappingSettings.Enabled
         ? (_mappingSettings.HadInvalidEntries ? "MappingDamagedConfig" : "MappingOff")
         : _keyboardHook == 0 ? "MappingHookFailed"
         : _viewModel.GetMappingTargetStatus() is { } status && status != "MappingReady" ? status
@@ -342,6 +370,7 @@ public partial class MainWindow
         _mappingFocus?.Dispose();
         _mappingTimer?.Stop();
         _viewModel.KeyboardMappingRequested -= ShowKeyboardMapping;
+        LeaveKeyboardMappingInputMode();
         ReconcileKeyboardHook();
     }
 

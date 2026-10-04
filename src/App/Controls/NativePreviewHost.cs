@@ -282,6 +282,11 @@ internal sealed class NativePreviewHost : HwndHost
                 case 0x0201: // WM_LBUTTONDOWN
                 case 0x0204: // WM_RBUTTONDOWN
                 case 0x0207: // WM_MBUTTONDOWN
+                    // STATIC children do not take keyboard focus on click.
+                    // Restore both WPF and native focus after a toolbar/editor
+                    // interaction before dispatching this preview input.
+                    Focus();
+                    SetFocus(_window);
                     if (SuppressLegacyMouseButtons)
                     {
                         handled = true;

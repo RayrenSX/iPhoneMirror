@@ -54,14 +54,15 @@ internal static partial class Program
                     throw new InvalidOperationException("Expired Bluetooth input was published as a report.");
             }
 
-            // A release must not carry the expired guard into the queue.
+            // An ordinary empty report must keep its ownership/session guard;
+            // explicit cleanup is sent separately with a session-only guard.
             SetKeyboardField(service, "_mousePumpRunning", true);
             var release = (Task)send.Invoke(service,
                 [(byte)0, Array.Empty<byte>(), "focus-test", (Func<bool>)(() => false)])!;
             var queue = KeyboardField(service, "_keyboardPriorityReports");
             var queued = (ITuple)queue.GetType().GetMethod("Peek")!.Invoke(queue, null)!;
-            if (queued[3] is not null)
-                throw new InvalidOperationException("Bluetooth release retained a focus restriction.");
+            if (queued[3] is not Func<bool> guard || guard())
+                throw new InvalidOperationException("Bluetooth release lost its ownership restriction.");
             // No GATT device is connected in this test; finish the inspected
             // release without starting a native notification.
             queue.GetType().GetMethod("Clear")!.Invoke(queue, null);

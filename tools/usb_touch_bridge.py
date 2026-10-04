@@ -81,6 +81,10 @@ from pymobiledevice3.remote.tunnel_service import (
 )
 from pymobiledevice3.remote.core_device.display_service import DisplayService
 from pymobiledevice3.remote.core_device.pasteboard_service import PasteboardService
+try:
+    from pymobiledevice3.remote.core_device.pasteboard_service import POLICY_PROMISE_SECONDARY
+except ImportError:  # pragma: no cover - older packaged pymobiledevice3
+    POLICY_PROMISE_SECONDARY = {'promiseSecondary': {}}
 from pymobiledevice3.remote.core_device.hid_service import (
     UniversalHIDServiceService,
     IndigoHIDService,
@@ -147,10 +151,20 @@ PASTEBOARD_POLL_MAX_BACKOFF_SECONDS = 8.0
 # PasteboardService is a best-effort side channel.  It must never be allowed
 # to stall the HID input reader when iOS or the Windows clipboard companion is
 # busy (for example while Win+Shift+S is committing a screenshot).
-PASTEBOARD_OPERATION_TIMEOUT_SECONDS = 2.0
-# Waiting for a read (including bounded connection cleanup) must not consume
-# the active paste's separate service-operation timeout.
-PASTEBOARD_WRITE_QUEUE_TIMEOUT_SECONDS = 5.0
+# CoreDevice pasteboard requests are considerably slower than HID requests on
+# real devices, especially when the phone is locked or the pasteboard daemon is
+# waking up.  Two seconds caused every poll and paste to time out in practice,
+# while still being long enough to stall the input loop.  Keep the operation
+# bounded, but give the side channel enough time to complete independently of
+# HID.
+PASTEBOARD_OPERATION_TIMEOUT_SECONDS = 8.0
+PASTEBOARD_RETRY_DELAY_SECONDS = 0.15
+# A foreground write can arrive immediately after a polling PULL has started.
+# That PULL owns the shared connection for its full operation budget and must
+# then dispose a timed-out RemoteXPC request before the SET can safely begin.
+# Five seconds was shorter than the eight-second PULL budget, so a slow poll
+# could make every queued Ctrl+V fail before it acquired the lock.
+PASTEBOARD_WRITE_QUEUE_TIMEOUT_SECONDS = 20.0
 # A CoreDevice HID request can remain pending after iOS has invalidated the
 # direct Universal HID session. Do not leave stdin's reader blocked forever:
 # the session supervisor rebuilds reverse control while retaining usbmux.
@@ -221,6 +235,43 @@ KEYBOARD_SURFACE_CONNECTED = 512
 REMOTE_PAIRING_PROVISION_TIMEOUT_SECONDS = 30
 REMOTE_PAIRING_DISCOVERY_TIMEOUT_SECONDS = 15
 REMOTE_PAIRING_DISCOVERY_GRACE_SECONDS = 2
+
+
+def _pasteboard_snapshot_text(snapshot: dict) -> tuple[Optional[str], bool]:
+    """Read inline text, and distinguish promised text from an empty board."""
+    representations = (
+        ('public.utf8-plain-text', 'utf-8'),
+        ('public.utf16-plain-text', 'utf-16'),
+        ('public.utf16-external-plain-text', 'utf-16'),
+        ('public.plain-text', 'utf-8'),
+        ('public.text', 'utf-8'),
+        ('public.url', 'utf-8'),
+    )
+    board = snapshot.get('pasteboard', snapshot)
+    unresolved = False
+    for item in board.get('items', []) or []:
+        data = item.get('data') or {}
+        types = item.get('types') or []
+        for uti, encoding in representations:
+            datum = data.get(uti)
+            if not isinstance(datum, dict):
+                unresolved |= uti in types
+                continue
+            raw = datum.get('data')
+            if isinstance(raw, str):
+                return raw, False
+            if not isinstance(raw, (bytes, bytearray)):
+                unresolved |= datum.get('isPromised') is True or uti in types
+                continue
+            # iOS UTF-16 without a BOM uses the device's little-endian order;
+            # external representations may explicitly carry either byte order.
+            if encoding == 'utf-16' and not raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+                encoding = 'utf-16-le'
+            try:
+                return raw.decode(encoding), False
+            except UnicodeDecodeError:
+                continue
+    return None, unresolved
 
 
 class BridgePrerequisiteError(RuntimeError):
@@ -1336,6 +1387,8 @@ class TouchSession:
         self.udid = udid
         self.transport_mode = transport
         self.ddi_dir = ddi_dir
+        self._mux_checkpoint = None
+        self._startup_mux_checkpoint = os.environ.pop('IPHONE_MIRROR_USB_MUX_RESUME', None)
         self.rsd: Optional[RemoteServiceDiscoveryService] = None
         self.hid: Optional[UniversalHIDServiceService] = None
         self.indigo: Optional[IndigoHIDService] = None
@@ -1365,6 +1418,9 @@ class TouchSession:
         self._pasteboard_writers_waiting = 0
         self._pasteboard_writes_idle = asyncio.Event()
         self._pasteboard_writes_idle.set()
+        self._pasteboard_operation_id = 0
+        self._pasteboard_read_id = 0
+        self._pasteboard_publish_lock = asyncio.Lock()
         self._paste_sequence_lock = asyncio.Lock()
         self._keyboard_lock = asyncio.Lock()
         self._hid_operation_lock = asyncio.Lock()
@@ -1442,6 +1498,11 @@ class TouchSession:
                 previous, self._usb_mux_resume = self._usb_mux_resume, None
                 if previous is not None and _udid_matches(previous.serial, device.serial):
                     mux.resume_from(previous)
+                elif self._startup_mux_checkpoint is not None:
+                    checkpoint, self._startup_mux_checkpoint = self._startup_mux_checkpoint, None
+                    with contextlib.suppress(ValueError, TypeError):
+                        if mux.import_checkpoint(json.loads(checkpoint)):
+                            log.info('resuming capture usbmux from the parent capture lifetime')
                 mux.start()
                 # Advertise the requested UDID verbatim: pymobiledevice3
                 # matches the usbmux serial case-sensitively, and the USB
@@ -1512,6 +1573,7 @@ class TouchSession:
         if mux is not None:
             with contextlib.suppress(Exception):
                 mux.close()
+                self._mux_checkpoint = mux
 
     async def _reconnect_lockdown(self):
         mux = self._usb_mux_transport
@@ -1673,7 +1735,7 @@ class TouchSession:
         # control explicitly, and reporting a ready session over USB would
         # make the UI claim that a network control path is working.
         try:
-            lockdown = await self._create_lockdown_with_retry(connection_type)
+            lockdown = await self._create_initial_lockdown(connection_type)
         except DeviceNotFoundError as discovery_error:
             if self.transport_mode == 'wireless':
                 # Wi-Fi Sync only gives us a legacy Network usbmux record. On
@@ -1693,6 +1755,23 @@ class TouchSession:
             # Always close it, including failures before start_tunnel enters.
             with contextlib.suppress(Exception):
                 await lockdown.close()
+
+    async def _create_initial_lockdown(self, connection_type: str):
+        try:
+            return await self._create_lockdown_with_retry(connection_type)
+        except Exception:
+            mux = self._usb_mux_transport
+            if connection_type != 'USB' or getattr(mux, 'resumed', False) is not True:
+                raise
+            # A phone may reset its mux internally without changing its USB
+            # address/configuration. A checkpoint is a candidate, never proof
+            # of readiness. Discard it and allow one fresh VERSION handshake.
+            self._close_capture_mux()
+            self._mux_checkpoint = None
+            await self.ipc.emit({'event': 'warning', 'code': 'capture_mux_checkpoint_rejected',
+                                 'message': 'Saved USB protocol state did not answer Lockdown; renegotiating once.'})
+            await self._start_capture_mux(attempts=1)
+            return await self._create_lockdown_with_retry(connection_type)
 
     async def _provision_remote_pairing(self, lockdown) -> bool:
         """Create the one-time RemotePairing record over the trusted USB link.
@@ -2716,17 +2795,19 @@ class TouchSession:
         sm = FiveSlotStateMachine()
         sm_generation = self._generation
         last_stale_generation = None
-        # Monitor both transports. Reuse one serialized pasteboard connection
-        # per RSD session instead of opening a side channel every 800 ms: that
-        # connection churn can disrupt Universal HID on affected iOS builds.
+        # Monitor both transports. Pasteboard operations are serialized, and
+        # each PULL/SET owns a fresh side-channel connection because
+        # dtpasteboardd rejects a second reply-bearing request on one socket.
         pasteboard_task = asyncio.create_task(self._poll_device_pasteboard())
         rotation_task = (asyncio.create_task(self._request_direct_hid_rotation())
                          if self.transport_mode == 'usb'
                          else None)
         paste_tasks: set[asyncio.Task[None]] = set()
+        keyboard_paste_tasks: set[asyncio.Task[None]] = set()
 
         def track_paste_task(task: asyncio.Task[None]) -> None:
             paste_tasks.discard(task)
+            keyboard_paste_tasks.discard(task)
 
         async def run_paste(text: str) -> None:
             try:
@@ -2745,9 +2826,7 @@ class TouchSession:
                 })
         async def run_clipboard_read() -> None:
             try:
-                text = await self._read_device_pasteboard()
-                await self.ipc.emit({'event': 'clipboard_text',
-                                     'text': text if isinstance(text, str) else ''})
+                await self._publish_device_pasteboard(force=True)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -2775,6 +2854,13 @@ class TouchSession:
                         try:
                             if frame.get('kind') == KEYBOARD_MESSAGE_KIND:
                                 _, ts, usages = decode_keyboard_batch(frame)
+                                if frame.get('releaseAll') is True:
+                                    if usages:
+                                        raise ValueError('keyboard ownership release must be empty')
+                                    # This frame is a handoff barrier, distinct
+                                    # from a physical key-up. Retire Ctrl+V work
+                                    # before any following mapped touch/input.
+                                    await self._cancel_keyboard_pastes(keyboard_paste_tasks)
                                 await self._apply_keyboard(frame, ts, usages)
                             elif frame.get('kind') == PASTE_TEXT_MESSAGE_KIND:
                                 text = frame.get('text')
@@ -2782,6 +2868,7 @@ class TouchSession:
                                     raise ValueError('paste text must be a string')
                                 paste_task = asyncio.create_task(run_paste(text))
                                 paste_tasks.add(paste_task)
+                                keyboard_paste_tasks.add(paste_task)
                                 paste_task.add_done_callback(track_paste_task)
                             elif frame.get('kind') == READ_CLIPBOARD_MESSAGE_KIND:
                                 read_task = asyncio.create_task(run_clipboard_read())
@@ -2951,14 +3038,26 @@ class TouchSession:
 
     async def _get_device_pasteboard(self):
         # Caller owns _pasteboard_lock, shared by reads and Windows -> iOS paste.
+        # CoreDevice's dtpasteboardd permits one reply-bearing request per
+        # RemoteXPC connection.  A service returned here is therefore owned by
+        # exactly one PULL or SET and must be closed by that operation.
         if self.rsd is None:
             raise RuntimeError('pasteboard service is unavailable')
-        if self._pasteboard_rsd is not self.rsd:
-            await self._close_device_pasteboard()
-        if self._pasteboard_service is None:
-            self._pasteboard_service = PasteboardService(self.rsd)
-            self._pasteboard_rsd = self.rsd
+        await self._close_device_pasteboard()
+        self._pasteboard_operation_id += 1
+        operation_id = self._pasteboard_operation_id
+        self._pasteboard_service = PasteboardService(self.rsd)
+        self._pasteboard_rsd = self.rsd
+        try:
             await self._pasteboard_service.__aenter__()
+        except BaseException as error:
+            await self._close_device_pasteboard()
+            log.warning('pasteboard_connect_failed op=%s generation=%s error=%s',
+                        operation_id, self._generation, type(error).__name__)
+            raise
+        log.info('pasteboard_connected op=%s generation=%s service=%s',
+                 operation_id, self._generation,
+                 getattr(self._pasteboard_service, 'service_name', 'unknown'))
         return self._pasteboard_service
 
     async def _close_device_pasteboard(self):
@@ -2968,20 +3067,44 @@ class TouchSession:
             await self._close_remote_service(service, 'pasteboard')
 
     async def _read_device_pasteboard(self):
-        # Foreground pastes own the next available turn. A running read is
-        # allowed to finish/clean up safely without reusing a cancelled XPC.
+        # Foreground pastes own the next available turn. Every read uses a
+        # fresh connection because dtpasteboardd rejects a second reply on one
+        # connection; this also prevents a late reply from poisoning the next
+        # request after cancellation.
         await self._pasteboard_writes_idle.wait()
         async with self._pasteboard_lock:
             async def read():
                 pasteboard = await self._get_device_pasteboard()
+                if hasattr(pasteboard, 'get'):
+                    snapshot = await pasteboard.get(
+                        data_policy=POLICY_PROMISE_SECONDARY)
+                    text, unresolved = _pasteboard_snapshot_text(snapshot)
+                    if unresolved:
+                        # Rich content can promise its plain-text alternative.
+                        # Resolve only when needed, using a new one-request
+                        # connection within the same timeout and read lock.
+                        pasteboard = await self._get_device_pasteboard()
+                        snapshot = await pasteboard.get(data_policy={'allResolved': {}})
+                        text, unresolved = _pasteboard_snapshot_text(snapshot)
+                        if unresolved:
+                            raise RuntimeError('device pasteboard text is unresolved')
+                    return text
                 return await pasteboard.get_text()
             try:
-                return await asyncio.wait_for(read(), PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
-            except (Exception, asyncio.CancelledError):
+                result = await asyncio.wait_for(read(), PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                log.info('pasteboard_pull_reply op=%s generation=%s text=%s',
+                         self._pasteboard_operation_id, self._generation,
+                         isinstance(result, str))
+                return result
+            except (Exception, asyncio.CancelledError) as error:
+                log.warning('pasteboard_pull_failed op=%s generation=%s error=%s',
+                            self._pasteboard_operation_id, self._generation,
+                            type(error).__name__)
+                raise
+            finally:
                 # A cancelled RemoteXPC request cannot be reused: its late reply
                 # could otherwise be mistaken for the next read/write response.
                 await self._close_device_pasteboard()
-                raise
 
     async def _write_device_pasteboard(self, text: str) -> None:
         self._pasteboard_writers_waiting += 1
@@ -3007,15 +3130,55 @@ class TouchSession:
                 # polling baseline so it cannot echo over a newer local copy.
                 self._pasteboard_last_text = text
                 self._pasteboard_unconfirmed_writes.clear()
-            except (Exception, asyncio.CancelledError):
-                await self._close_device_pasteboard()
+                log.info('pasteboard_set_reply op=%s generation=%s length=%s',
+                         self._pasteboard_operation_id, self._generation, len(text))
+            except (Exception, asyncio.CancelledError) as error:
+                log.warning('pasteboard_set_failed op=%s generation=%s length=%s error=%s',
+                            self._pasteboard_operation_id, self._generation, len(text),
+                            type(error).__name__)
                 raise
+            finally:
+                await self._close_device_pasteboard()
         finally:
             if acquired:
                 self._pasteboard_lock.release()
             self._pasteboard_writers_waiting -= 1
             if self._pasteboard_writers_waiting == 0:
                 self._pasteboard_writes_idle.set()
+
+    async def _publish_device_pasteboard(self, *, force: bool = False) -> None:
+        # Serialize explicit reads and polling through publication, so an older
+        # result cannot arrive after a newer one. SET still has its own priority.
+        async with self._pasteboard_publish_lock:
+            await self._pasteboard_writes_idle.wait()
+            self._pasteboard_read_id += 1
+            read_id = self._pasteboard_read_id
+            write_generation = self._pasteboard_write_generation
+            session_generation = self._generation
+            await self.ipc.emit({'event': 'clipboard_read_started', 'readId': read_id})
+            try:
+                text = await self._read_device_pasteboard()
+                if (write_generation != self._pasteboard_write_generation or
+                        session_generation != self._generation or self._recovering):
+                    return
+                normalized_text = text if isinstance(text, str) else '' if text is None else None
+                if normalized_text is None:
+                    return
+                # A lost SET reply may still have changed the phone. Reconcile
+                # its origin before either polling or an explicit read publishes.
+                unconfirmed_echo = normalized_text in self._pasteboard_unconfirmed_writes
+                if unconfirmed_echo:
+                    self._pasteboard_last_text = normalized_text
+                self._pasteboard_unconfirmed_writes.clear()
+                if not unconfirmed_echo and (force or normalized_text != self._pasteboard_last_text):
+                    await self.ipc.emit({'event': 'clipboard_text', 'readId': read_id,
+                                         'text': normalized_text})
+                    if write_generation == self._pasteboard_write_generation:
+                        self._pasteboard_last_text = normalized_text
+            finally:
+                # Also release the host's request snapshot on unchanged content,
+                # errors and cancellation; only live reads retain version tokens.
+                await self.ipc.emit({'event': 'clipboard_read_finished', 'readId': read_id})
 
     async def _poll_device_pasteboard(self) -> None:
         if self.rsd is None:
@@ -3026,33 +3189,7 @@ class TouchSession:
                 try:
                     if self._recovering:
                         await self._session_ready.wait()
-                    write_generation = self._pasteboard_write_generation
-                    text = await self._read_device_pasteboard()
-                    # Empty/non-text is a real state: it cancels stale host
-                    # retries and permits copying the same text again later.
-                    if isinstance(text, str):
-                        normalized_text = text
-                    elif text is None:
-                        normalized_text = ''
-                    else:
-                        normalized_text = None
-                    if (write_generation == self._pasteboard_write_generation and
-                            normalized_text is not None):
-                        # A lost SET reply may still have changed the phone.
-                        # Suppress only a matching first stable observation, then
-                        # forget candidates so later genuine changes can sync.
-                        if normalized_text in self._pasteboard_unconfirmed_writes:
-                            self._pasteboard_last_text = normalized_text
-                        self._pasteboard_unconfirmed_writes.clear()
-                        if normalized_text != self._pasteboard_last_text:
-                            await self.ipc.emit({
-                                'event': 'clipboard_text',
-                                'text': normalized_text,
-                            })
-                            # IPC output may yield while a host write succeeds.
-                            # Do not replace that newer baseline with this read.
-                            if write_generation == self._pasteboard_write_generation:
-                                self._pasteboard_last_text = normalized_text
+                    await self._publish_device_pasteboard()
                     if failures:
                         await self.ipc.emit({'event': 'status', 'code': 'clipboard_poll_recovered'})
                     failures = 0
@@ -3067,6 +3204,16 @@ class TouchSession:
             raise
         except Exception as error:
             log.debug('device pasteboard monitor unavailable: %s', error)
+
+    @staticmethod
+    async def _cancel_keyboard_pastes(tasks: set[asyncio.Task[None]]) -> None:
+        pending = tuple(tasks)
+        for task in pending:
+            task.cancel()
+        # _apply_paste_text's finally releases Command if it was pressed.
+        # The IPC reader cannot execute a new owner's frame until this ends.
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _apply_keyboard(self, frame: dict, timestamp: Optional[int], usages: list[int]) -> None:
         if timestamp is not None:
@@ -3126,7 +3273,16 @@ class TouchSession:
     async def _apply_paste_text(self, text: str) -> None:
         if self.rsd is None:
             raise RuntimeError('pasteboard service is unavailable')
-        await self._write_device_pasteboard(text)
+        # Retrying SET is idempotent even if its reply was lost. Retrying the
+        # HID chord is not: iOS may already have pasted before a send times out.
+        for attempt in range(2):
+            try:
+                await self._write_device_pasteboard(text)
+                break
+            except (TimeoutError, ConnectionError, OSError):
+                if attempt == 1:
+                    raise
+                await asyncio.sleep(PASTEBOARD_RETRY_DELAY_SECONDS)
         # The HID service exposes a full pressed-key bitmap. If Command and V
         # arrive in the same report, iOS may dispatch V before it observes the
         # Command modifier and inserts a literal "v". Keep the modifier held
@@ -3135,8 +3291,9 @@ class TouchSession:
             command_pressed = False
             try:
                 await asyncio.sleep(0.15)
-                await self._send_keyboard_report([0xE3])
+                # A failed send may still have delivered the modifier to iOS.
                 command_pressed = True
+                await self._send_keyboard_report([0xE3])
                 await asyncio.sleep(0.06)
                 await self._send_keyboard_report([0xE3, 0x19])
                 await asyncio.sleep(0.08)
@@ -3288,6 +3445,12 @@ async def main_async(rate_hz: int, udid: Optional[str], transport: str,
         # capture-mux setup or lockdown discovery happen before that scope is
         # entered. Always release those early resources as well.
         await session._cleanup()
+        if session._mux_checkpoint is not None:
+            # Capture after every tunnel/client finally block: those can still
+            # send a last RST while leaving connect(). Never export mid-cleanup.
+            with contextlib.suppress(Exception):
+                await ipc.emit({'event': 'capture_mux_checkpoint',
+                                'state': session._mux_checkpoint.export_checkpoint()})
 
 
 async def enable_wifi_sync_async(udid: str) -> bool:

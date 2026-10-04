@@ -47,6 +47,7 @@ internal static partial class Program
     private static int RunKeyboardFocusTests(bool initializeHiddenHandle = false,
         bool shortcutReview = false)
     {
+        SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext());
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         typeof(App).GetProperty("IsUiPreviewMode", KeyboardTestMembers)!.SetValue(app, true);
         app.InitializeComponent();
@@ -100,6 +101,10 @@ internal static partial class Program
                 SetKeyboardField(vm, "_bluetoothControlConnected", mode == "Bluetooth");
                 SetKeyboardField(vm, "_bluetoothControlInputEnabled", mode == "Bluetooth");
                 SetKeyboardField(vm, "_bluetoothControlDeviceUdid", udid);
+                SetKeyboardField(KeyboardField(vm, "_bluetoothControl"), "_targetDeviceUdid", udid);
+                // This fixture exercises routing/state without a GATT client.
+                // Transport queues and their guards have a separate fixture.
+                SetKeyboardField(KeyboardField(vm, "_bluetoothControl"), "_disposed", 1);
                 SetKeyboardField(vm, "_usbControlEnabled", mode == "Usb");
                 SetKeyboardField(vm, "_usbControlConnected", mode == "Usb");
                 SetKeyboardField(vm, "_usbControlDeviceUdid", udid);
@@ -110,7 +115,11 @@ internal static partial class Program
                 SetKeyboardField(vm, "_wirelessTouchBridge", host);
                 KeyboardCall(KeyboardField(vm, "_reverseInputRouter"), "Begin", udid,
                     Enum.Parse(assembly.GetType("IPhoneMirror.App.Services.ReverseControlMode")!, mode));
-                TestKeyboardFocusRoute(window, other, udid, packets, mode != "Bluetooth");
+                if (mode != "Bluetooth")
+                    ((DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", udid)!).Router.Begin(udid,
+                        mode == "Usb" ? ReverseControlMode.Usb : ReverseControlMode.Wireless);
+                ReleaseTestPhysicalKeys(window);
+                TestIsolatedKeyboardFocusRoute(window, other, udid, packets, mode != "Bluetooth");
                 if (shortcutReview)
                     TestShortcutReview(window, other, udid, packets, mode);
                 if (initializeHiddenHandle && mode != "Bluetooth")
@@ -137,6 +146,32 @@ internal static partial class Program
         }
     }
 
+    private static void TestIsolatedKeyboardFocusRoute(MainWindow window, Window other,
+        string udid, MemoryStream packets, bool verifyPackets)
+    {
+        // This fixture supplies foreground snapshots and drives the production
+        // handlers explicitly. Unrelated desktop activation must not race those
+        // snapshots while the dispatcher pumps async transport work. Restore
+        // the real subscriptions before the native pointer/focus integration test.
+        var activated = (EventHandler)Delegate.CreateDelegate(typeof(EventHandler), window,
+            typeof(MainWindow).GetMethod("OnMainKeyboardActivated", KeyboardTestMembers)!);
+        var deactivated = (EventHandler)Delegate.CreateDelegate(typeof(EventHandler), window,
+            typeof(MainWindow).GetMethod("OnMainKeyboardDeactivated", KeyboardTestMembers)!);
+        var keyboardFocus = (System.Windows.Input.KeyboardFocusChangedEventHandler)Delegate.CreateDelegate(
+            typeof(System.Windows.Input.KeyboardFocusChangedEventHandler), window,
+            typeof(MainWindow).GetMethod("OnMainKeyboardFocusChanged", KeyboardTestMembers)!);
+        window.Activated -= activated;
+        window.Deactivated -= deactivated;
+        window.PreviewGotKeyboardFocus -= keyboardFocus;
+        try { TestKeyboardFocusRoute(window, other, udid, packets, verifyPackets); }
+        finally
+        {
+            window.Activated += activated;
+            window.Deactivated += deactivated;
+            window.PreviewGotKeyboardFocus += keyboardFocus;
+        }
+    }
+
     private static void TestKeyboardFocusRoute(MainWindow window, Window other,
         string udid, MemoryStream packets, bool verifyPackets)
     {
@@ -156,17 +191,17 @@ internal static partial class Program
         void Focus(Window target)
         {
             // Deterministic foreground snapshots: Windows may reject focus
-            // stealing from a test process. Raise the real WPF event when the
-            // main window loses activation, without moving the user's focus.
+            // stealing from a test process. Drive the production focus handlers
+            // without mixing real desktop activation into the injected snapshot.
             var next = new WindowInteropHelper(target).Handle;
             var previous = foreground;
             foreground = next;
             if (previous == mainHandle && next != mainHandle)
-                KeyboardCall(window, "OnDeactivated", EventArgs.Empty);
+                KeyboardCall(window, "OnMainKeyboardDeactivated", window, EventArgs.Empty);
             if (previous == independentHandle && next != independentHandle)
                 KeyboardCall(window, "OnIndependentKeyboardFocusChanged", udid, independentHandle, false);
             if (next == mainHandle)
-                KeyboardCall(window, "OnActivated", EventArgs.Empty);
+                KeyboardCall(window, "OnMainKeyboardActivated", window, EventArgs.Empty);
             else if ((nint)KeyboardField(window, "_activeControlWindow") == independentHandle)
                 KeyboardCall(window, "OnIndependentKeyboardFocusChanged", udid, independentHandle, true);
             AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
@@ -229,6 +264,40 @@ internal static partial class Program
         KeyboardCall(window, "ProcessRawKeyboardInput", raw);
         Require(keys.Contains(5), "Focused Raw Input was dropped.");
         Key("Reset");
+        Key("Up", 0x42);
+        // Keyboard Raw Input retains WPF legacy messages as a fallback. The
+        // fallback paired with the raw packet must be consumed rather than
+        // generating a second HID keyboard report.
+        packets.SetLength(0);
+        KeyboardCall(window, "ProcessRawKeyboardInput", raw);
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+        var rawPacketLength = packets.Length;
+        var rawFallbackHandled = (bool)KeyboardCall(window, "TryRoutePreviewKeyboardEvent",
+            System.Windows.Input.Key.B, Enum.Parse(kindType, "Down"))!;
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+        Require(rawFallbackHandled && packets.Length == rawPacketLength,
+            "A WPF fallback duplicated a keyboard Raw Input report.");
+        Key("Reset");
+        Key("Up", 0x42);
+        // Raw Input emits VK_CONTROL while WPF identifies the same physical
+        // key as VK_LCONTROL/VK_RCONTROL. Those forms must share the fallback
+        // token as well, otherwise Ctrl+V sends duplicate modifier reports.
+        SetKeyboardField(raw, "VirtualKey", (ushort)0x11);
+        SetKeyboardField(raw, "MakeCode", (ushort)0x1D);
+        packets.SetLength(0);
+        KeyboardCall(window, "ProcessRawKeyboardInput", raw);
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+        rawPacketLength = packets.Length;
+        rawFallbackHandled = (bool)KeyboardCall(window, "TryRoutePreviewKeyboardEvent",
+            System.Windows.Input.Key.LeftCtrl, Enum.Parse(kindType, "Down"))!;
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+        Require(rawFallbackHandled && packets.Length == rawPacketLength,
+            "A WPF control fallback duplicated a keyboard Raw Input report.");
+        Key("Reset");
+        Key("Up", 0x11);
+        SetKeyboardField(raw, "VirtualKey", (ushort)0x42);
+        SetKeyboardField(raw, "MakeCode", (ushort)0);
+        TestKeyboardInputModeArbitration(window, udid, mainHandle, keys, Key, Require);
         var gate = (SemaphoreSlim)KeyboardField(window, "_bluetoothRouteGate");
         gate.Wait();
         try
@@ -307,5 +376,49 @@ internal static partial class Program
             Require(ReadPackets().All(p => p.Length == 0), "Expired shortcut/paste reached the writer.");
         }
         TestKeyboardHotkeyScope(window, other, udid, Focus);
+    }
+
+    private static void TestKeyboardInputModeArbitration(MainWindow window, string udid,
+        nint mainHandle, HashSet<byte> keys, Action<string, int, nint?> key,
+        Action<bool, string> require)
+    {
+        // The same arbitration is exercised by Raw Input, WPF fallback and
+        // native preview callbacks. Verify that a mode switch invalidates all
+        // of them before any transport writer can consume their key state.
+        KeyboardCall(window, "LeaveDirectKeyboardInputMode");
+        require((bool)KeyboardCall(window, "TryEnterKeyboardMappingInputMode")!,
+            "Keyboard mapping could not claim an idle keyboard route.");
+        require(!(bool)KeyboardCall(window, "TryEnterDirectKeyboardInputMode")!,
+            "Direct keyboard input claimed a mapping-owned route.");
+        var mappingGuard = (Func<bool>)KeyboardCall(window, "CaptureKeyboardSendGuard", mainHandle)!;
+        require(!mappingGuard(), "A queued direct keyboard sender survived mapping activation.");
+        key("Down", 0x41, mainHandle);
+        require(!keys.Contains(4), "Mapping mode forwarded a keyboard event to Apple.");
+
+        KeyboardCall(window, "LeaveKeyboardMappingInputMode");
+        require((bool)KeyboardCall(window, "TryEnterDirectKeyboardInputMode")!,
+            "Direct keyboard input could not claim an idle keyboard route.");
+        var directGuard = (Func<bool>)KeyboardCall(window, "CaptureKeyboardSendGuard", mainHandle)!;
+        require(directGuard(), "Direct keyboard sender was unexpectedly disabled.");
+        require((bool)KeyboardCall(window, "TryEnterKeyboardMappingInputMode")!,
+            "Keyboard mapping must take ownership from direct input.");
+        require(!directGuard(), "Direct input lease survived mapping takeover.");
+        AwaitMapping((Task)KeyboardField(window, "_keyboardHandoff"));
+        KeyboardCall(window, "LeaveKeyboardMappingInputMode");
+        AwaitMapping((Task)KeyboardField(window, "_keyboardHandoff"));
+        key("Reset", 0, mainHandle);
+    }
+
+    private static void ReleaseTestPhysicalKeys(MainWindow window)
+    {
+        // Separate scenarios end with actual physical ups, not merely a local
+        // state reset. The shared hook must retire these without sending them.
+        var data = Activator.CreateInstance(typeof(MainWindow).GetNestedType(
+            "LowLevelKeyboardData", BindingFlags.NonPublic)!)!;
+        foreach (var vk in Enumerable.Range(8, 248))
+        {
+            SetKeyboardField(data, "VirtualKey", (uint)vk);
+            KeyboardCall(window, "ProcessMappingHook", data, (nint)0x101);
+        }
     }
 }

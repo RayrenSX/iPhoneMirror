@@ -9,6 +9,8 @@ internal sealed record MappedTouchRoute(string Target, Func<bool> IsCurrent,
 internal sealed class KeyboardMappingExecutor : IDisposable
 {
     private CancellationTokenSource? _running;
+    private TaskCompletionSource? _completion;
+    internal Task Completion => _completion?.Task ?? Task.CompletedTask;
     internal bool IsBusy => _running is not null;
     internal void Cancel() => _running?.Cancel();
     public void Dispose() => Cancel();
@@ -20,6 +22,7 @@ internal sealed class KeyboardMappingExecutor : IDisposable
         if (mapping.Validate() is { } error) throw new ArgumentException(error, nameof(mapping));
         using var cancellation = new CancellationTokenSource();
         _running = cancellation;
+        _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         var token = cancellation.Token;
         var point = (X: 0d, Y: 0d);
         var pressed = false;
@@ -86,7 +89,7 @@ internal sealed class KeyboardMappingExecutor : IDisposable
                     await route.SendAsync("up", point.X, point.Y, releaseTimeout.Token);
                 }
             }
-            finally { _running = null; }
+            finally { _running = null; _completion.TrySetResult(); }
         }
     }
 }

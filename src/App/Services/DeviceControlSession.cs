@@ -10,6 +10,7 @@ internal sealed class DeviceControlSession(string deviceUdid)
     internal string? AppleUdid;
     internal ControlDeviceBinding? Binding;
     internal UsbTouchBridgeHost? WiredBridge;
+    internal UsbMuxResumeContext WiredMuxResume = new();
     internal UsbTouchBridgeHost? WirelessBridge;
     internal bool WiredEnabled;
     internal bool WiredConnected;

@@ -300,15 +300,16 @@ internal static partial class Program
             SetKeyboardField(vm, "_bluetoothControlDeviceUdid", phone.Udid);
             MappingAssert(vm.GetMappingTargetStatus() == "MappingBluetoothUnsupported", "Relative Bluetooth advertised absolute touch.");
             SetKeyboardField(main, "_mappingSettings", new KeyboardMappingSettings { Enabled = true, Mappings = [MappingEntry()] });
-            MappingAssert(!(bool)KeyboardCall(main, "ShouldSkipMappedDeviceKey", MappingTestKey.VirtualKey, phone.Udid)!,
-                "Unsupported Bluetooth mapping swallowed the existing device keyboard.");
+            KeyboardCall(main, "TryEnterKeyboardMappingInputMode");
+            MappingAssert(!(bool)KeyboardCall(main, "TryEnterDirectKeyboardInputMode")!,
+                "Unsupported mapping must still own the keyboard; it cannot leak to direct Bluetooth.");
             SetKeyboardField(vm, "_bluetoothControlEnabled", false);
             SetKeyboardField(vm, "_sourceVideoWidth", 1170u);
             SetKeyboardField(vm, "_sourceVideoHeight", 2532u);
             MappingAssert(vm.GetMappingTargetStatus() == "MappingGeometryUnavailable",
                 "A stopped preview with stale dimensions advertised executable mapping input.");
-            MappingAssert(!(bool)KeyboardCall(main, "ShouldSkipMappedDeviceKey", MappingTestKey.VirtualKey, pad.Udid)!,
-                "A mapping for the selected device swallowed another preview's keyboard.");
+            MappingAssert(!(bool)KeyboardCall(main, "TryEnterDirectKeyboardInputMode")!,
+                "Mapping ownership must exclude every direct preview route.");
             Console.WriteLine("PASS USB/wireless framed packets, iPhone/iPad dimensions, portrait/left/right rotation, selection changes, reconnect generations and Bluetooth capability gate.");
         }
         finally

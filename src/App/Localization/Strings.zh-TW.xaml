@@ -1248,6 +1248,10 @@
     <system:String x:Key="MappingLimit">最多支援 256 項映射。</system:String>
     <system:String x:Key="MappingOff">鍵盤映射已關閉</system:String>
     <system:String x:Key="MappingReady">鍵盤映射已啟用 · 目標為目前選取的裝置</system:String>
+    <system:String x:Key="MappingDirectKeyboardActive">直接鍵盤輸入已啟用。請先停止直接鍵盤輸入，再開啟或啟用鍵盤映射。</system:String>
+    <system:String x:Key="KeyboardInputModeNone">鍵盤輸入未啟用</system:String>
+    <system:String x:Key="KeyboardInputModeMapping">鍵盤映射已啟用；不會將鍵盤按鍵直接轉送至 Apple 裝置。</system:String>
+    <system:String x:Key="KeyboardInputModeDirect">直接鍵盤輸入已啟用，鍵盤映射暫時無法使用。</system:String>
     <system:String x:Key="MappingPaused">鍵盤映射已暫停。點選目前螢幕鏡像畫面後恢復；編輯或文字輸入期間不執行映射。</system:String>
     <system:String x:Key="MappingNoDevice">等候裝置：請選取並連線 iPhone/iPad。</system:String>
     <system:String x:Key="MappingUnsupportedDevice">目前裝置不支援觸控反向控制。請選取 iPhone/iPad 螢幕鏡像裝置。</system:String>

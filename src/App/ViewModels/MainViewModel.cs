@@ -1194,6 +1194,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _virtualCamera.StatusChanged += OnMediaOutputStatusChanged;
         _sessions.SessionHandleChanged += (udid, handle) =>
         {
+            // A new USB capture configuration cannot inherit mux sequence
+            // numbers from an earlier native session, even for the same phone.
+            if (FindControl(udid) is { } control) control.WiredMuxResume = new();
             // Settings windows are bound to the native session that existed
             // when they opened. Never let one follow a replacement handle.
             InvalidateImageSettingsWindow(udid);
@@ -1377,24 +1380,38 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     {
         var bridge = GetReadyUsbControlBridge(targetUdid);
         if (bridge is null) return;
-        try
+        Exception? lastError = null;
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            await bridge.SendPasteTextAsync(text, canSend: canSend);
-            AddDiagnosticLog(AppLog.Event("usb_paste_text_sent",
-                ("device", AppLog.Device(targetUdid)),
-                ("length", text.Length)));
-        }
-        catch (Exception error)
-        {
-            AddDiagnosticLog(AppLog.Event("usb_paste_text_failed",
-                ("device", AppLog.Device(targetUdid)),
-                ("error", AppLog.Error(error))));
-            if (error is ArgumentException { ParamName: "text" } &&
-                FindControl(targetUdid) is { } control)
+            try
             {
-                control.Status = LocalizationService.Get("ClipboardTextTooLarge");
-                NotifyUsbControlStateChanged();
+                await bridge.SendPasteTextAsync(text, canSend: canSend);
+                AddDiagnosticLog(AppLog.Event("usb_paste_text_sent",
+                    ("device", AppLog.Device(targetUdid)),
+                    ("length", text.Length), ("attempt", attempt + 1)));
+                return;
             }
+            catch (Exception error) when (attempt == 0 &&
+                error is TimeoutException or IOException)
+            {
+                lastError = error;
+                await Task.Delay(150).ConfigureAwait(true);
+            }
+            catch (Exception error)
+            {
+                lastError = error;
+                break;
+            }
+        }
+        if (lastError is null) return;
+        AddDiagnosticLog(AppLog.Event("usb_paste_text_failed",
+            ("device", AppLog.Device(targetUdid)),
+            ("error", AppLog.Error(lastError))));
+        if (lastError is ArgumentException { ParamName: "text" } &&
+            FindControl(targetUdid) is { } control)
+        {
+            control.Status = LocalizationService.Get("ClipboardTextTooLarge");
+            NotifyUsbControlStateChanged();
         }
     }
 
@@ -2230,8 +2247,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher is null || dispatcher.HasShutdownStarted) return;
-            var clipboardSequence = bridgeEvent.EventName == "clipboard_text"
-                ? clipboardSync.CaptureSequence() : null;
+            if (bridgeEvent.EventName is "ready" or "error" ||
+                (bridgeEvent.EventName == "status" && bridgeEvent.Code is "terminated" or "recovery_triggered"))
+                clipboardSync.ForgetReads(bridge);
+            var clipboardSequence = clipboardSync.CaptureReadEvent(bridge,
+                bridgeEvent.EventName, bridgeEvent.ClipboardReadId);
+            if (bridgeEvent.EventName is "clipboard_read_started" or "clipboard_read_finished" ||
+                (bridgeEvent.EventName == "clipboard_text" && clipboardSequence is null)) return;
             dispatcher.BeginInvoke(new Action(() =>
             {
                 if (!ReferenceEquals(control.WirelessBridge, bridge) || _disposed) return;
@@ -2436,7 +2458,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         DiagnosticLogger.ReverseControl("usb", "start_begin",
             ("device", AppLog.Device(device.Udid)), ("apple_device", AppLog.Device(boundUsbUdid)));
         NotifyUsbControlStateChanged();
-        var bridge = new UsbTouchBridgeHost();
+        var bridge = new UsbTouchBridgeHost(
+            _sessions.TryGet(device.Udid, out var muxCapture) && muxCapture.HasSession && !device.IsWireless
+                ? control.WiredMuxResume : null);
         control.WiredBridge = bridge;
         AttachUsbBridgeEvents(control, bridge, device, cancellationToken);
         var lockdownGateHeld = false;
@@ -2555,8 +2579,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher is null || dispatcher.HasShutdownStarted) return;
-            var clipboardSequence = bridgeEvent.EventName == "clipboard_text"
-                ? clipboardSync.CaptureSequence() : null;
+            if (bridgeEvent.EventName is "ready" or "error" ||
+                (bridgeEvent.EventName == "status" && bridgeEvent.Code is "terminated" or "recovery_triggered"))
+                clipboardSync.ForgetReads(bridge);
+            var clipboardSequence = clipboardSync.CaptureReadEvent(bridge,
+                bridgeEvent.EventName, bridgeEvent.ClipboardReadId);
+            if (bridgeEvent.EventName is "clipboard_read_started" or "clipboard_read_finished" ||
+                (bridgeEvent.EventName == "clipboard_text" && clipboardSequence is null)) return;
             dispatcher.BeginInvoke(new Action(() =>
             {
                 if (!ReferenceEquals(control.WiredBridge, bridge) || _disposed ||
@@ -3005,7 +3034,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 NotifyUsbControlStateChanged();
                 return;
             }
-            var newBridge = new UsbTouchBridgeHost();
+            var newBridge = new UsbTouchBridgeHost(
+                _sessions.TryGet(device.Udid, out var muxCapture) && muxCapture.HasSession && !device.IsWireless
+                    ? control.WiredMuxResume : null);
             control.WiredBridge = newBridge;
             var lockdownGateHeld = false;
             try

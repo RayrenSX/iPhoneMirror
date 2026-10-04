@@ -17,6 +17,8 @@ internal static partial class Program
         var foregroundProvider = KeyboardField(window, "_keyboardForegroundWindow");
         var previousWidth = KeyboardField(vm, "_sourceVideoWidth");
         var previousHeight = KeyboardField(vm, "_sourceVideoHeight");
+        var previousTitle = window.Title;
+        var previousShowInTaskbar = window.ShowInTaskbar;
         var main = new WindowInteropHelper(window).Handle;
         nint foreground = main;
         SetKeyboardField(window, "_keyboardForegroundWindow", (Func<nint>)(() => foreground));
@@ -51,12 +53,22 @@ internal static partial class Program
             // Use SendMessage through the actual HwndHost subclass and production
             // event subscription. Only the bridge writer and foreground snapshot
             // are faked; no phone receives input and no global mouse input is used.
+            window.ShowInTaskbar = true;
+            window.Title = "iPhoneMirror preview pointer regression";
+            ActivateMappingTestWindow(window);
+            var toolbar = (FrameworkElement)window.FindName("VersionButton");
+            toolbar.Focus();
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
+            InteractionAssert((bool)KeyboardCall(window, "IsMainKeyboardEditorFocused")!,
+                $"{context}: toolbar focus must initially keep keyboard input local.");
             packets.SetLength(0);
             Click();
             var touches = ReadPreviewTouchPackets(packets);
             InteractionAssert(touches.Select(p => p.Action).SequenceEqual(new[] { "down", "up" }) &&
                 touches.All(p => Math.Abs(p.X - 0.5) < 0.01 && Math.Abs(p.Y - 0.5) < 0.01),
                 $"{context}: a main-preview click must send down/up at the displayed center.");
+            InteractionAssert(!(bool)KeyboardCall(window, "IsMainKeyboardEditorFocused")!,
+                $"{context}: clicking the native preview must restore keyboard focus from the toolbar.");
 
             packets.SetLength(0);
             Send(0x0201, x, y);
@@ -98,6 +110,8 @@ internal static partial class Program
             SetKeyboardField(vm, "_sourceVideoWidth", previousWidth);
             SetKeyboardField(vm, "_sourceVideoHeight", previousHeight);
             SetKeyboardField(window, "_keyboardForegroundWindow", foregroundProvider);
+            window.Title = previousTitle;
+            window.ShowInTaskbar = previousShowInTaskbar;
         }
     }
 

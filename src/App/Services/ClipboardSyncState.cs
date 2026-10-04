@@ -27,6 +27,7 @@ internal sealed class ClipboardSyncState(
 
     private readonly Dictionary<string, Update> _latest = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sequenceLock = new();
+    private readonly Dictionary<(object Source, long ReadId), SequenceSnapshot> _reads = [];
     // Queued callbacks and device caches own tokens. Weak references let us
     // rebase live arrivals without retaining a history of clipboard versions.
     private readonly List<WeakReference<SequenceSnapshot>> _snapshots = [];
@@ -56,6 +57,35 @@ internal sealed class ClipboardSyncState(
             current = new SequenceSnapshot(sequence);
             _snapshots.Add(new WeakReference<SequenceSnapshot>(current));
             return current;
+        }
+    }
+
+    // Transport reader calls this before dispatching. A slow device PULL must
+    // retain the Windows version from request time, not from reply time.
+    internal SequenceSnapshot? CaptureReadEvent(object source, string eventName, long? readId)
+    {
+        lock (_sequenceLock)
+        {
+            if (_stopped) return null;
+            if (readId is not { } id)
+                return eventName == "clipboard_text" ? CaptureSequence() : null;
+            var key = (source, id);
+            if (eventName == "clipboard_read_started")
+                _reads[key] = CaptureSequence();
+            else if (eventName == "clipboard_read_finished")
+                _reads.Remove(key);
+            else if (eventName == "clipboard_text" && _reads.Remove(key, out var snapshot))
+                return snapshot;
+            return null;
+        }
+    }
+
+    internal void ForgetReads(object source)
+    {
+        lock (_sequenceLock)
+        {
+            foreach (var key in _reads.Keys.Where(key => ReferenceEquals(key.Source, source)).ToArray())
+                _reads.Remove(key);
         }
     }
 
@@ -131,7 +161,11 @@ internal sealed class ClipboardSyncState(
 
     internal void Stop()
     {
-        _stopped = true;
+        lock (_sequenceLock)
+        {
+            _stopped = true;
+            _reads.Clear();
+        }
         _latest.Clear();
         _selectedDevice = null;
     }

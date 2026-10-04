@@ -20,6 +20,8 @@ internal static partial class Program
 
     private static void TestClipboardSyncRegressions()
     {
+        TestUsbPasteKeyboardState();
+        WaitReviewTask(Application.Current.Dispatcher.InvokeAsync(TestClipboardReadRetries).Task);
         var vm = new MainViewModel();
         var writes = new List<string>();
         var attempts = 0;
@@ -85,6 +87,41 @@ internal static partial class Program
                 Flush();
                 InteractionAssert(writes.Count == before + 1 && writes.Last() == "fresh device event",
                     "A fresh device copy stopped syncing after discarding an older queued event.");
+
+                // Exercise JSON parsing and both bridge event routes. The local
+                // copy happens while PULL is running, before its reply arrives.
+                void Protocol(string json) => KeyboardCall(bridge, "OnBridgeEvent", Parse(json));
+                BridgeEvent Parse(string json)
+                {
+                    BridgeEvent? parsed = null;
+                    var reader = new DirectUsbInputBridge();
+                    reader.OnEvent += e => parsed = e;
+                    KeyboardCall(reader, "HandleLine", json);
+                    return parsed ?? throw new InvalidOperationException("Clipboard protocol event was lost.");
+                }
+                before = writes.Count;
+                Task.Run(() => Protocol("{\"event\":\"clipboard_read_started\",\"readId\":1}")).GetAwaiter().GetResult();
+                sequence++;
+                Task.Run(() => Protocol("{\"event\":\"clipboard_text\",\"readId\":1,\"text\":\"slow old reply\"}")).GetAwaiter().GetResult();
+                Protocol("{\"event\":\"clipboard_read_finished\",\"readId\":1}");
+                Flush();
+                InteractionAssert(writes.Count == before, "A slow device read overwrote a newer Windows copy.");
+                Protocol("{\"event\":\"clipboard_read_started\",\"readId\":2}");
+                Protocol("{\"event\":\"clipboard_text\",\"readId\":2,\"text\":\"new device copy\"}");
+                Protocol("{\"event\":\"clipboard_read_finished\",\"readId\":2}");
+                Flush();
+                InteractionAssert(writes.Count == before + 1 && writes.Last() == "new device copy",
+                    "A fresh read failed after discarding a slow stale reply.");
+                Protocol("{\"event\":\"clipboard_read_started\",\"readId\":3}");
+                Protocol("{\"event\":\"clipboard_read_finished\",\"readId\":3}");
+                Protocol("{\"event\":\"clipboard_text\",\"readId\":3,\"text\":\"late cancelled read\"}");
+                Flush();
+                InteractionAssert(writes.Count == before + 1, "A completed read accepted a late reply.");
+                Protocol("{\"event\":\"clipboard_read_started\",\"readId\":4}");
+                sync.ForgetReads(bridge);
+                Protocol("{\"event\":\"clipboard_text\",\"readId\":4,\"text\":\"reply after disconnect\"}");
+                Flush();
+                InteractionAssert(writes.Count == before + 1, "A disconnected read accepted a late reply.");
             }
             var accepted = writes.Count;
             Emit(wireless, "old bridge queued");
@@ -105,5 +142,39 @@ internal static partial class Program
             SetKeyboardField(vm, "_disposed", false);
             WaitReviewTask(vm.ShutdownAsync());
         }
+    }
+
+    private static void TestClipboardReadRetries()
+    {
+        var attempts = 0;
+        var read = ClipboardTextReader.ReadAsync(() =>
+        {
+            InteractionAssert(Application.Current.Dispatcher.CheckAccess() &&
+                Thread.CurrentThread.GetApartmentState() == ApartmentState.STA,
+                "Clipboard reads must retry on STA.");
+            if (++attempts < 3) throw new ExternalException("busy");
+            return "中文 / café / 😀";
+        }, () => true, () => Task.Delay(1));
+        WaitReviewTask(read);
+        InteractionAssert(attempts == 3 && read.Result == "中文 / café / 😀", "Busy clipboard lost Ctrl+V.");
+
+        var current = true;
+        attempts = 0;
+        read = ClipboardTextReader.ReadAsync(() =>
+        {
+            attempts++;
+            throw new ExternalException("busy");
+        }, () => current, () => { current = false; return Task.CompletedTask; });
+        WaitReviewTask(read);
+        InteractionAssert(attempts == 1 && read.Result is null, "A paste survived a keyboard ownership change.");
+
+        attempts = 0;
+        read = ClipboardTextReader.ReadAsync(() =>
+        {
+            attempts++;
+            throw new ExternalException("busy");
+        }, () => true, () => Task.CompletedTask);
+        InteractionAssert(read.IsFaulted && attempts == 5, "Clipboard read retries must be bounded.");
+        _ = read.Exception;
     }
 }

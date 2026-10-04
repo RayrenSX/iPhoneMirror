@@ -412,6 +412,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         SourceInitialized += OnSourceInitialized;
         Deactivated += OnMainKeyboardDeactivated;
         Activated += OnMainKeyboardActivated;
+        PreviewGotKeyboardFocus += OnMainKeyboardFocusChanged;
         SizeChanged += OnWorkspaceWindowSizeChanged;
         IsVisibleChanged += OnWorkspaceWindowVisibilityChanged;
         Unloaded += OnWorkspaceUnloaded;
@@ -662,7 +663,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (string.IsNullOrWhiteSpace(sourceUdid) ||
             (e.Kind != Controls.PreviewPointerKind.Reset && !usbTargetActive)) return;
         if (e.Kind != Controls.PreviewPointerKind.Reset &&
-            !CanForwardControlKeyboard(sourceUdid, GetControlKeyboardWindow(sourceUdid))) return;
+            !CanForwardControlPointer(sourceUdid, GetControlKeyboardWindow(sourceUdid))) return;
         var state = GetUsbTouchPointerState(sourceUdid);
         var sourceWidth = e.SourceWidth != 0 ? e.SourceWidth : _viewModel.SourceVideoWidth;
         var sourceHeight = e.SourceHeight != 0 ? e.SourceHeight : _viewModel.SourceVideoHeight;
@@ -678,7 +679,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     state.LastY, sourceUdid);
             return;
         }
-        var canSend = CaptureKeyboardSendGuard(GetControlKeyboardWindow(sourceUdid));
+        var canSend = CapturePointerSendGuard(GetControlKeyboardWindow(sourceUdid));
         if (e.Kind == Controls.PreviewPointerKind.Wheel)
         {
             // Velocity-based wheel simulation: the whole scroll gesture is
@@ -1409,6 +1410,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ToggleFullScreen();
             return;
         }
+        if (_rawKeyboardInputEnabled && e.Kind != Controls.PreviewKeyboardKind.Reset) return;
         HandleControlKeyboardInput(e, _viewModel.SelectedDevice?.Udid);
     }
 
@@ -1416,29 +1418,40 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Controls.PreviewKeyboardEventArgs e, string? sourceUdid = null,
         bool fromRawInput = false, nint? sourceWindow = null)
     {
-        var routeUdid = sourceUdid ??
-            (_activeControlWindow != 0 ? _activeControlUdid :
-                _viewModel.SelectedDevice?.Udid);
+        Dispatcher.VerifyAccess();
+        var routeUdid = sourceUdid ?? ActiveInputDeviceUdid;
         var keyboardWindow = sourceWindow ?? _windowSource?.Handle ?? 0;
-        var isReset = e.Kind == Controls.PreviewKeyboardKind.Reset;
-        if (isReset)
+        if (e.Kind == Controls.PreviewKeyboardKind.Reset)
         {
-            // Late cleanup from an inactive device releases that device's
-            // keys, but must not invalidate the current device's queued input.
+            // A late blur from an old preview cannot reset the new owner.
             if (DeviceViewModel.UdidEquals(routeUdid, _keyboardStateUdid) ||
                 DeviceViewModel.UdidEquals(routeUdid, ActiveInputDeviceUdid))
-            {
-                Interlocked.Increment(ref _keyboardInputGeneration);
-                _ordinaryKeysDown.Clear();
-            }
-        }
-        else if (!CanForwardControlKeyboard(routeUdid, keyboardWindow))
+                ResetKeyboardOwnership();
             return;
-        if (!isReset && TryHandleConfiguredKey(e.VirtualKey,
-                e.Kind == Controls.PreviewKeyboardKind.Down)) return;
-        if (!isReset && ShouldSkipMappedDeviceKey(e.VirtualKey, routeUdid)) return;
-        var generation = _keyboardInputGeneration;
-        var canSend = isReset ? null : CaptureKeyboardSendGuard(keyboardWindow);
+        }
+        if (_keyboardRouter.Mode == KeyboardInputMode.None &&
+            _keyboardRouter.RequestedMode != KeyboardInputMode.None)
+        {
+            _keyboardRouter.Route(KeyboardInputMode.Direct, ModifierKeyIdentity(e.VirtualKey, e.ScanCode),
+                e.Kind == Controls.PreviewKeyboardKind.Down);
+            return;
+        }
+        if (!CanForwardControlKeyboard(routeUdid, keyboardWindow) ||
+            !TryEnterDirectKeyboardInputMode()) return;
+        var route = _viewModel.CaptureDirectKeyboardRoute(routeUdid);
+        if (route is null) return;
+        if (_directKeyboardRoute is { } previous && !previous.SameSession(route))
+        {
+            ResetKeyboardOwnership();
+            if (!IsDirectKeyboardInputModeActive) return;
+        }
+        _directKeyboardRoute = route;
+        _keyboardStateUdid = routeUdid;
+        var down = e.Kind == Controls.PreviewKeyboardKind.Down;
+        var key = ModifierKeyIdentity(e.VirtualKey, e.ScanCode);
+        if (!_keyboardRouter.Route(KeyboardInputMode.Direct, key, down)) return;
+        if (TryHandleConfiguredKey(e.VirtualKey, down)) return;
+        var canSend = CaptureKeyboardSendGuard(keyboardWindow);
         await _bluetoothRouteGate.WaitAsync();
         var routeHeld = true;
         void ReleaseRoute()
@@ -1449,130 +1462,53 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         try
         {
-            if (Volatile.Read(ref _bluetoothRouteChanging) != 0) return;
-            if (!isReset && (generation != _keyboardInputGeneration ||
-                !CanForwardControlKeyboard(routeUdid, keyboardWindow))) return;
-            var usbTargetActive = _viewModel.IsUsbControlTarget(routeUdid);
-            var bluetoothTargetActive = IsBluetoothControlActiveFor(routeUdid);
-            _viewModel.AddDiagnosticLog(AppLog.Event("control_keyboard_route",
-                ("kind", e.Kind), ("virtual_key", e.VirtualKey),
-                ("scan_code", e.ScanCode), ("source", AppLog.Device(sourceUdid)),
-                ("route", AppLog.Device(routeUdid)),
-                ("from_raw", fromRawInput), ("usb_target", usbTargetActive),
-                ("bluetooth_target", bluetoothTargetActive),
-                ("usb_input_enabled", _viewModel.UsbControlIsInputEnabled),
-                ("usb_control_enabled", _viewModel.IsUsbControlEnabled)));
-            if (!usbTargetActive && !bluetoothTargetActive) return;
-            if (isReset && !DeviceViewModel.UdidEquals(_keyboardStateUdid, routeUdid))
-            {
-                ReleaseRoute();
-                if (bluetoothTargetActive) await _viewModel.SendBluetoothKeyboardAsync(0, [], routeUdid);
-                if (usbTargetActive) await _viewModel.SendUsbKeyboardAsync([], routeUdid);
-                return;
-            }
-            if (!isReset && !DeviceViewModel.UdidEquals(_keyboardStateUdid, routeUdid))
-            {
-                _controlKeyboardUsages.Clear();
-                _controlModifierKeys.Clear();
-                _controlKeyboardModifiers = 0;
-                _pasteVPending = false;
-                _keyboardStateUdid = routeUdid;
-            }
-            if (isReset)
-            {
-                _controlKeyboardUsages.Clear();
-                _controlModifierKeys.Clear();
-                _controlKeyboardModifiers = 0;
-                _pasteVPending = false;
-                // The empty release report must pass even after focus is lost;
-                // otherwise the iPhone can retain a held key or modifier.
-                ReleaseRoute();
-                if (bluetoothTargetActive) await _viewModel.SendBluetoothKeyboardAsync(0, [], routeUdid);
-                if (usbTargetActive) await _viewModel.SendUsbKeyboardAsync([], routeUdid);
-                return;
-            }
-            // Raw Input is preferred on the main preview, but it is not
-            // guaranteed to reach this window after focus changes or when an
-            // independent preview owns the route.  Keep the normal key-message
-            // fallback alive; the pressed-key set makes duplicate down/up
-            // notifications idempotent.
+            if (Volatile.Read(ref _bluetoothRouteChanging) != 0 || !canSend() || !route.IsCurrent()) return;
             if (!TryMapVirtualKey(e.VirtualKey, out var usage, out var modifier)) return;
-            if (e.Kind == Controls.PreviewKeyboardKind.Down)
+            if (down)
             {
-                if (modifier != 0) _controlModifierKeys.Add(
-                    ModifierKeyIdentity(e.VirtualKey, e.ScanCode));
+                if (modifier != 0) _controlModifierKeys.Add(key);
                 else if (usage != 0) _controlKeyboardUsages.Add(usage);
             }
             else
             {
-                if (modifier != 0) _controlModifierKeys.Remove(
-                    ModifierKeyIdentity(e.VirtualKey, e.ScanCode));
+                if (modifier != 0) _controlModifierKeys.Remove(key);
                 else if (usage != 0) _controlKeyboardUsages.Remove(usage);
             }
             _controlKeyboardModifiers = ModifierMask(_controlModifierKeys);
-            // Bluetooth and USB are normally mutually exclusive, but keep a
-            // pre-interception snapshot so an overlapping route still sees
-            // the physical V key exactly as it did before USB paste handling.
-            var bluetoothUsages = _controlKeyboardUsages.ToArray();
-            // Ctrl+V interception: when V is pressed while Ctrl is held and
-            // USB target is active, push the Windows clipboard to iOS via
-            // paste_text instead of sending V through the HID keyboard
-            // channel. The bridge writes the iOS pasteboard and simulates
-            // Cmd+V internally, so both the V keydown and keyup must be
-            // suppressed to avoid clobbering the bridge's HID keyboard
-            // sequence with our own reports.
+            var bluetooth = route.Transport == "BluetoothDirect";
             var pasteRequested = false;
-            var pasteIntercepted = usbTargetActive && TryInterceptUsbPasteKey(
-                e.Kind == Controls.PreviewKeyboardKind.Down, usage,
-                _controlKeyboardModifiers, _controlKeyboardUsages,
-                ref _pasteVPending, out pasteRequested);
-            var usages = _controlKeyboardUsages.ToArray();
+            var pasteIntercepted = !bluetooth && TryInterceptUsbPasteKey(down, usage,
+                _controlKeyboardModifiers, _controlKeyboardUsages, ref _pasteVPending, out pasteRequested);
             if (pasteRequested)
             {
-                // Clipboard API requires an STA thread; this keyboard
-                // handler already runs on the UI thread so we read
-                // synchronously and fire-and-forget the bridge send.
                 try
                 {
-                    if (System.Windows.Clipboard.ContainsText())
-                    {
-                        var clipText = System.Windows.Clipboard.GetText();
-                        if (!string.IsNullOrEmpty(clipText))
-                            _ = _viewModel.SendUsbPasteTextAsync(
-                                clipText, routeUdid, canSend);
-                    }
+                    var text = await ClipboardTextReader.ReadAsync(
+                        () => System.Windows.Clipboard.GetText(),
+                        () => route.IsCurrent() && canSend());
+                    if (!string.IsNullOrEmpty(text))
+                        await TrackKeyboardSendAsync(_viewModel.SendUsbPasteTextAsync(
+                            text, routeUdid, () => route.IsCurrent() && canSend()));
                 }
-                catch { /* Clipboard lock or bridge unavailable. */ }
+                catch (Exception error)
+                {
+                    _viewModel.AddDiagnosticLog(AppLog.Event("keyboard_paste_failed", ("error", error.Message)));
+                }
             }
-            // Snapshot shared key state before releasing the route lock.
-            // Each transport serializes its own reports; waiting for one
-            // device's writer must not block another device's input.
-            var usbUsages = usages.Concat(ModifierUsages(_controlModifierKeys)).ToArray();
-            var bluetoothModifiers = _controlKeyboardModifiers;
+            if (pasteIntercepted) return;
+            var usages = bluetooth ? _controlKeyboardUsages.ToArray() :
+                _controlKeyboardUsages.Concat(ModifierUsages(_controlModifierKeys)).ToArray();
+            var modifiers = _controlKeyboardModifiers;
             ReleaseRoute();
-            if (bluetoothTargetActive)
-                await _viewModel.SendBluetoothKeyboardAsync(bluetoothModifiers,
-                    bluetoothUsages, routeUdid, canSend);
-            if (usbTargetActive && !pasteIntercepted &&
-                generation == _keyboardInputGeneration &&
-                CanForwardControlKeyboard(routeUdid, keyboardWindow))
-            {
-                await _viewModel.SendUsbKeyboardAsync(usbUsages, routeUdid, canSend);
-            }
+            await TrackKeyboardSendAsync(route.SendAsync(modifiers, usages, canSend));
         }
         catch (Exception error)
         {
-            _viewModel.AddDiagnosticLog(AppLog.Event(
-                "control_keyboard_input_failed",
-                ("device", AppLog.Device(sourceUdid)),
-                ("error", AppLog.Error(error))));
+            _viewModel.AddDiagnosticLog(AppLog.Event("control_keyboard_input_failed",
+                ("device", AppLog.Device(routeUdid)), ("owner", route.Transport), ("error", AppLog.Error(error))));
         }
-        finally
-        {
-            ReleaseRoute();
-        }
+        finally { ReleaseRoute(); }
     }
-
     private static bool TryInterceptUsbPasteKey(bool isKeyDown, byte usage,
         byte modifiers, HashSet<byte> keyboardUsages, ref bool pasteVPending,
         out bool pasteRequested)
@@ -1585,7 +1521,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // Raw Input and the legacy window message can both describe the
             // same physical key press. Once a paste owns V, suppress every
             // duplicate or repeat until its matching release.
-            if ((modifiers & 0x01) == 0 && !pasteVPending) return false;
+            if ((modifiers & 0x11) == 0 && !pasteVPending) return false;
             keyboardUsages.Remove(usage);
             if (!pasteVPending)
             {
@@ -1604,10 +1540,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private static IEnumerable<byte> ModifierUsages(IEnumerable<int> modifierKeys) =>
         modifierKeys.Select(key => key switch
         {
-            0xA0 or 0xA1 => (byte)(0xE0 + (key - 0xA0)),
-            0xA2 or 0xA3 => (byte)(0xE2 + (key - 0xA2)),
-            0xA4 or 0xA5 => (byte)(0xE4 + (key - 0xA4)),
-            0x5B or 0x5C => (byte)(0xE3 + (key - 0x5B)),
+            0xA2 => (byte)0xE0, 0xA0 => (byte)0xE1, 0xA4 => (byte)0xE2, 0x5B => (byte)0xE3,
+            0xA3 => (byte)0xE4, 0xA1 => (byte)0xE5, 0xA5 => (byte)0xE6, 0x5C => (byte)0xE7,
             _ => (byte)0,
         }).Where(usage => usage != 0);
 
@@ -1651,6 +1585,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        DisposeKeyboardInputSubscriptions();
+        _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         DisposeKeyboardMapping();
         DisposeTray();
         _compactLaunchCancellation.Cancel();
@@ -1705,7 +1641,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (message == WmHotKey &&
             TryGetShortcutActionByHotKeyId(wParam.ToInt32(), out var hotkeyAction))
         {
-            if (_shortcutSettingsWindow is null &&
+            if ((IsDirectKeyboardInputModeActive || IsGlobalControlShortcut(hotkeyAction)) &&
+                _shortcutSettingsWindow is null &&
                 _registeredHotKeyIds.Contains(wParam.ToInt32()))
                 HandleConfiguredShortcut(hotkeyAction);
             handled = true;
@@ -1756,9 +1693,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         };
         // The actual preview surface is a native child HWND. Keyboard
         // messages sent to that HWND do not reliably bubble through WPF, so
-        // also subscribe to keyboard Raw Input. Keep legacy messages enabled
-        // (do not use RIDEV_NOLEGACY) so the WPF path remains a fallback when
-        // Raw Input is unavailable during a focus transition.
+        // select keyboard Raw Input as this window's sole direct ingress while
+        // registered. Legacy messages remain enabled for local WPF controls;
+        // native/WPF forwarding is the fallback only if registration is off.
         // A keyboard must never use INPUTSINK: background typing belongs to
         // the foreground application. The routing guard also checks the exact
         // preview HWND because other windows in this process can be active.
@@ -1950,7 +1887,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (!_rawKeyboardInputEnabled || _activeControlWindow != 0 ||
             !CanForwardControlKeyboard(_viewModel.SelectedDevice?.Udid,
-                _windowSource?.Handle ?? 0)) return;
+                _windowSource?.Handle ?? 0) ||
+            !TryEnterDirectKeyboardInputMode()) return;
         var isKeyUp = (keyboard.Flags & 0x01) != 0 || keyboard.Message is 0x0101 or 0x0105;
         var virtualKey = keyboard.VirtualKey;
         if (virtualKey is 0x5B or 0x5C or 0x5D or 0x5F)
@@ -1967,7 +1905,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (isKeyUp) _localFullScreenF11Down = false;
             return;
         }
-        if (TryHandleConfiguredKey(virtualKey, !isKeyUp)) return;
         if (virtualKey == 0x7A)
         {
             if (!isKeyUp && !_localFullScreenF11Down)
@@ -1987,10 +1924,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ToggleFullScreen();
             return;
         }
+        var kind = isKeyUp ? Controls.PreviewKeyboardKind.Up :
+            Controls.PreviewKeyboardKind.Down;
         HandleControlKeyboardInput(new Controls.PreviewKeyboardEventArgs(
-                isKeyUp ? Controls.PreviewKeyboardKind.Up :
-                    Controls.PreviewKeyboardKind.Down,
-                virtualKey, keyboard.MakeCode | ((keyboard.Flags & 0x02) != 0 ? 0x100 : 0)),
+                kind, virtualKey, keyboard.MakeCode | ((keyboard.Flags & 0x02) != 0 ? 0x100 : 0)),
             _activeControlWindow != 0 ? _activeControlUdid :
                 _viewModel.SelectedDevice?.Udid,
             fromRawInput: true);
@@ -2010,12 +1947,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private static byte ModifierMask(IEnumerable<int> keys)
     {
         byte mask = 0;
-        foreach (var key in keys)
-        {
-            if (key is 0xA0 or 0xA1) mask |= 0x02;
-            else if (key is 0xA2 or 0xA3) mask |= 0x01;
-            else if (key is 0xA4 or 0xA5) mask |= 0x04;
-        }
+        foreach (var usage in ModifierUsages(keys)) mask |= (byte)(1 << (usage - 0xE0));
         return mask;
     }
 
@@ -2650,6 +2582,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         e.Cancel = true;
         if (_shutdownStarted) return;
         _shutdownStarted = true;
+        DisposeKeyboardInputSubscriptions();
         DisposeKeyboardMapping();
         DisposeTray();
         _compactLaunchCancellation.Cancel();
@@ -5664,6 +5597,23 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            // Transport stop/recovery can publish from a worker. Revoke old
+            // queued input immediately; mutate capture/owner state only on
+            // the dispatcher which also owns every keyboard ingress.
+            if (e.PropertyName is nameof(MainViewModel.SelectedDevice) or
+                nameof(MainViewModel.CurrentSessionHandle) or nameof(MainViewModel.IsUsbControlEnabled) or
+                nameof(MainViewModel.IsWirelessControlEnabled) or nameof(MainViewModel.UsbControlIsInputEnabled) or
+                nameof(MainViewModel.IsBluetoothControlEnabled) or nameof(MainViewModel.BluetoothControlIsInputEnabled))
+                Interlocked.Increment(ref _keyboardInputGeneration);
+            if (!Dispatcher.HasShutdownStarted)
+                Dispatcher.BeginInvoke(() =>
+                {
+                    if (!_mappingClosing) OnViewModelPropertyChanged(sender, e);
+                });
+            return;
+        }
         OnMappingContextChanged(e.PropertyName);
         if (e.PropertyName == nameof(MainViewModel.IsTrayApplicationMode))
             Dispatcher.BeginInvoke(ApplyTrayMode);
@@ -5753,6 +5703,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var controlActive = IsBluetoothControlActive;
         var usbControlActive = IsUsbControlActive;
         var usbControlConnected = _viewModel.IsUsbControlTarget(ActiveInputDeviceUdid);
+        if ((controlActive || usbControlActive) && !IsKeyboardMappingInputModeActive)
+            TryEnterDirectKeyboardInputMode();
         Volatile.Write(ref _activeUsbInputEnabled, usbControlConnected);
         MainPreviewHost.CapturePointerInput =
             (controlActive || usbControlActive) && _activeControlWindow == 0;
@@ -5769,7 +5721,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         SetWindowsCursorHidden(controlActive && !usbControlConnected);
         SetSystemKeySuppression(controlActive);
         RegisterRawInput(controlActive && _activeControlWindow == 0,
-            (controlActive || usbControlActive) && _activeControlWindow == 0);
+            (controlActive || usbControlActive) && _activeControlWindow == 0 &&
+            !IsKeyboardMappingInputModeActive);
         if (controlActive && _activeControlWindow != 0)
         {
             // Native independent previews only forward input while foreground.
@@ -5807,6 +5760,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         RegisterRawInput(false, false);
         ClipCursor(IntPtr.Zero);
         ResetControlRouteState();
+        LeaveDirectKeyboardInputMode();
         foreach (var udid in _usbTouchStates.Keys.ToArray())
             _ = HandleUsbPointerInputAsync(new Controls.PreviewPointerEventArgs(
                 Controls.PreviewPointerKind.Reset, 0, 0, 0, 0), udid);
@@ -6306,7 +6260,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void ResetControlRouteState()
     {
-        Interlocked.Increment(ref _keyboardInputGeneration);
+        ResetKeyboardOwnership();
         _ordinaryKeysDown.Clear();
         _controlPointerInitialized = false;
         _lastControlSourceX = 0;
@@ -6895,7 +6849,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             e.Handled = true;
             return;
         }
-        if (TryHandleConfiguredKey(KeyInterop.VirtualKeyFromKey(key), down: true))
+        if (!IsUsbControlActive && !IsBluetoothControlActive && !IsKeyboardMappingInputModeActive &&
+            TryHandleConfiguredKey(KeyInterop.VirtualKeyFromKey(key), down: true))
         {
             e.Handled = true;
             return;
@@ -6960,7 +6915,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void OnPreviewKeyUp(object sender, KeyEventArgs e)
     {
         var key = ResolvePreviewKey(e);
-        if (TryHandleConfiguredKey(KeyInterop.VirtualKeyFromKey(key), down: false))
+        if (!IsUsbControlActive && !IsBluetoothControlActive && !IsKeyboardMappingInputModeActive &&
+            TryHandleConfiguredKey(KeyInterop.VirtualKeyFromKey(key), down: false))
         {
             e.Handled = true;
             return;
@@ -7016,9 +6972,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (_activeControlWindow != 0 ||
             (!IsUsbControlActive && !IsBluetoothControlActive) ||
             !CanForwardControlKeyboard(_viewModel.SelectedDevice?.Udid,
-                _windowSource?.Handle ?? 0)) return false;
+                _windowSource?.Handle ?? 0) ||
+            !TryEnterDirectKeyboardInputMode()) return false;
         var virtualKey = KeyInterop.VirtualKeyFromKey(key);
         if (virtualKey == 0) return false;
+        if (_rawKeyboardInputEnabled)
+        {
+            _viewModel.AddDiagnosticLog(AppLog.Event("preview_keyboard_fallback_suppressed",
+                ("kind", kind), ("virtual_key", virtualKey),
+                ("device", AppLog.Device(_viewModel.SelectedDevice?.Udid))));
+            return true;
+        }
         _viewModel.AddDiagnosticLog(AppLog.Event("preview_keyboard_fallback",
             ("kind", kind), ("virtual_key", virtualKey),
             ("device", AppLog.Device(_viewModel.SelectedDevice?.Udid)),
@@ -7194,7 +7158,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private async Task SendConfiguredSystemShortcutAsync(
         BluetoothShortcutAction action)
     {
-        if (!IsControlKeyboardForeground) return;
+        if (!IsDirectKeyboardInputModeActive || !IsControlKeyboardForeground) return;
         var target = _activeControlWindow != 0 ? _activeControlUdid :
             _viewModel.SelectedDevice?.Udid;
         if (action == BluetoothShortcutAction.ReverseControl) return;
@@ -7214,11 +7178,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         try
         {
             if (!canSend() || _shortcutSettingsWindow is not null) return;
-            var bluetoothTarget = _viewModel.BluetoothControlIsConnected &&
-                _viewModel.IsBluetoothControlTarget(target);
-            var usbTarget =
-                _viewModel.IsUsbControlTarget(target);
-            if (!bluetoothTarget && !usbTarget) return;
+            var route = _viewModel.CaptureDirectKeyboardRoute(target);
+            if (route is null) return;
+            var bluetoothTarget = route.Transport == "BluetoothDirect";
+            var usbTarget = !bluetoothTarget;
             if (action == BluetoothShortcutAction.AppSwitcher && bluetoothTarget)
                 await _viewModel.SendBluetoothAppSwitcherAsync(target, canSend);
             else if (usage != 0 && bluetoothTarget)
@@ -7233,17 +7196,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 // does not expose the Bluetooth navigation-menu report, so
                 // mirror the already-working Home shortcut instead.
                 var home = GetIndigoButton(BluetoothShortcutAction.Home)!.Value;
-                await SendUsbButtonPulseAsync(home, target, canSend);
+                await SendUsbButtonPulseAsync(home, route, canSend);
                 await Task.Delay(AppSwitcherDoublePressInterval);
-                await SendUsbButtonPulseAsync(home, target, canSend);
+                await SendUsbButtonPulseAsync(home, route, canSend);
             }
             else if (indigoButton is { } button && usbTarget)
             {
-                await SendUsbButtonPulseAsync(button, target, canSend);
+                await SendUsbButtonPulseAsync(button, route, canSend);
             }
             else if (usage != 0 && usbTarget)
             {
-                await SendUsbSystemShortcutAsync(usage, target, canSend);
+                await SendUsbSystemShortcutAsync(usage, route, canSend);
             }
             _viewModel.AddDiagnosticLog(AppLog.Event("system_shortcut_sent",
                 ("action", action.ToString()), ("device", AppLog.Device(target)),
@@ -7260,17 +7223,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     private async Task SendUsbButtonPulseAsync(
-        (ushort Page, ushort Code, int HoldMs) button, string? targetUdid,
+        (ushort Page, ushort Code, int HoldMs) button, DirectKeyboardRoute route,
         Func<bool>? canSend = null)
     {
+        if (route.SendButtonAsync is null) return;
         try
         {
-            await _viewModel.SendUsbButtonAsync(button.Page, button.Code, "down", targetUdid, canSend);
+            await route.SendButtonAsync(button.Page, button.Code, "down", canSend);
             await Task.Delay(button.HoldMs);
         }
         finally
         {
-            await _viewModel.SendUsbButtonAsync(button.Page, button.Code, "up", targetUdid);
+            await route.SendButtonAsync(button.Page, button.Code, "up", null);
         }
     }
 
@@ -7418,7 +7382,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (code >= 0 && ProcessMappingHook(Marshal.PtrToStructure<LowLevelKeyboardData>(lParam), wParam))
             return 1;
-        if (code >= 0 && IsBluetoothControlActive && IsControlKeyboardForeground)
+        if (code >= 0 && IsDirectKeyboardInputModeActive && IsBluetoothControlActive && IsControlKeyboardForeground)
         {
             var data = Marshal.PtrToStructure<LowLevelKeyboardData>(lParam);
             if (data.VirtualKey is 0x5B or 0x5C or 0x5D or 0x5F)
@@ -7557,6 +7521,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     [DllImport("user32.dll", SetLastError = true)]
     private static extern nint SetWindowsHookEx(int hookType,
         LowLevelKeyboardProc callback, nint module, uint threadId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint GetModuleHandle(string? moduleName);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

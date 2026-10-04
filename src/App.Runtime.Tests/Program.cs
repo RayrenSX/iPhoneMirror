@@ -28,6 +28,12 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--wired-control-restart-live", var restartOutput])
+                return RunKeyboardMappingLiveProbe(restartOutput, wiredRestart: true);
+            if (args is ["--keyboard-ownership"])
+                return RunKeyboardOwnershipTests();
+            if (args is ["--keyboard-ownership-live", var ownershipOutput])
+                return RunKeyboardMappingLiveProbe(ownershipOutput, ownership: true);
             if (args is ["--component-audio-formats", var referenceFfmpeg])
                 return RunComponentAudioFormatTests(referenceFfmpeg);
             if (args is ["--component-runtime"])
@@ -227,6 +233,19 @@ internal static partial class Program
                 "TryInterceptUsbPasteKey");
         var usages = new HashSet<byte>();
         const byte vUsage = 0x19;
+
+        foreach (var controlMask in new byte[] { 0x01, 0x10, 0x11 })
+        {
+            usages.Add(vUsage);
+            var press = InvokeUsbPasteIntercept(intercept, isKeyDown: true,
+                vUsage, controlMask, usages, pastePending: false);
+            if (!press.Intercepted || !press.PasteRequested || !press.PastePending || usages.Contains(vUsage))
+                throw new InvalidOperationException("Both left and right Ctrl+V must request a clipboard paste.");
+            var release = InvokeUsbPasteIntercept(intercept, isKeyDown: false,
+                vUsage, modifiers: 0, usages, press.PastePending);
+            if (!release.Intercepted || release.PastePending || release.PasteRequested)
+                throw new InvalidOperationException("Either Ctrl+V chord must release its paste state.");
+        }
 
         usages.Add(vUsage);
         var firstDown = InvokeUsbPasteIntercept(intercept, isKeyDown: true,

@@ -11,7 +11,8 @@ using System.Threading.Tasks;
 
 namespace IPhoneMirror.App.Services;
 
-public sealed record BridgeEvent(string Event, string? Code, string? Message, string? Text = null);
+public sealed record BridgeEvent(string Event, string? Code, string? Message, string? Text = null,
+    long? ClipboardReadId = null);
 
 public sealed record TouchPoint(
     [property: JsonPropertyName("pointerId")] int PointerId,
@@ -42,6 +43,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     private long _sequence;
     private int _stopping;
     private int _terminalEventReceived;
+    private string? _muxCheckpoint;
+    internal UsbMuxResumeContext? MuxResumeContext { get; set; }
 
     public bool IsReady { get; private set; }
     internal long InputGeneration => Interlocked.Read(ref _readyGeneration);
@@ -120,6 +123,9 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(existingPath))
             pathEntries.Add(existingPath);
         psi.Environment["PATH"] = string.Join(Path.PathSeparator, pathEntries);
+        psi.Environment.Remove("IPHONE_MIRROR_USB_MUX_RESUME");
+        if (!wireless && MuxResumeContext?.Take() is { } checkpoint)
+            psi.Environment["IPHONE_MIRROR_USB_MUX_RESUME"] = checkpoint;
         if (!usePackagedBridge)
             psi.ArgumentList.Add(bridgeScript);
         psi.ArgumentList.Add(wireless ? "--wireless" : "--usb");
@@ -254,7 +260,9 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     public async Task StopAsync()
     {
         Interlocked.Exchange(ref _stopping, 1);
-        _cts.Cancel();
+        IsReady = false;
+        GateOpen = false;
+        Interlocked.Increment(ref _readyGeneration);
         // Closing stdin ends the bridge's input loop and lets its teardown run:
         // releasing all touch points, closing the CoreDevice tunnel, and
         // releasing the claimed usbmux interface. Killing the process instead
@@ -267,7 +275,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             try
             {
                 using var gracePeriod = new CancellationTokenSource(
-                    TimeSpan.FromSeconds(2));
+                    TimeSpan.FromSeconds(8));
                 await _process.WaitForExitAsync(gracePeriod.Token)
                     .ConfigureAwait(false);
             }
@@ -287,6 +295,10 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             try { await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(2)); }
             catch { /* Process termination must not block UI teardown. */ }
         }
+        _cts.Cancel();
+        if (_process is { HasExited: true, ExitCode: 0 } && _muxCheckpoint is { } checkpoint)
+            MuxResumeContext?.Save(checkpoint);
+        _muxCheckpoint = null;
         try { if (_process is { HasExited: false }) _process.Kill(true); } catch { }
         try { _process?.Dispose(); } catch { }
         _stdin = null;
@@ -340,6 +352,13 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             var evt = root.GetProperty("event").GetString();
             switch (evt)
             {
+                case "capture_mux_checkpoint":
+                    if (!_requestedWireless && Volatile.Read(ref _stopping) != 0 &&
+                        root.TryGetProperty("state", out var checkpoint) &&
+                        checkpoint.ValueKind == JsonValueKind.Object &&
+                        checkpoint.GetRawText().Length <= 2048)
+                        _muxCheckpoint = checkpoint.GetRawText();
+                    break;
                 case "status":
                     var statusCode = root.TryGetProperty("code", out var c) ? c.GetString() : null;
                     if (statusCode == "recovery_triggered")
@@ -357,6 +376,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         statusCode, root.TryGetProperty("message", out var sm) ? sm.GetString() : null));
                     break;
                 case "ready":
+                    if (Volatile.Read(ref _stopping) != 0) return;
                     var readyUdid = root.TryGetProperty("udid", out var u) ? u.GetString() : null;
                     var transport = root.TryGetProperty("transport", out var t) ? t.GetString() : null;
                     if (!string.Equals(readyUdid, _requestedUdid, StringComparison.OrdinalIgnoreCase))
@@ -399,9 +419,12 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         root.TryGetProperty("code", out var wc) ? wc.GetString() : null,
                         root.TryGetProperty("message", out var m) ? m.GetString() : null));
                     break;
+                case "clipboard_read_started":
+                case "clipboard_read_finished":
                 case "clipboard_text":
-                    OnEvent?.Invoke(new BridgeEvent("clipboard_text", null, null,
-                        root.TryGetProperty("text", out var ct) ? ct.GetString() : null));
+                    OnEvent?.Invoke(new BridgeEvent(evt, null, null,
+                        root.TryGetProperty("text", out var ct) ? ct.GetString() : null,
+                        root.TryGetProperty("readId", out var readId) ? readId.GetInt64() : null));
                     break;
                 case "error":
                     Interlocked.Exchange(ref _terminalEventReceived, 1);
@@ -447,7 +470,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     }
 
     public async Task SendKeyboardAsync(IReadOnlyCollection<byte> usages,
-        CancellationToken ct = default, Func<bool>? canSend = null)
+        CancellationToken ct = default, Func<bool>? canSend = null, bool releaseAll = false)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
@@ -462,9 +485,10 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
-            // Drop stale presses after waiting for the writer. Empty reports
-            // release held keys and must still pass after focus is lost.
-            if (normalized.Length != 0 && canSend?.Invoke() == false) return;
+            // The caller supplies a session-only guard for cleanup and an
+            // ownership/focus guard for ordinary down/up reports. Stale empty
+            // reports must not release keys belonging to a replacement owner.
+            if (canSend?.Invoke() == false) return;
             // Recovery may close the gate while this packet waits for the writer.
             if (generation != Interlocked.Read(ref _readyGeneration)) return;
             if (!IsReady || _stdin is null)
@@ -474,6 +498,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 schema = CoreDeviceTouchProtocol.MessageSchema,
                 generation,
                 kind = CoreDeviceTouchProtocol.KeyboardMessageKind,
+                releaseAll,
                 seq = NextSequence(),
                 timestampNs = DateTimeOffset.UtcNow.ToUnixTimeNanoseconds(),
                 usages = normalized,
@@ -489,7 +514,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     }
 
     public async Task SendButtonAsync(ushort usagePage, ushort usageCode,
-        string state, CancellationToken ct = default, Func<bool>? canSend = null)
+        string state, CancellationToken ct = default, Func<bool>? canSend = null,
+        bool guardRelease = false)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
@@ -499,7 +525,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
-            if (state == "down" && canSend?.Invoke() == false) return;
+            if ((state == "down" || guardRelease) && canSend?.Invoke() == false) return;
             // Recovery may close the gate while this packet waits for the writer.
             if (generation != Interlocked.Read(ref _readyGeneration)) return;
             if (!IsReady || _stdin is null)

@@ -41,6 +41,29 @@ class Hid:
     async def create_keyboard_service(self, **kwargs): raise AssertionError('duplicate keyboard registration')
 
 class RecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reclaim_resets_host_and_device_endpoint_toggles(self):
+        from types import SimpleNamespace
+        from iostouch.qt.usbmux_usb import UsbMuxTransport
+        endpoints = [SimpleNamespace(bEndpointAddress=0x85, wMaxPacketSize=512),
+                     SimpleNamespace(bEndpointAddress=0x04, wMaxPacketSize=512)]
+        interface = SimpleNamespace(bInterfaceClass=0xff, bInterfaceSubClass=0xfe,
+                                    bInterfaceNumber=1)
+        class Configuration(list):
+            bConfigurationValue = 5
+        dev = Mock()
+        dev.get_active_configuration.return_value = Configuration([interface])
+        with patch('usb.util.claim_interface'), patch('usb.util.release_interface'), \
+                patch('usb.util.find_descriptor', side_effect=endpoints):
+            transport = UsbMuxTransport(dev, 'test-device')
+            self.assertEqual([(0x85,), (0x04,)],
+                             [c.args for c in dev.clear_halt.call_args_list])
+            # EP0 CLEAR_FEATURE does not reset Windows' pipe toggle. Never use
+            # it as a substitute when adopting a still-live capture mux.
+            dev.ctrl_transfer.assert_not_called()
+            dev.reset.assert_not_called()
+            dev.set_configuration.assert_not_called()
+            transport.close()
+
     async def test_idle_tunnel_eof_recovers_without_hid_timeout(self):
         s = self.session()
         reader = asyncio.get_running_loop().create_future()
@@ -181,6 +204,38 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(s._usb_mux_transport)
         mux.close.assert_called_once()
 
+    async def test_bridge_restart_checkpoint_preserves_mux_but_not_tcp_clients(self):
+        from types import SimpleNamespace
+        from iostouch.qt.usbmux_usb import UsbMuxTransport, MuxDevice, PROTO_CONTROL
+        def transport():
+            t = UsbMuxTransport.__new__(UsbMuxTransport)
+            t.dev = SimpleNamespace(bus=1, address=7, idProduct=0x12a8)
+            t.serial = 'test-device'; t._configuration = 5
+            t._thread = None; t._ep_out = Mock(wMaxPacketSize=512); t.bytes_out = 0
+            t.mux = MuxDevice(t._write); t.resumed = False
+            return t
+        old = transport()
+        old.mux.version = 2; old.mux.tx_seq = 4321; old.mux.rx_seq = 123
+        old.mux._next_sport = 77
+        state = json.loads(json.dumps(old.export_checkpoint()))
+        fresh = transport()
+        self.assertTrue(fresh.import_checkpoint(state))
+        self.assertEqual({}, fresh.mux._conns)
+        with patch.object(threading, 'Thread'), patch.object(fresh.mux, 'start') as version:
+            fresh.start(); version.assert_not_called()
+        fresh.mux._send_packet(PROTO_CONTROL, b'probe')
+        self.assertEqual(4322, fresh.mux.tx_seq)
+        self.assertEqual(77, fresh.mux._next_sport)
+        for key, value in [('serial', 'another-phone'), ('address', 8), ('configuration', 1),
+                           ('schema', 2), ('tx', -1), ('rx', 65536), ('port', '77')]:
+            with self.subTest(key=key):
+                candidate = transport()
+                self.assertFalse(candidate.import_checkpoint({**state, key: value}))
+                self.assertFalse(candidate.mux.ready.is_set())
+        old._thread = Mock(is_alive=Mock(return_value=True))
+        with self.assertRaisesRegex(Exception, 'live USB reader'):
+            old.export_checkpoint()
+
     async def test_verified_resume_is_retained_and_exits_probe_state(self):
         s = self.session()
         mux = Mock(failure_reason=None, resumed=True)
@@ -191,6 +246,22 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(mux.resumed)
         mux.close.assert_not_called()
         self.assertTrue(any(e.get('code') == 'capture_mux_resume_verified' for e in s.ipc.events))
+
+    async def test_checkpoint_lockdown_failure_renegotiates_once(self):
+        s = self.session()
+        s._usb_mux_transport = Mock(resumed=True)
+        s._usb_mux_server = Mock()
+        fresh = object()
+        s._create_lockdown_with_retry = AsyncMock(side_effect=[ConnectionResetError(), fresh])
+        s._start_capture_mux = AsyncMock()
+        self.assertIs(fresh, await s._create_initial_lockdown('USB'))
+        s._start_capture_mux.assert_awaited_once_with(attempts=1)
+        self.assertIsNone(s._mux_checkpoint)
+        s._usb_mux_transport = Mock(resumed=False)
+        s._create_lockdown_with_retry = AsyncMock(side_effect=ConnectionResetError())
+        s._start_capture_mux.reset_mock()
+        with self.assertRaises(ConnectionResetError): await s._create_initial_lockdown('USB')
+        s._start_capture_mux.assert_not_awaited()
 
     def session(self):
         s=bridge.TouchSession(Ipc(),120,'test-device')

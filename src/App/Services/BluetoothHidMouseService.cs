@@ -874,7 +874,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         Func<bool>? canSend)
     {
         if (!CanQueueReports) return Task.CompletedTask;
-        if (modifiers == 0 && usages.Count == 0) canSend = null;
+        canSend = CaptureReportSessionGuard(canSend);
         var report = new byte[8];
         report[0] = modifiers;
         var index = 2;
@@ -904,10 +904,28 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         return QueueKeyboardAsync(modifiers, usages, canSend);
     }
 
+    internal DirectKeyboardRoute CaptureKeyboardRoute(string target)
+    {
+        var generation = Volatile.Read(ref _routeGeneration);
+        bool Current() => generation == Volatile.Read(ref _routeGeneration) &&
+            string.Equals(target, _targetDeviceUdid, StringComparison.OrdinalIgnoreCase);
+        return new(target, "BluetoothDirect", this, generation, Current,
+            (modifiers, usages, canSend) => QueueKeyboardAsync(modifiers, usages,
+                () => Current() && canSend?.Invoke() != false));
+    }
+
+    private Func<bool> CaptureReportSessionGuard(Func<bool>? canSend = null)
+    {
+        var generation = Volatile.Read(ref _routeGeneration);
+        var target = _targetDeviceUdid;
+        return () => generation == Volatile.Read(ref _routeGeneration) &&
+            string.Equals(target, _targetDeviceUdid, StringComparison.OrdinalIgnoreCase) && canSend?.Invoke() != false;
+    }
+
     private Task SendConsumerAsync(ushort usage, Func<bool>? canSend = null)
     {
         if (!CanQueueReports) return Task.CompletedTask;
-        if (usage == 0) canSend = null;
+        canSend = CaptureReportSessionGuard(canSend);
         var report = new[] { (byte)(usage & 0xFF), (byte)(usage >> 8) };
         var completion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -927,7 +945,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     private Task SendNavigationAsync(ushort controls, Func<bool>? canSend = null)
     {
         if (!CanQueueReports) return Task.CompletedTask;
-        if (controls == 0) canSend = null;
+        canSend = CaptureReportSessionGuard(canSend);
         var report = new[] { (byte)(controls & 0xFF), (byte)(controls >> 8) };
         var completion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -947,6 +965,9 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     internal async Task SendIphoneSystemShortcutAsync(byte keyboardUsage,
         Func<bool>? canSend = null)
     {
+        if (canSend?.Invoke() == false) return;
+        var session = CaptureReportSessionGuard();
+        canSend = CaptureReportSessionGuard(canSend);
         Exception? failure = null;
         try
         {
@@ -964,8 +985,8 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
         try
         {
-            var keyReleased = SendKeyboardAsync(0, []);
-            var modifierReleased = SendConsumerAsync(0);
+            var keyReleased = QueueKeyboardAsync(0, [], session);
+            var modifierReleased = SendConsumerAsync(0, session);
             await Task.WhenAll(keyReleased, modifierReleased).ConfigureAwait(false);
         }
         catch (Exception error) { failure ??= error; }
@@ -985,6 +1006,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
     internal async Task SendIphoneAppSwitcherAsync(Func<bool>? canSend = null)
     {
+        canSend = CaptureReportSessionGuard(canSend);
         await SendNavigationControlAsync(NavigationMenu, canSend).ConfigureAwait(false);
         await Task.Delay(AppSwitcherDoublePressInterval).ConfigureAwait(false);
         await SendNavigationControlAsync(NavigationMenu, canSend).ConfigureAwait(false);
@@ -1003,6 +1025,9 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     internal async Task SendIphoneConsumerShortcutAsync(ushort usage, int holdMs,
         string? expectedTargetDeviceUdid, Func<bool>? canSend = null)
     {
+        if (canSend?.Invoke() == false) return;
+        var session = CaptureReportSessionGuard();
+        canSend = CaptureReportSessionGuard(canSend);
         if (expectedTargetDeviceUdid is not null &&
             !string.Equals(_targetDeviceUdid, expectedTargetDeviceUdid,
                 StringComparison.OrdinalIgnoreCase)) return;
@@ -1011,15 +1036,18 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             await SendConsumerAsync(usage, canSend).ConfigureAwait(false);
             await Task.Delay(holdMs).ConfigureAwait(false);
         }
-        finally { await SendConsumerAsync(0).ConfigureAwait(false); }
+        finally { await SendConsumerAsync(0, session).ConfigureAwait(false); }
     }
 
     private async Task SendNavigationControlAsync(ushort controls, Func<bool>? canSend = null)
     {
+        if (canSend?.Invoke() == false) return;
+        var session = CaptureReportSessionGuard();
+        canSend = CaptureReportSessionGuard(canSend);
         Exception? failure = null;
         try { await SendNavigationAsync(controls, canSend).ConfigureAwait(false); }
         catch (Exception error) { failure = error; }
-        try { await SendNavigationAsync(0).ConfigureAwait(false); }
+        try { await SendNavigationAsync(0, session).ConfigureAwait(false); }
         catch (Exception error) { failure ??= error; }
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }

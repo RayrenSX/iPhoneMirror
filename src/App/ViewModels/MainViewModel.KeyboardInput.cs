@@ -1,0 +1,35 @@
+using IPhoneMirror.App.Services;
+
+namespace IPhoneMirror.App.ViewModels;
+
+internal sealed partial class MainViewModel
+{
+    internal DirectKeyboardRoute? CaptureDirectKeyboardRoute(string? target)
+    {
+        if (_disposed || target is null) return null;
+        var control = FindControl(target);
+        var bridge = GetReadyUsbControlBridge(target);
+        if (control is not null && !control.Starting && !control.Stopping && bridge is not null)
+        {
+            var mode = ReferenceEquals(bridge, control.WiredBridge) && control.WiredEnabled
+                ? ReverseControlMode.Usb : ReverseControlMode.Wireless;
+            var apple = control.Router.AppleUdid;
+            var generation = control.Router.Generation;
+            var bridgeGeneration = bridge.InputGeneration;
+            bool Current() => !_disposed && apple is not null && bridge.IsReady &&
+                bridge.InputGeneration == bridgeGeneration && control.Router.Owns(apple, mode, generation);
+            if (!Current()) return null;
+            return new(target, mode == ReverseControlMode.Usb ? "WiredDirect" : "WirelessDirect",
+                bridge, generation, Current, (modifiers, usages, canSend) =>
+                    bridge.SendKeyboardAsync(usages, canSend: () => Current() && canSend?.Invoke() != false,
+                        releaseAll: canSend is null && usages.Count == 0),
+                (page, code, state, canSend) => bridge.SendButtonAsync(page, code, state,
+                    canSend: () => Current() && canSend?.Invoke() != false, guardRelease: true));
+        }
+        // One route is selected. Bluetooth cannot receive a second copy while
+        // a wired/wireless route is ready or still establishing ownership.
+        if (control is { Enabled: true } or { Starting: true } or { Stopping: true }) return null;
+        return BluetoothControlIsConnected && IsBluetoothControlTarget(target)
+            ? _bluetoothControl.CaptureKeyboardRoute(target) : null;
+    }
+}

@@ -1248,6 +1248,10 @@
     <system:String x:Key="MappingLimit">最多支持 256 条映射。</system:String>
     <system:String x:Key="MappingOff">键盘映射已关闭</system:String>
     <system:String x:Key="MappingReady">键盘映射已启用 · 目标为当前选中的设备</system:String>
+    <system:String x:Key="MappingDirectKeyboardActive">直连键盘输入已启用。请先停止直连键盘输入，再打开或启用键盘映射。</system:String>
+    <system:String x:Key="KeyboardInputModeNone">键盘输入未启用</system:String>
+    <system:String x:Key="KeyboardInputModeMapping">键盘映射已启用；不会将键盘按键直连转发到 Apple 设备。</system:String>
+    <system:String x:Key="KeyboardInputModeDirect">直连键盘输入已启用，键盘映射暂不可用。</system:String>
     <system:String x:Key="MappingPaused">键盘映射已暂停。点击当前投屏画面后恢复；编辑或文字输入期间不执行映射。</system:String>
     <system:String x:Key="MappingNoDevice">等待设备：请选择并连接 iPhone/iPad。</system:String>
     <system:String x:Key="MappingUnsupportedDevice">当前设备不支持触控反控。请选择 iPhone/iPad 投屏设备。</system:String>

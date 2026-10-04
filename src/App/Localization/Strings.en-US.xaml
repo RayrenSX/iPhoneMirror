@@ -1248,6 +1248,10 @@
     <system:String x:Key="MappingLimit">Up to 256 mappings are supported.</system:String>
     <system:String x:Key="MappingOff">Keyboard mapping is off</system:String>
     <system:String x:Key="MappingReady">Keyboard mapping is ready · targets the selected device</system:String>
+    <system:String x:Key="MappingDirectKeyboardActive">Direct keyboard input is active. Stop it before opening or enabling keyboard mapping.</system:String>
+    <system:String x:Key="KeyboardInputModeNone">Keyboard input is inactive</system:String>
+    <system:String x:Key="KeyboardInputModeMapping">Keyboard mapping is active; direct keyboard forwarding to Apple is disabled.</system:String>
+    <system:String x:Key="KeyboardInputModeDirect">Direct keyboard input to Apple is active; keyboard mapping is unavailable.</system:String>
     <system:String x:Key="MappingPaused">Mapping is paused. Click the current mirror to resume; editing and text input pause execution.</system:String>
     <system:String x:Key="MappingNoDevice">Waiting for a device: select and connect an iPhone/iPad.</system:String>
     <system:String x:Key="MappingUnsupportedDevice">This device does not support touch control. Select an iPhone/iPad mirror.</system:String>

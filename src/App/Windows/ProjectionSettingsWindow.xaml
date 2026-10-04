@@ -188,6 +188,8 @@
                                     AutomationProperties.AutomationId="OpenKeyboardMappingButton"/>
                             <TextBlock Text="{Binding KeyboardMappingStatus}" TextWrapping="Wrap" Margin="0,6,0,0"
                                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                            <TextBlock Text="{Binding KeyboardInputModeStatus}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
                         </StackPanel>
                     </Border>
 

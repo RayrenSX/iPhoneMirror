@@ -392,6 +392,7 @@ class UsbMuxTransport:
         self.serial = serial
         self.timeout_ms = timeout_ms
         cfg = dev.get_active_configuration()
+        self._configuration = int(cfg.bConfigurationValue)
         intf = None
         for i in cfg:
             if i.bInterfaceClass == 0xFF and i.bInterfaceSubClass == self.SUBCLASS_USBMUX:
@@ -409,9 +410,12 @@ class UsbMuxTransport:
             raise MuxError("usbmux bulk endpoints not found")
         for ep in (self._ep_in, self._ep_out):
             try:
-                dev.ctrl_transfer(0x02, 0x01, 0, ep.bEndpointAddress, b"", timeout=1000)
+                # Reset the host pipe's DATA toggle as well as the device's.
+                # A raw CLEAR_FEATURE resets only the phone; on reopen Windows
+                # can retain the old toggle and silently drop the next packet.
+                dev.clear_halt(ep.bEndpointAddress)
             except Exception as exc:  # noqa: BLE001
-                logger.debug("clear feature 0x%02x: %s", ep.bEndpointAddress, exc)
+                logger.debug("clear halt 0x%02x: %s", ep.bEndpointAddress, exc)
         self.mux = MuxDevice(self._write, wmax_packet=self._ep_out.wMaxPacketSize or 512, serial=serial)
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -446,6 +450,41 @@ class UsbMuxTransport:
             mux._resume_probe_pending = True
         self.mux = mux
         self.resumed = True
+
+    def export_checkpoint(self) -> dict:
+        """Checkpoint only after the reader and every TCP connection stopped."""
+        if self._thread is not None and self._thread.is_alive():
+            raise MuxError('cannot checkpoint a live USB reader')
+        with self.mux._lock:
+            if self.mux.version not in (1, 2) or self.mux._conns:
+                raise MuxError('cannot checkpoint an unnegotiated or busy mux')
+            return dict(schema=1, serial=self.serial, bus=self.dev.bus,
+                        address=self.dev.address, product=self.dev.idProduct,
+                        configuration=self._configuration,
+                        version=self.mux.version, tx=self.mux.tx_seq,
+                        rx=self.mux.rx_seq, port=self.mux._next_sport)
+
+    def import_checkpoint(self, state: dict) -> bool:
+        # The parent additionally scopes this in-memory value to one native
+        # capture lifetime. Never adopt another device/configuration, and never
+        # restore TCP clients, pressed keys, tunnels or authentication state.
+        expected = dict(schema=1, serial=self.serial, bus=self.dev.bus,
+                        address=self.dev.address, product=self.dev.idProduct,
+                        configuration=self._configuration)
+        if not isinstance(state, dict) or any(state.get(k) != v for k, v in expected.items()):
+            return False
+        if state.get('version') not in (1, 2) or any(
+                type(state.get(k)) is not int or not 0 <= state[k] <= 65535
+                for k in ('tx', 'rx', 'port')):
+            return False
+        with self.mux._lock:
+            self.mux.version = state['version']
+            self.mux.tx_seq, self.mux.rx_seq = state['tx'], state['rx']
+            self.mux._next_sport = state['port']
+            self.mux._resume_probe_pending = True
+            self.mux.ready.set()
+        self.resumed = True
+        return True
 
     def start(self) -> None:
         from iostouch.qt.usb import _is_timeout

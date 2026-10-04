@@ -18,6 +18,15 @@ internal sealed partial class MainViewModel
         OnPropertyChanged(nameof(KeyboardMappingStatus));
     }
 
+    private string _keyboardInputModeStatus = "KeyboardInputModeNone";
+    public string KeyboardInputModeStatus => Localization.LocalizationService.Get(_keyboardInputModeStatus);
+    internal void SetKeyboardInputModeStatus(string resourceKey)
+    {
+        if (_keyboardInputModeStatus == resourceKey) return;
+        _keyboardInputModeStatus = resourceKey;
+        OnPropertyChanged(nameof(KeyboardInputModeStatus));
+    }
+
     internal string GetMappingTargetStatus()
     {
         if (_disposed || SelectedDevice is null) return "MappingNoDevice";

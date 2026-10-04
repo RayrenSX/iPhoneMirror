@@ -51,6 +51,7 @@ internal static partial class Program
         }
         try
         {
+            ReleaseTestPhysicalKeys(window);
             Focus(first);
             firstPackets.SetLength(0);
             secondPackets.SetLength(0);

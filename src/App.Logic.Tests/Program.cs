@@ -440,7 +440,7 @@ Equal(true,
         "private UsbTouchBridgeHost? GetReadyUsbControlBridge(string? targetUdid)",
         StringComparison.Ordinal) &&
     mainWindowSource.Contains(
-        "SendUsbKeyboardAsync(usbUsages, routeUdid, canSend)",
+        "route.SendAsync(modifiers, usages, canSend)",
         StringComparison.Ordinal),
     "wired, wireless, and Bluetooth control modes remain mutually exclusive per device");
 Equal(true,
@@ -1500,7 +1500,7 @@ Equal(true,
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("ExceptionDispatchInfo.Capture(failure).Throw()",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("var keyReleased = SendKeyboardAsync(0, []",
+    bluetoothHidCode.Contains("var keyReleased = QueueKeyboardAsync(0, [], session)",
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("var modifierReleased = SendConsumerAsync(0",
         StringComparison.Ordinal),
