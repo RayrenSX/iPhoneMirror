@@ -34,7 +34,15 @@ public partial class MainWindow
         // UI preview must not install a system hook or read another app's focus.
         if (Application.Current is App { IsUiPreviewMode: true }) _mappingSettings.Enabled = false;
         _mappingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
-        _mappingTimer.Tick += (_, _) => { RefreshMappingStatus(); RefreshMappingOverlays(); };
+        _mappingTimer.Tick += (_, _) => { RefreshMappingStatus(); RefreshMappingOverlays(); RefreshMappingCursor(); };
+        _mappingContinuous.Failed += error => Dispatcher.BeginInvoke(() =>
+        {
+            if (_mappingClosing) return;
+            var status = error.Message.StartsWith("Mapping", StringComparison.Ordinal) ? error.Message : "MappingSendFailed";
+            _viewModel.SetKeyboardMappingStatus(status);
+            _mappingWindow?.SetRuntimeStatus(status);
+            DiagnosticLogger.ReverseControlWarning("keyboard_mapping", "continuous_failed", ("error", error.Message));
+        });
         if (_mappingSettings.Enabled && TryEnterKeyboardMappingInputMode()) StartMappingMonitoring();
         RefreshMappingStatus();
     }
@@ -44,6 +52,7 @@ public partial class MainWindow
         _mappingFocus ??= new KeyboardMappingFocusGuard();
         _mappingTimer?.Start();
         ReconcileKeyboardHook();
+        ReconcileMappingMouse();
     }
 
     private void ShowKeyboardMapping()
@@ -68,18 +77,13 @@ public partial class MainWindow
 
     private string? ApplyKeyboardMapping(KeyboardMappingSettings next)
     {
-        foreach (var entry in next.Mappings)
+        if (next.Validate() is { } invalidSettings) return LocalizationService.Get(invalidSettings);
+        foreach (var entry in next.Profiles.SelectMany(p => p.Mappings))
         {
             if (entry.Validate() is { } invalid) return LocalizationService.Get(invalid);
-            if (KeyboardMappingKeys.Conflict(entry.Key!, GetConfiguredShortcuts().Values) is { } conflict)
+            if (MappingInputConflict(entry) is { } conflict)
                 return LocalizationService.Get(conflict);
         }
-        if (next.Mappings.Count > 256) return LocalizationService.Get("MappingLimit");
-        for (var i = 0; i < next.Mappings.Count; ++i)
-            for (var j = i + 1; j < next.Mappings.Count; ++j)
-                if (next.Mappings[i].Id == next.Mappings[j].Id ||
-                    next.Mappings[i].Key!.SamePhysicalKey(next.Mappings[j].Key!))
-                    return LocalizationService.Get("MappingDuplicate");
         if (Application.Current is not App app) return LocalizationService.Get("MappingSaveFailed");
         var enteredMappingMode = false;
         if (next.Enabled && !IsKeyboardMappingInputModeActive)
@@ -122,6 +126,7 @@ public partial class MainWindow
             _mappingTimer?.Stop();
         }
         ReconcileKeyboardHook();
+        ReconcileMappingMouse();
         if (wasEnabled != next.Enabled)
             DiagnosticLogger.ReverseControl("keyboard_mapping", next.Enabled ? "enabled" : "disabled");
         RefreshMappingStatus();
@@ -178,6 +183,7 @@ public partial class MainWindow
 
     private void QueueMappedGesture(KeyboardMappingEntry mapping)
     {
+        if (mapping.Action == MappedTouchAction.ReleasePointer) { ReleaseMappingPointer(); return; }
         if (_mappingQueued.Count < CoreDeviceTouchProtocol.MaxSlots && !_mappingQueued.ContainsKey(mapping.Id))
         {
             var ticket = new object();
@@ -269,8 +275,20 @@ public partial class MainWindow
         LogMappingLimited("mapping_matched", entry, route.Target);
         try
         {
-            if (await _mappingExecutor.ExecuteAsync(entry, route, keyReleased, replayCompletedHold: true))
+            var action = entry;
+            var cycleIndex = _mappingCycles.GetValueOrDefault(entry.Id);
+            if (entry.Action == MappedTouchAction.CycleTargets)
+            {
+                var points = new[] { new MappingPoint(entry.X, entry.Y) }.Concat(entry.Targets).ToArray();
+                var point = points[cycleIndex % points.Length];
+                action = entry with { Action = MappedTouchAction.Tap, X = point.X, Y = point.Y };
+            }
+            if (await _mappingExecutor.ExecuteAsync(action, route, keyReleased, replayCompletedHold: true))
+                {
+                if (entry.Action == MappedTouchAction.CycleTargets) _mappingCycles[entry.Id] = (cycleIndex + 1) % (entry.Targets.Length + 1);
                 LogMappingLimited("action_sent", entry, route.Target);
+                if (entry.ReleasePointerAfter) ReleaseMappingPointer();
+            }
         }
         catch (OperationCanceledException) { LogMappingLimited("action_cancelled_or_disconnected", entry, route.Target); }
         catch (Exception error)
@@ -315,7 +333,10 @@ public partial class MainWindow
 
     private void CancelMappedGesture()
     {
-        ++_mappingGeneration;
+        Interlocked.Increment(ref _mappingGeneration);
+        _mappingContinuous.Cancel();
+        _mappingCycles.Clear();
+        ReleaseMappingCursor();
         _mappingHolds.Cancel();
         _mappingExecutor.Cancel();
         _keyboardRouter.ReleaseAllPressedKeys();
@@ -347,6 +368,7 @@ public partial class MainWindow
     private void DisposeKeyboardMapping()
     {
         _mappingClosing = true;
+        ReconcileMappingMouse();
         CancelMappingPositionPick();
         RefreshMappingOverlays();
         CancelMappedGesture();

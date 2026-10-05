@@ -6,6 +6,15 @@ namespace IPhoneMirror.App.Services;
 
 internal static class KeyboardMappingKeys
 {
+    internal static string DisplayInput(KeyboardMappingEntry entry)
+    {
+        var text = entry.InputKind == MappingInputKind.Keyboard ?
+            entry.Action == MappedTouchAction.Joystick ? string.Join(" / ", entry.InputKeys.Select(Display)) : Display(entry.Key) :
+            LocalizationService.Get(entry.InputKind == MappingInputKind.MouseButton ? "MappingMouse" + entry.MouseButton : "Mapping" + entry.InputKind);
+        return string.Concat((entry.Modifiers & 2) != 0 ? "Ctrl + " : "", (entry.Modifiers & 1) != 0 ? "Alt + " : "",
+            (entry.Modifiers & 4) != 0 ? "Shift + " : "", (entry.Modifiers & 8) != 0 ? "Win + " : "", text);
+    }
+
     internal static string Display(MappedKey? key)
     {
         if (key is null) return LocalizationService.Get("MappingCaptureHint");

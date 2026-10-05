@@ -1,5 +1,6 @@
 <UserControl x:Class="IPhoneMirror.App.Windows.MappingWizard.ConfirmationStep"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <UserControl.Resources><BooleanToVisibilityConverter x:Key="VisibleWhen"/></UserControl.Resources>
  <Border Style="{StaticResource CardBorder}" Padding="24" MaxWidth="420" VerticalAlignment="Center">
   <StackPanel>
    <TextBlock Text="{DynamicResource MappingKey}" Style="{StaticResource CaptionText}"/>
@@ -9,6 +10,7 @@
    <TextBlock Text="{Binding ParameterText}" Style="{StaticResource SecondaryText}"/>
    <TextBlock Text="{DynamicResource WizardPositionLabel}" Style="{StaticResource CaptionText}" Margin="0,20,0,4"/>
    <TextBlock Text="{Binding PositionText}" Style="{StaticResource BodyText}"/>
-  </StackPanel>
+   <CheckBox Visibility="{Binding CanReleaseAfter, Converter={StaticResource VisibleWhen}}" IsChecked="{Binding ReleasePointerAfter}" Margin="0,16,0,0"><TextBlock Text="{DynamicResource MappingReleaseAfter}" TextWrapping="Wrap"/></CheckBox>
+ </StackPanel>
  </Border>
 </UserControl>

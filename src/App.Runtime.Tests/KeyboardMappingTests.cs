@@ -70,15 +70,15 @@ internal static partial class Program
             "Fresh installs must have no default bindings and no capture.");
         initial.Language = "zh-HK";
         initial.KeyboardMapping = new() { Enabled = true, SuppressOriginalKey = true,
-            Mappings = Enum.GetValues<MappedTouchAction>().Select((a, i) => MappingEntry(a) with
+            Mappings = Enum.GetValues<MappedTouchAction>().Where(a => a <= MappedTouchAction.HoldUntilRelease).ToArray().Select((a, i) => MappingEntry(a) with
                 { Key = new MappedKey(0x41 + i, 0x10 + i, false) }).ToList() };
         store.Save(initial);
         var loaded = store.Load();
         MappingAssert(loaded.KeyboardMapping.Enabled && loaded.KeyboardMapping.SuppressOriginalKey &&
-            loaded.KeyboardMapping.Mappings.SequenceEqual(initial.KeyboardMapping.Mappings), "Mappings did not survive restart.");
+            loaded.KeyboardMapping.Mappings.Zip(initial.KeyboardMapping.Mappings).All(p => p.First.ContentEquals(p.Second)), "Mappings did not survive restart.");
         var clone = loaded.Clone();
         clone.KeyboardMapping.Mappings.Clear();
-        MappingAssert(loaded.KeyboardMapping.Mappings.Count == Enum.GetValues<MappedTouchAction>().Length, "Settings rollback snapshot aliases the mapping list.");
+        MappingAssert(loaded.KeyboardMapping.Mappings.Count == Enum.GetValues<MappedTouchAction>().Where(a => a <= MappedTouchAction.HoldUntilRelease).ToArray().Length, "Settings rollback snapshot aliases the mapping list.");
         var valid = JsonSerializer.Serialize(MappingEntry());
         var corruptCases = new[]
         {
@@ -91,7 +91,7 @@ internal static partial class Program
             var result = JsonSerializer.Deserialize<UpdateSettings>("{\"Language\":\"zh-HK\",\"KeyboardMapping\":" + json + "}")!;
             MappingAssert(result.Language == "zh-HK" && !result.KeyboardMapping.Enabled &&
                 result.KeyboardMapping.HadInvalidEntries, "Corrupt mapping reset unrelated settings or stayed enabled.");
-            MappingAssert(result.KeyboardMapping.SchemaVersion == 1, "Recovered mappings retained an unsupported schema version.");
+            MappingAssert(result.KeyboardMapping.SchemaVersion == KeyboardMappingSettings.CurrentVersion, "Recovered mappings retained an unsupported schema version.");
         }
         MappingAssert((MappingEntry() with { X = double.NaN }).Validate() is not null, "NaN was accepted.");
         MappingAssert((MappingEntry(MappedTouchAction.SwipeUp) with { Y = .1, Distance = .2 }).Validate() is not null,
@@ -151,7 +151,7 @@ internal static partial class Program
     private static async Task TestMappingGesturesAsync()
     {
         using var executor = new KeyboardMappingExecutor();
-        foreach (var action in Enum.GetValues<MappedTouchAction>().Where(a => a != MappedTouchAction.HoldUntilRelease))
+        foreach (var action in Enum.GetValues<MappedTouchAction>().Where(a => a <= MappedTouchAction.HoldUntilRelease).ToArray().Where(a => a != MappedTouchAction.HoldUntilRelease))
         {
             var samples = new List<(string Action, double X, double Y, long Ms)>();
             var clock = Stopwatch.StartNew();
@@ -391,7 +391,7 @@ internal static partial class Program
                     WizardNext(editor);
                     var actionBox = (ListBox)editor.FindName("ActionBox");
                     actionBox.SelectedValue = MappedTouchAction.Swipe;
-                    MappingAssert(actionBox.Items.Count == 5, "Existing action types were not retained.");
+                    MappingAssert(actionBox.Items.Count == 9, "Existing action types were not retained.");
                     WizardNext(editor);
                     MappingAssert(((ComboBox)editor.FindName("DirectionBox")).Items.Count == 5,
                         "Swipe directions were not grouped under one action.");

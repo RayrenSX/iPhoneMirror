@@ -24,6 +24,11 @@ internal sealed class KeyboardMappingHoldState
             }
     }
 
+    internal void Release(Guid id)
+    {
+        if (_held.Remove(id, out var held)) held.Release.Cancel();
+    }
+
     internal void Complete(Guid id, CancellationTokenSource release)
     {
         if (_held.TryGetValue(id, out var held) && ReferenceEquals(held.Release, release)) _held.Remove(id);

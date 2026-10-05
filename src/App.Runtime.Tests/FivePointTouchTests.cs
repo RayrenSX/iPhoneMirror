@@ -44,11 +44,14 @@ internal static partial class Program
         // The shared writer enforces five points even across separate input producers.
         packets.SetLength(0);
         var routes = Enumerable.Range(0, 6).Select(_ => Route()).ToArray();
-        for (var i = 0; i < 6; ++i) await routes[i].SendAsync("down", .1 * i, .4, default);
+        for (var i = 0; i < 5; ++i) await routes[i].SendAsync("down", .1 * i, .4, default);
+        try { await routes[5].SendAsync("down", .5, .4, default); throw new Exception("Sixth contact reported success."); }
+        catch (InvalidOperationException error) when (error.Message == "MappingContactUnavailable") { }
         MappingAssert(TouchPoints(packets).Length == 5, $"{context}: mixed producers bypassed the touch budget.");
         await routes[0].SendAsync("up", 0, .4, default);
         var beforeMove = packets.Length;
-        await routes[5].SendAsync("move", .7, .8, default);
+        try { await routes[5].SendAsync("move", .7, .8, default); throw new Exception("Unadmitted move reported success."); }
+        catch (InvalidOperationException error) when (error.Message == "MappingContactUnavailable") { }
         MappingAssert(packets.Length == beforeMove, "Rejected sixth finger was resurrected by a move.");
         await routes[5].SendAsync("up", .7, .8, default);
         await routes[5].SendAsync("down", .7, .8, default);

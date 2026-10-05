@@ -4272,10 +4272,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private Task SendRoutedTouchAsync(UsbTouchBridgeHost bridge, string action,
         double x, double y, int pointerId, CancellationToken token,
-        Func<bool>? canSend = null, long? expectedGeneration = null) =>
+        Func<bool>? canSend = null, long? expectedGeneration = null, bool requireAcceptance = false, bool requireAcknowledgement = false) =>
         bridge.SendTouchBatchAsync([new TouchPoint(pointerId, action, x, y)],
             DateTimeOffset.UtcNow.ToUnixTimeNanoseconds(),
-            Interlocked.Increment(ref _usbTouchSequence), token, canSend, expectedGeneration);
+            Interlocked.Increment(ref _usbTouchSequence), token, canSend, expectedGeneration, requireAcceptance, requireAcknowledgement);
 
     private async Task ShowCaptureErrorNoticeAsync(string errorTitle, string errorBody)
     {

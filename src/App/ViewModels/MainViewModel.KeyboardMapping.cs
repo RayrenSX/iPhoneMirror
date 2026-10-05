@@ -41,13 +41,13 @@ internal sealed partial class MainViewModel
     }
 
     internal MappedTouchRoute? CaptureMappingRoute(Func<bool> isCurrent,
-        Func<double, double, (double X, double Y)> transform)
-        => CaptureTouchRoute(SelectedDevice?.Udid, isCurrent, transform, requireSelection: true);
+        Func<double, double, (double X, double Y)> transform, bool requireAcknowledgement = false)
+        => CaptureTouchRoute(SelectedDevice?.Udid, isCurrent, transform, requireSelection: true, requireAcknowledgement);
 
     private int _nextTouchPointerId = 1; // Mouse/wheel retains ID 1.
 
     internal MappedTouchRoute? CaptureTouchRoute(string? targetUdid, Func<bool> isCurrent,
-        Func<double, double, (double X, double Y)> transform, bool requireSelection = false)
+        Func<double, double, (double X, double Y)> transform, bool requireSelection = false, bool requireAcknowledgement = false)
     {
         var control = FindControl(targetUdid);
         var bridge = GetReadyUsbControlBridge(targetUdid);
@@ -62,7 +62,8 @@ internal sealed partial class MainViewModel
             control.Router.Owns(appleUdid, mode, routerGeneration);
         bool Current() => SameSession() && !_disposed &&
             (!requireSelection || DeviceViewModel.UdidEquals(SelectedDevice?.Udid, control.DeviceUdid)) &&
-            ReferenceEquals(GetReadyUsbControlBridge(control.DeviceUdid), bridge) && isCurrent();
+            (ReferenceEquals(control.WiredBridge, bridge) && control.WiredEnabled ||
+                ReferenceEquals(control.WirelessBridge, bridge) && control.WirelessEnabled) && isCurrent();
         if (!Current()) return null;
         var pointerId = Interlocked.Increment(ref _nextTouchPointerId);
         return new(control.DeviceUdid, Current, async (action, x, y, token) =>
@@ -74,7 +75,7 @@ internal sealed partial class MainViewModel
             // they can change while a down/move waits behind another packet.
             // The transport deliberately exempts cleanup releases from this guard.
             await SendRoutedTouchAsync(bridge, action, x, y, pointerId, token,
-                () => Current() && !token.IsCancellationRequested, bridgeGeneration);
+                () => Current() && !token.IsCancellationRequested, bridgeGeneration, requireAcceptance: true, requireAcknowledgement).ConfigureAwait(false);
             if (action != "up" && !Current()) throw new OperationCanceledException();
         }, transform);
     }

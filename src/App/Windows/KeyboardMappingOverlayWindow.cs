@@ -230,7 +230,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
             var background = owner.TryFindResource("PreviewPanelAltBrush") as Brush ?? Brushes.DimGray;
             var foreground = owner.TryFindResource("PreviewTextBrush") as Brush ?? Brushes.White;
             var scale = Math.Clamp(Math.Min(ActualWidth, ActualHeight) / 400, .8, 1.25);
-            foreach (var entry in owner._entries.Where(e => e.Enabled))
+            foreach (var entry in owner._entries.Where(e => e.Enabled && e.NeedsPosition))
             {
                 var point = entry.DeviceCoordinates ? owner.Surface.ToPreview(entry.X, entry.Y) : (entry.X, entry.Y);
                 var start = owner.Project(point.Item1, point.Item2);
@@ -243,7 +243,18 @@ internal sealed class KeyboardMappingOverlayWindow : Window
                     if (entry.DeviceCoordinates) endpoint = owner.Surface.ToPreview(endpoint.X, endpoint.Y);
                     DrawPath(dc, start, owner.Project(endpoint.X, endpoint.Y), accent, scale);
                 }
-                var label = new FormattedText(KeyboardMappingKeys.Display(entry.Key), CultureInfo.CurrentUICulture,
+                if (entry.IsContinuous)
+                {
+                    var radius = (entry.Action == MappedTouchAction.Joystick ? entry.Joystick.Radius : entry.RelativeDrag.Radius) * Math.Min(ActualWidth, ActualHeight);
+                    dc.DrawEllipse(null, new Pen(accent, 1), start, radius, radius);
+                }
+                foreach (var target in entry.Action == MappedTouchAction.CycleTargets ? entry.Targets : [])
+                {
+                    var preview = entry.DeviceCoordinates ? owner.Surface.ToPreview(target.X, target.Y) : (target.X, target.Y);
+                    var location = owner.Project(preview.Item1, preview.Item2);
+                    dc.DrawEllipse(null, new Pen(accent, 1), location, 6 * scale, 6 * scale);
+                }
+                var label = new FormattedText(KeyboardMappingKeys.DisplayInput(entry), CultureInfo.CurrentUICulture,
                     FlowDirection.LeftToRight, new Typeface("Segoe UI"), 12 * scale, foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
                 var width = Math.Min(ActualWidth, Math.Max(28 * scale, label.Width + 14 * scale));
                 var height = 25 * scale;

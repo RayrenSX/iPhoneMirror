@@ -254,6 +254,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private nint _activeControlWindow;
     private string? _activeControlUdid;
     private bool _rawMouseInputEnabled;
+    private bool _rawMappingMouseMode;
     private bool _rawKeyboardInputEnabled;
     private nint _rawInputBuffer;
     private int _rawInputBufferSize;
@@ -1628,9 +1629,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ResetMainControlState();
         }
         if (message == WmInput &&
-            (IsBluetoothControlActive || IsUsbControlActive) &&
+            (_rawMappingMouseMode || IsBluetoothControlActive || IsUsbControlActive) &&
             (_rawMouseInputEnabled || _rawKeyboardInputEnabled) &&
-            _activeControlWindow == 0)
+            (_rawMappingMouseMode || _activeControlWindow == 0))
         {
             if (_rawMouseInputEnabled && GetRawInputType(lParam) == RimTypeMouse)
                 ProcessLatestQueuedRawMouseInput(hwnd, wParam, lParam);
@@ -1678,10 +1679,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void RegisterRawInput(bool mouseEnabled, bool keyboardEnabled)
     {
         if (_keyboardHook != 0) keyboardEnabled = false;
+        var mappingMouse = !_mappingClosing && IsKeyboardMappingInputModeActive && _mappingSettings.Enabled;
+        mouseEnabled |= mappingMouse;
         var hwnd = _windowSource?.Handle ?? 0;
         if (hwnd == 0) return;
         if (mouseEnabled == _rawMouseInputEnabled &&
-            keyboardEnabled == _rawKeyboardInputEnabled) return;
+            keyboardEnabled == _rawKeyboardInputEnabled && mappingMouse == _rawMappingMouseMode) return;
+        _rawMappingMouseMode = mappingMouse;
         _rawMouseDeltaTracker.Reset();
         var deviceSize = (uint)Marshal.SizeOf<RawInputDevice>();
         var devices = new RawInputDevice[2];
@@ -1693,7 +1697,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // legacy mouse messages only for the relative-mouse Bluetooth
             // route. USB/wireless control uses normal mouse messages so the
             // rest of the WPF window remains clickable.
-            Flags = mouseEnabled ? RidevInputSink | RidevNoLegacy : RidevRemove,
+            Flags = mouseEnabled ? RidevInputSink | (mappingMouse ? 0u : RidevNoLegacy) : RidevRemove,
             Target = mouseEnabled ? hwnd : 0,
         };
         // The actual preview surface is a native child HWND. Keyboard
@@ -1720,9 +1724,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ("keyboard", _rawKeyboardInputEnabled),
             ("mouse", _rawMouseInputEnabled),
             ("win32_error", registered ? 0 : Marshal.GetLastWin32Error())));
-        MainPreviewHost.SuppressMouseMove = _rawMouseInputEnabled;
-        MainPreviewHost.SuppressLegacyMouseButtons = _rawMouseInputEnabled;
-        if (mouseEnabled || keyboardEnabled)
+        MainPreviewHost.SuppressMouseMove = _rawMouseInputEnabled && !mappingMouse;
+        MainPreviewHost.SuppressLegacyMouseButtons = _rawMouseInputEnabled && !mappingMouse;
+        if (!mappingMouse && (mouseEnabled || keyboardEnabled))
         {
             MainPreviewHost.Focus();
         }
@@ -1806,6 +1810,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         if (input.Header.Type != RimTypeMouse) return;
+        if (_rawMappingMouseMode)
+        {
+            var desktop = (input.Mouse.Flags & 2) != 0;
+            var movement = _rawMouseDeltaTracker.Translate(input.Header.Device, input.Mouse.Flags, input.Mouse.LastX, input.Mouse.LastY,
+                GetSystemMetrics(desktop ? 78 : 0), GetSystemMetrics(desktop ? 79 : 1));
+            _mappingContinuous.Move(movement.X, movement.Y);
+            return; // mouse buttons have a single owner in the low level hook
+        }
         if (includeMouseMovement)
         {
             if (IsBluetoothControlActive)

@@ -2,7 +2,8 @@ namespace IPhoneMirror.App.Services;
 
 internal sealed record MappedTouchRoute(string Target, Func<bool> IsCurrent,
     Func<string, double, double, CancellationToken, Task> SendAsync,
-    Func<double, double, (double X, double Y)> Transform);
+    Func<double, double, (double X, double Y)> Transform,
+    Func<double, double, (double X, double Y)>? TransformOffset = null);
 
 // Up to five independent gestures. The caller captures an existing route; this
 // class never resolves a device, connects a backend, or converts coordinates.

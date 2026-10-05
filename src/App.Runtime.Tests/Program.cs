@@ -28,6 +28,8 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--custom-mapping", var customOutput])
+                return RunCustomMappingTests(customOutput);
             if (args is ["--keyboard-mapping-wizard", var wizardOutput])
                 return RunMappingWizardTests(wizardOutput);
             if (args is ["--keyboard-mapping-picking", var pickingOutput])

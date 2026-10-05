@@ -65,7 +65,7 @@ public partial class MainWindow
         _directKeyboardRoute = null;
         var pending = Task.WhenAll(_keyboardSends.ToArray());
         _keyboardHandoff = FinishKeyboardHandoffAsync(_keyboardHandoff, pending,
-            _mappingExecutor.Completion, oldRoute, generation);
+            Task.WhenAll(_mappingExecutor.Completion, _mappingContinuous.Completion), oldRoute, generation);
         DiagnosticLogger.ReverseControl("keyboard_input", "owner_changing",
             ("from", previous), ("to", next), ("generation", generation),
             ("device", AppLog.Device(oldRoute?.Target)), ("transport", oldRoute?.Transport));

@@ -10,6 +10,10 @@ public partial class MainWindow
 
     private bool TryHandlePointerShortcut(PreviewPointerEventArgs e, string? udid)
     {
+        if (IsKeyboardMappingInputModeActive && _mappingSettings.Enabled &&
+            (e.Kind == PreviewPointerKind.Wheel && _mappingSettings.Mappings.Any(m => m.Enabled && m.IsWheel) ||
+             e.Kind is PreviewPointerKind.ButtonDown or PreviewPointerKind.ButtonUp &&
+                (_mappingMousePresses.ContainsKey(e.Button) || _mappingSettings.Mappings.Any(m => m.Enabled && m.InputKind == MappingInputKind.MouseButton && m.MouseButton == e.Button)))) return true;
         var identity = (udid?.ToUpperInvariant() ?? string.Empty, e.Button);
         if (e.Kind == PreviewPointerKind.Reset)
         {

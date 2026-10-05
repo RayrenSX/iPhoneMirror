@@ -7,6 +7,10 @@ public partial class ActionSelectionStep : UserControl
 {
     public ActionSelectionStep() => InitializeComponent();
 }
+internal sealed record MappingInputOption(MappingInputKind Kind, int Button = 1)
+{
+    public string Label => LocalizationService.Get(Kind == MappingInputKind.MouseButton ? "MappingMouse" + Button : "Mapping" + Kind);
+}
 internal sealed record MappingActionOption(MappedTouchAction Value, SymbolRegular Icon)
 {
     public string Label => LocalizationService.Get("MappingAction" + Value);

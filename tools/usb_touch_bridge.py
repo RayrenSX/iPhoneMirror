@@ -2746,7 +2746,7 @@ class TouchSession:
             await self._recovery_event('hid_ready')
             await self._recovery_event('sender_restored')
         await self.ipc.emit({
-            'event': 'ready', 'protocol': PROTOCOL_VERSION,
+            'event': 'ready', 'protocol': PROTOCOL_VERSION, 'touchAck': True,
             'capabilities': CAPABILITIES, 'udid': self.udid, 'rateHz': self.rate_hz,
             'gateOpen': self.gate_open, 'authMode': self.auth_mode,
             'transport': self.transport_mode,
@@ -2907,6 +2907,9 @@ class TouchSession:
                                 self._input_verified = True
                                 await self.ipc.emit({'event': 'status', 'code': 'input_verified',
                                     'message': f'kind={frame.get("kind")} seq={frame.get("seq")} generation={self._generation}'})
+                            if frame.get('kind') == MESSAGE_KIND and frame.get('ack') is True:
+                                await self.ipc.emit({'event': 'touch_ack', 'seq': frame.get('seq'),
+                                                     'generation': self._generation})
                             break
                         except Exception as error:
                             if (attempt != 0 or self.transport_mode != 'usb' or

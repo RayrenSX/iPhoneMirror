@@ -74,7 +74,7 @@ internal static partial class Program
         MappingAssert(!state.IsDirty && !state.CanNext && !state.MoveNext(), "Empty key advanced or new draft is dirty.");
         state.SetKey(MappingTestKey);
         MappingAssert(state.MoveNext() && !state.CanNext, "Missing action was accepted.");
-        foreach (var action in Enum.GetValues<MappedTouchAction>())
+        foreach (var action in Enum.GetValues<MappedTouchAction>().Where(a => a <= MappedTouchAction.HoldUntilRelease).ToArray())
         {
             state = new(null, [], _ => null);
             state.SetKey(MappingTestKey); state.MoveNext(); state.SelectAction(action);

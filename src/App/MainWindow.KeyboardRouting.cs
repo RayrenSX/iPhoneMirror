@@ -118,6 +118,8 @@ public partial class MainWindow
         // the release of a key held when the transaction was cancelled.
         if (_mappingCapture.Process(key, down, _mappingCapture.Waiting,
             action => Dispatcher.BeginInvoke(action, DispatcherPriority.Input))) return true;
+        if (key.VirtualKey == 0x1B && (_mappingEscapeHeld || down && _mappingContinuous.HasRelativeDrag))
+        { _mappingEscapeHeld = down; if (down) ReleaseMappingPointer(); return true; }
         var generation = _keyboardRouter.Generation;
         var sourceForeground = _keyboardForegroundWindow();
         var mappingAllowed = IsKeyboardMappingInputModeActive && _mappingSettings.Enabled && MappingFocusAllows();
@@ -125,15 +127,17 @@ public partial class MainWindow
         {
             if (_mappingClosing || generation != _keyboardRouter.Generation || sourceForeground != _keyboardForegroundWindow())
                 return new(KeyboardEventOwner.Retired, true);
-            if (mappingAllowed && !chord && _viewModel.GetMappingTargetStatus() == "MappingReady")
+            if (mappingAllowed && _viewModel.GetMappingTargetStatus() == "MappingReady")
             {
-                var mapping = _mappingSettings.Mappings.FirstOrDefault(m => m.Enabled && m.Key!.SamePhysicalKey(physical));
+                var modifiers = _keyboardRouter.PressedModifiers & ~KeyboardShortcutRecognizer.Modifier(physical.VirtualKey);
+                if (_mappingSettings.Selected.ModifiersAsButtons) modifiers &= ~MappingOwnedModifiers();
+                var mapping = _mappingSettings.Mappings.FirstOrDefault(m => m.Enabled && m.MatchesKey(physical, modifiers) &&
+                    (!chord || modifiers != 0 || _mappingSettings.Selected.ModifiersAsButtons));
                 if (mapping is not null)
                     return new(KeyboardEventOwner.Mapping, physical.IsWindows || _mappingSettings.SuppressOriginalKey,
                         pressed =>
                         {
-                            if (pressed) QueueMappedGesture(mapping);
-                            else _mappingHolds.Process(physical, false);
+                            DispatchMappingInput(mapping, physical, pressed);
                         });
             }
             var session = _mappingWindow?.IsEditing != true && IsDirectKeyboardInputModeActive && CanForwardControlKeyboard(target, window)
@@ -144,10 +148,11 @@ public partial class MainWindow
                         physical.ScanCode | (physical.Extended ? 0x100 : 0)), target, false, window, session));
             return new(KeyboardEventOwner.Windows, false);
         }
-        var defer = mappingAllowed && (key.IsModifier || key.IsWindows) &&
-            _mappingSettings.Mappings.Any(m => m.Enabled && m.Key!.SamePhysicalKey(key));
+        var defer = mappingAllowed && !_mappingSettings.Selected.ModifiersAsButtons && (key.IsModifier || key.IsWindows) &&
+            _mappingSettings.Mappings.Any(m => m.Enabled && m.InputKeys.Any(k => k.SamePhysicalKey(key)));
         return _keyboardRouter.RouteEvent(key, down, Resolve, ReplayKeyboardEvent, defer,
-            bufferShortcutModifiers: CanForwardControlKeyboard(target, window) && _keyboardRouter.Mode != KeyboardInputMode.None);
+            bufferShortcutModifiers: !(mappingAllowed && _mappingSettings.Selected.ModifiersAsButtons) &&
+                CanForwardControlKeyboard(target, window) && _keyboardRouter.Mode != KeyboardInputMode.None);
     }
 
     private static void ReplayKeyboardEvent(MappedKey key, bool down)

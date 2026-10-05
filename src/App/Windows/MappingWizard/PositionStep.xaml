@@ -1,6 +1,7 @@
 <UserControl x:Class="IPhoneMirror.App.Windows.MappingWizard.PositionStep"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+ <UserControl.Resources><BooleanToVisibilityConverter x:Key="VisibleWhen"/></UserControl.Resources>
  <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
   <ui:SymbolIcon FontSize="40" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" Margin="0,0,0,20">
    <ui:SymbolIcon.Style><Style TargetType="ui:SymbolIcon">
@@ -14,5 +15,12 @@
   <TextBlock Text="{Binding PositionText}" Style="{StaticResource SecondaryText}" TextAlignment="Center" Margin="0,8,0,24"/>
   <Button x:Name="PickButton" HorizontalAlignment="Center" MinWidth="180" MinHeight="48"
    AutomationProperties.AutomationId="MappingPick"/>
+  <StackPanel Visibility="{Binding IsCycle, Converter={StaticResource VisibleWhen}}" Margin="0,16,0,0">
+   <TextBlock Text="{DynamicResource MappingCycleHelp}" Style="{StaticResource SecondaryText}"/>
+   <WrapPanel HorizontalAlignment="Center" Margin="0,8,0,0">
+    <Button x:Name="AddTargetButton" Content="{DynamicResource MappingAddTarget}" Margin="4"/>
+    <Button x:Name="RemoveTargetButton" Content="{DynamicResource MappingRemoveTarget}" Margin="4"/>
+   </WrapPanel>
+  </StackPanel>
  </StackPanel>
 </UserControl>

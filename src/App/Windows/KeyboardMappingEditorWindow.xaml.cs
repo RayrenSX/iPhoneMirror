@@ -35,9 +35,9 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
     private Action? _resumeOwnerClose;
     internal KeyboardMappingWizardState Wizard { get; }
     internal bool IsEditorClosed => _closed;
-    private bool CanAdvance => Wizard.CanNext && !_picking && !_disconnected && !_committed && _captureError is null;
+    private bool CanAdvance => !Wizard.Capturing && Wizard.CanNext && !_picking && !_disconnected && !_committed && _captureError is null;
     internal MappingEditorState State => _picking ? MappingEditorState.PickingPosition : Wizard.Capturing ? MappingEditorState.WaitingForKey :
-        Wizard.Draft.Key is null ? MappingEditorState.Idle : Wizard.HasPosition ? MappingEditorState.MappingReady : MappingEditorState.KeyCaptured;
+        !Wizard.HasKey ? MappingEditorState.Idle : Wizard.HasPosition ? MappingEditorState.MappingReady : MappingEditorState.KeyCaptured;
 
     internal KeyboardMappingEditorWindow(KeyboardMappingEntry? entry, IReadOnlyList<KeyboardMappingEntry> mappings,
         Func<MappedKey, string?> conflict, Func<Action<MappedKey>, string?> beginCapture,
@@ -64,6 +64,13 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
         _actionView.ActionBox.SelectionChanged += OnActionChanged;
         _parameterView.DirectionBox.SelectionChanged += OnDirectionChanged;
         _positionView.PickButton.Click += OnPickClick;
+        _positionView.AddTargetButton.Click += (_, _) => PickPosition(true);
+        _positionView.RemoveTargetButton.Click += (_, _) => Wizard.RemoveTarget();
+        _parameterView.DownKeyButton.Click += (_, _) => StartCapture(1);
+        _parameterView.LeftKeyButton.Click += (_, _) => StartCapture(2);
+        _parameterView.RightKeyButton.Click += (_, _) => StartCapture(3);
+        _keyView.InputBox.SelectionChanged += (_, _) =>
+        { if (!_loading && _keyView.InputBox.SelectedItem is MappingInputOption option) { StopCapture(); Wizard.SetInput(option.Kind, option.Button); } };
         Wizard.PropertyChanged += OnDraftChanged;
         _statusTimer.Tick += OnPreviewStatusTick;
         _completionTimer.Tick += (_, _) => { _completionTimer.Stop(); Close(); };
@@ -94,7 +101,15 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
             new MappingActionOption(MappedTouchAction.HoldUntilRelease, SymbolRegular.HandLeft20),
             new MappingActionOption(MappedTouchAction.DoubleTap, SymbolRegular.CursorClick20),
             new MappingActionOption(MappedTouchAction.Swipe, SymbolRegular.ArrowSwap20),
+            new MappingActionOption(MappedTouchAction.Joystick, SymbolRegular.ArrowSwap20),
+            new MappingActionOption(MappedTouchAction.RelativeDrag, SymbolRegular.Cursor20),
+            new MappingActionOption(MappedTouchAction.CycleTargets, SymbolRegular.CursorClick20),
+            new MappingActionOption(MappedTouchAction.ReleasePointer, SymbolRegular.HandLeft20),
         };
+        _keyView.InputBox.ItemsSource = new[] { new MappingInputOption(MappingInputKind.Keyboard),
+            new MappingInputOption(MappingInputKind.MouseButton, 1), new MappingInputOption(MappingInputKind.MouseButton, 2),
+            new MappingInputOption(MappingInputKind.MouseButton, 4), new MappingInputOption(MappingInputKind.MouseButton, 8), new MappingInputOption(MappingInputKind.MouseButton, 16),
+            new MappingInputOption(MappingInputKind.WheelUp), new MappingInputOption(MappingInputKind.WheelDown) };
         _parameterView.DirectionBox.ItemsSource = new[] { MappedTouchAction.Swipe, MappedTouchAction.SwipeUp,
             MappedTouchAction.SwipeDown, MappedTouchAction.SwipeLeft, MappedTouchAction.SwipeRight }
             .Select(a => new MappingSwipeDirectionOption(a)).ToArray();
@@ -102,6 +117,8 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
     }
     private void SyncSelection()
     {
+        _keyView.InputBox.SelectedItem = _keyView.InputBox.Items.Cast<MappingInputOption>().FirstOrDefault(o => o.Kind == Wizard.Draft.InputKind &&
+            (o.Kind != MappingInputKind.MouseButton || o.Button == Wizard.Draft.MouseButton));
         _actionView.ActionBox.SelectedValue = Wizard.HasAction ? Wizard.IsSwipe ? MappedTouchAction.Swipe : Wizard.Draft.Action : null;
         _parameterView.DirectionBox.SelectedValue = Wizard.IsSwipe ? Wizard.Draft.Action : MappedTouchAction.Swipe;
     }
@@ -119,12 +136,14 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
         SaveButton.IsEnabled = CanAdvance;
         PreviousButton.IsEnabled = !_picking && !_committed;
         _positionView.PickButton.IsEnabled = _beginPick is not null && !_picking && !_disconnected;
+        _positionView.AddTargetButton.IsEnabled = Wizard.HasPosition && Wizard.Draft.Targets.Length < 31 && _positionView.PickButton.IsEnabled;
+        _positionView.RemoveTargetButton.IsEnabled = Wizard.Draft.Targets.Length > 0 && !_picking;
         _positionView.PickButton.SetResourceReference(ContentControl.ContentProperty,
             Wizard.HasPosition ? "MappingRepick" : Wizard.IsSwipe ? "WizardRecordGesture" : "MappingPick");
         _positionView.PickStatus.Text = L(Wizard.HasPosition ? Wizard.IsSwipe ? "WizardGestureSelected" : "WizardPositionSelected" : "WizardReadyToPick");
         var error = Wizard.ErrorFor(Wizard.Current);
         RefreshError();
-        ConflictPanel.Visibility = Wizard.Current == MappingWizardStep.Key && error == "WizardDuplicate" ? Visibility.Visible : Visibility.Collapsed;
+        ConflictPanel.Visibility = error == "WizardDuplicate" ? Visibility.Visible : Visibility.Collapsed;
         RefreshIndicator(); RefreshLayout();
     }
     private void RefreshError()
@@ -179,7 +198,7 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
         StepIndicator.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         StepNumberText.Visibility = StepTitle.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         StepHeading.Margin = new Thickness(0, 0, 0, compact ? 12 : 24);
-        StepPage.Height = Math.Max(300, StepScroller.ActualHeight - 24);
+        StepPage.MinHeight = Math.Max(300, StepScroller.ActualHeight - 24);
     }
     private void EnterStep()
     {
@@ -243,17 +262,18 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
     }
     private void OnCaptureClick(object sender, RoutedEventArgs e)
     { if (Wizard.Capturing) StopCapture(); else StartCapture(); }
-    private void StartCapture()
+    private void StartCapture(int direction = 0)
     {
-        if (_closed || Wizard.Current != MappingWizardStep.Key) return;
+        if (_closed || (direction == 0 ? Wizard.Current != MappingWizardStep.Key || !Wizard.IsKeyboard : Wizard.Current != MappingWizardStep.Parameters)) return;
+        StopCapture();
         _captureError = null; Wizard.Capturing = true;
         var generation = ++_captureGeneration; Wizard.Notify();
         var error = _beginCapture(key =>
         {
-            if (_closed || !Wizard.Capturing || generation != _captureGeneration || Wizard.Current != MappingWizardStep.Key) return;
+            if (_closed || !Wizard.Capturing || generation != _captureGeneration) return;
             StopCapture();
             if (key.Validate() is { } invalid) { _captureError = L(invalid); Refresh(); return; }
-            Wizard.SetKey(key);
+            if (direction == 0) Wizard.SetKey(key); else Wizard.SetDirectionKey(direction, key);
         });
         if (error is not null) { StopCapture(); _captureError = error; Refresh(); }
     }
@@ -269,7 +289,7 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
     { if (!_loading && Wizard.IsSwipe && _parameterView.DirectionBox.SelectedValue is MappedTouchAction action) Wizard.SelectAction(action); }
     private void OnPreviewStatusTick(object? sender, EventArgs e)
     {
-        if (_closed || _committed || _previewSurface is null || !IsVisible || DiscardPanel.Visibility == Visibility.Visible) return;
+        if (!Wizard.NeedsPosition || _closed || _committed || _previewSurface is null || !IsVisible || DiscardPanel.Visibility == Visibility.Visible) return;
         var surface = _previewSurface();
         var disconnected = surface is null && _everConnected;
         if (surface is not null)
@@ -296,9 +316,10 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
             RefreshError();
         SaveButton.IsEnabled = CanAdvance;
     }
-    private void OnPickClick(object sender, RoutedEventArgs e)
+    private void OnPickClick(object sender, RoutedEventArgs e) => PickPosition(false);
+    private void PickPosition(bool additional)
     {
-        if (Wizard.Current != MappingWizardStep.Position || _picking || _beginPick is null || Wizard.Draft.Key is null) return;
+        if (Wizard.Current != MappingWizardStep.Position || _picking || _beginPick is null || !Wizard.HasKey) return;
         StopCapture();
         _picking = true; _previewError = _pickError = null;
         var generation = ++_pickGeneration; Refresh();
@@ -307,7 +328,7 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
             if (_closed || !_picking || generation != _pickGeneration || Wizard.Current != MappingWizardStep.Position) return;
             ++_pickGeneration;
             _picking = false;
-            if (result is not null) Wizard.SetPosition(result);
+            if (result is not null) { if (additional) Wizard.AddTarget(result); else Wizard.SetPosition(result); }
             Refresh();
         });
         if (error is not null) { _picking = false; _pickError = error; Refresh(); }

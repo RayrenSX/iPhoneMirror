@@ -45,6 +45,9 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     private readonly HashSet<int> _touchContacts = [];
     private long _touchContactGeneration = -1;
     private long _sequence;
+    private sealed record TouchAcknowledgement(long Sequence, long Generation, TaskCompletionSource Done);
+    private TouchAcknowledgement? _pendingTouchAck;
+    internal bool SupportsTouchAcknowledgements { get; private set; }
     private int _stopping;
     private int _terminalEventReceived;
     private string? _muxCheckpoint;
@@ -194,7 +197,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     public async Task SendTouchBatchAsync(IReadOnlyList<TouchPoint> points, long timestampNs,
         long sequence, CancellationToken ct = default, Func<bool>? canSend = null,
-        long? expectedGeneration = null)
+        long? expectedGeneration = null, bool requireAcceptance = false, bool requireAcknowledgement = false)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
@@ -220,9 +223,11 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 throw new OperationCanceledException();
             // Pure releases must pass after focus loss. A queued contact or
             // movement belongs to the focus snapshot that created it.
-            if (points.Any(point => point.Action != "up") && canSend?.Invoke() == false) return;
+            if (points.Any(point => point.Action != "up") && canSend?.Invoke() == false)
+            { if (requireAcceptance) throw new OperationCanceledException(); return; }
             // Recovery may close the gate while this packet waits for the writer.
-            if (generation != Interlocked.Read(ref _readyGeneration)) return;
+            if (generation != Interlocked.Read(ref _readyGeneration))
+            { if (requireAcceptance) throw new OperationCanceledException(); return; }
             if (!IsReady || _stdin is null)
                 throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
             if (_touchContactGeneration != generation)
@@ -230,6 +235,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 _touchContacts.Clear();
                 _touchContactGeneration = generation;
             }
+            if (requireAcknowledgement && !SupportsTouchAcknowledgements)
+                throw new InvalidOperationException("MappingBridgeUpdateRequired");
             var contacts = new HashSet<int>(_touchContacts);
             var accepted = new List<TouchPoint>(points.Count);
             foreach (var point in points)
@@ -244,6 +251,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 else if (point.Action == "up") contacts.Remove(point.PointerId);
                 accepted.Add(point);
             }
+            if (requireAcceptance && accepted.Count != points.Count)
+                throw new InvalidOperationException("MappingContactUnavailable");
             if (accepted.Count == 0) return;
             var frameSequence = NextSequence();
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
@@ -251,13 +260,31 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                     schema = CoreDeviceTouchProtocol.MessageSchema,
                     generation,
                     kind = CoreDeviceTouchProtocol.MessageKind,
+                    ack = requireAcknowledgement,
                     seq = frameSequence,
                     timestampNs,
                     points = accepted,
                 });
-            await WriteFrameAsync(bytes, ct);
             _touchContacts.Clear();
             _touchContacts.UnionWith(contacts);
+            var pending = requireAcknowledgement ? new TouchAcknowledgement(frameSequence, generation,
+                new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)) : null;
+            Volatile.Write(ref _pendingTouchAck, pending);
+            try
+            {
+                await WriteFrameAsync(bytes, ct, requireAcknowledgement ? 2 : 10).ConfigureAwait(false);
+                if (pending is not null)
+                    await pending.Done.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Unknown delivery must close the gate. The bridge releases its
+                // contacts when stdin closes; no later gesture may reuse them.
+                IsReady = false; GateOpen = false;
+                try { _stdin?.Close(); } catch { }
+                throw new InvalidOperationException("MappingTouchTimeout");
+            }
+            finally { Volatile.Write(ref _pendingTouchAck, null); }
         }
         finally
         {
@@ -284,7 +311,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     // Called only under _sendLock. Cancellation may reject a frame before its
     // first byte, but must not leave a length prefix without its JSON payload.
-    private async Task WriteFrameAsync(byte[] payload, CancellationToken ct)
+    private async Task WriteFrameAsync(byte[] payload, CancellationToken ct, int timeoutSeconds = 10)
     {
         ct.ThrowIfCancellationRequested();
         var frame = new byte[sizeof(uint) + payload.Length];
@@ -296,7 +323,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         {
             // The caller can cancel after this point; finish the current frame
             // before its cleanup release is allowed to acquire the writer lock.
-            using var writeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var writeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
             await stdin.BaseStream.WriteAsync(frame, writeTimeout.Token);
             await stdin.BaseStream.FlushAsync(writeTimeout.Token);
         }
@@ -313,6 +340,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     public async Task StopAsync()
     {
+        Volatile.Read(ref _pendingTouchAck)?.Done.TrySetCanceled();
         Interlocked.Exchange(ref _stopping, 1);
         IsReady = false;
         GateOpen = false;
@@ -406,6 +434,11 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             var evt = root.GetProperty("event").GetString();
             switch (evt)
             {
+                case "touch_ack":
+                    var pending = Volatile.Read(ref _pendingTouchAck);
+                    if (pending is not null && root.GetProperty("seq").GetInt64() == pending.Sequence &&
+                        root.GetProperty("generation").GetInt64() == pending.Generation) pending.Done.TrySetResult();
+                    break;
                 case "capture_mux_checkpoint":
                     if (!_requestedWireless && Volatile.Read(ref _stopping) != 0 &&
                         root.TryGetProperty("state", out var checkpoint) &&
@@ -417,6 +450,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                     var statusCode = root.TryGetProperty("code", out var c) ? c.GetString() : null;
                     if (statusCode == "recovery_triggered")
                     {
+                        Volatile.Read(ref _pendingTouchAck)?.Done.TrySetCanceled();
                         IsReady = false;
                         GateOpen = false;
                     }
@@ -445,6 +479,8 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         RejectReady("bridge_transport_mismatch", LocalizationService.Format("TouchBridgeTransportMismatchFormat", expectedTransport, transport));
                         return;
                     }
+                    SupportsTouchAcknowledgements = root.TryGetProperty("touchAck", out var touchAck) && touchAck.ValueKind == JsonValueKind.True;
+                    Volatile.Read(ref _pendingTouchAck)?.Done.TrySetCanceled();
                     Udid = readyUdid;
                     RateHz = root.TryGetProperty("rateHz", out var r) ? r.GetInt32() : 0;
                     GateOpen = root.TryGetProperty("gateOpen", out var g) && g.GetBoolean();
@@ -481,6 +517,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         root.TryGetProperty("readId", out var readId) ? readId.GetInt64() : null));
                     break;
                 case "error":
+                    Volatile.Read(ref _pendingTouchAck)?.Done.TrySetCanceled();
                     Interlocked.Exchange(ref _terminalEventReceived, 1);
                     IsReady = false;
                     GateOpen = false;

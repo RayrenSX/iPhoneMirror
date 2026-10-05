@@ -23,6 +23,25 @@
         </Grid>
         <Border Grid.Row="1" Style="{StaticResource CardBorder}" Padding="16" Margin="0,0,0,12">
             <StackPanel>
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <ComboBox x:Name="ProfileBox" DisplayMemberPath="Label" SelectedValuePath="Id" SelectionChanged="OnProfileChanged" AutomationProperties.Name="{DynamicResource MappingProfile}"/>
+                    <Button Grid.Column="1" Content="⋯" Margin="8,0,0,0" MinWidth="40" AutomationProperties.Name="{DynamicResource MappingProfileActions}" Click="OnProfileMenuClick">
+                        <Button.ContextMenu><ContextMenu>
+                            <MenuItem Header="{DynamicResource MappingNewProfile}" Tag="new" Click="OnProfileCommand"/>
+                            <MenuItem Header="{DynamicResource MappingCopyProfile}" Tag="copy" Click="OnProfileCommand"/>
+                            <MenuItem Header="{DynamicResource MappingDeleteProfile}" Tag="delete" Click="OnProfileCommand"/>
+                            <Separator/>
+                            <MenuItem Header="{DynamicResource MappingImportProfile}" Tag="import" Click="OnProfileCommand"/>
+                            <MenuItem Header="{DynamicResource MappingExportProfile}" Tag="export" Click="OnProfileCommand"/>
+                        </ContextMenu></Button.ContextMenu>
+                    </Button>
+                </Grid>
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBox x:Name="ProfileNameBox" MaxLength="80" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingProfileName}"/>
+                    <Button Grid.Column="1" Content="{DynamicResource MappingRenameProfile}" Tag="rename" Click="OnProfileCommand" Margin="8,0,0,0"/>
+                </Grid>
                 <CheckBox x:Name="EnabledBox" Content="{DynamicResource MappingEnable}"
                     Click="OnEnabledClick" AutomationProperties.AutomationId="MappingEnable"/>
                 <TextBlock x:Name="RuntimeStatus" TextWrapping="Wrap" Foreground="{DynamicResource AccentBrush}" Margin="0,8,0,0"/>
@@ -30,6 +49,7 @@
                           AutomationProperties.Name="{DynamicResource MappingSuppress}">
                     <TextBlock Text="{DynamicResource MappingSuppress}" TextWrapping="Wrap"/>
                 </CheckBox>
+                <CheckBox x:Name="ModifiersBox" Margin="0,10,0,0" Click="OnModifiersClick"><TextBlock Text="{DynamicResource MappingModifiersAsButtons}" TextWrapping="Wrap"/></CheckBox>
                 <TextBlock Text="{DynamicResource MappingGlobalHelp}" TextWrapping="Wrap" Margin="0,6,0,0"
                     Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
             </StackPanel>

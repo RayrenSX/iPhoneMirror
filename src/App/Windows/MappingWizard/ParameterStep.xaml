@@ -17,5 +17,44 @@
    <TextBox x:Name="IntervalBox" Text="{Binding Interval, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource RoundedTextBox}"
     AutomationProperties.Name="{DynamicResource MappingInterval}"/>
   </StackPanel>
+
+  <StackPanel Visibility="{Binding IsJoystick, Converter={StaticResource VisibleWhen}}">
+   <TextBlock Text="{DynamicResource MappingDirectionKeys}" Style="{StaticResource DetailLabel}"/>
+   <TextBlock Text="{DynamicResource MappingUpKeyHelp}" Style="{StaticResource SecondaryText}" Margin="0,0,0,8"/>
+   <UniformGrid Columns="3">
+    <StackPanel Margin="0,0,8,0"><TextBlock Text="{DynamicResource MappingDown}"/><Button x:Name="DownKeyButton" Content="{Binding DownText}" Padding="8"/></StackPanel>
+    <StackPanel Margin="0,0,8,0"><TextBlock Text="{DynamicResource MappingLeft}"/><Button x:Name="LeftKeyButton" Content="{Binding LeftText}" Padding="8"/></StackPanel>
+    <StackPanel><TextBlock Text="{DynamicResource MappingRight}"/><Button x:Name="RightKeyButton" Content="{Binding RightText}" Padding="8"/></StackPanel>
+   </UniformGrid>
+   <CheckBox IsChecked="{Binding OppositeNeutral}" Margin="0,12,0,0"><TextBlock Text="{DynamicResource MappingOppositeNeutral}" TextWrapping="Wrap"/></CheckBox>
+  </StackPanel>
+  <StackPanel Visibility="{Binding IsContinuous, Converter={StaticResource VisibleWhen}}" Margin="0,12,0,0">
+   <TextBlock Text="{DynamicResource MappingRadius}" Style="{StaticResource DetailLabel}"/>
+   <TextBlock Text="{Binding Radius, StringFormat=P0}" Style="{StaticResource CaptionText}"/>
+   <Slider Minimum="0.01" Maximum="0.45" Value="{Binding Radius}" TickFrequency="0.01" IsSnapToTickEnabled="True" AutomationProperties.Name="{DynamicResource MappingRadius}"/>
+  </StackPanel>
+  <StackPanel Visibility="{Binding IsJoystick, Converter={StaticResource VisibleWhen}}" Margin="0,12,0,0">
+   <TextBlock Text="{DynamicResource MappingStartup}" Style="{StaticResource DetailLabel}"/>
+   <TextBlock Text="{Binding StartupMs, StringFormat={}{0:0} ms}" Style="{StaticResource CaptionText}"/>
+   <Slider Minimum="0" Maximum="500" Value="{Binding StartupMs}" TickFrequency="10" IsSnapToTickEnabled="True" AutomationProperties.Name="{DynamicResource MappingStartup}"/>
+   <TextBlock Text="{DynamicResource MappingTurn}" Style="{StaticResource DetailLabel}" Margin="0,12,0,0"/>
+   <TextBlock Text="{Binding TurnMs, StringFormat={}{0:0} ms}" Style="{StaticResource CaptionText}"/>
+   <Slider Minimum="0" Maximum="500" Value="{Binding TurnMs}" TickFrequency="10" IsSnapToTickEnabled="True" AutomationProperties.Name="{DynamicResource MappingTurn}"/>
+  </StackPanel>
+  <StackPanel Visibility="{Binding IsRelativeDrag, Converter={StaticResource VisibleWhen}}" Margin="0,12,0,0">
+   <TextBlock Text="{DynamicResource MappingSensitivityX}" Style="{StaticResource DetailLabel}"/>
+   <TextBlock Text="{Binding SensitivityX, StringFormat=N2}" Style="{StaticResource CaptionText}"/>
+   <Slider Minimum="0.01" Maximum="5" Value="{Binding SensitivityX}" TickFrequency="0.01" IsSnapToTickEnabled="True" AutomationProperties.Name="{DynamicResource MappingSensitivityX}"/>
+   <TextBlock Text="{DynamicResource MappingSensitivityY}" Style="{StaticResource DetailLabel}" Margin="0,12,0,0"/>
+   <TextBlock Text="{Binding SensitivityY, StringFormat=N2}" Style="{StaticResource CaptionText}"/>
+   <Slider Minimum="0.01" Maximum="5" Value="{Binding SensitivityY}" TickFrequency="0.01" IsSnapToTickEnabled="True" AutomationProperties.Name="{DynamicResource MappingSensitivityY}"/>
+   <WrapPanel Margin="0,12,0,0">
+    <CheckBox Content="{DynamicResource MappingInvertX}" IsChecked="{Binding InvertX}" Margin="0,0,16,0"/>
+    <CheckBox Content="{DynamicResource MappingInvertY}" IsChecked="{Binding InvertY}"/>
+   </WrapPanel>
+   <CheckBox IsChecked="{Binding ToggleDrag}" Margin="0,12,0,0"><TextBlock Text="{DynamicResource MappingToggleDrag}" TextWrapping="Wrap"/></CheckBox>
+   <CheckBox IsChecked="{Binding Recenter}" Margin="0,12,0,0"><TextBlock Text="{DynamicResource MappingRecenter}" TextWrapping="Wrap"/></CheckBox>
+   <TextBlock Text="{DynamicResource MappingDragHelp}" Style="{StaticResource SecondaryText}" Margin="0,12,0,0"/>
+  </StackPanel>
  </StackPanel>
 </UserControl>

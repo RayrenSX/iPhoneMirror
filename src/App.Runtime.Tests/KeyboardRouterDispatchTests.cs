@@ -107,10 +107,10 @@ internal static partial class Program
                 Key(0x43, false); Key(0xA3, false); FinishClipboard();
                 clipboardFrames = MappingFrames(packets);
                 var copyReports = clipboardFrames.Where(f => f.TryGetProperty("usages", out _))
-                    .Select(f => string.Join(",", f.GetProperty("usages").EnumerateArray().Select(v => v.GetInt32()))).ToArray();
-                MappingAssert(copyReports.SequenceEqual(new[] { "227", "227,6", "227", "" }) &&
+                    .Select(f => string.Join(",", f.GetProperty("usages").EnumerateArray().Select(v => v.GetInt32()).Order())).ToArray();
+                MappingAssert(copyReports.SequenceEqual(new[] { "227", "6,227", "227", "" }) &&
                     clipboardFrames.Count == 5 && clipboardFrames[^1].GetProperty("kind").GetString() == "read_clipboard",
-                    $"{mode}: Ctrl+C did not send one released Command+C and refresh the phone clipboard.");
+                    $"{mode}: Ctrl+C did not send one released Command+C and refresh the phone clipboard. Frames: {string.Join(" | ", clipboardFrames.Select(f => f.ToString()))}");
                 SetKeyboardField(main, "_isSettingsPanelVisible", true);
                 SetKeyboardField(main, "_keyboardFocusedWindow", (Func<nint>)(() => 0));
                 packets.SetLength(0);

@@ -53,6 +53,7 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
 
     private void Refresh()
     {
+        RefreshProfiles();
         ErrorText.Text = LocalizationService.RefreshText(ErrorText.Text);
         EnabledBox.IsChecked = _settings.Enabled;
         SuppressBox.IsChecked = _settings.SuppressOriginalKey;
@@ -155,6 +156,10 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
         });
         return false;
     }
+    private void OnProfileMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { ContextMenu: { } menu } button) { menu.PlacementTarget = button; menu.IsOpen = true; }
+    }
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 }
 
@@ -162,10 +167,12 @@ public sealed class KeyboardMappingRow
 {
     internal KeyboardMappingRow(KeyboardMappingEntry entry) => Entry = entry;
     internal KeyboardMappingEntry Entry { get; }
-    public string KeyText => KeyboardMappingKeys.Display(Entry.Key);
+    public string KeyText => string.IsNullOrWhiteSpace(Entry.Name) ? KeyboardMappingKeys.DisplayInput(Entry) : $"{Entry.Name} 路 {KeyboardMappingKeys.DisplayInput(Entry)}";
     public string ActionText => LocalizationService.Get("MappingAction" + Entry.Action);
     public bool Enabled => Entry.Enabled;
-    public string ParameterText => Entry.IsSwipe
+    public string ParameterText => Entry.Action == MappedTouchAction.ReleasePointer ? LocalizationService.Get("MappingLocalCommand") :
+        Entry.IsContinuous ? LocalizationService.Format("MappingRadiusSummary", (Entry.Action == MappedTouchAction.Joystick ? Entry.Joystick.Radius : Entry.RelativeDrag.Radius) * 100) :
+        Entry.Action == MappedTouchAction.CycleTargets ? LocalizationService.Format("MappingTargetsCount", Entry.Targets.Length + 1) : Entry.IsSwipe
         ? LocalizationService.Format("MappingSwipeSummary", Entry.X * 100, Entry.Y * 100,
             Entry.EndPoint.X * 100, Entry.EndPoint.Y * 100, Entry.DurationMs)
         : Entry.Action == MappedTouchAction.LongPress
