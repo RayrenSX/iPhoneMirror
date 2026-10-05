@@ -150,6 +150,7 @@ internal static partial class Program
                 SetKeyboardField(vm, "_wirelessControlEnabled", true);
                 SetKeyboardField(vm, "_wirelessControlConnected", true);
                 SetKeyboardField(vm, "_wirelessTouchBridge", firstHost);
+                ((DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", first.Udid)!).Router.Begin(first.Udid, ReverseControlMode.Wireless);
                 TestBothMainPreviewRoutes("two wireless devices");
                 TestMultiDeviceInputIsolation(window, vm, first, firstHost, firstPackets,
                     second, secondPackets, main, "two wireless devices");
@@ -158,6 +159,7 @@ internal static partial class Program
                 SetKeyboardField(vm, "_wirelessTouchBridge", null);
                 SetKeyboardField(vm, "_usbControlEnabled", true);
                 SetKeyboardField(vm, "_usbTouchBridge", firstHost);
+                ((DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", first.Udid)!).Router.Begin(first.Udid, ReverseControlMode.Usb);
                 Focus(second, 0);
             }
 
@@ -174,6 +176,13 @@ internal static partial class Program
                 "Independent window switching failed to release A or route B.");
             Require(ReferenceEquals(KeyboardField(vm, "_selectedDevice"), second),
                 "Independent focus changed the main tab.");
+            if (testPointerInput)
+            {
+                Focus(first, hwndA);
+                TestFivePointPreview(window, first, firstPackets, hwndA, "independent wired device", independent: true);
+                Focus(second, hwndB);
+                TestFivePointPreview(window, second, secondPackets, hwndB, "independent wireless device", independent: true);
+            }
             TestIndependentBluetoothShortcutTarget(window, vm, first, second, hwndB);
 
             var mode = Enum.Parse(assembly.GetType("IPhoneMirror.App.Services.ControlStatusMode")!, "Usb");

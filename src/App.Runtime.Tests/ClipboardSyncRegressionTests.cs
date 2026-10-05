@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.ViewModels;
@@ -122,6 +123,17 @@ internal static partial class Program
                 Protocol("{\"event\":\"clipboard_text\",\"readId\":4,\"text\":\"reply after disconnect\"}");
                 Flush();
                 InteractionAssert(writes.Count == before + 1, "A disconnected read accepted a late reply.");
+
+                var previousStatus = control.Status;
+                KeyboardCall(bridge, "Raise", "warning", "clipboard_poll_failed", "simulated", null);
+                DrainDispatcher();
+                InteractionAssert(control.Status == previousStatus,
+                    "A background clipboard poll warning changed the control status.");
+                KeyboardCall(bridge, "Raise", "warning", "paste_failed", "simulated", null);
+                DrainDispatcher();
+                var pasteFailure = LocalizationService.Get("ClipboardPasteFailed");
+                InteractionAssert(control.Status == pasteFailure && vm.LogText.Contains(pasteFailure),
+                    "An asynchronous device paste failure was hidden from the user.");
             }
             var accepted = writes.Count;
             Emit(wireless, "old bridge queued");

@@ -108,10 +108,10 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     }
 
     internal Task SendReadClipboardAsync(
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Func<bool>? canSend = null)
     {
         EnsureReady();
-        return _bridge.SendReadClipboardAsync(cancellationToken);
+        return _bridge.SendReadClipboardAsync(cancellationToken, canSend);
     }
 
 

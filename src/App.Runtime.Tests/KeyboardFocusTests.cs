@@ -45,7 +45,7 @@ internal static partial class Program
         owner.GetType().GetMethod(name, KeyboardTestMembers)!.Invoke(owner, args);
 
     private static int RunKeyboardFocusTests(bool initializeHiddenHandle = false,
-        bool shortcutReview = false)
+        bool shortcutReview = false, bool mouseShortcutReview = false)
     {
         SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext());
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -123,12 +123,15 @@ internal static partial class Program
                 if (shortcutReview)
                     TestShortcutReview(window, other, udid, packets, mode);
                 if (initializeHiddenHandle && mode != "Bluetooth")
-                    TestMainPreviewPointerRoute(window, device, packets, mode);
+                {
+                    if (mouseShortcutReview) TestNativeMouseShortcutRoute(window, device, packets, mode);
+                    else TestMainPreviewPointerRoute(window, device, packets, mode);
+                }
                 Console.WriteLine($"{mode}: foreground routing, releases, queued input and independent-window checks passed.");
             }
             TestBluetoothKeyboardTransportGates();
             TestMultipleDeviceControl(window, vm, device, host, packets, bindings,
-                testPointerInput: initializeHiddenHandle);
+                testPointerInput: initializeHiddenHandle && !mouseShortcutReview);
             Console.WriteLine("Keyboard focus runtime tests passed (USB/Wireless packets captured in memory; no device input sent).");
             return 0;
         }
@@ -352,8 +355,9 @@ internal static partial class Program
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(150));
                 var reports = ReadPackets();
                 Require(reports.Length > 0 && reports.All(p => p.Length == 0),
-                    "An old press survived the transport wait, or its release was lost.");
+                    $"An old press survived the transport wait, or its release was lost: refocus={refocus}, reports={string.Join(";", reports.Select(r => string.Join(",", r)))}.");
                 Require(keys.Count == 0, "Stale keyboard state survived the transport wait.");
+                Key("Up", 0x58); // physical release ends the retired lifetime before the next scenario
             }
             Focus(window);
             var guard = (Func<bool>)KeyboardCall(window, "CaptureKeyboardSendGuard", mainHandle)!;
@@ -418,7 +422,7 @@ internal static partial class Program
         foreach (var vk in Enumerable.Range(8, 248))
         {
             SetKeyboardField(data, "VirtualKey", (uint)vk);
-            KeyboardCall(window, "ProcessMappingHook", data, (nint)0x101);
+            KeyboardCall(window, "ProcessKeyboardHook", data, (nint)0x101);
         }
     }
 }

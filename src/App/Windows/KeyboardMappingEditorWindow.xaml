@@ -1,62 +1,66 @@
 <chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.KeyboardMappingEditorWindow"
-    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
-    xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
-    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    Title="{DynamicResource MappingEditorTitle}" Width="580" Height="740" MinWidth="480" MinHeight="500"
-    WindowStartupLocation="CenterOwner" ResizeMode="CanResize" WindowStyle="None"
-    AllowsTransparency="True" Background="Transparent" Foreground="{DynamicResource TextBrush}">
-    <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True" Margin="0,0,0,16">
-            <TextBlock Text="{DynamicResource MappingEditorTitle}" Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
-            <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
-                <ui:SymbolIcon Symbol="Dismiss20" Style="{StaticResource ButtonSymbolIcon}"/>
-            </Button>
-        </Grid>
-        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Padding="16">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="0,0,8,0">
-                    <TextBlock Text="{DynamicResource MappingKey}" Style="{StaticResource DetailLabel}"/>
-                    <Button x:Name="CaptureButton" Click="OnCaptureClick" MinHeight="44" HorizontalContentAlignment="Center"
-                        AutomationProperties.AutomationId="MappingCapture"/>
-                    <TextBlock Text="{DynamicResource MappingCaptureHelp}" TextWrapping="Wrap" Margin="0,8,0,0"
-                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
-                    <TextBlock Text="{DynamicResource MappingAction}" Style="{StaticResource DetailLabel}"/>
-                    <ComboBox x:Name="ActionBox" DisplayMemberPath="Label" SelectedValuePath="Value"
-                        SelectionChanged="OnActionChanged" AutomationProperties.Name="{DynamicResource MappingAction}"/>
-                    <TextBlock Text="{DynamicResource MappingCoordinateHelp}" TextWrapping="Wrap" Margin="0,12,0,0"
-                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
-                    <Button x:Name="PickButton" Content="{DynamicResource MappingPick}" Click="OnPickClick"
-                        Margin="0,12,0,0" MinHeight="44" AutomationProperties.AutomationId="MappingPick"/>
-                    <TextBlock x:Name="PositionSummary" TextWrapping="Wrap" Margin="0,8,0,0"
-                        Foreground="{DynamicResource MutedTextBrush}"/>
-                    <TextBlock x:Name="StateText" TextWrapping="Wrap" Margin="0,8,0,0"
-                        Foreground="{DynamicResource AccentBrush}"/>                    <StackPanel x:Name="DurationPanel">
-                        <TextBlock Text="{DynamicResource MappingDuration}" Style="{StaticResource DetailLabel}"/>
-                        <TextBox x:Name="DurationBox" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingDuration}"/>
-                    </StackPanel>
-                    <StackPanel x:Name="IntervalPanel">
-                        <TextBlock Text="{DynamicResource MappingInterval}" Style="{StaticResource DetailLabel}"/>
-                        <TextBox x:Name="IntervalBox" Style="{StaticResource RoundedTextBox}" AutomationProperties.Name="{DynamicResource MappingInterval}"/>
-                    </StackPanel>
-                    <CheckBox x:Name="EntryEnabledBox" Content="{DynamicResource MappingEnabled}" Margin="0,16,0,0"/>
-                </StackPanel>
-            </ScrollViewer>
-        </Border>
-        <StackPanel Grid.Row="2" Margin="0,12,0,0">
-            <TextBlock x:Name="ErrorText" TextWrapping="Wrap" Foreground="{DynamicResource ErrorBrush}"/>
-            <WrapPanel x:Name="ConflictPanel" Visibility="Collapsed" Margin="0,8,0,0">
-                <Button Content="{DynamicResource MappingReplace}" Click="OnReplaceClick" Margin="0,0,8,8"/>
-                <Button Content="{DynamicResource MappingEditOriginal}" Click="OnEditOriginalClick" Margin="0,0,8,8"/>
-                <Button Content="{DynamicResource Cancel}" Click="OnCancelConflictClick" Margin="0,0,0,8"/>
-            </WrapPanel>
-            <WrapPanel HorizontalAlignment="Right" Margin="0,10,0,0">
-                <Button Content="{DynamicResource Cancel}" Click="OnCloseClick" MinWidth="90" Margin="0,0,8,0"/>
-                <Button x:Name="SaveButton" Content="{DynamicResource Save}" Click="OnSaveClick" IsDefault="True"
-                    MinWidth="100" Style="{StaticResource PrimaryButton}" AutomationProperties.AutomationId="MappingSave"/>
-            </WrapPanel>
-        </StackPanel>
-    </Grid>
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls" xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+ xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+ Title="{DynamicResource MappingEditorTitle}" Width="680" Height="760" MinWidth="480" MinHeight="560"
+ WindowStartupLocation="CenterOwner" ResizeMode="CanResize" WindowStyle="None" AllowsTransparency="True"
+ Background="Transparent" Foreground="{DynamicResource TextBrush}">
+ <Grid Style="{StaticResource SubWindowPageRoot}">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid animations:WindowDragBehavior.IsEnabled="True" Margin="0,0,0,16">
+   <StackPanel Margin="0,8,40,0">
+    <Grid x:Name="StepIndicator" HorizontalAlignment="Center" MinHeight="56"/>
+    <StackPanel x:Name="CompactIndicator" Visibility="Collapsed" Margin="0,4,0,0">
+     <TextBlock Text="{Binding ProgressText}" Style="{StaticResource CaptionText}" TextAlignment="Center"/>
+     <TextBlock Text="{Binding Title}" Style="{StaticResource BodyText}" FontSize="20" FontWeight="SemiBold" TextAlignment="Center" Margin="0,4,0,0"/>
+    </StackPanel>
+   </StackPanel>
+   <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
+    <ui:SymbolIcon Symbol="Dismiss20" Style="{StaticResource ButtonSymbolIcon}"/>
+   </Button>
+  </Grid>
+  <ScrollViewer x:Name="StepScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+   <Grid x:Name="StepPage" MinHeight="300" Margin="8,8,8,16">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel x:Name="StepHeading" Margin="0,0,0,24">
+     <TextBlock x:Name="StepNumberText" Text="{Binding StepNumber}" FontSize="20" Foreground="{DynamicResource AccentBrush}" TextAlignment="Center"/>
+     <TextBlock x:Name="StepTitle" Text="{Binding Title}" FontSize="{DynamicResource PageTitleFontSize}" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0"/>
+     <TextBlock Text="{Binding Subtitle}" Style="{StaticResource SecondaryText}" TextAlignment="Center" Margin="0,8,0,0"/>
+    </StackPanel>
+    <ContentControl x:Name="StepContent" Grid.Row="1" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+    <StackPanel Grid.Row="2" Margin="0,16,0,0" MaxWidth="440">
+     <TextBlock x:Name="ErrorText" TextWrapping="Wrap" TextAlignment="Center" Foreground="{DynamicResource ErrorBrush}" AutomationProperties.LiveSetting="Polite"/>
+     <WrapPanel x:Name="ConflictPanel" Visibility="Collapsed" HorizontalAlignment="Center" Margin="0,8,0,0">
+      <Button Content="{DynamicResource MappingReplace}" Click="OnReplaceClick" Margin="4"/>
+      <Button Content="{DynamicResource MappingEditOriginal}" Click="OnEditOriginalClick" Margin="4"/>
+     </WrapPanel>
+    </StackPanel>
+   </Grid>
+  </ScrollViewer>
+  <Image x:Name="OutgoingPage" Grid.Row="1" IsHitTestVisible="False" Stretch="Fill"/>
+  <Grid x:Name="NavigationBar" Grid.Row="2" Margin="0,12,0,0">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <Button Content="{DynamicResource Cancel}" Click="OnCloseClick" Style="{StaticResource GhostButton}"/>
+   <Button x:Name="PreviousButton" Grid.Column="2" Content="{DynamicResource WizardPrevious}" Click="OnPreviousClick" Margin="0,0,8,0"/>
+   <Button x:Name="SaveButton" Grid.Column="3" Content="{Binding NextText}" Click="OnNextClick" MinWidth="100"
+    Style="{StaticResource PrimaryButton}" AutomationProperties.AutomationId="MappingNext"/>
+  </Grid>
+  <Border x:Name="DiscardPanel" Grid.RowSpan="3" Visibility="Collapsed" Background="{DynamicResource WindowBackgroundBrush}" CornerRadius="{StaticResource CardCornerRadius}">
+   <StackPanel VerticalAlignment="Center" Margin="24">
+    <TextBlock Text="{DynamicResource WizardDiscardTitle}" Style="{StaticResource SubWindowTitle}" TextAlignment="Center"/>
+    <TextBlock Text="{DynamicResource WizardDiscardHint}" Style="{StaticResource SecondaryText}" TextAlignment="Center" Margin="0,12,0,24"/>
+    <WrapPanel HorizontalAlignment="Center">
+     <Button x:Name="ContinueButton" Content="{DynamicResource WizardContinueEditing}" Click="OnContinueEditingClick" Margin="4"/>
+     <Button Content="{DynamicResource WizardDiscard}" Style="{StaticResource DangerButton}" Click="OnDiscardClick" Margin="4"/>
+    </WrapPanel>
+   </StackPanel>
+  </Border>
+  <Border x:Name="SuccessPanel" Grid.RowSpan="3" Visibility="Collapsed" Background="{DynamicResource WindowBackgroundBrush}" CornerRadius="{StaticResource CardCornerRadius}">
+   <StackPanel VerticalAlignment="Center" Margin="24">
+    <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="40" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center"/>
+    <TextBlock Text="{DynamicResource WizardSaved}" Style="{StaticResource SubWindowTitle}" TextAlignment="Center" Margin="0,20,0,12"/>
+    <TextBlock x:Name="SuccessText" Style="{StaticResource SecondaryText}" TextAlignment="Center"/>
+   </StackPanel>
+  </Border>
+ </Grid>
 </chrome:RoundedWindow>

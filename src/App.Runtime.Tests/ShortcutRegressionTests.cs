@@ -66,6 +66,8 @@ internal static partial class Program
                 TestShortcutEditorAndRegistration(window, other, bindings);
                 TestStoredMouseBossKey();
                 foreground = mainHandle;
+                KeyboardCall(window, "FocusControlDevice", udid, (nint)0);
+                AwaitMapping((Task)KeyboardField(window, "_keyboardHandoff"));
                 TestBluetoothConsumerShortcuts(window, udid);
             }
             else
@@ -92,6 +94,7 @@ internal static partial class Program
 
                 bindings[BluetoothShortcutAction.Home] = KeyboardShortcut.HomeDefault;
                 bindings[BluetoothShortcutAction.AppSwitcher] = KeyboardShortcut.AppSwitcherDefault;
+                KeyboardCall(window, "ConfigureKeyboardShortcuts", bindings);
                 foreach (var route in new[] { "raw", "main", "independent" })
                 {
                     SetKeyboardField(window, "_activeControlWindow", route == "independent" ? independentHandle : (nint)0);
@@ -124,6 +127,7 @@ internal static partial class Program
                 SetKeyboardField(window, "_activeControlWindow", (nint)0);
                 SetKeyboardField(window, "_activeControlUdid", null);
                 bindings[BluetoothShortcutAction.Home] = new KeyboardShortcut(0, 0x77); // F8
+                KeyboardCall(window, "ConfigureKeyboardShortcuts", bindings);
                 packets.SetLength(0);
                 for (var i = 0; i < 2; i++)
                     KeyboardCall(window, "HandleControlKeyboardInput",
@@ -163,12 +167,26 @@ internal static partial class Program
                     WaitShortcutTask((Task)KeyboardCall(window, "SendConfiguredSystemShortcutAsync",
                         BluetoothShortcutAction.ControlCenter)!);
                     var releases = ReadShortcutPackets(failedWriterStream);
-                    InteractionAssert(releases.Length == 2 &&
-                        releases[0].GetProperty("usages").GetArrayLength() == 0 &&
-                        releases[1].GetProperty("state").GetString() == "up",
-                        "A failed Globe press skipped keyboard or Consumer release cleanup.");
+                    InteractionAssert(releases.Length == 0 && !bridge.IsReady,
+                        "A failed framed write must revoke the bridge rather than append releases to a possibly truncated frame.");
                 }
-                finally { SetKeyboardField(bridge, "_stdin", previousWriter); }
+                finally
+                {
+                    SetKeyboardField(bridge, "_stdin", previousWriter);
+                    SetKeyboardField(bridge, "<IsReady>k__BackingField", true);
+                }
+                var cleanup = new List<string>();
+                var cleanupRoute = new DirectKeyboardRoute(udid, "WiredDirect", new object(), 1, () => true,
+                    (_, _, _) => { cleanup.Add("keyboard-up"); return Task.CompletedTask; },
+                    (_, _, state, _) =>
+                    {
+                        cleanup.Add(state);
+                        return state == "down" ? Task.FromException(new IOException("pre-write failure")) : Task.CompletedTask;
+                    });
+                try { WaitShortcutTask((Task)KeyboardCall(window, "SendUsbSystemShortcutAsync", (byte)6, cleanupRoute, (Func<bool>)(() => true))!); }
+                catch (IOException) { }
+                InteractionAssert(cleanup.SequenceEqual(new[] { "down", "keyboard-up", "up" }),
+                    "Shortcut cleanup did not attempt both captured-session releases after a failed down.");
             }
             Console.WriteLine($"{mode}: shortcut regression checks passed.");
         }
@@ -178,8 +196,7 @@ internal static partial class Program
             KeyboardCall(window, "UnregisterConfiguredHotkeys");
             bindings.Clear();
             foreach (var pair in previous) bindings[pair.Key] = pair.Value;
-            ((HashSet<int>)KeyboardField(window, "_shortcutKeysDown")).Clear();
-            ((HashSet<int>)KeyboardField(window, "_ordinaryKeysDown")).Clear();
+            KeyboardCall(window, "ConfigureKeyboardShortcuts", bindings);
             app.RestoreUpdateSettings(settings);
             SetKeyboardField(window, "_activeControlWindow", (nint)0);
             SetKeyboardField(window, "_activeControlUdid", null);
@@ -196,8 +213,7 @@ internal static partial class Program
         var oldRaw = (bool)KeyboardField(window, "_rawKeyboardInputEnabled");
         var hwnd = new WindowInteropHelper(window).Handle;
         var usages = (HashSet<byte>)KeyboardField(window, "_controlKeyboardUsages");
-        var shortcutKeys = (HashSet<int>)KeyboardField(window, "_shortcutKeysDown");
-        var ordinaryKeys = (HashSet<int>)KeyboardField(window, "_ordinaryKeysDown");
+        var inputRouter = (KeyboardInputRouter)KeyboardField(window, "_keyboardRouter");
         void Modifiers(bool control)
         {
             var state = new byte[256];
@@ -207,6 +223,7 @@ internal static partial class Program
         try
         {
             bindings[BluetoothShortcutAction.Home] = new(KeyboardShortcut.Control, 0x43);
+            KeyboardCall(window, "ConfigureKeyboardShortcuts", bindings);
             SetKeyboardField(window, "_rawKeyboardInputEnabled", true);
             foreach (var raw in new[] { false, true })
             foreach (var repeat in new[] { false, true })
@@ -224,8 +241,7 @@ internal static partial class Program
                         new PreviewKeyboardEventArgs(down ? PreviewKeyboardKind.Down : PreviewKeyboardKind.Up, vk),
                         udid, false, hwnd);
                 }
-                shortcutKeys.Clear();
-                ordinaryKeys.Clear();
+                inputRouter.ReleaseAllPressedKeys();
                 ReleaseTestPhysicalKeys(window);
                 packets.SetLength(0);
                 Modifiers(false);
@@ -255,7 +271,7 @@ internal static partial class Program
                 Key(false, 0x43);
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
                 frames = ReadShortcutPackets(packets);
-                InteractionAssert(usages.Count == 0 && shortcutKeys.Count == 0 &&
+                InteractionAssert(usages.Count == 0 && inputRouter.PressedKeyCount == 0 &&
                     frames.Count(f => f.GetProperty("kind").GetString() == "button_event") == 2 &&
                     frames.Where(f => f.GetProperty("kind").GetString() == "keyboard_batch")
                         .SkipWhile(f => f.GetProperty("usages").GetArrayLength() != 0)
@@ -268,8 +284,7 @@ internal static partial class Program
             SetShortcutTestKeyboardState(savedState);
             bindings[BluetoothShortcutAction.Home] = oldHome;
             SetKeyboardField(window, "_rawKeyboardInputEnabled", oldRaw);
-            shortcutKeys.Clear();
-            ordinaryKeys.Clear();
+            KeyboardCall(window, "ConfigureKeyboardShortcuts", bindings);
             KeyboardCall(window, "HandleControlKeyboardInput",
                 new PreviewKeyboardEventArgs(PreviewKeyboardKind.Reset, 0), udid, false, hwnd);
         }
@@ -345,7 +360,8 @@ internal static partial class Program
         bindings[BluetoothShortcutAction.Home] = KeyboardShortcut.HomeDefault;
         bindings[BluetoothShortcutAction.AppSwitcher] = KeyboardShortcut.AppSwitcherDefault;
         KeyboardCall(window, "TryRegisterShortcutSet", bindings, BluetoothShortcutAction.BluetoothControl);
-        InteractionAssert(!Probe(keys[0]), "Global shortcut was not registered before editing.");
+        InteractionAssert(Probe(keys[0]) && ((KeyboardInputRouter)KeyboardField(window, "_keyboardRouter"))
+            .Shortcuts.Match((int)keys[0], 6) is not null, "Global shortcut is not exclusively owned by the router.");
         KeyboardCall(window, "ShowShortcutSettings");
         var editor = (ShortcutSettingsWindow)KeyboardField(window, "_shortcutSettingsWindow");
         try
@@ -418,7 +434,8 @@ internal static partial class Program
             InteractionAssert(Probe(keys[0]) && Probe(keys[1]), "Save re-enabled hotkeys while recording.");
         }
         finally { editor.Close(); }
-        InteractionAssert(!Probe(keys[0]), "Closing the editor failed to restore the global shortcut.");
+        InteractionAssert(Probe(keys[0]) && ((KeyboardInputRouter)KeyboardField(window, "_keyboardRouter"))
+            .Shortcuts.Match((int)keys[0], 6) is not null, "Closing the editor failed to restore the routed global shortcut.");
     }
 
     private static void TestBluetoothConsumerShortcuts(MainWindow window, string udid)

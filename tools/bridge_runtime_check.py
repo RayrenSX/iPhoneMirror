@@ -3,6 +3,7 @@
 No sockets are opened, no device is contacted, and no persistent state is changed.
 """
 import ssl
+import struct
 
 import certifi
 import lzfse
@@ -14,7 +15,7 @@ from qh3.quic.configuration import QuicConfiguration
 from qh3.quic.connection import QuicConnection
 
 
-def check_runtime_functionality(build_touchscreen_report, contact, release):
+def check_runtime_functionality(build_touchscreen_report, contact, release, build_touchscreen_frame):
     checks = []
     payload = {'text': 'clipboard 中文 😀', 'id': XpcUInt64Type(42),
                'report': b'\x00\x01\xff', 'values': [True, None, 1.25]}
@@ -27,9 +28,25 @@ def check_runtime_functionality(build_touchscreen_report, contact, release):
     for slot in range(5):
         down = build_touchscreen_report(slot, contact, 123, 456, timestamp=1)
         up = build_touchscreen_report(slot, release, 123, 456, timestamp=1)
-        if len(down) != 58 or len(up) != 58 or down[3] != (0xC2 | slot) or up[3] != (0x02 | slot):
+        if (len(down) != 58 or len(up) != 58 or down[3] != (0xC0 | slot) or up[3] != slot
+                or down[40 + slot] != slot + 1 or down[45:51] != b'\x01\x00\x00\x00\x00\x00'):
             raise RuntimeError('HID report serialization failed')
     checks.append('five_slot_hid_reports')
+
+    # Exercise the full multi-contact encoder in the packaged executable, not
+    # just five separate single-contact reports (which cannot preserve holds).
+    for released_slot in (None, 2):
+        frame = build_touchscreen_frame([
+            (slot, release if slot == released_slot else contact, 100 + slot, 200 + slot)
+            for slot in range(5)], timestamp=1)
+        if len(frame) != 58 or frame[:3] != bytes((9, 5, 5)):
+            raise RuntimeError('Multi-contact HID frame header failed')
+        for slot in range(5):
+            flags, x, y = struct.unpack_from('<BHH', frame, 3 + slot * 5)
+            expected = slot if slot == released_slot else 0xC0 | slot
+            if (flags, x, y, frame[40 + slot]) != (expected, 100 + slot, 200 + slot, slot + 1):
+                raise RuntimeError('Multi-contact HID hold/release failed')
+    checks.append('simultaneous_contacts_independent_release')
 
     # QuicConnection builds encrypted packets in memory; it does not own a socket.
     connection = QuicConnection(configuration=QuicConfiguration(is_client=True, alpn_protocols=['h3']))

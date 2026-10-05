@@ -22,6 +22,7 @@ internal sealed class ClipboardSyncState(
         internal readonly string Text = text;
         internal readonly SequenceSnapshot Snapshot = snapshot;
         internal bool Applied;
+        internal bool BusyReported;
         internal int Attempts;
     }
 
@@ -110,7 +111,7 @@ internal sealed class ClipboardSyncState(
         await Task.Yield();
         while (!_stopped && _selectedDevice is { } device &&
                _latest.TryGetValue(device, out var update) &&
-               !update.Applied && update.Attempts < 5)
+               !update.Applied)
         {
             if (update.Text.Length == 0 ||
                 !isSourceCurrent(device, update.Source))
@@ -146,13 +147,28 @@ internal sealed class ClipboardSyncState(
             }
             catch (Exception error)
             {
-                if (update.Attempts == 5 || error is not System.Runtime.InteropServices.ExternalException)
+                if (error is not System.Runtime.InteropServices.ExternalException)
                 {
-                    update.Attempts = 5;
+                    update.Applied = true;
                     completed(device, update.Text, error);
                     return;
                 }
-                await (retryDelay?.Invoke() ?? Task.Delay(100 * update.Attempts));
+                if (update.Attempts == 5)
+                {
+                    // A busy Windows clipboard can outlast one short retry
+                    // burst. The phone only sends changes, so dropping this
+                    // update would lose it until the user copies again.
+                    update.Attempts = 0;
+                    if (!update.BusyReported)
+                    {
+                        update.BusyReported = true;
+                        completed(device, update.Text, error);
+                    }
+                    if (_stopped) return;
+                    await (retryDelay?.Invoke() ?? Task.Delay(1000));
+                }
+                else
+                    await (retryDelay?.Invoke() ?? Task.Delay(100 * update.Attempts));
                 continue;
             }
             completed(device, update.Text, null);

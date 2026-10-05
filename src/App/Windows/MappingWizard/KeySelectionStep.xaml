@@ -1,0 +1,20 @@
+<UserControl x:Class="IPhoneMirror.App.Windows.MappingWizard.KeySelectionStep"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+ <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
+  <ui:SymbolIcon FontSize="28" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,0,0,20">
+   <ui:SymbolIcon.Style><Style TargetType="ui:SymbolIcon">
+    <Setter Property="Symbol" Value="Keyboard20"/>
+    <Style.Triggers>
+     <DataTrigger Binding="{Binding HasKey}" Value="True"><Setter Property="Symbol" Value="CheckmarkCircle24"/></DataTrigger>
+     <DataTrigger Binding="{Binding KeyHasError}" Value="True"><Setter Property="Symbol" Value="Warning20"/></DataTrigger>
+     <DataTrigger Binding="{Binding Capturing}" Value="True"><Setter Property="Symbol" Value="Keyboard20"/></DataTrigger>
+    </Style.Triggers>
+   </Style></ui:SymbolIcon.Style>
+  </ui:SymbolIcon>
+  <Button x:Name="CaptureButton" Content="{Binding KeyText}" FontSize="32" MinWidth="220" MinHeight="112"
+    Padding="24" HorizontalContentAlignment="Center" AutomationProperties.AutomationId="MappingCapture"/>
+  <TextBlock Text="{Binding KeyStatus}" Style="{StaticResource StatusText}" TextAlignment="Center" Margin="0,16,0,0"/>
+  <TextBlock Text="{DynamicResource WizardCaptureNavigation}" Style="{StaticResource CaptionText}" TextAlignment="Center" Margin="0,12,0,0"/>
+ </StackPanel>
+</UserControl>

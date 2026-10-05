@@ -35,6 +35,18 @@ internal static partial class Program
     {
         var hwnd = new WindowInteropHelper(window).Handle;
         window.Activate(); MappingSetForeground(hwnd);
+        if (MappingGetForeground() != hwnd)
+        {
+            // An unattended test launcher may not own the foreground queue.
+            // Briefly attach for the explicit activation, then detach before
+            // any input assertions. Production focus checks stay unchanged.
+            var foregroundThread = MappingWindowThread(MappingGetForeground(), out _);
+            var currentThread = MappingCurrentThread();
+            var attached = foregroundThread != 0 && foregroundThread != currentThread &&
+                MappingAttachInput(currentThread, foregroundThread, true);
+            try { if (attached) { window.Activate(); MappingSetForeground(hwnd); } }
+            finally { if (attached) MappingAttachInput(currentThread, foregroundThread, false); }
+        }
         var clock = System.Diagnostics.Stopwatch.StartNew();
         if (MappingGetForeground() != hwnd)
             Console.WriteLine($"FOCUS WAIT: test window {hwnd}, foreground {MappingGetForeground()}, enabled={MappingIsEnabled(hwnd)}. Activate the test window to continue.");
@@ -190,7 +202,7 @@ internal static partial class Program
             MappingAssert(Math.Abs(preview.X - .23) < 1e-10 && Math.Abs(preview.Y - .71) < 1e-10,
                 "Mouse/pick/marker roundtrip drifted with rotation, resolution or DPI.");
         }
-        foreach (var action in Enum.GetValues<MappedTouchAction>().Where(a => a >= MappedTouchAction.SwipeUp))
+        foreach (var action in Enum.GetValues<MappedTouchAction>().Where(a => a is >= MappedTouchAction.SwipeUp and <= MappedTouchAction.SwipeRight))
         {
             var constrained = KeyboardMappingOverlayWindow.ConstrainEnd(action, (.5, .5), (.2, .8));
             MappingAssert(action switch {
@@ -373,6 +385,7 @@ internal static partial class Program
             MappingAssert(overlays.Count == 1 && overlays.Values.Single().Surface.Window == host.WindowHandle,
                 "Main native preview did not receive its persistent overlay.");
             first = Shell("Mapping phone preview test", 1170, 2532);
+            MappingAssert(IsTouchWindow(first.Handle, out _), "Independent preview did not register native touch input.");
             second = Shell("Mapping iPad preview test", 1668, 2388);
             windows.Add(phone.Udid, first); windows.Add(pad.Udid, second);
             KeyboardCall(main, "RefreshMappingOverlays");
@@ -423,6 +436,9 @@ internal static partial class Program
     [DllImport("user32.dll", EntryPoint = "SetCursorPos")] private static extern bool MappingSetCursorPos(int x, int y);
     [DllImport("user32.dll", EntryPoint = "SetFocus")] private static extern nint MappingSetFocus(nint hwnd);
     [DllImport("user32.dll", EntryPoint = "SetForegroundWindow")] private static extern bool MappingSetForeground(nint hwnd);
+    [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")] private static extern uint MappingWindowThread(nint hwnd, out uint process);
+    [DllImport("kernel32.dll", EntryPoint = "GetCurrentThreadId")] private static extern uint MappingCurrentThread();
+    [DllImport("user32.dll", EntryPoint = "AttachThreadInput")] private static extern bool MappingAttachInput(uint source, uint target, bool attach);
     [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")] private static extern nint MappingGetForeground();
     [DllImport("user32.dll", EntryPoint = "IsWindowEnabled")] private static extern bool MappingIsEnabled(nint hwnd);
 }

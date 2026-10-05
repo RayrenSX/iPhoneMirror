@@ -67,16 +67,18 @@ internal static partial class Program
                     (0xA3, 0xE4), (0xA4, 0xE2), (0xA5, 0xE6) })
                 {
                     packets.SetLength(0);
-                    Key(vk, true);
-                    MappingAssert(Reports().Last().SequenceEqual(new[] { expected }), $"{mode}: wrong modifier usage for {vk:X}.");
+                    Key(vk, true); Key(vk, false);
+                    MappingAssert(Reports()[^2].SequenceEqual(new[] { expected }) && Reports()[^1].Length == 0, $"{mode}: wrong modifier usage for {vk:X}.");
+                    Key(vk, true); // Candidate or direct modifier must be retired by takeover.
                     Mapping(true); Drain();
                     MappingAssert(Reports().Last().Length == 0, $"{mode}: takeover did not release the held modifier.");
                     var count = packets.Length;
                     Key(vk, false); Key(0x42, true); Key(0x42, false);
                     MappingAssert(packets.Length == count, $"{mode}: direct events leaked during mapping.");
                     Mapping(false); Drain();
-                    Key(vk, true); Key(vk, false); // retired repeat and trailing up are discarded
-                    MappingAssert(packets.Length == count, $"{mode}: held key crossed ownership on disable.");
+                    Key(vk, true); Key(vk, false); // prior physical up retired the old lifetime in the shared router
+                    MappingAssert(Reports()[^2].SequenceEqual(new[] { expected }) && Reports()[^1].Length == 0,
+                        $"{mode}: a fresh modifier did not resume after the old physical release.");
                     Key(vk, true); Key(vk, false);
                     MappingAssert(Reports().Length >= 4 && Reports().Last().Length == 0, $"{mode}: fresh modifier did not resume.");
                 }
@@ -104,8 +106,9 @@ internal static partial class Program
                 // direct owner cannot resume before its cancelled touch is up.
                 packets.SetLength(0);
                 var executor = (KeyboardMappingExecutor)KeyboardField(main, "_mappingExecutor");
-                var route = vm.CaptureMappingRoute(() => router.Mode == KeyboardInputMode.Mapping, (x, y) => (x, y))!;
-                var gesture = executor.ExecuteAsync(MappingEntry(MappedTouchAction.LongPress) with { DurationMs = 1000 }, route);
+                var gesture = Task.WhenAll(Enumerable.Range(0, 5).Select(_ => executor.ExecuteAsync(
+                    MappingEntry(MappedTouchAction.LongPress) with { DurationMs = 1000 },
+                    vm.CaptureMappingRoute(() => router.Mode == KeyboardInputMode.Mapping, (x, y) => (x, y))!)));
                 MappingAssert(!gesture.IsCompleted, "Long-press fixture did not hold a touch.");
                 Mapping(false);
                 MappingAssert(router.Mode == KeyboardInputMode.None, "Direct owner opened before mapping cleanup.");
@@ -114,7 +117,7 @@ internal static partial class Program
                     "Mapping cleanup did not finish before restoring direct input.");
                 var actions = MappingFrames(packets).Where(f => f.TryGetProperty("points", out _))
                     .Select(f => f.GetProperty("points")[0].GetProperty("action").GetString()).ToArray();
-                MappingAssert(actions.SequenceEqual(new[] { "down", "up" }) && Reports().Length == 0,
+                MappingAssert(actions.SequenceEqual(Enumerable.Repeat("down", 5).Concat(Enumerable.Repeat("up", 5))) && Reports().Length == 0,
                     "Mapping cancellation leaked a keyboard packet or retained a touch.");
 
                 // Capture a session, then reconnect while its release waits.

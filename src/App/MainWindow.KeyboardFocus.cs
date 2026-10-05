@@ -14,6 +14,7 @@ public partial class MainWindow
     // before waiting for the route lock so queued input cannot survive refocus.
     private long _keyboardInputGeneration;
     private readonly Func<nint> _keyboardForegroundWindow = GetForegroundWindow;
+    private readonly Func<nint> _keyboardFocusedWindow = GetFocus;
     private string? _keyboardStateUdid;
     private bool _keyboardFocusSuspended;
     private string? ActiveInputDeviceUdid => _activeControlWindow != 0
@@ -50,7 +51,10 @@ public partial class MainWindow
         ApplyBluetoothControlInputState(activateIndependentWindow: false);
     }
 
-    private Func<bool> CaptureKeyboardSendGuard(nint sourceWindow)
+    private Func<bool> CaptureKeyboardSendGuard(nint sourceWindow) =>
+        CaptureKeyboardOwnerSendGuard(sourceWindow, Services.KeyboardInputMode.Direct);
+
+    private Func<bool> CaptureKeyboardOwnerSendGuard(nint sourceWindow, Services.KeyboardInputMode owner)
     {
         var generation = Volatile.Read(ref _keyboardInputGeneration);
         var modeGeneration = KeyboardInputModeGeneration;
@@ -59,7 +63,7 @@ public partial class MainWindow
         // worker. Route/focus resets invalidate this immutable snapshot.
         return () => generation == Volatile.Read(ref _keyboardInputGeneration) &&
             modeGeneration == KeyboardInputModeGeneration &&
-            IsDirectKeyboardInputModeActive &&
+            _keyboardRouter.Mode == owner &&
             sourceWindow != 0 && sourceWindow == foregroundWindow();
     }
 
@@ -84,7 +88,7 @@ public partial class MainWindow
     }
 
     private bool CanForwardControlKeyboard(string? udid, nint sourceWindow)
-        => CanForwardControlPointer(udid, sourceWindow) &&
+        => _mappingWindow?.IsEditing != true && CanForwardControlPointer(udid, sourceWindow) &&
             (sourceWindow != _windowSource?.Handle || !IsMainKeyboardEditorFocused());
 
     private bool CanForwardControlPointer(string? udid, nint sourceWindow)
@@ -99,7 +103,7 @@ public partial class MainWindow
     }
 
     private bool IsMainKeyboardEditorFocused() =>
-        (MainPreviewHost.WindowHandle == 0 || GetFocus() != MainPreviewHost.WindowHandle) &&
+        (MainPreviewHost.WindowHandle == 0 || _keyboardFocusedWindow() != MainPreviewHost.WindowHandle) &&
         (_isSettingsPanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or ComboBox or ButtonBase or Slider);
 
     private void OnMainKeyboardFocusChanged(object sender, KeyboardFocusChangedEventArgs e)
@@ -129,13 +133,9 @@ public partial class MainWindow
 
     private void OnMainKeyboardDeactivated(object? sender, EventArgs e)
     {
-        _shortcutKeysDown.Clear();
-        _ordinaryKeysDown.Clear();
         _mouseShortcutButtons.Clear();
         _viewModel.SetControlInputDevice(null);
         UnregisterDeviceHotkeys();
-        _localFullScreenEscapeDown = false;
-        _localFullScreenF11Down = false;
         if (_activeControlWindow == 0)
         {
             _keyboardFocusSuspended = true;
@@ -156,8 +156,6 @@ public partial class MainWindow
             if (_activeControlWindow != hwnd ||
                 !DeviceViewModel.UdidEquals(_activeControlUdid, udid)) return;
             _keyboardFocusSuspended = true;
-            _shortcutKeysDown.Clear();
-            _ordinaryKeysDown.Clear();
             _mouseShortcutButtons.Clear();
             _viewModel.SetControlInputDevice(null);
             UnregisterDeviceHotkeys();
@@ -175,12 +173,6 @@ public partial class MainWindow
             Services.BluetoothShortcutAction.WirelessControl or
             Services.BluetoothShortcutAction.WiredControl;
 
-    private readonly HashSet<int> _failedDeviceHotKeyIds = [];
-
-    private bool ShouldRegisterDeviceHotkeys => IsDirectKeyboardInputModeActive &&
-        _shortcutSettingsWindow is null && IsControlKeyboardForeground &&
-        (IsBluetoothControlActive || _viewModel.IsUsbControlTarget(ActiveInputDeviceUdid));
-
     private void UnregisterDeviceHotkeys()
     {
         if (_windowSource is null) return;
@@ -191,37 +183,12 @@ public partial class MainWindow
             if (_registeredHotKeyIds.Remove(id))
                 UnregisterHotKey(_windowSource.Handle, id);
         }
-        _hotKeyRegistered = _registeredHotKeyIds.Count != 0;
     }
 
     private void RefreshDeviceHotkeys()
     {
-        if (_windowSource is null) return;
-        if (!ShouldRegisterDeviceHotkeys)
-        {
-            UnregisterDeviceHotkeys();
-            return;
-        }
-        foreach (var (action, shortcut) in GetConfiguredShortcuts())
-        {
-            if (IsGlobalControlShortcut(action) || !shortcut.IsBound ||
-                shortcut.VirtualKey is Services.KeyboardShortcut.MouseRight or
-                    Services.KeyboardShortcut.MouseMiddle) continue;
-            var id = HotKeyId(action);
-            if (_registeredHotKeyIds.Contains(id)) continue;
-            if (RegisterHotKey(_windowSource.Handle, id,
-                    shortcut.RegistrationModifiers, shortcut.VirtualKey))
-            {
-                _registeredHotKeyIds.Add(id);
-                _failedDeviceHotKeyIds.Remove(id);
-            }
-            else if (_failedDeviceHotKeyIds.Add(id))
-            {
-                _viewModel.AddUiLog(Localization.LocalizationService.Format(
-                    "ShortcutRegistrationFailedFormat", shortcut.DisplayText));
-            }
-        }
-        _hotKeyRegistered = _registeredHotKeyIds.Count != 0;
+        // Keyboard execution belongs exclusively to the shared hook/router.
+        UnregisterDeviceHotkeys();
     }
 
     [DllImport("user32.dll")]

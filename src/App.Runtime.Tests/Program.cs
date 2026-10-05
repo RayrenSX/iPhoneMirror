@@ -28,12 +28,23 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--keyboard-mapping-wizard", var wizardOutput])
+                return RunMappingWizardTests(wizardOutput);
+            if (args is ["--keyboard-mapping-picking", var pickingOutput])
+                return RunMappingPickingTests(pickingOutput);
+            if (args is ["--five-point-live", var fiveOutput, var fiveTransport, var fiveUdid,
+                var fivePython, var fiveScript, var fiveObserver])
+                return RunFivePointLive(fiveOutput, fiveTransport, fiveUdid, fivePython, fiveScript, fiveObserver);
             if (args is ["--wired-control-restart-live", var restartOutput])
                 return RunKeyboardMappingLiveProbe(restartOutput, wiredRestart: true);
+            if (args is ["--keyboard-router"])
+                return RunKeyboardRouterTests();
             if (args is ["--keyboard-ownership"])
                 return RunKeyboardOwnershipTests();
             if (args is ["--keyboard-ownership-live", var ownershipOutput])
                 return RunKeyboardMappingLiveProbe(ownershipOutput, ownership: true);
+            if (args is ["--keyboard-clipboard-live", var clipboardOutput])
+                return RunKeyboardMappingLiveProbe(clipboardOutput, ownership: true, clipboard: true);
             if (args is ["--component-audio-formats", var referenceFfmpeg])
                 return RunComponentAudioFormatTests(referenceFfmpeg);
             if (args is ["--component-runtime"])
@@ -48,6 +59,8 @@ internal static partial class Program
             }
             if (args is ["--keyboard-mapping", var mappingOutput])
                 return RunKeyboardMappingTests(mappingOutput);
+            if (args is ["--keyboard-mapping-regressions"])
+                return RunKeyboardMappingRegressions();
             if (args is ["--keyboard-mapping-interaction", var mappingInteractionOutput])
                 return RunKeyboardMappingInteractionTests(mappingInteractionOutput);
             if (args is ["--keyboard-mapping-lifecycle", var mappingLifecycleOutput])
@@ -155,6 +168,8 @@ internal static partial class Program
                 return RunKeyboardFocusTests();
             if (args is ["--shortcuts"])
                 return RunKeyboardFocusTests(shortcutReview: true);
+            if (args is ["--mouse-shortcuts"])
+                return RunKeyboardFocusTests(initializeHiddenHandle: true, shortcutReview: true, mouseShortcutReview: true);
             if (args is ["--preview-pointer"])
                 return RunKeyboardFocusTests(initializeHiddenHandle: true);
             if (args is ["--driver-localization-audit", var localizedDriverAssembly])

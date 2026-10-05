@@ -12,6 +12,7 @@ internal sealed class KeyboardMappingFocusGuard : IDisposable
     private int _checking;
     private int _disposed;
     private long _focusGeneration;
+    internal long Generation => Interlocked.Read(ref _focusGeneration);
     private readonly WinEventProc _focusChanged;
     private readonly nint _focusHook;
     private readonly nint _foregroundHook;

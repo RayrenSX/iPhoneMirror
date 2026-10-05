@@ -32,6 +32,8 @@ internal sealed class KeyboardMappingKeyState
         if (mapping is null) return default;
         if (key.IsModifier)
         {
+            if (_down.Count == 1 && mapping.Action == MappedTouchAction.HoldUntilRelease)
+                return new(mapping, false);
             if (_down.Count == 1) _modifierCandidates.Add(id);
             return default; // Never swallow modifier transitions or system chords.
         }

@@ -4,7 +4,7 @@ internal enum KeyboardInputMode { None, Mapping, Direct }
 
 // All ingress runs on the window dispatcher (including WH_KEYBOARD_LL).
 // Workers only read a generation lease; they never choose an input owner.
-internal sealed class KeyboardInputRouter
+internal sealed partial class KeyboardInputRouter
 {
     private long _generation;
     private int _mode;
@@ -17,6 +17,7 @@ internal sealed class KeyboardInputRouter
 
     internal long BeginHandoff(KeyboardInputMode next, IEnumerable<int>? held = null)
     {
+        ReleaseAllPressedKeys();
         Volatile.Write(ref _mode, (int)KeyboardInputMode.None);
         var generation = Interlocked.Increment(ref _generation);
         RequestedMode = next;
@@ -62,7 +63,9 @@ internal sealed class KeyboardInputRouter
 internal sealed record DirectKeyboardRoute(string Target, string Transport,
     object Session, long Generation, Func<bool> IsCurrent,
     Func<byte, IReadOnlyCollection<byte>, Func<bool>?, Task> SendAsync,
-    Func<ushort, ushort, string, Func<bool>?, Task>? SendButtonAsync = null)
+    Func<ushort, ushort, string, Func<bool>?, Task>? SendButtonAsync = null,
+    Func<string, Func<bool>?, Task>? PasteTextAsync = null,
+    Func<Func<bool>?, Task>? ReadClipboardAsync = null)
 {
     internal bool SameSession(DirectKeyboardRoute other) =>
         ReferenceEquals(Session, other.Session) && Generation == other.Generation &&

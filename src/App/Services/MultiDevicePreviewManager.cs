@@ -10,7 +10,6 @@ namespace IPhoneMirror.App.Services;
 internal sealed class MultiDevicePreviewManager : IDisposable
 {
     private readonly MainViewModel viewModel;
-    private readonly Func<bool> _isReverseControlHotkeyRegistered;
     private readonly Func<string, nint, bool> _isReverseControlEnabledForWindow;
     private readonly Dictionary<string, NativePreviewWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
@@ -32,11 +31,9 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal event Action<string, nint, bool>? KeyboardFocusChanged;
 
     internal MultiDevicePreviewManager(MainViewModel viewModel,
-        Func<bool>? isReverseControlHotkeyRegistered = null,
         Func<string, nint, bool>? isReverseControlEnabledForWindow = null)
     {
         this.viewModel = viewModel;
-        _isReverseControlHotkeyRegistered = isReverseControlHotkeyRegistered ?? (() => false);
         _isReverseControlEnabledForWindow = isReverseControlEnabledForWindow ??
             ((udid, _) => viewModel.BluetoothControlIsInputEnabled &&
                 viewModel.IsBluetoothControlTarget(udid));
@@ -53,6 +50,16 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal nint GetWindowHandle(string? udid) =>
         !string.IsNullOrWhiteSpace(udid) && _windows.TryGetValue(udid, out var window)
             ? window.Handle : 0;
+
+    internal bool ContainsWindow(nint handle) => handle != 0 && _windows.Values.Any(w => w.Handle == handle);
+    internal bool IsFullScreenWindow(nint handle) => _windows.Values.Any(w => w.Handle == handle && w.IsFullScreen);
+    internal bool ToggleFullScreenWindow(nint handle)
+    {
+        var window = _windows.Values.FirstOrDefault(w => w.Handle == handle);
+        if (window is null) return false;
+        window.ToggleFullScreen();
+        return true;
+    }
 
     internal bool Activate(string? udid)
     {
@@ -173,7 +180,6 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  args => PointerInput?.Invoke(device.Udid, args),
                  args => KeyboardInput?.Invoke(device.Udid, args),
                  hwnd => ReverseControlRequested?.Invoke(device.Udid, hwnd),
-                 _isReverseControlHotkeyRegistered,
                  () => viewModel.IsUsbControlTarget(device.Udid),
                  hwnd => UsbControlRequested?.Invoke(device.Udid, hwnd),
                  hwnd => WirelessControlRequested?.Invoke(device.Udid, hwnd)) || window is null)

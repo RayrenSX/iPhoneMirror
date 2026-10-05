@@ -1263,13 +1263,13 @@ def decode_button_event(message: dict) -> tuple[int, int, int, str]:
 class FiveSlotStateMachine:
     """逻辑触点 ID → 固定 slot 0..4，最多 5 点同触。
 
-    slot 状态字节: release = 0x02 | slot, contact = 0xC2 | slot
-    每点独立 58 字节报告；多点并发时按 slot 顺序逐个发送。
+    每帧携带全部活动触点；省略活动触点会被设备解释为释放。
     """
 
     def __init__(self) -> None:
         self._id_to_slot: dict[int, int] = {}
         self._free_slots = list(range(MAX_SLOTS))
+        self._positions: dict[int, tuple[int, int]] = {}
 
     def assign(self, touch_id: int) -> Optional[int]:
         if touch_id in self._id_to_slot:
@@ -1278,18 +1278,29 @@ class FiveSlotStateMachine:
             return None
         slot = self._free_slots.pop(0)
         self._id_to_slot[touch_id] = slot
+        self._positions[touch_id] = (0, 0)
         return slot
 
     def release(self, touch_id: int) -> Optional[int]:
         slot = self._id_to_slot.pop(touch_id, None)
         if slot is None:
             return None
+        self._positions.pop(touch_id, None)
         self._free_slots.append(slot)
         self._free_slots.sort()
         return slot
 
     def slot_for(self, touch_id: int) -> Optional[int]:
         return self._id_to_slot.get(touch_id)
+
+    def update_position(self, touch_id: int, x: int, y: int) -> None:
+        if touch_id in self._id_to_slot:
+            self._positions[touch_id] = (x, y)
+
+    def contacts(self, released: set[int]) -> list[tuple[int, int, int, int]]:
+        return sorted((slot, TOUCHSCREEN_STATE_RELEASE if touch_id in released
+                       else TOUCHSCREEN_STATE_CONTACT, *self._positions[touch_id])
+                      for touch_id, slot in self._id_to_slot.items())
 
     def clear(self) -> list[int]:
         ids = list(self._id_to_slot.keys())
@@ -1299,24 +1310,32 @@ class FiveSlotStateMachine:
 
 
 def build_touchscreen_report(slot: int, state: int, x: int, y: int, timestamp: Optional[int] = None) -> bytes:
-    """58 字节 mainTouchscreen 报告，slot 状态字节按五点状态机规则。
+    """Single-contact convenience wrapper; live gestures use full snapshots."""
+    return build_touchscreen_frame([(slot, state, x, y)], timestamp)
 
-    slot 0..4: contact = 0xC2 | slot, release = 0x02 | slot
+
+def build_touchscreen_frame(contacts: list[tuple[int, int, int, int]],
+                            timestamp: Optional[int] = None) -> bytes:
+    """58-byte DigitizerReport: five 5-byte contacts and a slot-indexed identity table.
+
+    DigitizerContact.index occupies bits 0..4, touch bit 6, range bit 7.
+    See docs/FIVE_POINT_TOUCH.md for the checked CoreDevice layout.
     """
+    if not 1 <= len(contacts) <= MAX_SLOTS:
+        raise ValueError('touch report must contain one to five contacts')
+    slots = [contact[0] for contact in contacts]
+    if len(set(slots)) != len(slots) or any(slot not in range(MAX_SLOTS) for slot in slots):
+        raise ValueError('touch report slots must be unique and in range 0..4')
     if timestamp is None:
         timestamp = time.monotonic_ns() & ((1 << 48) - 1)
-    if state == TOUCHSCREEN_STATE_CONTACT:
-        state_byte = 0xC2 | (slot & 0x07)
-    else:
-        state_byte = 0x02 | (slot & 0x07)
-    return (
-        bytes([0x09, 0x01, 0x05, state_byte])
-        + struct.pack('<HH', x & 0xFFFF, y & 0xFFFF)
-        + b'\x00' * 32
-        + b'\x02\x00\x00\x00'
-        + timestamp.to_bytes(6, 'little')
-        + b'\x00' * 8
-    )
+    report = bytearray(58)
+    report[:3] = bytes([0x09, len(contacts), MAX_SLOTS])
+    for index, (slot, state, x, y) in enumerate(contacts):
+        flags = 0xC0 if state == TOUCHSCREEN_STATE_CONTACT else 0
+        struct.pack_into('<BHH', report, 3 + index * 5, flags | slot, x & 0xFFFF, y & 0xFFFF)
+        report[40 + slot] = slot + 1
+    report[45:51] = timestamp.to_bytes(6, 'little')
+    return bytes(report)
 
 
 class BridgeChannel:
@@ -3317,10 +3336,20 @@ class TouchSession:
 
 
     async def _apply_frame(self, sm: FiveSlotStateMachine, frame: dict, points: list[dict]) -> None:
+        # Replacing a contact in a full five-point batch needs a release frame
+        # before its slot can represent the new finger. Never omit the old up
+        # or silently drop the new down just because they share one IPC batch.
+        if (any(p['action'] == 'up' and sm.slot_for(p['pointerId']) is not None for p in points)
+                and any(p['action'] == 'down' and sm.slot_for(p['pointerId']) is None for p in points)):
+            await self._apply_frame(sm, frame, [p for p in points if p['action'] == 'up'])
+            await self._apply_frame(sm, frame, [p for p in points if p['action'] != 'up'])
+            return
         # The HID report field is device-monotonic time, not host wall-clock
         # time. Generate it at send time so delayed frames cannot move time
         # backwards after a refresh or clock adjustment.
         ts = None
+        released: set[int] = set()
+        changed = False
         for touch_point in points:
             pointer_id = int(touch_point['pointerId'])
             action = touch_point['action']
@@ -3330,20 +3359,18 @@ class TouchSession:
                 slot = sm.assign(pointer_id)
                 if slot is None:
                     continue
-                report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_CONTACT, x, y, ts)
-                await self._send_touch_report(report)
-            elif action == 'move':
-                slot = sm.slot_for(pointer_id)
-                if slot is None:
-                    continue
-                report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_CONTACT, x, y, ts)
-                await self._send_touch_report(report, motion=True)
-            elif action == 'up':
-                slot = sm.slot_for(pointer_id)
-                if slot is None:
-                    continue
-                report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_RELEASE, x, y, ts)
-                await self._send_touch_report(report)
+            elif sm.slot_for(pointer_id) is None:
+                continue
+            sm.update_position(pointer_id, x, y)
+            changed = True
+            if action == 'up':
+                released.add(pointer_id)
+        if changed:
+            # dtuhidd treats missing contacts as lifted. A delta-only report
+            # would release the other four fingers on every movement.
+            report = build_touchscreen_frame(sm.contacts(released), ts)
+            await self._send_touch_report(report, motion=all(p['action'] == 'move' for p in points))
+            for pointer_id in released:
                 sm.release(pointer_id)
 
     async def _close_remote_service(self, service, stage: str) -> None:
@@ -3519,7 +3546,8 @@ def main() -> int:
             importlib.import_module(module)
         from bridge_runtime_check import check_runtime_functionality
         checks = check_runtime_functionality(
-            build_touchscreen_report, TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE)
+            build_touchscreen_report, TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE,
+            build_touchscreen_frame)
         print(json.dumps({'runtime': 'ready', 'modules': modules, 'functional_checks': checks}))
         return 0
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',

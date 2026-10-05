@@ -11,7 +11,7 @@ SHA-256，再通过 Apple 个性化流程挂载；`BuildManifest.plist` 必须�
 Universal HID；只有设备没有 mainTouchscreen（Service ID `257`）时才停止，不会显示为
 “已连接”。已挂载的旧 DDI 缺少该 service 时，桥接器只会自动重挂一次。
 
-触控 surface 使用 Service ID `257`，Report ID `0x09`，坐标为 little-endian UInt16。`down`/`move` 使用 `0xC2 | slot`，`up` 使用 `0x02 | slot`。
+触控 surface 使用 Service ID `257`，Report ID `0x09`，坐标为 little-endian UInt16。每份报告包含全部仍活动的触点及本次抬起的触点；`down`/`move` 的状态字节为 `0xC0 | slot`，`up` 为 `slot`。报告布局和设备端行为见[五点触控](FIVE_POINT_TOUCH.md)。
 
 `ready` 仅在 mainTouchscreen（Service ID `257`）通过验证后发出。它的 `authMode` 会说明
 是 `mediastream` 还是 `direct`，避免把没有实际触控 surface 的连接显示为成功。

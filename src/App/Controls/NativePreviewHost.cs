@@ -32,6 +32,7 @@ internal sealed class NativePreviewHost : HwndHost
     private (int Width, int Height, int Radius, double Curve)? _appliedRegion;
 
     internal bool CapturePointerInput { get; set; }
+    internal bool CaptureTouchInput { get; set; }
     internal bool SuppressMouseMove { get; set; }
     // Raw Input owns button and wheel transitions while Bluetooth control is
     // active. Suppress legacy messages that leak from the child HWND so a
@@ -90,6 +91,9 @@ internal sealed class NativePreviewHost : HwndHost
     [DllImport("user32.dll")]
     private static extern nint SetFocus(nint window);
 
+    [DllImport("user32.dll")]
+    private static extern nint GetFocus();
+
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
         _window = CreateWindowExW(0, "STATIC", string.Empty,
@@ -97,6 +101,7 @@ internal sealed class NativePreviewHost : HwndHost
             0, 0, 1, 1, hwndParent.Handle, 0, 0, 0);
         if (_window == 0) throw new InvalidOperationException(
             LocalizationService.Get("PreviewChildCreateFailed"));
+        NativeTouchInput.RegisterTouchWindow(_window);
         if (!Activate())
         {
             DestroyWindow(_window);
@@ -233,6 +238,22 @@ internal sealed class NativePreviewHost : HwndHost
     protected override nint WndProc(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message == NativeTouchInput.WmTouch)
+        {
+            NativeTouchInput.Dispatch(hwnd, wParam, lParam, CapturePointerInput && CaptureTouchInput,
+                GetClientWidth(), GetClientHeight(), 0, 0, 0, input =>
+                {
+                    if (input.Kind == PreviewPointerKind.TouchDown) { Focus(); SetFocus(hwnd); }
+                    PointerInput?.Invoke(this, input);
+                });
+            handled = true;
+            return 0;
+        }
+        if (CapturePointerInput && CaptureTouchInput && NativeTouchInput.IsPromotedMouseMessage(message))
+        {
+            handled = true;
+            return 0;
+        }
         if (message == WmNcHitTest)
         {
             if (CapturePointerInput)
@@ -256,6 +277,13 @@ internal sealed class NativePreviewHost : HwndHost
         }
         if (CapturePointerInput)
         {
+            // Button-up clears our mask before ReleaseCapture synchronously
+            // sends WM_CAPTURECHANGED. That is a completed click, not a reset.
+            if (message == 0x0215 && _capturedMouseButtons == 0)
+            {
+                handled = true;
+                return 0;
+            }
             if (message is 0x0008 or 0x001F or 0x0215) // focus/capture lost
             {
                 ReleasePointerCapture();
@@ -285,8 +313,13 @@ internal sealed class NativePreviewHost : HwndHost
                     // STATIC children do not take keyboard focus on click.
                     // Restore both WPF and native focus after a toolbar/editor
                     // interaction before dispatching this preview input.
-                    Focus();
-                    SetFocus(_window);
+                    // Re-focusing an already focused HWND through WPF briefly
+                    // blurs it and retires held shortcut modifiers (e.g. Ctrl).
+                    if (GetFocus() != _window)
+                    {
+                        Focus();
+                        SetFocus(_window);
+                    }
                     if (SuppressLegacyMouseButtons)
                     {
                         handled = true;
@@ -469,15 +502,24 @@ internal sealed class NativePreviewHost : HwndHost
     private static extern bool ReleaseCapture();
 }
 
-internal enum PreviewPointerKind { Move, ButtonDown, ButtonUp, Wheel, Reset }
+internal enum PreviewPointerKind { Move, ButtonDown, ButtonUp, Wheel, Reset, TouchDown, TouchMove, TouchUp }
 internal sealed class PreviewPointerEventArgs : EventArgs
 {
     internal PreviewPointerEventArgs(PreviewPointerKind kind, short x, short y,
         byte button, int wheel, int surfaceWidth = 1, int surfaceHeight = 1,
-        uint sourceWidth = 0, uint sourceHeight = 0, int rotation = 0) =>
+        uint sourceWidth = 0, uint sourceHeight = 0, int rotation = 0)
+        : this(kind, (int)x, (int)y, button, wheel, surfaceWidth, surfaceHeight,
+            sourceWidth, sourceHeight, rotation, 0, 0) { }
+
+    internal PreviewPointerEventArgs(PreviewPointerKind kind, int x, int y,
+        byte button, int wheel, int surfaceWidth, int surfaceHeight,
+        uint sourceWidth, uint sourceHeight, int rotation,
+        uint touchId, nint sourceWindow) =>
         (Kind, X, Y, Button, Wheel, SurfaceWidth, SurfaceHeight, SourceWidth,
-            SourceHeight, Rotation) = (kind, x, y, button, wheel, surfaceWidth,
-            surfaceHeight, sourceWidth, sourceHeight, rotation);
+            SourceHeight, Rotation, TouchId, SourceWindow) = (kind, x, y, button, wheel, surfaceWidth,
+            surfaceHeight, sourceWidth, sourceHeight, rotation, touchId, sourceWindow);
+    internal uint TouchId { get; }
+    internal nint SourceWindow { get; }
     internal PreviewPointerKind Kind { get; }
     internal int X { get; }
     internal int Y { get; }

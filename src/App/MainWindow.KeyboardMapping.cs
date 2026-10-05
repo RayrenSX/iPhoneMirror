@@ -15,16 +15,14 @@ namespace IPhoneMirror.App;
 public partial class MainWindow
 {
     private KeyboardMappingSettings _mappingSettings = new();
-    private readonly KeyboardMappingKeyState _mappingKeys = new();
+    private readonly KeyboardMappingHoldState _mappingHolds = new();
     private readonly KeyboardMappingExecutor _mappingExecutor = new();
     private KeyboardMappingFocusGuard? _mappingFocus;
     private KeyboardMappingWindow? _mappingWindow;
     private DispatcherTimer? _mappingTimer;
     private readonly KeyboardMappingCapture _mappingCapture = new();
-    private readonly KeyboardMappingWindowsKey _mappingWindowsKey = new();
-    private bool _systemKeySuppressionRequested;
     private bool _mappingClosing;
-    private bool _mappingQueued;
+    private readonly Dictionary<Guid, object> _mappingQueued = [];
     private long _mappingGeneration;
     private string? _lastMappingStatus;
     private readonly Dictionary<string, long> _mappingLogTimes = [];
@@ -55,7 +53,8 @@ public partial class MainWindow
         var window = new KeyboardMappingWindow(_mappingSettings, ApplyKeyboardMapping,
             key => KeyboardMappingKeys.Conflict(key, GetConfiguredShortcuts().Values),
             BeginMappingKeyCapture, EndMappingKeyCapture, () => MappingStatusKey(),
-            () => _viewModel.SelectedDevice?.DisplayName, BeginMappingPositionPick, CancelMappingPositionPick) { Owner = this };
+            () => _viewModel.SelectedDevice?.DisplayName, BeginMappingPositionPick, CancelMappingPositionPick,
+            () => MappingSurfaces().LastOrDefault()) { Owner = this };
         _mappingWindow = window;
         window.Closed += (_, _) =>
         {
@@ -118,7 +117,6 @@ public partial class MainWindow
         else
         {
             LeaveKeyboardMappingInputMode();
-            _mappingKeys.Disable();
             _mappingFocus?.Dispose();
             _mappingFocus = null;
             _mappingTimer?.Stop();
@@ -153,9 +151,8 @@ public partial class MainWindow
 
     private void ReconcileKeyboardHook()
     {
-        var needed = !_mappingClosing && (_systemKeySuppressionRequested || IsKeyboardMappingInputModeActive ||
-            _keyboardRouter.Mode != _keyboardRouter.RequestedMode ||
-            _keyboardRouter.HasRetiredKeys || _mappingCapture.Waiting || _mappingCapture.HasHeldKeys || _mappingWindowsKey.HasHeldKey || _mappingKeys.HasSuppressedKeys);
+        var needed = !_mappingClosing && (Application.Current is not App { IsUiPreviewMode: true } ||
+            _mappingSettings.Enabled || _mappingCapture.Waiting || _mappingCapture.HasHeldKeys);
         if (needed && _keyboardHook == 0)
             _keyboardHook = InstallKeyboardHook();
         else if (!needed && _keyboardHook != 0)
@@ -179,76 +176,53 @@ public partial class MainWindow
         return hook;
     }
 
-    private bool ProcessMappingHook(LowLevelKeyboardData data, nint message)
-    {
-        if ((data.Flags & 0x12) != 0) return false; // injected/lower-integrity events
-        var down = message is 0x100 or 0x104;
-        if (!down && message is not (0x101 or 0x105)) return false;
-        var key = new MappedKey((int)data.VirtualKey, (int)data.ScanCode, (data.Flags & 1) != 0);
-        var routed = _keyboardRouter.Route(KeyboardInputMode.Mapping,
-            ModifierKeyIdentity(key.VirtualKey, key.ScanCode | (key.Extended ? 0x100 : 0)), down);
-        // Capture is a global transaction. Once the editor starts waiting, it
-        // must keep accepting the physical key even if WPF focus moves to a
-        // preview or another window while the user completes the key press.
-        if (_mappingCapture.Process(key, down, routed && _mappingCapture.Waiting,
-                action => Dispatcher.BeginInvoke(action, DispatcherPriority.Input)))
-        {
-            Dispatcher.BeginInvoke(ReconcileKeyboardHook);
-            return true;
-        }
-        var modifiers = AnyOtherModifierPressed(key);
-        var allowed = routed && IsKeyboardMappingInputModeActive && _mappingSettings.Enabled &&
-            MappingFocusAllows() && !_mappingClosing;
-        if (key.VirtualKey == 0x1B && MappingIsFullScreen()) allowed = false;
-        if (KeyboardMappingKeys.Conflict(key, _bluetoothShortcuts.Values) is not null) allowed = false;
-        var canExecute = _viewModel.GetMappingTargetStatus() == "MappingReady";
-        var windowsResult = _mappingWindowsKey.Process(key, down, allowed && canExecute, modifiers || _mappingKeys.HasHeldKeys,
-            _mappingSettings.Mappings, KeyboardMappingWindowsKey.Replay);
-        if (windowsResult.Mapping is { } windowsMapping) QueueMappedGesture(windowsMapping);
-        if (!down) Dispatcher.BeginInvoke(ReconcileKeyboardHook);
-        if (windowsResult.Suppress) return true;
-        var result = _mappingKeys.Process(key, down, false, allowed, modifiers,
-            canExecute && _mappingSettings.SuppressOriginalKey, _mappingSettings.Mappings);
-        if (!IsKeyboardMappingInputModeActive || !_mappingSettings.Enabled) _mappingKeys.Disable();
-        if (result.Mapping is { } mapping) QueueMappedGesture(mapping);
-        return result.Suppress;
-    }
-
     private void QueueMappedGesture(KeyboardMappingEntry mapping)
     {
-        if (!_mappingQueued && !_mappingExecutor.IsBusy)
+        if (_mappingQueued.Count < CoreDeviceTouchProtocol.MaxSlots && !_mappingQueued.ContainsKey(mapping.Id))
         {
-            _mappingQueued = true;
+            var ticket = new object();
+            _mappingQueued.Add(mapping.Id, ticket);
+            var release = mapping.Action == MappedTouchAction.HoldUntilRelease ? _mappingHolds.Begin(mapping) : null;
+            // Let a quick release/repress enqueue a new lifetime. An older
+            // callback must never remove the new press's queue reservation.
+            var registration = release?.Token.Register(() =>
+            {
+                if (_mappingQueued.TryGetValue(mapping.Id, out var queued) && ReferenceEquals(queued, ticket))
+                    _mappingQueued.Remove(mapping.Id);
+            });
             var generation = _mappingGeneration;
+            var foreground = _keyboardForegroundWindow();
+            var focusGeneration = _mappingFocus?.Generation;
             Dispatcher.BeginInvoke(async () =>
             {
-                _mappingQueued = false;
-                if (generation == _mappingGeneration) await ExecuteMappedGestureAsync(mapping);
+                if (_mappingQueued.TryGetValue(mapping.Id, out var queued) && ReferenceEquals(queued, ticket))
+                    _mappingQueued.Remove(mapping.Id);
+                try
+                {
+                    if (generation == _mappingGeneration && foreground == _keyboardForegroundWindow() &&
+                        focusGeneration == _mappingFocus?.Generation)
+                        await ExecuteMappedGestureAsync(mapping, release?.Token ?? default);
+                }
+                finally
+                {
+                    registration?.Dispose();
+                    if (release is not null) _mappingHolds.Complete(mapping.Id, release);
+                }
             }, DispatcherPriority.Input);
         }
     }
 
-    private bool MappingIsFullScreen() => _isFullScreen ||
-        (_viewModel.SelectedDevice is { } device && _secondaryMirrors.IsFullScreen(device.Udid));
-
-    private static bool AnyOtherModifierPressed(MappedKey key)
-    {
-        foreach (var modifier in new[] { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C })
-            if (modifier != key.VirtualKey && GetAsyncKeyState(modifier) < 0) return true;
-        return false;
-    }
-
     private bool MappingFocusAllows()
     {
-        if (_bossKeyHidden || _mappingCapture.Waiting || _mappingPick is not null) return false;
-        var foreground = GetForegroundWindow();
+        if (_bossKeyHidden || _mappingWindow?.IsEditing == true || _mappingCapture.Waiting || _mappingPick is not null) return false;
+        var foreground = _keyboardForegroundWindow();
         if (_viewModel.SelectedDevice is { } device && foreground != 0 &&
             foreground == _secondaryMirrors.GetWindowHandle(device.Udid)) return true;
         if (foreground == _windowSource?.Handle)
         {
             // Native HWND focus is authoritative. WPF logical focus can stay
             // on the settings button (or null) after clicking the D3D surface.
-            if (GetFocus() == MainPreviewHost.WindowHandle && MainPreviewHost.WindowHandle != 0) return true;
+            if (_keyboardFocusedWindow() == MainPreviewHost.WindowHandle && MainPreviewHost.WindowHandle != 0) return true;
             if (_isSettingsPanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or
                     ComboBox or ButtonBase or Slider || Keyboard.FocusedElement is null) return false;
             return true;
@@ -267,7 +241,7 @@ public partial class MainWindow
             (_viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight, 0);
     }
 
-    private async Task ExecuteMappedGestureAsync(KeyboardMappingEntry entry)
+    private async Task ExecuteMappedGestureAsync(KeyboardMappingEntry entry, CancellationToken keyReleased = default)
     {
         if (_keyboardRouter.Mode != KeyboardInputMode.Mapping || !_mappingSettings.Enabled || !MappingFocusAllows()) return;
         LogMappingLimited("key_pressed", entry);
@@ -280,19 +254,22 @@ public partial class MainWindow
         }
         var geometry = MappingGeometry();
         var generation = _mappingGeneration;
+        var foreground = _keyboardForegroundWindow();
+        var focusGeneration = _mappingFocus?.Generation;
         var portrait = _viewModel.AppliedBluetoothPortraitMouseDirection;
         var landscape = _viewModel.AppliedBluetoothLandscapeMouseDirection;
         var reverseX = _viewModel.AppliedBluetoothMouseReverseHorizontal;
         var reverseY = _viewModel.AppliedBluetoothMouseReverseVertical;
         var route = _viewModel.CaptureMappingRoute(
-            () => generation == _mappingGeneration && MappingFocusAllows() && geometry == MappingGeometry(),
+            () => generation == _mappingGeneration && foreground == _keyboardForegroundWindow() &&
+                focusGeneration == _mappingFocus?.Generation && MappingFocusAllows() && geometry == MappingGeometry(),
             (x, y) => entry.DeviceCoordinates ? (x, y) : BluetoothMouseOrientationMapper.MapNormalized(x, y, geometry.Width, geometry.Height,
                 geometry.Rotation, portrait, landscape, reverseX, reverseY));
         if (route is null) return;
         LogMappingLimited("mapping_matched", entry, route.Target);
         try
         {
-            if (await _mappingExecutor.ExecuteAsync(entry, route))
+            if (await _mappingExecutor.ExecuteAsync(entry, route, keyReleased, replayCompletedHold: true))
                 LogMappingLimited("action_sent", entry, route.Target);
         }
         catch (OperationCanceledException) { LogMappingLimited("action_cancelled_or_disconnected", entry, route.Target); }
@@ -325,6 +302,7 @@ public partial class MainWindow
 
     private void RefreshMappingStatus()
     {
+        ObserveKeyboardForeground();
         var key = MappingStatusKey();
         if (key != _lastMappingStatus)
         {
@@ -338,9 +316,9 @@ public partial class MainWindow
     private void CancelMappedGesture()
     {
         ++_mappingGeneration;
+        _mappingHolds.Cancel();
         _mappingExecutor.Cancel();
-        _mappingKeys.CancelCandidates();
-        _mappingWindowsKey.Cancel();
+        _keyboardRouter.ReleaseAllPressedKeys();
     }
 
     private void OnMappingContextChanged(string? property)
@@ -350,11 +328,16 @@ public partial class MainWindow
             nameof(ViewModels.MainViewModel.IsCapturing) or
             nameof(ViewModels.MainViewModel.IsVideoProtected) or
             nameof(ViewModels.MainViewModel.IsAudioOnlyAirPlay) or
+            nameof(ViewModels.MainViewModel.SourceVideoWidth) or
             nameof(ViewModels.MainViewModel.SourceVideoHeight) or
             nameof(ViewModels.MainViewModel.UsbControlIsInputEnabled) or
             nameof(ViewModels.MainViewModel.BluetoothControlIsInputEnabled))
         {
             CancelMappedGesture();
+            RetireInvalidPreviewTouches();
+            if (property is nameof(ViewModels.MainViewModel.SourceVideoWidth) or
+                nameof(ViewModels.MainViewModel.SourceVideoHeight) && _viewModel.SelectedDevice is { } device)
+                _ = ResetPreviewTouchesAsync(device.Udid);
             RefreshMappingStatus();
             _mappingWindow?.SetRuntimeStatus(MappingStatusKey());
             RefreshMappingOverlays();
@@ -370,7 +353,7 @@ public partial class MainWindow
         _mappingFocus?.Dispose();
         _mappingTimer?.Stop();
         _viewModel.KeyboardMappingRequested -= ShowKeyboardMapping;
-        LeaveKeyboardMappingInputMode();
+        ChangeKeyboardOwner(KeyboardInputMode.None);
         ReconcileKeyboardHook();
     }
 
