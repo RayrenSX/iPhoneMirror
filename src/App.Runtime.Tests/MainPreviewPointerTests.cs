@@ -98,6 +98,7 @@ internal static partial class Program
             Click();
             InteractionAssert(ReadPreviewTouchPackets(packets).Length == 2,
                 $"{context}: touch must resume after returning to the main window.");
+            TestFivePointPreview(window, device, packets, hwnd, context);
             Console.WriteLine($"{context}: native main-preview click, drag, cancellation and focus checks passed.");
         }
         finally

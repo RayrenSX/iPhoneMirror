@@ -17,14 +17,17 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
     private readonly Func<string?> _targetName;
     private readonly Func<KeyboardMappingEntry, Action<KeyboardMappingEntry?>, string?>? _beginPick;
     private readonly Action? _cancelPick;
+    private readonly Func<MappingPreviewSurface?>? _previewSurface;
     private KeyboardMappingEditorWindow? _editor;
+    internal bool IsEditing => _editor is not null;
     private string _statusKey = "MappingOff";
     public ObservableCollection<KeyboardMappingRow> Rows { get; } = [];
     internal KeyboardMappingWindow(KeyboardMappingSettings settings,
         Func<KeyboardMappingSettings, string?> apply, Func<MappedKey, string?> conflict,
         Func<Action<MappedKey>, string?> beginCapture, Action endCapture, Func<string> runtimeStatus,
         Func<string?>? targetName = null,
-        Func<KeyboardMappingEntry, Action<KeyboardMappingEntry?>, string?>? beginPick = null, Action? cancelPick = null)
+        Func<KeyboardMappingEntry, Action<KeyboardMappingEntry?>, string?>? beginPick = null, Action? cancelPick = null,
+        Func<MappingPreviewSurface?>? previewSurface = null)
     {
         _settings = settings.Clone();
         (_apply, _conflict, _beginCapture, _endCapture, _runtimeStatus) =
@@ -32,8 +35,10 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
         _targetName = targetName ?? (() => null);
         _beginPick = beginPick;
         _cancelPick = cancelPick;
+        _previewSurface = previewSurface;
         InitializeComponent();
         DataContext = this;
+        Closing += (_, e) => { if (!e.Cancel) e.Cancel = !TryCloseEditor(Close); };
         Refresh();
         LocalizationService.RefreshWhenLanguageChanges(this, Refresh);
     }
@@ -114,7 +119,7 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
                 next.Mappings.RemoveAll(m => m.Id == edited.Id || m.Id == replacedId);
                 next.Mappings.Add(edited);
                 return Save(next, _settings.Mappings.Any(m => m.Id == edited.Id) ? "mapping_edited" : "mapping_created");
-            }, BeginPick) { Owner = this };
+            }, BeginPick, _cancelPick, _previewSurface) { Owner = this };
         _editor = editor;
         editor.Closed += (_, _) => { _editor = null; _endCapture(); _cancelPick?.Invoke(); };
         editor.Show();
@@ -128,13 +133,27 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
         Hide();
         void Restore(KeyboardMappingEntry? result)
         {
-            if (editor is null || !ReferenceEquals(_editor, editor)) return;
+            if (editor is null || editor.IsEditorClosed || !ReferenceEquals(_editor, editor)) return;
             Show(); editor.Show(); editor.Activate();
             completed(result);
         }
         var error = _beginPick(entry, Restore);
         if (error is not null) Restore(null);
         return error;
+    }
+    internal bool TryCloseEditor(Action resumeClose)
+    {
+        // WPF skips an owned window's Closing event when its owner closes.
+        if (_editor is not { } editor || editor.RequestOwnerClose(resumeClose)) return true;
+        // Wait until the owner's Closing event has been cancelled before
+        // restoring windows hidden by the original-preview picking flow.
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!ReferenceEquals(_editor, editor) || editor.IsEditorClosed) return;
+            _cancelPick?.Invoke();
+            Show(); editor.Show(); editor.Activate();
+        });
+        return false;
     }
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 }

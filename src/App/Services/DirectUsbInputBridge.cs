@@ -40,6 +40,10 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     private string? _lastStandardError;
     private long _readyGeneration;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    // Shared budget for mouse, keyboard gestures and physical touch, protected
+    // by the writer lock. Recovery starts a fresh contact lifetime.
+    private readonly HashSet<int> _touchContacts = [];
+    private long _touchContactGeneration = -1;
     private long _sequence;
     private int _stopping;
     private int _terminalEventReceived;
@@ -198,6 +202,9 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
         if (points.Count == 0 || points.Count > CoreDeviceTouchProtocol.MaxSlots)
             throw new ArgumentOutOfRangeException(nameof(points), LocalizationService.Get("TouchBridgeInvalidBatch"));
+        if (points.Select(point => point.PointerId).Distinct().Count() != points.Count ||
+            points.Any(point => point.Action is not ("down" or "move" or "up")))
+            throw new ArgumentException("Touch batches require unique IDs and down/move/up actions.", nameof(points));
         foreach (var point in points)
         {
             if (point.PointerId < 0)
@@ -218,6 +225,26 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             if (generation != Interlocked.Read(ref _readyGeneration)) return;
             if (!IsReady || _stdin is null)
                 throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
+            if (_touchContactGeneration != generation)
+            {
+                _touchContacts.Clear();
+                _touchContactGeneration = generation;
+            }
+            var contacts = new HashSet<int>(_touchContacts);
+            var accepted = new List<TouchPoint>(points.Count);
+            foreach (var point in points)
+            {
+                if (point.Action == "down")
+                {
+                    if (!contacts.Contains(point.PointerId) && contacts.Count >= CoreDeviceTouchProtocol.MaxSlots)
+                        continue;
+                    contacts.Add(point.PointerId);
+                }
+                else if (point.Action == "move" && !contacts.Contains(point.PointerId)) continue;
+                else if (point.Action == "up") contacts.Remove(point.PointerId);
+                accepted.Add(point);
+            }
+            if (accepted.Count == 0) return;
             var frameSequence = NextSequence();
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
                 {
@@ -226,13 +253,11 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                     kind = CoreDeviceTouchProtocol.MessageKind,
                     seq = frameSequence,
                     timestampNs,
-                    points,
+                    points = accepted,
                 });
-            var header = BitConverter.GetBytes((uint)bytes.Length);
-
-            await _stdin.BaseStream.WriteAsync(header, ct);
-            await _stdin.BaseStream.WriteAsync(bytes, ct);
-            await _stdin.BaseStream.FlushAsync(ct);
+            await WriteFrameAsync(bytes, ct);
+            _touchContacts.Clear();
+            _touchContacts.UnionWith(contacts);
         }
         finally
         {
@@ -256,6 +281,35 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     }
 
     private long NextSequence() => Interlocked.Increment(ref _sequence);
+
+    // Called only under _sendLock. Cancellation may reject a frame before its
+    // first byte, but must not leave a length prefix without its JSON payload.
+    private async Task WriteFrameAsync(byte[] payload, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var frame = new byte[sizeof(uint) + payload.Length];
+        BitConverter.TryWriteBytes(frame.AsSpan(0, sizeof(uint)), (uint)payload.Length);
+        payload.CopyTo(frame.AsSpan(sizeof(uint)));
+        ct.ThrowIfCancellationRequested();
+        var stdin = _stdin ?? throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
+        try
+        {
+            // The caller can cancel after this point; finish the current frame
+            // before its cleanup release is allowed to acquire the writer lock.
+            using var writeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await stdin.BaseStream.WriteAsync(frame, writeTimeout.Token);
+            await stdin.BaseStream.FlushAsync(writeTimeout.Token);
+        }
+        catch
+        {
+            // An I/O error can have written only part of a frame. Closing the
+            // pipe prevents later input from being parsed as its missing bytes.
+            IsReady = false;
+            GateOpen = false;
+            try { stdin.Close(); } catch { }
+            throw;
+        }
+    }
 
     public async Task StopAsync()
     {
@@ -504,11 +558,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 usages = normalized,
             };
             var bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
-            var header = BitConverter.GetBytes((uint)bytes.Length);
-
-            await _stdin.BaseStream.WriteAsync(header, ct);
-            await _stdin.BaseStream.WriteAsync(bytes, ct);
-            await _stdin.BaseStream.FlushAsync(ct);
+            await WriteFrameAsync(bytes, ct);
         }
         finally { _sendLock.Release(); }
     }
@@ -541,11 +591,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 state,
             };
             var bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
-            var header = BitConverter.GetBytes((uint)bytes.Length);
-
-            await _stdin.BaseStream.WriteAsync(header, ct);
-            await _stdin.BaseStream.WriteAsync(bytes, ct);
-            await _stdin.BaseStream.FlushAsync(ct);
+            await WriteFrameAsync(bytes, ct);
         }
         finally { _sendLock.Release(); }
     }
@@ -578,15 +624,12 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             // an oversized frame terminates the receiver's input loop.
             if (bytes.Length > CoreDeviceTouchProtocol.MaxFrameSize)
                 throw new ArgumentException(LocalizationService.Get("ClipboardTextTooLarge"), nameof(text));
-            var header = BitConverter.GetBytes((uint)bytes.Length);
-            await _stdin.BaseStream.WriteAsync(header, ct);
-            await _stdin.BaseStream.WriteAsync(bytes, ct);
-            await _stdin.BaseStream.FlushAsync(ct);
+            await WriteFrameAsync(bytes, ct);
         }
         finally { _sendLock.Release(); }
     }
 
-    public async Task SendReadClipboardAsync(CancellationToken ct = default)
+    public async Task SendReadClipboardAsync(CancellationToken ct = default, Func<bool>? canSend = null)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
         if (!IsReady || _stdin is null)
@@ -594,6 +637,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
+            if (canSend?.Invoke() == false) return;
             // Recovery may close the gate while this packet waits for the writer.
             if (generation != Interlocked.Read(ref _readyGeneration)) return;
             if (!IsReady || _stdin is null)
@@ -606,10 +650,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 seq = NextSequence(),
             };
             var bytes = JsonSerializer.SerializeToUtf8Bytes(frame);
-            var header = BitConverter.GetBytes((uint)bytes.Length);
-            await _stdin.BaseStream.WriteAsync(header, ct);
-            await _stdin.BaseStream.WriteAsync(bytes, ct);
-            await _stdin.BaseStream.FlushAsync(ct);
+            await WriteFrameAsync(bytes, ct);
         }
         finally { _sendLock.Release(); }
     }

@@ -36,12 +36,15 @@ internal static partial class Program
             TestMappingWindowsKeyChords();
             TestMappingVisualCoordinates();
             AwaitMapping(TestMappingGesturesAsync());
+            AwaitMapping(TestMappingHoldUntilReleaseAsync());
+            AwaitMapping(TestMappingFrameCancellationAsync());
             TestMappingRoutes(app);
             TestMappingHookAndEntry(app);
             TestMappingNativePreviewFocus(app);
             TestMappingFocusGuard();
             TestMappingWindows(app, output);
             TestMappingOverlayInteraction(app, output);
+            TestMappingPickPreservesDuration();
             TestMappingSurfaceLifecycle(app);
             Console.WriteLine("PASS keyboard mapping: configuration, key families/chords/repeat, all gestures, cancellation, USB/wireless framed transport, device switching/reconnect, orientation, editor CRUD/conflicts, three languages, both themes, resized windows.");
             return 0;
@@ -75,7 +78,7 @@ internal static partial class Program
             loaded.KeyboardMapping.Mappings.SequenceEqual(initial.KeyboardMapping.Mappings), "Mappings did not survive restart.");
         var clone = loaded.Clone();
         clone.KeyboardMapping.Mappings.Clear();
-        MappingAssert(loaded.KeyboardMapping.Mappings.Count == 8, "Settings rollback snapshot aliases the mapping list.");
+        MappingAssert(loaded.KeyboardMapping.Mappings.Count == Enum.GetValues<MappedTouchAction>().Length, "Settings rollback snapshot aliases the mapping list.");
         var valid = JsonSerializer.Serialize(MappingEntry());
         var corruptCases = new[]
         {
@@ -148,7 +151,7 @@ internal static partial class Program
     private static async Task TestMappingGesturesAsync()
     {
         using var executor = new KeyboardMappingExecutor();
-        foreach (var action in Enum.GetValues<MappedTouchAction>())
+        foreach (var action in Enum.GetValues<MappedTouchAction>().Where(a => a != MappedTouchAction.HoldUntilRelease))
         {
             var samples = new List<(string Action, double X, double Y, long Ms)>();
             var clock = Stopwatch.StartNew();
@@ -174,8 +177,9 @@ internal static partial class Program
             var current = true;
             var route = new MappedTouchRoute("old", () => current, (action, _, _, _) =>
             { events.Add(action); return Task.CompletedTask; }, (x, y) => (x, y));
-            var first = executor.ExecuteAsync(MappingEntry(MappedTouchAction.LongPress) with { DurationMs = 1000 }, route);
-            MappingAssert(!await executor.ExecuteAsync(MappingEntry(), route), "Rapid keys queued an unbounded gesture.");
+            var heldMapping = MappingEntry(MappedTouchAction.LongPress) with { DurationMs = 1000 };
+            var first = executor.ExecuteAsync(heldMapping, route);
+            MappingAssert(!await executor.ExecuteAsync(heldMapping, route), "The same mapping overlapped itself.");
             if (cancel) executor.Cancel(); else current = false;
             try { await first; throw new Exception("Cancelled gesture completed."); }
             catch (OperationCanceledException) { }
@@ -223,6 +227,7 @@ internal static partial class Program
                 control.WirelessConnected = control.WirelessEnabled;
                 control.WirelessBridge = control.WirelessEnabled ? host : null;
                 control.Router.Begin(phone.Udid, mode);
+                AwaitMapping(TestFivePointMappingAsync(vm, packets, mode.ToString()));
                 foreach (var dimensions in new[] { (1170u, 2532u), (1668u, 2388u), (2532u, 1170u), (2388u, 1668u) })
                 foreach (var turn in new[] { 0, 1, 3 })
                 {
@@ -233,7 +238,8 @@ internal static partial class Program
                     using var executor = new KeyboardMappingExecutor();
                     AwaitMapping(executor.ExecuteAsync(MappingEntry() with { X = .2, Y = .7 }, route));
                     var frames = MappingFrames(packets);
-                    MappingAssert(frames.Count == 2 && frames.All(f => f.GetProperty("points")[0].GetProperty("pointerId").GetInt32() == 2),
+                    MappingAssert(frames.Count == 2 && frames.All(f => f.GetProperty("points")[0].GetProperty("pointerId").GetInt32() > 1) &&
+                        frames.Select(f => f.GetProperty("points")[0].GetProperty("pointerId").GetInt32()).Distinct().Count() == 1,
                         "Mapping bypassed touch framing or collided with mouse pointer ID.");
                     // Independent expected positions for the existing preview
                     // rotation followed by per-orientation direction mapping.
@@ -375,54 +381,71 @@ internal static partial class Program
                 editor.Show();
                 try
                 {
-                    var captureButton = (Button)editor.FindName("CaptureButton");
-                    captureButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    MappingAssert(capture is not null && !((Button)editor.FindName("SaveButton")).IsEnabled, "Key capture did not start.");
+                    MappingAssert(capture is not null && !((Button)editor.FindName("SaveButton")).IsEnabled,
+                        "Key capture did not start automatically.");
                     capture!(MappingTestKey);
-                    ((ComboBox)editor.FindName("ActionBox")).SelectedValue = MappedTouchAction.Swipe;
-                    MappingAssert(!((Button)editor.FindName("SaveButton")).IsEnabled &&
-                        editor.State == MappingEditorState.KeyCaptured, "Capture bypassed required visual picking.");
+                    MappingAssert(((WrapPanel)editor.FindName("ConflictPanel")).Visibility == Visibility.Visible &&
+                        !editor.Wizard.CanNext && saved is null, "Duplicate mapping did not block the key step.");
+                    SaveWindowRender(editor, Path.Combine(output, $"mapping-conflict-{language}-{theme}.png"));
+                    KeyboardCall(editor, "OnReplaceClick", editor, new RoutedEventArgs());
+                    WizardNext(editor);
+                    var actionBox = (ListBox)editor.FindName("ActionBox");
+                    actionBox.SelectedValue = MappedTouchAction.Swipe;
+                    MappingAssert(actionBox.Items.Count == 5, "Existing action types were not retained.");
+                    WizardNext(editor);
+                    MappingAssert(((ComboBox)editor.FindName("DirectionBox")).Items.Count == 5,
+                        "Swipe directions were not grouped under one action.");
+                    WizardNext(editor);
+                    MappingAssert(!((Button)editor.FindName("SaveButton")).IsEnabled,
+                        "Capture bypassed required visual picking.");
                     ((Button)editor.FindName("PickButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     MappingAssert(editor.State == MappingEditorState.MappingReady, "Pick did not finish the editing transaction.");
+                    WizardNext(editor);
                     AdvanceDispatcher(TimeSpan.FromMilliseconds(260));
                     SaveWindowRender(editor, Path.Combine(output, $"mapping-editor-{language}-{theme}.png"));
-                    editor.Width = 480; editor.Height = 500;
-                    editor.UpdateLayout();
-                    CheckMappingButtons(editor);
-                    ((Button)editor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    MappingAssert(((WrapPanel)editor.FindName("ConflictPanel")).Visibility == Visibility.Visible && saved is null,
-                        "Duplicate mapping was silently overwritten.");
-                    editor.UpdateLayout();
-                    CheckMappingButtons(editor);
-                    SaveWindowRender(editor, Path.Combine(output, $"mapping-conflict-{language}-{theme}.png"));
-                    KeyboardCall(editor, "OnCancelConflictClick", editor, new RoutedEventArgs());
-                    MappingAssert(saved is null, "Conflict cancellation saved changes.");
-                    ((Button)editor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    KeyboardCall(editor, "OnReplaceClick", editor, new RoutedEventArgs());
+                    editor.Width = 480; editor.Height = 560; editor.UpdateLayout(); CheckMappingButtons(editor);
+                    WizardNext(editor);
                     MappingAssert(saved is { X: .2, Y: .7, EndX: .8, EndY: .3, Action: MappedTouchAction.Swipe } &&
-                        replaced == settings.Mappings[0].Id, "Replace did not save the edited mapping and explicit conflict ID.");
+                        replaced == settings.Mappings[0].Id, "Replace did not preserve the edited mapping and conflict ID.");
                 }
-                finally { editor.Close(); }
-                // A second editor exercises the third conflict resolution path.
+                finally { DiscardWizard(editor); }
+                var directionalEditor = new KeyboardMappingEditorWindow(settings.Mappings[1], settings.Mappings,
+                    _ => null, _ => null, () => { }, (entry, _) => { saved = entry; return null; },
+                    (entry, completed) => { completed(entry with { X = .5, Y = .3, EndX = .5, EndY = .7,
+                        DeviceCoordinates = true }); return null; }) { Owner = manager, ShowInTaskbar = false };
+                directionalEditor.Show();
+                try
+                {
+                    MappingAssert(((ListBox)directionalEditor.FindName("ActionBox")).SelectedValue is MappedTouchAction.Swipe &&
+                        ((ComboBox)directionalEditor.FindName("DirectionBox")).SelectedValue is MappedTouchAction.SwipeUp,
+                        "Existing directional swipe did not restore its direction.");
+                    WizardTo(directionalEditor, MappingWizardStep.Parameters);
+                    ((ComboBox)directionalEditor.FindName("DirectionBox")).SelectedValue = MappedTouchAction.SwipeDown;
+                    MappingAssert(!directionalEditor.Wizard.HasPosition, "Changing direction reused old coordinates.");
+                    WizardNext(directionalEditor);
+                    ((Button)directionalEditor.FindName("PickButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    WizardNext(directionalEditor); WizardNext(directionalEditor);
+                    MappingAssert(saved?.Action == MappedTouchAction.SwipeDown, "Selected swipe direction was not saved.");
+                }
+                finally { DiscardWizard(directionalEditor); }
                 var originalEditor = new KeyboardMappingEditorWindow(null, settings.Mappings, _ => null,
                     callback => { capture = callback; return null; }, () => { },
-                    (entry, replace) => { saved = entry; replaced = replace; return null; },
-                    (entry, completed) => { completed(entry); return null; })
+                    (entry, replace) => { saved = entry; replaced = replace; return null; })
                     { Owner = manager, ShowInTaskbar = false };
                 originalEditor.Show();
                 try
                 {
-                    ((Button)originalEditor.FindName("CaptureButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     capture!(MappingTestKey);
-                    ((Button)originalEditor.FindName("PickButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    ((Button)originalEditor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     KeyboardCall(originalEditor, "OnEditOriginalClick", originalEditor, new RoutedEventArgs());
-                    ((ComboBox)originalEditor.FindName("ActionBox")).SelectedValue = MappedTouchAction.LongPress;
-                    ((Button)originalEditor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    MappingAssert(saved?.Id == settings.Mappings[0].Id && saved.Action == MappedTouchAction.LongPress && replaced is null,
-                        "Edit-original did not retain the original mapping identity.");
+                    WizardNext(originalEditor);
+                    ((ListBox)originalEditor.FindName("ActionBox")).SelectedValue = MappedTouchAction.HoldUntilRelease;
+                    MappingAssert(originalEditor.Wizard.Steps.Count == 4 && originalEditor.Wizard.HasPosition,
+                        "Hold unnecessarily requires parameters or discards the selected point.");
+                    WizardTo(originalEditor, MappingWizardStep.Confirmation); WizardNext(originalEditor);
+                    MappingAssert(saved?.Id == settings.Mappings[0].Id && saved.Action == MappedTouchAction.HoldUntilRelease && replaced is null,
+                        "Edit-original did not retain original identity.");
                 }
-                finally { originalEditor.Close(); }
+                finally { DiscardWizard(originalEditor); }
                 var row = manager.Rows[0];
                 var rowToggle = new CheckBox { DataContext = row, IsChecked = false };
                 KeyboardCall(manager, "OnRowEnabledClick", rowToggle, new RoutedEventArgs());
@@ -453,7 +476,8 @@ internal static partial class Program
             manager.Dispatcher.BeginInvoke(() =>
             {
                 var editor = app.Windows.OfType<KeyboardMappingEditorWindow>().Single();
-                ((Button)editor.FindName("CaptureButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if (!editor.Wizard.Capturing)
+                    ((Button)editor.FindName("CaptureButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 MappingAssert((nint)KeyboardField(main, "_keyboardHook") != 0, "Recording did not install the shared Windows hook.");
                 // Exercise the actual native callback with an in-process packet.
                 // No SendInput: injected input is intentionally rejected.
@@ -477,13 +501,24 @@ internal static partial class Program
                 // Transport-free test of saving a confirmed position. Real
                 // overlay mouse selection is covered by the interaction probe.
                 KeyboardCall(editor, "LoadEntry", MappingEntry());
+                // The hook test has no device frame. Navigation/preview gating
+                // is covered separately with a deterministic frame provider.
+                while (editor.Wizard.Current != MappingWizardStep.Confirmation) editor.Wizard.MoveNext();
                 ((Button)editor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             });
             KeyboardCall(manager, "OnAddClick", manager, new RoutedEventArgs());
             AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
             MappingAssert(manager.Rows.Count == 1 && app.UpdateSettings.KeyboardMapping.Mappings.Single().Key == MappingTestKey,
                 "Add did not persist real captured scan/VK data.");
-            MappingAssert((nint)KeyboardField(main, "_keyboardHook") == 0, "Recording left a hook active while mapping is off.");
+            // Leaving mapping ownership drains its asynchronous handoff before
+            // the shared hook can be removed.
+            var hookDrain = Stopwatch.StartNew();
+            while ((nint)KeyboardField(main, "_keyboardHook") != 0 && hookDrain.Elapsed < TimeSpan.FromSeconds(2))
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(10));
+            var router = (KeyboardInputRouter)KeyboardField(main, "_keyboardRouter");
+            var capture = (KeyboardMappingCapture)KeyboardField(main, "_mappingCapture");
+            MappingAssert((nint)KeyboardField(main, "_keyboardHook") == 0,
+                $"Recording left a hook active while mapping is off: mode={router.Mode}, requested={router.RequestedMode}, retired={router.HasRetiredKeys}, captureHeld={capture.HasHeldKeys}, captureWaiting={capture.Waiting}.");
             var toggle = (CheckBox)manager.FindName("EnabledBox");
             toggle.IsChecked = true;
             toggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

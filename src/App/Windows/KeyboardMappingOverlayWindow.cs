@@ -214,9 +214,8 @@ internal sealed class KeyboardMappingOverlayWindow : Window
     {
         if (_pick is { } pick)
         {
-            var coordinates = _cursor is { } point ? $"X {point.X:P1}  Y {point.Y:P1}" : LocalizationService.Get("MappingPickInside");
-            _hint.Text = $"{KeyboardMappingKeys.Display(pick.Entry.Key)} · {LocalizationService.Get("MappingAction" + pick.Entry.Action)}\n{coordinates}\n" +
-                LocalizationService.Get(pick.Entry.IsSwipe ? "MappingPickDrag" : "MappingPickClick");
+            _hint.Text = LocalizationService.Get(_dragging && pick.Entry.IsSwipe ? "WizardRecording" :
+                pick.Entry.IsSwipe ? "MappingPickDrag" : "MappingPickClick");
         }
         _visual.InvalidateVisual();
     }

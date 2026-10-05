@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace IPhoneMirror.App.Services;
 
-internal enum MappedTouchAction { Tap, LongPress, DoubleTap, Swipe, SwipeUp, SwipeDown, SwipeLeft, SwipeRight }
+internal enum MappedTouchAction { Tap, LongPress, DoubleTap, Swipe, SwipeUp, SwipeDown, SwipeLeft, SwipeRight, HoldUntilRelease }
 
 // Scan code + extended flag identify a physical key, independent of layout and
 // NumLock. VirtualKey is retained for display, accessibility and shortcut checks.
@@ -36,8 +36,8 @@ internal sealed record KeyboardMappingEntry
     // their original preview-space interpretation until explicitly repicked.
     public bool DeviceCoordinates { get; init; }
 
-    internal bool IsSwipe => Action >= MappedTouchAction.Swipe;
-    internal bool IsDirectional => Action >= MappedTouchAction.SwipeUp;
+    internal bool IsSwipe => Action is >= MappedTouchAction.Swipe and <= MappedTouchAction.SwipeRight;
+    internal bool IsDirectional => Action is >= MappedTouchAction.SwipeUp and <= MappedTouchAction.SwipeRight;
     internal (double X, double Y) EndPoint => DeviceCoordinates ? (EndX, EndY) : Action switch
     {
         MappedTouchAction.SwipeUp => (X, Y - Distance),

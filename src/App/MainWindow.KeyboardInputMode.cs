@@ -57,9 +57,6 @@ public partial class MainWindow
         if (next == KeyboardInputMode.Mapping) RegisterRawInput(_rawMouseInputEnabled, false);
         Interlocked.Increment(ref _keyboardInputGeneration);
         CancelMappedGesture();
-        _mappingKeys.Disable();
-        _ordinaryKeysDown.Clear();
-        _shortcutKeysDown.Clear();
         _controlKeyboardUsages.Clear();
         _controlModifierKeys.Clear();
         _controlKeyboardModifiers = 0;

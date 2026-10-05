@@ -44,8 +44,8 @@ internal sealed class KeyboardMappingWindowsKey
         var mapping = mappings.FirstOrDefault(m => m.Enabled && m.Key!.SamePhysicalKey(key));
         if (mapping is null) return default;
         _held = key;
-        _candidate = mapping;
-        return new(null, true);
+        _candidate = mapping.Action == MappedTouchAction.HoldUntilRelease ? null : mapping;
+        return new(mapping.Action == MappedTouchAction.HoldUntilRelease ? mapping : null, true);
     }
 
     internal static bool Replay(MappedKey[] keys)

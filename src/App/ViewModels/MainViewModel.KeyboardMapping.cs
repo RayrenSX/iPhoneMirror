@@ -42,11 +42,17 @@ internal sealed partial class MainViewModel
 
     internal MappedTouchRoute? CaptureMappingRoute(Func<bool> isCurrent,
         Func<double, double, (double X, double Y)> transform)
+        => CaptureTouchRoute(SelectedDevice?.Udid, isCurrent, transform, requireSelection: true);
+
+    private int _nextTouchPointerId = 1; // Mouse/wheel retains ID 1.
+
+    internal MappedTouchRoute? CaptureTouchRoute(string? targetUdid, Func<bool> isCurrent,
+        Func<double, double, (double X, double Y)> transform, bool requireSelection = false)
     {
-        var control = SelectedControl;
-        var bridge = GetReadyUsbControlBridge(SelectedDevice?.Udid);
+        var control = FindControl(targetUdid);
+        var bridge = GetReadyUsbControlBridge(targetUdid);
         if (control is null || control.Starting || control.Stopping || bridge is null || control.AppleUdid is null ||
-            IsBluetoothControlTarget(SelectedDevice?.Udid)) return null;
+            IsBluetoothControlTarget(targetUdid)) return null;
         var appleUdid = control.AppleUdid;
         var mode = control.WiredEnabled && ReferenceEquals(control.WiredBridge, bridge)
             ? ReverseControlMode.Usb : ReverseControlMode.Wireless;
@@ -55,19 +61,19 @@ internal sealed partial class MainViewModel
         bool SameSession() => bridge.IsReady && bridge.InputGeneration == bridgeGeneration &&
             control.Router.Owns(appleUdid, mode, routerGeneration);
         bool Current() => SameSession() && !_disposed &&
-            DeviceViewModel.UdidEquals(SelectedDevice?.Udid, control.DeviceUdid) &&
+            (!requireSelection || DeviceViewModel.UdidEquals(SelectedDevice?.Udid, control.DeviceUdid)) &&
             ReferenceEquals(GetReadyUsbControlBridge(control.DeviceUdid), bridge) && isCurrent();
         if (!Current()) return null;
+        var pointerId = Interlocked.Increment(ref _nextTouchPointerId);
         return new(control.DeviceUdid, Current, async (action, x, y, token) =>
         {
             if (!SameSession()) throw new OperationCanceledException();
             if (action != "up" && !Current()) throw new OperationCanceledException();
-            // Pointer 2 is reserved for keyboard gestures; pointer 1 belongs to
-            // the existing mouse/wheel path. Neither can release the other.
+            // Every gesture keeps its own ID, including cleanup after focus loss.
             // Recheck focus, selection and geometry inside the writer lock;
             // they can change while a down/move waits behind another packet.
             // The transport deliberately exempts cleanup releases from this guard.
-            await SendRoutedTouchAsync(bridge, action, x, y, 2, token,
+            await SendRoutedTouchAsync(bridge, action, x, y, pointerId, token,
                 () => Current() && !token.IsCancellationRequested, bridgeGeneration);
             if (action != "up" && !Current()) throw new OperationCanceledException();
         }, transform);

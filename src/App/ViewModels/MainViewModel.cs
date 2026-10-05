@@ -1386,7 +1386,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             try
             {
                 await bridge.SendPasteTextAsync(text, canSend: canSend);
-                AddDiagnosticLog(AppLog.Event("usb_paste_text_sent",
+                AddDiagnosticLog(AppLog.Event("usb_paste_text_queued",
                     ("device", AppLog.Device(targetUdid)),
                     ("length", text.Length), ("attempt", attempt + 1)));
                 return;
@@ -1407,10 +1407,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         AddDiagnosticLog(AppLog.Event("usb_paste_text_failed",
             ("device", AppLog.Device(targetUdid)),
             ("error", AppLog.Error(lastError))));
-        if (lastError is ArgumentException { ParamName: "text" } &&
-            FindControl(targetUdid) is { } control)
+        if (FindControl(targetUdid) is { } control)
         {
-            control.Status = LocalizationService.Get("ClipboardTextTooLarge");
+            control.Status = LocalizationService.Get(lastError is ArgumentException { ParamName: "text" }
+                ? "ClipboardTextTooLarge" : "ClipboardPasteFailed");
+            AddUiLog(control.Status);
             NotifyUsbControlStateChanged();
         }
     }
@@ -2262,6 +2263,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     HandleClipboardTextFromDevice(control.DeviceUdid, bridge, bridgeEvent.Text, clipboardSequence!);
                     return;
                 }
+                if (bridgeEvent.EventName == "warning" && bridgeEvent.Code == "paste_failed")
+                    ShowClipboardPasteFailure(control);
                 LogBridgeEvent("wireless", bridgeEvent);
                 UpdateReverseControlStartupStatus(control,
                     LocalizationService.Get("ReverseControlTransportWireless"),
@@ -2595,6 +2598,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     HandleClipboardTextFromDevice(control.DeviceUdid, bridge, bridgeEvent.Text, clipboardSequence!);
                     return;
                 }
+                if (bridgeEvent.EventName == "warning" && bridgeEvent.Code == "paste_failed")
+                    ShowClipboardPasteFailure(control);
                 LogBridgeEvent("usb", bridgeEvent);
                 UpdateReverseControlStartupStatus(control,
                     LocalizationService.Get("ReverseControlTransportWired"),
@@ -2878,6 +2883,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         if (dispatcher is null) { Volatile.Write(ref _reverseControlErrorPromptInFlight, 0); return; }
         if (dispatcher.CheckAccess()) Show();
         else dispatcher.BeginInvoke(Show);
+    }
+
+    private void ShowClipboardPasteFailure(DeviceControlSession control)
+    {
+        control.Status = LocalizationService.Get("ClipboardPasteFailed");
+        AddUiLog(control.Status);
+        NotifyUsbControlStateChanged();
     }
 
     private static void LogBridgeEvent(string mode, BridgeStatusEventArgs bridgeEvent)

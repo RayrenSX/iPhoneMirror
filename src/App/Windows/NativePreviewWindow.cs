@@ -137,7 +137,6 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly Action<nint>? _showImageSettings;
     private readonly Action? _showProjectionSettings;
     private readonly Func<nint, bool>? _isReverseControlEnabled;
-    private readonly Func<bool>? _isReverseControlHotkeyRegistered;
     private readonly Action<PreviewPointerEventArgs>? _pointerInput;
     private readonly Action<PreviewKeyboardEventArgs>? _keyboardInput;
     private readonly Action<nint>? _requestReverseControl;
@@ -193,7 +192,6 @@ internal sealed class NativePreviewWindow : IDisposable
            Action<PreviewPointerEventArgs>? pointerInput = null,
            Action<PreviewKeyboardEventArgs>? keyboardInput = null,
            Action<nint>? requestReverseControl = null,
-           Func<bool>? isReverseControlHotkeyRegistered = null,
            Func<bool>? isUsbControlEnabled = null,
            Action<nint>? requestUsbControl = null,
            Action<nint>? requestWirelessControl = null,
@@ -213,7 +211,6 @@ internal sealed class NativePreviewWindow : IDisposable
         _showImageSettings = showImageSettings;
         _showProjectionSettings = showProjectionSettings;
         _isReverseControlEnabled = isReverseControlEnabled;
-        _isReverseControlHotkeyRegistered = isReverseControlHotkeyRegistered;
         _pointerInput = pointerInput;
         _keyboardInput = keyboardInput;
         _requestReverseControl = requestReverseControl;
@@ -330,6 +327,7 @@ internal sealed class NativePreviewWindow : IDisposable
         _handle = _source.Handle;
         if (_handle == 0) throw new InvalidOperationException(
             "Could not create the native preview window.");
+        if (managedContent is null) NativeTouchInput.RegisterTouchWindow(_handle);
 
         if (managedContent is not null)
         {
@@ -462,7 +460,6 @@ internal sealed class NativePreviewWindow : IDisposable
         Action<PreviewPointerEventArgs>? pointerInput = null,
         Action<PreviewKeyboardEventArgs>? keyboardInput = null,
         Action<nint>? requestReverseControl = null,
-        Func<bool>? isReverseControlHotkeyRegistered = null,
         Func<bool>? isUsbControlEnabled = null,
         Action<nint>? requestUsbControl = null,
         Action<nint>? requestWirelessControl = null)
@@ -479,7 +476,7 @@ internal sealed class NativePreviewWindow : IDisposable
                  connectedDeviceCount, setAudioEnabled, muteOtherWindows,
                   showImageSettings, showProjectionSettings,
                   isReverseControlEnabled, pointerInput, keyboardInput, requestReverseControl,
-                  isReverseControlHotkeyRegistered, isUsbControlEnabled, requestUsbControl,
+                  isUsbControlEnabled, requestUsbControl,
                   requestWirelessControl,
                   logDiagnostic: logDiagnostic);
             if (!candidate._attachPreview(candidate._handle))
@@ -651,6 +648,7 @@ internal sealed class NativePreviewWindow : IDisposable
     internal void SetSourceDimensions(uint width, uint height)
     {
         var changed = _sourceWidth != width || _sourceHeight != height;
+        if (changed) _pointerInput?.Invoke(new PreviewPointerEventArgs(PreviewPointerKind.Reset, 0, 0, 0, 0));
         _sourceWidth = width;
         _sourceHeight = height;
         ApplyRotatedDimensions();
@@ -715,6 +713,22 @@ internal sealed class NativePreviewWindow : IDisposable
     private nint WindowProcedure(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message == NativeTouchInput.WmTouch && _managedContent is null)
+        {
+            GetClientRect(hwnd, out var touchRect);
+            NativeTouchInput.Dispatch(hwnd, wParam, lParam, IsPointerInputActive && IsUsbControlEnabledForWindow,
+                Math.Max(1, touchRect.Right - touchRect.Left), Math.Max(1, touchRect.Bottom - touchRect.Top),
+                (_rotation & 1) == 0 ? _sourceWidth : _sourceHeight,
+                (_rotation & 1) == 0 ? _sourceHeight : _sourceWidth, _rotation,
+                input => _pointerInput?.Invoke(input));
+            handled = true;
+            return 0;
+        }
+        if (IsPointerInputActive && IsUsbControlEnabledForWindow && _managedContent is null && NativeTouchInput.IsPromotedMouseMessage(message))
+        {
+            handled = true;
+            return 0;
+        }
         if (message == 0x007C && wParam.ToInt32() == GwlExStyle &&
             lParam != 0 && _managedContent is not null) // WM_STYLECHANGING
         {
@@ -821,21 +835,6 @@ internal sealed class NativePreviewWindow : IDisposable
                 HideSystemCursor();
                 handled = true;
                 return 1;
-            case WmKeyDown or WmSysKeyDown when IsBossKeyHotkey(wParam.ToInt32()):
-                // Boss key is process-global. Keep it out of the iPhone HID
-                // stream while the main window receives WM_HOTKEY.
-                handled = true;
-                return 0;
-            case WmKeyDown when wParam.ToInt32() == VkF11:
-                handled = true;
-                ToggleFullScreen();
-                return 0;
-            case WmKeyDown when wParam.ToInt32() == VkEscape && _isFullScreen:
-                // Escape exits the preview window's full-screen mode even
-                // while reverse control is forwarding other key presses.
-                handled = true;
-                ToggleFullScreen();
-                return 0;
             case WmKeyDown when IsPointerInputActive:
                 _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
                     PreviewKeyboardKind.Down, wParam.ToInt32(),
@@ -1202,16 +1201,6 @@ internal sealed class NativePreviewWindow : IDisposable
         UpdateContextMenuLabels();
     }
 
-    private static bool IsBossKeyHotkey(int virtualKey) =>
-        GetConfiguredShortcut(BluetoothShortcutAction.BossKey)
-            .MatchesVirtualKey(virtualKey,
-                IsKeyDown(VkControl), IsKeyDown(VkMenu), IsKeyDown(VkShift));
-
-    private static KeyboardShortcut GetConfiguredShortcut(
-        BluetoothShortcutAction action) =>
-        Application.Current is App app
-            ? KeyboardShortcut.FromSettings(app.UpdateSettings, action)
-            : KeyboardShortcut.DefaultFor(action);
 
     private static bool IsKeyDown(int virtualKey) => GetKeyState(virtualKey) < 0;
 
@@ -1307,6 +1296,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private void Rotate(int delta)
     {
         if (_handle == 0) return;
+        _pointerInput?.Invoke(new PreviewPointerEventArgs(PreviewPointerKind.Reset, 0, 0, 0, 0));
         _rotation = ((_rotation + delta) % 4 + 4) % 4;
         if (_managedContent is not null)
             _managedContent.LayoutTransform = new RotateTransform(_rotation * 90);

@@ -174,19 +174,19 @@ class TestBuildTouchscreenReport(unittest.TestCase):
 
     def test_contact_state_byte_slot0(self):
         report = self.build(0, self.CONTACT, 0, 0)
-        self.assertEqual(report[3], 0xC2)
+        self.assertEqual(report[3], 0xC0)
 
     def test_contact_state_byte_slot3(self):
         report = self.build(3, self.CONTACT, 0, 0)
-        self.assertEqual(report[3], 0xC2 | 3)  # 0xC3
+        self.assertEqual(report[3], 0xC3)
 
     def test_release_state_byte_slot0(self):
         report = self.build(0, self.RELEASE, 0, 0)
-        self.assertEqual(report[3], 0x02)
+        self.assertEqual(report[3], 0x00)
 
     def test_release_state_byte_slot4(self):
         report = self.build(4, self.RELEASE, 0, 0)
-        self.assertEqual(report[3], 0x06)
+        self.assertEqual(report[3], 0x04)
 
     def test_xy_little_endian(self):
         report = self.build(0, self.CONTACT, 0x1234, 0x5678)
@@ -203,17 +203,17 @@ class TestBuildTouchscreenReport(unittest.TestCase):
     def test_timestamp_48bit_little_endian(self):
         ts = 0x010203040506
         report = self.build(0, self.CONTACT, 0, 0, timestamp=ts)
-        ts_bytes = report[44:50]
+        ts_bytes = report[45:51]
         self.assertEqual(int.from_bytes(ts_bytes, 'little'), ts)
 
     def test_padding_bytes_zero(self):
         report = self.build(0, self.CONTACT, 0, 0)
         self.assertEqual(report[8:40], b'\x00' * 32)
-        self.assertEqual(report[50:58], b'\x00' * 8)
+        self.assertEqual(report[51:58], b'\x00' * 7)
 
-    def test_fixed_bytes_at_40_42(self):
+    def test_identity_table_at_40(self):
         report = self.build(0, self.CONTACT, 0, 0)
-        self.assertEqual(report[40:44], b'\x02\x00\x00\x00')
+        self.assertEqual(report[40:45], b'\x01\x00\x00\x00\x00')
 
 
 class TestIpcFrameParsing(unittest.TestCase):

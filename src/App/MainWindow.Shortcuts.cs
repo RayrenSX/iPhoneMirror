@@ -6,8 +6,6 @@ namespace IPhoneMirror.App;
 public partial class MainWindow
 {
     private readonly HashSet<(string Device, byte Button)> _mouseShortcutButtons = [];
-    private readonly HashSet<int> _shortcutKeysDown = [];
-    private readonly HashSet<int> _ordinaryKeysDown = [];
     private readonly SemaphoreSlim _systemShortcutGate = new(1, 1);
 
     private bool TryHandlePointerShortcut(PreviewPointerEventArgs e, string? udid)
@@ -30,28 +28,20 @@ public partial class MainWindow
         return true;
     }
 
-    private bool TryHandleConfiguredKey(int virtualKey, bool down)
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, SemaphoreSlim> _keyboardSessionGates = new();
+    private SemaphoreSlim KeyboardSessionGate(DirectKeyboardRoute route) =>
+        _keyboardSessionGates.GetValue(route.Session, _ => new SemaphoreSlim(1, 1));
+
+    private async Task SendRoutedKeyboardAsync(DirectKeyboardRoute route, byte modifiers,
+        byte[] usages, Func<bool> canSend)
     {
-        if (IsKeyboardMappingInputModeActive) return false;
-        // A press keeps its original disposition until release, even if
-        // modifiers change during auto-repeat or before key-up.
-        if (!down)
+        var gate = KeyboardSessionGate(route);
+        await gate.WaitAsync();
+        try
         {
-            _ordinaryKeysDown.Remove(virtualKey);
-            return _shortcutKeysDown.Remove(virtualKey);
+            if (canSend() && route.IsCurrent()) await route.SendAsync(modifiers, usages, canSend);
         }
-        if (_shortcutKeysDown.Contains(virtualKey)) return true;
-        if (_ordinaryKeysDown.Contains(virtualKey)) return false;
-        if (_shortcutSettingsWindow is not null ||
-            !TryGetShortcutAction(virtualKey, out var action))
-        {
-            _ordinaryKeysDown.Add(virtualKey);
-            return false;
-        }
-        _shortcutKeysDown.Add(virtualKey);
-        if (!_registeredHotKeyIds.Contains(HotKeyId(action)))
-            HandleConfiguredShortcut(action);
-        return true;
+        finally { gate.Release(); }
     }
 
     private async Task SendUsbSystemShortcutAsync(byte usage, DirectKeyboardRoute route,

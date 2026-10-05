@@ -175,15 +175,43 @@ internal static class ClipboardSyncTests
             Check(writes.SequenceEqual(expected), $"Stale clipboard write after {scenario}.");
         }
 
+        // A clipboard held longer than one retry burst must still receive the
+        // same device copy when it becomes writable; unchanged phone text is
+        // not published again by the bridge.
+        attempts = completions = 0;
+        var busyReports = 0;
+        writes.Clear();
+        sync = new ClipboardSyncState(text =>
+        {
+            if (++attempts <= 6) throw new ExternalException("still busy");
+            writes.Add(text);
+            windowsSequence++;
+        }, () => windowsSequence, (_, _) => true,
+            (_, _, error) =>
+            {
+                if (error is null) completions++;
+                else busyReports++;
+            }, () => Task.CompletedTask);
+        sync.SelectDevice("A");
+        Observe("A", source, "eventually writable");
+        await sync.FlushAsync();
+        Check(attempts == 7 && busyReports == 1 && completions == 1 &&
+              writes.SequenceEqual(["eventually writable"]),
+            "A long clipboard lock permanently lost the device copy.");
+
         attempts = completions = 0;
         sync = new ClipboardSyncState(_ => { attempts++; throw new ExternalException("still busy"); },
-            () => 1, (_, _) => true, (_, _, error) => { if (error is not null) completions++; },
-            () => Task.CompletedTask);
+            () => 1, (_, _) => true, (_, _, error) =>
+            {
+                if (error is null) return;
+                completions++;
+                sync.Stop();
+            }, () => Task.CompletedTask);
         sync.SelectDevice("A");
         Observe("A", source, "retry limit");
         await sync.FlushAsync();
-        await sync.FlushAsync();
-        Check(attempts == 5 && completions == 1, "Clipboard retry must be bounded and report final failure once.");
+        Check(attempts == 5 && completions == 1,
+            "A busy clipboard must report one retry burst and stop after shutdown.");
         Console.WriteLine("Clipboard sync: background routing, cache, retries, stale writes and shutdown passed.");
     }
 }

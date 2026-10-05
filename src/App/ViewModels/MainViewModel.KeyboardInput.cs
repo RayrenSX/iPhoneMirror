@@ -4,6 +4,10 @@ namespace IPhoneMirror.App.ViewModels;
 
 internal sealed partial class MainViewModel
 {
+    internal bool CanUseDeviceClipboard(string? target) => !_disposed &&
+        FindControl(target) is { Starting: false, Stopping: false } &&
+        GetReadyUsbControlBridge(target) is not null;
+
     internal DirectKeyboardRoute? CaptureDirectKeyboardRoute(string? target)
     {
         if (_disposed || target is null) return null;
@@ -24,7 +28,11 @@ internal sealed partial class MainViewModel
                     bridge.SendKeyboardAsync(usages, canSend: () => Current() && canSend?.Invoke() != false,
                         releaseAll: canSend is null && usages.Count == 0),
                 (page, code, state, canSend) => bridge.SendButtonAsync(page, code, state,
-                    canSend: () => Current() && canSend?.Invoke() != false, guardRelease: true));
+                    canSend: () => Current() && canSend?.Invoke() != false, guardRelease: true),
+                (text, canSend) => bridge.SendPasteTextAsync(text,
+                    canSend: () => Current() && canSend?.Invoke() != false),
+                canSend => bridge.SendReadClipboardAsync(
+                    canSend: () => Current() && canSend?.Invoke() != false));
         }
         // One route is selected. Bluetooth cannot receive a second copy while
         // a wired/wireless route is ready or still establishing ownership.

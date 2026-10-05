@@ -17,10 +17,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import struct
-import time
 import sys
 from typing import Optional
+from usb_touch_bridge import build_touchscreen_report, build_touchscreen_frame
 
 import pymobiledevice3.remote.tunnel_service as _ts
 _ts.USE_USERSPACE_TUNNEL = True
@@ -58,6 +57,7 @@ class UsbDirectTouch:
         self.dial_plane = None
         self.gate_open = False
         self._lock = asyncio.Lock()
+        self._contacts = {}
 
     async def connect(self) -> None:
         print('[1/6] 正在连接 USB 设备...')
@@ -141,18 +141,26 @@ class UsbDirectTouch:
 
     async def touch_down(self, x: float, y: float, slot: int = 0) -> None:
         async with self._lock:
-            report = self._build_report(slot, TOUCHSCREEN_STATE_CONTACT, to_pixel(x), to_pixel(y))
+            self._contacts[slot] = (slot, TOUCHSCREEN_STATE_CONTACT, to_pixel(x), to_pixel(y))
+            report = build_touchscreen_frame(list(self._contacts.values()))
             await self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report)
 
     async def touch_move(self, x: float, y: float, slot: int = 0) -> None:
         async with self._lock:
-            report = self._build_report(slot, TOUCHSCREEN_STATE_CONTACT, to_pixel(x), to_pixel(y))
+            if slot not in self._contacts:
+                return
+            self._contacts[slot] = (slot, TOUCHSCREEN_STATE_CONTACT, to_pixel(x), to_pixel(y))
+            report = build_touchscreen_frame(list(self._contacts.values()))
             await self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report)
 
     async def touch_up(self, x: float, y: float, slot: int = 0) -> None:
         async with self._lock:
-            report = self._build_report(slot, TOUCHSCREEN_STATE_RELEASE, to_pixel(x), to_pixel(y))
+            if slot not in self._contacts:
+                return
+            self._contacts[slot] = (slot, TOUCHSCREEN_STATE_RELEASE, to_pixel(x), to_pixel(y))
+            report = build_touchscreen_frame(list(self._contacts.values()))
             await self.hid.send_report(DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report)
+            self._contacts.pop(slot, None)
 
     async def tap(self, x: float, y: float) -> None:
         await self.touch_down(x, y)
@@ -180,19 +188,7 @@ class UsbDirectTouch:
 
     @staticmethod
     def _build_report(slot: int, state: int, x: int, y: int) -> bytes:
-        ts = time.monotonic_ns() & ((1 << 48) - 1)
-        if state == TOUCHSCREEN_STATE_CONTACT:
-            state_byte = 0xC2 | (slot & 0x07)
-        else:
-            state_byte = 0x02 | (slot & 0x07)
-        return (
-            bytes([0x09, 0x01, 0x05, state_byte])
-            + struct.pack('<HH', x & 0xFFFF, y & 0xFFFF)
-            + b'\x00' * 32
-            + b'\x02\x00\x00\x00'
-            + ts.to_bytes(6, 'little')
-            + b'\x00' * 8
-        )
+        return build_touchscreen_report(slot, state, x, y)
 
     async def _run(self) -> None:
         raise NotImplementedError

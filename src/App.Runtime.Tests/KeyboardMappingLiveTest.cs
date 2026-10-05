@@ -11,7 +11,7 @@ internal static partial class Program
 {
     // Opt-in hardware probe. Uses production enumeration, saved identity
     // bindings, capture and reverse-control startup. No ready state is faked.
-    private static int RunKeyboardMappingLiveProbe(string output, bool exercise = false, bool wireless = false, bool interactive = false, bool captureOnly = false, bool ownership = false, bool wiredRestart = false)
+    private static int RunKeyboardMappingLiveProbe(string output, bool exercise = false, bool wireless = false, bool interactive = false, bool captureOnly = false, bool ownership = false, bool wiredRestart = false, bool clipboard = false)
     {
         Directory.CreateDirectory(output);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
@@ -91,7 +91,7 @@ internal static partial class Program
             }
             else if (ownership)
             {
-                ExerciseLiveKeyboardOwnership(main, vm, output);
+                ExerciseLiveKeyboardOwnership(main, vm, output, clipboard);
             }
             else if (interactive || captureOnly)
             {
@@ -117,7 +117,7 @@ internal static partial class Program
                 var manager = app.Windows.OfType<Windows.KeyboardMappingWindow>().Single();
                 KeyboardCall(manager, "OnAddClick", manager, new RoutedEventArgs());
                 var editor = app.Windows.OfType<Windows.KeyboardMappingEditorWindow>().Single();
-                KeyboardCall(editor, "OnCaptureClick", editor, new RoutedEventArgs());
+                if (!editor.Wizard.Capturing) KeyboardCall(editor, "OnCaptureClick", editor, new RoutedEventArgs());
                 Console.WriteLine("INTERACTIVE READY: physical key capture is waiting. Configuration is isolated in UI-preview memory; close the test main window to finish.");
                 var last = string.Empty;
                 Task frameCapture = Task.CompletedTask;

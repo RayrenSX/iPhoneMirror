@@ -97,8 +97,6 @@ internal static partial class Program
         var actionType = assembly.GetType("IPhoneMirror.App.Services.BluetoothShortcutAction", true)!;
         var shortcutType = assembly.GetType("IPhoneMirror.App.Services.KeyboardShortcut", true)!;
         object Action(string name) => Enum.Parse(actionType, name);
-        int Id(object action) => (int)type.GetMethod("HotKeyId", BindingFlags.NonPublic | BindingFlags.Static)!
-            .Invoke(null, [action])!;
         void Require(bool value, string message)
         {
             if (!value) throw new InvalidOperationException(message);
@@ -116,30 +114,31 @@ internal static partial class Program
             focus(window);
             Require((bool)KeyboardCall(window, "TryRegisterShortcutSet", shortcuts,
                 Activator.CreateInstance(actionType))!, "Focused hotkey registration failed.");
-            Require(!Probe(keys[0]), "The focused device hotkey was not registered with Windows.");
+            var recognizer = ((IPhoneMirror.App.Services.KeyboardInputRouter)KeyboardField(window, "_keyboardRouter")).Shortcuts;
+            Require(recognizer.Match((int)keys[0], 6) is not null, "Focused device shortcut is unavailable.");
+            Require(keys.All(Probe), "Router left an independent Windows hotkey registration active.");
             focus(other);
-            Require(Probe(keys[0]), "The background device hotkey is still reserved with Windows.");
-            var registered = (HashSet<int>)KeyboardField(window, "_registeredHotKeyIds");
-            Require(actions.Skip(1).All(a => registered.Contains(Id(Action(a)))),
-                "Focus loss removed a global boss/mode hotkey.");
-            Require(keys.Skip(1).All(k => !Probe(k)), "A global hotkey was released with the device hotkeys.");
+            Require(recognizer.Match((int)keys[0], 6) is null, "Background device shortcut is still active.");
+            Require(keys.Skip(1).All(k => recognizer.Match((int)k, 6) is not null),
+                "Focus loss removed a global boss/mode shortcut.");
             focus(window);
-            Require(!Probe(keys[0]), "Refocusing did not restore the device hotkey.");
+            Require(recognizer.Match((int)keys[0], 6) is not null, "Refocusing did not restore the device shortcut.");
 
             SetKeyboardField(window, "_activeControlWindow", otherHandle);
             SetKeyboardField(window, "_activeControlUdid", udid);
             focus(other);
-            Require(!Probe(keys[0]), "Independent activation did not register the device hotkey.");
+            Require(recognizer.Match((int)keys[0], 6) is not null, "Independent activation lost the device shortcut.");
             KeyboardCall(window, "OnIndependentKeyboardFocusChanged", udid, otherHandle, false);
-            Require(Probe(keys[0]), "Independent deactivation retained the device hotkey.");
+            Require(recognizer.Match((int)keys[0], 6) is null, "Independent deactivation retained the device shortcut.");
             focus(window);
-            Require(!Probe(keys[0]), "Returning to the main device did not restore its hotkey.");
+            Require(recognizer.Match((int)keys[0], 6) is not null, "Returning to main did not restore its shortcut.");
             Console.WriteLine("Windows hotkey scope checks passed for main/independent focus and global exceptions.");
         }
         finally
         {
             KeyboardCall(window, "UnregisterConfiguredHotkeys");
             foreach (var (key, value) in previous) shortcuts[key] = value;
+            KeyboardCall(window, "ConfigureKeyboardShortcuts", shortcuts);
             SetKeyboardField(window, "_activeControlWindow", (nint)0);
             SetKeyboardField(window, "_activeControlUdid", null);
         }
