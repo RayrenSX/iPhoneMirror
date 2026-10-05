@@ -421,6 +421,12 @@ var mainViewModelSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "ViewModels", "MainViewModel.cs")).ReplaceLineEndings("\n");
 var mainWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "MainWindow.xaml.cs"));
+var mainWindowShortcutsSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "MainWindow.Shortcuts.cs"));
+var keyboardRoutingSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "MainWindow.KeyboardRouting.cs"));
+var keyboardRouterEventsSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "Services", "KeyboardInputRouter.Events.cs"));
 var previewWindowSource = File.ReadAllText(Path.Combine(sourceDirectory,
     "App", "Windows", "NativePreviewWindow.cs"));
 var multiDevicePreviewSource = File.ReadAllText(Path.Combine(sourceDirectory,
@@ -439,7 +445,7 @@ Equal(true,
     mainViewModelSource.Contains(
         "private UsbTouchBridgeHost? GetReadyUsbControlBridge(string? targetUdid)",
         StringComparison.Ordinal) &&
-    mainWindowSource.Contains(
+    mainWindowShortcutsSource.Contains(
         "route.SendAsync(modifiers, usages, canSend)",
         StringComparison.Ordinal),
     "wired, wireless, and Bluetooth control modes remain mutually exclusive per device");
@@ -491,41 +497,39 @@ Equal(true,
     "full-screen previews use black WPF fill and a rectangular native surface");
 var previewKeyHandlerIndex = mainWindowSource.IndexOf(
     "private void OnPreviewKeyDown", StringComparison.Ordinal);
-var mainEscapeGuardIndex = mainWindowSource.IndexOf(
-    "if (key == Key.Escape &&", previewKeyHandlerIndex,
-    StringComparison.Ordinal);
-var mainF11GuardIndex = mainWindowSource.IndexOf(
-    "if (key == Key.F11)", previewKeyHandlerIndex,
-    StringComparison.Ordinal);
 var previewKeyboardRouteIndex = mainWindowSource.IndexOf(
-    "if (TryRoutePreviewKeyboardEvent", previewKeyHandlerIndex,
+    "if (RouteKeyboardEvent", previewKeyHandlerIndex,
     StringComparison.Ordinal);
-var nativeEscapeHandlerIndex = previewWindowSource.IndexOf(
-    "case WmKeyDown when wParam.ToInt32() == VkEscape && _isFullScreen:",
-    StringComparison.Ordinal);
-var nativeKeyboardRouteIndex = previewWindowSource.IndexOf(
-    "case WmKeyDown when IsPointerInputActive:", nativeEscapeHandlerIndex,
-    StringComparison.Ordinal);
+var shortcutMatchIndex = keyboardRouterEventsSource.IndexOf(
+    "Shortcuts.Match(key.VirtualKey, modifiers)", StringComparison.Ordinal);
+var shortcutExecuteIndex = keyboardRouterEventsSource.IndexOf(
+    "match.Execute();", shortcutMatchIndex, StringComparison.Ordinal);
+var directDeliveryIndex = keyboardRouterEventsSource.IndexOf(
+    "Deliver(press, chord: modifiers != 0", shortcutExecuteIndex, StringComparison.Ordinal);
 Equal(true,
-    previewKeyHandlerIndex >= 0 && mainEscapeGuardIndex > previewKeyHandlerIndex &&
-    mainF11GuardIndex > mainEscapeGuardIndex &&
-    previewKeyboardRouteIndex > mainEscapeGuardIndex &&
-    previewKeyboardRouteIndex > mainF11GuardIndex &&
-    nativeEscapeHandlerIndex >= 0 && nativeKeyboardRouteIndex > nativeEscapeHandlerIndex,
+    previewKeyHandlerIndex >= 0 && previewKeyboardRouteIndex > previewKeyHandlerIndex &&
+    keyboardRoutingSource.Contains(
+        "Local(0x7A, 0, \"FullScreen\", ToggleKeyboardFullScreen, anyPreview: true)",
+        StringComparison.Ordinal) &&
+    keyboardRoutingSource.Contains(
+        "Local(0x1B, 0, \"ExitFullScreen\", ToggleKeyboardFullScreen,",
+        StringComparison.Ordinal) &&
+    shortcutMatchIndex >= 0 && shortcutExecuteIndex > shortcutMatchIndex &&
+    directDeliveryIndex > shortcutExecuteIndex,
     "Escape and F11 stay local before reverse-control keyboard routing");
 Equal(true,
     mainWindowSource.Contains(
-        "e.VirtualKey == 0x1B && _isFullScreen", StringComparison.Ordinal) &&
-    mainWindowSource.Contains(
-        "!isKeyUp && virtualKey == 0x1B && _isFullScreen",
+        "RouteKeyboardEvent(new(ModifierKeyIdentity(e.VirtualKey, e.ScanCode)",
         StringComparison.Ordinal) &&
-    mainWindowSource.Contains(
-        "virtualKey == 0x7A", StringComparison.Ordinal) &&
-    mainWindowSource.Contains(
-        "_localFullScreenF11Down = false", StringComparison.Ordinal) &&
-    mainWindowSource.Contains(
-        "_localFullScreenEscapeDown = false", StringComparison.Ordinal),
-    "captured and raw preview Escape/F11 events also exit full screen");
+    previewWindowSource.Contains("case WmKeyDown when IsPointerInputActive:",
+        StringComparison.Ordinal) &&
+    keyboardRoutingSource.Contains("return RouteKeyboardEvent(key, down, ActiveInputDeviceUdid,",
+        StringComparison.Ordinal) &&
+    keyboardRoutingSource.Contains("_isFullScreen || _secondaryMirrors.IsFullScreenWindow(_keyboardForegroundWindow())",
+        StringComparison.Ordinal) &&
+    keyboardRoutingSource.Contains("_secondaryMirrors.ToggleFullScreenWindow(_keyboardForegroundWindow())",
+        StringComparison.Ordinal),
+    "captured, raw and hook keyboard events share the foreground preview full-screen shortcuts");
 Equal(true, WindowsAutoPlayGuard.ShouldCancel(
         WindowsAutoPlayGuard.QueryCancelAutoPlayMessage, captureActive: true),
     "active capture cancels Windows AutoPlay device claims");
@@ -2232,7 +2236,7 @@ Equal(true, mainWindowXaml.Contains("OpenShortcutSettingsButton",
          StringComparison.Ordinal) &&
      mainWindowCode.Contains("SendBluetoothSystemShortcutAsync",
          StringComparison.Ordinal) &&
-     mainWindowCode.Contains("TryGetShortcutActionByHotKeyId",
+     keyboardRoutingSource.Contains("HandleConfiguredShortcut(action)",
          StringComparison.Ordinal) &&
      shortcutSettingsCode.Contains("BluetoothShortcutAction.ControlCenter",
          StringComparison.Ordinal) &&
@@ -2276,9 +2280,9 @@ Equal(true, mainWindowXaml.Contains("OpenShortcutSettingsButton",
          StringComparison.Ordinal) &&
      mainWindowCode.Contains("CoreDeviceTouchProtocol.IndigoLock, 500",
          StringComparison.Ordinal) &&
-     File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
-         "NativePreviewWindow.cs")).Contains("IsBossKeyHotkey",
-             StringComparison.Ordinal) &&
+     keyboardRoutingSource.Contains("IsGlobalControlShortcut(action)",
+         StringComparison.Ordinal) &&
+     mainWindowCode.Contains("BluetoothShortcutAction.BossKey", StringComparison.Ordinal) &&
      File.ReadAllText(Path.Combine(sourceDirectory, "App", "Windows",
          "NativePreviewWindow.cs")).Contains("SetAllBossKeyHidden",
              StringComparison.Ordinal) &&
