@@ -1,5 +1,45 @@
 [
   {
+    "tag_name": "v1.8.5-pre",
+    "name": "iPhoneMirror v1.8.5-pre",
+    "body": "Prerelease for feature and compatibility testing.\n\n### Added\n\n- Unify keyboard routing and add a key-mapping wizard and five-point touch support.\n- Provide UxPlay as an optional downloadable wireless component.\n\n- Add independent Traditional Chinese (Taiwan) localization across the app,\n  driver tools, installer, stream test pages and complete release history.\n\n### Fixed\n\n- Isolate multi-device keyboard writes so a stalled device cannot block another\n  device's input. Drop queued touch gestures after focus changes, preserve\n  foreground input during inactive-device cleanup, and target Bluetooth startup\n  shortcuts at the focused preview device.\n- Compact preview toolbar labels from right to left according to the available\n  layout width, and restore them when space returns. Preserve icons, tooltips,\n  accessible names, theme styling and scrolling when even the icons cannot fit.\n- Keep navigation and button icon colors in sync with their controls when the\n  app starts in the system tray and first opens the complete or lightweight\n  workspace, including later theme and enabled-state changes.\n- Restore main-preview wired and wireless touch control after starting in the\n  system tray and opening the workspace. Initialize the input source from the\n  native window handle even while the WPF visual tree is still unattached.\n- Keep the last wireless mirroring frame visible when a static phone screen\n  stops sending video. Frame inactivity no longer restarts the session, and\n  resized or additional previews can reuse the retained frame.\n- Retry static preview redraws after a busy compositor or a transient GPU\n  upload failure, including when opening settings resizes the preview. Only\n  mark a frame as presented after success, and throttle retries while occluded.",
+    "published_at": "2026-10-05T17:15:13Z",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.8.5-pre-x64.exe",
+        "size": 122270378,
+        "digest": "sha256:ab7de363ba9ebe48fe6706183d717218eefe789e2b64a803e3c6c2644eafc9f5",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre/iPhoneMirror-Setup-v1.8.5-pre-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.5-pre-win-x64.zip",
+        "size": 216431208,
+        "digest": "sha256:1a6a90766f92153c78516783129ddbb5d36ba779c13711310f016971f81fee12",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre/iPhoneMirror-v1.8.5-pre-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-UxPlay-v1.8.5-pre-win-x64.zip",
+        "size": 70622367,
+        "digest": "sha256:4089fca2799dd10ce753dfcb53052f37849b902c38bd131ab90a68b49503bc59",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre/iPhoneMirror-UxPlay-v1.8.5-pre-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.5-pre-win-x64-sbom.spdx.json",
+        "size": 711847,
+        "digest": "sha256:e834e90ac814927017e2ece249df28ad21a078e5dc99c90525df87248c3a4161",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre/iPhoneMirror-v1.8.5-pre-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 428,
+        "digest": "sha256:144dfac4747d7d27ae9644c8ca894c292990297d84f2720583ea099a01c13c1b",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.8.3",
     "name": "iPhoneMirror v1.8.3",
     "body": "### Fixed\n\n- Emergency fix for reverse control failing to find `libusb0.dll` after a\n  direct upgrade from 1.8.1 to 1.8.2. The USB bridge now receives all packaged\n  runtime directories in its process-specific DLL search path.",
