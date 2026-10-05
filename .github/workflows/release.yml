@@ -301,6 +301,8 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_NOTES: ${{ steps.notes.outputs.path }}
         run: |
+          $releaseFlags = @("--prerelease=$($env:RELEASE_TAG.Contains('-').ToString().ToLowerInvariant())")
+          if ($env:RELEASE_TAG.Contains('-')) { $releaseFlags += '--latest=false' }
           $releaseJson = gh release view $env:RELEASE_TAG `
             --repo $env:GITHUB_REPOSITORY --json isDraft 2> $null
           if ($LASTEXITCODE -eq 0) {
@@ -308,11 +310,13 @@ jobs:
             if (-not $release.isDraft) {
               throw "Release $env:RELEASE_TAG is already public; refusing to overwrite its assets."
             }
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY @releaseFlags
+            if ($LASTEXITCODE -ne 0) { throw "Failed to set release channel for $env:RELEASE_TAG" }
             exit 0
           }
           gh release create $env:RELEASE_TAG `
             --repo $env:GITHUB_REPOSITORY `
-            --draft `
+            --draft @releaseFlags `
             --notes-file $env:RELEASE_NOTES `
             --verify-tag `
             --title "iPhoneMirror $env:RELEASE_TAG"

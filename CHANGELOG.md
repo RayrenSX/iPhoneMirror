@@ -5,7 +5,14 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+## [1.8.5-pre] - 2026-10-06
+
+Prerelease for feature and compatibility testing.
+
 ### Added
+
+- Unify keyboard routing and add a key-mapping wizard and five-point touch support.
+- Provide UxPlay as an optional downloadable wireless component.
 
 - Add independent Traditional Chinese (Taiwan) localization across the app,
   driver tools, installer, stream test pages and complete release history.

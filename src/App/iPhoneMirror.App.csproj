@@ -12,9 +12,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.8.4-test4</Version>
-    <AssemblyVersion>1.8.4.0</AssemblyVersion>
-    <FileVersion>1.8.4.0</FileVersion>
+    <Version>1.8.5-pre</Version>
+    <AssemblyVersion>1.8.5.0</AssemblyVersion>
+    <FileVersion>1.8.5.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>
