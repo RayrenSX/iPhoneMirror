@@ -276,10 +276,16 @@ internal static partial class Program
                 $"Native click did not complete and exit visual picking: completions={completions}, picking={overlay.IsPicking}, result={picked}, foreground={MappingGetForeground()}, overlay={hwnd}, trace={string.Join(',', inputTrace)}.");
             MappingAssert(Math.Abs(picked!.X - .5) < .01 && Math.Abs(picked.Y - .6) < .01,
                 $"Visual click position differs from the shared mouse coordinates: {picked.X}, {picked.Y}.");
-            foreach (var action in Enum.GetValues<MappedTouchAction>())
+            foreach (var action in Enum.GetValues<MappedTouchAction>().Where(a => a != MappedTouchAction.ReleasePointer))
             {
                 inputTrace.Clear();
-                var current = entry with { Action = action };
+                var joystick = JoystickEntry();
+                var current = action switch
+                {
+                    MappedTouchAction.Joystick => entry with { Action = action, Key = joystick.Key, Joystick = joystick.Joystick },
+                    MappedTouchAction.CycleTargets => entry with { Action = action, Targets = [new(.2, .3)] },
+                    _ => entry with { Action = action },
+                };
                 overlay.BeginPick(new(current, surface, result => picked = result));
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
                 var end = action switch
@@ -323,7 +329,7 @@ internal static partial class Program
             overlay.BeginPick(new(entry, surface with { Rotation = 1 }, result => { picked = result; ++completions; }));
             owner.Hide(); overlay.Update(surface with { Rotation = 1 }, []);
             MappingAssert(completions == 3 && !overlay.IsVisible, "Hidden/disconnected surface retained a ghost picker.");
-            Console.WriteLine("PASS real owned HWND overlay, rendered enabled/disabled/deleted markers, click-through, resize, native click and all eight action picks, timed drag, automatic exit, rotation cancellation and hidden-owner cleanup.");
+            Console.WriteLine("PASS real owned HWND overlay, rendered enabled/disabled/deleted markers, click-through, resize, native click and all position-based action picks, timed drag, automatic exit, rotation cancellation and hidden-owner cleanup.");
         }
         finally { overlay.Close(); owner.Close(); }
     }

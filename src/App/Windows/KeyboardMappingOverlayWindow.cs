@@ -245,7 +245,10 @@ internal sealed class KeyboardMappingOverlayWindow : Window
                 }
                 if (entry.IsContinuous)
                 {
-                    var radius = (entry.Action == MappedTouchAction.Joystick ? entry.Joystick.Radius : entry.RelativeDrag.Radius) * Math.Min(ActualWidth, ActualHeight);
+                    var contentStart = owner.Project(0, 0);
+                    var contentEnd = owner.Project(1, 1);
+                    var radius = (entry.Action == MappedTouchAction.Joystick ? entry.Joystick.Radius : entry.RelativeDrag.Radius) *
+                        Math.Min(contentEnd.X - contentStart.X, contentEnd.Y - contentStart.Y);
                     dc.DrawEllipse(null, new Pen(accent, 1), start, radius, radius);
                 }
                 foreach (var target in entry.Action == MappedTouchAction.CycleTargets ? entry.Targets : [])

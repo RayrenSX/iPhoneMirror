@@ -71,14 +71,8 @@ public partial class MainWindow
             foreground == _keyboardForegroundWindow() && focusGeneration == _mappingFocus?.Generation,
             (x, y) => entry.DeviceCoordinates ? (x, y) : Transform(x, y), requireAcknowledgement: true);
         return route is null ? null : route with { TransformOffset = (x, y) =>
-        {
-            var center = Transform(.5, .5);
-            var moved = Transform(.5 + x, .5 + y);
-            // Use the shorter device side so diagonals have a circular radius.
-            var shortSide = Math.Max(1, Math.Min(geometry.Width, geometry.Height));
-            return ((moved.X - center.X) * shortSide / Math.Max(1, geometry.Width),
-                (moved.Y - center.Y) * shortSide / Math.Max(1, geometry.Height));
-        } };
+            BluetoothMouseOrientationMapper.MapShortSideOffset(x, y, geometry.Width, geometry.Height,
+                geometry.Rotation, portrait, landscape, reverseX, reverseY) };
     }
 
     private void ReconcileMappingMouse()

@@ -33,6 +33,7 @@ internal static partial class Program
         try
         {
             TestCustomMappingSettings();
+            TestContinuousMappingGeometry();
             AwaitMapping(TestContinuousControlsAsync());
             AwaitMapping(TestMappingAcknowledgementsAsync());
             TestCustomMappingUi(app, output);
@@ -83,6 +84,28 @@ internal static partial class Program
     {
         using var timeout = new CancellationTokenSource(1500);
         while (!predicate()) await Task.Delay(5, timeout.Token);
+    }
+    private static void TestContinuousMappingGeometry()
+    {
+        foreach (var (width, height) in new[] { (1000u, 2000u), (2000u, 1000u), (1536u, 2048u) })
+        foreach (var rotation in Enumerable.Range(0, 4))
+        foreach (var direction in Enum.GetValues<BluetoothMouseDirection>())
+        foreach (var reverseX in new[] { false, true })
+        foreach (var reverseY in new[] { false, true })
+        foreach (var input in new[] { (.1, 0d), (0d, -.1), (.1 / Math.Sqrt(2), .1 / Math.Sqrt(2)) })
+        {
+            var offset = BluetoothMouseOrientationMapper.MapShortSideOffset(input.Item1, input.Item2,
+                width, height, rotation, direction, direction, reverseX, reverseY);
+            var center = BluetoothMouseOrientationMapper.MapNormalized(.5, .5,
+                width, height, rotation, direction, direction, reverseX, reverseY);
+            var preview = BluetoothMouseOrientationMapper.UnmapNormalized(center.X + offset.X, center.Y + offset.Y,
+                width, height, rotation, direction, direction, reverseX, reverseY);
+            var shortSide = Math.Min(width, height);
+            var dx = (preview.X - .5) * width / shortSide;
+            var dy = (preview.Y - .5) * height / shortSide;
+            MappingAssert(Math.Abs(dx - input.Item1) < 1e-9 && Math.Abs(dy - input.Item2) < 1e-9,
+                "Continuous control radius changed with preview rotation or orientation.");
+        }
     }
     private static async Task TestContinuousControlsAsync()
     {

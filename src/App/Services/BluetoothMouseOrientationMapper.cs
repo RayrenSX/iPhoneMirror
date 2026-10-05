@@ -75,6 +75,20 @@ internal static class BluetoothMouseOrientationMapper
         return (Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1));
     }
 
+    internal static (double X, double Y) MapShortSideOffset(
+        double x, double y, uint displayedWidth, uint displayedHeight,
+        int displayRotation, BluetoothMouseDirection portraitDirection,
+        BluetoothMouseDirection landscapeDirection, bool reverseHorizontal,
+        bool reverseVertical)
+    {
+        var shortSide = Math.Max(1u, Math.Min(displayedWidth, displayedHeight));
+        // Normalize the preview displacement before rotating axes. Scaling in
+        // device space would stretch the range whenever the transform swaps X/Y.
+        return Map(x * shortSide / Math.Max(1u, displayedWidth),
+            y * shortSide / Math.Max(1u, displayedHeight), displayedWidth, displayedHeight,
+            displayRotation, portraitDirection, landscapeDirection, reverseHorizontal, reverseVertical);
+    }
+
     // The inverse lives with the mouse converter so markers and capture use
     // exactly the same orientation/calibration as ordinary mouse input.
     internal static (double X, double Y) UnmapNormalized(
