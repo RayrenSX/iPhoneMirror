@@ -888,7 +888,6 @@ internal static partial class Program
             .SetValue(application, true);
         application.InitializeComponent();
         var assembly = typeof(App).Assembly;
-        TestLogicReviewRegressions();
         TestHongKongLocalizationSwitch(application, assembly);
 
         var parserType = assembly.GetType(
@@ -932,6 +931,7 @@ internal static partial class Program
         owner.Show();
         try
         {
+            TestLogicReviewRegressions();
             var windowType = assembly.GetType(
                 "IPhoneMirror.App.Windows.UpdateWindow", throwOnError: true)!;
             var window = Activator.CreateInstance(windowType,

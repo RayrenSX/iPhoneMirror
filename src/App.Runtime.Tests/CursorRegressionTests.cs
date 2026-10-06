@@ -22,6 +22,7 @@ internal static partial class Program
         pointerField.SetValue(preview, Expression.Lambda(pointerField.FieldType,
             Expression.Empty(), pointerParameter).Compile());
         InteractionSet(preview, "_isUsbControlEnabled", (Func<bool>)(() => true));
+        InteractionSet(preview, "_inputForegroundWindow", (Func<nint>)(() => 0));
 
         var originalCursor = CursorTestGetCursor();
         var originalCount = ReadCursorDisplayCount();
