@@ -1,31 +1,31 @@
 {
   "schema": 1,
-  "version": "1.8.4-test45",
-  "name": "iPhoneMirror-UxPlay-v1.8.4-test45-win-x64.zip",
-  "release": "uxplay-v1.8.4-test45",
-  "url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/uxplay-v1.8.4-test45/iPhoneMirror-UxPlay-v1.8.4-test45-win-x64.zip",
-  "size": 70624550,
-  "sha256": "2818f767df228c660582c800e2c2ca17178fec36730a309fafd00454a859fa8b",
+  "version": "1.8.5-pre",
+  "name": "iPhoneMirror-UxPlay-v1.8.5-pre-win-x64.zip",
+  "release": "v1.8.5-pre",
+  "url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre/iPhoneMirror-UxPlay-v1.8.5-pre-win-x64.zip",
+  "size": 70622367,
+  "sha256": "4089fca2799dd10ce753dfcb53052f37849b902c38bd131ab90a68b49503bc59",
   "files": [
     {
       "path": "bin/avcodec-63.dll",
-      "size": 20619275,
-      "sha256": "923c097c4a5d0e230128d6793c96812c971dff18d85dce9d82ded92102b77c75"
+      "size": 20616581,
+      "sha256": "073ad5f013f15c0cc6e06ba3cd5e25dd308b9de940e9797d33e9535eb49f6dcb"
     },
     {
       "path": "bin/avfilter-12.dll",
-      "size": 6797020,
-      "sha256": "76ca7494bf1f0edeb8314d5a4c459bb46d54051fcc10dd282c23ee6b0db96868"
+      "size": 6797539,
+      "sha256": "64b896b74b67e6a51e1023a5b78e6dc0cb2b9c920e2a2cba22e95943e2dc6b5e"
     },
     {
       "path": "bin/avformat-63.dll",
-      "size": 2991740,
-      "sha256": "b195d8dd6dbec91cf9742a62b7b808aeb39625b3d8725b84528624a47c635dde"
+      "size": 2990582,
+      "sha256": "d878d8b3aa12368e7810b74512e49f7f8495394d5521ef821cf4dcac36b18638"
     },
     {
       "path": "bin/avutil-61.dll",
-      "size": 1287901,
-      "sha256": "f64a705810cebe80b69dd2fbd7612c6992d65020e42bbadbc70cd1848dc81066"
+      "size": 1287359,
+      "sha256": "333840039d2b927423f3036ef506cacd875c7f7935596332de7be09f0955a090"
     },
     {
       "path": "bin/dnssd.dll",
@@ -35,17 +35,17 @@
     {
       "path": "bin/ggml-0.dll",
       "size": 55948,
-      "sha256": "15d8793fedcec0ea97f2c8c571f41f299d7c2f009e9d4dd7eb05f4ca91d6c89c"
+      "sha256": "6f5f4a2842cc680ebcc96bdefc7b1e9f82249074039e80de427a04db52717580"
     },
     {
       "path": "bin/ggml-base-0.dll",
-      "size": 905115,
-      "sha256": "c09a6654c03bb0f571bbcb27794460d8092a55d43a7bf94f5dcf06a2d24b5f8b"
+      "size": 906139,
+      "sha256": "a831400c16dd40be5568272bd9d28fbed6dfa20784b3017c37ef349bca1fd5f9"
     },
     {
       "path": "bin/libaom.dll",
-      "size": 9681044,
-      "sha256": "d4928dc8fa01e1c7b1cc66ff42caabc460b51d89a2c9b8efc7b9024c0e056aee"
+      "size": 9679990,
+      "sha256": "13e651628932728e53ed927d49fba57fa9168ec9df7f87f56c89db602bf5f37f"
     },
     {
       "path": "bin/libass-9.dll",
@@ -79,13 +79,13 @@
     },
     {
       "path": "bin/libcairo-2.dll",
-      "size": 1243422,
-      "sha256": "5d7ccdcf19d26f8f196ef5d66d2499a664d2df090dcb5f8e6aebc4b0cb2ffde5"
+      "size": 1244446,
+      "sha256": "be391428fd305983f888becae10ebab9d8009637e7805383e822740043e95849"
     },
     {
       "path": "bin/libcairo-gobject-2.dll",
       "size": 31536,
-      "sha256": "aeadf08e9be9e351982f1a6d5c335c251365d5055dc1f0b1b416953d25f36bd9"
+      "sha256": "060e586a23bc07d81cf9c9c2a3927dc2d61168fcc89b13601e98afdffffbfeb6"
     },
     {
       "path": "bin/libcrypto-3-x64.dll",
@@ -114,8 +114,8 @@
     },
     {
       "path": "bin/libexpat-1.dll",
-      "size": 236660,
-      "sha256": "3331b4d4a77cd21edc26518cbb818e17b49b2c1de34a79d2ef4dca4013670f19"
+      "size": 237172,
+      "sha256": "228d7458da0d55a060a982ae809503f2ea9bdfc6f88b9fa756abb98ffe04afa8"
     },
     {
       "path": "bin/libffi-8.dll",
@@ -549,13 +549,13 @@
     },
     {
       "path": "bin/libwhisper-1.dll",
-      "size": 500147,
-      "sha256": "113d63b57a5a630f98fb995dc02bad95e101b07107051854440fd2087a10539f"
+      "size": 500171,
+      "sha256": "d0e7392ad2ac759c1aa703f65773b4729d54e42e65a9137ab39ed9e1735c7498"
     },
     {
       "path": "bin/libwinpthread-1.dll",
       "size": 64574,
-      "sha256": "d1b3564a65a000a4eab341641d1f4f1a9c80ca91cc69b20e79999e55ef0b1613"
+      "sha256": "76cc52adfcdb8c800813b2ae8da42a908934eb1ee54ce8e9744fc8d703c76ee1"
     },
     {
       "path": "bin/libx264-165.dll",
@@ -589,13 +589,13 @@
     },
     {
       "path": "bin/swresample-7.dll",
-      "size": 184907,
-      "sha256": "ce78699da628392e262061142172a88bcae1cf29228f0bf45b00da8b454a519e"
+      "size": 183853,
+      "sha256": "293a1a9786b8e037e29b88677f2eac8785cffec48ef9509ad451f59015b766fd"
     },
     {
       "path": "bin/swscale-10.dll",
-      "size": 2206004,
-      "sha256": "c0cf17383bb87c686913508a1a5fb2a6d373b1060709bb9cf1b212f3a103fc10"
+      "size": 2205462,
+      "sha256": "fb120b345443d59df93203f900aadac9f077c32a55b11401196c521fe2be1594"
     },
     {
       "path": "bin/vulkan-1.dll",
@@ -614,8 +614,8 @@
     },
     {
       "path": "iPhoneMirror.UxPlayHost.exe",
-      "size": 501760,
-      "sha256": "4dba647fda9775b07590406f8498d8739b719a9d07c33fb288cbd540ea2d199d"
+      "size": 499712,
+      "sha256": "3ec6e3c9ea65f9b0e4064b4976e6304e4f389a64b59c7a3d30132553e2377770"
     },
     {
       "path": "lib/gstreamer-1.0/libgstapp.dll",
@@ -684,28 +684,18 @@
     },
     {
       "path": "SOURCE.md",
-      "size": 743,
-      "sha256": "44c0f89205140dff7841420659e6984e25e16bea6f2718c4d84cde6ae6b854c6"
-    },
-    {
-      "path": "test2.err",
-      "size": 0,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    },
-    {
-      "path": "test2.out",
-      "size": 0,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "size": 749,
+      "sha256": "5e609919e5be8176fc5e7b764662edb420a1aa2240e5cbe70a9df33de97804a6"
     },
     {
       "path": "uxplay-windows-mdns-interface.patch",
-      "size": 6548,
-      "sha256": "eb3f715607595883e769c53d74c34902684849154e83d6d39641c92e58516bb7"
+      "size": 6702,
+      "sha256": "e83d0ac0fc90262dc0fb3b9b326ab23b5e2e21751b6b3a702611c003d3d22ed4"
     },
     {
       "path": "uxplay.exe",
       "size": 696230,
-      "sha256": "5dbb533fc0a8e021d54021752be2ad3cc6d07103f7440c7fbd1fba92e037182a"
+      "sha256": "1cb76acebc99cd52ce689d5be209e7404b27aa3541f98ddd4853a54883e0df80"
     }
   ]
 }
