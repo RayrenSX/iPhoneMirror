@@ -759,6 +759,7 @@ try {
             'Wireless\licenses\NOTICE-FDK-AAC.txt',
             'Wireless\licenses\NOTICE-FFMPEG-BUILD.txt',
             'Wireless\licenses\SOURCE.md',
+            'Wireless\licenses\BUILD.json',
             'Wireless\licenses\SHA256SUMS.txt'
         )
         if ($UseUxPlayRuntime) {
