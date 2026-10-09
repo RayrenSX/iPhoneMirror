@@ -398,6 +398,20 @@ std::optional<std::uint32_t> preferred_dns_sd_interface_impl(
             best = candidate;
     }
 
+    ULONG default_route_interface{};
+    // 8.8.8.8 is only a route-table probe; no packet is sent. The upstream
+    // DNS-SD caller can enumerate adapters and call us first for a virtual
+    // interface, so apply the route preference even when it supplied an index.
+    if (GetBestInterface(0x08080808U, &default_route_interface) == NO_ERROR) {
+        for (auto* adapter = adapters; adapter; adapter = adapter->Next) {
+            if (adapter_interface_index(adapter) == default_route_interface &&
+                adapter_preference(adapter, 0)) {
+                return iPhoneMirror::wireless::dns_sd_registration_interface(
+                    requested, default_route_interface);
+            }
+        }
+    }
+
     if (best) {
         return iPhoneMirror::wireless::dns_sd_registration_interface(
             requested, best->index);
