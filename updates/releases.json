@@ -1,5 +1,39 @@
 [
   {
+    "tag_name": "v1.8.5-pre2",
+    "name": "iPhoneMirror v1.8.5-pre2",
+    "body": "这是用于功能和兼容性测试的预览版。\n\n### 修复\n\n- 设置助手仅在首次打开应用时自动显示。之后即使设置尚未完成，也不会随每次启动弹出；可通过应用偏好、投屏设置或开发者选项手动进入，并保留已有进度。\n- 应用与驱动版本统一为 1.8.5-pre2。\n- 同步发布对应版本的 UxPlay 无线组件，供应用内下载和安装。\n\n### 下载\n\n- `iPhoneMirror-Setup-v1.8.5-pre2-x64.exe`：Windows x64 安装包，包含运行库。\n- `iPhoneMirror-v1.8.5-pre2-win-x64.zip`：Windows x64 便携版。\n- `iPhoneMirror-UxPlay-v1.8.5-pre2-win-x64.zip`：可选 UxPlay 组件。\n- `SHA256SUMS.txt`：文件校验值。\n\n### 验证与已知问题\n\n16 项原生测试、396 项 Python 测试、应用逻辑、驱动测试和设置助手专项回归通过。最终发布文件的版本、依赖及 SHA-256 已验证，便携 ZIP 的 881 个文件与发布目录逐一匹配。\n\n完整桌面运行时测试输出断言通过后，进程退出时出现 `0xC0000409`；Windows 崩溃记录指向 AMD 显卡驱动 `amdxx64.dll` 32.0.21032.8002。因此该完整测试进程未正常退出，AMD 环境仍需实际使用验证。设置助手专项测试正常退出。\n\n这是本地构建后上传的测试包，不代表 GitHub Actions 发布构建已通过；包内提交标识保留构建时的基线，发布标签同时记录该次构建的源文件修改。\r\n",
+    "published_at": "2026-10-09T14:13:36Z",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.8.5-pre2-x64.exe",
+        "size": 114689657,
+        "digest": "sha256:60c3d87125b2bce14647c784e77ab1a1a412daf7b51a0a7b008da83fdd274946",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre2/iPhoneMirror-Setup-v1.8.5-pre2-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-UxPlay-v1.8.5-pre2-win-x64.zip",
+        "size": 70624394,
+        "digest": "sha256:0119841dfe8c7bc504c55854a49767439868eb51213b54205b05fe5155cfc715",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre2/iPhoneMirror-UxPlay-v1.8.5-pre2-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.5-pre2-win-x64.zip",
+        "size": 212779564,
+        "digest": "sha256:fc43a251e479bbd68a0409a019ca0868ec0e832de936861e80ca5193c0cbff01",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre2/iPhoneMirror-v1.8.5-pre2-win-x64.zip"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 318,
+        "digest": "sha256:54ae2deaae58e7e1f670ec0a50d761180f02cf692ef1e2473c7ee77cf9b8f78b",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre2/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.8.5-pre",
     "name": "iPhoneMirror v1.8.5-pre",
     "body": "Prerelease for feature and compatibility testing.\n\n### Added\n\n- Unify keyboard routing and add a key-mapping wizard and five-point touch support.\n- Provide UxPlay as an optional downloadable wireless component.\n\n- Add independent Traditional Chinese (Taiwan) localization across the app,\n  driver tools, installer, stream test pages and complete release history.\n\n### Fixed\n\n- Isolate multi-device keyboard writes so a stalled device cannot block another\n  device's input. Drop queued touch gestures after focus changes, preserve\n  foreground input during inactive-device cleanup, and target Bluetooth startup\n  shortcuts at the focused preview device.\n- Compact preview toolbar labels from right to left according to the available\n  layout width, and restore them when space returns. Preserve icons, tooltips,\n  accessible names, theme styling and scrolling when even the icons cannot fit.\n- Keep navigation and button icon colors in sync with their controls when the\n  app starts in the system tray and first opens the complete or lightweight\n  workspace, including later theme and enabled-state changes.\n- Restore main-preview wired and wireless touch control after starting in the\n  system tray and opening the workspace. Initialize the input source from the\n  native window handle even while the WPF visual tree is still unattached.\n- Keep the last wireless mirroring frame visible when a static phone screen\n  stops sending video. Frame inactivity no longer restarts the session, and\n  resized or additional previews can reuse the retained frame.\n- Retry static preview redraws after a busy compositor or a transient GPU\n  upload failure, including when opening settings resizes the preview. Only\n  mark a frame as presented after success, and throttle retries while occluded.",
