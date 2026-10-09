@@ -4,6 +4,8 @@ using System.Windows;
 using System.Windows.Threading;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.ViewModels;
+using IPhoneMirror.App.Models;
+using IPhoneMirror.App.Interop;
 
 namespace IPhoneMirror.App.Runtime.Tests;
 
@@ -11,16 +13,43 @@ internal static partial class Program
 {
     // Opt-in hardware probe. Uses production enumeration, saved identity
     // bindings, capture and reverse-control startup. No ready state is faked.
-    private static int RunKeyboardMappingLiveProbe(string output, bool exercise = false, bool wireless = false, bool interactive = false, bool captureOnly = false, bool ownership = false, bool wiredRestart = false, bool clipboard = false)
+    private static int RunKeyboardMappingLiveProbe(string output, bool exercise = false, bool wireless = false, bool interactive = false, bool captureOnly = false, bool ownership = false, bool wiredRestart = false, bool clipboard = false, bool realWindowExit = false, string? selectedUdid = null, bool skipReverseControl = false)
     {
+        if (skipReverseControl && (selectedUdid is null || !realWindowExit || wiredRestart))
+            throw new ArgumentException("Capture isolation requires selected identity and a real window exit.", nameof(skipReverseControl));
+        if (selectedUdid is not null && (!realWindowExit || captureOnly || wireless || exercise || interactive || ownership || clipboard))
+            throw new ArgumentException("Selected identity mode only supports wired window-exit verification.", nameof(selectedUdid));
         Directory.CreateDirectory(output);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown, IsUiPreviewMode = true };
         app.InitializeComponent();
         var main = captureOnly ? CreateWorkspaceTestWindow(app, includeNativePreview: false) : new MainWindow();
         app.MainWindow = main;
-        main.Show();
         var vm = (MainViewModel)KeyboardField(main, "_viewModel");
+        DispatcherTimer? selectedPoll = null;
+        Task? selectedPollTask = null;
+        if (selectedUdid is not null)
+        {
+            // Keep real capture/control/close, but avoid the global inventory
+            // when another phone has been withdrawn from hardware testing.
+            SetKeyboardField(main, "_startupServicesStarted", true);
+            var constructor = typeof(DeviceViewModel).GetConstructors(KeyboardTestMembers).Single();
+            vm.Devices.Add((DeviceViewModel)constructor.Invoke([selectedUdid, "Selected test iPhone",
+                "", "", "USB", "", ConnectionState.Ready]));
+            MappingAssert(DeviceViewModel.UdidEquals(vm.ResolveAppleUdid(selectedUdid), selectedUdid),
+                "Selected phone has no matching saved binding.");
+            selectedPoll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            selectedPoll.Tick += (_, _) =>
+            {
+                if (selectedPollTask is { IsCompleted: false }) return;
+                selectedPollTask?.GetAwaiter().GetResult();
+                selectedPollTask = (Task)KeyboardCall(vm, "RefreshActiveSessionStatusAsync")!;
+            };
+            selectedPoll.Start();
+            Console.WriteLine("Selected USB identity from prior verification; inventory disabled, active-session status only.");
+        }
+        main.Show();
+        string? restartAppleUdid = null;
         bool Wait(Func<bool> completed, int seconds)
         {
             var clock = Stopwatch.StartNew();
@@ -46,9 +75,20 @@ internal static partial class Program
                 return 2;
             }
             vm.SelectedDevice = candidates[0];
+            if (realWindowExit && !skipReverseControl) restartAppleUdid = vm.ResolveAppleUdid(vm.SelectedDevice.Udid);
             Console.WriteLine($"HARDWARE selected: {vm.SelectedDevice.DisplayName}");
             if (vm.StartCommand.CanExecute(null)) vm.StartCommand.Execute(null);
             Wait(() => vm.SourceVideoWidth > 0 && vm.SourceVideoHeight > 0, 35);
+            if (skipReverseControl)
+            {
+                MappingAssert(vm.SourceVideoWidth > 0 && vm.SourceVideoHeight > 0,
+                    "Capture isolation did not receive a real video frame.");
+                vm.CaptureScreenshot(Path.GetFullPath(Path.Combine(output, "iphone-before.png")));
+                Console.WriteLine($"CAPTURE ONLY READY: {vm.SourceVideoWidth}x{vm.SourceVideoHeight}; reverse control never started.");
+                AdvanceDispatcher(TimeSpan.FromSeconds(5));
+            }
+            else
+            {
             // The user explicitly confirmed unlock, trust and Developer Mode
             // before running this opt-in probe. This changes no phone setting.
             SetKeyboardField(vm, "_wiredControlPrerequisiteAcknowledged", true);
@@ -68,9 +108,11 @@ internal static partial class Program
             vm.CaptureScreenshot(path);
             Console.WriteLine($"HARDWARE READY: {vm.SourceVideoWidth}x{vm.SourceVideoHeight}, existing {(wireless ? "Wireless" : "USB")} mapping route ready. Frame: {path}");
             }
+            }
             if (wiredRestart)
             {
                 var target = vm.SelectedDevice!.Udid;
+                restartAppleUdid = vm.ResolveAppleUdid(target);
                 foreach (var pause in new[] { 0, 1000, 5000, 0, 1000 })
                 {
                     var stopControl = vm.CancelReverseControlAsync(ControlStatusMode.Usb, target);
@@ -187,13 +229,68 @@ internal static partial class Program
         }
         finally
         {
+            selectedPoll?.Stop();
+            if (selectedPollTask is not null)
+            {
+                MappingAssert(Wait(() => selectedPollTask.IsCompleted, 10), "Selected session status poll did not finish.");
+                selectedPollTask.GetAwaiter().GetResult();
+            }
+            var shutdownSecondsLimit = (int)Math.Ceiling(vm.NormalShutdownTimeout.TotalSeconds);
+            if (realWindowExit)
+            {
+                var actuallyClosed = false;
+                var realExitWatch = Stopwatch.StartNew();
+                main.Closed += (_, _) => actuallyClosed = true;
+                // Exercise the production close path with capture and control
+                // still running. A hidden window is not proof of completed exit.
+                main.Close();
+                MappingAssert(Wait(() => actuallyClosed, shutdownSecondsLimit + 10),
+                    "Production window close did not finish.");
+                Console.WriteLine($"WINDOW EXIT: elapsed_seconds={realExitWatch.Elapsed.TotalSeconds:F2}");
+            }
+            var cleanupWatch = Stopwatch.StartNew();
             var stop = vm.CancelReverseControlAsync(wireless ? ControlStatusMode.Wireless : ControlStatusMode.Usb);
-            Wait(() => stop.IsCompleted, 20);
+            var stopped = Wait(() => stop.IsCompleted, 20);
+            var stopSeconds = cleanupWatch.Elapsed.TotalSeconds;
+            cleanupWatch.Restart();
             var shutdown = vm.ShutdownAsync();
-            Wait(() => shutdown.IsCompleted, 20);
-            CloseWorkspaceTestWindow(main);
-            Wait(() => !main.IsVisible, 15);
-            app.Shutdown();
+            var shutDown = Wait(() => shutdown.IsCompleted, shutdownSecondsLimit);
+            var shutdownSeconds = cleanupWatch.Elapsed.TotalSeconds;
+            if (!realWindowExit) CloseWorkspaceTestWindow(main);
+            var closed = Wait(() => !main.IsVisible, 15);
+            if (!realWindowExit) app.Shutdown();
+            // A successful ready/restart loop must not hide timed-out cleanup.
+            MappingAssert(stopped, "Hardware control cleanup timed out.");
+            stop.GetAwaiter().GetResult();
+            MappingAssert(shutDown, "Hardware capture shutdown timed out.");
+            shutdown.GetAwaiter().GetResult();
+            MappingAssert(closed, "Hardware test window did not close.");
+            Console.WriteLine($"CLEANUP PASS: control_stop_seconds={stopSeconds:F2}, capture_shutdown_seconds={shutdownSeconds:F2}");
+            if (skipReverseControl || selectedUdid is not null)
+            {
+                AssertWiredCaptureRestorationEvidence(Environment.GetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE"));
+            }
+            if (restartAppleUdid is not null)
+            {
+                // Shutdown can finish while native capture reports a USB
+                // configuration-restore warning. Prove the released phone can
+                // still establish control instead of treating task completion
+                // as proof that Apple's management connection recovered.
+                var bridgePath = Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
+                Task.Run(() => RunDeviceControlLive(bridgePath, restartAppleUdid, "usb"))
+                    .GetAwaiter().GetResult();
+                Console.WriteLine("POST-CAPTURE PASS: real USB control, HID acknowledgements and restart.");
+            }
         }
+    }
+
+    private static void AssertWiredCaptureRestorationEvidence(string? path)
+    {
+        MappingAssert(path is not null && File.Exists(path), "Capture isolation native evidence missing.");
+        var evidence = File.ReadAllText(path!);
+        MappingAssert(evidence.Contains("normal_observed=true", StringComparison.Ordinal) &&
+            !evidence.Contains("normal_observed=false", StringComparison.Ordinal) &&
+            !evidence.Contains("app_shutdown_stop_warning", StringComparison.Ordinal),
+            "Capture ended, but Apple USB restoration was not confirmed; cleanup completion is not a pass.");
     }
 }

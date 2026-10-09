@@ -47,6 +47,8 @@ internal static class ElevatedDriverHost
         var operationId = arguments[4];
         var paths = DriverConstants.GetOperationPaths(operationId);
         var timer = Stopwatch.StartNew();
+        DriverLogger.WriteEvent("elevated-host", "operation_storage_resolved",
+            ("operation", operationId), ("directory", paths.Directory));
         try
         {
             DriverPayload.CreateProtectedSystemDirectory(DriverConstants.DataRoot);

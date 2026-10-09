@@ -678,7 +678,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             _wireless.SelectedProfile = value;
             OnPropertyChanged();
             ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
-            if (WirelessReceiverConfiguration.RequiresOriginalQualityWarning(value))
+            if (!SetupActive && WirelessReceiverConfiguration.RequiresOriginalQualityWarning(value))
             {
                 AppPromptWindow.Inform(
                     LocalizationService.Get("WirelessOriginalQualityWarningTitle"),
@@ -783,6 +783,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             {
                 session.RenderWidth = value.Width;
                 session.RenderHeight = value.Height;
+                PersistDeviceVideoPreferences(session);
             }
             if (SelectedDevice is { IsWireless: false, IsMediaCast: false })
                 SetPendingVideoSettingsStatus(CurrentDeviceSession);
@@ -800,6 +801,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (IsSettingsInteractionBlocked) return;
             if (!Set(ref _selectedFrameRate, value)) return;
             if (CurrentDeviceSession is { } session) session.FrameRate = value;
+            if (CurrentDeviceSession is { } frameState) PersistDeviceVideoPreferences(frameState);
             if (SelectedDevice is { IsWireless: false, IsMediaCast: false })
                 SetPendingVideoSettingsStatus(CurrentDeviceSession);
             else
@@ -971,6 +973,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             var state = GetOrCreateDeviceState(device);
             if (state.DecoderPreference == value.Preference) return;
             state.DecoderPreference = value.Preference;
+            PersistDeviceVideoPreferences(state);
             OnPropertyChanged();
             SetPendingVideoSettingsStatus(state);
             AddDiagnosticLog(AppLog.Event("decoder_preference_selected",
@@ -1122,6 +1125,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 return;
             void ShowStatus()
             {
+                if (SetupActive) return;
                 if (Application.Current?.MainWindow is { } owner)
                     ReverseControlStatusWindow.Show(owner, ControlStatus,
                         () => _ = CancelReverseControlAsync(snapshot.Mode));
@@ -1307,17 +1311,23 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     internal Task SendBluetoothMouseAsync(int dx, int dy, byte buttons = 0, int wheel = 0,
         string? expectedTargetDeviceUdid = null) =>
+        !AutomationHumanAllowed(expectedTargetDeviceUdid ?? _bluetoothControlDeviceUdid) ? Task.CompletedTask :
         _bluetoothControl.SendMouseAsync(dx, dy, buttons, wheel,
             expectedTargetDeviceUdid);
 
     internal Task SendBluetoothKeyboardAsync(byte modifiers, IReadOnlyCollection<byte> usages,
         string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null) =>
+        !AutomationHumanAllowed(expectedTargetDeviceUdid ?? _bluetoothControlDeviceUdid) ? Task.CompletedTask :
         _bluetoothControl.SendKeyboardAsync(modifiers, usages,
             expectedTargetDeviceUdid, canSend);
 
     internal async Task SendUsbKeyboardAsync(IReadOnlyCollection<byte> usages,
         string? targetUdid, Func<bool>? canSend = null)
     {
+        if (targetUdid is null || !AutomationHumanAllowed(targetUdid)) return;
+        var humanGuard = AutomationHumanGuard(targetUdid);
+        var previousGuard = canSend;
+        canSend = () => humanGuard() && previousGuard?.Invoke() != false;
         var bridge = GetReadyUsbControlBridge(targetUdid);
         AddDiagnosticLog(AppLog.Event("usb_keyboard_send_begin",
             ("usages", string.Join(',', usages)),
@@ -1356,6 +1366,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         // Hardware buttons must follow the same target selection as pointer
         // input instead of being delivered to the first bridge that happens
         // to remain ready.
+        if (targetUdid is null || !AutomationHumanAllowed(targetUdid)) return;
+        var humanGuard = AutomationHumanGuard(targetUdid);
+        var previousGuard = canSend;
+        canSend = () => humanGuard() && previousGuard?.Invoke() != false;
         var bridge = GetReadyUsbControlBridge(targetUdid);
         AddDiagnosticLog(AppLog.Event("usb_button_send_begin",
             ("usage_page", usagePage), ("usage_code", usageCode),
@@ -1378,6 +1392,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     internal async Task SendUsbPasteTextAsync(string text, string? targetUdid,
         Func<bool>? canSend = null)
     {
+        if (targetUdid is null || !AutomationHumanAllowed(targetUdid)) return;
+        var humanGuard = AutomationHumanGuard(targetUdid);
+        var previousGuard = canSend;
+        canSend = () => humanGuard() && previousGuard?.Invoke() != false;
         var bridge = GetReadyUsbControlBridge(targetUdid);
         if (bridge is null) return;
         Exception? lastError = null;
@@ -1479,20 +1497,23 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     internal Task SendBluetoothSystemShortcutAsync(byte keyboardUsage,
         string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null) =>
+        !AutomationHumanAllowed(expectedTargetDeviceUdid ?? _bluetoothControlDeviceUdid) ? Task.CompletedTask :
         _bluetoothControl.SendIphoneSystemShortcutAsync(keyboardUsage,
             expectedTargetDeviceUdid, canSend);
 
     internal Task SendBluetoothAppSwitcherAsync(
         string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null) =>
+        !AutomationHumanAllowed(expectedTargetDeviceUdid ?? _bluetoothControlDeviceUdid) ? Task.CompletedTask :
         _bluetoothControl.SendIphoneAppSwitcherAsync(expectedTargetDeviceUdid, canSend);
 
     internal Task SendBluetoothConsumerShortcutAsync(ushort usage, int holdMs,
         string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null) =>
+        !AutomationHumanAllowed(expectedTargetDeviceUdid ?? _bluetoothControlDeviceUdid) ? Task.CompletedTask :
         _bluetoothControl.SendIphoneConsumerShortcutAsync(usage, holdMs,
             expectedTargetDeviceUdid, canSend);
 
     internal Task ReleaseBluetoothControlInputAsync() =>
-        _bluetoothControl.ReleaseAllAsync();
+        !AutomationHumanAllowed(_bluetoothControlDeviceUdid) ? Task.CompletedTask : _bluetoothControl.ReleaseAllAsync();
 
     internal async Task<bool> CalibrateBluetoothControlAsync()
     {
@@ -2088,6 +2109,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         double normalizedY, string? targetUdid,
         CancellationToken cancellationToken = default, Func<bool>? canSend = null)
     {
+        if (targetUdid is null || !AutomationHumanAllowed(targetUdid)) return;
+        var humanGuard = AutomationHumanGuard(targetUdid);
+        var previousGuard = canSend;
+        canSend = () => humanGuard() && previousGuard?.Invoke() != false;
         var bridge = GetReadyUsbControlBridge(targetUdid);
         if (bridge is null ||
             !CoreDeviceTouchProtocol.IsNormalizedCoordinate(normalizedX) ||
@@ -2243,6 +2268,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void AttachWirelessBridgeEvents(DeviceControlSession control, UsbTouchBridgeHost bridge, DeviceViewModel device)
     {
+        bridge.InputAdmission = () => AutomationOwnership.EnterInput(AutomationPhysicalId(control.DeviceUdid));
         var clipboardSync = ClipboardSync;
         bridge.StatusChanged += (_, bridgeEvent) =>
         {
@@ -2269,6 +2295,16 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 UpdateReverseControlStartupStatus(control,
                     LocalizationService.Get("ReverseControlTransportWireless"),
                     ControlStatusMode.Wireless, bridgeEvent);
+                if (bridgeEvent.EventName == "status" && bridgeEvent.Code == "recovery_triggered")
+                {
+                    control.WirelessConnected = false;
+                    control.Router.Stop();
+                    control.ControlStatus.Report(ControlStatusMode.Wireless, ControlStage.Recovering,
+                        device.Name, LocalizationService.Get("ControlReconnectingChannel"));
+                    control.Status = LocalizationService.Get("ReverseControlWirelessDisconnected");
+                    NotifyUsbControlStateChanged();
+                    return;
+                }
                 if (bridgeEvent.EventName is not ("error" or "status") ||
                     (bridgeEvent.EventName == "status" && bridgeEvent.Code != "terminated"))
                     return;
@@ -2577,6 +2613,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private void AttachUsbBridgeEvents(DeviceControlSession control, UsbTouchBridgeHost bridge,
         DeviceViewModel device, CancellationToken cancellationToken)
     {
+        bridge.InputAdmission = () => AutomationOwnership.EnterInput(AutomationPhysicalId(control.DeviceUdid));
         var clipboardSync = ClipboardSync;
         bridge.StatusChanged += (_, bridgeEvent) =>
         {
@@ -2646,15 +2683,19 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     control.WiredEnabled = control.WiredConnected = false;
                     control.Failed = true;
                     control.Router.Stop();
+                    var recoveryMessage = LocalizationService.Get("UsbControlFailureRecoveryExhausted");
                     control.ControlStatus.Failed(ControlStatusMode.Usb, device.Name,
-                        LocalizationService.Get("ControlRecoveryFailed"), bridgeEvent.Message);
-                    control.Status = LocalizationService.Format("ReverseControlUsbFailedFormat", bridgeEvent.Message);
+                        recoveryMessage, bridgeEvent.Message);
+                    control.Status = LocalizationService.Format("ReverseControlUsbFailedFormat", recoveryMessage);
                     NotifyUsbControlStateChanged();
                     if (!control.Starting)
                     {
                         control.WiredBridge = null;
                         control.WiredTarget = null;
                         _ = DisposeFailedUsbBridgeAsync(bridge);
+                        ShowDeviceControlError(control, LocalizationService.Get("ReverseControlTransportWired"),
+                            recoveryMessage, "ReverseControlRecoveryErrorTitle",
+                            $"{bridgeEvent.Code}: {bridgeEvent.Message}");
                     }
                     return;
                 }
@@ -2690,6 +2731,49 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         if (error is ControlBindingException) return error.Message;
         var raw = string.IsNullOrWhiteSpace(error.Message)
             ? string.Empty : AppLog.Sanitize(error.Message);
+        if (bridge.LastErrorCode == "bridge_runtime_invalid")
+            return LocalizationService.Get("UsbControlFailureRuntimeInvalid");
+        if (bridge.LastErrorCode is "developer_mode_check_failed" or "developer_mode_check_timeout")
+            return LocalizationService.Get("UsbControlFailureDeveloperModeCheck");
+        if (bridge.LastErrorCode == "apple_connection_lost")
+            return LocalizationService.Get("UsbControlFailureConnectionLost");
+        if (bridge.LastErrorCode == "developer_image_service_unavailable")
+            return LocalizationService.Get("UsbControlFailureImageServiceUnavailable");
+        if (bridge.LastErrorCode == "developer_image_cache_failed")
+            return LocalizationService.Get("UsbControlFailureImageCache");
+        if (bridge.LastErrorCode == "developer_image_upload_failed")
+            return LocalizationService.Get("UsbControlFailureImageUploadFailed");
+        if (bridge.LastErrorCode == "developer_image_verification_failed")
+            return LocalizationService.Get("UsbControlFailureImageVerification");
+        if (bridge.LastErrorCode == "developer_image_tss_unavailable")
+            return LocalizationService.Get("UsbControlFailureImageTssUnavailable");
+        if (bridge.LastErrorCode == "developer_image_tss_rejected")
+            return LocalizationService.Get("UsbControlFailureImageTssRejected");
+        if (bridge.LastErrorCode == "device_identity_mismatch")
+            return LocalizationService.Get("UsbControlFailureIdentityMismatch");
+        if (bridge.LastErrorCode is "bridge_transport_mismatch" or "bridge_invalid_output" or
+            "bad_frame" or "bridge_input_overflow" or "userspace_tunnel_unavailable")
+            return LocalizationService.Get("UsbControlFailureBridgeProtocol");
+        if (bridge.LastErrorCode == "control_service_start_timeout")
+            return LocalizationService.Get("UsbControlFailureControlServiceTimeout");
+        if (bridge.LastErrorCode == "wired_control_service_unavailable")
+            return LocalizationService.Get("UsbControlFailureTouchService");
+        if (bridge.LastErrorCode == "apple_device_connection_timeout")
+            return LocalizationService.Get("UsbControlFailureDeviceConnectionTimeout");
+        if (bridge.LastErrorCode == "direct_hid_recovery_exhausted")
+            return LocalizationService.Get("UsbControlFailureRecoveryExhausted");
+        if (bridge.LastErrorCode is "bridge_exited" or "bridge_output_closed")
+            return LocalizationService.Get("UsbControlFailureBridgeExited");
+        if (bridge.LastErrorCode == "developer_image_tss_timeout")
+            return LocalizationService.Get("UsbControlFailureImageTssTimeout");
+        if (bridge.LastErrorCode == "developer_image_service_timeout")
+            return LocalizationService.Get("UsbControlFailureImageServiceTimeout");
+        if (bridge.LastErrorCode == "developer_image_upload_timeout")
+            return LocalizationService.Get("UsbControlFailureImageUploadTimeout");
+        if (bridge.LastErrorCode is "developer_image_prepare_timeout" or "developer_image_mount_timeout")
+            return LocalizationService.Get("UsbControlFailureImagePrepareTimeout");
+        if (bridge.LastErrorCode == "bridge_start_timeout")
+            return LocalizationService.Get("UsbControlFailureStartTimeout");
         if (string.Equals(bridge.LastErrorCode, "apple_usbmux_unavailable",
                 StringComparison.OrdinalIgnoreCase) ||
             raw.Contains("ConnectionFailedToUsbmuxd", StringComparison.OrdinalIgnoreCase))
@@ -2703,8 +2787,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             raw.Contains("PasswordProtected", StringComparison.OrdinalIgnoreCase) ||
             raw.Contains("passwordrequired", StringComparison.OrdinalIgnoreCase))
             return LocalizationService.Get("UsbControlFailureDeviceLocked");
-        if (bridge.LastErrorCode is "developer_mode_required" or
-            "developer_mode_check_failed")
+        if (bridge.LastErrorCode == "developer_mode_required")
             return LocalizationService.Get("UsbControlFailureDeveloperMode");
         if (string.Equals(bridge.LastErrorCode, "developer_image_required",
                 StringComparison.OrdinalIgnoreCase))
@@ -2721,14 +2804,12 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         if (string.Equals(bridge.LastErrorCode, "developer_image_download_incompatible",
                 StringComparison.OrdinalIgnoreCase))
             return LocalizationService.Get("UsbControlFailureImageIncompatible");
-        if (string.Equals(bridge.LastErrorCode, "developer_image_tss_failed",
-                StringComparison.OrdinalIgnoreCase))
+        if (bridge.LastErrorCode == "developer_image_tss_failed")
             return LocalizationService.Get("UsbControlFailureImageTss");
         if (string.Equals(bridge.LastErrorCode, "developer_image_remount_failed",
                 StringComparison.OrdinalIgnoreCase))
             return LocalizationService.Get("UsbControlFailureImageRemount");
-        if (bridge.LastErrorCode is "developer_image_bundle_invalid" or
-            "developer_image_mount_failed" or "developer_image_mount_timeout")
+        if (bridge.LastErrorCode is "developer_image_bundle_invalid" or "developer_image_mount_failed")
             return LocalizationService.Get("UsbControlFailureImageMount");
         if (string.Equals(bridge.LastErrorCode, "remote_control_unsupported_ios",
                 StringComparison.OrdinalIgnoreCase) ||
@@ -2743,13 +2824,20 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         if (string.Equals(bridge.LastErrorCode, "wireless_device_not_discoverable",
                 StringComparison.OrdinalIgnoreCase))
             return LocalizationService.Get("UsbControlFailureWirelessNotDiscoverable");
+        if (string.Equals(bridge.LastErrorCode, "wireless_discovery_unavailable",
+                StringComparison.OrdinalIgnoreCase))
+            return LocalizationService.Get("UsbControlFailureWirelessDiscoveryUnavailable");
+        if (string.Equals(bridge.LastErrorCode, "wireless_address_resolution_failed",
+                StringComparison.OrdinalIgnoreCase))
+            return LocalizationService.Get("UsbControlFailureWirelessAddressResolution");
         if (string.Equals(bridge.LastErrorCode, "wireless_remote_pairing_failed",
                 StringComparison.OrdinalIgnoreCase))
             return LocalizationService.Get("UsbControlFailureWirelessPairingFailed");
         if (bridge.LastErrorCode is "remote_control_gate_unavailable" or
             "remote_control_gate_closed")
             return LocalizationService.Get("UsbControlFailureGateUnavailable");
-        if (raw.Contains("com.apple.coredevice.hid.universalhidservice",
+        if (bridge.LastErrorCode == "remote_control_service_unavailable" ||
+            raw.Contains("com.apple.coredevice.hid.universalhidservice",
                 StringComparison.OrdinalIgnoreCase) ||
             raw.Contains("no such service", StringComparison.OrdinalIgnoreCase) ||
             raw.Contains("no_such_service", StringComparison.OrdinalIgnoreCase) ||
@@ -2768,6 +2856,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             string.Equals(bridge.LastErrorCode, "muxexception",
                 StringComparison.OrdinalIgnoreCase))
             return LocalizationService.Get("UsbControlFailureMux");
+        if (error is TimeoutException)
+            return LocalizationService.Get("UsbControlFailureStartTimeout");
+        if (bridge.LastErrorCode is { Length: > 0 and <= 80 } code &&
+            code.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+            return LocalizationService.Format("UsbControlFailureUnknownCodeFormat", code);
         if (string.IsNullOrWhiteSpace(raw))
             return LocalizationService.Get("UsbControlFailureNoDetails");
         return LocalizationService.Get("UsbControlFailureUnknown");
@@ -2785,6 +2878,12 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             "testing_developer_image_sources" => LocalizationService.Get("ReverseControlCheckingImageSources"),
             "downloading_developer_image" => LocalizationService.Get("ReverseControlDownloadingImage"),
             "remounting_developer_image" => LocalizationService.Get("ReverseControlRemountingImage"),
+            "checking_developer_image_ticket" => LocalizationService.Get("ReverseControlCheckingImageTicket"),
+            "personalizing_developer_image" => LocalizationService.Get("ReverseControlPersonalizingImage"),
+            "uploading_developer_image" => LocalizationService.Get("ReverseControlUploadingImage"),
+            "activating_developer_image" => LocalizationService.Get("ReverseControlActivatingImage"),
+            "verifying_developer_image" => LocalizationService.Get("ReverseControlVerifyingImage"),
+            "switching_developer_image" => LocalizationService.Get("ReverseControlSwitchingImage"),
             "discovering_wireless_device" => LocalizationService.Get("ReverseControlDiscoveringWireless"),
             "capture_mux_ready" => LocalizationService.Get("ReverseControlCaptureMuxReady"),
             "waiting_for_hid_service" => LocalizationService.Get("ReverseControlWaitingTouchService"),
@@ -2798,7 +2897,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             "checking_developer_environment" => ControlStage.CheckingPermissions,
             "mounting_developer_image" or "testing_developer_image_sources" or
-                "downloading_developer_image" or "remounting_developer_image" => ControlStage.PreparingDeviceSupport,
+                "downloading_developer_image" or "remounting_developer_image" or
+                "checking_developer_image_ticket" or "personalizing_developer_image" or
+                "uploading_developer_image" or "activating_developer_image" or
+                "verifying_developer_image" or "switching_developer_image" => ControlStage.PreparingDeviceSupport,
             "discovering_wireless_device" => ControlStage.Connecting,
             "capture_mux_ready" => ControlStage.Connecting,
             "waiting_for_hid_service" or "initializing_touch" => ControlStage.InitializingServices,
@@ -2868,8 +2970,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                         _ => StartUsbControlAsync(target),
                     };
                 };
+                if (SetupActive || Application.Current?.MainWindow is not { } owner) return;
                 ReverseControlStatusWindow.Show(
-                    Application.Current?.MainWindow ?? throw new InvalidOperationException("Main window unavailable"),
+                    owner,
                     status,
                     cancel: () => _ = CancelReverseControlAsync(mode, target),
                     retry: retry);
@@ -3060,6 +3163,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 await newBridge.StartAsync(UsbTouchTransport.Usb, boundUsbUdid,
                     bridgePath, cancellationToken);
                 EnsureControlBindingCurrent(control, device, ControlStatusMode.Usb, cancellationToken);
+                if (!newBridge.IsReady || !ReferenceEquals(control.WiredBridge, newBridge) ||
+                    control.Stopping || !control.WiredEnabled)
+                    throw new InvalidOperationException(LocalizationService.Get("ReverseControlUsbDisconnected"));
                 control.WiredConnected = true;
                 control.Router.Begin(boundUsbUdid, ReverseControlMode.Usb);
                 control.ControlStatus.Ready(ControlStatusMode.Usb, device.Name);
@@ -3301,7 +3407,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     public async Task RefreshAsync(bool forceDeviceEnumeration = false)
     {
-        if (_disposed) return;
+        if (_disposed || SetupActive) return;
         if (!_sessions.AnySession)
             Interlocked.Exchange(ref _activeSessionStatusPolls, 0);
         // Device enumeration opens the USB/usbmux stack and takes roughly
@@ -3395,7 +3501,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (!forceDeviceEnumeration && wiredStates.Any(state => state.HasSession))
                 enumerateWired = false;
             var refreshWiredMetadata = UsbDeviceRefreshPolicy.ShouldRefreshMetadata(
-                forceDeviceEnumeration, wiredStates.Any(state => state.HasSession));
+                forceDeviceEnumeration || _usbRestoreRecovery.HasBlockedDevices,
+                wiredStates.Any(state => state.HasSession));
             var wirelessDevices = await Task.Run(_core.GetWirelessDevices);
             if (enumerateWired)
             {
@@ -3495,14 +3602,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                         devices.Add(known.AsUsbPresentNoMux());
                 }
             }
-            foreach (var clearedDevice in _usbRestoreRecovery.Observe(
-                         devices.Where(device => !device.IsWireless)
-                             .Select(device => device.Udid)))
-            {
-                AddDiagnosticLog(AppLog.Event("usb_restore_recovery_cleared",
-                    ("device", AppLog.Device(clearedDevice)),
-                    ("reason", "device_reenumerated")));
-            }
+            ObserveUsbRestoreRecovery(enumerateWired, refreshWiredMetadata);
             var currentWirelessDeviceIds = devices
                 .Where(device => device.IsWireless)
                 .Select(device => device.Udid)
@@ -3878,23 +3978,24 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         await RefreshAsync(forceDeviceEnumeration: true);
     }
 
-    private void PersistWirelessReceiverSettings(WirelessReceiverBackend backend,
+    private bool PersistWirelessReceiverSettings(WirelessReceiverBackend backend,
         WirelessDisplayProfile profile, string receiverName)
     {
-        if (Application.Current is not App app) return;
+        if (Application.Current is not App app) return false;
         var previousBackend = app.UpdateSettings.WirelessReceiverBackend;
         var previousProfile = app.UpdateSettings.WirelessDisplayProfileId;
         var previousName = app.UpdateSettings.WirelessReceiverName;
         app.UpdateSettings.WirelessReceiverBackend = backend;
         app.UpdateSettings.WirelessDisplayProfileId = profile.Id;
         app.UpdateSettings.WirelessReceiverName = receiverName;
-        if (app.SaveUpdateSettings()) return;
+        if (app.SaveUpdateSettings()) return true;
         app.UpdateSettings.WirelessReceiverBackend = previousBackend;
         app.UpdateSettings.WirelessDisplayProfileId = previousProfile;
         app.UpdateSettings.WirelessReceiverName = previousName;
         AddDiagnosticLog(AppLog.Event("wireless_backend_save_failed",
             ("backend", backend.ToString()), ("profile", profile.Id)));
         AddUiLog(LocalizationService.Get("WirelessBackendSettingsSaveFailed"));
+        return false;
     }
 
     private void ReconcileDevices(
@@ -4231,7 +4332,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             }
             if (!IsCurrentSession(state, h)) continue;
             if (status.Width != 0 && status.Height != 0)
+            {
+                ObserveAutomationGeometry(state.Udid, status.Width, status.Height);
                 DeviceVideoSizeChanged?.Invoke(state.Udid, status.Width, status.Height);
+            }
             UpdateProtectionState(state, ProtectedContentStatus.Parse(
                 status.Message, status.AudioSampleRate, status.AudioChannels));
             if (status.State != CaptureState.Error || state.ErrorShown) continue;
@@ -5580,7 +5684,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(BluetoothDeviceOrientationDisplay));
         }
         if (status.Width != 0 && status.Height != 0 && SelectedDevice is { } selected)
+        {
+            ObserveAutomationGeometry(selected.Udid, status.Width, status.Height);
             DeviceVideoSizeChanged?.Invoke(selected.Udid, status.Width, status.Height);
+        }
         FpsDisplay = audioOnlyAirPlay
             ? LocalizationService.Get("WirelessMusicNoVideo")
             : status.Fps > 0 ? $"{status.Fps:F1} fps" : "— fps";
@@ -5924,6 +6031,24 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         return true;
     }
 
+    private void ObserveUsbRestoreRecovery(bool enumerationCurrent, bool metadataCurrent)
+    {
+        if (!enumerationCurrent) return;
+        // Retained device cards and a deferred inventory cannot prove a USB
+        // disappearance. Reappearance must also have a fresh readable tunnel,
+        // rather than a Ready flag copied from the native metadata cache.
+        var wired = _lastUsbDevices.Where(device => device.UsbConnected != 0).ToArray();
+        foreach (var clearedDevice in _usbRestoreRecovery.Observe(
+                     wired.Select(device => device.Udid),
+                     metadataCurrent ? wired.Where(device => device.LockdownAccessible != 0)
+                         .Select(device => device.Udid) : []))
+        {
+            AddDiagnosticLog(AppLog.Event("usb_restore_recovery_cleared",
+                ("device", AppLog.Device(clearedDevice)),
+                ("reason", "usb_management_channel_returned")));
+        }
+    }
+
     private bool OpenDriverManager(bool automatic = false)
     {
         var result = _driverManager.Launch();
@@ -5945,6 +6070,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private static string GetCaptureStatusText(NativeCaptureStatus status, bool wireless)
     {
+        if (wireless && status.Message == "AirPlay video paused")
+            return LocalizationService.Get("WirelessVideoPaused");
+        if (wireless && status.Message == "AirPlay video reconnecting")
+            return LocalizationService.Get("WirelessVideoReconnecting");
         if (status.State == CaptureState.Streaming &&
             ProtectedContentStatus.Parse(status.Message, status.AudioSampleRate,
                 status.AudioChannels).IsProtected)
@@ -6124,6 +6253,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             PlayAudio = IsTrayApplicationMode,
             Volume = 100,
         };
+        if (Application.Current is App app && app.UpdateSettings.DeviceVideoPreferences?.TryGetValue(device.Udid, out var saved) == true)
+            saved?.Apply(state);
         _sessions.Set(state);
         return state;
     }
@@ -6140,6 +6271,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             PlayAudio = PlayAudio,
             Volume = PlaybackVolume,
         };
+        if (Application.Current is App app && app.UpdateSettings.DeviceVideoPreferences?.TryGetValue(device.Udid, out var saved) == true)
+            saved?.Apply(state);
         _sessions.Set(state);
         return state;
     }
@@ -7190,6 +7323,15 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    // Snapshot before ShutdownAsync revokes handles. Native teardown is serial
+    // across devices and may need protocol drain, restore lease, helper and PnP
+    // observation. The 45s base also covers both bridge-stop budgets and other
+    // bounded shutdown stages. A healthy shutdown still completes immediately.
+    // An affected USB port may require up to 60s for administrator consent,
+    // followed by a bounded cycle and a fresh Apple-management observation.
+    internal TimeSpan NormalShutdownTimeout => TimeSpan.FromSeconds(45 + 110 *
+        _sessions.Values.Count(state => state.HasSession || state.IsStarting || state.IsStopping));
+
     internal async Task ShutdownAsync()
     {
         if (_disposed) return;
@@ -7199,6 +7341,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         // stage below is therefore best-effort and bounded; process teardown
         // is safer than leaving the window in an unresponsive state.
         var shutdownStageTimeout = TimeSpan.FromMilliseconds(1500);
+        // Bridge stop owns an 8s graceful process exit plus output draining.
+        // Do not change USB configuration while that bridge still owns mux I/O.
+        var controlShutdownTimeout = TimeSpan.FromSeconds(15);
         AddDiagnosticLog(AppLog.Event("app_shutdown_begin",
             ("sessions", _sessions.Values.Count(state => state.HasSession)),
             ("media_cast", _isMediaCasting), ("uptime_ms", _lifetime.ElapsedMilliseconds)));
@@ -7210,9 +7355,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _shutdownCancellation.Cancel();
         LocalizationService.LanguageChanged -= OnLanguageChanged;
         await AwaitShutdownStageAsync("disable_usb_control",
-            Task.WhenAll(_deviceControls.Values.ToArray().Select(DisableUsbControlAsync)), shutdownStageTimeout);
+            Task.WhenAll(_deviceControls.Values.ToArray().Select(DisableUsbControlAsync)), controlShutdownTimeout);
         await AwaitShutdownStageAsync("disable_wireless_control",
-            Task.WhenAll(_deviceControls.Values.ToArray().Select(DisableWirelessControlAsync)), shutdownStageTimeout);
+            Task.WhenAll(_deviceControls.Values.ToArray().Select(DisableWirelessControlAsync)), controlShutdownTimeout);
         await AwaitShutdownStageAsync("dispose_bluetooth_control",
             _bluetoothControl.DisposeAsync().AsTask(), shutdownStageTimeout);
         _mediaOutput.StatusChanged -= OnMediaOutputStatusChanged;

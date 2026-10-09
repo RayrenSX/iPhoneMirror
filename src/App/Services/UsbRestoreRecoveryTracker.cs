@@ -3,7 +3,8 @@ namespace IPhoneMirror.App.Services;
 /// <summary>
 /// Keeps a device out of capture startup after native teardown could not
 /// confirm that iOS returned to its normal USB configuration. The block is
-/// released only after the device disappears and is later observed again.
+/// released only after the management channel disappears and returns. Device
+/// cards retained for display are not inventory evidence.
 /// </summary>
 internal sealed class UsbRestoreRecoveryTracker
 {
@@ -28,15 +29,24 @@ internal sealed class UsbRestoreRecoveryTracker
         lock (_gate) return _blocked.Contains(udid);
     }
 
+    internal bool HasBlockedDevices
+    {
+        get { lock (_gate) return _blocked.Count != 0; }
+    }
+
     /// <summary>
     /// A missing observation is not enough by itself to clear the block. The
-    /// next present observation must follow it, proving a real re-enumeration.
+    /// next accessible observation must follow it. Callers can require fresh
+    /// management access, rather than cached device metadata, for recovery.
     /// </summary>
-    internal IReadOnlyList<string> Observe(IEnumerable<string> presentUdids)
+    internal IReadOnlyList<string> Observe(IEnumerable<string> presentUdids,
+        IEnumerable<string>? accessibleUdids = null)
     {
         var present = new HashSet<string>(presentUdids.Where(
             value => !string.IsNullOrWhiteSpace(value)),
             StringComparer.OrdinalIgnoreCase);
+        var accessible = accessibleUdids is null ? present :
+            new HashSet<string>(accessibleUdids, StringComparer.OrdinalIgnoreCase);
         var cleared = new List<string>();
         lock (_gate)
         {
@@ -47,7 +57,7 @@ internal sealed class UsbRestoreRecoveryTracker
                     _disconnected.Add(udid);
                     continue;
                 }
-                if (!_disconnected.Remove(udid)) continue;
+                if (!accessible.Contains(udid) || !_disconnected.Remove(udid)) continue;
                 _blocked.Remove(udid);
                 cleared.Add(udid);
             }

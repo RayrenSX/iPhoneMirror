@@ -154,6 +154,18 @@ void test_latest_pending_frame_per_device() {
 
 int main() {
     try {
+        using namespace iPhoneMirror::wireless;
+        const auto pause = parse_mirror_event("IPHONE_MIRROR_VIDEO_STATE\tdevice-a\t1");
+        require(pause && pause->type == MessageType::MirrorState && pause->reserved == 1,
+            "parse explicit sender pause");
+        const auto geometry = parse_mirror_event("IPHONE_MIRROR_VIDEO_GEOMETRY\tdevice-a\t1920\t1080\t1280\t720");
+        require(geometry && geometry->width == 1280 && geometry->stride[0] == 1920,
+            "preserve source and output geometry separately");
+        require(!parse_mirror_event("IPHONE_MIRROR_VIDEO_STATE\tdevice-a\t3") &&
+            !parse_mirror_event("IPHONE_MIRROR_VIDEO_STATE\tdevice-a\t1\textra") &&
+            !parse_mirror_event("IPHONE_MIRROR_VIDEO_GEOMETRY\tdevice-a\t0\t1080\t1280\t720") &&
+            !parse_mirror_event("IPHONE_MIRROR_VIDEO_GEOMETRY\tdevice-a\tnan\t1080\t1280\t720"),
+            "reject malformed state and geometry events");
         test_final_frame_while_writing();
         test_latest_pending_frame_per_device();
         std::puts("IPC writer tests passed.");

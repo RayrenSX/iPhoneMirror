@@ -2048,6 +2048,7 @@
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource AppPreferencesTitle}"
                                            Style="{StaticResource ControlSectionTitle}"/>
+                                <Button Content="{DynamicResource SetupReopen}" Click="OnFirstRunSetupClick" Margin="0,10,0,8"/>
                                 <TextBlock Text="{DynamicResource ApplicationModeLabel}"
                                            Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
                                 <ComboBox AutomationProperties.Name="{DynamicResource ApplicationModeLabel}" SelectedValue="{Binding SelectedApplicationDisplayMode, Mode=TwoWay}"

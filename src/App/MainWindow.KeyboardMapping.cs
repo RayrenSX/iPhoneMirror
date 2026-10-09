@@ -151,8 +151,7 @@ public partial class MainWindow
 
     private void ReconcileKeyboardHook()
     {
-        var needed = !_mappingClosing && (Application.Current is not App { IsUiPreviewMode: true } ||
-            _mappingSettings.Enabled || _mappingCapture.Waiting || _mappingCapture.HasHeldKeys);
+        var needed = IsKeyboardHookNeeded;
         if (needed && _keyboardHook == 0)
             _keyboardHook = InstallKeyboardHook();
         else if (!needed && _keyboardHook != 0)
@@ -160,6 +159,7 @@ public partial class MainWindow
             UnhookWindowsHookEx(_keyboardHook);
             _keyboardHook = 0;
         }
+        SetKeyboardHookRefreshEnabled(needed);
     }
 
     private nint InstallKeyboardHook()

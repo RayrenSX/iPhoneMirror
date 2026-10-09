@@ -1,0 +1,47 @@
+{
+  "BaseCommit": "34ba6cfd49b2432cf30e89913d66decb775763e4",
+  "UpstreamVersion": "v1.2.5",
+  "UpstreamCommit": "85bb8dcbe82f75f40f30bb603255668f9162a8f9",
+  "ReceiverPatchSha256": "9dfb5eb38b517fef39eafad3e44f651360d7aa43de0eec80b9a65740dfee0c3f",
+  "IpcVersion": 8,
+  "Ffmpeg": {
+    "Commit": "63b2b0f47df420007c53888ce0e8383d24b8fb06",
+    "SourceUrl": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/63b2b0f47df420007c53888ce0e8383d24b8fb06",
+    "SourceSha256": "2D6E9244BE21B32756C481F4653D7F17AE08608DD2DB1BA04E826CF0052DF860",
+    "RecipeSha256": "C8C8DC78656CD9DE71DB5DF2D1D3AE6A3401D6E288916B3D696580DD5D6F7464",
+    "PatchSha256": "B2C6963C26B9E83D30618D2674CB2043F278B2D03002DC8F7929AA06527B9DE8",
+    "Compiler": "gcc.exe (Rev4, Built by MSYS2 project) 16.2.0"
+  },
+  "Runtime": [
+    {
+      "Name": "airplay2dll.dll",
+      "Size": 421888,
+      "Sha256": "d5e1cdd0250f306bf7419dbe971daebd69aede3b517390586df54a60a8057397"
+    },
+    {
+      "Name": "avcodec-58.dll",
+      "Size": 1262592,
+      "Sha256": "a3bafedd357b33cb35cf47463c95f7c93c805057c2729db4a8c736918b37a823"
+    },
+    {
+      "Name": "avutil-56.dll",
+      "Size": 522752,
+      "Sha256": "3f9bd71c581fb65602cd8043595d8789ea5a504dcefc70a85c4484b9788915dc"
+    },
+    {
+      "Name": "dnssd.dll",
+      "Size": 433664,
+      "Sha256": "d18d47bf555902dde6faa6817f62dcdbff0535bb1cd62eac0f99fbd324f2d072"
+    },
+    {
+      "Name": "swresample-3.dll",
+      "Size": 102400,
+      "Sha256": "97bc36e7db8c12b1fcf72681e94bff39b1ca0a0011756d8ca831e51820594bfc"
+    },
+    {
+      "Name": "swscale-5.dll",
+      "Size": 477696,
+      "Sha256": "412f8a0c90ee10a4131faa3a82b2eeed0a165c9ab10babf5cd95edea892b4fbf"
+    }
+  ]
+}

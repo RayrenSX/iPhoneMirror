@@ -248,6 +248,8 @@ internal static partial class Program
                 SetKeyboardField(main, "_mappingFocus", null);
             }
             Console.WriteLine("PASS queued shortcut focus-away/back cancellation.");
+            TestIndependentKeyboardReconnect(main, control, packets, hwnd, value => foreground = value, Key, Finish);
+            TestKeyboardHookRecovery(main, packets, Key, Finish);
             TestBluetoothKeyboardTransportGates();
             packets.SetLength(0);
             Key(0x41, true);

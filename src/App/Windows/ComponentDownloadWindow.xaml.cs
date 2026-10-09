@@ -102,11 +102,11 @@ public partial class ComponentDownloadWindow : IPhoneMirror.UI.Controls.RoundedW
         {
             DiagnosticLogger.Exception("components", "uxplay_install_failed", error);
             _failed = true;
-            if (UxPlayComponent.Descriptor is { } descriptor)
-                _failureDiagnostics = "\n\n" +
-                    (error is System.Net.Http.HttpRequestException { StatusCode: { } status } ? $"HTTP: {(int)status}\n" : string.Empty) +
-                    $"Version: {descriptor.Version}\nArchitecture: x64\nRelease: {descriptor.ReleaseTag}\n" +
-                    $"Asset: {descriptor.Name}\nURL: {descriptor.Url}";
+            _failureDiagnostics = error is System.Net.Http.HttpRequestException { StatusCode: { } status }
+                ? $"\n\nHTTP: {(int)status}" : string.Empty;
+            if (UxPlayComponent.DownloadRelease is { ZipAsset: { } asset } release)
+                _failureDiagnostics += $"\n\nRelease: {release.TagName}\nArchitecture: x64\n" +
+                    $"Asset: {asset.Name}\nURL: {asset.DownloadUri}";
             StatusText = LocalizationService.Get("UxPlayDownloadFailed");
             DetailText = LocalizationService.Get(error switch
             {

@@ -158,6 +158,25 @@ internal sealed partial class KeyboardInputRouter
         // Tombstones survive until physical up, so repeats and releases can
         // never acquire another device or backend after focus/session changes.
     }
+    // Only after BeginHandoff has released every old owner. Do not dispatch
+    // synthetic key-ups here: that could execute a buffered shortcut candidate.
+    internal void ReconcileRetiredKeys(IReadOnlySet<int> physicallyHeld)
+    {
+        foreach (var (id, press) in _presses.ToArray())
+            if (press.Route.Owner == KeyboardEventOwner.Retired && !physicallyHeld.Contains(press.Key.VirtualKey))
+                _presses.Remove(id);
+        _retired.RemoveWhere(key => !physicallyHeld.Contains(key));
+        _retired.UnionWith(physicallyHeld);
+    }
+
+    internal void ReleaseCapturedKey(MappedKey key)
+    {
+        _retired.Remove(key.VirtualKey);
+        foreach (var (id, press) in _presses.ToArray())
+            if (press.Route.Owner == KeyboardEventOwner.Retired && press.Key.SamePhysicalKey(key))
+                _presses.Remove(id);
+    }
+
     [Conditional("DEBUG")]
     private void TraceEvent(string name, Press press)
     {

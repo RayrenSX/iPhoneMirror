@@ -46,12 +46,12 @@ inline constexpr std::uint32_t DnsSdAllInterfaces = 0xFFFFFFFFu;
 
 constexpr std::uint32_t dns_sd_registration_interface(
     std::uint32_t requested, std::uint32_t preferred) noexcept {
-    // When the upstream caller did not constrain discovery to a specific
-    // adapter, retain Windows DNS-SD's all-interface behavior. Selecting just
-    // the lowest-metric adapter hides an AirPlay receiver from Mobile Hotspot
-    // clients when Ethernet remains the preferred route.
-    if (requested == 0 && preferred != 0) return DnsSdAllInterfaces;
-    return preferred != 0 ? preferred : requested;
+    // Upstream registers the same receiver once per adapter. Those references
+    // share one logical registration here, so its native registration must
+    // cover every interface rather than retain the first reference's adapter.
+    // Otherwise Ethernet ownership hides the receiver from Mobile Hotspot.
+    if (preferred != 0) return DnsSdAllInterfaces;
+    return requested;
 }
 
 constexpr std::uint32_t dns_sd_native_interface(

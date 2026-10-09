@@ -5,6 +5,93 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Automatically reconnect only the affected iPhone's USB port if Apple's
+  management connection remains missing after wired mirroring cleanup. Request
+  administrator approval when needed and verify recovery before reporting success.
+- Bundle both pinned x64 USB backend DLLs inside the frozen bridge's `_internal`
+  directory, and require native backend loading during its build-time self-check.
+  Release manifest validation now rejects packages missing either USB backend.
+  Override PyInstaller's host USB discovery so DLL aliases on the build machine
+  cannot shadow the bundled libusb0 backend.
+- Reject capture-mux listener startup timeouts instead of advertising an unbound
+  address; cancellation closes listeners created during startup and retires the
+  server loop before returning.
+- Close capture-mux connections when clients disconnect during startup or cancel
+  forwarding, including USB connections returned after cancellation; retire both
+  forwarding tasks with their owner.
+- Release partially initialized capture USB control interfaces before retry or
+  fallback, preserving the original error if device removal also breaks cleanup.
+  Retain USB configuration restore-helper failures in native diagnostics.
+- Let USB configuration recovery observe a full window after its helper returns.
+  Wait for control bridges before capture teardown and allow normal window exit
+  enough time for each active device's bounded cleanup.
+- Require an exact USB device record when confirming recovery after wired
+  mirroring; a wireless record no longer counts as restored USB connectivity.
+  Log individual USB/PnP recovery transitions for timeout diagnosis.
+- Distinguish missing wireless advertisements from failed connections to
+  advertised routes, preserving handshake diagnostics and pairing guidance.
+- Keep Apple's standard USB control route available when the optional capture
+  backend cannot load or USB discovery fails, including during capture retries.
+- Bound all Lockdown handshake retries, including USB DDI preparation for
+  wireless control, and close partially initialized device sockets on cancellation.
+- Retry alternate HID services after startup stream resets and verify each
+  candidate's live connection before selection; preserve dead-tunnel recovery.
+- Retry brief Windows sharing conflicts when atomically selecting a DDI cache
+  snapshot, retaining cancellation, bounded waits and the previous cache.
+- Keep DDI mirrors eligible when Range probes fail, and prefer a source that
+  completed a verified download for the remaining files. Report cache creation,
+  disk-space and write-access failures without retrying unrelated mirrors.
+- Try wireless RemotePairing after initial Network usbmux connection resets or
+  transport failures, while preserving device trust and lock-screen errors.
+- Bound each DDI source attempt and inspect partial socket reads so a slow
+  download cannot consume the entire fallback budget. Apply the same streaming
+  deadline checks to metadata and mirror probes; log transfer bytes and timing.
+- Reconcile key recording as well as keyboard routing after hook recovery, so
+  lost releases do not stall recording or leave shortcuts blocked after cancellation.
+- Fall back to RemotePairing when a discovered Network CoreDevice tunnel fails
+  before readiness, and abort wireless sockets when cleanup is cancelled.
+- Publish verified DDI cache snapshots atomically, preserving files used by
+  existing mounts during refresh, cancellation and concurrent downloads. Add
+  actionable cache write failure guidance in all four languages.
+- Restore keyboard ownership after USB/wireless reconnection in independent previews.
+  Clear missed modifier releases when restoring a keyboard hook while keeping held
+  keys quarantined until release.
+- Renew the Windows keyboard hook automatically so a silently removed hook cannot
+  permanently disable typing and configured shortcuts while mouse control still works.
+- Retry discovered wireless addresses, bound discovery and optional pairing, and
+  allow RemotePairing when Network usbmux is unavailable. Verify the RSD device
+  identity before opening input services. A missing USB tunnel now offers explicit
+  wireless control instead of silently using Wi-Fi while reporting a wired session.
+- Serialize bridge startup and shutdown, cancel pending startup on stop, and ignore
+  output from retired processes. Preserve cancellation instead of reporting a timeout.
+- Keep host input lifetimes distinct across child-process restarts so queued input
+  and clipboard requests cannot enter a later session with a reused protocol counter.
+- Release touch and keyboard state before closing media-authenticated HID sessions;
+  clean up partially opened button services and release pending button presses.
+- Keep HID fallback available while reconnecting, and bound media-session startup
+  and cleanup even when authentication fails. Scope rejected DDI cache records to
+  the device and OS with a five-minute expiry. Normalize cached asset ordering and
+  share the download deadline across metadata, proxies and compatible-version fallback.
+- Fall back from Modern HID to Legacy when the touch surface is missing, preserve
+  direct authentication after optional media failures, and close failed candidates.
+- Pin compatible DDI downloads so GitHub metadata outages do not block mirrors.
+  Reuse mirror rankings, isolate direct requests from proxy settings, validate the
+  manifest before downloading the image, retain local fallback candidates, and
+  refresh rejected cached images once without retrying identical content. Accept
+  the official `Image.dmg.trustcache` filename in local bundles.
+- Bound RemotePairing startup and teardown, detect idle wireless HID failures, and
+  keep wireless recovery on the selected transport. Fix queued-input cancellation,
+  blocked stdin shutdown, bridge reuse and stale process-exit callbacks.
+- Make Apple DDI personalization cancellable and bound image-service startup, upload,
+  mounting and verification. Report the failing stage, retain specific timeout errors,
+  and stop cancelled downloads from publishing their cache.
+- Preserve bridge runtime validation details instead of replacing them with an unknown error.
+- Retry temporary Apple signing failures within the existing timeout, verify mounted images,
+  and handle damaged DDI cache manifests. Observe host cancellation during startup and
+  retain the original failure through cleanup, with actionable guidance in all four languages.
+
 ## [1.8.5-pre] - 2026-10-06
 
 Prerelease for feature and compatibility testing.

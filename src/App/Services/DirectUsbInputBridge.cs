@@ -20,26 +20,32 @@ public sealed record TouchPoint(
     [property: JsonPropertyName("normalizedX")] double NormalizedX,
     [property: JsonPropertyName("normalizedY")] double NormalizedY);
 
-public sealed class DirectUsbInputBridge : IAsyncDisposable
+public sealed partial class DirectUsbInputBridge : IAsyncDisposable
 {
     // A first-run Personalized DDI download, Apple TSS personalization, and
     // mount may consume the bridge's 180 second device timeout. A stale DDI
     // recovery can add one 30 second unmount and a second tunnel handshake.
     private static readonly TimeSpan InitialReadyTimeout = TimeSpan.FromSeconds(360);
     private Process? _process;
+    private OwnedBridgeProcess? _ownedProcess;
     private StreamReader? _stdout;
     private StreamWriter? _stdin;
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _cts = new();
     private Task? _readerTask;
     private Task? _errorDrainTask;
     private TaskCompletionSource<bool>? _readySignal;
     private string? _requestedUdid;
     private bool _requestedWireless;
     private string? _lastDiagnostic;
+    private string? _lastFailureDiagnostic;
     private string? _lastErrorCode;
+    private string? _lastStatusCode;
     private string? _lastStandardError;
     private long _readyGeneration;
+    // Host lifetimes never repeat when a new child restarts its wire counter at 1.
+    private long _wireGeneration;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
     // Shared budget for mouse, keyboard gestures and physical touch, protected
     // by the writer lock. Recovery starts a fresh contact lifetime.
     private readonly HashSet<int> _touchContacts = [];
@@ -56,7 +62,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     public string? AuthMode { get; private set; }
     public string? Udid { get; private set; }
     public int RateHz { get; private set; }
-    public string? LastDiagnostic => _lastDiagnostic;
+    public string? LastDiagnostic => _lastFailureDiagnostic ?? _lastDiagnostic;
     public string? LastErrorCode => _lastErrorCode;
 
     public event Action<BridgeEvent>? OnEvent;
@@ -71,96 +77,126 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(udid))
             throw new ArgumentException("Bridge transport requires an explicit Apple UDID.", nameof(udid));
-        Interlocked.Exchange(ref _stopping, 0);
-        Interlocked.Exchange(ref _terminalEventReceived, 0);
-        AuthMode = null;
-        _requestedUdid = udid;
-        _requestedWireless = wireless;
-        bridgeScript ??= Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
-        var usePackagedBridge = string.Equals(Path.GetExtension(bridgeScript), ".exe",
-            StringComparison.OrdinalIgnoreCase);
-        if (usePackagedBridge &&
-            !RuntimeBinaryIntegrity.VerifyUsbTouchBridgeRuntime(bridgeScript,
-                out var runtimeFailure))
+        await _lifecycleLock.WaitAsync(ct).ConfigureAwait(false);
+        Task ready;
+        try
         {
-            throw new InvalidOperationException(
-                LocalizationService.Format("TouchBridgeRuntimeIncompleteFormat", runtimeFailure));
+            ct.ThrowIfCancellationRequested();
+            if (_process is not null)
+                throw new InvalidOperationException(LocalizationService.Get("TouchBridgeAlreadyStarted"));
+            if (_cts.IsCancellationRequested)
+            {
+                _cts.Dispose();
+                _cts = new CancellationTokenSource();
+            }
+            Interlocked.Exchange(ref _stopping, 0);
+            Interlocked.Exchange(ref _terminalEventReceived, 0);
+            AuthMode = null;
+            IsReady = false;
+            GateOpen = false;
+            _lastStandardError = null;
+            _lastErrorCode = null;
+            _lastStatusCode = null;
+            _lastDiagnostic = null;
+            _lastFailureDiagnostic = null;
+            _requestedUdid = udid;
+            _requestedWireless = wireless;
+            bridgeScript ??= Path.Combine(AppContext.BaseDirectory, "tools", "iUsbBridge.exe");
+            var usePackagedBridge = string.Equals(Path.GetExtension(bridgeScript), ".exe",
+                StringComparison.OrdinalIgnoreCase);
+            if (usePackagedBridge &&
+                !RuntimeBinaryIntegrity.VerifyUsbTouchBridgeRuntime(bridgeScript,
+                    out var runtimeFailure))
+            {
+                _lastErrorCode = "bridge_runtime_invalid";
+                _lastDiagnostic = runtimeFailure;
+                _lastFailureDiagnostic = runtimeFailure;
+                throw new InvalidOperationException(
+                    LocalizationService.Format("TouchBridgeRuntimeIncompleteFormat", runtimeFailure));
+            }
+            var launchFile = usePackagedBridge ? bridgeScript : pythonExe;
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = launchFile,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+                WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(bridgeScript)) ?? AppContext.BaseDirectory,
+                CreateNoWindow = true,
+            };
+            // libusb0.dll is published beside the main application, while the
+            // PyInstaller bridge runs from tools\.  Python's ctypes loader does
+            // not search the parent directory, so make every packaged runtime
+            // location explicit for both fresh installs and overlay upgrades.
+            var bridgeDirectory = Path.GetDirectoryName(Path.GetFullPath(bridgeScript))
+                ?? AppContext.BaseDirectory;
+            var applicationDirectory = AppContext.BaseDirectory.TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var runtimeDirectories = new[]
+            {
+                applicationDirectory,
+                bridgeDirectory,
+                Path.Combine(bridgeDirectory, "_internal"),
+            };
+            var existingPath = psi.Environment.TryGetValue("PATH", out var path)
+                ? path
+                : Environment.GetEnvironmentVariable("PATH");
+            var pathEntries = new List<string>(runtimeDirectories.Length + 1);
+            foreach (var directory in runtimeDirectories)
+            {
+                if (!string.IsNullOrWhiteSpace(directory) &&
+                    !pathEntries.Contains(directory, StringComparer.OrdinalIgnoreCase))
+                    pathEntries.Add(directory);
+            }
+            if (!string.IsNullOrWhiteSpace(existingPath))
+                pathEntries.Add(existingPath);
+            psi.Environment["PATH"] = string.Join(Path.PathSeparator, pathEntries);
+            psi.Environment.Remove("IPHONE_MIRROR_USB_MUX_RESUME");
+            if (!wireless && MuxResumeContext?.Take() is { } checkpoint)
+                psi.Environment["IPHONE_MIRROR_USB_MUX_RESUME"] = checkpoint;
+            if (!usePackagedBridge)
+                psi.ArgumentList.Add(bridgeScript);
+            psi.ArgumentList.Add(wireless ? "--wireless" : "--usb");
+            psi.ArgumentList.Add("--rate-hz");
+            psi.ArgumentList.Add(rateHz.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add("--udid");
+            psi.ArgumentList.Add(udid);
+            if (GetPersonalizedDdiDirectory() is { } ddiDirectory)
+            {
+                // Prefer the verified bundled Personalized DDI; an environment
+                // override still allows operators to provide a different build.
+                psi.ArgumentList.Add("--ddi-dir");
+                psi.ArgumentList.Add(ddiDirectory);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            var ownedProcess = OwnedBridgeProcess.Start(psi);
+            _ownedProcess = ownedProcess;
+            var startedProcess = ownedProcess.Process;
+            _process = startedProcess;
+            _stdin = ownedProcess.Input;
+            _stdout = ownedProcess.Output;
+
+            _readySignal = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var output = _stdout;
+            var readerToken = _cts.Token;
+            _readerTask = Task.Run(() => ReadLoopAsync(startedProcess, output, readerToken));
+            var bridgeProcessId = startedProcess.Id;
+            _errorDrainTask = Task.Run(() => DrainErrorAsync(startedProcess, ownedProcess.Error, bridgeProcessId));
+            startedProcess.EnableRaisingEvents = true;
+            startedProcess.Exited += (_, _) => _ = HandleProcessExitAsync(startedProcess);
+            if (startedProcess.HasExited)
+                _ = HandleProcessExitAsync(startedProcess);
+
+            ready = WaitForReadyAsync(ct);
         }
-        var launchFile = usePackagedBridge ? bridgeScript : pythonExe;
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = launchFile,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-            WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(bridgeScript)) ?? AppContext.BaseDirectory,
-            CreateNoWindow = true,
-        };
-        // libusb0.dll is published beside the main application, while the
-        // PyInstaller bridge runs from tools\.  Python's ctypes loader does
-        // not search the parent directory, so make every packaged runtime
-        // location explicit for both fresh installs and overlay upgrades.
-        var bridgeDirectory = Path.GetDirectoryName(Path.GetFullPath(bridgeScript))
-            ?? AppContext.BaseDirectory;
-        var applicationDirectory = AppContext.BaseDirectory.TrimEnd(
-            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var runtimeDirectories = new[]
-        {
-            applicationDirectory,
-            bridgeDirectory,
-            Path.Combine(bridgeDirectory, "_internal"),
-        };
-        var existingPath = psi.Environment.TryGetValue("PATH", out var path)
-            ? path
-            : Environment.GetEnvironmentVariable("PATH");
-        var pathEntries = new List<string>(runtimeDirectories.Length + 1);
-        foreach (var directory in runtimeDirectories)
-        {
-            if (!string.IsNullOrWhiteSpace(directory) &&
-                !pathEntries.Contains(directory, StringComparer.OrdinalIgnoreCase))
-                pathEntries.Add(directory);
-        }
-        if (!string.IsNullOrWhiteSpace(existingPath))
-            pathEntries.Add(existingPath);
-        psi.Environment["PATH"] = string.Join(Path.PathSeparator, pathEntries);
-        psi.Environment.Remove("IPHONE_MIRROR_USB_MUX_RESUME");
-        if (!wireless && MuxResumeContext?.Take() is { } checkpoint)
-            psi.Environment["IPHONE_MIRROR_USB_MUX_RESUME"] = checkpoint;
-        if (!usePackagedBridge)
-            psi.ArgumentList.Add(bridgeScript);
-        psi.ArgumentList.Add(wireless ? "--wireless" : "--usb");
-        psi.ArgumentList.Add("--rate-hz");
-        psi.ArgumentList.Add(rateHz.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        psi.ArgumentList.Add("--udid");
-        psi.ArgumentList.Add(udid);
-        if (GetPersonalizedDdiDirectory() is { } ddiDirectory)
-        {
-            // Prefer the verified bundled Personalized DDI; an environment
-            // override still allows operators to provide a different build.
-            psi.ArgumentList.Add("--ddi-dir");
-            psi.ArgumentList.Add(ddiDirectory);
-        }
-
-        var startedProcess = Process.Start(psi) ?? throw new InvalidOperationException(LocalizationService.Get("TouchBridgeStartFailed"));
-        _process = startedProcess;
-        _stdin = startedProcess.StandardInput;
-        _stdout = startedProcess.StandardOutput;
-
-        _readySignal = new TaskCompletionSource<bool>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        _readerTask = Task.Run(() => ReadLoopAsync(_cts.Token));
-        var bridgeProcessId = startedProcess.Id;
-        _errorDrainTask = Task.Run(() => DrainErrorAsync(startedProcess.StandardError, bridgeProcessId));
-        startedProcess.EnableRaisingEvents = true;
-        startedProcess.Exited += (_, _) => _ = HandleProcessExitAsync(startedProcess);
-        if (startedProcess.HasExited)
-            _ = HandleProcessExitAsync(startedProcess);
-
-        await WaitForReadyAsync(ct);
+        finally { _lifecycleLock.Release(); }
+        await ready.ConfigureAwait(false);
     }
 
     private static string? GetPersonalizedDdiDirectory()
@@ -183,7 +219,10 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         {
             try
             {
-                if (new FileInfo(Path.Combine(directory, fileName)).Length <= 0)
+                var filePath = Path.Combine(directory, fileName);
+                if (fileName == "Image.trustcache" && !File.Exists(filePath))
+                    filePath = Path.Combine(directory, "Image.dmg.trustcache");
+                if (new FileInfo(filePath).Length <= 0)
                     return false;
             }
             catch (IOException) { return false; }
@@ -197,6 +236,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         long? expectedGeneration = null)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
+        var wireGeneration = Interlocked.Read(ref _wireGeneration);
         if (!IsReady || _stdin is null)
             throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
 
@@ -216,6 +256,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
+            using var inputAdmission = InputAdmission?.Invoke();
             if (expectedGeneration is { } expected && expected != Interlocked.Read(ref _readyGeneration))
                 throw new OperationCanceledException();
             // Pure releases must pass after focus loss. A queued contact or
@@ -249,7 +290,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
                 {
                     schema = CoreDeviceTouchProtocol.MessageSchema,
-                    generation,
+                    generation = wireGeneration,
                     kind = CoreDeviceTouchProtocol.MessageKind,
                     seq = frameSequence,
                     timestampNs,
@@ -313,7 +354,15 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     public async Task StopAsync()
     {
+        await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+        try { await StopCoreAsync().ConfigureAwait(false); }
+        finally { _lifecycleLock.Release(); }
+    }
+
+    private async Task StopCoreAsync()
+    {
         Interlocked.Exchange(ref _stopping, 1);
+        _readySignal?.TrySetCanceled();
         IsReady = false;
         GateOpen = false;
         Interlocked.Increment(ref _readyGeneration);
@@ -324,6 +373,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         // capture teardown that follows and can force iOS to re-prompt for
         // trust. Give the graceful exit a bounded window before killing.
         try { _stdin?.Close(); } catch { }
+        var graceTimer = Stopwatch.StartNew();
         if (_process is { HasExited: false })
         {
             try
@@ -335,11 +385,12 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             }
             catch (OperationCanceledException) { }
             catch (InvalidOperationException) { }
-            if (!_process.HasExited)
-            {
-                try { _process.Kill(); } catch { }
-            }
         }
+        // A launcher exit does not prove its interpreter released USB. The
+        // job includes every descendant, assigned before the first instruction.
+        if (_ownedProcess is { } ownedProcess)
+            await ownedProcess.RetireAsync(TimeSpan.FromSeconds(8) - graceTimer.Elapsed)
+                .ConfigureAwait(false);
         var reader = _readerTask;
         var errorDrain = _errorDrainTask;
         if (reader is not null || errorDrain is not null)
@@ -350,10 +401,12 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             catch { /* Process termination must not block UI teardown. */ }
         }
         _cts.Cancel();
-        if (_process is { HasExited: true, ExitCode: 0 } && _muxCheckpoint is { } checkpoint)
+        if (_ownedProcess is { WasForced: false } &&
+            _process is { HasExited: true, ExitCode: 0 } && _muxCheckpoint is { } checkpoint)
             MuxResumeContext?.Save(checkpoint);
         _muxCheckpoint = null;
-        try { if (_process is { HasExited: false }) _process.Kill(true); } catch { }
+        try { _ownedProcess?.Dispose(); } catch { }
+        _ownedProcess = null;
         try { _process?.Dispose(); } catch { }
         _stdin = null;
         _stdout = null;
@@ -364,24 +417,23 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         AuthMode = null;
     }
 
-    private async Task ReadLoopAsync(CancellationToken ct)
+    private async Task ReadLoopAsync(Process process, StreamReader output, CancellationToken ct)
     {
-        if (_stdout is null) return;
         try
         {
             while (!ct.IsCancellationRequested)
             {
                 string? line;
-                try { line = await _stdout.ReadLineAsync(ct); }
+                try { line = await output.ReadLineAsync(ct); }
                 catch (OperationCanceledException) { break; }
                 catch (ObjectDisposedException) { break; }
-                if (line is null) break;
+                if (line is null || !ReferenceEquals(_process, process)) break;
                 HandleLine(line);
             }
         }
         finally
         {
-            if (!ct.IsCancellationRequested && Volatile.Read(ref _stopping) == 0 &&
+            if (ReferenceEquals(_process, process) && !ct.IsCancellationRequested && Volatile.Read(ref _stopping) == 0 &&
                 Interlocked.Exchange(ref _terminalEventReceived, 1) == 0)
             {
                 IsReady = false;
@@ -390,7 +442,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                 OnEvent?.Invoke(new BridgeEvent("error", _lastErrorCode,
                     LocalizationService.Get("TouchBridgeOutputDisconnected")));
             }
-            if (!IsReady)
+            if (ReferenceEquals(_process, process) && !IsReady)
                 _readySignal?.TrySetException(new InvalidOperationException(
                     LocalizationService.Get("TouchBridgeOutputClosed")));
         }
@@ -398,14 +450,18 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     private void HandleLine(string line)
     {
-        _lastDiagnostic = line;
+        _lastDiagnostic = "bridge_event";
         try
         {
             using var doc = JsonDocument.Parse(line);
             var root = doc.RootElement;
             var evt = root.GetProperty("event").GetString();
+            if (evt is not ("clipboard_text" or "clipboard_result")) _lastDiagnostic = line;
             switch (evt)
             {
+                case "clipboard_result":
+                    CompleteAutomationClipboard(root);
+                    break;
                 case "capture_mux_checkpoint":
                     if (!_requestedWireless && Volatile.Read(ref _stopping) != 0 &&
                         root.TryGetProperty("state", out var checkpoint) &&
@@ -415,6 +471,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                     break;
                 case "status":
                     var statusCode = root.TryGetProperty("code", out var c) ? c.GetString() : null;
+                    if (statusCode != "terminated") _lastStatusCode = statusCode;
                     if (statusCode == "recovery_triggered")
                     {
                         IsReady = false;
@@ -445,6 +502,9 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         RejectReady("bridge_transport_mismatch", LocalizationService.Format("TouchBridgeTransportMismatchFormat", expectedTransport, transport));
                         return;
                     }
+                    SupportsAutomationClipboard = root.TryGetProperty("capabilities", out var caps) &&
+                        caps.ValueKind == JsonValueKind.Array && caps.EnumerateArray().Any(c =>
+                            c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.clipboard.rpc.v1");
                     Udid = readyUdid;
                     RateHz = root.TryGetProperty("rateHz", out var r) ? r.GetInt32() : 0;
                     GateOpen = root.TryGetProperty("gateOpen", out var g) && g.GetBoolean();
@@ -460,11 +520,13 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         _readySignal?.TrySetException(CreateStartupException(gateMessage));
                         return;
                     }
-                    Interlocked.Exchange(ref _readyGeneration,
+                    Interlocked.Exchange(ref _wireGeneration,
                         root.TryGetProperty("generation", out var generation) ? generation.GetInt64() : 0);
+                    Interlocked.Increment(ref _readyGeneration);
                     IsReady = true;
                     Interlocked.Exchange(ref _terminalEventReceived, 0);
                     _lastErrorCode = null;
+                    _lastFailureDiagnostic = null;
                     OnEvent?.Invoke(new BridgeEvent("ready", null, "gate_open"));
                     _readySignal?.TrySetResult(true);
                     break;
@@ -481,6 +543,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
                         root.TryGetProperty("readId", out var readId) ? readId.GetInt64() : null));
                     break;
                 case "error":
+                    _lastFailureDiagnostic = line;
                     Interlocked.Exchange(ref _terminalEventReceived, 1);
                     IsReady = false;
                     GateOpen = false;
@@ -503,6 +566,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     private void RejectReady(string code, string message)
     {
+        _lastFailureDiagnostic = message;
         IsReady = false;
         GateOpen = false;
         _lastErrorCode = code;
@@ -517,8 +581,19 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(InitialReadyTimeout);
         try { await readySignal.Task.WaitAsync(timeout.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && timeout.IsCancellationRequested)
         {
+            _lastErrorCode ??= _lastStatusCode switch
+            {
+                "personalizing_developer_image" => "developer_image_tss_timeout",
+                "uploading_developer_image" => "developer_image_upload_timeout",
+                "testing_developer_image_sources" or "downloading_developer_image" => "developer_image_download_timeout",
+                "checking_developer_environment" => "developer_mode_check_timeout",
+                "mounting_developer_image" or "activating_developer_image" or
+                    "remounting_developer_image" or "checking_developer_image_ticket" or
+                    "verifying_developer_image" or "switching_developer_image" => "developer_image_prepare_timeout",
+                _ => "bridge_start_timeout",
+            };
             throw new TimeoutException(LocalizationService.Format("TouchBridgeTimeoutFormat", InitialReadyTimeout.TotalSeconds, _lastDiagnostic ?? LocalizationService.Get("ReverseControlNoDetail")));
         }
     }
@@ -527,6 +602,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         CancellationToken ct = default, Func<bool>? canSend = null, bool releaseAll = false)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
+        var wireGeneration = Interlocked.Read(ref _wireGeneration);
         if (!IsReady || _stdin is null)
             throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
         if (usages.Count > CoreDeviceTouchProtocol.MaxKeyboardUsages)
@@ -539,6 +615,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
+            using var inputAdmission = InputAdmission?.Invoke();
             // The caller supplies a session-only guard for cleanup and an
             // ownership/focus guard for ordinary down/up reports. Stale empty
             // reports must not release keys belonging to a replacement owner.
@@ -550,7 +627,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             var frame = new
             {
                 schema = CoreDeviceTouchProtocol.MessageSchema,
-                generation,
+                generation = wireGeneration,
                 kind = CoreDeviceTouchProtocol.KeyboardMessageKind,
                 releaseAll,
                 seq = NextSequence(),
@@ -568,6 +645,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         bool guardRelease = false)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
+        var wireGeneration = Interlocked.Read(ref _wireGeneration);
         if (!IsReady || _stdin is null)
             throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
         if (state is not ("down" or "up" or "canceled"))
@@ -575,6 +653,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
         await _sendLock.WaitAsync(ct);
         try
         {
+            using var inputAdmission = InputAdmission?.Invoke();
             if ((state == "down" || guardRelease) && canSend?.Invoke() == false) return;
             // Recovery may close the gate while this packet waits for the writer.
             if (generation != Interlocked.Read(ref _readyGeneration)) return;
@@ -583,7 +662,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             var frame = new
             {
                 schema = CoreDeviceTouchProtocol.MessageSchema,
-                generation,
+                generation = wireGeneration,
                 kind = CoreDeviceTouchProtocol.ButtonMessageKind,
                 seq = NextSequence(),
                 usagePage = (int)usagePage,
@@ -600,12 +679,19 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     public async Task SendPasteTextAsync(string text, CancellationToken ct = default,
         Func<bool>? canSend = null)
     {
+        if (SupportsAutomationClipboard)
+        {
+            await AutomationClipboardAsync("paste_text", text, () => canSend?.Invoke() != false, ct);
+            return;
+        }
         var generation = Interlocked.Read(ref _readyGeneration);
+        var wireGeneration = Interlocked.Read(ref _wireGeneration);
         if (!IsReady || _stdin is null)
             throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
         await _sendLock.WaitAsync(ct);
         try
         {
+            using var inputAdmission = InputAdmission?.Invoke();
             if (canSend?.Invoke() == false) return;
             // Recovery may close the gate while this packet waits for the writer.
             if (generation != Interlocked.Read(ref _readyGeneration)) return;
@@ -614,7 +700,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             var frame = new
             {
                 schema = CoreDeviceTouchProtocol.MessageSchema,
-                generation,
+                generation = wireGeneration,
                 kind = CoreDeviceTouchProtocol.PasteTextMessageKind,
                 seq = NextSequence(),
                 text,
@@ -632,6 +718,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     public async Task SendReadClipboardAsync(CancellationToken ct = default, Func<bool>? canSend = null)
     {
         var generation = Interlocked.Read(ref _readyGeneration);
+        var wireGeneration = Interlocked.Read(ref _wireGeneration);
         if (!IsReady || _stdin is null)
             throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
         await _sendLock.WaitAsync(ct);
@@ -645,7 +732,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             var frame = new
             {
                 schema = CoreDeviceTouchProtocol.MessageSchema,
-                generation,
+                generation = wireGeneration,
                 kind = CoreDeviceTouchProtocol.ReadClipboardMessageKind,
                 seq = NextSequence(),
             };
@@ -656,12 +743,13 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
     }
 
 
-    private async Task DrainErrorAsync(StreamReader reader, int bridgeProcessId)
+    private async Task DrainErrorAsync(Process process, StreamReader reader, int bridgeProcessId)
     {
         try
         {
             while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
+                if (!ReferenceEquals(_process, process)) return;
                 _lastStandardError = line;
                 _lastDiagnostic = line;
                 // Preserve transport failures and tracebacks before later cleanup
@@ -676,9 +764,23 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
 
     private async Task HandleProcessExitAsync(Process process)
     {
+        if (!ReferenceEquals(_process, process)) return;
         int exitCode;
         try { exitCode = process.ExitCode; }
         catch { exitCode = -1; }
+
+        // A launcher crash can leave its child holding stdout and USB. Retire
+        // that lifetime before waiting for EOF; otherwise the recovery event
+        // itself never reaches the host. Stop owns retirement when requested.
+        if (Volatile.Read(ref _stopping) == 0 && _ownedProcess is { } owner &&
+            ReferenceEquals(owner.Process, process))
+        {
+            try { await owner.RetireAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+            catch (Exception error)
+            {
+                DiagnosticLogger.Exception("reverse_control", "bridge_exit_retirement_failed", error);
+            }
+        }
 
         // Process.Exited can run before redirected stdout has delivered its
         // final structured error. Let the reader win before adding a fallback.
@@ -688,7 +790,7 @@ public sealed class DirectUsbInputBridge : IAsyncDisposable
             try { await reader.ConfigureAwait(false); }
             catch { }
         }
-        if (Volatile.Read(ref _stopping) != 0 ||
+        if (!ReferenceEquals(_process, process) || Volatile.Read(ref _stopping) != 0 ||
             Interlocked.Exchange(ref _terminalEventReceived, 1) != 0) return;
 
         IsReady = false;

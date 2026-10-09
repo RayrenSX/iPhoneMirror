@@ -72,12 +72,13 @@ public partial class CaptureStatusNoticeWindow : IPhoneMirror.UI.Controls.Rounde
             }
             _activeError.Close();
         }
+        // WPF assigns the first constructed Window as MainWindow. Capture the
+        // existing owner first, and ignore a hidden or already closed owner.
+        var owner = Application.Current?.MainWindow;
         var notice = new CaptureStatusNoticeWindow(title, body,
             usbConfiguration ? NoticeKind.UsbConfiguration : NoticeKind.Error,
-            reverseControl: reverseControl, technicalDetails: technicalDetails)
-        {
-            Owner = Application.Current.MainWindow,
-        };
+            reverseControl: reverseControl, technicalDetails: technicalDetails);
+        if (owner is { IsVisible: true }) notice.Owner = owner;
         _activeError = notice;
         notice.Closed += (_, _) =>
         {
@@ -90,10 +91,9 @@ public partial class CaptureStatusNoticeWindow : IPhoneMirror.UI.Controls.Rounde
         Func<Task> afterShown)
     {
         ArgumentNullException.ThrowIfNull(afterShown);
-        var notice = new CaptureStatusNoticeWindow(title, body, NoticeKind.Stopped)
-        {
-            Owner = Application.Current.MainWindow,
-        };
+        var owner = Application.Current?.MainWindow;
+        var notice = new CaptureStatusNoticeWindow(title, body, NoticeKind.Stopped);
+        if (owner is { IsVisible: true }) notice.Owner = owner;
         var started = false;
         async Task ReleaseAfterShownAsync()
         {

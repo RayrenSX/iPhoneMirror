@@ -1,7 +1,7 @@
 name: Publish Windows Release
 
 run-name: >-
-  Publish Windows x64 release ${{ github.ref_name }}
+  Publish Windows x64 release ${{ inputs.tag || github.ref_name }}
 
 on:
   push:
@@ -25,14 +25,16 @@ permissions:
   statuses: write
 
 concurrency:
-  group: windows-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  # Every release updates the same default-branch manifest.
+  group: windows-release
   cancel-in-progress: false
 
 jobs:
   release:
     name: Build and publish Windows x64 release
     runs-on: windows-latest
-    timeout-minutes: 90
+    # Includes waiting for a separate Windows validation run (up to 60 minutes).
+    timeout-minutes: 180
 
     steps:
       - name: Resolve release tag
@@ -51,7 +53,7 @@ jobs:
           "version=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
 
       - name: Checkout release tag
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.version.outputs.tag }}
           fetch-depth: 0
@@ -78,18 +80,41 @@ jobs:
           }
           "sha=$releaseSha" >> $env:GITHUB_OUTPUT
 
+      - name: Verify all App and Driver localization dictionaries
+        shell: pwsh
+        run: ./scripts/verify_localization.ps1
+
       - name: Set up .NET 10 SDK
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/packages.lock.json', '**/[Nn]u[Gg]et.[Cc]onfig', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Set up Python for USB touch bridge
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
+          cache: pip
+          cache-dependency-path: scripts/usb-bridge-recipe/requirements.txt
 
-      - name: Set up MSYS2 UCRT64 for UxPlay and compact FFmpeg
-        uses: msys2/setup-msys2@v2
+      - name: Set up Node.js for browser localization tests
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Verify installer, cleanup, browser and fallback localization
+        shell: pwsh
+        run: ./scripts/verify_localization_surfaces.ps1
+
+      - name: Set up MSYS2 UCRT64 for UxPlay
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
           # Avoid a full MSYS2 mirror upgrade on every run. The action still
@@ -97,15 +122,6 @@ jobs:
           # unrelated mirror timeouts during database refresh.
           update: false
           install: >-
-            make
-            diffutils
-            mingw-w64-ucrt-x86_64-nasm
-            mingw-w64-ucrt-x86_64-libx264
-            mingw-w64-ucrt-x86_64-opus
-            mingw-w64-ucrt-x86_64-srt
-            mingw-w64-ucrt-x86_64-libvpl
-            mingw-w64-ucrt-x86_64-amf-headers
-            mingw-w64-ucrt-x86_64-ffnvcodec-headers
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-toolchain
@@ -128,22 +144,31 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Failed to install Microsoft SBOM Tool." }
           }
 
-      - name: Verify localization
-        shell: pwsh
-        run: ./scripts/verify_localization.ps1
-
       - name: Build and test
         shell: pwsh
-        run: ./build.ps1 -Configuration Release -Version '${{ steps.version.outputs.version }}' -PrepareUxPlayComponent
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./build.ps1 -Configuration Release -Version $env:RELEASE_VERSION -PrepareUxPlayComponent
 
       - name: Package release assets
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: >-
           ./scripts/package_release.ps1
-          -Version '${{ steps.version.outputs.version }}'
+          -Version $env:RELEASE_VERSION
           -SkipBuild
           -GenerateSbom
           -UpdateReleaseManifest
+
+      - name: Preserve packaged release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iPhoneMirror-release-${{ steps.version.outputs.tag }}-${{ github.run_attempt }}
+          path: outputs/releases/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
       - name: Prepare release notes
         id: notes
@@ -545,6 +570,7 @@ jobs:
       - name: Validate fallback release manifest commit
         id: validation
         if: steps.manifest.outputs.changed == 'true'
+        timeout-minutes: 75
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -552,7 +578,7 @@ jobs:
           MANIFEST_SHA: ${{ steps.manifest.outputs.sha }}
         run: |
           gh workflow run windows-build.yml --repo $env:GITHUB_REPOSITORY `
-            --ref $env:MANIFEST_BRANCH
+            --ref $env:MANIFEST_BRANCH -f build_installer=false
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to dispatch manifest validation for $env:MANIFEST_BRANCH."
           }
@@ -582,7 +608,7 @@ jobs:
             $env:GITHUB_OUTPUT
 
           gh run watch $validationRun.databaseId --repo $env:GITHUB_REPOSITORY `
-            --exit-status
+            --exit-status --interval 15
           if ($LASTEXITCODE -ne 0) {
             throw "Manifest validation failed: $($validationRun.databaseId)."
           }
@@ -950,9 +976,11 @@ jobs:
 
       - name: Reconcile interrupted release transaction
         id: reconcile
+        # Never publish through recovery when tag/preflight checks skipped publication.
         if: >-
           always() &&
           steps.manifest.outcome == 'success' &&
+          steps.transaction.outcome != 'skipped' &&
           steps.transaction.outcome != 'success' &&
           ((steps.manifest.outputs.changed == 'true' &&
             steps.validation.outcome == 'success') ||
@@ -1086,6 +1114,7 @@ jobs:
           always() &&
           steps.manifest.outputs.changed == 'true' &&
           (steps.validation.outcome != 'success' ||
+           steps.transaction.outcome == 'skipped' ||
            steps.transaction.outputs.cleanup_branch == 'true' ||
            steps.reconcile.outputs.cleanup_branch == 'true')
         continue-on-error: true

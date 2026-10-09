@@ -1124,30 +1124,33 @@ internal sealed class NativeCore : IDisposable
         return new VideoFrame(info.Width, info.Height, info.Stride, info.Timestamp100Ns, _frameBuffer);
     }
 
-    internal VideoFrame? GetDeviceOutputFrame(NativeSessionHandle? handle, uint width, uint height)
+    internal VideoFrame? GetDeviceOutputFrame(NativeSessionHandle? handle, uint width, uint height, bool owned = false)
     {
+        // API encoders retain their own frame; UI output keeps its reusable buffer.
+        var buffer = owned ? null : _outputFrameBuffer;
         if (handle is null || handle.IsInvalid) return null;
         bool added = false;
         handle.DangerousAddRef(ref added);
         try
         {
-        var info = new NativeVideoFrameInfo
-        {
-            StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>(),
-        };
-        uint size = (uint)(_outputFrameBuffer?.Length ?? 0);
-        var result = im_session_copy_latest_video_frame(handle.RawHandle, ref info,
-            _outputFrameBuffer, ref size, width, height);
-        if (result == (int)NativeResult.BufferTooSmall)
-        {
-            _outputFrameBuffer = new byte[size];
-            info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
-            result = im_session_copy_latest_video_frame(handle.RawHandle, ref info,
-                _outputFrameBuffer, ref size, width, height);
-        }
-        if (result != 0 || _outputFrameBuffer is null) return null;
-        return new VideoFrame(info.Width, info.Height, info.Stride,
-            info.Timestamp100Ns, _outputFrameBuffer);
+            var info = new NativeVideoFrameInfo
+            {
+                StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>(),
+            };
+            uint size = (uint)(buffer?.Length ?? 0);
+            var result = im_session_copy_latest_video_frame(handle.RawHandle, ref info,
+                buffer, ref size, width, height);
+            if (result == (int)NativeResult.BufferTooSmall)
+            {
+                buffer = new byte[size];
+                info.StructSize = (uint)Marshal.SizeOf<NativeVideoFrameInfo>();
+                result = im_session_copy_latest_video_frame(handle.RawHandle, ref info,
+                    buffer, ref size, width, height);
+            }
+            if (!owned) _outputFrameBuffer = buffer;
+            if (result != 0 || buffer is null) return null;
+            return new VideoFrame(info.Width, info.Height, info.Stride,
+                info.Timestamp100Ns, buffer);
         }
         finally { if (added) handle.DangerousRelease(); }
     }

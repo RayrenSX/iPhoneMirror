@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
@@ -72,6 +73,7 @@ struct PipeCapture {
     bool protocol_valid{true};
     bool environment_sync_failed{};
     bool runtime_device_id_invalid{};
+    std::atomic_uint pauses{}, resumes{}, reconnects{}, geometries{};
 };
 
 void drain_pipe(HANDLE pipe, PipeCapture& capture) {
@@ -89,6 +91,14 @@ void drain_pipe(HANDLE pipe, PipeCapture& capture) {
             capture.protocol_valid = false;
             return;
         }
+        if (header.type == iPhoneMirror::wireless::MessageType::MirrorState) {
+            if (header.reserved == 1) ++capture.pauses;
+            else if (header.reserved == 2) ++capture.reconnects;
+            else if (header.reserved == 0) ++capture.resumes;
+            else capture.protocol_valid = false;
+        }
+        if (header.type == iPhoneMirror::wireless::MessageType::MirrorGeometry)
+            ++capture.geometries;
         if (header.type != iPhoneMirror::wireless::MessageType::Log) continue;
         const std::string_view log(reinterpret_cast<const char*>(payload.data()),
             payload.size());
@@ -626,7 +636,7 @@ constexpr std::uint8_t second_setup_plist[] = {
 };
 
 bool probe_media_route(DWORD process_id, unsigned short raop_port,
-    in_addr local_address) {
+    in_addr local_address, PipeCapture& capture) {
     auto timing_socket = WSASocketW(AF_INET, SOCK_DGRAM, IPPROTO_UDP,
         nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
     if (timing_socket == INVALID_SOCKET) return false;
@@ -731,6 +741,89 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
         }
     }
 
+    bool reconnect_valid{}, setup_restart_valid{};
+    if (ports_valid) {
+        const auto await_counter = [](const std::atomic_uint& count, unsigned expected) {
+            const auto start = GetTickCount64();
+            while (count.load() < expected && GetTickCount64() - start < 4000) Sleep(10);
+            return count.load() >= expected;
+        };
+        auto data_socket = connect_with_retry(data_port, local_address);
+        if (data_socket != INVALID_SOCKET) {
+            std::array<char, 128> header{};
+            header[4] = 1; header[6] = 0x56;
+            const auto paused = send_all(data_socket, std::string_view(header.data(), header.size())) &&
+                await_counter(capture.pauses, 1);
+            // FIN after only eight header bytes must preserve the data listener.
+            send_all(data_socket, std::string_view(header.data(), 8));
+            closesocket(data_socket);
+            const auto interrupted = await_counter(capture.reconnects, 1);
+            data_socket = connect_with_retry(data_port, local_address);
+            if (data_socket != INVALID_SOCKET) {
+                const auto resumes_before = capture.resumes.load();
+                header[6] = 0x16;
+                reconnect_valid = paused && interrupted &&
+                    send_all(data_socket, std::string_view(header.data(), header.size())) &&
+                    await_counter(capture.resumes, resumes_before + 1);
+                // Retrying the existing stream must return the current ports.
+                const auto retry_response = socket_request(control_socket,
+                    rtsp_request("SETUP", "/stream", 5, second_setup_plist,
+                        "application/x-apple-binary-plist"));
+                const BinaryPlist retry_plist(response_body(retry_response));
+                const auto retry_root = retry_plist.root();
+                const auto retry_streams = retry_root ?
+                    retry_plist.dictionary_value(*retry_root, "streams") : std::nullopt;
+                const auto retry_stream = retry_streams ?
+                    retry_plist.array_value(*retry_streams, 0) : std::nullopt;
+                const auto retry_data = retry_stream ?
+                    plist_integer(retry_plist, *retry_stream, "dataPort") : std::nullopt;
+                const auto retry_timing = retry_root ?
+                    plist_integer(retry_plist, *retry_root, "timingPort") : std::nullopt;
+                const auto retry_valid = successful_rtsp_response(retry_response) &&
+                    retry_data == data_port_value && retry_timing == timing_port_value;
+                const auto reconnects_before = capture.reconnects.load();
+                closesocket(data_socket);
+                const auto lost = await_counter(capture.reconnects, reconnects_before + 1);
+                // A new streamConnectionID during reconnect must safely replace
+                // the old stream and advertise usable endpoints, never port zero.
+                auto new_setup = std::vector<std::uint8_t>(
+                    std::begin(second_setup_plist), std::end(second_setup_plist));
+                constexpr std::array<std::uint8_t, 8> original_id{
+                    0x10,0x20,0x30,0x40,0x50,0x60,0x70,0x80};
+                const auto id_at = std::search(new_setup.begin(), new_setup.end(),
+                    original_id.begin(), original_id.end());
+                if (id_at != new_setup.end()) *(id_at + 7) ^= 1;
+                const auto restart_response = socket_request(control_socket,
+                    rtsp_request("SETUP", "/stream", 6, new_setup,
+                        "application/x-apple-binary-plist"));
+                const BinaryPlist restart_plist(response_body(restart_response));
+                const auto restart_root = restart_plist.root();
+                const auto restart_streams = restart_root ?
+                    restart_plist.dictionary_value(*restart_root, "streams") : std::nullopt;
+                const auto restart_stream = restart_streams ?
+                    restart_plist.array_value(*restart_streams, 0) : std::nullopt;
+                const auto restart_data = restart_stream ?
+                    plist_integer(restart_plist, *restart_stream, "dataPort") : std::nullopt;
+                const auto restart_timing = restart_root ?
+                    plist_integer(restart_plist, *restart_root, "timingPort") : std::nullopt;
+                if (lost && retry_valid && id_at != new_setup.end() &&
+                    successful_rtsp_response(restart_response) &&
+                    restart_data && *restart_data > 0 && *restart_data <= 65535 &&
+                    restart_timing && *restart_timing > 0 && *restart_timing <= 65535) {
+                    data_socket = connect_with_retry(
+                        static_cast<unsigned short>(*restart_data), local_address);
+                    if (data_socket != INVALID_SOCKET) {
+                        const auto pauses_before = capture.pauses.load();
+                        header[6] = 0x56;
+                        setup_restart_valid = send_all(data_socket,
+                            std::string_view(header.data(), header.size())) &&
+                            await_counter(capture.pauses, pauses_before + 1);
+                        closesocket(data_socket);
+                    }
+                }
+            }
+        }
+    }
     closesocket(control_socket);
     closesocket(timing_socket);
     const auto responses_valid = successful_rtsp_response(fairplay_one_response) &&
@@ -740,7 +833,8 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
         successful_rtsp_response(setup_one_response) &&
         successful_rtsp_response(setup_two_response) && response_plist.valid();
     const auto passed = responses_valid && ports_valid && tcp_exact && udp_exact &&
-        !tcp_wildcard && !udp_wildcard && timing_source_valid;
+        !tcp_wildcard && !udp_wildcard && timing_source_valid && reconnect_valid &&
+        setup_restart_valid;
     std::array<char, INET_ADDRSTRLEN> address_text{};
     InetNtopA(AF_INET, &local_address, address_text.data(),
         static_cast<DWORD>(address_text.size()));
@@ -751,12 +845,15 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
         << " tcp_wildcard=" << tcp_wildcard
         << " udp_wildcard=" << udp_wildcard
         << " timing_source=" << timing_source_valid
+        << " pause_reconnect=" << reconnect_valid
+        << " setup_restart=" << setup_restart_valid
         << " passed=" << passed << '\n';
     return passed;
 }
 
 bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
-    std::uint32_t features, std::optional<in_addr> route_address = std::nullopt) {
+    std::uint32_t features, std::optional<in_addr> route_address = std::nullopt,
+    std::uint32_t width = 1280, std::uint32_t height = 720, std::uint32_t fps = 30) {
     const auto raop_port = free_port(SOCK_STREAM, IPPROTO_TCP);
     auto airplay_port = free_port(SOCK_STREAM, IPPROTO_TCP);
     for (int attempt = 0; airplay_port == raop_port && attempt < 10; ++attempt)
@@ -799,7 +896,8 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
     auto command = quote(host.wstring()) + L" --pipe " + quote(pipe_name) +
         L" --stop-event " + quote(stop_name) + L" --name \"Protocol Smoke\"" +
         L" --parent-pid " + std::to_wstring(GetCurrentProcessId()) +
-        L" --width 1280 --height 720 --fps 30 --mode " + std::wstring(mode) +
+        L" --width " + std::to_wstring(width) + L" --height " + std::to_wstring(height) +
+        L" --fps " + std::to_wstring(fps) + L" --mode " + std::wstring(mode) +
         L" --raop-port " + std::to_wstring(raop_port) +
         L" --airplay-port " + std::to_wstring(airplay_port) +
         L" --dlna-port " + std::to_wstring(dlna_port) +
@@ -865,14 +963,14 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
     const auto display = displays ? info_plist.array_value(*displays, 0) :
         std::nullopt;
     const auto info_display = display &&
-        plist_integer(info_plist, *display, "width") == 1280 &&
-        plist_integer(info_plist, *display, "height") == 720 &&
-        plist_integer(info_plist, *display, "widthPixels") == 1280 &&
-        plist_integer(info_plist, *display, "heightPixels") == 720 &&
-        plist_integer(info_plist, *display, "maxFPS") == 30 &&
-        plist_integer(info_plist, *display, "refreshRate") == 30;
+        plist_integer(info_plist, *display, "width") == width &&
+        plist_integer(info_plist, *display, "height") == height &&
+        plist_integer(info_plist, *display, "widthPixels") == width &&
+        plist_integer(info_plist, *display, "heightPixels") == height &&
+        plist_integer(info_plist, *display, "maxFPS") == fps &&
+        plist_integer(info_plist, *display, "refreshRate") == fps;
     const auto media_route_passed = !route_address ||
-        probe_media_route(process.dwProcessId, raop_port, *route_address);
+        probe_media_route(process.dwProcessId, raop_port, *route_address, pipe_capture);
     auto passed = connected && server_status && info_status && server_features &&
         device_valid && info_plist.valid() && info_features && info_device &&
         info_name && info_display && media_route_passed;
@@ -950,7 +1048,8 @@ int wmain(int argc, wchar_t** argv) {
     }
     const auto passed = environment_clean &&
         probe_mode(host, L"mirror", 0x5A7FFEE6U) &&
-        probe_mode(host, L"combined", 0x5A7FFEF7U);
+        probe_mode(host, L"combined", 0x5A7FFEF7U) &&
+        probe_mode(host, L"combined", 0x5A7FFEF7U, std::nullopt, 2880, 2880, 60);
     WSACleanup();
     if (!passed) {
         std::cerr << "Wireless receiver protocol smoke failed: environment_clean="

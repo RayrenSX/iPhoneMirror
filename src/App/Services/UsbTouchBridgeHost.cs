@@ -25,6 +25,9 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     private string? _requestedUdid;
     private UsbTouchTransport _transport;
     private int _started;
+    private long _lifecycleVersion;
+    private Task? _stopTask;
+    private CancellationTokenSource? _startCancellation;
 
     internal UsbTouchBridgeHost() : this(null) { }
 
@@ -34,6 +37,11 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     }
 
     internal bool IsReady => _bridge.IsReady;
+    internal bool SupportsAutomationClipboard => _bridge.SupportsAutomationClipboard;
+    internal Func<IDisposable>? InputAdmission { set => _bridge.InputAdmission = value; }
+    internal bool InputWritePending => _bridge.InputWritePending;
+    internal Task<string?> AutomationClipboardAsync(string kind, string? text, Func<bool> current,
+        CancellationToken cancellation) => _bridge.AutomationClipboardAsync(kind, text, current, cancellation);
     internal long InputGeneration => _bridge.InputGeneration;
     internal string? Udid => _bridge.Udid;
     internal bool GateOpen => _bridge.GateOpen;
@@ -47,29 +55,61 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
         string bridgePath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(udid);
+        long version;
+        CancellationTokenSource startup;
         lock (_gate)
         {
-            if (Interlocked.Exchange(ref _started, 1) != 0)
+            if (_started != 0 || _stopTask is { IsCompleted: false })
                 throw new InvalidOperationException(LocalizationService.Get("TouchBridgeAlreadyStarted"));
+            _started = 1;
+            version = ++_lifecycleVersion;
+            startup = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _startCancellation = startup;
             _requestedUdid = udid;
             _transport = transport;
             State = ReverseControlState.Connecting;
+            _bridge.OnEvent += OnBridgeEvent;
         }
-        _bridge.OnEvent += OnBridgeEvent;
         try
         {
             await _bridge.StartAsync(bridgePath, bridgePath, udid, 120,
-                transport == UsbTouchTransport.Wireless, cancellationToken);
+                transport == UsbTouchTransport.Wireless, startup.Token);
             if (!string.Equals(_bridge.Udid, udid, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException(LocalizationService.Get("TouchBridgeTargetMismatch"));
-            State = ReverseControlState.Ready;
-            Raise("ready", null, $"{transport}:{udid}");
+            lock (_gate)
+            {
+                startup.Token.ThrowIfCancellationRequested();
+                if (_started == 0 || version != _lifecycleVersion || !_bridge.IsReady)
+                    throw new OperationCanceledException("Bridge startup was stopped.");
+                State = ReverseControlState.Ready;
+                Raise("ready", null, $"{transport}:{udid}");
+            }
         }
         catch
         {
-            State = ReverseControlState.Error;
-            await StopAsync().ConfigureAwait(false);
+            Task? stop = null;
+            lock (_gate)
+            {
+                if (version == _lifecycleVersion)
+                {
+                    if (_started != 0)
+                    {
+                        State = ReverseControlState.Error;
+                        stop = StopAsync();
+                    }
+                    else stop = _stopTask;
+                }
+            }
+            if (stop is not null) await stop.ConfigureAwait(false);
             throw;
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_startCancellation, startup)) _startCancellation = null;
+                startup.Dispose();
+            }
         }
     }
 
@@ -115,11 +155,23 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     }
 
 
-    internal async Task StopAsync()
+    internal Task StopAsync()
     {
-        if (Interlocked.Exchange(ref _started, 0) == 0) return;
-        await _bridge.StopAsync().ConfigureAwait(false);
+        lock (_gate)
+        {
+            if (_stopTask is { IsCompleted: false }) return _stopTask;
+            if (_started == 0) return Task.CompletedTask;
+            _started = 0;
+            _startCancellation?.Cancel();
+            _stopTask = StopCoreAsync();
+            return _stopTask;
+        }
+    }
+
+    private async Task StopCoreAsync()
+    {
         _bridge.OnEvent -= OnBridgeEvent;
+        await _bridge.StopAsync().ConfigureAwait(false);
         State = ReverseControlState.Idle;
     }
 
@@ -131,6 +183,7 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
 
     private void OnBridgeEvent(BridgeEvent e)
     {
+        if (Volatile.Read(ref _started) == 0) return;
         if (e.Event == "ready") State = ReverseControlState.Ready;
         else if (e.Event == "status" && e.Code == "recovery_triggered")
             State = ReverseControlState.Recovering;

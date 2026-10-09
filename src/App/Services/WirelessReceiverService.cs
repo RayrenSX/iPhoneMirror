@@ -108,7 +108,9 @@ internal static class WirelessReceiverConfiguration
     ];
     internal static IReadOnlyList<WirelessDisplayProfile> DisplayProfiles { get; } =
     [
-        new("maximum", "WirelessProfileMaximum", 5120, 2880, 60),
+        // Preserve the 2880-pixel long edge in either orientation. An asymmetric
+        // 5120x2880 display makes iOS request a 5K-wide encoder when rotating.
+        new("maximum", "WirelessProfileMaximum", 2880, 2880, 60),
         new("1080p", "WirelessProfile1080p", 1920, 1080, 60),
         new("720p", "WirelessProfile720p", 1280, 720, 30),
         new("540p", "WirelessProfile540p", 960, 540, 30),

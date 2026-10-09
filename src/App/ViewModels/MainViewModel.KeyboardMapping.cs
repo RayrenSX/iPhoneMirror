@@ -47,8 +47,11 @@ internal sealed partial class MainViewModel
     private int _nextTouchPointerId = 1; // Mouse/wheel retains ID 1.
 
     internal MappedTouchRoute? CaptureTouchRoute(string? targetUdid, Func<bool> isCurrent,
-        Func<double, double, (double X, double Y)> transform, bool requireSelection = false)
+        Func<double, double, (double X, double Y)> transform, bool requireSelection = false, bool automation = false)
     {
+        if (targetUdid is null) return null;
+        var humanGuard = automation ? (Func<bool>)(() => true) : AutomationHumanGuard(targetUdid);
+        if (!humanGuard()) return null;
         var control = FindControl(targetUdid);
         var bridge = GetReadyUsbControlBridge(targetUdid);
         if (control is null || control.Starting || control.Stopping || bridge is null || control.AppleUdid is null ||
@@ -60,9 +63,9 @@ internal sealed partial class MainViewModel
         var bridgeGeneration = bridge.InputGeneration;
         bool SameSession() => bridge.IsReady && bridge.InputGeneration == bridgeGeneration &&
             control.Router.Owns(appleUdid, mode, routerGeneration);
-        bool Current() => SameSession() && !_disposed &&
+        bool Current() => humanGuard() && SameSession() && !_disposed &&
             (!requireSelection || DeviceViewModel.UdidEquals(SelectedDevice?.Udid, control.DeviceUdid)) &&
-            ReferenceEquals(GetReadyUsbControlBridge(control.DeviceUdid), bridge) && isCurrent();
+            (ReferenceEquals(control.WiredBridge, bridge) || ReferenceEquals(control.WirelessBridge, bridge)) && isCurrent();
         if (!Current()) return null;
         var pointerId = Interlocked.Increment(ref _nextTouchPointerId);
         return new(control.DeviceUdid, Current, async (action, x, y, token) =>

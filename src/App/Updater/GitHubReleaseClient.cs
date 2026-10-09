@@ -287,7 +287,31 @@ internal sealed class GitHubReleaseClient : IDisposable
     }
 
     internal async Task<ReleaseInfo?> GetLatestAsync(UpdateSettings settings,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await GetLatestCoreAsync(settings, false, cancellationToken);
+
+    // Components follow the latest public application release, including previews.
+    // Resolve the list before selecting its ZIP: a missing new component must not
+    // silently send the user back to a stale release or embedded URL.
+    internal async Task<ReleaseInfo> GetLatestUxPlayAsync(bool allowMirrorFallback,
+        CancellationToken cancellationToken)
+    {
+        var release = await GetLatestCoreAsync(new UpdateSettings
+        {
+            NotifyStableReleases = true, NotifyPrereleaseReleases = true,
+            AllowMirrorFallback = allowMirrorFallback,
+        }, true, cancellationToken);
+        if (release?.UxPlayAsset is not { } asset)
+            throw new HttpRequestException("The latest application release has no UxPlay ZIP.",
+                null, HttpStatusCode.NotFound);
+        if (asset.Size is <= 0 or > 200_000_000)
+            throw new InvalidDataException("Invalid UxPlay package size.");
+        var expected = await GetExpectedSha256Async(release, asset, allowMirrorFallback, cancellationToken);
+        return release with { InstallerAsset = null, ZipAsset = asset with { Sha256 = expected } };
+    }
+
+    private async Task<ReleaseInfo?> GetLatestCoreAsync(UpdateSettings settings,
+        bool requireApplicationAsset, CancellationToken cancellationToken)
     {
         DiagnosticLogger.Info("updater", "release_check_begin",
             ("stable", settings.NotifyStableReleases),
@@ -305,7 +329,7 @@ internal sealed class GitHubReleaseClient : IDisposable
                 var json = await ReadReleaseListAsync(endpoint.Uri, cancellationToken);
                 var release = ReleaseParser.ParseLatest(json,
                     settings.NotifyStableReleases,
-                    settings.NotifyPrereleaseReleases);
+                    settings.NotifyPrereleaseReleases, requireApplicationAsset);
                 DiagnosticLogger.Info("updater", "release_check_complete",
                     ("release", release?.TagName ?? "none"),
                     ("endpoint", endpoint.Name));
@@ -795,6 +819,18 @@ internal sealed class GitHubReleaseClient : IDisposable
     private async Task<string> VerifyAsync(ReleaseInfo release, ReleaseAsset asset,
         string path, bool allowMirrorFallback, CancellationToken cancellationToken)
     {
+        var expected = await GetExpectedSha256Async(release, asset, allowMirrorFallback, cancellationToken);
+        await using var stream = File.OpenRead(path);
+        var actual = Convert.ToHexString(
+            await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(LocalizationService.Get("UpdateChecksumFailed"));
+        return actual;
+    }
+
+    private async Task<string> GetExpectedSha256Async(ReleaseInfo release, ReleaseAsset asset,
+        bool allowMirrorFallback, CancellationToken cancellationToken)
+    {
         var expected = asset.Sha256;
         if (expected is null)
         {
@@ -807,12 +843,7 @@ internal sealed class GitHubReleaseClient : IDisposable
                 throw new InvalidDataException(
                     LocalizationService.Format("UpdateChecksumEntryMissingFormat", asset.Name));
         }
-        await using var stream = File.OpenRead(path);
-        var actual = Convert.ToHexString(
-            await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
-        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException(LocalizationService.Get("UpdateChecksumFailed"));
-        return actual;
+        return expected;
     }
 
     private async Task<string> ReadChecksumManifestAsync(ReleaseAsset checksumAsset,

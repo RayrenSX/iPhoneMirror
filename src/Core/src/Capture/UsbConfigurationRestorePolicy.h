@@ -45,6 +45,13 @@ struct UsbConfigurationCandidateEvidence {
     bool quicktime{};
 };
 
+[[nodiscard]] constexpr bool should_reconnect_normal_usb_device(
+    bool restore_confirmed, bool configuration_known, unsigned configuration,
+    bool management_stack_present, bool exact_usbmux_present) noexcept {
+    return !restore_confirmed && configuration_known && configuration == 3 &&
+        management_stack_present && !exact_usbmux_present;
+}
+
 [[nodiscard]] inline UsbConfigurationObservation
 classify_libusb0_configuration_observation(
     std::span<const UsbConfigurationCandidateEvidence> candidates,

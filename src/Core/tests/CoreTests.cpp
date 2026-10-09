@@ -1,3 +1,4 @@
+#include "Transport/UsbMuxClient.h"
 #include "Audio/WasapiRenderer.h"
 #include "Media/CoreMedia.h"
 #include "Media/H264.h"
@@ -12,11 +13,13 @@
 #include "Capture/CaptureSession.h"
 #include "Capture/WirelessCaptureSession.h"
 #include "Device/AppleUsbDiscovery.h"
+#include "Device/DeviceManager.h"
 #include "Logging.h"
 #include "IpcProtocol.h"
 #include "iPhoneMirror/CoreApi.h"
 
 #include <Windows.h>
+#include <lusb0_usb.h>
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
 #include <wrl/client.h>
@@ -712,7 +715,65 @@ void test_apple_usb_serial_matching() {
         "empty normalized USB serials never identify a device");
 }
 
+void test_device_metadata_recovery() {
+    using namespace iPhoneMirror;
+    using namespace iPhoneMirror::device;
+    DeviceRecord cached;
+    cached.device_id = 7;
+    cached.mux_port = 27015;
+    cached.name = L"Saved iPhone";
+    cached.product_type = L"iPhone13,1";
+    cached.os_version = L"18.7.8";
+    cached.state = ConnectionState::Ready;
+    cached.pair_record_present = true;
+    cached.lockdown_accessible = true;
+    auto current = cached;
+    check(!detail::needs_device_metadata_refresh(false, current, &cached),
+        "healthy unchanged device avoids extra Lockdown reads");
+    check(detail::needs_device_metadata_refresh(true, current, &cached),
+        "explicit recovery verification bypasses cached readiness");
+    current.device_id++;
+    check(detail::needs_device_metadata_refresh(false, current, &cached),
+        "new Apple device handle must not reuse old readiness");
+    current = cached;
+    current.mux_port = 37015;
+    check(detail::needs_device_metadata_refresh(false, current, &cached),
+        "replacement mux route requires new metadata verification");
+    DeviceRecord failed;
+    failed.device_id = cached.device_id;
+    failed.mux_port = cached.mux_port;
+    failed.state = ConnectionState::Paired;
+    failed.status = L"Unlock the iPhone";
+    detail::preserve_cached_device_display_metadata(failed, cached);
+    check(failed.name == cached.name && failed.product_type == cached.product_type &&
+        failed.os_version == cached.os_version && !failed.lockdown_accessible &&
+        !failed.pair_record_present && failed.state == ConnectionState::Paired &&
+        failed.status == L"Unlock the iPhone",
+        "failed fresh read preserves display fields without reviving trust or Ready");
+    check(detail::needs_device_metadata_refresh(false, failed, &failed),
+        "unreadable cached device is retried on the next inventory poll");
+}
+
 void test_apple_usb_filter_safety() {
+    using iPhoneMirror::transport::MuxDevice;
+    using iPhoneMirror::transport::UsbMuxClient;
+    const std::vector<MuxDevice> wireless_only{
+        {.serial = "00008101-00044D600A22001E", .connection_type = "Network"},
+        {.serial = "another-phone", .connection_type = "USB"},
+    };
+    check(!UsbMuxClient::contains_usb_device(wireless_only,
+            "00008101-00044D600A22001E"),
+        "a wireless row and another phone's USB row do not prove USB recovery");
+    auto recovered = wireless_only;
+    recovered.push_back({.serial = "0000810100044d600a22001e", .connection_type = "USB"});
+    check(UsbMuxClient::contains_usb_device(recovered,
+            "00008101-00044D600A22001E"),
+        "restored USB row preserves normalized exact identity matching");
+    check(!UsbMuxClient::contains_usb_device(
+            std::vector<MuxDevice>{{.serial = "00008101-00044D600A22001E"}},
+            "00008101-00044D600A22001E") &&
+        !UsbMuxClient::contains_usb_device(recovered, ""),
+        "missing transport and missing selected identity cannot prove USB recovery");
     using iPhoneMirror::device::is_unsafe_apple_usb_filter_combination;
     using iPhoneMirror::device::apple_usb_parent_instance_matches_serial;
     using iPhoneMirror::device::libusb0_apple_interface_path_matches;
@@ -1660,7 +1721,7 @@ void test_capture_media_safety_helpers() {
     FastStreamReconnectGate reconnect_gate;
     check(!reconnect_gate.request_for_silence(std::chrono::milliseconds(2565),
             std::chrono::milliseconds(0)) && reconnect_gate.attempt_count() == 0,
-        "live audio prevents resetting a video-silent QuickTime session (11:09:50 regression)");
+        "live audio gives short video stalls a longer recovery grace period");
     check(!reconnect_gate.request_for_silence(std::chrono::milliseconds(2500),
             std::chrono::milliseconds(2499)),
         "a video stall does not reset a recently active media session");
@@ -1673,6 +1734,33 @@ void test_capture_media_safety_helpers() {
             std::chrono::milliseconds(2500)) &&
         !silent_gate.request_for_silence(std::chrono::seconds(10), std::chrono::seconds(10)),
         "a fully silent transport still gets one bounded reconnect attempt");
+
+    FastStreamReconnectGate video_only_gate;
+    StreamingSilenceWatchdog video_watchdog;
+    StreamingSilenceWatchdog audio_active_watchdog;
+    video_watchdog.observe_media(media_started);
+    for (int elapsed_ms = 0; elapsed_ms < 5000; ++elapsed_ms) {
+        const auto now = media_started + std::chrono::milliseconds(elapsed_ms);
+        audio_active_watchdog.observe_media(now);
+        check(!video_only_gate.request_for_silence(
+                video_watchdog.silence_duration(now),
+                audio_active_watchdog.silence_duration(now)),
+            "continuous audio does not shorten the five-second video grace period");
+    }
+    const auto video_deadline = media_started + std::chrono::seconds(5);
+    audio_active_watchdog.observe_media(video_deadline);
+    check(video_only_gate.request_for_silence(
+            video_watchdog.silence_duration(video_deadline),
+            audio_active_watchdog.silence_duration(video_deadline)) &&
+        video_only_gate.attempt_count() == 1,
+        "five seconds without video reconnects even while audio keeps arriving");
+    check(!video_only_gate.request_for_silence(std::chrono::seconds(6),
+            std::chrono::milliseconds(0)),
+        "a video-only stall cannot start duplicate reconnects while recovery is pending");
+    check(video_only_gate.observe_video_frame() &&
+        video_only_gate.request_for_silence(std::chrono::seconds(5),
+            std::chrono::milliseconds(0)) && video_only_gate.attempt_count() == 2,
+        "another five-second video stall can reconnect after video recovery");
 
     ProtectedVideoDetector protected_video;
     static_assert(ProtectedVideoDetector::HoldLimit == std::chrono::seconds(8));
@@ -1819,6 +1907,26 @@ void test_wireless_i420_conversion() {
     stream.set_identity(L"test", true);
     stream.publish_video(header, i420);
     const auto published = stream.latest_frame();
+    stream.set_mirror_state(iPhoneMirror::wireless::MirrorSenderState::Paused);
+    check(stream.latest_frame() == published &&
+        stream.snapshot().state == iPhoneMirror::capture::State::Streaming &&
+        stream.snapshot().message == L"AirPlay video paused",
+        "sender pause preserves the decoded frame and live capture state");
+    auto geometry = header;
+    geometry.width = 1280; geometry.height = 720;
+    geometry.stride[0] = 1920; geometry.stride[1] = 1080;
+    stream.set_mirror_geometry(geometry);
+    check(stream.snapshot().width == 3 && stream.snapshot().height == 2 &&
+        stream.latest_frame() == published,
+        "reported geometry cannot replace actual decoded frame dimensions");
+    stream.set_mirror_state(iPhoneMirror::wireless::MirrorSenderState::Reconnecting);
+    stream.attach({.play_audio = false});
+    check(stream.latest_frame() == published,
+        "transport interruption and local reattach retain the last static frame");
+    stream.detach();
+    stream.publish_video(header, i420);
+    check(stream.snapshot().message == L"Wireless mirroring",
+        "a decoded frame clears sender pause and reconnect state");
     check(published && published->color.range ==
             iPhoneMirror::coremedia::ColorRange::Full,
         "wireless AirPlay frames retain their full-range color levels");
@@ -1840,7 +1948,7 @@ void test_wireless_i420_conversion() {
         iPhoneMirror::ApiVersion == 18 &&
         header.magic == iPhoneMirror::wireless::IpcMagic &&
         header.version == iPhoneMirror::wireless::IpcVersion &&
-        iPhoneMirror::wireless::IpcVersion == 7,
+        iPhoneMirror::wireless::IpcVersion == 8,
         "wireless IPC header layout and version are stable");
     check(static_cast<std::uint32_t>(
             iPhoneMirror::capture::MediaCastCommandType::Pause) == 3 &&
@@ -2224,6 +2332,108 @@ int run_preview_opacity_smoke();
 int run_preview_static_frame_smoke(bool retry_only = false);
 
 int main(int argc, char** argv) {
+    if (argc == 3 && std::string_view(argv[1]) == "--usb-configure-only") {
+        try {
+            const auto selected = iPhoneMirror::transport::find_libusb0_device(argv[2]);
+            if (!selected || !selected->can_open ||
+                !iPhoneMirror::transport::apple_usb_serial_equal(selected->serial, argv[2]) ||
+                !iPhoneMirror::transport::is_libusb0_quicktime_configuration_active(*selected))
+                throw std::runtime_error("Exact active QuickTime identity required");
+            const auto identity = iPhoneMirror::transport::make_apple_usb_identity(*selected);
+            usb_init();
+            if (usb_find_busses() < 0 || usb_find_devices() < 0)
+                throw std::runtime_error("USB enumeration failed");
+            struct usb_device* matching{};
+            unsigned matches{};
+            for (auto* bus = usb_get_busses(); bus; bus = bus->next)
+                for (auto* device = bus->devices; device; device = device->next) {
+                    const auto topology = std::format("{}:{:08x}:{}", bus->dirname, bus->location, device->filename);
+                    if (topology == identity.topology_id && device->descriptor.idVendor == 0x05ac) {
+                        matching = device;
+                        ++matches;
+                    }
+                }
+            if (matches != 1) throw std::runtime_error("Exact topology changed");
+            std::unique_ptr<usb_dev_handle, decltype(&usb_close)> handle(usb_open(matching), &usb_close);
+            if (!handle) throw std::runtime_error("Selected device open failed");
+            char serial[256]{};
+            const auto length = usb_get_string_simple(handle.get(), matching->descriptor.iSerialNumber, serial, sizeof(serial));
+            if (length <= 0 || length > static_cast<int>(sizeof(serial)) ||
+                !iPhoneMirror::transport::apple_usb_serial_equal(std::string_view(serial, static_cast<std::size_t>(length)), argv[2]))
+                throw std::runtime_error("Fresh exact serial validation failed");
+            char active{};
+            if (usb_control_msg(handle.get(), 0x80, 0x08, 0, 0, &active, 1, 1000) != 1 ||
+                static_cast<unsigned char>(active) != identity.expected_quicktime_configuration)
+                throw std::runtime_error("Active configuration changed");
+            const auto result = usb_set_configuration(handle.get(), identity.expected_quicktime_configuration);
+            if (result < 0) throw std::runtime_error("Selected configuration initialization failed");
+            std::cout << "QuickTime configuration initialized; interface_claims=0 media_packets=0\n";
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+    }
+    if (argc == 3 && std::string_view(argv[1]) == "--usb-quicktime-open-only") {
+        try {
+            // Opt-in hardware isolation after the caller's exact activation.
+            // No media, mux, HID, Pair or vendor transition request is sent.
+            const auto selected = iPhoneMirror::transport::find_libusb0_device(argv[2]);
+            if (!selected || !selected->can_open ||
+                !iPhoneMirror::transport::apple_usb_serial_equal(selected->serial, argv[2]) ||
+                !iPhoneMirror::transport::is_libusb0_quicktime_configuration_active(*selected)) {
+                std::cerr << "Exact active QuickTime identity required\n";
+                return 2;
+            }
+            const auto identity = iPhoneMirror::transport::make_apple_usb_identity(*selected);
+            auto connection = iPhoneMirror::transport::LibUsb0Connection::open_quicktime(identity,
+                {.allow_configuration_initialization = true});
+            connection.close();
+            std::cout << "QuickTime interface initialized, claimed and closed; media_packets=0\n";
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+    }
+    if (argc == 3 && std::string_view(argv[1]) == "--usb-helper-identity") {
+        // Only resolve the exact current phone. The caller must still use the
+        // helper's independent fresh serial validation before any transition.
+        const auto selected = iPhoneMirror::transport::find_libusb0_device(argv[2]);
+        if (!selected || !selected->can_open ||
+            !iPhoneMirror::transport::apple_usb_serial_equal(selected->serial, argv[2])) {
+            std::cerr << "Exact readable USB identity missing\n";
+            return 2;
+        }
+        const auto identity = iPhoneMirror::transport::make_apple_usb_identity(*selected);
+        std::cout << "topology=" << identity.topology_id << '\n'
+                  << "expected_configuration=" << static_cast<unsigned>(identity.expected_quicktime_configuration) << '\n';
+        return 0;
+    }
+    if (argc == 3 && std::string_view(argv[1]) == "--usb-restore-state") {
+        // Read-only hardware evidence using the same discovery paths as restore.
+        const auto pnp = iPhoneMirror::device::inspect_apple_normal_usb_stack(argv[2]);
+        std::cout << "parent=" << pnp.parent_started
+                  << " media=" << pnp.media_interface_started
+                  << " management=" << pnp.management_interface_started << '\n';
+        const auto configuration =
+            iPhoneMirror::device::inspect_apple_usb_configuration(argv[2]);
+        std::cout << "active_configuration_known=" << configuration.has_value()
+                  << " active_configuration="
+                  << (configuration ? static_cast<unsigned>(*configuration) : 0U)
+                  << '\n';
+        for (const auto port : {std::uint16_t{27015}, std::uint16_t{37015}}) {
+            try {
+                iPhoneMirror::transport::UsbMuxClient mux(port);
+                const auto devices = mux.list_devices();
+                std::cout << "port=" << port << " selected_usb="
+                          << mux.contains_usb_device(devices, argv[2]) << '\n';
+            } catch (const std::exception&) {
+                std::cout << "port=" << port << " unavailable\n";
+            }
+        }
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--preview-opacity-only")
         return run_preview_opacity_smoke();
     if (argc == 2 && std::string_view(argv[1]) == "--preview-static-frame-only")
@@ -2256,6 +2466,7 @@ int main(int argc, char** argv) {
     }
     try {
         test_plist();
+        test_device_metadata_recovery();
         test_quicktime_framing();
         test_gpu_frame_readback();
         test_h264();

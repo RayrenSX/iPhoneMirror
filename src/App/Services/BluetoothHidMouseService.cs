@@ -172,7 +172,16 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         GattServiceProviderAdvertisementStatus.StartedWithoutAllAdvertisementData;
     public bool IsConnected => Volatile.Read(ref _transportFailed) == 0 &&
         IsMouseConnected;
+    internal Func<IDisposable>? InputAdmission { get; set; }
+    private static async Task FinishAdmittedInput(Task send, IDisposable? admission)
+    {
+        using (admission) await send.ConfigureAwait(false);
+    }
     internal bool IsMouseReady => IsConnected;
+    internal bool HasPendingInput { get { lock (_mousePumpSync) return _mousePumpRunning ||
+        _lastQueuedMouseButtons != 0 || _mouseNotificationTransportGate.CurrentCount == 0; } }
+    internal bool IsKeyboardReady => Volatile.Read(ref _transportFailed) == 0 &&
+        (HasTargetSubscriber(_keyboardReport) || HasTargetSubscriber(_bootKeyboardInput));
     public int WheelResolutionMultiplier => GetTargetClientState()?.WheelResolutionMultiplier ?? 1;
     private bool IsMouseConnected => HasTargetSubscriber(_mouseReport) ||
         HasTargetSubscriber(_bootMouseInput);
@@ -376,6 +385,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
     public Task SendMouseAsync(int dx, int dy, byte buttons = 0, int wheel = 0)
     {
+        using var admission = InputAdmission?.Invoke();
         var x = (short)Math.Clamp(dx, short.MinValue + 1, short.MaxValue);
         var y = (short)Math.Clamp(dy, short.MinValue + 1, short.MaxValue);
         var encodedWheel = Math.Clamp(wheel, -127, 127);
@@ -879,19 +889,23 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         report[0] = modifiers;
         var index = 2;
         foreach (var usage in usages.Take(6)) report[index++] = usage;
+        var admission = InputAdmission?.Invoke();
         var completion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_mousePumpSync)
         {
-            if (_mousePumpStopping || !CanQueueReports) return Task.CompletedTask;
-            _keyboardPriorityReports.Enqueue((1, report, completion, canSend));
-            if (!_mousePumpRunning)
+            if (_mousePumpStopping || !CanQueueReports) completion.TrySetResult(true);
+            else
             {
-                _mousePumpRunning = true;
-                StartReportPumpWhileLocked();
+                _keyboardPriorityReports.Enqueue((1, report, completion, canSend));
+                if (!_mousePumpRunning)
+                {
+                    _mousePumpRunning = true;
+                    StartReportPumpWhileLocked();
+                }
             }
         }
-        return completion.Task;
+        return FinishAdmittedInput(completion.Task, admission);
     }
 
     internal Task SendKeyboardAsync(byte modifiers, IReadOnlyCollection<byte> usages,
@@ -927,19 +941,23 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         if (!CanQueueReports) return Task.CompletedTask;
         canSend = CaptureReportSessionGuard(canSend);
         var report = new[] { (byte)(usage & 0xFF), (byte)(usage >> 8) };
+        var admission = InputAdmission?.Invoke();
         var completion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_mousePumpSync)
         {
-            if (_mousePumpStopping || !CanQueueReports) return Task.CompletedTask;
-            _keyboardPriorityReports.Enqueue((4, report, completion, canSend));
-            if (!_mousePumpRunning)
+            if (_mousePumpStopping || !CanQueueReports) completion.TrySetResult(true);
+            else
             {
-                _mousePumpRunning = true;
-                StartReportPumpWhileLocked();
+                _keyboardPriorityReports.Enqueue((4, report, completion, canSend));
+                if (!_mousePumpRunning)
+                {
+                    _mousePumpRunning = true;
+                    StartReportPumpWhileLocked();
+                }
             }
         }
-        return completion.Task;
+        return FinishAdmittedInput(completion.Task, admission);
     }
 
     private Task SendNavigationAsync(ushort controls, Func<bool>? canSend = null)
@@ -947,19 +965,23 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         if (!CanQueueReports) return Task.CompletedTask;
         canSend = CaptureReportSessionGuard(canSend);
         var report = new[] { (byte)(controls & 0xFF), (byte)(controls >> 8) };
+        var admission = InputAdmission?.Invoke();
         var completion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_mousePumpSync)
         {
-            if (_mousePumpStopping || !CanQueueReports) return Task.CompletedTask;
-            _keyboardPriorityReports.Enqueue((5, report, completion, canSend));
-            if (!_mousePumpRunning)
+            if (_mousePumpStopping || !CanQueueReports) completion.TrySetResult(true);
+            else
             {
-                _mousePumpRunning = true;
-                StartReportPumpWhileLocked();
+                _keyboardPriorityReports.Enqueue((5, report, completion, canSend));
+                if (!_mousePumpRunning)
+                {
+                    _mousePumpRunning = true;
+                    StartReportPumpWhileLocked();
+                }
             }
         }
-        return completion.Task;
+        return FinishAdmittedInput(completion.Task, admission);
     }
 
     internal async Task SendIphoneSystemShortcutAsync(byte keyboardUsage,

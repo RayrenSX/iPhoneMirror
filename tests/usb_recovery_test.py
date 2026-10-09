@@ -270,6 +270,187 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         s._preflight_developer_environment=AsyncMock()
         return s
 
+    async def test_touch_keepalive_retains_full_latest_contacts_and_fresh_timestamp(self):
+        s = self.session()
+        s._session_ready.set()
+        sm = bridge.FiveSlotStateMachine()
+        points = [{'pointerId': i, 'action': 'down', 'normalizedX': i / 10, 'normalizedY': .5}
+                  for i in range(1, 6)]
+        await s._apply_frame(sm, {}, points)
+        first = s.hid.reports[-1][1]
+        s._touch_report_sent_at = 0
+        async with s._hid_lifecycle_lock:
+            await s._keep_touch_alive()
+        refreshed = s.hid.reports[-1][1]
+        self.assertEqual(first[:45], refreshed[:45])
+        self.assertNotEqual(first[45:51], refreshed[45:51])
+        self.assertEqual(bytes(range(1, 6)), refreshed[40:45])
+        await s._apply_frame(sm, {}, [dict(points[2], action='up')])
+        s._touch_report_sent_at = 0
+        async with s._hid_lifecycle_lock:
+            await s._keep_touch_alive()
+        refreshed = s.hid.reports[-1][1]
+        self.assertEqual(bytes((1, 2, 0, 4, 5)), refreshed[40:45])
+
+    async def test_touch_keepalive_skips_recent_input_and_recovery(self):
+        s = self.session()
+        s._session_ready.set()
+        sm = bridge.FiveSlotStateMachine()
+        await s._apply_frame(sm, {}, [{'pointerId': 7, 'action': 'down',
+            'normalizedX': .4, 'normalizedY': .5}])
+        count = len(s.hid.reports)
+        with patch.object(bridge, 'HID_TOUCH_KEEPALIVE_SECONDS', 3600):
+            async with s._hid_lifecycle_lock:
+                await s._keep_touch_alive()
+        self.assertEqual(count, len(s.hid.reports))
+        await s._mark_recovering(ConnectionResetError())
+        s._touch_report_sent_at = 0
+        async with s._hid_lifecycle_lock:
+            await s._keep_touch_alive()
+        self.assertEqual(count, len(s.hid.reports))
+
+    async def test_touch_keepalive_cannot_replay_a_release_whose_delivery_failed(self):
+        s = self.session()
+        s._session_ready.set()
+        sm = bridge.FiveSlotStateMachine()
+        point = {'pointerId': 7, 'action': 'down', 'normalizedX': .4, 'normalizedY': .5}
+        await s._apply_frame(sm, {}, [point])
+        s.hid.send_report = AsyncMock(side_effect=ConnectionResetError())
+        with self.assertRaises(ConnectionResetError):
+            await s._apply_frame(sm, {}, [dict(point, action='up')])
+        s.hid.send_report = AsyncMock()
+        s._touch_report_sent_at = 0
+        async with s._hid_lifecycle_lock:
+            await s._keep_touch_alive()
+        s.hid.send_report.assert_not_awaited()
+        self.assertEqual({7}, s._active_touch_ids)
+
+    async def test_waiting_keepalive_uses_state_after_queued_release(self):
+        s = self.session()
+        s._session_ready.set()
+        sm = bridge.FiveSlotStateMachine()
+        point = {'pointerId': 7, 'action': 'down', 'normalizedX': .4, 'normalizedY': .5}
+        await s._apply_frame(sm, {}, [point])
+        async def health():
+            async with s._hid_lifecycle_lock:
+                await s._keep_touch_alive()
+        await s._hid_lifecycle_lock.acquire()
+        release = asyncio.create_task(s._apply_frame(sm, {}, [dict(point, action='up')]))
+        await asyncio.sleep(0)
+        keepalive = asyncio.create_task(health())
+        await asyncio.sleep(0)
+        s._hid_lifecycle_lock.release()
+        await asyncio.gather(release, keepalive)
+        self.assertEqual(2, len(s.hid.reports))
+        self.assertEqual(0, s.hid.reports[-1][1][3])  # Contact/range bits are clear.
+
+    async def test_wired_and_wireless_health_rounds_keep_static_contacts_alive(self):
+        real_sleep = asyncio.sleep
+        for mode in ('usb', 'wireless'):
+            with self.subTest(mode=mode):
+                s = self.session()
+                s.transport_mode = mode
+                s._session_ready.set()
+                await s._apply_frame(bridge.FiveSlotStateMachine(), {}, [
+                    {'pointerId': 7, 'action': 'down', 'normalizedX': .4, 'normalizedY': .5}])
+                s._touch_report_sent_at = 0
+                ticks = 0
+                async def sleep(_):
+                    nonlocal ticks
+                    ticks += 1
+                    if ticks > 1: raise asyncio.CancelledError
+                    await real_sleep(0)
+                with patch.object(bridge.asyncio, 'sleep', sleep):
+                    with self.assertRaises(asyncio.CancelledError):
+                        await s._request_direct_hid_rotation()
+                self.assertEqual(2, len(s.hid.reports))
+                self.assertEqual(s.hid.reports[0][1][:45], s.hid.reports[1][1][:45])
+
+    async def test_proactive_refresh_waits_for_held_touch_keyboard_and_buttons(self):
+        from types import SimpleNamespace
+        real_sleep = asyncio.sleep
+        for kind in ('touch', 'keyboard', 'button', 'touch-and-keyboard'):
+            with self.subTest(kind=kind):
+                s = self.session()
+                await s._verify_touch_surface(s.hid)
+                sm = bridge.FiveSlotStateMachine()
+                s.indigo = SimpleNamespace(send_button=AsyncMock(), __aexit__=AsyncMock())
+                if kind in ('touch', 'touch-and-keyboard'):
+                    await s._apply_frame(sm, {}, [{'pointerId': 7, 'action': 'down',
+                        'normalizedX': .4, 'normalizedY': .5}])
+                if kind in ('keyboard', 'touch-and-keyboard'):
+                    await s._send_keyboard_report([4])
+                if kind == 'button':
+                    await s._apply_button(12, 64, 'down')
+                async def watchdog_tick():
+                    ticks = 0
+                    async def sleep(_):
+                        nonlocal ticks
+                        ticks += 1
+                        if ticks > 1: raise asyncio.CancelledError
+                        await real_sleep(0)
+                    with patch.object(bridge.asyncio, 'sleep', sleep), \
+                         patch.object(bridge, 'DIRECT_HID_ROTATION_SECONDS', 0):
+                        with self.assertRaises(asyncio.CancelledError):
+                            await s._request_direct_hid_rotation()
+                with patch.object(bridge, 'UniversalHIDServiceService', side_effect=Hid) as factory, \
+                     patch.object(s, '_ping_hid', wraps=s._ping_hid) as ping:
+                    old_hid = s.hid
+                    await watchdog_tick()
+                    factory.assert_not_called()
+                    ping.assert_awaited()
+                    self.assertIs(old_hid, s.hid)
+                    if kind in ('touch', 'touch-and-keyboard'):
+                        await s._apply_frame(sm, {}, [{'pointerId': 7, 'action': 'up',
+                            'normalizedX': .4, 'normalizedY': .5}])
+                    if kind == 'touch-and-keyboard':
+                        await watchdog_tick()
+                        factory.assert_not_called()
+                    if kind in ('keyboard', 'touch-and-keyboard'):
+                        await s._send_keyboard_report([])
+                    if kind == 'button':
+                        await s._apply_button(12, 64, 'up')
+                    await watchdog_tick()
+                    factory.assert_called_once()
+                    self.assertIsNot(old_hid, s.hid)
+
+    async def test_failed_release_defers_idle_refresh_but_allows_fault_repair(self):
+        s = self.session()
+        await s._verify_touch_surface(s.hid)
+        sm = bridge.FiveSlotStateMachine()
+        await s._apply_frame(sm, {}, [{'pointerId': 7, 'action': 'down',
+            'normalizedX': .4, 'normalizedY': .5}])
+        await s._send_keyboard_report([4])
+        s.hid.send_report = AsyncMock(side_effect=ConnectionResetError())
+        s.hid.send_keyboard = AsyncMock(side_effect=ConnectionResetError())
+        with self.assertRaises(ConnectionResetError):
+            await s._apply_frame(sm, {}, [{'pointerId': 7, 'action': 'up',
+                'normalizedX': .4, 'normalizedY': .5}])
+        with self.assertRaises(ConnectionResetError): await s._send_keyboard_report([])
+        self.assertEqual({7}, s._active_touch_ids)
+        self.assertEqual(frozenset({4}), s._held_keyboard_usages)
+        with patch.object(bridge, 'UniversalHIDServiceService', side_effect=Hid) as factory:
+            self.assertFalse(await s._refresh_direct_hid(idle_only=True))
+            factory.assert_not_called()
+            self.assertTrue(await s._refresh_direct_hid())
+        self.assertFalse(s._active_touch_ids)
+        self.assertFalse(s._held_keyboard_usages)
+
+    async def test_idle_refresh_checks_held_input_after_acquiring_report_lock(self):
+        s = self.session()
+        await s._hid_lifecycle_lock.acquire()
+        try:
+            with patch.object(bridge, 'UniversalHIDServiceService') as factory:
+                task = asyncio.create_task(s._refresh_direct_hid(idle_only=True))
+                await asyncio.sleep(0)
+                # A report holder updates state before handing over the lock.
+                s._held_keyboard_usages = frozenset({4})
+                s._hid_lifecycle_lock.release()
+                self.assertFalse(await task)
+                factory.assert_not_called()
+        finally:
+            if s._hid_lifecycle_lock.locked(): s._hid_lifecycle_lock.release()
+
     async def test_dead_capture_mux_is_retired_before_lockdown_retry(self):
         s = self.session()
         dead = Mock(failure_reason='USB reader exited')

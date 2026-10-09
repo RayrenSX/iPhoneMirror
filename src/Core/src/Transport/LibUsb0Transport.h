@@ -68,6 +68,9 @@ public:
     [[nodiscard]] static bool enable_quicktime_configuration(const AppleUsbIdentity& identity);
     [[nodiscard]] static bool disable_quicktime_configuration(const std::string& serial);
     [[nodiscard]] static bool disable_quicktime_configuration(const AppleUsbIdentity& identity);
+    // Called only after all selected-phone handles have been released and its
+    // normal configuration returned, but Apple USBMux still cannot see it.
+    [[nodiscard]] static bool reconnect_normal_device(const AppleUsbIdentity& identity);
     [[nodiscard]] static LibUsb0Connection open_quicktime(const std::string& serial);
     [[nodiscard]] static LibUsb0Connection open_quicktime(
         const AppleUsbIdentity& identity,

@@ -1,4 +1,5 @@
 #include "Transport/UsbMuxClient.h"
+#include "Transport/LibUsb0Transport.h"
 
 #include "Logging.h"
 
@@ -97,6 +98,17 @@ std::vector<MuxDevice> UsbMuxClient::list_devices() {
         if (!device.serial.empty()) devices.push_back(std::move(device));
     }
     return devices;
+}
+
+bool UsbMuxClient::contains_usb_device(
+    std::span<const MuxDevice> devices, std::string_view serial) noexcept {
+    for (const auto& device : devices) {
+        // A saved or live Network row cannot confirm that Apple's USB
+        // management interface recovered after the QuickTime configuration.
+        if (device.connection_type == "USB" &&
+            apple_usb_serial_equal(device.serial, serial)) return true;
+    }
+    return false;
 }
 
 bool UsbMuxClient::has_pair_record(const std::string& udid) {

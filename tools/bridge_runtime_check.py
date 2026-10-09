@@ -4,6 +4,12 @@ No sockets are opened, no device is contacted, and no persistent state is change
 """
 import ssl
 import struct
+import asyncio
+import sys
+from pathlib import Path
+
+import httpx
+from anyio._backends._asyncio import AsyncIOBackend
 
 import certifi
 import lzfse
@@ -15,8 +21,26 @@ from qh3.quic.configuration import QuicConfiguration
 from qh3.quic.connection import QuicConnection
 
 
+def check_usb_backends():
+    """Load both bundled backends without enumerating or opening a device."""
+    from iostouch.qt.usb import get_backend
+
+    checks = []
+    for backend, filename in (('libusb0', 'libusb0.dll'), ('libusb1', 'libusb-1.0.dll')):
+        if getattr(sys, 'frozen', False) and not (Path(sys._MEIPASS) / filename).is_file():
+            raise RuntimeError(f'Bundled USB backend is missing: _internal/{filename}')
+        # Importing usb.backend.* alone succeeds even when the DLL cannot load.
+        # Require each backend explicitly; fallback could mask missing libusb0.
+        if get_backend(backend) is None:
+            raise RuntimeError(f'USB backend could not be loaded: {backend}')
+        checks.append(f'usb_backend_{backend}')
+    return checks
+
+
 def check_runtime_functionality(build_touchscreen_report, contact, release, build_touchscreen_frame):
     checks = []
+    if sys.platform == 'win32' and getattr(sys, 'frozen', False):
+        checks.extend(check_usb_backends())
     payload = {'text': 'clipboard 中文 😀', 'id': XpcUInt64Type(42),
                'report': b'\x00\x01\xff', 'values': [True, None, 1.25]}
     wire = create_xpc_wrapper(payload, message_id=7, wanting_reply=True)
@@ -68,4 +92,13 @@ def check_runtime_functionality(build_touchscreen_report, contact, release, buil
     if ssl.create_default_context(cafile=certifi.where()).cert_store_stats()['x509_ca'] == 0:
         raise RuntimeError('Bundled CA store is empty')
     checks.append('ca_store')
+    async def check_ddi_http_transport():
+        # Exercise the frozen HTTP client's TLS construction and async backend
+        # without opening a socket or sending a device ticket.
+        AsyncIOBackend.current_time()
+        async with httpx.AsyncClient(trust_env=False) as client:
+            if client.is_closed:
+                raise RuntimeError('DDI HTTP client closed unexpectedly')
+    asyncio.run(check_ddi_http_transport())
+    checks.append('ddi_async_http_transport')
     return checks

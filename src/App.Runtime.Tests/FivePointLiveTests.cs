@@ -14,12 +14,14 @@ namespace IPhoneMirror.App.Runtime.Tests;
 internal static partial class Program
 {
     // Opt-in real-device test. Only run with the observer page visible on the phone.
-    // Discovery/UI are isolated fixture state; readiness, routes, writer, Python
+    // Discovery/UI are isolated fixture state; readiness, routes, writer, frozen
     // transport, HID reports and phone-side TouchEvents are real.
     private static int RunFivePointLive(string output, string transport, string udid,
         string python, string script, string observer)
     {
         if (transport is not ("usb" or "wireless")) throw new ArgumentException("Expected usb or wireless");
+        if (!string.Equals(Path.GetExtension(script), ".exe", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Phone event verification requires the complete packaged bridge runtime.", nameof(script));
         Directory.CreateDirectory(output);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown, IsUiPreviewMode = true };
@@ -45,10 +47,9 @@ internal static partial class Program
                 // Never log clipboard content. Readiness comes from the real child.
                 if (e.Event is "ready" or "error" || e.Event == "status")
                     Console.WriteLine($"BRIDGE {e.Event}: {e.Code}");
-                KeyboardCall(host, "OnBridgeEvent", e);
             };
-            WaitLive(bridge.StartAsync(Path.GetFullPath(python), Path.GetFullPath(script), udid,
-                wireless: transport == "wireless"), 240);
+            WaitLive(host.StartAsync(transport == "wireless" ? UsbTouchTransport.Wireless : UsbTouchTransport.Usb,
+                udid, Path.GetFullPath(script)), 240);
             MappingAssert(bridge.IsReady && bridge.Udid == udid, "Real bridge not ready");
             var ctor = typeof(DeviceViewModel).GetConstructors(KeyboardTestMembers).Single();
             var phone = (DeviceViewModel)ctor.Invoke([udid, "Hardware test", "iPhone", "", "USB", "",
@@ -77,7 +78,7 @@ internal static partial class Program
         }
         finally
         {
-            WaitLive(bridge.StopAsync(), 30);
+            WaitLive(host.StopAsync(), 30);
             File.WriteAllText(Path.Combine(output, transport + "-result.json"), JsonSerializer.Serialize(new
             {
                 transport, passed, at = DateTimeOffset.Now, findings,

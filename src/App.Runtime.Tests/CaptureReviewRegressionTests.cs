@@ -2,7 +2,9 @@ using System.Collections;
 using System.Linq.Expressions;
 using System.Reflection;
 using IPhoneMirror.App;
+using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Models;
+using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Runtime.Tests;
 
@@ -19,7 +21,48 @@ internal static partial class Program
         TestFailedCaptureWiredTeardown(restoreWarning: false);
         TestFailedCaptureWiredTeardown(restoreWarning: true);
         TestFailedCaptureWiredTeardown(restoreWarning: false, throwingObserver: true);
+        TestUsbRestoreInventoryRecovery();
         Console.WriteLine("Capture review regressions passed: stale status, deferred generation checks, wired cleanup ordering and restore recovery.");
+    }
+
+    private static void TestUsbRestoreInventoryRecovery()
+    {
+        using var fixture = new CaptureReviewFixture();
+        var tracker = (UsbRestoreRecoveryTracker)KeyboardField(fixture.Vm, "_usbRestoreRecovery");
+        const string target = "review-recovery-A", other = "review-recovery-B";
+        var cards = ((ViewModels.MainViewModel)fixture.Vm).Devices;
+        cards.Add(((DeviceViewModel)fixture.Device(target)).AsUsbPresentNoMux());
+        cards.Add((DeviceViewModel)fixture.Device(other));
+        NativeDeviceInfo Row(string udid, bool readable = true) => new()
+        {
+            Udid = udid, UsbConnected = 1, LockdownAccessible = readable ? 1 : 0,
+            State = readable ? ConnectionState.Ready : ConnectionState.Connected,
+        };
+        void Observe(bool current, bool metadata, params NativeDeviceInfo[] rows)
+        {
+            SetKeyboardField(fixture.Vm, "_lastUsbDevices", rows);
+            KeyboardCall(fixture.Vm, "ObserveUsbRestoreRecovery", current, metadata);
+        }
+        tracker.MarkRecoveryRequired(target);
+        tracker.MarkRecoveryRequired(other);
+        Observe(current: false, metadata: true);
+        Observe(true, true, Row(target), Row(other));
+        InteractionAssert(tracker.IsBlocked(target), "Deferred empty inventory fabricated a disconnect.");
+        Observe(true, true, Row(other));
+        InteractionAssert(cards.Any(card => card.Udid == target), "Retained card fixture was lost.");
+        Observe(false, true, Row(target), Row(other));
+        InteractionAssert(tracker.IsBlocked(target), "Deferred cached inventory cleared recovery protection.");
+        Observe(true, false, Row(target), Row(other));
+        InteractionAssert(tracker.IsBlocked(target), "Cached Ready metadata cleared recovery protection.");
+        Observe(true, true, Row(target, readable: false), Row(other));
+        InteractionAssert(tracker.IsBlocked(target), "An unreadable management tunnel cleared recovery protection.");
+        Observe(true, true, Row(target), Row(other));
+        InteractionAssert(!tracker.IsBlocked(target) && tracker.IsBlocked(other),
+            "Fresh management recovery must clear only its device despite retained cards and another phone.");
+        Observe(true, true, Row(target));
+        Observe(true, true, Row(target), Row(other));
+        InteractionAssert(!tracker.HasBlockedDevices, "Second device failed to recover independently.");
+        Console.WriteLine("USB recovery: retained cards, second device, deferred inventory, stale Ready and unreadable tunnels passed.");
     }
 
     private static void TestStaleCaptureStatus(string transition)
@@ -86,6 +129,9 @@ internal static partial class Program
     private static void TestQueuedCaptureWarning()
     {
         using var fixture = new CaptureReviewFixture();
+        var application = System.Windows.Application.Current;
+        var previousMainWindow = application.MainWindow;
+        application.MainWindow = null;
         var (state, handle) = fixture.State("review-warning", 451);
         var gate = (SemaphoreSlim)KeyboardField(fixture.Vm, "_coreGate");
         var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -121,7 +167,7 @@ internal static partial class Program
             InteractionAssert(sawNotice && !timedOut && fixture.Stops == 1 && fixture.Destroys == 1,
                 "Visible capture warning delayed native teardown until the dialog closed.");
         }
-        finally { timer.Stop(); }
+        finally { timer.Stop(); application.MainWindow = previousMainWindow; }
     }
 
     private static void TestBackgroundErrorNoticeDoesNotOwnGate()
@@ -168,6 +214,9 @@ internal static partial class Program
     private static void TestSelectedErrorReleasesBeforeNotice()
     {
         using var fixture = new CaptureReviewFixture();
+        var application = System.Windows.Application.Current;
+        var previousMainWindow = application.MainWindow;
+        application.MainWindow = null;
         var (state, handle) = fixture.State("review-selected-error", 471);
         SetKeyboardField(fixture.Vm, "_selectedDevice", fixture.Device("review-selected-error"));
         var sawNotice = false;
@@ -181,7 +230,7 @@ internal static partial class Program
                 if (window.GetType().Name != "CaptureStatusNoticeWindow") continue;
                 sawNotice = true;
                 releasedBeforeNotice = fixture.Stops == 1 && fixture.Destroys == 1 &&
-                    fixture.Property(state, "Handle") is null;
+                    fixture.Property(state, "Handle") is null && window.Owner is null;
                 window.Close();
             }
         };
@@ -194,7 +243,7 @@ internal static partial class Program
             InteractionAssert(sawNotice && releasedBeforeNotice,
                 "Selected capture displayed its error before releasing the failed session.");
         }
-        finally { timer.Stop(); }
+        finally { timer.Stop(); application.MainWindow = previousMainWindow; }
     }
 
     private static void TestFailedCaptureWiredTeardown(bool restoreWarning, bool throwingObserver = false)

@@ -47,6 +47,11 @@ function Get-UsbTouchBridgeRuntimeManifestEntries {
             throw "$Label manifest contains an invalid file entry."
         }
     }
+    foreach ($required in @('_internal/libusb0.dll', '_internal/libusb-1.0.dll')) {
+        if (-not $seen.Contains($required)) {
+            throw "$Label manifest is missing required USB backend: $required"
+        }
+    }
     return $entries
 }
 

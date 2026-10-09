@@ -190,6 +190,9 @@ internal static partial class Program
                 KeyboardCall(vm, "GetControlStatus", mode, second.Udid)), "Devices share progress/cancel state.");
             var firstControl = KeyboardCall(vm, "GetOrCreateControl", first.Udid)!;
             KeyboardCall(vm, "AttachUsbBridgeEvents", firstControl, firstHost, first, CancellationToken.None);
+            // This memory-only sender has no child process. Model a started
+            // host while injecting lifecycle events; stopped hosts ignore them.
+            SetKeyboardField(firstHost, "_started", 1);
             KeyboardCall(firstHost, "OnBridgeEvent", new BridgeEvent("status", "recovery_triggered", "test recovery"));
             AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
             Require(!(bool)KeyboardCall(vm, "IsUsbControlTarget", first.Udid)! &&
@@ -199,6 +202,7 @@ internal static partial class Program
             KeyboardCall(firstHost, "OnBridgeEvent", new BridgeEvent("ready", null, null));
             AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
             Require((bool)KeyboardCall(vm, "IsUsbControlTarget", first.Udid)!, "A did not resume after its ready event.");
+            SetKeyboardField(firstHost, "_started", 0);
             var wirelessMode = Enum.Parse(mode.GetType(), "Wireless");
             var pendingCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             KeyboardCall(KeyboardField(secondControl, "WirelessOperation"), "RunAsync",
@@ -235,6 +239,10 @@ internal static partial class Program
 
         void TestBothMainPreviewRoutes(string context)
         {
+            // The preceding keyboard isolation case intentionally leaves Ctrl
+            // and letter presses retired. End that simulated physical lifetime
+            // before testing unmodified mouse shortcuts on either device.
+            ReleaseTestPhysicalKeys(window);
             foreach (var (device, packets, otherPackets) in new[]
             {
                 (first, firstPackets, secondPackets),

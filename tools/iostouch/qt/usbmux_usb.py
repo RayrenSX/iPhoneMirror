@@ -401,6 +401,23 @@ class UsbMuxTransport:
         if intf is None:
             raise MuxError("usbmux interface (subclass 0xFE) not found in active configuration")
         usb.util.claim_interface(dev, intf.bInterfaceNumber)
+        try:
+            self._initialize_claimed_interface(intf)
+        except BaseException:
+            # A failed constructor never reaches the caller's mux variable.
+            # Release our claim here so bounded retry/Apple fallback cannot
+            # inherit a half-initialized owner. Preserve the startup failure
+            # if unplugging also makes release fail.
+            try:
+                usb.util.release_interface(dev, intf.bInterfaceNumber)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("release partially initialized usbmux interface: %s", exc)
+            raise
+
+    def _initialize_claimed_interface(self, intf) -> None:
+        import usb.util
+
+        dev = self.dev
         self._intf = intf
         self._ep_in = usb.util.find_descriptor(
             intf, custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
@@ -416,7 +433,7 @@ class UsbMuxTransport:
                 dev.clear_halt(ep.bEndpointAddress)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("clear halt 0x%02x: %s", ep.bEndpointAddress, exc)
-        self.mux = MuxDevice(self._write, wmax_packet=self._ep_out.wMaxPacketSize or 512, serial=serial)
+        self.mux = MuxDevice(self._write, wmax_packet=self._ep_out.wMaxPacketSize or 512, serial=self.serial)
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.bytes_in = 0

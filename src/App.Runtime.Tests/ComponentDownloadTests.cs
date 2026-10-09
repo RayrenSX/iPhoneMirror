@@ -140,8 +140,8 @@ internal static partial class Program
         if (window.CanRetry) throw new Exception("Retry exposed before failure");
         var first = Start(); ComponentPumpUntil(() => first.IsCompleted);
         if (!window.CanRetry || window.IsIndeterminate || !window.DetailText.StartsWith(LocalizationService.Get("UxPlayDownloadNotFound")) ||
-            !window.DetailText.Contains("HTTP: 404") || !window.DetailText.Contains("Architecture: x64") ||
-            !window.DetailText.Contains(Services.UxPlayComponent.Descriptor!.Url)) throw new Exception("404/retry diagnostic state");
+            !window.DetailText.Contains("HTTP: 404") ||
+            window.DetailText.Contains(Services.UxPlayComponent.Descriptor!.Url)) throw new Exception("404/retry must not display a stale embedded download URL");
         typeof(LocalizationService).GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, ["zh-CN", false, true]);
         if (window.StatusText != LocalizationService.Get("UxPlayDownloadFailed") || !window.DetailText.StartsWith(LocalizationService.Get("UxPlayDownloadNotFound")))
             throw new Exception("Open dialog did not refresh its language");

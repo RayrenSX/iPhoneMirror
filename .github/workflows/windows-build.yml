@@ -9,12 +9,17 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      build_installer:
+        description: Build and upload the EXE installer
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-build-${{ github.ref }}
+  group: windows-build-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -27,24 +32,49 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify all App and Driver localization dictionaries
+        shell: pwsh
+        run: ./scripts/verify_localization.ps1
 
       - name: Set up .NET 10 SDK
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/packages.lock.json', '**/[Nn]u[Gg]et.[Cc]onfig', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Set up Python for USB touch bridge
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
+          cache: pip
+          cache-dependency-path: scripts/usb-bridge-recipe/requirements.txt
+
+      - name: Set up Node.js for browser localization tests
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Verify installer, cleanup, browser and fallback localization
+        shell: pwsh
+        run: ./scripts/verify_localization_surfaces.ps1
 
       - name: Set up MSYS2 UCRT64 for UxPlay
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
           # Avoid a full MSYS2 mirror upgrade on every run. The action still
-          # installs the pinned build dependencies below, while avoiding
+          # installs the required build dependencies below, while avoiding
           # unrelated mirror timeouts during database refresh.
           update: false
           install: >-
@@ -60,10 +90,29 @@ jobs:
             mingw-w64-ucrt-x86_64-libplist
             mingw-w64-ucrt-x86_64-openssl
 
-      - name: Verify Simplified Chinese and English resources
-        shell: pwsh
-        run: ./scripts/verify_localization.ps1
-
       - name: Build Release, run tests, and publish Windows x64 output
         shell: pwsh
         run: ./build.ps1 -Configuration Release
+
+      - name: Build Windows x64 EXE installer
+        if: github.event_name != 'workflow_dispatch' || inputs.build_installer
+        shell: pwsh
+        run: ./scripts/build_installer.ps1 -SkipAppBuild
+
+      - name: Upload Windows x64 EXE installer
+        id: installer
+        if: github.event_name != 'workflow_dispatch' || inputs.build_installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: outputs/releases/iPhoneMirror-Setup-v*-x64.exe
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Add installer download to summary
+        if: github.event_name != 'workflow_dispatch' || inputs.build_installer
+        shell: pwsh
+        env:
+          INSTALLER_URL: ${{ steps.installer.outputs.artifact-url }}
+        run: |
+          "[Download Windows x64 EXE installer]($env:INSTALLER_URL) (retained for 14 days)" >> $env:GITHUB_STEP_SUMMARY

@@ -1,0 +1,2487 @@
+--- a/AirPlayServerLib/lib/byteutils.c
++++ b/AirPlayServerLib/lib/byteutils.c
+@@ -68,7 +68,7 @@
+ 
+ #ifdef WIN32
+ // https://stackoverflow.com/questions/5404277/porting-clock-gettime-to-windows?r=SearchResults
+-#define CLOCK_PROCESS_CPUTIME_ID 0
++#define CLOCK_MONOTONIC 0
+ LARGE_INTEGER
+ getFILETIMEoffset()
+ {
+@@ -126,13 +126,13 @@
+     microseconds = (double)t.QuadPart / frequencyToMicroseconds;
+     t.QuadPart = (LONGLONG)microseconds;
+     tv->tv_sec = (long)(t.QuadPart / 1000000);
+-    tv->tv_nsec = t.QuadPart % 1000000;
++    tv->tv_nsec = (long)((t.QuadPart % 1000000) * 1000);
+     return (0);
+ }
+ #endif // WIN32
+ 
+ uint64_t now_us() {
+     struct timespec time;
+-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time);
+-    return (uint64_t)time.tv_sec * 10000000L + (uint64_t)(time.tv_nsec / 1000);
++    clock_gettime(CLOCK_MONOTONIC, &time);
++    return (uint64_t)time.tv_sec * 1000000ULL + (uint64_t)(time.tv_nsec / 1000);
+ }
+--- a/AirPlayServerLib/compat.c
++++ b/AirPlayServerLib/compat.c
+@@ -34,17 +34,26 @@
+     return 0;
+ }
+ 
+-int pthread_cond_timedwait(cond_handle_t* __cond, mutex_handle_t* __mutex, const struct timespec* __timeout) {
+-    if (__timeout != NULL) {
++/* IPHONE_MIRROR_TIMED_WAIT: absolute deadline in milliseconds, including
++ * the current fractional second. Release the mutex while waiting so stop
++ * can signal this event without waiting for the entire probe interval. */
++int pthread_cond_timedwait(cond_handle_t* condition, mutex_handle_t* mutex,
++    const struct timespec* deadline) {
++    DWORD delay = INFINITE;
++    DWORD result;
++    if (deadline != NULL) {
+         struct timeval now;
++        __int64 remaining;
+         gettimeofday(&now, NULL);
+-        WaitForSingleObject(*__cond, (__timeout->tv_sec - now.tv_sec) * 1000 + __timeout->tv_nsec / 1000000);
++        remaining = ((__int64)deadline->tv_sec - now.tv_sec) * 1000 +
++            deadline->tv_nsec / 1000000 - now.tv_usec / 1000;
++        delay = remaining <= 0 ? 0 : remaining >= INFINITE ?
++            INFINITE - 1 : (DWORD)remaining;
+     }
+-    else {
+-        WaitForSingleObject(*__cond, INFINITE);
+-    }
+-    return 0;
++    MUTEX_UNLOCK(*mutex);
++    result = WaitForSingleObject(*condition, delay);
++    MUTEX_LOCK(*mutex);
++    return result == WAIT_TIMEOUT ? 1 : result == WAIT_OBJECT_0 ? 0 : -1;
+ }
+ 
+ #endif // WIN32
+-
+--- a/AirPlayServerLib/lib/raop_rtp.c
++++ b/AirPlayServerLib/lib/raop_rtp.c
+@@ -74,6 +74,7 @@
+     /* These variables only edited mutex locked */
+     int running;
+     int joined;
++    int stop_in_progress;
+ 
+     float volume;
+     int volume_changed;
+@@ -116,29 +117,22 @@
+ };
+ 
+ static int
+-raop_rtp_parse_remote(raop_rtp_t *raop_rtp, const unsigned char *remote, int remotelen)
+-{
+-    char current[25];
+-    int family;
+-    int ret;
+-    assert(raop_rtp);
++raop_rtp_parse_remote(raop_rtp_t *receiver, const unsigned char *remote, int remotelen)
++{
++    /* IPHONE_MIRROR_BINARY_REMOTE_ADDRESS: retain all IPv6 address bytes. */
++    if (!remote) return -1;
++    memset(&receiver->remote_saddr, 0, sizeof(receiver->remote_saddr));
+     if (remotelen == 4) {
+-        family = AF_INET;
++        struct sockaddr_in *address = (struct sockaddr_in *)&receiver->remote_saddr;
++        address->sin_family = AF_INET;
++        memcpy(&address->sin_addr, remote, 4);
++        receiver->remote_saddr_len = sizeof(*address);
+     } else if (remotelen == 16) {
+-        family = AF_INET6;
+-    } else {
+-        return -1;
+-    }
+-    memset(current, 0, sizeof(current));
+-    sprintf(current, "%d.%d.%d.%d", remote[0], remote[1], remote[2], remote[3]);
+-    logger_log(raop_rtp->logger, LOGGER_DEBUG, "raop_rtp_parse_remote ip = %s", current);
+-    ret = netutils_parse_address(family, current,
+-                                 &raop_rtp->remote_saddr,
+-                                 sizeof(raop_rtp->remote_saddr));
+-    if (ret < 0) {
+-        return -1;
+-    }
+-    raop_rtp->remote_saddr_len = ret;
++        struct sockaddr_in6 *address = (struct sockaddr_in6 *)&receiver->remote_saddr;
++        address->sin6_family = AF_INET6;
++        memcpy(&address->sin6_addr, remote, 16);
++        receiver->remote_saddr_len = sizeof(*address);
++    } else return -1;
+     return 0;
+ }
+ 
+@@ -173,16 +167,17 @@
+         return NULL;
+     }
+     if (raop_rtp_parse_remote(raop_rtp, remote, remotelen) < 0) {
++        raop_buffer_destroy(raop_rtp->buffer);
+ 		free(raop_rtp);
+ 		return NULL;
+ 	}
+     memset(raop_rtp->remoteName, 0, 128);
+ 	memset(raop_rtp->remoteDeviceId, 0, 128);
+     if (remoteName != NULL) {
+-        strncpy(raop_rtp->remoteName, remoteName, min(128, strlen(remoteName)));
++        strncpy(raop_rtp->remoteName, remoteName, min(127, strlen(remoteName)));
+     }
+ 	if (remoteDeviceId != NULL) {
+-		strncpy(raop_rtp->remoteDeviceId, remoteDeviceId, min(128, strlen(remoteDeviceId)));
++		strncpy(raop_rtp->remoteDeviceId, remoteDeviceId, min(127, strlen(remoteDeviceId)));
+ 	}
+ 
+     raop_rtp->running = 0;
+@@ -201,6 +196,15 @@
+ {
+     if (raop_rtp) {
+         raop_rtp_stop(raop_rtp);
++        /* A concurrent stop owns the joins and still uses this buffer/lock. */
++        for (;;) {
++            int joined;
++            MUTEX_LOCK(raop_rtp->run_mutex);
++            joined = raop_rtp->joined;
++            MUTEX_UNLOCK(raop_rtp->run_mutex);
++            if (joined) break;
++            sleepms(1);
++        }
+         MUTEX_DESTROY(raop_rtp->run_mutex);
+         MUTEX_DESTROY(raop_rtp->time_mutex);
+         COND_DESTROY(raop_rtp->time_cond);
+@@ -400,171 +404,148 @@
+ static THREAD_RETVAL
+ raop_rtp_thread_time(void *arg)
+ {
+-    raop_rtp_t *raop_rtp = arg;
+-    assert(raop_rtp);
+-    struct sockaddr_storage saddr;
+-    socklen_t saddrlen;
+-    unsigned char packet[128];
+-    unsigned int packetlen;
+-    unsigned char time[32]={0x80,0xd2,0x00,0x07,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+-            ,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+-    };
+-    uint64_t base = now_us();
+-    uint64_t rec_pts = 0;
+-    while (1) {
+-        MUTEX_LOCK(raop_rtp->run_mutex);
+-        if (!raop_rtp->running) {
+-            MUTEX_UNLOCK(raop_rtp->run_mutex);
++    raop_rtp_t *receiver = arg;
++    unsigned char request[32] = {0};
++    uint64_t base = now_us(), rec_pts = 0;
++    struct sockaddr_storage destination = receiver->remote_saddr;
++    /* IPHONE_MIRROR_TIMING_PACKET_BOUNDS */
++    if (destination.ss_family == AF_INET6)
++        ((struct sockaddr_in6 *)&destination)->sin6_port = htons(receiver->timing_rport);
++    else
++        ((struct sockaddr_in *)&destination)->sin_port = htons(receiver->timing_rport);
++    request[0] = 0x80;
++    request[1] = 0xd2; request[3] = 7;
++    for (;;) {
++        fd_set rfds;
++        struct timeval window = {0, 300000}, now;
++        struct timespec deadline;
++        unsigned char response[128];
++        int ready, count;
++        MUTEX_LOCK(receiver->run_mutex);
++        if (!receiver->running) { MUTEX_UNLOCK(receiver->run_mutex); break; }
++        MUTEX_UNLOCK(receiver->run_mutex);
++        byteutils_put_timeStamp(request, 24, now_us() - base + rec_pts);
++        sendto(receiver->tsock, (const char *)request, sizeof(request), 0,
++            (struct sockaddr *)&destination, receiver->remote_saddr_len);
++        FD_ZERO(&rfds);
++        FD_SET(receiver->tsock, &rfds);
++        ready = select(receiver->tsock + 1, &rfds, NULL, NULL, &window);
++        if (ready > 0) {
++            struct sockaddr_storage peer;
++            socklen_t peer_len = sizeof(peer);
++            count = recvfrom(receiver->tsock, (char *)response, sizeof(response),
++                0, (struct sockaddr *)&peer, &peer_len);
++            /* Never read NTP offsets from a short packet or a recv error. */
++            if (count >= 32 && peer.ss_family == destination.ss_family &&
++                ((peer.ss_family == AF_INET &&
++                  ((struct sockaddr_in *)&peer)->sin_addr.s_addr ==
++                  ((struct sockaddr_in *)&destination)->sin_addr.s_addr) ||
++                 (peer.ss_family == AF_INET6 && memcmp(
++                  &((struct sockaddr_in6 *)&peer)->sin6_addr,
++                  &((struct sockaddr_in6 *)&destination)->sin6_addr, 16) == 0)))
++                rec_pts = byteutils_read_timeStamp(response, 16);
++        }
++        MUTEX_LOCK(receiver->time_mutex);
++        MUTEX_LOCK(receiver->run_mutex);
++        if (!receiver->running) {
++            MUTEX_UNLOCK(receiver->run_mutex);
++            MUTEX_UNLOCK(receiver->time_mutex);
+             break;
+         }
+-        MUTEX_UNLOCK(raop_rtp->run_mutex);
+-        uint64_t send_time = now_us() - base + rec_pts;
+-
+-        byteutils_put_timeStamp(time, 24, send_time);
+-        logger_log(raop_rtp->logger, LOGGER_DEBUG, "raop_rtp_thread_time send time 32 bytes, port = %d", raop_rtp->timing_rport);
+-        struct sockaddr_in *addr = (struct sockaddr_in *)&raop_rtp->remote_saddr;
+-        addr->sin_port = htons(raop_rtp->timing_rport);
+-        int sendlen = sendto(raop_rtp->tsock, (char *)time, sizeof(time), 0, (struct sockaddr *) &raop_rtp->remote_saddr, raop_rtp->remote_saddr_len);
+-        logger_log(raop_rtp->logger, LOGGER_DEBUG, "raop_rtp_thread_time sendlen = %d", sendlen);
+-
+-        saddrlen = sizeof(saddr);
+-        packetlen = recvfrom(raop_rtp->tsock, (char *)packet, sizeof(packet), 0,
+-                             (struct sockaddr *)&saddr, &saddrlen);
+-        int type_t = packet[1] & ~0x80;
+-        logger_log(raop_rtp->logger, LOGGER_DEBUG, "raop_rtp_thread_time receive time type_t 0x%02x, packetlen = %d", type_t, packetlen);
+-        if (type_t == 0x53) {
+-
+-        }
+-        uint64_t Origin_Timestamp = byteutils_read_timeStamp(packet, 8);
+-        uint64_t Receive_Timestamp = byteutils_read_timeStamp(packet, 16);
+-        uint64_t Transmit_Timestamp = byteutils_read_timeStamp(packet, 24);
+-
+-        rec_pts = Receive_Timestamp;
+-
+-        struct timeval now;
+-        struct timespec outtime;
+-        MUTEX_LOCK(raop_rtp->time_mutex);
++        MUTEX_UNLOCK(receiver->run_mutex);
+         gettimeofday(&now, NULL);
+-        outtime.tv_sec = now.tv_sec + 1;  // Reduced from 3 to 1 second for faster timeout
+-        outtime.tv_nsec = now.tv_usec * 1000;
+-        int ret = pthread_cond_timedwait(&raop_rtp->time_cond, &raop_rtp->time_mutex, &outtime);
+-        MUTEX_UNLOCK(raop_rtp->time_mutex);
+-    }
+-
+-    logger_log(raop_rtp->logger, LOGGER_INFO, "Exiting UDP raop_rtp_thread_time thread");
++        deadline.tv_sec = now.tv_sec + 3;
++        deadline.tv_nsec = now.tv_usec * 1000;
++        pthread_cond_timedwait(&receiver->time_cond, &receiver->time_mutex, &deadline);
++        MUTEX_UNLOCK(receiver->time_mutex);
++    }
+     return 0;
+ }
+ 
++/* IPHONE_MIRROR_AUDIO_PEER_AND_RESEND: keep UDP input within the
++ * negotiated control peer and drain both original and retransmitted packets. */
++static int raop_rtp_peer_matches(const raop_rtp_t *receiver,
++    const struct sockaddr_storage *peer) {
++    const struct sockaddr_storage *remote = &receiver->remote_saddr;
++    if (peer->ss_family != remote->ss_family) return 0;
++    if (peer->ss_family == AF_INET)
++        return ((const struct sockaddr_in *)peer)->sin_addr.s_addr ==
++            ((const struct sockaddr_in *)remote)->sin_addr.s_addr;
++    if (peer->ss_family == AF_INET6)
++        return memcmp(&((const struct sockaddr_in6 *)peer)->sin6_addr,
++            &((const struct sockaddr_in6 *)remote)->sin6_addr, 16) == 0;
++    return 0;
++}
++
++static void raop_rtp_drain_audio(raop_rtp_t *receiver) {
++    int no_resend = receiver->control_rport == 0;
++    int length;
++    unsigned int pts;
++    uint32_t rate;
++    uint16_t channels, bits;
++    const void *pcm;
++    while ((pcm = raop_buffer_dequeue(receiver->buffer, &length, &pts,
++        no_resend, &rate, &channels, &bits))) {
++        int running;
++        MUTEX_LOCK(receiver->run_mutex);
++        running = receiver->running;
++        MUTEX_UNLOCK(receiver->run_mutex);
++        if (!running) break;
++        if (length > 0 && rate > 0 && channels > 0 && bits > 0 &&
++            receiver->callbacks.audio_process) {
++            pcm_data_struct output;
++            output.data = pcm; output.data_len = length; output.pts = pts;
++            output.sample_rate = rate; output.channels = channels;
++            output.bits_per_sample = bits;
++            receiver->callbacks.audio_process(receiver->callbacks.cls, &output,
++                receiver->remoteName, receiver->remoteDeviceId);
++        }
++    }
++    if (!no_resend)
++        raop_buffer_handle_resends(receiver->buffer, raop_rtp_resend_callback, receiver);
++}
++
+ static THREAD_RETVAL
+-raop_rtp_thread_udp(void *arg)
+-{
+-    raop_rtp_t *raop_rtp = arg;
+-    logger_log(raop_rtp->logger, LOGGER_DEBUG, "raop_rtp_thread_udp");
++raop_rtp_thread_udp(void *arg) {
++    raop_rtp_t *receiver = arg;
+     unsigned char packet[RAOP_PACKET_LEN];
+-    unsigned int packetlen;
+-    struct sockaddr_storage saddr;
+-    socklen_t saddrlen;
+-    assert(raop_rtp);
+-
+-    while(1) {
++    for (;;) {
+         fd_set rfds;
+-        struct timeval tv;
+-        int nfds, ret;
+-
+-        /* Check if we are still running and process callbacks */
+-        if (raop_rtp_process_events(raop_rtp, NULL)) {
+-            break;
+-        }
+-
+-        /* Set timeout value to 1ms (reduced from 5ms for lower latency) */
+-        tv.tv_sec = 0;
+-        tv.tv_usec = 1000;
+-
+-        /* Get the correct nfds value */
+-        nfds = raop_rtp->csock+1;
+-        if (raop_rtp->dsock >= nfds)
+-            nfds = raop_rtp->dsock+1;
+-
+-        /* Set rfds and call select */
++        struct timeval window = {0, 1000};
++        struct sockaddr_storage peer;
++        socklen_t peer_len;
++        int ready, count, queued = 0;
++        if (raop_rtp_process_events(receiver, NULL)) break;
+         FD_ZERO(&rfds);
+-        FD_SET(raop_rtp->csock, &rfds);
+-        FD_SET(raop_rtp->dsock, &rfds);
+-
+-
+-        ret = select(nfds, &rfds, NULL, NULL, &tv);
+-        if (ret == 0) {
+-            /* Timeout happened */
+-            continue;
+-        } else if (ret == -1) {
+-            /* FIXME: Error happened */
+-            break;
+-        }
+-
+-        if (FD_ISSET(raop_rtp->csock, &rfds)) {
+-           saddrlen = sizeof(saddr);
+-           packetlen = recvfrom(raop_rtp->csock, (char *)packet, sizeof(packet), 0,
+-                                (struct sockaddr *)&saddr, &saddrlen);
+-
+-            memcpy(&raop_rtp->control_saddr, &saddr, saddrlen);
+-            raop_rtp->control_saddr_len = saddrlen;
+-            int type_c = packet[1] & ~0x80;
+-            logger_log(raop_rtp->logger, LOGGER_DEBUG, "raop_rtp_thread_udp type_c 0x%02x, packetlen = %d", type_c, packetlen);
+-            if (type_c == 0x56) {
+-                int ret = raop_buffer_queue(raop_rtp->buffer, packet+4, packetlen-4, &raop_rtp->callbacks,
+-                    raop_rtp->ct);
+-                assert(ret >= 0);
+-
+-            } else if (type_c == 0x54) {
+-
+-            } else {
+-                logger_log(raop_rtp->logger, LOGGER_DEBUG, "raop_rtp_thread_udp unknown packet");
+-            }
+-        }
+-        if (FD_ISSET(raop_rtp->dsock, &rfds)) {
+-            saddrlen = sizeof(saddr);
+-            packetlen = recvfrom(raop_rtp->dsock, (char *)packet, sizeof(packet), 0,
+-                                 (struct sockaddr *)&saddr, &saddrlen);
+-            // rtp payload type
+-            int type_d = packet[1] & ~0x80;
+-            //logger_log(raop_rtp->logger, LOGGER_DEBUG, "raop_rtp_thread_udp type_d 0x%02x, packetlen = %d", type_d, packetlen);
+-
+-            if (packetlen >= 12) {
+-                /* IPHONE_MIRROR_RAOP_PACKET_RESEND */
+-                int no_resend = raop_rtp->control_rport == 0;
+-                int buf_ret;
+-                const void *audiobuf;
+-                int audiobuflen;
+-                unsigned int pts;
+-                uint32_t sample_rate = 0;
+-                uint16_t channels = 0;
+-                uint16_t bits_per_sample = 0;
+-
+-                buf_ret = raop_buffer_queue(raop_rtp->buffer, packet, packetlen, &raop_rtp->callbacks,
+-                    raop_rtp->ct);
+-                assert(buf_ret >= 0);
+-                /* Decode all frames in queue */
+-                while ((audiobuf = raop_buffer_dequeue(raop_rtp->buffer, &audiobuflen, &pts, no_resend, &sample_rate, &channels, &bits_per_sample))) {
+-                    /* IPHONE_MIRROR_SKIP_INVALID_AUDIO */
+-                    if (audiobuflen <= 0 || sample_rate == 0 || channels == 0 ||
+-                        bits_per_sample == 0) continue;
+-                    pcm_data_struct pcm_data;
+-                    pcm_data.data_len = audiobuflen;
+-                    pcm_data.data = audiobuf;
+-                    pcm_data.pts = pts;
+-                    pcm_data.sample_rate = sample_rate;
+-                    pcm_data.channels = channels;
+-                    pcm_data.bits_per_sample = bits_per_sample;
+-                    raop_rtp->callbacks.audio_process(raop_rtp->callbacks.cls, &pcm_data, raop_rtp->remoteName, raop_rtp->remoteDeviceId);
+-                }
+-                /* Handle possible resend requests */
+-                if (!no_resend) {
+-                    raop_buffer_handle_resends(raop_rtp->buffer, raop_rtp_resend_callback, raop_rtp);
++        FD_SET(receiver->csock, &rfds); FD_SET(receiver->dsock, &rfds);
++        ready = select(0, &rfds, NULL, NULL, &window);
++        if (ready == 0) continue;
++        if (ready < 0) break;
++        if (FD_ISSET(receiver->csock, &rfds)) {
++            peer_len = sizeof(peer);
++            count = recvfrom(receiver->csock, (char *)packet, sizeof(packet), 0,
++                (struct sockaddr *)&peer, &peer_len);
++            if (count >= 2 && raop_rtp_peer_matches(receiver, &peer)) {
++                int type = packet[1] & 0x7f;
++                if ((type == 0x56 && count > 16) || (type == 0x54 && count >= 20)) {
++                    receiver->control_saddr = peer;
++                    receiver->control_saddr_len = peer_len;
++                    if (type == 0x56)
++                        queued |= raop_buffer_queue(receiver->buffer, packet + 4,
++                            count - 4, &receiver->callbacks, receiver->ct) > 0;
+                 }
+             }
+-
+-        }
+-    }
+-    logger_log(raop_rtp->logger, LOGGER_INFO, "Exiting UDP raop_rtp_thread_udp thread");
++        }
++        if (FD_ISSET(receiver->dsock, &rfds)) {
++            peer_len = sizeof(peer);
++            count = recvfrom(receiver->dsock, (char *)packet, sizeof(packet), 0,
++                (struct sockaddr *)&peer, &peer_len);
++            if (count > 12 && raop_rtp_peer_matches(receiver, &peer))
++                queued |= raop_buffer_queue(receiver->buffer, packet, count,
++                    &receiver->callbacks, receiver->ct) > 0;
++        }
++        if (queued) raop_rtp_drain_audio(receiver);
++    }
+     return 0;
+ }
+ 
+@@ -579,7 +560,15 @@
+     assert(raop_rtp);
+ 
+     MUTEX_LOCK(raop_rtp->run_mutex);
+-    if (raop_rtp->running || !raop_rtp->joined) {
++    if (raop_rtp->running && !raop_rtp->stop_in_progress) {
++        /* A repeated audio SETUP must return the ports that are still live. */
++        if (control_lport) *control_lport = raop_rtp->control_lport;
++        if (timing_lport) *timing_lport = raop_rtp->timing_lport;
++        if (data_lport) *data_lport = raop_rtp->data_lport;
++        MUTEX_UNLOCK(raop_rtp->run_mutex);
++        return;
++    }
++    if (!raop_rtp->joined || raop_rtp->stop_in_progress) {
+         MUTEX_UNLOCK(raop_rtp->run_mutex);
+         return;
+     }
+@@ -592,6 +581,14 @@
+         "IPHONE_MIRROR_AUDIO_CODEC_NEGOTIATION codec=%u control_port=%u",
+         (unsigned int)codec_type, (unsigned int)control_rport);
+     raop_rtp->control_rport = control_rport;
++    /* Resends can precede the first sync/control packet. Use the negotiated
++     * endpoint until a valid packet from that same peer confirms its port. */
++    raop_rtp->control_saddr = raop_rtp->remote_saddr;
++    raop_rtp->control_saddr_len = raop_rtp->remote_saddr_len;
++    if (raop_rtp->control_saddr.ss_family == AF_INET6)
++        ((struct sockaddr_in6 *)&raop_rtp->control_saddr)->sin6_port = htons(control_rport);
++    else
++        ((struct sockaddr_in *)&raop_rtp->control_saddr)->sin_port = htons(control_rport);
+     //raop_rtp->timing_rport = timing_rport;
+     logger_log(raop_rtp->logger, LOGGER_DEBUG, "IPHONE_MIRROR_PRESERVE_IPV6_MEDIA");
+     if (raop_rtp->remote_saddr.ss_family == AF_INET6) {
+@@ -719,15 +716,16 @@
+ void
+ raop_rtp_stop(raop_rtp_t *raop_rtp)
+ {
+-    assert(raop_rtp);
++    if (!raop_rtp) return;
+ 
+     /* Check that we are running and thread is not
+      * joined (should never be while still running) */
+     MUTEX_LOCK(raop_rtp->run_mutex);
+-    if (!raop_rtp->running || raop_rtp->joined) {
++    if (raop_rtp->joined || raop_rtp->stop_in_progress) {
+         MUTEX_UNLOCK(raop_rtp->run_mutex);
+         return;
+     }
++    raop_rtp->stop_in_progress = 1;
+     raop_rtp->running = 0;
+     MUTEX_UNLOCK(raop_rtp->run_mutex);
+ 
+@@ -740,9 +738,9 @@
+ 
+     THREAD_JOIN(raop_rtp->thread_time);
+     
+-    if (raop_rtp->csock != -1) closesocket(raop_rtp->csock);
+-    if (raop_rtp->tsock != -1) closesocket(raop_rtp->tsock);
+-    if (raop_rtp->dsock != -1) closesocket(raop_rtp->dsock);
++    if (raop_rtp->csock != -1) { closesocket(raop_rtp->csock); raop_rtp->csock = -1; }
++    if (raop_rtp->tsock != -1) { closesocket(raop_rtp->tsock); raop_rtp->tsock = -1; }
++    if (raop_rtp->dsock != -1) { closesocket(raop_rtp->dsock); raop_rtp->dsock = -1; }
+ 
+     /* Flush buffer into initial state */
+     raop_buffer_flush(raop_rtp->buffer, -1);
+@@ -750,5 +748,6 @@
+     /* Mark thread as joined */
+     MUTEX_LOCK(raop_rtp->run_mutex);
+     raop_rtp->joined = 1;
+-    MUTEX_UNLOCK(raop_rtp->run_mutex);
+-}
++    raop_rtp->stop_in_progress = 0;
++    MUTEX_UNLOCK(raop_rtp->run_mutex);
++}
+--- a/AirPlayServerLib/lib/raop_rtp_mirror.c
++++ b/AirPlayServerLib/lib/raop_rtp_mirror.c
+@@ -9,6 +9,7 @@
+ #include <string.h>
+ #include <assert.h>
+ #include <errno.h>
++#include <math.h>
+ 
+ #include "raop.h"
+ #include "netutils.h"
+@@ -25,11 +26,16 @@
+ #include <windows.h> 
+ #endif // WIN32
+ 
++#ifdef WIN32
++typedef SOCKET mirror_socket_t;
++#else
++typedef int mirror_socket_t;
++#endif
+ 
+ struct h264codec_s {
+     unsigned char compatibility;
+-    short lengthofPPS;
+-    short lengthofSPS;
++    size_t lengthofPPS;
++    size_t lengthofSPS;
+     unsigned char level;
+     unsigned char numberOfPPS;
+     unsigned char* picture_parameter_set;
+@@ -64,6 +70,8 @@
+     int joined;
+     int stop_in_progress;
+ 
++    int aes_initialized;
++    uint64_t stream_connection_id;
+     int flush;
+     thread_handle_t thread_mirror;
+     thread_handle_t thread_time;
+@@ -87,10 +95,11 @@
+ /* IPHONE_MIRROR_AIRPLAY_MIRROR_RECOVERY: do not block forever on a
+  * half-delivered TCP frame after a sender network-path change. */
+ static int
+-mirror_recv_exact(raop_rtp_mirror_t *mirror, int socket_fd,
++mirror_recv_exact(raop_rtp_mirror_t *mirror, mirror_socket_t socket_fd,
+     unsigned char *buffer, int length)
+ {
+     int offset = 0;
++    uint64_t started = GetTickCount64();
+ 
+     if (mirror == NULL || socket_fd == -1 || buffer == NULL || length < 0) {
+         return -1;
+@@ -111,14 +120,15 @@
+ 
+         FD_ZERO(&rfds);
+         FD_SET(socket_fd, &rfds);
+-        timeout.tv_sec = MIRROR_READ_TIMEOUT_MS / 1000;
+-        timeout.tv_usec = (MIRROR_READ_TIMEOUT_MS % 1000) * 1000;
+-        ready = select(socket_fd + 1, &rfds, NULL, NULL, &timeout);
+-        if (ready == 0) {
++        if (GetTickCount64() - started >= MIRROR_READ_TIMEOUT_MS) {
+             logger_log(mirror->logger, LOGGER_WARNING,
+                 "Mirror TCP read timed out after %d ms", MIRROR_READ_TIMEOUT_MS);
+             return -1;
+         }
++        timeout.tv_sec = 0;
++        timeout.tv_usec = 100000;
++        ready = select(0, &rfds, NULL, NULL, &timeout);
++        if (ready == 0) continue;
+         if (ready < 0) {
+             logger_log(mirror->logger, LOGGER_WARNING,
+                 "Mirror TCP select failed");
+@@ -137,7 +147,7 @@
+ }
+ 
+ static void
+-mirror_enable_keepalive(int socket_fd)
++mirror_enable_keepalive(mirror_socket_t socket_fd)
+ {
+     int enabled = 1;
+     setsockopt(socket_fd, SOL_SOCKET, SO_KEEPALIVE,
+@@ -155,29 +165,22 @@
+ #endif
+ }
+ static int
+-raop_rtp_parse_remote(raop_rtp_mirror_t *raop_rtp_mirror, const unsigned char *remote, int remotelen)
+-{
+-    char current[25];
+-    int family;
+-    int ret;
+-    assert(raop_rtp_mirror);
++raop_rtp_parse_remote(raop_rtp_mirror_t *receiver, const unsigned char *remote, int remotelen)
++{
++    /* IPHONE_MIRROR_BINARY_REMOTE_ADDRESS: retain all IPv6 address bytes. */
++    if (!remote) return -1;
++    memset(&receiver->remote_saddr, 0, sizeof(receiver->remote_saddr));
+     if (remotelen == 4) {
+-        family = AF_INET;
++        struct sockaddr_in *address = (struct sockaddr_in *)&receiver->remote_saddr;
++        address->sin_family = AF_INET;
++        memcpy(&address->sin_addr, remote, 4);
++        receiver->remote_saddr_len = sizeof(*address);
+     } else if (remotelen == 16) {
+-        family = AF_INET6;
+-    } else {
+-        return -1;
+-    }
+-    memset(current, 0, sizeof(current));
+-    sprintf(current, "%d.%d.%d.%d", remote[0], remote[1], remote[2], remote[3]);
+-    logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "raop_rtp_parse_remote ip = %s", current);
+-    ret = netutils_parse_address(family, current,
+-                                 &raop_rtp_mirror->remote_saddr,
+-                                 sizeof(raop_rtp_mirror->remote_saddr));
+-    if (ret < 0) {
+-        return -1;
+-    }
+-    raop_rtp_mirror->remote_saddr_len = ret;
++        struct sockaddr_in6 *address = (struct sockaddr_in6 *)&receiver->remote_saddr;
++        address->sin6_family = AF_INET6;
++        memcpy(&address->sin6_addr, remote, 16);
++        receiver->remote_saddr_len = sizeof(*address);
++    } else return -1;
+     return 0;
+ }
+ 
+@@ -212,16 +215,17 @@
+         return NULL;
+     }
+     if (raop_rtp_parse_remote(raop_rtp_mirror, remote, remotelen) < 0) {
++        mirror_buffer_destroy(raop_rtp_mirror->buffer);
+         free(raop_rtp_mirror);
+         return NULL;
+     }
+ 	memset(raop_rtp_mirror->remoteName, 0, 128);
+ 	memset(raop_rtp_mirror->remoteDeviceId, 0, 128);
+ 	if (remoteName != NULL) {
+-		strncpy(raop_rtp_mirror->remoteName, remoteName, min(128, strlen(remoteName)));
++		strncpy(raop_rtp_mirror->remoteName, remoteName, min(127, strlen(remoteName)));
+ 	}
+ 	if (remoteDeviceId != NULL) {
+-		strncpy(raop_rtp_mirror->remoteDeviceId, remoteDeviceId, min(128, strlen(remoteDeviceId)));
++		strncpy(raop_rtp_mirror->remoteDeviceId, remoteDeviceId, min(127, strlen(remoteDeviceId)));
+ 	}
+ 
+     raop_rtp_mirror->running = 0;
+@@ -238,7 +242,37 @@
+ void
+ raop_rtp_init_mirror_aes(raop_rtp_mirror_t *raop_rtp_mirror, uint64_t streamConnectionID)
+ {
++    int reuse;
++    assert(raop_rtp_mirror);
++    MUTEX_LOCK(raop_rtp_mirror->run_mutex);
++    reuse = raop_rtp_mirror->aes_initialized &&
++        raop_rtp_mirror->stream_connection_id == streamConnectionID &&
++        raop_rtp_mirror->running && !raop_rtp_mirror->stop_in_progress;
++    MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
++    if (reuse) return; /* A retried SETUP must not rewind an active cipher. */
++
++    /* IPHONE_MIRROR_MIRROR_SETUP_RESTART: finish all old reads/decrypts and
++     * exception cleanup before replacing keys or starting new workers. */
++    raop_rtp_mirror_stop(raop_rtp_mirror);
++    for (;;) {
++        int joined;
++        MUTEX_LOCK(raop_rtp_mirror->run_mutex);
++        joined = raop_rtp_mirror->joined;
++        MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
++        if (joined) break;
++        sleepms(1);
++    }
++    if (raop_rtp_mirror->thread_exit_exception) {
++        THREAD_JOIN(raop_rtp_mirror->thread_exit_exception);
++        raop_rtp_mirror->thread_exit_exception = NULL;
++    }
+     mirror_buffer_init_aes(raop_rtp_mirror->buffer, streamConnectionID);
++    MUTEX_LOCK(raop_rtp_mirror->run_mutex);
++    raop_rtp_mirror->aes_initialized = 1;
++    raop_rtp_mirror->stream_connection_id = streamConnectionID;
++    MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
++    logger_log(raop_rtp_mirror->logger, LOGGER_INFO,
++        "IPHONE_MIRROR_MIRROR_SETUP_RESTART cipher initialized");
+ }
+ 
+ /**
+@@ -247,85 +281,61 @@
+ static THREAD_RETVAL
+ raop_rtp_mirror_thread_time(void *arg)
+ {
+-    raop_rtp_mirror_t *raop_rtp_mirror = arg;
+-    assert(raop_rtp_mirror);
+-    struct sockaddr_storage saddr;
+-    socklen_t saddrlen;
+-    unsigned char packet[128];
+-    unsigned int packetlen;
+-    int first = 0;
+-    unsigned char time[48]={35,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+-    uint64_t base = now_us();
+-    uint64_t rec_pts = 0;
+-    while (1) {
+-        MUTEX_LOCK(raop_rtp_mirror->run_mutex);
+-        if (!raop_rtp_mirror->running) {
+-            MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
++    raop_rtp_mirror_t *receiver = arg;
++    unsigned char request[48] = {0};
++    uint64_t base = now_us(), rec_pts = 0;
++    struct sockaddr_storage destination = receiver->remote_saddr;
++    /* IPHONE_MIRROR_TIMING_PACKET_BOUNDS */
++    if (destination.ss_family == AF_INET6)
++        ((struct sockaddr_in6 *)&destination)->sin6_port = htons(receiver->mirror_timing_rport);
++    else
++        ((struct sockaddr_in *)&destination)->sin_port = htons(receiver->mirror_timing_rport);
++    request[0] = 35;
++    
++    for (;;) {
++        fd_set rfds;
++        struct timeval window = {0, 300000}, now;
++        struct timespec deadline;
++        unsigned char response[128];
++        int ready, count;
++        MUTEX_LOCK(receiver->run_mutex);
++        if (!receiver->running) { MUTEX_UNLOCK(receiver->run_mutex); break; }
++        MUTEX_UNLOCK(receiver->run_mutex);
++        byteutils_put_timeStamp(request, 40, now_us() - base + rec_pts);
++        sendto(receiver->mirror_time_sock, (const char *)request, sizeof(request), 0,
++            (struct sockaddr *)&destination, receiver->remote_saddr_len);
++        FD_ZERO(&rfds);
++        FD_SET(receiver->mirror_time_sock, &rfds);
++        ready = select(receiver->mirror_time_sock + 1, &rfds, NULL, NULL, &window);
++        if (ready > 0) {
++            struct sockaddr_storage peer;
++            socklen_t peer_len = sizeof(peer);
++            count = recvfrom(receiver->mirror_time_sock, (char *)response, sizeof(response),
++                0, (struct sockaddr *)&peer, &peer_len);
++            /* Never read NTP offsets from a short packet or a recv error. */
++            if (count >= 48 && peer.ss_family == destination.ss_family &&
++                ((peer.ss_family == AF_INET &&
++                  ((struct sockaddr_in *)&peer)->sin_addr.s_addr ==
++                  ((struct sockaddr_in *)&destination)->sin_addr.s_addr) ||
++                 (peer.ss_family == AF_INET6 && memcmp(
++                  &((struct sockaddr_in6 *)&peer)->sin6_addr,
++                  &((struct sockaddr_in6 *)&destination)->sin6_addr, 16) == 0)))
++                rec_pts = byteutils_read_timeStamp(response, 32);
++        }
++        MUTEX_LOCK(receiver->time_mutex);
++        MUTEX_LOCK(receiver->run_mutex);
++        if (!receiver->running) {
++            MUTEX_UNLOCK(receiver->run_mutex);
++            MUTEX_UNLOCK(receiver->time_mutex);
+             break;
+         }
+-        MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
+-        uint64_t send_time = now_us() - base + rec_pts;
+-
+-        byteutils_put_timeStamp(time, 40, send_time);
+-        logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "raop_rtp_mirror_thread_time send time 48 bytes, port = %d", raop_rtp_mirror->mirror_timing_rport);
+-        struct sockaddr_in *addr = (struct sockaddr_in *)&raop_rtp_mirror->remote_saddr;
+-        addr->sin_port = htons(raop_rtp_mirror->mirror_timing_rport);
+-        int sendlen = sendto(raop_rtp_mirror->mirror_time_sock, (char *)time, sizeof(time), 0, (struct sockaddr *) &raop_rtp_mirror->remote_saddr, raop_rtp_mirror->remote_saddr_len);
+-        logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "raop_rtp_mirror_thread_time sendlen = %d", sendlen);
+-
+-        fd_set rfds;
+-        struct timeval tv;
+-        int nfds, ret;
+-        /* Set timeout value to 1ms (reduced from 5ms for lower latency) */
+-        tv.tv_sec = 0;
+-        tv.tv_usec = 1000;
+-
+-        /* Get the correct nfds value and set rfds */
+-        FD_ZERO(&rfds);
+-        FD_SET(raop_rtp_mirror->mirror_time_sock, &rfds);
+-        nfds = raop_rtp_mirror->mirror_time_sock + 1;
+-        ret = select(nfds, &rfds, NULL, NULL, &tv);
+-        if (ret == 0) {
+-            /* Timeout happened */
+-            sleepms(10);  // Reduced from 1000ms to 10ms to minimize video latency
+-            continue;
+-        }
+-
+-        saddrlen = sizeof(saddr);
+-        packetlen = recvfrom(raop_rtp_mirror->mirror_time_sock, (char *)packet, sizeof(packet), 0,
+-                             (struct sockaddr *)&saddr, &saddrlen);
+-        logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "raop_rtp_mirror_thread_time receive time packetlen = %d", packetlen);
+-        // 16-24 The time when the system clock was last set or updated
+-        uint64_t Reference_Timestamp = byteutils_read_timeStamp(packet, 16);
+-        // 24-32 Local time of sender when NTP request leaves sender. T1
+-        uint64_t Origin_Timestamp = byteutils_read_timeStamp(packet, 24);
+-        // 32-40 Local time of receiver when NTP request arrives at receiver. T2
+-        uint64_t Receive_Timestamp = byteutils_read_timeStamp(packet, 32);
+-        // 40-48 Transmit Timestamp: Local time of responder when response leaves responder. T3
+-        uint64_t Transmit_Timestamp = byteutils_read_timeStamp(packet, 40);
+-
+-        // FIXME: Let's just write it simply for now
+-        rec_pts = Receive_Timestamp;
+-
+-        if (first == 0) {
+-            first++;
+-        } else {
+-            struct timeval now;
+-            struct timespec outtime;
+-#ifndef WIN32
+-            MUTEX_LOCK(raop_rtp_mirror->time_mutex);
+-#endif // !WIN32
+-            gettimeofday(&now, NULL);
+-            outtime.tv_sec = now.tv_sec + 1;  // Reduced from 3 to 1 second for faster timeout
+-            outtime.tv_nsec = now.tv_usec * 1000;
+-            int ret = pthread_cond_timedwait(&raop_rtp_mirror->time_cond, &raop_rtp_mirror->time_mutex, &outtime);
+-#ifndef WIN32
+-            MUTEX_UNLOCK(raop_rtp_mirror->time_mutex);
+-#endif // !WIN32
+-            //sleepms(3000);
+-        }
+-    }
+-    logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "Exiting UDP raop_rtp_mirror_thread_time thread");
++        MUTEX_UNLOCK(receiver->run_mutex);
++        gettimeofday(&now, NULL);
++        deadline.tv_sec = now.tv_sec + 3;
++        deadline.tv_nsec = now.tv_usec * 1000;
++        pthread_cond_timedwait(&receiver->time_cond, &receiver->time_mutex, &deadline);
++        MUTEX_UNLOCK(receiver->time_mutex);
++    }
+     return 0;
+ }
+ //#define DUMP_H264
+@@ -338,370 +348,255 @@
+     return 0;
+ }
+ 
+-#define RAOP_PACKET_LEN 32768
+-/**
+- * mirror
+- */
++/* IPHONE_MIRROR_UPSTREAM_125: selected upstream safety, reconnect and
++ * sender-state changes. Keep the public DLL callback ABI unchanged. */
++#define MIRROR_RECONNECT_GRACE_MS 120000
++#define MIRROR_INVALID_FRAME_LIMIT 3
++
++/* CTR advancement depends only on byte count. A complete header gives the
++ * sender's full encrypted frame length even when the TCP payload is cut. */
++static void mirror_skip_encrypted_frame(raop_rtp_mirror_t *mirror, int length) {
++    unsigned char zeros[4096] = {0}, scratch[4096];
++    while (length > 0) {
++        int running;
++        MUTEX_LOCK(mirror->run_mutex);
++        running = mirror->running;
++        MUTEX_UNLOCK(mirror->run_mutex);
++        if (!running) return; /* SETUP/TEARDOWN discards this old context. */
++        int count = length < sizeof(scratch) ? length : (int)sizeof(scratch);
++        mirror_buffer_decrypt(mirror->buffer, zeros, scratch, count);
++        length -= count;
++    }
++    logger_log(mirror->logger, LOGGER_INFO,
++        "IPHONE_MIRROR_MIRROR_CTR_SKIP discarded incomplete encrypted frame");
++}
++
++static int mirror_peer_matches(raop_rtp_mirror_t *mirror,
++    const struct sockaddr_storage *peer) {
++    const struct sockaddr_storage *remote = &mirror->remote_saddr;
++    if (peer->ss_family != remote->ss_family) return 0;
++    if (peer->ss_family == AF_INET)
++        return ((const struct sockaddr_in *)peer)->sin_addr.s_addr ==
++               ((const struct sockaddr_in *)remote)->sin_addr.s_addr;
++    if (peer->ss_family == AF_INET6)
++        return memcmp(&((const struct sockaddr_in6 *)peer)->sin6_addr,
++            &((const struct sockaddr_in6 *)remote)->sin6_addr, 16) == 0;
++    return 0;
++}
++
++static void mirror_report_state(raop_rtp_mirror_t *mirror, int state) {
++    const unsigned char *id = (const unsigned char *)mirror->remoteDeviceId;
++    if (!*id) return;
++    for (; *id; ++id) if (*id < 32 || *id == 127) return;
++    logger_log(mirror->logger, LOGGER_INFO, "IPHONE_MIRROR_VIDEO_STATE\t%s\t%d",
++        mirror->remoteDeviceId, state);
++}
++
++/* Convert an AVC configuration record into Annex B without assuming signed
++ * 16-bit lengths or a single parameter set. Each length is checked before use. */
++static unsigned char *mirror_parameter_sets(const unsigned char *data,
++    size_t size, int *length) {
++    size_t cursor = 6, used = 0;
++    unsigned char *output;
++    int group;
++    *length = 0;
++    if (size < 7 || size > 102400) return NULL;
++    output = malloc(size * 2);
++    if (!output) return NULL;
++    for (group = 0; group < 2; ++group) {
++        unsigned int count, index;
++        if (group == 0) count = data[5] & 31;
++        else { if (cursor >= size) goto invalid; count = data[cursor++]; }
++        if (!count) goto invalid;
++        for (index = 0; index < count; ++index) {
++            size_t bytes;
++            if (size - cursor < 2) goto invalid;
++            bytes = ((size_t)data[cursor] << 8) | data[cursor + 1];
++            cursor += 2;
++            if (!bytes || bytes > size - cursor || used + bytes + 4 > size * 2)
++                goto invalid;
++            output[used++] = 0; output[used++] = 0;
++            output[used++] = 0; output[used++] = 1;
++            memcpy(output + used, data + cursor, bytes);
++            used += bytes; cursor += bytes;
++        }
++    }
++    *length = (int)used;
++    return output;
++invalid:
++    free(output);
++    return NULL;
++}
++
+ static THREAD_RETVAL
+ raop_rtp_mirror_thread(void *arg)
+ {
+-    raop_rtp_mirror_t *raop_rtp_mirror = arg;
+-    int stream_fd = -1;
+-    unsigned char packet[128];
+-    memset(packet, 0 , 128);
+-    unsigned int readstart = 0;
+-    uint64_t pts_base = 0;
+-    uint64_t pts = 0;
+-    /* IPHONE_MIRROR_ORIENTATION_ACCESS_UNIT: retain only the most recent
+-     * unencrypted SPS/PPS until the matching encrypted IDR arrives. */
+-    unsigned char* pending_sps_pps = NULL;
+-    int pending_sps_pps_len = 0;
+-    uint64_t pending_sps_pps_timestamp = 0;
+-    assert(raop_rtp_mirror);
+-
+-    int exceptionExit = 0;
+-#ifdef DUMP_H264
+-    // C decrypted
+-    FILE* file = fopen("demo.h264", "wb");
+-    // encrypted source file
+-    FILE* file_source = fopen("demo.source", "wb");
+-
+-    FILE* file_len = fopen("demo.len", "wb");
+-#endif
+-    while (1) {
++    raop_rtp_mirror_t *mirror = arg;
++    mirror_socket_t stream = (mirror_socket_t)-1;
++    unsigned char header[128];
++    unsigned char *pending_sps_pps = NULL;
++    int pending_sps_pps_len = 0, sender_paused = 0, exceptionExit = 0;
++    uint64_t pending_timestamp = 0, pts_base = 0, reconnect_deadline = 0;
++    int have_pts = 0, invalid_frames = 0;
++    for (;;) {
+         fd_set rfds;
+-        struct timeval tv;
+-        int nfds, ret;
+-        MUTEX_LOCK(raop_rtp_mirror->run_mutex);
+-        if (!raop_rtp_mirror->running) {
+-            MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
+-            break;
+-        }
+-        MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
+-        /* Set timeout value to 1ms (reduced from 5ms for lower latency) */
+-        tv.tv_sec = 0;
+-        tv.tv_usec = 1000;
+-
+-        /* Get the correct nfds value and set rfds */
+-        FD_ZERO(&rfds);
+-        if (stream_fd == -1) {
+-            FD_SET(raop_rtp_mirror->mirror_data_sock, &rfds);
+-            nfds = raop_rtp_mirror->mirror_data_sock+1;
+-        } else {
+-            FD_SET(stream_fd, &rfds);
+-            nfds = stream_fd+1;
+-        }
+-        ret = select(nfds, &rfds, NULL, NULL, &tv);
+-        if (ret == 0) {
+-            /* Timeout happened */
+-            continue;
+-        } else if (ret == -1) {
+-            /* FIXME: Error happened */
+-            logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "Error in select");
++        struct timeval window = {0, 100000};
++        int ready, payloadsize, type;
++        unsigned char *payload = NULL;
++        MUTEX_LOCK(mirror->run_mutex);
++        if (!mirror->running) { MUTEX_UNLOCK(mirror->run_mutex); break; }
++        MUTEX_UNLOCK(mirror->run_mutex);
++        if (stream == (mirror_socket_t)-1 && reconnect_deadline &&
++            GetTickCount64() >= reconnect_deadline) {
++            logger_log(mirror->logger, LOGGER_WARNING, "Mirror data reconnect grace expired");
+             exceptionExit = 1;
+             break;
+         }
+-        if (stream_fd == -1 && FD_ISSET(raop_rtp_mirror->mirror_data_sock, &rfds)) {
+-            struct sockaddr_storage saddr;
+-            socklen_t saddrlen;
+-
+-            logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "Accepting client");
+-            saddrlen = sizeof(saddr);
+-            stream_fd = accept(raop_rtp_mirror->mirror_data_sock, (struct sockaddr *)&saddr, &saddrlen);
+-            if (stream_fd == -1) {
+-                /* FIXME: Error happened */
+-                logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "Error in accept %d %s", errno, strerror(errno));
+-                exceptionExit = 1;
+-                break;
++        FD_ZERO(&rfds);
++        FD_SET(stream == (mirror_socket_t)-1 ? mirror->mirror_data_sock : stream, &rfds);
++        ready = select(0, &rfds, NULL, NULL, &window);
++        if (ready == 0) continue; /* Static and paused frames remain valid. */
++        if (ready < 0) {
++            if (stream != (mirror_socket_t)-1) goto reconnect;
++            exceptionExit = 1; break;
++        }
++        if (stream == (mirror_socket_t)-1) {
++            struct sockaddr_storage peer;
++            socklen_t peer_len = sizeof(peer);
++            stream = accept(mirror->mirror_data_sock, (struct sockaddr *)&peer, &peer_len);
++            if (stream == (mirror_socket_t)-1) continue;
++            if (!mirror_peer_matches(mirror, &peer)) {
++                closesocket(stream); stream = (mirror_socket_t)-1; continue;
+             }
+-            mirror_enable_keepalive(stream_fd);
+-        }
+-        if (stream_fd != -1 && FD_ISSET(stream_fd, &rfds)) {
+-            // packetlen initially 0
+-            ret = recv(stream_fd, packet + readstart, 4 - readstart, 0);
+-            if (ret == 0) {
+-                /* TCP socket closed */
+-                logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "TCP socket closed");
+-                exceptionExit = 1;
+-                break;
+-            } else if (ret == -1) {
+-                /* FIXME: Error happened */
+-                logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "Error in recv");
+-                exceptionExit = 1;
+-                break;
++            mirror_enable_keepalive(stream);
++            reconnect_deadline = 0;
++            logger_log(mirror->logger, LOGGER_INFO, "Mirror data client accepted");
++            mirror_report_state(mirror, sender_paused ? 1 : 0);
++            continue;
++        }
++        /* A readable socket starts a bounded exact header read. Idle sockets
++         * never enter this path, so a static screen has no read deadline. */
++        if (mirror_recv_exact(mirror, stream, header, sizeof(header)) < 0) goto reconnect;
++        payloadsize = byteutils_get_int(header, 0);
++        type = byteutils_get_short(header, 4) & 255;
++        if (payloadsize < 0 || payloadsize > MIRROR_MAX_PAYLOAD_SIZE) {
++            exceptionExit = 1; break; /* Frame length/cipher position is unknowable. */
++        }
++        if (payloadsize) {
++            payload = malloc((size_t)payloadsize);
++            if (!payload) { exceptionExit = 1; break; }
++            if (mirror_recv_exact(mirror, stream, payload, payloadsize) < 0) {
++                if (type == 0) mirror_skip_encrypted_frame(mirror, payloadsize);
++                free(payload); goto reconnect;
+             }
+-            readstart += ret;
+-            if (readstart < 4) {
++        }
++        if (type == 1) {
++            int next_paused = header[6] == 0x56 ? 1 : header[6] == 0x16 ? 0 : sender_paused;
++            if (next_paused != sender_paused) {
++                sender_paused = next_paused;
++                mirror_report_state(mirror, sender_paused);
++            }
++            if (payloadsize) {
++                float sw = byteutils_get_float(header, 40), sh = byteutils_get_float(header, 44);
++                float ow = byteutils_get_float(header, 56), oh = byteutils_get_float(header, 60);
++                int config_len;
++                unsigned char *config = mirror_parameter_sets(payload, payloadsize, &config_len);
++                if (config) {
++                    logger_log(mirror->logger, LOGGER_INFO,
++                        "IPHONE_MIRROR_VIDEO_DIAG 0 %d %d %d %d %d %d",
++                        payloadsize, config_len, header[6],
++                        isfinite(sw) && sw > 0 && sw <= 16384 ? (int)sw : 0,
++                        isfinite(sh) && sh > 0 && sh <= 16384 ? (int)sh : 0,
++                        isfinite(ow) && ow > 0 && ow <= 16384 ? (int)ow : 0);
++                    free(pending_sps_pps);
++                    pending_sps_pps = config; pending_sps_pps_len = config_len;
++                    pending_timestamp = byteutils_get_long(header, 8);
++                    if (isfinite(sw) && isfinite(sh) && isfinite(ow) && isfinite(oh) &&
++                        sw > 0 && sh > 0 && ow > 0 && oh > 0 &&
++                        sw <= 16384 && sh <= 16384 && ow <= 16384 && oh <= 16384)
++                        logger_log(mirror->logger, LOGGER_INFO,
++                            "IPHONE_MIRROR_VIDEO_GEOMETRY\t%s\t%.0f\t%.0f\t%.0f\t%.0f",
++                            mirror->remoteDeviceId, sw, sh, ow, oh);
++                } else {
++                    free(pending_sps_pps); pending_sps_pps = NULL; pending_sps_pps_len = 0;
++                    logger_log(mirror->logger, LOGGER_WARNING, "Invalid mirror SPS/PPS record size=%d", payloadsize);
++                }
++            }
++        } else if (type == 0 && payloadsize) {
++            unsigned char *decoded = malloc((size_t)payloadsize);
++            uint64_t timestamp = byteutils_get_long(header, 8), absolute_pts = ntptopts(timestamp);
++            size_t offset = 0;
++            int has_new_parameter_sets = 0, valid = 1;
++            h264_decode_struct frame;
++            if (!decoded) { free(payload); exceptionExit = 1; break; }
++            mirror_buffer_decrypt(mirror->buffer, payload, decoded, payloadsize);
++            /* IPHONE_MIRROR_MIRROR_NAL_BOUNDS */
++            while (offset < (size_t)payloadsize) {
++                size_t bytes;
++                if ((size_t)payloadsize - offset < 4) { valid = 0; break; }
++                bytes = ((size_t)decoded[offset] << 24) | ((size_t)decoded[offset+1] << 16) |
++                    ((size_t)decoded[offset+2] << 8) | decoded[offset+3];
++                if (!bytes || bytes > (size_t)payloadsize - offset - 4) { valid = 0; break; }
++                decoded[offset] = 0; decoded[offset+1] = 0;
++                decoded[offset+2] = 0; decoded[offset+3] = 1;
++                offset += bytes + 4;
++            }
++            if (!valid) {
++                free(decoded); free(payload);
++                if (++invalid_frames >= MIRROR_INVALID_FRAME_LIMIT) {
++                    logger_log(mirror->logger, LOGGER_WARNING,
++                        "Mirror cipher/framing lost synchronization; new SETUP required");
++                    exceptionExit = 1; break;
++                }
+                 continue;
+             }
+-            if ((packet[0] == 80 && packet[1] == 79 && packet[2] == 83 && packet[3] == 84) || (packet[0] == 71 && packet[1] == 69 && packet[2] == 84)) {
+-                // POST or GET
+-                logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "handle http data");
+-            } else {
+-                // normal data block
+-                if (mirror_recv_exact(raop_rtp_mirror, stream_fd,
+-                    packet + readstart, 128 - readstart) != 0) {
+-                    exceptionExit = 1;
+-                    break;
++            invalid_frames = 0;
++            /* IPHONE_MIRROR_ORIENTATION_ACCESS_UNIT: merge the codec record
++             * with the encrypted frame sharing its NTP timestamp. */
++            if (pending_sps_pps) {
++                logger_log(mirror->logger, LOGGER_INFO,
++                    "IPHONE_MIRROR_VIDEO_DIAG 1 %d %d %d %d 0 0",
++                    payloadsize, pending_sps_pps_len,
++                    pending_timestamp == timestamp, decoded[4] & 31);
++                if (pending_timestamp == timestamp) {
++                    unsigned char *access_unit = malloc((size_t)payloadsize + pending_sps_pps_len);
++                    if (!access_unit) { free(decoded); free(payload); goto reconnect; }
++                    memcpy(access_unit, pending_sps_pps, pending_sps_pps_len);
++                    memcpy(access_unit + pending_sps_pps_len, decoded, payloadsize);
++                    free(decoded); decoded = access_unit;
++                    payloadsize += pending_sps_pps_len; has_new_parameter_sets = 1;
++                    logger_log(mirror->logger, LOGGER_INFO,
++                        "IPHONE_MIRROR_ORIENTATION_ACCESS_UNIT merged SPS/PPS with IDR");
+                 }
+-                readstart = 128;
+-                int payloadsize = byteutils_get_int(packet, 0);
+-                if (payloadsize < 0 || payloadsize > MIRROR_MAX_PAYLOAD_SIZE) {
+-                    logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
+-                        "Invalid mirror payload size: %d", payloadsize);
+-                    exceptionExit = 1;
+-                    break;
+-                }
+-                // FIXME: The calculation method here needs to be confirmed
+-                short payloadtype = (short) (byteutils_get_short(packet, 4) & 0xff);
+-                short payloadoption = byteutils_get_short(packet, 6);
+-
+-                // process content data
+-                if (payloadtype == 0) {
+-                    uint64_t payloadntp = byteutils_get_long(packet, 8);
+-                    // read time
+-                    if (pts_base == 0) {
+-                        pts_base = ntptopts(payloadntp);
+-                    } else {
+-                        pts =  ntptopts(payloadntp) - pts_base;
+-                    }
+-                    // this is encrypted data
+-                    unsigned char* payload_in = malloc(payloadsize);
+-                    unsigned char* payload = malloc(payloadsize);
+-                    readstart = 0;
+-                    if (mirror_recv_exact(raop_rtp_mirror, stream_fd,
+-                        payload_in, payloadsize) != 0) {
+-                        free(payload_in);
+-                        free(payload);
+-                        exceptionExit = 1;
+-                        break;
+-                    }
+-                    readstart = payloadsize;
+-                    //logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "readstart = %d", readstart);
+-#ifdef DUMP_H264
+-                    fwrite(payload_in, payloadsize, 1, file_source);
+-                    fwrite(&readstart, sizeof(readstart), 1, file_len);
+-#endif
+-                    // decrypt data
+-                    mirror_buffer_decrypt(raop_rtp_mirror->buffer, payload_in, payload, payloadsize);
+-                    /* IPHONE_MIRROR_MIRROR_NAL_BOUNDS */
+-                    int nalu_size = 0;
+-                    int nalu_num = 0;
+-                    int valid_nalus = payloadsize == 0;
+-                    while (!valid_nalus && nalu_size + 4 <= payloadsize) {
+-                        uint32_t nc_len = ((uint32_t)payload[nalu_size + 0] << 24) |
+-                            ((uint32_t)payload[nalu_size + 1] << 16) |
+-                            ((uint32_t)payload[nalu_size + 2] << 8) |
+-                            (uint32_t)payload[nalu_size + 3];
+-                        if (nc_len == 0 || nc_len > (uint32_t)(payloadsize - nalu_size - 4))
+-                            break;
+-                        payload[nalu_size + 0] = 0;
+-                        payload[nalu_size + 1] = 0;
+-                        payload[nalu_size + 2] = 0;
+-                        payload[nalu_size + 3] = 1;
+-                        nalu_size += (int)nc_len + 4;
+-                        nalu_num++;
+-                        valid_nalus = nalu_size == payloadsize;
+-                    }
+-                    if (!valid_nalus || nalu_size != payloadsize) {
+-                        logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
+-                            "Invalid decrypted mirror NAL payload size=%d offset=%d",
+-                            payloadsize, nalu_size);
+-                        free(payload_in);
+-                        free(payload);
+-                        memset(packet, 0, 128);
+-                        readstart = 0;
+-                        continue;
+-                    }
+-                    //logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "nalu_size = %d, payloadsize = %d nalu_num = %d", nalu_size, payloadsize, nalu_num);
+-
+-                    // write to file
+-#ifdef DUMP_H264
+-                    fwrite(payload, payloadsize, 1, file);
+-#endif
+-                    /* A parameter-set update belongs to the first IDR with
+-                     * the same NTP timestamp. Passing it separately leaves
+-                     * some FFmpeg H.264 decoders stuck on the old geometry. */
+-                    int has_new_parameter_sets = 0;
+-                    if (pending_sps_pps != NULL) {
+-                        if (pending_sps_pps_timestamp == payloadntp) {
+-                            unsigned char* access_unit = malloc((size_t)pending_sps_pps_len + (size_t)payloadsize);
+-                            if (access_unit == NULL) {
+-                                logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
+-                                    "Unable to allocate rotated H.264 access unit");
+-                                free(pending_sps_pps);
+-                                pending_sps_pps = NULL;
+-                                pending_sps_pps_len = 0;
+-                            } else {
+-                                memcpy(access_unit, pending_sps_pps, pending_sps_pps_len);
+-                                memcpy(access_unit + pending_sps_pps_len, payload, payloadsize);
+-                                free(pending_sps_pps);
+-                                pending_sps_pps = NULL;
+-                                free(payload);
+-                                payload = access_unit;
+-                                payloadsize += pending_sps_pps_len;
+-                                pending_sps_pps_len = 0;
+-                                has_new_parameter_sets = 1;
+-                                logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG,
+-                                    "IPHONE_MIRROR_ORIENTATION_ACCESS_UNIT merged SPS/PPS with IDR");
+-                            }
+-                        } else {
+-                            logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG,
+-                                "Discarding unmatched H.264 SPS/PPS timestamp");
+-                            free(pending_sps_pps);
+-                            pending_sps_pps = NULL;
+-                            pending_sps_pps_len = 0;
+-                        }
+-                    }
+-                    h264_decode_struct h264_data;
+-                    h264_data.data_len = payloadsize;
+-                    h264_data.data = payload;
+-                    h264_data.frame_type = has_new_parameter_sets ? 0 : 1;
+-                    h264_data.pts = pts;
+-                    raop_rtp_mirror->callbacks.video_process(raop_rtp_mirror->callbacks.cls, &h264_data, raop_rtp_mirror->remoteName, raop_rtp_mirror->remoteDeviceId);
+-                    free(payload_in);
+-                    free(payload);
+-                } else if ((payloadtype & 255) == 1) {
+-                    float mWidthSource = byteutils_get_float(packet, 40);
+-                    float mHeightSource = byteutils_get_float(packet, 44);
+-                    float mWidth = byteutils_get_float(packet, 56);
+-                    float mHeight =byteutils_get_float(packet, 60);
+-                    logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "mWidthSource = %f mHeightSource = %f mWidth = %f mHeight = %f", mWidthSource, mHeightSource, mWidth, mHeight);
+-                    /*int mRotateMode = 0;
+-
+-                    int p = payloadtype >> 8;
+-                    if (p == 4) {
+-                        mRotateMode = 1;
+-                    } else if (p == 7) {
+-                        mRotateMode = 3;
+-                    } else if (p != 0) {
+-                        mRotateMode = 2;
+-                    }*/
+-
+-                    // sps_pps this data is not encrypted
+-                    unsigned char* payload = malloc(payloadsize);
+-                    readstart = 0;
+-                    if (mirror_recv_exact(raop_rtp_mirror, stream_fd,
+-                        payload, payloadsize) != 0) {
+-                        free(payload);
+-                        exceptionExit = 1;
+-                        break;
+-                    }
+-                    readstart = payloadsize;
+-                    h264codec_t h264;
+-                    h264.version = payload[0];
+-                    h264.profile_high = payload[1];
+-                    h264.compatibility = payload[2];
+-                    h264.level = payload[3];
+-                    h264.reserved6andNAL = payload[4];
+-                    h264.reserved3andSPS = payload[5];
+-                    h264.lengthofSPS = (short) (((payload[6] & 255) << 8) + (payload[7] & 255));
+-                    logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "lengthofSPS = %d", h264.lengthofSPS);
+-                    h264.sequence = malloc(h264.lengthofSPS);
+-                    memcpy(h264.sequence, payload + 8, h264.lengthofSPS);
+-                    h264.numberOfPPS = payload[h264.lengthofSPS + 8];
+-                    h264.lengthofPPS = (short) (((payload[h264.lengthofSPS + 9] & 2040) + payload[h264.lengthofSPS + 10]) & 255);
+-                    h264.picture_parameter_set = malloc(h264.lengthofPPS);
+-                    logger_log(raop_rtp_mirror->logger, LOGGER_DEBUG, "lengthofPPS = %d", h264.lengthofPPS);
+-                    memcpy(h264.picture_parameter_set, payload + h264.lengthofSPS + 11, h264.lengthofPPS);
+-                    if (h264.lengthofSPS + h264.lengthofPPS < 102400) {
+-                        // copy sps_pps
+-                        int sps_pps_len = (h264.lengthofSPS + h264.lengthofPPS) + 8;
+-                        unsigned char* sps_pps = malloc(sps_pps_len);
+-                        sps_pps[0] = 0;
+-                        sps_pps[1] = 0;
+-                        sps_pps[2] = 0;
+-                        sps_pps[3] = 1;
+-                        memcpy(sps_pps + 4, h264.sequence, h264.lengthofSPS);
+-                        sps_pps[h264.lengthofSPS + 4] = 0;
+-                        sps_pps[h264.lengthofSPS + 5] = 0;
+-                        sps_pps[h264.lengthofSPS + 6] = 0;
+-                        sps_pps[h264.lengthofSPS + 7] = 1;
+-                        memcpy(sps_pps + h264.lengthofSPS + 8, h264.picture_parameter_set, h264.lengthofPPS);
+-#ifdef DUMP_H264
+-                        fwrite(sps_pps, sps_pps_len, 1, file);
+-#endif
+-                        if (pending_sps_pps != NULL) {
+-                            free(pending_sps_pps);
+-                        }
+-                        pending_sps_pps = sps_pps;
+-                        pending_sps_pps_len = sps_pps_len;
+-                        pending_sps_pps_timestamp = byteutils_get_long(packet, 8);
+-                        sps_pps = NULL;
+-                    }
+-                    free(payload);
+-                    free(h264.picture_parameter_set);
+-                    free(h264.sequence);
+-                } else if (payloadtype == (short) 2) {
+-                    readstart = 0;
+-                    if (payloadsize > 0) {
+-                        unsigned char* payload_in = malloc(payloadsize);
+-                    if (mirror_recv_exact(raop_rtp_mirror, stream_fd,
+-                        payload_in, payloadsize) != 0) {
+-                        free(payload_in);
+-                        exceptionExit = 1;
+-                        break;
+-                    }
+-                    readstart = payloadsize;
+-						free(payload_in);
+-                    }
+-                } else if (payloadtype == (short) 4) {
+-                    readstart = 0;
+-                    if (payloadsize > 0) {
+-                        unsigned char* payload_in = malloc(payloadsize);
+-                    if (mirror_recv_exact(raop_rtp_mirror, stream_fd,
+-                        payload_in, payloadsize) != 0) {
+-                        free(payload_in);
+-                        exceptionExit = 1;
+-                        break;
+-                    }
+-                    readstart = payloadsize;
+-						free(payload_in);
+-                    }
+-                } else {
+-                    readstart = 0;
+-                    if (payloadsize > 0) {
+-                        unsigned char* payload_in = malloc(payloadsize);
+-                    if (mirror_recv_exact(raop_rtp_mirror, stream_fd,
+-                        payload_in, payloadsize) != 0) {
+-                        free(payload_in);
+-                        exceptionExit = 1;
+-                        break;
+-                    }
+-                    readstart = payloadsize;
+-                        free(payload_in);
+-                    }
+-                }
++                free(pending_sps_pps); pending_sps_pps = NULL; pending_sps_pps_len = 0;
+             }
+-            memset(packet, 0 , 128);
+-            readstart = 0;
+-        }
+-    }
+-
+-    if (pending_sps_pps != NULL) {
+-        free(pending_sps_pps);
+-        pending_sps_pps = NULL;
+-    }
+-
+-    /* Close the stream file descriptor */
+-    if (stream_fd != -1) {
+-        closesocket(stream_fd);
+-    }
++            if (!have_pts || absolute_pts < pts_base) { pts_base = absolute_pts; have_pts = 1; }
++            frame.data = decoded; frame.data_len = payloadsize;
++            frame.frame_type = has_new_parameter_sets ? 0 : 1;
++            frame.pts = absolute_pts - pts_base;
++            if (sender_paused) { sender_paused = 0; mirror_report_state(mirror, 0); }
++            if (mirror->callbacks.video_process)
++                mirror->callbacks.video_process(mirror->callbacks.cls, &frame, mirror->remoteName, mirror->remoteDeviceId);
++            free(decoded);
++        }
++        free(payload);
++        continue;
++reconnect:
++        closesocket(stream); stream = (mirror_socket_t)-1;
++        free(pending_sps_pps); pending_sps_pps = NULL; pending_sps_pps_len = 0;
++        have_pts = 0; pts_base = 0;
++        /* Preserve the negotiated AES stream context across transport replacement.
++         * A new SETUP initializes keys; reconnect alone never resets them. */
++        reconnect_deadline = GetTickCount64() + MIRROR_RECONNECT_GRACE_MS;
++        mirror_report_state(mirror, 2);
++        logger_log(mirror->logger, LOGGER_INFO, "Mirror data interrupted; awaiting reconnect");
++    }
++    free(pending_sps_pps);
++    if (stream != (mirror_socket_t)-1) closesocket(stream);
+     if (exceptionExit) {
+-        if (raop_rtp_mirror->thread_exit_exception != NULL) {
+-            logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "Exiting exception thread[1]");
+-            THREAD_JOIN(raop_rtp_mirror->thread_exit_exception);
+-            raop_rtp_mirror->thread_exit_exception = NULL;
+-            logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "Exception thread exit[1]");
+-        }
+-        THREAD_CREATE(raop_rtp_mirror->thread_exit_exception, raop_exception_thread, raop_rtp_mirror);
+-    }
+-    logger_log(raop_rtp_mirror->logger, LOGGER_INFO, "Exiting TCP raop_rtp_mirror_thread thread");
+-#ifdef DUMP_H264
+-    fclose(file);
+-    fclose(file_source);
+-    fclose(file_len);
+-#endif
++        if (mirror->thread_exit_exception) THREAD_JOIN(mirror->thread_exit_exception);
++        THREAD_CREATE(mirror->thread_exit_exception, raop_exception_thread, mirror);
++    }
+     return 0;
+ }
+ 
+@@ -714,7 +609,13 @@
+     assert(raop_rtp_mirror);
+ 
+     MUTEX_LOCK(raop_rtp_mirror->run_mutex);
+-    if (raop_rtp_mirror->running || !raop_rtp_mirror->joined || raop_rtp_mirror->stop_in_progress) {
++    if (raop_rtp_mirror->running && !raop_rtp_mirror->stop_in_progress) {
++        if (mirror_timing_lport) *mirror_timing_lport = raop_rtp_mirror->mirror_timing_lport;
++        if (mirror_data_lport) *mirror_data_lport = raop_rtp_mirror->mirror_data_lport;
++        MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
++        return;
++    }
++    if (!raop_rtp_mirror->joined || raop_rtp_mirror->stop_in_progress) {
+         MUTEX_UNLOCK(raop_rtp_mirror->run_mutex);
+         return;
+     }
+--- a/AirPlayServerLib/lib/raop_buffer.c
++++ b/AirPlayServerLib/lib/raop_buffer.c
+@@ -28,13 +28,6 @@
+ #include "crypto/crypto.h"
+ #include "aes.h"
+ #include "compat.h"
+-#include "fdk-aac/libAACdec/include/aacdecoder_lib.h"
+-#ifndef FIXP_SGL
+-typedef SHORT FIXP_SGL;
+-#endif // !FIXP_SGL
+-
+-#include "fdk-aac/libFDK/include/clz.h"
+-#include "fdk-aac/libSYS/include/FDK_audio.h"
+ #include "stream.h"
+ #include <libavcodec/avcodec.h>
+ #include <libavutil/frame.h>
+@@ -72,7 +65,8 @@
+ 	unsigned char aeskey[RAOP_AESKEY_LEN];
+ 	unsigned char aesiv[RAOP_AESIV_LEN];
+ 
+-    HANDLE_AACDECODER phandle;
++    AVCodecContext *aac_context;
++    AVFrame *aac_frame;
+     AVCodecContext *alac_context;
+     AVFrame *alac_frame;
+     unsigned int aac_decode_failures;
+@@ -98,41 +92,71 @@
+ 	void *buffer;
+ };
+ 
+-static int fdk_flags = 0;
+-
+-/* period size 480 samples */
+-#define N_SAMPLE 480
+-
+-static int pcm_pkt_size = 4 * N_SAMPLE;
+-
+-HANDLE_AACDECODER
+-create_fdk_aac_decoder(logger_t *logger)
+-{
+-    int ret = 0;
+-    UINT nrOfLayers = 1;
+-	HANDLE_AACDECODER phandle = aacDecoder_Open(TT_MP4_RAW, nrOfLayers);
+-    if (phandle == NULL) {
+-        logger_log(logger, LOGGER_DEBUG, "aacDecoder open faild!\n");
+-        return NULL;
+-    }
+-    /* ASC config binary data */
+-	UCHAR eld_conf[] = { 0xF8, 0xE8, 0x50, 0x00 };
+-	UCHAR *conf[] = { eld_conf };
+-	static UINT conf_len = sizeof(eld_conf);
+-    ret = aacDecoder_ConfigRaw(phandle, conf, &conf_len);
+-    if (ret != AAC_DEC_OK) {
+-        logger_log(logger, LOGGER_DEBUG, "Unable to set configRaw\n");
+-        return NULL;
+-    }
+-    CStreamInfo *aac_stream_info = aacDecoder_GetStreamInfo(phandle);
+-    if (aac_stream_info == NULL) {
+-        logger_log(logger, LOGGER_DEBUG, "aacDecoder_GetStreamInfo failed!\n");
+-        return NULL;
+-    }
+-    logger_log(logger, LOGGER_DEBUG, "> stream info: channel = %d\tsample_rate = %d\tframe_size = %d\taot = %d\tbitrate = %d\n",   \
+-            aac_stream_info->channelConfig, aac_stream_info->aacSampleRate,
+-           aac_stream_info->aacSamplesPerFrame, aac_stream_info->aot, aac_stream_info->bitRate);
+-    return phandle;
++/* IPHONE_MIRROR_FFMPEG_AAC_ELD: use the same FFmpeg ABI as ALAC/H.264. */
++static AVCodecContext *create_aac_decoder(logger_t *logger) {
++    const unsigned char config[] = {0xf8, 0xe8, 0x50, 0x00};
++    AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_AAC);
++    AVCodecContext *context;
++    if (!codec) return NULL;
++    context = avcodec_alloc_context3(codec);
++    if (!context) return NULL;
++    context->extradata = av_mallocz(sizeof(config) + AV_INPUT_BUFFER_PADDING_SIZE);
++    if (!context->extradata) { avcodec_free_context(&context); return NULL; }
++    memcpy(context->extradata, config, sizeof(config));
++    context->extradata_size = sizeof(config);
++    context->sample_rate = 44100;
++    context->channels = 2;
++    context->channel_layout = AV_CH_LAYOUT_STEREO;
++    context->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
++    if (avcodec_open2(context, codec, NULL) < 0) {
++        avcodec_free_context(&context); return NULL;
++    }
++    logger_log(logger, LOGGER_INFO, "IPHONE_MIRROR_FFMPEG_AAC_ELD initialized");
++    return context;
++}
++
++static int decode_aac_packet(raop_buffer_t *buffer, raop_buffer_entry_t *entry,
++    unsigned char *data, int size) {
++    AVPacket packet;
++    AVFrame *frame = buffer->aac_frame;
++    int result, samples, rate, channels;
++    av_init_packet(&packet); packet.data = data; packet.size = size;
++    av_frame_unref(frame);
++    result = avcodec_send_packet(buffer->aac_context, &packet);
++    if (result < 0) return result;
++    result = avcodec_receive_frame(buffer->aac_context, frame);
++    if (result < 0) return result;
++    channels = frame->channels; samples = frame->nb_samples; rate = frame->sample_rate;
++    if (channels < 1 || channels > 2 || samples <= 0 || rate <= 0 ||
++        samples > entry->audio_buffer_size / (channels * 2) || !frame->extended_data)
++        return -1;
++    /* PCM format conversion only. Preserve the decoded sample count/rate. */
++    {
++        enum AVSampleFormat format = av_get_packed_sample_fmt(frame->format);
++        int planar = av_sample_fmt_is_planar(frame->format);
++        short *output = entry->audio_buffer;
++        for (int sample = 0; sample < samples; ++sample) {
++            for (int channel = 0; channel < channels; ++channel) {
++                const unsigned char *plane = frame->extended_data[planar ? channel : 0];
++                int index = planar ? sample : sample * channels + channel;
++                double value;
++                if (!plane) return -1;
++                switch (format) {
++                case AV_SAMPLE_FMT_S16: value = ((const int16_t *)plane)[index]; break;
++                case AV_SAMPLE_FMT_S32: value = ((const int32_t *)plane)[index] / 65536.0; break;
++                case AV_SAMPLE_FMT_FLT: value = ((const float *)plane)[index] * 32768.0; break;
++                case AV_SAMPLE_FMT_DBL: value = ((const double *)plane)[index] * 32768.0; break;
++                default: return -1;
++                }
++                output[sample * channels + channel] = !isfinite(value) ? 0 :
++                    value >= 32767 ? 32767 : value <= -32768 ? -32768 : (short)lrint(value);
++            }
++        }
++    }
++    entry->audio_buffer_len = samples * channels * 2;
++    entry->sample_rate = rate; entry->channels = (uint16_t)channels;
++    entry->bits_per_sample = 16;
++    return 0;
+ }
+ 
+ static AVCodecContext *
+@@ -270,23 +294,27 @@
+     raop_buffer->logger = logger;
+ 
+ 	/* Allocate the output audio buffers */
+-    audio_buffer_size = 480 * 2 * 2;
+-    raop_buffer->phandle = create_fdk_aac_decoder(logger);
+-    if (!raop_buffer->phandle) {
++    audio_buffer_size = 1024 * 2 * 2;
++    raop_buffer->aac_context = create_aac_decoder(logger);
++    if (!raop_buffer->aac_context) {
+         free(raop_buffer);
+         return NULL;
+     }
++    raop_buffer->aac_frame = av_frame_alloc();
+     raop_buffer->alac_frame = av_frame_alloc();
+-    if (!raop_buffer->alac_frame) {
+-        aacDecoder_Close(raop_buffer->phandle);
++    if (!raop_buffer->alac_frame || !raop_buffer->aac_frame) {
++        avcodec_free_context(&raop_buffer->aac_context);
++        av_frame_free(&raop_buffer->aac_frame);
++        av_frame_free(&raop_buffer->alac_frame);
+         free(raop_buffer);
+         return NULL;
+     }
+ 	raop_buffer->buffer_size = audio_buffer_size * RAOP_BUFFER_LENGTH;
+ 	raop_buffer->buffer = malloc(raop_buffer->buffer_size);
+ 	if (!raop_buffer->buffer) {
+-        if (raop_buffer->phandle) {
+-            aacDecoder_Close(raop_buffer->phandle);
++        if (raop_buffer->aac_context) {
++            avcodec_free_context(&raop_buffer->aac_context);
++        av_frame_free(&raop_buffer->aac_frame);
+         }
+         av_frame_free(&raop_buffer->alac_frame);
+ 		free(raop_buffer);
+@@ -309,7 +337,8 @@
+ raop_buffer_destroy(raop_buffer_t *raop_buffer)
+ {
+ 	if (raop_buffer) {
+-	    aacDecoder_Close(raop_buffer->phandle);
++	    avcodec_free_context(&raop_buffer->aac_context);
++        av_frame_free(&raop_buffer->aac_frame);
+         avcodec_free_context(&raop_buffer->alac_context);
+         av_frame_free(&raop_buffer->alac_frame);
+ 		free(raop_buffer->buffer);
+@@ -389,7 +418,7 @@
+ #endif
+ 
+     /* Check packet data length is valid */
+-    if (datalen < 12 || datalen > RAOP_PACKET_LEN) {
++    if (!data || datalen <= 12 || datalen > RAOP_PACKET_LEN) {
+         return -1;
+     }
+     unsigned short seqnum = (data[2] << 8) | data[3];
+@@ -429,7 +458,8 @@
+     entry->available = 1;
+ 
+     encryptedlen = payloadsize/16*16;
+-    unsigned char* packetbuf = malloc(payloadsize);
++    unsigned char* packetbuf = av_mallocz(payloadsize + AV_INPUT_BUFFER_PADDING_SIZE);
++    if (!packetbuf) { entry->available = 0; return -1; }
+     memset(packetbuf, 0, payloadsize);
+ 	// needs to be initialized internally
+     AES_CTX aes_ctx_audio;
+@@ -459,30 +489,7 @@
+         }
+     } else {
+         int ret = 0;
+-        int pkt_size = payloadsize;
+-        UINT valid_size = payloadsize;
+-        UCHAR *input_buf[1] = {packetbuf};
+-        CStreamInfo *streamInfo = NULL;
+-        ret = aacDecoder_Fill(raop_buffer->phandle, input_buf, &pkt_size, &valid_size);
+-        if (ret == AAC_DEC_OK) {
+-            const int pcm_capacity = entry->audio_buffer_size / sizeof(INT_PCM);
+-            ret = aacDecoder_DecodeFrame(raop_buffer->phandle,
+-                entry->audio_buffer, pcm_capacity, fdk_flags);
+-        }
+-        if (ret == AAC_DEC_OK) {
+-            streamInfo = aacDecoder_GetStreamInfo(raop_buffer->phandle);
+-        }
+-        if (streamInfo != NULL && streamInfo->numChannels > 0 &&
+-            streamInfo->frameSize > 0) {
+-            const int decoded_size = streamInfo->frameSize *
+-                streamInfo->numChannels * sizeof(INT_PCM);
+-            if (decoded_size <= entry->audio_buffer_size) {
+-                entry->audio_buffer_len = decoded_size;
+-                entry->sample_rate = streamInfo->sampleRate;
+-                entry->channels = (uint16_t)streamInfo->numChannels;
+-                entry->bits_per_sample = sizeof(INT_PCM) * 8;
+-            }
+-        }
++        ret = decode_aac_packet(raop_buffer, entry, packetbuf, payloadsize);
+         if (entry->audio_buffer_len == 0) {
+             raop_buffer->aac_decode_failures++;
+             if (raop_buffer->aac_decode_failures <= 3) {
+@@ -513,7 +520,7 @@
+ 	if (seqnum_cmp(seqnum, raop_buffer->last_seqnum) > 0) {
+ 		raop_buffer->last_seqnum = seqnum;
+ 	}
+-	free(packetbuf);
++	av_free(packetbuf);
+ 
+     return 1;
+ }
+@@ -524,6 +531,7 @@
+ {
+ 	short buflen;
+ 	raop_buffer_entry_t *entry;
++    *length = 0; *pts = 0; *sample_rate = 0; *channels = 0; *bits_per_sample = 0;
+ 
+ 	/* Calculate number of entries in the current buffer */
+ 	buflen = seqnum_cmp(raop_buffer->last_seqnum, raop_buffer->first_seqnum) + 1;
+@@ -603,6 +611,14 @@
+ {
+ 	int i;
+ 	assert(raop_buffer);
++    /* FLUSH starts a new PCM timeline. Missing packets must not reuse the
++     * old route's format or AAC overlap samples before fresh audio arrives. */
++    raop_buffer->concealment_buffer_len = 0;
++    raop_buffer->concealment_sample_rate = 0;
++    raop_buffer->concealment_channels = 0;
++    raop_buffer->concealment_bits_per_sample = 0;
++    avcodec_flush_buffers(raop_buffer->aac_context);
++    if (raop_buffer->alac_context) avcodec_flush_buffers(raop_buffer->alac_context);
+ 	for (i=0; i<RAOP_BUFFER_LENGTH; i++) {
+ 		raop_buffer->entries[i].available = 0;
+ 		raop_buffer->entries[i].audio_buffer_len = 0;
+--- a/AirPlayServerLib/AirPlayLib.vcxproj
++++ b/AirPlayServerLib/AirPlayLib.vcxproj
+@@ -94,7 +94,7 @@
+       <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_WARNINGS;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+       <ConformanceMode>true</ConformanceMode>
+       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+-      <AdditionalIncludeDirectories>lib\ed25519;lib\fdk-aac\libAACdec\include;lib\fdk-aac\libAACenc\include;lib\fdk-aac\libArithCoding\include;lib\fdk-aac\libDRCdec\include;lib\fdk-aac\libFDK\include;lib\fdk-aac\libFDK\include\x86;lib\fdk-aac\libMpegTPDec\include;lib\fdk-aac\libMpegTPEnc\include;lib\fdk-aac\libPCMutils\include;lib\fdk-aac\libSACdec\include;lib\fdk-aac\libSACenc\include;lib\fdk-aac\libSBRdec\include;lib\fdk-aac\libSBRenc\include;lib\fdk-aac\libSYS\include;lib\fdk-aac\win32;$(SolutionDir)external;$(SolutionDir)external\ffmpeg\include;lib;lib\crypto;lib\curve25519;lib\playfair;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <AdditionalIncludeDirectories>lib\ed25519;$(SolutionDir)external;$(SolutionDir)external\ffmpeg\include;lib;lib\crypto;lib\curve25519;lib\playfair;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+     </ClCompile>
+     <Link>
+       <SubSystem>Windows</SubSystem>
+@@ -109,7 +109,7 @@
+       <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_WARNINGS;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+       <ConformanceMode>true</ConformanceMode>
+       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+-      <AdditionalIncludeDirectories>lib\ed25519;lib\fdk-aac\libAACdec\include;lib\fdk-aac\libAACenc\include;lib\fdk-aac\libArithCoding\include;lib\fdk-aac\libDRCdec\include;lib\fdk-aac\libFDK\include;lib\fdk-aac\libFDK\include\x86;lib\fdk-aac\libMpegTPDec\include;lib\fdk-aac\libMpegTPEnc\include;lib\fdk-aac\libPCMutils\include;lib\fdk-aac\libSACdec\include;lib\fdk-aac\libSACenc\include;lib\fdk-aac\libSBRdec\include;lib\fdk-aac\libSBRenc\include;lib\fdk-aac\libSYS\include;lib\fdk-aac\win32;$(SolutionDir)external;$(SolutionDir)external\ffmpeg\include;lib;lib\crypto;lib\curve25519;lib\playfair;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <AdditionalIncludeDirectories>lib\ed25519;$(SolutionDir)external;$(SolutionDir)external\ffmpeg\include;lib;lib\crypto;lib\curve25519;lib\playfair;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+     </ClCompile>
+     <Link>
+       <SubSystem>Windows</SubSystem>
+@@ -126,7 +126,7 @@
+       <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_WARNINGS;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+       <ConformanceMode>true</ConformanceMode>
+       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+-      <AdditionalIncludeDirectories>lib\ed25519;lib\fdk-aac\libAACdec\include;lib\fdk-aac\libAACenc\include;lib\fdk-aac\libArithCoding\include;lib\fdk-aac\libDRCdec\include;lib\fdk-aac\libFDK\include;lib\fdk-aac\libFDK\include\x86;lib\fdk-aac\libMpegTPDec\include;lib\fdk-aac\libMpegTPEnc\include;lib\fdk-aac\libPCMutils\include;lib\fdk-aac\libSACdec\include;lib\fdk-aac\libSACenc\include;lib\fdk-aac\libSBRdec\include;lib\fdk-aac\libSBRenc\include;lib\fdk-aac\libSYS\include;lib\fdk-aac\win32;$(SolutionDir)external;$(SolutionDir)external\ffmpeg\include;lib;lib\crypto;lib\curve25519;lib\playfair;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <AdditionalIncludeDirectories>lib\ed25519;$(SolutionDir)external;$(SolutionDir)external\ffmpeg\include;lib;lib\crypto;lib\curve25519;lib\playfair;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+     </ClCompile>
+     <Link>
+       <SubSystem>Windows</SubSystem>
+@@ -145,7 +145,7 @@
+       <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_WARNINGS;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+       <ConformanceMode>true</ConformanceMode>
+       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+-      <AdditionalIncludeDirectories>lib\ed25519;lib\fdk-aac\libAACdec\include;lib\fdk-aac\libAACenc\include;lib\fdk-aac\libArithCoding\include;lib\fdk-aac\libDRCdec\include;lib\fdk-aac\libFDK\include;lib\fdk-aac\libFDK\include\x86;lib\fdk-aac\libMpegTPDec\include;lib\fdk-aac\libMpegTPEnc\include;lib\fdk-aac\libPCMutils\include;lib\fdk-aac\libSACdec\include;lib\fdk-aac\libSACenc\include;lib\fdk-aac\libSBRdec\include;lib\fdk-aac\libSBRenc\include;lib\fdk-aac\libSYS\include;lib\fdk-aac\win32;$(SolutionDir)external;$(SolutionDir)external\ffmpeg\include;lib;lib\crypto;lib\curve25519;lib\playfair;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <AdditionalIncludeDirectories>lib\ed25519;$(SolutionDir)external;$(SolutionDir)external\ffmpeg\include;lib;lib\crypto;lib\curve25519;lib\playfair;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+     </ClCompile>
+     <Link>
+       <SubSystem>Windows</SubSystem>
+@@ -187,219 +187,6 @@
+     <ClInclude Include="lib\ed25519\sc.h" />
+     <ClInclude Include="lib\ed25519\sha512.h" />
+     <ClInclude Include="lib\fairplay.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\include\aacdecoder_lib.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdecoder.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdec_drc.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdec_drc_types.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdec_hcr.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdec_hcrs.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdec_hcr_bit.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdec_hcr_types.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdec_pns.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aacdec_tns.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aac_ram.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\aac_rom.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\block.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\channel.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\channelinfo.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\conceal.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\conceal_types.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\FDK_delay.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\ldfiltbank.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\overlapadd.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\pulsedata.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\rvlc.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\rvlcbit.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\rvlcconceal.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\rvlc_info.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\stereo.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\usacdec_acelp.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\usacdec_ace_d4t64.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\usacdec_ace_ltp.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\usacdec_const.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\usacdec_fac.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\usacdec_lpc.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\usacdec_lpd.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACdec\src\usacdec_rom.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\include\aacenc_lib.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\aacenc.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\aacenc_pns.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\aacEnc_ram.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\aacEnc_rom.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\aacenc_tns.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\adj_thr.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\adj_thr_data.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\bandwidth.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\band_nrg.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\bitenc.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\bit_cnt.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\block_switch.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\channel_map.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\chaosmeasure.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\dyn_bits.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\grp_data.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\intensity.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\interface.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\line_pe.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\metadata_compressor.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\metadata_main.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\mps_main.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\ms_stereo.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\noisedet.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\pnsparam.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\pns_func.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\pre_echo_control.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\psy_configuration.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\psy_const.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\psy_data.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\psy_main.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\qc_data.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\qc_main.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\quantize.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\sf_estim.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\spreading.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\tns_func.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\tonality.h" />
+-    <ClInclude Include="lib\fdk-aac\libAACenc\src\transform.h" />
+-    <ClInclude Include="lib\fdk-aac\libArithCoding\include\ac_arith_coder.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\include\FDK_drcDecLib.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcDecoder.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcDec_gainDecoder.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcDec_reader.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcDec_rom.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcDec_selectionProcess.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcDec_tools.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcDec_types.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcGainDec_init.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcGainDec_preprocess.h" />
+-    <ClInclude Include="lib\fdk-aac\libDRCdec\src\drcGainDec_process.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\abs.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\autocorr2nd.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\clz.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\common_fix.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\cplx_mul.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\dct.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_archdef.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_bitbuffer.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_bitstream.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_core.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_crc.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_decorrelate.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_hybrid.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_lpc.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_matrixCalloc.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_qmf_domain.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_tools_rom.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\FDK_trigFcts.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\fft.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\fft_rad2.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\fixmadd.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\fixminmax.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\fixmul.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\fixpoint_math.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\huff_nodes.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\mdct.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\nlc_dec.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\qmf.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\qmf_pcm.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\scale.h" />
+-    <ClInclude Include="lib\fdk-aac\libFDK\include\scramble.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPDec\include\tpdec_lib.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPDec\include\tp_data.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPDec\src\tpdec_adif.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPDec\src\tpdec_adts.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPDec\src\tpdec_drm.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPDec\src\tpdec_latm.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPDec\src\tp_version.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPEnc\include\tpenc_lib.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPEnc\include\tp_data.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_adif.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_adts.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_asc.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_latm.h" />
+-    <ClInclude Include="lib\fdk-aac\libMpegTPEnc\src\tp_version.h" />
+-    <ClInclude Include="lib\fdk-aac\libPCMutils\include\limiter.h" />
+-    <ClInclude Include="lib\fdk-aac\libPCMutils\include\pcmdmx_lib.h" />
+-    <ClInclude Include="lib\fdk-aac\libPCMutils\include\pcm_utils.h" />
+-    <ClInclude Include="lib\fdk-aac\libPCMutils\src\version.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\include\sac_dec_errorcodes.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\include\sac_dec_lib.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_bitdec.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_calcM1andM2.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_dec.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_dec_conceal.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_dec_interface.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_dec_ssc_struct.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_process.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_qmf.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_reshapeBBEnv.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_rom.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_smoothing.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_stp.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACdec\src\sac_tsd.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\include\sacenc_lib.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_bitstream.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_const.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_delay.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_dmx_tdom_enh.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_filter.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_framewindowing.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_huff_tab.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_nlc_enc.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_onsetdetect.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_paramextract.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_staticgain.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_tree.h" />
+-    <ClInclude Include="lib\fdk-aac\libSACenc\src\sacenc_vectorfunctions.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\include\sbrdecoder.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\env_calc.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\env_dec.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\env_extr.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\hbe.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\HFgen_preFlat.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\huff_dec.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\lpp_tran.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\psbitdec.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\psdec.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\psdec_drm.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\pvc_dec.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\sbrdec_drc.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\sbrdec_freq_sca.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\sbr_crc.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\sbr_deb.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\sbr_dec.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\sbr_ram.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\sbr_rom.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRdec\src\transcendent.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\include\sbr_encoder.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\bit_sbr.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\cmondata.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\code_env.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\env_bit.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\env_est.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\fram_gen.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\invf_est.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\mh_det.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\nf_est.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\ps_bitenc.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\ps_const.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\ps_encode.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\ps_main.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\resampler.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\sbr.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\sbrenc_freq_sca.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\sbrenc_ram.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\sbrenc_rom.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\sbr_def.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\sbr_misc.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\ton_corr.h" />
+-    <ClInclude Include="lib\fdk-aac\libSBRenc\src\tran_det.h" />
+-    <ClInclude Include="lib\fdk-aac\libSYS\include\FDK_audio.h" />
+-    <ClInclude Include="lib\fdk-aac\libSYS\include\genericStds.h" />
+-    <ClInclude Include="lib\fdk-aac\libSYS\include\machine_type.h" />
+-    <ClInclude Include="lib\fdk-aac\libSYS\include\syslib_channelMapDescr.h" />
+-    <ClInclude Include="lib\fdk-aac\wavreader.h" />
+-    <ClInclude Include="lib\fdk-aac\win32\getopt.h" />
+     <ClInclude Include="lib\global.h" />
+     <ClInclude Include="lib\httpd.h" />
+     <ClInclude Include="lib\http_parser.h" />
+@@ -452,184 +239,6 @@
+     <ClCompile Include="lib\ed25519\sign.c" />
+     <ClCompile Include="lib\ed25519\verify.c" />
+     <ClCompile Include="lib\fairplay_playfair.c" />
+-    <ClCompile Include="lib\fdk-aac\aac-enc.c">
+-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+-    </ClCompile>
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aacdecoder.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aacdecoder_lib.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aacdec_drc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aacdec_hcr.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aacdec_hcrs.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aacdec_hcr_bit.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aacdec_pns.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aacdec_tns.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aac_ram.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\aac_rom.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\block.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\channel.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\channelinfo.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\conceal.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\FDK_delay.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\ldfiltbank.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\pulsedata.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\rvlc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\rvlcbit.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\rvlcconceal.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\stereo.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\usacdec_acelp.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\usacdec_ace_d4t64.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\usacdec_ace_ltp.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\usacdec_fac.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\usacdec_lpc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\usacdec_lpd.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACdec\src\usacdec_rom.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\aacenc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\aacenc_lib.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\aacenc_pns.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\aacEnc_ram.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\aacEnc_rom.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\aacenc_tns.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\adj_thr.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\bandwidth.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\band_nrg.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\bitenc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\bit_cnt.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\block_switch.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\channel_map.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\chaosmeasure.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\dyn_bits.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\grp_data.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\intensity.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\line_pe.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\metadata_compressor.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\metadata_main.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\mps_main.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\ms_stereo.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\noisedet.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\pnsparam.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\pre_echo_control.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\psy_configuration.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\psy_main.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\qc_main.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\quantize.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\sf_estim.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\spreading.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\tonality.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libAACenc\src\transform.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libArithCoding\src\ac_arith_coder.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\drcDec_gainDecoder.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\drcDec_reader.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\drcDec_rom.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\drcDec_selectionProcess.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\drcDec_tools.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\drcGainDec_init.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\drcGainDec_preprocess.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\drcGainDec_process.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libDRCdec\src\FDK_drcDecLib.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\autocorr2nd.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\dct.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_bitbuffer.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_core.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_crc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_decorrelate.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_hybrid.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_lpc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_matrixCalloc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_qmf_domain.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_tools_rom.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\FDK_trigFcts.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\fft.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\fft_rad2.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\fixpoint_math.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\huff_nodes.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\mdct.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\nlc_dec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\qmf.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libFDK\src\scale.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPDec\src\tpdec_adif.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPDec\src\tpdec_adts.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPDec\src\tpdec_asc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPDec\src\tpdec_drm.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPDec\src\tpdec_latm.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPDec\src\tpdec_lib.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_adif.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_adts.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_asc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_latm.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libMpegTPEnc\src\tpenc_lib.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libPCMutils\src\limiter.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libPCMutils\src\pcmdmx_lib.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libPCMutils\src\pcm_utils.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_bitdec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_calcM1andM2.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_dec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_dec_conceal.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_dec_lib.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_process.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_qmf.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_reshapeBBEnv.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_rom.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_smoothing.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_stp.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACdec\src\sac_tsd.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_bitstream.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_delay.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_dmx_tdom_enh.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_filter.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_framewindowing.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_huff_tab.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_lib.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_nlc_enc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_onsetdetect.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_paramextract.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_staticgain.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_tree.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSACenc\src\sacenc_vectorfunctions.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\env_calc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\env_dec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\env_extr.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\hbe.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\HFgen_preFlat.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\huff_dec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\lpp_tran.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\psbitdec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\psdec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\psdecrom_drm.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\psdec_drm.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\pvc_dec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\sbrdecoder.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\sbrdec_drc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\sbrdec_freq_sca.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\sbr_crc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\sbr_deb.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\sbr_dec.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\sbr_ram.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRdec\src\sbr_rom.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\bit_sbr.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\code_env.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\env_bit.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\env_est.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\fram_gen.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\invf_est.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\mh_det.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\nf_est.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\ps_bitenc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\ps_encode.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\ps_main.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\resampler.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\sbrenc_freq_sca.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\sbrenc_ram.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\sbrenc_rom.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\sbr_encoder.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\sbr_misc.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\ton_corr.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSBRenc\src\tran_det.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSYS\src\genericStds.cpp" />
+-    <ClCompile Include="lib\fdk-aac\libSYS\src\syslib_channelMapDescr.cpp" />
+-    <ClCompile Include="lib\fdk-aac\wavreader.c" />
+     <ClCompile Include="lib\httpd.c" />
+     <ClCompile Include="lib\http_parser.c" />
+     <ClCompile Include="lib\http_request.c" />
+--- a/AirPlayServerLib/lib/mirror_buffer.c
++++ b/AirPlayServerLib/lib/mirror_buffer.c
+@@ -94,32 +94,25 @@
+ }
+ 
+ void mirror_buffer_decrypt(mirror_buffer_t *mirror_buffer, unsigned char* input, unsigned char* output, int inputLen) {
+-    // start decryption
+-    if (mirror_buffer->nextDecryptCount > 0) {//mirror_buffer->nextDecryptCount = 10
+-        for (int i = 0; i < mirror_buffer->nextDecryptCount; i++) {
+-            output[i] = (input[i] ^ mirror_buffer->og[(16 - mirror_buffer->nextDecryptCount) + i]);
++    /* A packet may consume only part of the remaining CTR block. */
++    int offset = 0;
++    while (offset < inputLen && mirror_buffer->nextDecryptCount > 0) {
++        output[offset] = input[offset] ^ mirror_buffer->og[16 - mirror_buffer->nextDecryptCount];
++        --mirror_buffer->nextDecryptCount; ++offset;
++    }
++    if (offset < inputLen) {
++        int complete = (inputLen - offset) / 16 * 16;
++        memcpy(output + offset, input + offset, complete);
++        AES_CTR_xcrypt_buffer(&mirror_buffer->aes_ctx, output + offset, complete);
++        offset += complete;
++        if (offset < inputLen) {
++            int count = inputLen - offset;
++            memset(mirror_buffer->og, 0, 16);
++            AES_CTR_xcrypt_buffer(&mirror_buffer->aes_ctx, mirror_buffer->og, 16);
++            for (int index = 0; index < count; ++index)
++                output[offset + index] = input[offset + index] ^ mirror_buffer->og[index];
++            mirror_buffer->nextDecryptCount = 16 - count;
+         }
+-    }
+-    // process encrypted bytes
+-    int encryptlen = ((inputLen - mirror_buffer->nextDecryptCount) / 16) * 16;
+-    // aes decrypt
+-    AES_CTR_xcrypt_buffer(&mirror_buffer->aes_ctx, input + mirror_buffer->nextDecryptCount, encryptlen);
+-    // copy to output
+-    memcpy(output + mirror_buffer->nextDecryptCount, input + mirror_buffer->nextDecryptCount, encryptlen);
+-    int outputlength = mirror_buffer->nextDecryptCount + encryptlen;
+-    // process remaining length
+-    int restlen = (inputLen - mirror_buffer->nextDecryptCount) % 16;
+-    int reststart = inputLen - restlen;
+-    mirror_buffer->nextDecryptCount = 0;
+-    if (restlen > 0) {
+-        memset(mirror_buffer->og, 0, 16);
+-        memcpy(mirror_buffer->og, input + reststart, restlen);
+-        AES_CTR_xcrypt_buffer(&mirror_buffer->aes_ctx, mirror_buffer->og, 16);
+-        for (int j = 0; j < restlen; j++) {
+-            output[reststart + j] = mirror_buffer->og[j];
+-        }
+-        outputlength += restlen;
+-        mirror_buffer->nextDecryptCount = 16 - restlen; // IPHONE_MIRROR_ASCII_DECRYPT_COMMENT
+     }
+ }
+ 
+--- a/airplay2dll/FgAirplayChannel.cpp
++++ b/airplay2dll/FgAirplayChannel.cpp
+@@ -1,5 +1,7 @@
+ #include "FgAirplayChannel.h"
+ #include "CAutoLock.h"
++#include <cmath>
++#include <new>
+ 
+ FgAirplayChannel::FgAirplayChannel(IAirServerCallback* pCallback)
+ : m_nRef(1)
+@@ -96,6 +98,8 @@
+ 		avcodec_free_context(&m_pCodecCtx);
+ 		m_pCodecCtx = NULL;
+ 	}
++    m_bCodecOpened = false;
++    m_pCodec = NULL;
+ 	if (m_pSwsCtx)
+ 	{
+ 		sws_freeContext(m_pSwsCtx);
+@@ -105,7 +109,9 @@
+ 
+ float FgAirplayChannel::setScale(float fRatio)
+ {
+-	m_fScaleRatio = fRatio;
++    CAutoLock oLock(m_mutexVideo, "setScale");
++    if (std::isfinite(fRatio) && fRatio > 0.0f && fRatio <= 16.0f)
++        m_fScaleRatio = fRatio;
+ 	return m_fScaleRatio;
+ }
+ 
+@@ -120,15 +126,29 @@
+ 	}
+ 	AVPacket packet;
+ 	av_init_packet(&packet);
+-	packet.data = data->data;
+-	packet.size = data->size;
++    /* FFmpeg's bitstream readers require zero-filled trailing padding.
++     * Own the packet so every caller, including the DLL wrapper, is safe. */
++    struct PacketCleanup {
++        AVPacket* value;
++        ~PacketCleanup() { av_packet_unref(value); }
++    } cleanup{&packet};
++    ret = av_new_packet(&packet, data->size);
++    if (ret < 0) return ret;
++    memcpy(packet.data, data->data, data->size);
+ 	packet.pts = data->pts;
+ 	ret = avcodec_send_packet(m_pCodecCtx, &packet);
++    if (data->is_key && m_pCallback) {
++        char diagnostic[192];
++        sprintf_s(diagnostic, "IPHONE_MIRROR_VIDEO_DIAG 2 %d %d %d %d 0 0",
++            data->size, m_pCodecCtx->width, m_pCodecCtx->height, ret);
++        m_pCallback->log(6, diagnostic);
++    }
+ 	if (ret < 0 && ret != AVERROR(EAGAIN)) {
+ 		printf("IPHONE_MIRROR_H264_ROTATION_RECOVERY send_failed=%d\\n", ret);
+ 		return ret;
+ 	}
+ 
++    bool packet_sent = ret >= 0;
+ 	/* One packet can produce more than one frame, especially while the
+ 	 * decoder drains frames queued immediately before an orientation change. */
+ 	for (;;) {
+@@ -137,35 +157,71 @@
+ 		ret = avcodec_receive_frame(m_pCodecCtx, pFrame);
+ 		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+ 			av_frame_free(&pFrame);
++            if (!packet_sent && ret == AVERROR(EAGAIN)) {
++                /* send_packet(EAGAIN) did not consume this access unit.
++                 * Drain the queued frames, then retry this same packet. */
++                ret = avcodec_send_packet(m_pCodecCtx, &packet);
++    if (data->is_key && m_pCallback) {
++        char diagnostic[192];
++        sprintf_s(diagnostic, "IPHONE_MIRROR_VIDEO_DIAG 2 %d %d %d %d 0 0",
++            data->size, m_pCodecCtx->width, m_pCodecCtx->height, ret);
++        m_pCallback->log(6, diagnostic);
++    }
++                if (ret < 0) return ret;
++                packet_sent = true;
++                continue;
++            }
+ 			break;
+ 		}
+ 		if (ret < 0) {
+-			printf("IPHONE_MIRROR_H264_ROTATION_RECOVERY receive_failed=%d\\n", ret);
++			if (m_pCallback) {
++                char diagnostic[192];
++                sprintf_s(diagnostic, "IPHONE_MIRROR_VIDEO_DIAG 3 %d %d %d 0 0 0",
++                    ret, m_pCodecCtx->width, m_pCodecCtx->height);
++                m_pCallback->log(4, diagnostic);
++            }
+ 			av_frame_free(&pFrame);
+ 			break;
+ 		}
+ 		if (pFrame->width <= 0 || pFrame->height <= 0 ||
++            pFrame->width > 16384 || pFrame->height > 16384 ||
++            (pFrame->format != AV_PIX_FMT_YUV420P && pFrame->format != AV_PIX_FMT_YUVJ420P) ||
++            pFrame->linesize[0] < pFrame->width ||
++            pFrame->linesize[1] < (pFrame->width + 1) / 2 ||
++            pFrame->linesize[2] < (pFrame->width + 1) / 2 ||
+ 			pFrame->data[0] == NULL || pFrame->data[1] == NULL ||
+ 			pFrame->data[2] == NULL) {
+ 			av_frame_free(&pFrame);
+ 			continue;
+ 		}
+ 
+-		const int chromaHeight = (pFrame->height + 1) >> 1;
+-		const int ySize = pFrame->linesize[0] * pFrame->height;
+-		const int uSize = pFrame->linesize[1] * chromaHeight;
+-		const int vSize = pFrame->linesize[2] * chromaHeight;
+-		const int totalSize = ySize + uSize + vSize;
+-		if (ySize <= 0 || uSize <= 0 || vSize <= 0 || totalSize <= 0) {
++		if (m_pCallback && (m_sVideoFrameOri.width != pFrame->width ||
++            m_sVideoFrameOri.height != pFrame->height)) {
++            char diagnostic[192];
++            sprintf_s(diagnostic, "IPHONE_MIRROR_VIDEO_DIAG 4 %d %d %d %d %d 0",
++                pFrame->width, pFrame->height, pFrame->linesize[0],
++                m_sVideoFrameOri.width, m_sVideoFrameOri.height);
++            m_pCallback->log(6, diagnostic);
++        }
++        const int chromaHeight = (pFrame->height + 1) >> 1;
++        const int64_t yBytes = (int64_t)pFrame->linesize[0] * pFrame->height;
++        const int64_t uBytes = (int64_t)pFrame->linesize[1] * chromaHeight;
++        const int64_t vBytes = (int64_t)pFrame->linesize[2] * chromaHeight;
++        const int64_t totalBytes = yBytes + uBytes + vBytes;
++        if (totalBytes <= 0 || totalBytes > 64 * 1024 * 1024) {
+ 			av_frame_free(&pFrame);
+ 			continue;
+ 		}
++        const int ySize = (int)yBytes, uSize = (int)uBytes, vSize = (int)vBytes;
++        const int totalSize = (int)totalBytes;
+ 		if (m_sVideoFrameOri.data == NULL ||
+ 			m_sVideoFrameOri.width != pFrame->width ||
+ 			m_sVideoFrameOri.height != pFrame->height ||
+ 			m_sVideoFrameOri.dataTotalLen < totalSize) {
++            uint8_t* replacement = new (std::nothrow) uint8_t[totalSize];
++            if (!replacement) { av_frame_free(&pFrame); return AVERROR(ENOMEM); }
+ 			delete[] m_sVideoFrameOri.data;
+-			m_sVideoFrameOri.data = new uint8_t[totalSize];
++			m_sVideoFrameOri.data = replacement;
+ 		}
+ 		m_sVideoFrameOri.width = pFrame->width;
+ 		m_sVideoFrameOri.height = pFrame->height;
+@@ -184,8 +240,8 @@
+ 
+ 		if (m_pCallback != NULL) {
+ 			if (m_fScaleRatio < 0.9999f || m_fScaleRatio > 1.0001f) {
+-				scaleH264Data(&m_sVideoFrameOri);
+-				m_pCallback->outputVideo(&m_sVideoFrameScale, remoteName, remoteDeviceId);
++                if (scaleH264Data(&m_sVideoFrameOri) == 0)
++                    m_pCallback->outputVideo(&m_sVideoFrameScale, remoteName, remoteDeviceId);
+ 			} else {
+ 				m_pCallback->outputVideo(&m_sVideoFrameOri, remoteName, remoteDeviceId);
+ 			}
+@@ -195,53 +251,54 @@
+ 	return 0;
+ }
+ 
+-int FgAirplayChannel::scaleH264Data(SFgVideoFrame* pSrcFrame)
+-{
+-	int nScreenWidth = pSrcFrame->width * m_fScaleRatio;
+-	int nScreenHeight = pSrcFrame->height * m_fScaleRatio;
+-	if (m_pSwsCtx && m_sVideoFrameScale.width != nScreenWidth || m_sVideoFrameScale.height != nScreenHeight)
+-	{
+-		sws_freeContext(m_pSwsCtx);
+-		m_pSwsCtx = NULL;
+-	}
+-	if (!m_pSwsCtx)
+-	{
+-		// Use SWS_BILINEAR for fast scaling with good quality
+-		m_pSwsCtx = sws_getContext(pSrcFrame->width, pSrcFrame->height, AV_PIX_FMT_YUV420P,
+-			nScreenWidth, nScreenHeight, AV_PIX_FMT_YUV420P, SWS_BILINEAR,
+-			NULL, NULL, NULL);
+-	}
+-	if (m_sVideoFrameScale.width != nScreenWidth || m_sVideoFrameScale.height != nScreenHeight)
+-	{
+-		delete[] m_sVideoFrameScale.data;
+-		m_sVideoFrameScale.data = NULL;
+-	}
+-
+-	m_sVideoFrameScale.width = nScreenWidth;
+-	m_sVideoFrameScale.height = nScreenHeight;
+-	m_sVideoFrameScale.pts = pSrcFrame->pts;
+-	m_sVideoFrameScale.isKey = pSrcFrame->isKey;
+-	m_sVideoFrameScale.pitch[0] = ((nScreenWidth + 15) >> 4) << 4;
+-	m_sVideoFrameScale.pitch[1] = (((nScreenWidth >> 1) + 15) >> 4) << 4;
+-	m_sVideoFrameScale.pitch[2] = m_sVideoFrameScale.pitch[1];
+-
+-	int ySize = m_sVideoFrameScale.pitch[0] * nScreenHeight;
+-	int uSize = m_sVideoFrameScale.pitch[1] * nScreenHeight >> 1;
+-	int vSize = m_sVideoFrameScale.pitch[2] * nScreenHeight >> 1;
+-	m_sVideoFrameScale.dataTotalLen = ySize + uSize + vSize;
+-	m_sVideoFrameScale.dataLen[0] = ySize;
+-	m_sVideoFrameScale.dataLen[1] = uSize;
+-	m_sVideoFrameScale.dataLen[2] = vSize;
+-	if (!m_sVideoFrameScale.data) {
+-		m_sVideoFrameScale.data = new uint8_t[m_sVideoFrameScale.dataTotalLen];
+-	}
+-
+-	const uint8_t* srcSlice[3] = { pSrcFrame->data, pSrcFrame->data + pSrcFrame->dataLen[0], pSrcFrame->data + pSrcFrame->dataLen[0] + pSrcFrame->dataLen[1] };
+-	const uint8_t* dst[3] = { m_sVideoFrameScale.data,
+-		m_sVideoFrameScale.data + m_sVideoFrameScale.dataLen[0],
+-		m_sVideoFrameScale.data + m_sVideoFrameScale.dataLen[0] + m_sVideoFrameScale.dataLen[1] };
+-	sws_scale(m_pSwsCtx, (const uint8_t* const*)srcSlice, (const int*)pSrcFrame->pitch, 0,
+-		pSrcFrame->height, (uint8_t* const*)dst, (const int*)m_sVideoFrameScale.pitch);
+-
+-	return 0;
+-}
++int FgAirplayChannel::scaleH264Data(SFgVideoFrame* source) {
++    CAutoLock oLock(m_mutexVideo, "scaleH264Data");
++    if (!source || !source->data || !source->width || !source->height ||
++        source->width > 16384 || source->height > 16384) return AVERROR(EINVAL);
++    const uint64_t sourceChromaHeight = (source->height + 1) / 2;
++    if (source->pitch[0] < source->width ||
++        source->pitch[1] < (source->width + 1) / 2 ||
++        source->pitch[2] < (source->width + 1) / 2 ||
++        (uint64_t)source->pitch[0] * source->height > source->dataLen[0] ||
++        (uint64_t)source->pitch[1] * sourceChromaHeight > source->dataLen[1] ||
++        (uint64_t)source->pitch[2] * sourceChromaHeight > source->dataLen[2] ||
++        (uint64_t)source->dataLen[0] + source->dataLen[1] + source->dataLen[2] > source->dataTotalLen ||
++        source->dataTotalLen > 64 * 1024 * 1024) return AVERROR(EINVAL);
++    const double scaledWidth = source->width * (double)m_fScaleRatio;
++    const double scaledHeight = source->height * (double)m_fScaleRatio;
++    if (!std::isfinite(scaledWidth) || !std::isfinite(scaledHeight) ||
++        scaledWidth <= 0 || scaledHeight <= 0 ||
++        scaledWidth > 16384 || scaledHeight > 16384) return AVERROR(EINVAL);
++    const int width = scaledWidth < 1 ? 1 : (int)scaledWidth;
++    const int height = scaledHeight < 1 ? 1 : (int)scaledHeight;
++    const int yPitch = (width + 15) & ~15;
++    const int cPitch = ((width + 1) / 2 + 15) & ~15;
++    const int64_t yBytes = (int64_t)yPitch * height;
++    const int64_t cBytes = (int64_t)cPitch * ((height + 1) / 2);
++    const int64_t total = yBytes + 2 * cBytes;
++    if (total > 64 * 1024 * 1024) return AVERROR(EINVAL);
++    m_pSwsCtx = sws_getCachedContext(m_pSwsCtx, source->width, source->height,
++        AV_PIX_FMT_YUV420P, width, height, AV_PIX_FMT_YUV420P,
++        SWS_BILINEAR, NULL, NULL, NULL);
++    if (!m_pSwsCtx) return AVERROR(ENOMEM);
++    if (!m_sVideoFrameScale.data || m_sVideoFrameScale.dataTotalLen < total) {
++        uint8_t* replacement = new (std::nothrow) uint8_t[(size_t)total]();
++        if (!replacement) return AVERROR(ENOMEM);
++        delete[] m_sVideoFrameScale.data;
++        m_sVideoFrameScale.data = replacement;
++    }
++    m_sVideoFrameScale.width = width; m_sVideoFrameScale.height = height;
++    m_sVideoFrameScale.pts = source->pts; m_sVideoFrameScale.isKey = source->isKey;
++    m_sVideoFrameScale.pitch[0] = yPitch;
++    m_sVideoFrameScale.pitch[1] = m_sVideoFrameScale.pitch[2] = cPitch;
++    m_sVideoFrameScale.dataLen[0] = (unsigned int)yBytes;
++    m_sVideoFrameScale.dataLen[1] = m_sVideoFrameScale.dataLen[2] = (unsigned int)cBytes;
++    m_sVideoFrameScale.dataTotalLen = (unsigned int)total;
++    const uint8_t* input[3] = {source->data, source->data + source->dataLen[0],
++        source->data + source->dataLen[0] + source->dataLen[1]};
++    uint8_t* output[3] = {m_sVideoFrameScale.data,
++        m_sVideoFrameScale.data + m_sVideoFrameScale.dataLen[0],
++        m_sVideoFrameScale.data + m_sVideoFrameScale.dataLen[0] + m_sVideoFrameScale.dataLen[1]};
++    return sws_scale(m_pSwsCtx, input, (const int*)source->pitch, 0, source->height,
++        output, (const int*)m_sVideoFrameScale.pitch) == height ? 0 : AVERROR(EINVAL);
++}

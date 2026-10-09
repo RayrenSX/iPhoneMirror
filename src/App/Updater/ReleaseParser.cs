@@ -24,6 +24,7 @@ internal sealed record ReleaseInfo(
     internal Uri ReleaseUrl { get; init; } = new($"https://github.com/RayrenSX/iPhoneMirror/releases/tag/{TagName}");
     internal string? TaiwanBody { get; init; }
     internal bool TaiwanNotesChecked { get; init; }
+    internal ReleaseAsset? UxPlayAsset { get; init; }
 
     internal ReleaseAsset? PreferredAsset => InstallerAsset ?? ZipAsset;
 
@@ -35,7 +36,7 @@ internal sealed record ReleaseInfo(
 internal static class ReleaseParser
 {
     internal static ReleaseInfo? ParseLatest(string json, bool includeStable,
-        bool includePrerelease)
+        bool includePrerelease, bool requireApplicationAsset = false)
     {
         using var document = JsonDocument.Parse(json, new JsonDocumentOptions
         {
@@ -69,13 +70,20 @@ internal static class ReleaseParser
             var checksum = assets.FirstOrDefault(asset =>
                 asset.Name.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase) ||
                 asset.Name.Equals("checksums.txt", StringComparison.OrdinalIgnoreCase));
+            if (requireApplicationAsset && installer is null && zip is null) continue;
             var published = DateTimeOffset.TryParse(
                 GetOptionalString(element, "published_at"), out var parsedPublished)
                 ? parsedPublished : DateTimeOffset.MinValue;
             var releaseInfo = new ReleaseInfo(tag,
                 GetOptionalString(element, "name") ?? tag,
                 GetOptionalString(element, "body") ?? string.Empty,
-                published, version, prerelease, installer, zip, checksum);
+                published, version, prerelease, installer, zip, checksum)
+            {
+                UxPlayAsset = assets.FirstOrDefault(asset =>
+                    asset.Name == $"iPhoneMirror-UxPlay-{tag}-win-x64.zip" &&
+                    asset.DownloadUri.AbsoluteUri ==
+                        $"https://github.com/RayrenSX/iPhoneMirror/releases/download/{tag}/{asset.Name}"),
+            };
             if (Uri.TryCreate(GetOptionalString(element, "html_url"), UriKind.Absolute,
                     out var releaseUrl) && IsTrustedReleasePageUri(releaseUrl))
                 releaseInfo = releaseInfo with { ReleaseUrl = releaseUrl };

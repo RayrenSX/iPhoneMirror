@@ -68,22 +68,60 @@ def read_ini(path: Path):
 
 def installer_resources():
     compiler = ROOT/'work/tools/inno-setup'
-    defaults = ('Languages/ChineseSimplified.isl', 'Languages/ChineseTraditional.isl', str(ROOT/'installer/Languages/ChineseTraditionalTaiwan.isl'), 'Default.isl')
-    if not all((compiler/p).exists() for p in defaults):
-        return {}, '未发现本地 Inno Setup 语言包；安装器继承文本未验证'
-    result = {lang: {f'{section}/{key}': value for (section, key), value in read_ini(compiler/p).items()
-                     if section in ('Messages', 'CustomMessages')}
-              for lang, p in zip(LANGUAGES, defaults)}
-    overrides = read_ini(ROOT/'installer/iPhoneMirror.iss')
-    codes = dict(zip(('chinesesimp', 'chinesetrad', 'chinesetaiwan', 'english'), LANGUAGES))
+    script_path = ROOT/'installer/iPhoneMirror.iss'
+    script = script_path.read_text(encoding='utf-8-sig')
+    codes = {'chinesesimp': 'zh-CN', 'chinesetrad': 'zh-HK',
+             'chinesetaiwan': 'zh-TW', 'english': 'en-US'}
+    language_ids = {'zh-CN': '$0804', 'zh-HK': '$0C04', 'zh-TW': '$0404', 'en-US': '$0409'}
+    # Read the actual compiler inputs. Cached files must not hide a deleted
+    # [Languages] entry or a changed MessagesFile path.
+    section = re.search(r'^\[Languages\]\s*\n(.*?)(?=^\[|\Z)', script, re.M | re.S)
+    if section is None:
+        raise ValueError('Installer: missing [Languages] section')
+    declarations = {}
+    for line in section[1].splitlines():
+        if not line.strip() or line.lstrip().startswith(';'):
+            continue
+        name = re.search(r'\bName:\s*"([^"]+)"', line)
+        messages = re.search(r'\bMessagesFile:\s*"([^"]+)"', line)
+        if name is None or messages is None:
+            raise ValueError(f'Installer: cannot audit language declaration: {line}')
+        code = name[1]
+        if code not in codes or code in declarations:
+            raise ValueError(f'Installer: unknown or duplicate language {code}')
+        relative = messages[1].replace('\\', '/')
+        declarations[code] = (compiler/relative.removeprefix('compiler:')
+                              if relative.startswith('compiler:') else script_path.parent/relative)
+    missing = set(codes) - set(declarations)
+    if missing:
+        raise ValueError(f'Installer: missing language declarations: {", ".join(sorted(missing))}')
+    absent = [str(path) for path in declarations.values() if not path.is_file()]
+    if absent:
+        return {}, f'Installer language files unavailable: {", ".join(absent)}'
+    overrides = read_ini(script_path)
+    result = {}
+    for code, path in declarations.items():
+        entries = read_ini(path)
+        language = codes[code]
+        language_id = overrides.get(('LangOptions', f'{code}.LanguageID'),
+                                    entries.get(('LangOptions', 'LanguageID'), ''))
+        if language_id.upper() != language_ids[language]:
+            raise ValueError(f'Installer: wrong LanguageID for {code}: {language_id}')
+        result[language] = {f'{section}/{key}': value for (section, key), value in entries.items()
+                            if section in ('Messages', 'CustomMessages')}
+    # Unqualified messages apply to every language; qualified ones override them.
+    for (section, name), value in overrides.items():
+        if section in ('Messages', 'CustomMessages') and '.' not in name:
+            for catalog in result.values():
+                catalog[f'{section}/{name}'] = value
     for (section, name), value in overrides.items():
         if section not in ('Messages', 'CustomMessages') or '.' not in name:
             continue
         code, key = name.split('.', 1)
-        if code in codes:
-            result[codes[code]][f'{section}/{key}'] = value
+        if code not in codes:
+            raise ValueError(f'Installer: unknown message language {code}')
+        result[codes[code]][f'{section}/{key}'] = value
     # Language-specific shortcut labels live outside the message dictionary.
-    script = (ROOT/'installer/iPhoneMirror.iss').read_text(encoding='utf-8-sig')
     for name, target, code in re.findall(
             r'Name: "\{group\}\\([^"{}]+)"; Filename: "([^"]+)";[^\n]*Languages: (\w+)', script):
         if code in codes:
@@ -130,19 +168,26 @@ def hardcoded_resources(inventory):
 
 
 def check_catalog(name, catalog, errors):
+    languages = tuple(dict.fromkeys((*LANGUAGES, *catalog)))
+    for language in languages:
+        if language not in catalog:
+            errors.append(f'{name}: missing language {language}')
+        elif not catalog[language]:
+            errors.append(f'{name}: empty language dictionary {language}')
+    catalog = {language: catalog.get(language, {}) for language in languages}
     keys = set().union(*(set(values) for values in catalog.values()))
     for key in keys:
-        for lang in LANGUAGES:
+        for lang in languages:
             if key not in catalog[lang]:
                 errors.append(f'{name}/{key}: missing {lang}')
             elif not catalog[lang][key].strip() and not (name == 'Installer' and key in {
                     'Messages/BeveledLabel', 'Messages/HelpTextNote', 'Messages/AboutSetupNote', 'Messages/TranslatorNote'}):
                 errors.append(f'{name}/{key}: empty {lang}')
-        present = [catalog[lang][key] for lang in LANGUAGES if key in catalog[lang]]
-        if len(present) == len(LANGUAGES) and len({tuple(sorted(TOKEN.findall(v))) for v in present}) != 1:
+        present = [catalog[lang][key] for lang in languages if key in catalog[lang]]
+        if len(present) == len(languages) and len({tuple(sorted(TOKEN.findall(v))) for v in present}) != 1:
             errors.append(f'{name}/{key}: placeholder mismatch')
         # Filter descriptions may differ; patterns and separators must remain intact.
-        if key.endswith('Filter') and len(present) == len(LANGUAGES):
+        if key.endswith('Filter') and len(present) == len(languages):
             if len({tuple(v.split('|')[1::2]) for v in present}) != 1:
                 errors.append(f'{name}/{key}: file filter mismatch')
         if any('\ufffd' in v for v in present):
@@ -170,23 +215,26 @@ def check_catalog(name, catalog, errors):
                         continue
                     if key in catalog[reference] and Counter(syntax.findall(taiwan)) != Counter(syntax.findall(catalog[reference][key])):
                         errors.append(f'{name}/{key}: whitespace/markup differs from {reference}')
-        if name == 'Installer' and len(present) == len(LANGUAGES) and key != 'Messages/RetryCancelCancel':
+        if name == 'Installer' and len(present) == len(languages) and key != 'Messages/RetryCancelCancel':
             # Chinese adds Alt+C to this optional action; the English catalog
             # intentionally uses a plain Cancel label. This is not a mismatch.
             if len({tuple(sorted(c.upper() for c in re.findall(r'(?<!&)&([A-Za-z])',v))) for v in present}) != 1:
                 errors.append(f'{name}/{key}: accelerator mismatch')
 
 
-def audit():
+def audit(require_installer=False):
     errors, warnings, catalogs, references = [], [], {}, {}
     inventory = (source_files(ROOT/'src') + source_files(ROOT/'scripts') +
                  source_files(ROOT/'tools') + source_files(ROOT/'installer') +
                  sorted(ROOT.glob('*.cmd')) + sorted(ROOT.glob('*.bat')))
     for project in ('App', 'DriverInstaller'):
-        catalog = {lang: read_xaml(ROOT/f'src/{project}/Localization/Strings.{lang}.xaml', errors)
-                   for lang in LANGUAGES}
+        catalog = {path.stem.removeprefix('Strings.'): read_xaml(path, errors)
+                   for path in sorted((ROOT/f'src/{project}/Localization').glob('Strings.*.xaml'))}
         catalogs[project] = catalog
         check_catalog(project, catalog, errors)
+        if 'en-US' not in catalog:
+            references[project] = set()
+            continue
         project_sources = source_files(ROOT/'src'/project) + source_files(ROOT/'src/SharedUI')
         used = set()
         all_resource_keys = set(catalog['en-US'])
@@ -240,7 +288,8 @@ def audit():
     if re.search(r'ScriptHash\s*=\s*"([A-F0-9]+)"', host)[1] != digest:
         errors.append('Cleanup: canonical script integrity hash mismatch')
     installer, warning = installer_resources()
-    if warning: warnings.append(warning)
+    if warning:
+        (errors if require_installer else warnings).append(warning)
     else:
         catalogs['Installer'] = installer
         check_catalog('Installer', installer, errors)
@@ -264,6 +313,10 @@ def audit():
             'ExecutableMissing': messages[index], 'OperationIncomplete': messages[index+3]}
             for index, lang in ((0, "zh-CN"), (1, "zh-HK"), (1, "zh-TW"), (2, "en-US"))}
         check_catalog('Launcher', catalogs['Launcher'], errors)
+    app_languages = set(catalogs['App'])
+    for component, catalog in catalogs.items():
+        for language in sorted(app_languages - set(catalog)):
+            errors.append(f'{component}: missing App language {language}')
     return catalogs, references, inventory, errors, warnings
 
 
@@ -344,10 +397,16 @@ def write_report(catalogs, references, inventory, errors, warnings):
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--write-report',action='store_true')
+    parser.add_argument('--require-installer', action='store_true',
+                        help='Fail if Inno Setup language resources cannot be audited (CI).')
+    parser.add_argument('--summary', action='store_true', help='Omit the unreferenced-key inventory.')
     args=parser.parse_args()
-    catalogs, references, inventory, errors, warnings = audit()
+    catalogs, references, inventory, errors, warnings = audit(require_installer=args.require_installer)
     if args.write_report: write_report(catalogs,references,inventory,errors,warnings)
-    print(json.dumps({'source_files':len(inventory),'keys':{p:{l:len(v) for l,v in c.items()} for p,c in catalogs.items()},
-                      'unreferenced':{p:sorted(set(catalogs[p]['en-US'])-v) for p,v in references.items()},
-                      'errors':errors,'warnings':warnings},ensure_ascii=False,indent=2))
+    result = {'source_files': len(inventory),
+              'keys': {p: {l: len(v) for l, v in c.items()} for p, c in catalogs.items()},
+              'errors': errors, 'warnings': warnings}
+    if not args.summary:
+        result['unreferenced'] = {p: sorted(set(catalogs[p].get('en-US', {}))-v) for p, v in references.items()}
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     raise SystemExit(1 if errors else 0)

@@ -122,6 +122,8 @@ internal static partial class Program
                 TestIsolatedKeyboardFocusRoute(window, other, udid, packets, mode != "Bluetooth");
                 if (shortcutReview)
                     TestShortcutReview(window, other, udid, packets, mode);
+                if (initializeHiddenHandle && mode == "Bluetooth")
+                    TestIndependentBluetoothPointer(window, other, device);
                 if (initializeHiddenHandle && mode != "Bluetooth")
                 {
                     if (mouseShortcutReview) TestNativeMouseShortcutRoute(window, device, packets, mode);

@@ -26,6 +26,18 @@ internal static class ScreenshotService
 
         var frame = frameProvider() ??
             throw new InvalidOperationException(LocalizationService.Get("ScreenshotNoFrame"));
+        return SavePng(CreateBitmap(frame), destinationPath);
+    }
+
+    internal static byte[] EncodePng(VideoFrame frame)
+    {
+        using var stream = new MemoryStream();
+        WritePng(CreateBitmap(frame), stream);
+        return stream.ToArray();
+    }
+
+    private static BitmapSource CreateBitmap(VideoFrame frame)
+    {
         var requiredBytes = checked((int)(frame.Stride * frame.Height));
         if (frame.Width == 0 || frame.Height == 0 || frame.Stride < frame.Width * 4U ||
             frame.Pixels.Length < requiredBytes)
@@ -41,7 +53,7 @@ internal static class ScreenshotService
             96, 96, PixelFormats.Bgra32, null, pixels, checked((int)frame.Stride));
         bitmap.Freeze();
 
-        return SavePng(bitmap, destinationPath);
+        return bitmap;
     }
 
     internal static string CaptureVisualPng(FrameworkElement visual, string destinationPath)
@@ -67,10 +79,15 @@ internal static class ScreenshotService
         var directory = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var output = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-        encoder.Save(output);
+        WritePng(bitmap, output);
         return fullPath;
     }
+    private static void WritePng(BitmapSource bitmap, Stream output)
+    {
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        encoder.Save(output);
+    }
+
 }

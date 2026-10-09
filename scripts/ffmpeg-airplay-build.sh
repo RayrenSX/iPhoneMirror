@@ -14,7 +14,7 @@ cd "$build_dir"
     --disable-postproc --disable-avresample --enable-small \
     --enable-shared --disable-static --extra-ldflags=-static-libgcc \
     --extra-libs='-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic' \
-    --enable-decoder=h264,alac --enable-parser=h264 \
+    --enable-decoder=h264,alac,aac --enable-parser=h264 \
     --enable-swresample --enable-swscale
 make -j"$jobs"
 for library in libavcodec/avcodec-58.dll libavutil/avutil-56.dll \

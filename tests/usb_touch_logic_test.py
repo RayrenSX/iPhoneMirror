@@ -10,7 +10,7 @@ import struct
 import time
 import hashlib
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import sys
 import os
 import plistlib
@@ -77,7 +77,7 @@ class TestDirectHidLeaseRefresh(unittest.TestCase):
             session = TouchSession(ipc, 120, 'test-device')
             session.auth_mode = 'direct'
             calls = []
-            async def refresh():
+            async def refresh(**_):
                 calls.append(True)
                 raise asyncio.CancelledError
             session._refresh_direct_hid = refresh
@@ -574,7 +574,7 @@ class TestDeveloperEnvironmentPreflight(unittest.IsolatedAsyncioTestCase):
             mount_timeouts.append(timeout)
             return await awaitable
 
-        def fetch_bundle(download_started):
+        def fetch_bundle(download_started, cancelled=None):
             download_started()
             return (Path('Image.dmg'), Path('BuildManifest.plist'),
                     Path('Image.trustcache'))
@@ -597,7 +597,8 @@ class TestDeveloperEnvironmentPreflight(unittest.IsolatedAsyncioTestCase):
             bridge.PERSONALIZED_DDI_FILES)
         self.assertEqual([event['code'] for event in ipc.events], [
             'checking_developer_environment', 'mounting_developer_image',
-            'testing_developer_image_sources', 'downloading_developer_image'])
+            'testing_developer_image_sources', 'downloading_developer_image',
+            'verifying_developer_image'])
 
     async def test_automatic_personalized_image_failure_has_stable_error(self):
         import usb_touch_bridge as bridge
@@ -937,7 +938,7 @@ class TestDeveloperEnvironmentPreflight(unittest.IsolatedAsyncioTestCase):
             udid = 'trusted-device'
 
         ipc = self.Ipc()
-        session = bridge.TouchSession(ipc, 120, udid='trusted-device')
+        session = bridge.TouchSession(ipc, 120, udid='trusted-device', transport='wireless')
         calls = []
 
         async def preflight(_lockdown):
@@ -1076,7 +1077,8 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
         session = bridge.TouchSession(ipc, 120)
         session.rsd = Rsd()
         with patch.object(bridge, 'UniversalHIDServiceService', MissingModern), \
-             patch.object(bridge, 'LegacyUniversalHIDServiceService', AvailableLegacy):
+             patch.object(bridge, 'LegacyUniversalHIDServiceService', AvailableLegacy), \
+             patch.object(session, '_ping_hid', AsyncMock()):
             await session._init_touch()
 
         self.assertIsInstance(session.hid, AvailableLegacy)
@@ -1184,7 +1186,7 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
                           side_effect=lambda: iter(['trusted-device'])), \
              patch.object(bridge, 'get_remote_pairing_tunnel_services', discover), \
              patch.object(bridge, 'start_tunnel', return_value=Tunnel()), \
-             patch.object(session, '_connect_with_tunnel_result', connect), \
+             patch.object(session, '_run_observed_tunnel', connect), \
              patch.object(session, '_prepare_ddi_for_remote_pairing', prepare):
             await session._connect_via_remote_pairing()
 

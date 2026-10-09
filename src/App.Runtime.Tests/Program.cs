@@ -28,6 +28,42 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--device-control-live", var liveBridge, var liveUdid, var liveMode])
+                return RunDeviceControlLive(liveBridge, liveUdid, liveMode);
+            if (args is ["--device-control-hold-live", var holdBridge, var holdUdid, var holdMode, var holdSeconds])
+                return RunDeviceControlLive(holdBridge, holdUdid, holdMode, int.Parse(holdSeconds));
+            if (args is ["--wireless-recovery-live"])
+                return RunWirelessRecoveryLive();
+            if (args is ["--wireless-recovery-selected-live", var recoveryUdid])
+                return RunWirelessRecoveryLive(recoveryUdid);
+            if (args is ["--wireless-socket-recovery-selected-live", var socketUdid, var socketMode])
+                return RunWirelessRecoveryLive(socketUdid, socketMode);
+            if (args is ["--control-lifecycle", var lifecyclePython])
+                return RunBridgeProcessLifecycleTests(lifecyclePython);
+            if (args is ["--owned-runtime-check", var ownedBridge])
+                return RunOwnedRuntimeCheck(ownedBridge);
+            if (args is ["--ddi-startup"])
+                return RunDdiStartupTests();
+            if (args is ["--ddi-startup", var ddiBridge])
+                return RunDdiStartupTests(ddiBridge);
+            if (args is ["--control-error-presentation"])
+                return RunControlErrorPresentationTests();
+            if (args is ["--automation-api"])
+                return RunAutomationApiTests();
+            if (args is ["--automation-settings", var automationOutput])
+                return RunAutomationSettingsTests(automationOutput);
+            if (args is ["--first-run-setup", var setupOutput])
+                return RunFirstRunSetupTests(setupOutput);
+            if (args is ["--setup-assessment", var assessmentOutput])
+                return RunSetupAssessmentTests(assessmentOutput);
+            if (args is ["--setup-assessment-preview", var assessmentPreviewOutput])
+                return RunSetupAssessmentTests(assessmentPreviewOutput, preview: true);
+            if (args is ["--setup-runtime-probe", var runtimeDriver])
+                return ProbeSetupRuntimeAsync(runtimeDriver).GetAwaiter().GetResult();
+            if (args is ["--first-run-driver-probe", var setupDriver])
+                return ProbeFirstRunDriver(setupDriver);
+            if (args is ["--first-run-driver-cancel", var cancellationDriver])
+                return TestFirstRunDriverCancellationAsync(cancellationDriver).GetAwaiter().GetResult();
             if (args is ["--keyboard-mapping-wizard", var wizardOutput])
                 return RunMappingWizardTests(wizardOutput);
             if (args is ["--keyboard-mapping-picking", var pickingOutput])
@@ -37,6 +73,18 @@ internal static partial class Program
                 return RunFivePointLive(fiveOutput, fiveTransport, fiveUdid, fivePython, fiveScript, fiveObserver);
             if (args is ["--wired-control-restart-live", var restartOutput])
                 return RunKeyboardMappingLiveProbe(restartOutput, wiredRestart: true);
+            if (args is ["--wired-window-exit-live", var exitOutput])
+                return RunKeyboardMappingLiveProbe(exitOutput, realWindowExit: true);
+            if (args is ["--wired-window-exit-selected-live", var selectedExitOutput, var selectedExitUdid])
+                return RunKeyboardMappingLiveProbe(selectedExitOutput, realWindowExit: true, selectedUdid: selectedExitUdid);
+            if (args is ["--wired-capture-only-exit-selected-live", var captureExitOutput, var captureExitUdid])
+                return RunKeyboardMappingLiveProbe(captureExitOutput, realWindowExit: true, selectedUdid: captureExitUdid, skipReverseControl: true);
+            if (args is ["--wired-capture-exit-evidence", var captureExitEvidence])
+            {
+                AssertWiredCaptureRestorationEvidence(captureExitEvidence);
+                Console.WriteLine("Native capture exit confirms Apple USB restoration without warnings.");
+                return 0;
+            }
             if (args is ["--keyboard-router"])
                 return RunKeyboardRouterTests();
             if (args is ["--keyboard-ownership"])
@@ -206,6 +254,9 @@ internal static partial class Program
                 return RunCaptureStatusPreview(statusArgs.FirstOrDefault());
             if (args is ["--ui-preview", var themeName, var surface])
                 return RunUiPreview(themeName, surface);
+            if (args.Length != 0)
+                throw new ArgumentException("Unknown runtime test arguments: " + string.Join(" ", args));
+            RunAutomationApiTests();
             // Use deterministic WPF rendering; native preview checks still use their real HWNDs.
             RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
             RunInteractionRegressionTests();
@@ -456,14 +507,26 @@ internal static partial class Program
             window = new IPhoneMirror.App.Windows.AdvancedSettingsWindow(
                 1920, 1080, previewOnly: true);
         }
+        else if (surface.Equals("setup", StringComparison.OrdinalIgnoreCase))
+        {
+            var checkpoint = Path.Combine(Path.GetTempPath(), "iPhoneMirror-setup-preview", Guid.NewGuid().ToString("N"), "checkpoint.json");
+            window = new IPhoneMirror.App.Windows.FirstRunSetupWindow(new IPhoneMirror.App.ViewModels.MainViewModel(),
+                new FirstRunSetupStore(checkpoint), previewOnly: true);
+        }
         else
         {
-            throw new ArgumentException("UI preview surface must be main or child.");
+            throw new ArgumentException("UI preview surface must be main, child or setup.");
         }
 
         window.Title = $"iPhoneMirror UI Audit — {theme} — {surface}";
         application.MainWindow = window;
-        window.Closed += (_, _) => application.Shutdown();
+        window.Closed += (_, _) =>
+        {
+            application.Shutdown();
+            // This preview uses Dispatcher.Run rather than Application.Run.
+            if (surface.Equals("setup", StringComparison.OrdinalIgnoreCase))
+                application.Dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
+        };
         window.Show();
         ApplyTheme(assembly, theme);
         Dispatcher.Run();
@@ -910,7 +973,7 @@ internal static partial class Program
               }]
             }]
             """;
-        var release = parseLatest.Invoke(null, [releaseJson, true, false]) ??
+        var release = parseLatest.Invoke(null, [releaseJson, true, false, Type.Missing]) ??
             throw new InvalidOperationException("Release fixture was not parsed.");
 
         var clientType = assembly.GetType(
@@ -1128,7 +1191,7 @@ internal static partial class Program
                     throw new InvalidOperationException(
                         "Developer tools window must be independent and non-topmost.");
                 AssertSelfDrawnWindowCorners(window);
-                AssertCatalogCount(windowType, window, "WorkspaceItems", 6);
+                AssertCatalogCount(windowType, window, "WorkspaceItems", 7);
                 AssertCatalogKeys(windowType, window, "WindowItems",
                 [
                     "advanced-settings", "text-input", "device-binding",

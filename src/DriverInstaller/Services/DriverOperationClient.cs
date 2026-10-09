@@ -70,7 +70,8 @@ internal sealed class DriverOperationClient
     }
 
     internal async Task<DriverOperationResult> RunAsync(DriverOperationKind kind,
-        AppleDeviceRecord device, ParentDriverConsent? parentConsent = null)
+        AppleDeviceRecord device, ParentDriverConsent? parentConsent = null,
+        CancellationToken cancellationToken = default)
     {
         var operationId = Guid.NewGuid().ToString("N");
         var timer = Stopwatch.StartNew();
@@ -91,6 +92,8 @@ internal sealed class DriverOperationClient
             ("present", device.IsPresent), ("service", device.Service),
             ("capture_filter", device.HasLibUsb0Filter));
         var paths = DriverConstants.GetOperationPaths(operationId);
+        DriverLogger.WriteEvent("driver-operation", "operation_storage_resolved",
+            ("operation", operationId), ("directory", paths.Directory));
         if (!EnsureElevationBoundary(out var boundaryError))
         {
             DriverLogger.WriteException("driver-operation", "elevation_boundary_failed",
@@ -119,6 +122,8 @@ internal sealed class DriverOperationClient
                 ("process", Path.GetFileName(executable)),
                 ("timeout_ms", OperationTimeout.TotalMilliseconds));
             using var cancellation = DriverOperationCancellation.Create(operationId);
+            cancellationToken.ThrowIfCancellationRequested();
+            using var cancelRegistration = cancellationToken.Register(cancellation.Request);
             using var process = Process.Start(start);
             if (process is null)
             {

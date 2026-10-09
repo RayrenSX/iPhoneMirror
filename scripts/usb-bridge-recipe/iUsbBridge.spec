@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import importlib.util
 import sys
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 
 hiddenimports = []
@@ -64,13 +65,20 @@ datas += collect_data_files('pytun_pmd3')
 # its .dist-info must accompany the onedir bridge as well.
 datas += copy_metadata('pyimg4')
 
+# Onedir places these at _internal's root (sys._MEIPASS). Merely shipping
+# them beside iPhoneMirror.exe cannot satisfy pyi_rth_usb's library lookup.
+usb_binaries = [(str(Path(SPECPATH) / 'native' / name), '.')
+                for name in ('libusb0.dll', 'libusb-1.0.dll')]
+
 a = Analysis(
     ['src/usb_touch_bridge.py'],
     pathex=[],
-    binaries=[],
+    binaries=usb_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=[],
+    # Override hook-usb: its host discovery can add aliases such as usb-1.0.dll
+    # that shadow the pinned libusb0 backend in the standard runtime hook.
+    hookspath=[str(Path(SPECPATH) / 'hooks')],
     hooksconfig={},
     runtime_hooks=[],
     # The optional Pygments image formatter is the only Pillow consumer in

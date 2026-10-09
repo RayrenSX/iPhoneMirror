@@ -258,10 +258,8 @@ bool usbmux_contains_serial(std::string_view serial) noexcept {
         if (!transport::Socket::probe_loopback(port)) continue;
         try {
             transport::UsbMuxClient mux(port);
-            for (const auto& device : mux.list_devices()) {
-                if (transport::apple_usb_serial_equal(device.serial, serial))
-                    return true;
-            }
+            if (transport::UsbMuxClient::contains_usb_device(mux.list_devices(), serial))
+                return true;
         } catch (...) {
         }
     }
@@ -350,8 +348,20 @@ UsbConfigurationRestoreResult restore_usb_configuration(
             // transport so no error path can send the request a second time.
             logging::write(std::format(
                 "usb_configuration_restore backend={} action=disable_requested", backend));
+            try { disable(); }
+            catch (const std::exception& error) {
+                logging::write(logging::Level::Warning, "usb",
+                    std::format("usb_configuration_restore backend={} action=disable_failed error={}",
+                        backend, error.what()));
+            } catch (...) {
+                logging::write(logging::Level::Warning, "usb",
+                    std::format("usb_configuration_restore backend={} action=disable_failed error=unknown",
+                        backend));
+            }
+            // The helper itself waits for removal/rearrival (up to 18s).
+            // Give the newly arrived management/WPD children their complete
+            // observation window after it returns, including an uncertain exit.
             deadline = std::chrono::steady_clock::now() + RestoreObservationWindow;
-            try { disable(); } catch (...) {}
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
@@ -388,7 +398,7 @@ UsbConfigurationRestoreResult restore_libusb0_configuration(
                 filter_safety.diagnostic));
     }
     auto result = restore_usb_configuration("libusb0",
-        [&, previous_state = std::optional<bool>{}, stable_normal = 0U,
+        [&, previous_state = std::optional<unsigned>{}, stable_normal = 0U,
             stable_quicktime_residual = 0U,
             automatic_restore_deadline = std::chrono::steady_clock::now() +
                 std::chrono::seconds(3)]() mutable {
@@ -420,7 +430,12 @@ UsbConfigurationRestoreResult restore_libusb0_configuration(
             stable_quicktime_residual >= 2 &&
             std::chrono::steady_clock::now() >= automatic_restore_deadline)
             observation = detail::UsbConfigurationObservation::QuickTime;
-        if (!previous_state || *previous_state != normal || stable_normal == 2 ||
+        const unsigned state = (mux_present ? 1U : 0U) |
+            (parent_present ? 2U : 0U) |
+            (pnp.media_interface_started ? 4U : 0U) |
+            (pnp.management_interface_started ? 8U : 0U) |
+            (restore_request_sent ? 16U : 0U);
+        if (!previous_state || *previous_state != state || stable_normal == 2 ||
             stable_quicktime_residual == 2) {
             logging::write(std::format(
                 "usb_configuration_restore backend=libusb0 observation={} usbmux_exact_present={} pnp_normal_stack={} parent_present={} mi00_media_started={} mi01_management_started={} request_sent={} stable_normal={} stable_quicktime_residual={}",
@@ -432,7 +447,7 @@ UsbConfigurationRestoreResult restore_libusb0_configuration(
                 pnp.media_interface_started,
                 pnp.management_interface_started, restore_request_sent,
                 stable_normal, stable_quicktime_residual));
-            previous_state = normal;
+            previous_state = state;
         }
         return observation;
     }, [&] {
@@ -440,6 +455,35 @@ UsbConfigurationRestoreResult restore_libusb0_configuration(
         (void)transport::LibUsb0Connection::disable_quicktime_configuration(identity);
     }, primary_request_sent);
     result.disable_requested = restore_request_sent;
+    const auto configuration = result.normal_observed ? std::optional<std::uint8_t>{} :
+        device::inspect_apple_usb_configuration(identity.serial);
+    const auto reconnect_pnp = device::inspect_apple_normal_usb_stack(identity.serial);
+    if (detail::should_reconnect_normal_usb_device(result.normal_observed,
+            configuration.has_value(), configuration.value_or(0),
+            reconnect_pnp.parent_started && reconnect_pnp.management_interface_started,
+            usbmux_contains_serial(identity.serial))) {
+        logging::write("usb_configuration_restore backend=libusb0 action=reconnect_exact_normal_port");
+        bool accepted{};
+        try { accepted = transport::LibUsb0Connection::reconnect_normal_device(identity); }
+        catch (const std::exception& error) {
+            logging::write(logging::Level::Warning, "usb_reconnect", error.what());
+        } catch (...) {}
+        if (accepted) {
+            // An accepted cycle is not a recovered Apple management channel.
+            // Require the exact USBMux row and complete normal PnP stack again.
+            unsigned stable{};
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
+            while (std::chrono::steady_clock::now() < deadline) {
+                const bool normal = usbmux_contains_serial(identity.serial) &&
+                    device::is_apple_normal_usb_stack_present(identity.serial);
+                stable = normal ? stable + 1U : 0U;
+                if (stable >= 2) { result.normal_observed = true; break; }
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+        }
+        logging::write(std::format("usb_reconnect accepted={} management_restored={}",
+            accepted, result.normal_observed));
+    }
     return result;
 }
 
@@ -1329,10 +1373,20 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             configuration_restore_result.disable_requested,
             active_normal_request_sent));
         if (!restored && publish_failure) {
+            const auto configuration =
+                device::inspect_apple_usb_configuration(serial_);
+            const auto pnp = device::inspect_apple_normal_usb_stack(serial_);
+            logging::write(logging::Level::Warning, "usb",
+                std::format(
+                    "usb_restore_unavailable device_fp={} active_configuration_known={} active_configuration={} parent_started={} media_started={} management_started={}",
+                    device_fp, configuration.has_value(),
+                    configuration ? static_cast<unsigned>(*configuration) : 0U,
+                    pnp.parent_started, pnp.media_interface_started,
+                    pnp.management_interface_started));
             set_stopped_warning(FailureKind::UsbConnection,
                 FailureStage::SessionTeardown,
                 -2108,
-                L"投屏停止时未确认 Apple USB 设备恢复普通配置；已释放投屏资源，请重新插拔数据线后再试");
+                L"投屏已停止并释放资源，但尚未确认 Apple USB 通道恢复可用。自动重连可能未获管理员授权或未成功；如手机出现信任提示，请点信任并输入密码。若仍无法识别，请重新插拔数据线后再试");
         }
         return restored;
     };
@@ -1988,8 +2042,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             }
             logging::write(
                 std::format("quicktime_fast_reconnect requested=frame_rate_unavailable "
-                    "attempt={} video_silence_intervals=10 usb_configuration=retained",
-                    fast_stream_reconnect_gate.attempt_count()));
+                    "attempt={} video_silence_ms={} media_silence_ms={} usb_configuration=retained",
+                    fast_stream_reconnect_gate.attempt_count(),
+                    video_silence_watchdog.silence_duration(now).count(),
+                    media_silence_watchdog.silence_duration(now).count()));
         };
         const auto detect_streaming_media_silence = [&] {
             const auto now = std::chrono::steady_clock::now();

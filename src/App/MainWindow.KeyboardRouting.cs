@@ -117,7 +117,14 @@ public partial class MainWindow
         // Recording is the router's exclusive editor transaction, including
         // the release of a key held when the transaction was cancelled.
         if (_mappingCapture.Process(key, down, _mappingCapture.Waiting,
-            action => Dispatcher.BeginInvoke(action, DispatcherPriority.Input))) return true;
+            action => Dispatcher.BeginInvoke(action, DispatcherPriority.Input)))
+        {
+            // Recovery can quarantine this same physical key in the router.
+            // Recording owns its up, but both owners must forget the retired
+            // lifetime without dispatching it to a device or a shortcut.
+            if (!down) _keyboardRouter.ReleaseCapturedKey(key);
+            return true;
+        }
         var generation = _keyboardRouter.Generation;
         var sourceForeground = _keyboardForegroundWindow();
         var mappingAllowed = IsKeyboardMappingInputModeActive && _mappingSettings.Enabled && MappingFocusAllows();

@@ -3,6 +3,7 @@
 #include "Logging.h"
 
 #include <Windows.h>
+#include <shellapi.h>
 #include <lusb0_usb.h>
 
 #include <algorithm>
@@ -175,11 +176,55 @@ DWORD run_configuration_helper(const AppleUsbIdentity& identity,
         throw std::runtime_error(std::format(
             "read USB configuration helper result: win32_error={}", GetLastError()));
     const auto operation_name = operation == L"activate" ? "activate" :
-        operation == L"restore" ? "restore" : "verify";
+        operation == L"restore" ? "restore" :
+        operation == L"reconnect" ? "reconnect" : "verify";
     logging::write(std::format(
         "usb_configuration_helper operation={} exit_code={}",
         operation_name, exit_code));
     return exit_code;
+}
+
+DWORD run_elevated_reconnect_helper(const AppleUsbIdentity& identity) {
+    std::wstring module_path(32768, L'\0');
+    const auto length = GetModuleFileNameW(nullptr, module_path.data(),
+        static_cast<DWORD>(module_path.size()));
+    if (length == 0 || length >= module_path.size())
+        throw std::runtime_error("locate USB reconnect helper failed");
+    module_path.resize(length);
+    const auto helper = std::filesystem::path(module_path).parent_path() /
+        L"iPhoneMirror.UsbConfigurationSwitch.exe";
+    if (!std::filesystem::is_regular_file(helper))
+        throw std::runtime_error("USB reconnect helper is missing");
+    // Consent has a deadline. A late accepted UAC prompt must not restart a
+    // device after the cleanup operation has already expired.
+    const auto parameters = L"reconnect " + quote_process_argument(widen_ascii(identity.serial)) +
+        L" " + std::to_wstring(identity.expected_quicktime_configuration) + L" " +
+        quote_process_argument(widen_ascii(identity.topology_id)) + L" " +
+        std::to_wstring(GetTickCount64() + 60000);
+    SHELLEXECUTEINFOW execute{.cbSize = sizeof(execute)};
+    execute.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    execute.lpVerb = L"runas";
+    execute.lpFile = helper.c_str();
+    execute.lpParameters = parameters.c_str();
+    execute.nShow = SW_HIDE;
+    logging::write("usb_reconnect action=administrator_consent_required");
+    if (!ShellExecuteExW(&execute)) {
+        const auto error = GetLastError();
+        logging::write(logging::Level::Warning, "usb_reconnect",
+            std::format("usb_reconnect action=elevation_failed win32_error={}", error));
+        return error == ERROR_CANCELLED ? 47 : 44;
+    }
+    if (!execute.hProcess) return 45;
+    const auto wait = WaitForSingleObject(execute.hProcess, 18000);
+    DWORD result = 46;
+    if (wait == WAIT_OBJECT_0 && !GetExitCodeProcess(execute.hProcess, &result))
+        result = 45;
+    // This atomic hub operation never disables a device persistently, opens
+    // a phone filter or has child processes. Do not forcibly kill an elevated
+    // process during a kernel port cycle. A timeout remains a failed restore.
+    CloseHandle(execute.hProcess);
+    logging::write(std::format("usb_reconnect elevated_helper_exit={}", result));
+    return result;
 }
 
 bool run_configuration_switch_helper(const AppleUsbIdentity& identity,
@@ -189,6 +234,9 @@ bool run_configuration_switch_helper(const AppleUsbIdentity& identity,
     const auto exit_code = run_configuration_helper(identity, operation);
     if (exit_code == 0 || exit_code == 20) return true;
     if (exit_code == 10) return false;
+    if (exit_code == 34)
+        throw std::runtime_error(
+            "USB configuration helper could not read the selected phone's serial; no configuration request was sent");
     if (exit_code == 32)
         throw std::runtime_error(std::format(
             "USB configuration helper observed {} removal but the exact interface did not return before timeout",
@@ -928,6 +976,13 @@ bool LibUsb0Connection::disable_quicktime_configuration(const std::string& seria
 bool LibUsb0Connection::disable_quicktime_configuration(
     const AppleUsbIdentity& identity) {
     return run_configuration_switch_helper(identity, false);
+}
+
+bool LibUsb0Connection::reconnect_normal_device(const AppleUsbIdentity& identity) {
+    auto result = run_configuration_helper(identity, L"reconnect");
+    if (result == 44) result = run_elevated_reconnect_helper(identity);
+    logging::write(std::format("usb_reconnect result={} accepted={}", result, result == 0));
+    return result == 0;
 }
 
 LibUsb0Connection LibUsb0Connection::open_quicktime(const std::string& serial) {

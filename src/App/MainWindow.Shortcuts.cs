@@ -28,9 +28,8 @@ public partial class MainWindow
         return true;
     }
 
-    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, SemaphoreSlim> _keyboardSessionGates = new();
     private SemaphoreSlim KeyboardSessionGate(DirectKeyboardRoute route) =>
-        _keyboardSessionGates.GetValue(route.Session, _ => new SemaphoreSlim(1, 1));
+        _viewModel.DeviceInput.KeyboardGate(route);
 
     private async Task SendRoutedKeyboardAsync(DirectKeyboardRoute route, byte modifiers,
         byte[] usages, Func<bool> canSend)

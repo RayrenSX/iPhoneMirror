@@ -43,8 +43,8 @@ driver), installed runtime hashes, uninstall with data preservation, and uninsta
 with deletion of isolated test data. Test installations were cleaned up.
 
 No external release was uploaded and no SBOM was generated for this local package.
-Online UxPlay installation requires publishing the matching component ZIP at the
-embedded release URL. Real iPhone mirroring, sound, USB control/recovery and
+Online UxPlay installation requires publishing the matching component ZIP with
+the latest application Release. Real iPhone mirroring, sound, USB control/recovery and
 Intel/AMD hardware encoding remain hardware acceptance checks.
 
 ## Component behavior
@@ -55,12 +55,40 @@ downloaded/total bytes, throughput, cancellation and retry. The existing receive
 continues until the component is ready and the user applies the receiver change.
 An unavailable saved UxPlay selection falls back to the original receiver at startup.
 
-`package_uxplay_component.ps1` creates a deterministic ZIP and embeds its URL,
-size, SHA-256 and per-file hashes in the app. `package_release.ps1` publishes this
+`package_uxplay_component.ps1` creates a deterministic ZIP and records its URL,
+size, SHA-256 and per-file hashes for packaging validation. `package_release.ps1` publishes this
 ZIP alongside Setup, the portable ZIP and checksums; the release workflow expects
 all five assets when SBOM generation is enabled. The component ZIP must be uploaded
 with that release before users can download it. This implementation does not upload
 development assets on its own.
+
+Each download or retry queries the public release list and selects the UxPlay
+Windows x64 ZIP from the latest application version, including prereleases.
+Drafts and standalone component releases are excluded. If that release has no
+matching ZIP, installation fails instead of downloading an older embedded URL.
+The GitHub API falls back to `updates/releases.json` when unavailable. The archive
+must match the release asset digest or its `SHA256SUMS.txt` entry before installation.
+No additional manifest asset is required for existing releases.
+
+The verified ZIP supplies the per-file hashes and is retained under
+`Components/UxPlay/Archives/<archive-hash>.zip`. Every explicit install resolves
+the current release digest and validates the retained ZIP before rebuilding its
+file list; local metadata cannot approve a modified runtime. A valid archive can
+repair runtime files without downloading them again. A damaged archive is downloaded
+again and must pass the same release checksum verification.
+
+Successful installation atomically saves `installed-component.dat`, protected by
+Windows DPAPI for the current user. This protects the offline receipt from file
+modification; it is local storage protection, not a publisher signature. Old plain
+`installed-component.json` files are not trusted or migrated. Existing caches that
+match the application's embedded file hashes remain usable; other legacy caches
+are verified again through the download flow.
+
+Current/newer verified components remain usable offline without an automatic
+network check. If an application upgrade embeds a newer component requirement,
+an older saved component no longer hides it: selecting UxPlay opens the download
+flow. A stale release list cannot satisfy that newer requirement. The previous
+component is retained if the required release is missing or installation fails.
 
 Downloaded components are verified before extraction into a staging directory,
 then moved into `%LOCALAPPDATA%\iPhoneMirror\Components\UxPlay\<archive-hash>`.
@@ -71,7 +99,7 @@ request firewall access when the downloaded receiver first starts.
 
 Build flags:
 
-- Default: build UxPlay as a separate asset, include its download metadata.
+- Default: build UxPlay as a separate asset, include its minimum-version and legacy-cache metadata.
 - `-IncludeUxPlayRuntime`: also include it in the application for an offline bundle.
 - `-OmitUxPlayRuntime`: skip building the optional asset on development machines.
 - `-MaximumInstallerBytes`: size target, default **100,000,000 bytes** (exclusive).

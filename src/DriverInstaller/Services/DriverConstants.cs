@@ -32,9 +32,21 @@ internal static partial class DriverConstants
     internal const string Dll32Hash =
         "00CACA07869B19D10B370552AC7CC2F6F2EE246FC15DB11650F6CD3F4EF9B666";
 
-    internal static string DataRoot => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "iPhoneMirror.Driver");
+    // .NET resolves CommonApplicationData from the ProgramData environment variable.
+    // The elevated bootstrap deliberately clears that environment. Read the
+    // machine's expanded shell-folder registration in both processes instead.
+    internal static string DataRoot => Path.Combine(GetMachineDataDirectory(), "iPhoneMirror.Driver");
+    private static string GetMachineDataDirectory()
+    {
+        using var machine = Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine,
+            Microsoft.Win32.RegistryView.Registry64);
+        using var folders = machine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders");
+        var path = folders?.GetValue("Common AppData", null,
+            Microsoft.Win32.RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || path.Contains('%'))
+            throw new IOException("Windows did not return an absolute shared driver data directory.");
+        return path;
+    }
     internal static string OperationsRoot => Path.Combine(DataRoot, "Operations");
     internal static string BackupsRoot => Path.Combine(DataRoot, "Backups");
     internal static string PackagesRoot => Path.Combine(

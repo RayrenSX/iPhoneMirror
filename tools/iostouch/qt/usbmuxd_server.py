@@ -217,9 +217,8 @@ class UsbmuxdServer:
             writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_BADDEV}))
             await writer.drain()
             return
-        loop = asyncio.get_running_loop()
         try:
-            conn: MuxConnection = await loop.run_in_executor(None, self.mux.connect, port)
+            conn = await self._connect_owned(port)
         except ConnectionRefused:
             writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_CONNREFUSED}))
             await writer.drain()
@@ -229,11 +228,54 @@ class UsbmuxdServer:
             writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_BADDEV}))
             await writer.drain()
             return
-        self.connections += 1
-        writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_OK}))
-        await writer.drain()
-        logger.info("usbmuxd: bridged client to device port %d (sport %d)", port, conn.sport)
+        try:
+            self.connections += 1
+            writer.write(self._frame(tag, {"MessageType": "Result", "Number": RESULT_OK}))
+            await writer.drain()
+            logger.info("usbmuxd: bridged client to device port %d (sport %d)", port, conn.sport)
+        except BaseException:
+            self._close_connection(conn)
+            raise
+        # Ownership transfers to _bridge only after the reply is delivered.
         await self._bridge(reader, writer, conn)
+
+    @staticmethod
+    def _close_connection(conn: MuxConnection) -> None:
+        try:
+            conn.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("close mux connection failed: %s", exc)
+
+    async def _connect_owned(self, port: int) -> MuxConnection:
+        # Cancelling run_in_executor does not stop a blocking USB connect.
+        # Hand ownership back under a thread lock, so a late success is closed
+        # even after the asyncio loop has retired and cannot run callbacks.
+        lock = threading.Lock()
+        abandoned = False
+        pending: Optional[MuxConnection] = None
+
+        def connect() -> Optional[MuxConnection]:
+            nonlocal pending
+            conn = self.mux.connect(port)
+            with lock:
+                if not abandoned:
+                    pending = conn
+                    return conn
+            self._close_connection(conn)
+            return None
+
+        try:
+            conn = await asyncio.get_running_loop().run_in_executor(None, connect)
+        except BaseException:
+            with lock:
+                abandoned = True
+                orphan, pending = pending, None
+            if orphan is not None:
+                self._close_connection(orphan)
+            raise
+        with lock:
+            pending = None
+        return conn
 
     async def _bridge(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, conn: MuxConnection) -> None:
         loop = asyncio.get_running_loop()
@@ -276,11 +318,13 @@ class UsbmuxdServer:
 
         t1 = asyncio.create_task(sock_to_usb())
         t2 = asyncio.create_task(usb_to_sock())
-        await stop.wait()
-        conn.close()
-        for t in (t1, t2):
-            t.cancel()
-        with _suppress():
+        try:
+            await stop.wait()
+        finally:
+            stop.set()
+            self._close_connection(conn)
+            for t in (t1, t2):
+                t.cancel()
             await asyncio.gather(t1, t2, return_exceptions=True)
 
 
@@ -306,20 +350,33 @@ class UsbmuxdThread:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._started = threading.Event()
+        self._stop_requested = threading.Event()
+        self._lifecycle: Optional[asyncio.Task] = None
         self.error: Optional[BaseException] = None
 
     def start(self) -> str:
+        async def serve() -> None:
+            try:
+                if self._stop_requested.is_set():
+                    raise asyncio.CancelledError
+                await self.server.start()
+                self._started.set()
+                await asyncio.Event().wait()
+            finally:
+                await self.server.stop()
+
         def run() -> None:
             loop = asyncio.new_event_loop()
             self._loop = loop
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(self.server.start())
-                self._started.set()
-                loop.run_forever()
+                self._lifecycle = loop.create_task(serve())
+                loop.run_until_complete(self._lifecycle)
+            except asyncio.CancelledError:
+                if not self._started.is_set():
+                    self.error = MuxError('capture usbmux server stopped during startup')
             except BaseException as exc:  # noqa: BLE001
                 self.error = exc
-                self._started.set()
             finally:
                 # Retire accept and client tasks before closing the IOCP loop.
                 # Closing it with live tasks loses their socket cleanup.
@@ -330,23 +387,34 @@ class UsbmuxdThread:
                     loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 loop.close()
                 self._loop = None
+                self._lifecycle = None
+                self._started.set()
 
         self._thread = threading.Thread(target=run, name="usbmuxd-server", daemon=True)
         self._thread.start()
-        self._started.wait(10)
+        if not self._started.wait(10):
+            self.stop()
+            raise MuxError('capture usbmux server startup timed out')
         if self.error:
             raise self.error
+        if self._stop_requested.is_set():
+            raise MuxError('capture usbmux server stopped during startup')
         return self.server.address
 
     def stop(self) -> None:
+        already_requested = self._stop_requested.is_set()
+        self._stop_requested.set()
         loop = self._loop
-        if loop is None or loop.is_closed():
-            return
-
-        async def _shutdown() -> None:
-            await self.server.stop()
-            loop.stop()
-
-        asyncio.run_coroutine_threadsafe(_shutdown(), loop)
-        if self._thread:
+        if not already_requested and loop is not None and not loop.is_closed():
+            def cancel() -> None:
+                if self._lifecycle is not None:
+                    self._lifecycle.cancel()
+            try:
+                loop.call_soon_threadsafe(cancel)
+            except RuntimeError:
+                # The thread may have completed cleanup between the checks.
+                pass
+        if self._thread and self._thread is not threading.current_thread():
             self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                raise MuxError('capture usbmux server shutdown timed out')

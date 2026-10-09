@@ -8,9 +8,39 @@ internal static partial class Program
     private static int RunKeyboardRouterTests()
     {
         TestKeyboardReleaseFailureIsolation();
+        TestRetiredKeyReconciliation();
+        TestMappingCaptureTransactions();
+        TestCaptureRecoveryPhysicalIdentity();
         TestUnifiedKeyboardLifetimes();
         TestUnifiedKeyboardDispatch();
         return 0;
+    }
+
+    private static void TestRetiredKeyReconciliation()
+    {
+        var router = new KeyboardInputRouter();
+        router.CompleteHandoff(router.BeginHandoff(KeyboardInputMode.Direct));
+        var events = new List<(int Key, bool Down)>();
+        KeyboardPressRoute Resolve(MappedKey key, bool chord) => new(KeyboardEventOwner.Direct, true,
+            down => events.Add((key.VirtualKey, down)));
+        void Key(int vk, bool down) => router.RouteEvent(new(vk, 0, false), down, Resolve, (_, _) => { });
+        Key(0x41, true); Key(0xA0, true);
+        var generation = router.BeginHandoff(KeyboardInputMode.Direct);
+        // A remains held; Shift was released unseen; B was first pressed
+        // during the outage. Both physical holds must wait for their release.
+        router.ReconcileRetiredKeys(new HashSet<int> { 0x41, 0x42 });
+        router.CompleteHandoff(generation);
+        events.Clear();
+        Key(0x41, true); Key(0x42, true);
+        MappingAssert(events.Count == 0 && router.PressedModifiers == 0,
+            "Recovery replayed an outage hold or retained a released modifier.");
+        Key(0x41, false); Key(0x42, false);
+        MappingAssert(events.Count == 0 && !router.HasRetiredKeys,
+            "Retired outage releases dispatched input or remained stuck.");
+        Key(0x41, true); Key(0x41, false); Key(0x42, true); Key(0x42, false);
+        MappingAssert(events.SequenceEqual(new[] { (0x41, true), (0x41, false), (0x42, true), (0x42, false) }),
+            "Fresh presses failed after outage-held keys were released.");
+        Console.WriteLine("PASS retired-key reconciliation: lost modifier up cleared; known and unseen holds quarantined; fresh keys resume once.");
     }
 
     private static void TestKeyboardReleaseFailureIsolation()

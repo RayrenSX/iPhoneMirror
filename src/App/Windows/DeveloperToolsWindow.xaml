@@ -28,14 +28,6 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{DynamicResource DeveloperToolsTitle}"
                                    Style="{StaticResource SubWindowTitle}"/>
-                        <Border Background="{DynamicResource WarningSurfaceBrush}"
-                                BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1"
-                                CornerRadius="8" Padding="8,3" Margin="12,0,0,0"
-                                VerticalAlignment="Center">
-                            <TextBlock Text="{DynamicResource DeveloperToolsPreviewBadge}"
-                                       Foreground="{DynamicResource WarningBrush}" FontSize="{DynamicResource CaptionFontSize}"
-                                       FontWeight="SemiBold"/>
-                        </Border>
                     </StackPanel>
                     <TextBlock Text="{DynamicResource DeveloperToolsSubtitle}"
                                Style="{StaticResource SubWindowSubtitle}"/>
@@ -49,6 +41,28 @@
                           HorizontalScrollBarVisibility="Disabled" Margin="0,12,0,0">
                 <StackPanel>
                     <Border Style="{StaticResource SettingsSection}" Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource AutomationTitle}" Style="{StaticResource SubWindowSectionTitle}"/>
+                            <TextBlock Text="{DynamicResource AutomationHelp}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,0"/>
+                            <CheckBox x:Name="ApiEnabled" Content="{DynamicResource AutomationEnable}" Margin="0,10,0,8"/>
+                            <TextBlock Text="127.0.0.1"/>
+                            <TextBlock Text="{DynamicResource AutomationPort}" Margin="0,8,0,4"/>
+                            <TextBox x:Name="ApiPort" MaxLength="5" AutomationProperties.Name="{DynamicResource AutomationPort}"/>
+                            <TextBlock x:Name="ApiStatus" Margin="0,8,0,4" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="ApiAddress" TextWrapping="Wrap"/>
+                            <TextBlock Text="API Key: ••••••••••••" Margin="0,8,0,4"/>
+                            <WrapPanel>
+                                <Button Content="{DynamicResource AutomationApply}" Click="OnAutomationApply" Margin="0,4,6,0"/>
+                                <Button Content="{DynamicResource AutomationRegenerate}" Click="OnAutomationRegenerate" Margin="0,4,6,0"/>
+                                <Button Content="{DynamicResource AutomationCopyKey}" Click="OnAutomationCopyKey" Margin="0,4,6,0"/>
+                                <Button Content="{DynamicResource AutomationDocs}" Click="OnAutomationDocs" Margin="0,4,6,0"/>
+                                <Button Content="{DynamicResource AutomationCopyAddress}" Click="OnAutomationCopyAddress" Margin="0,4,6,0"/>
+                                <Button Content="{DynamicResource AutomationReclaim}" Click="OnAutomationReclaim" Margin="0,4,6,0"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsSection}" Padding="16" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource DeveloperToolsWorkspaceSection}"
                                        Style="{StaticResource SubWindowSectionTitle}"/>

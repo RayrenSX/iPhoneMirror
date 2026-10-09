@@ -12,6 +12,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <charconv>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
@@ -163,6 +164,54 @@ std::optional<DeviceMetadata> parse_device_metadata(std::string_view message) {
         .product_type = std::string(fields[1]),
         .os_version = std::string(fields[2]),
     };
+}
+
+std::optional<iPhoneMirror::wireless::MessageHeader> parse_mirror_event(
+    std::string_view message) {
+    using namespace iPhoneMirror::wireless;
+    MessageHeader header;
+    std::size_t count{};
+    if (message.starts_with("IPHONE_MIRROR_VIDEO_STATE\t")) {
+        message.remove_prefix(std::string_view("IPHONE_MIRROR_VIDEO_STATE\t").size());
+        header.type = MessageType::MirrorState;
+        count = 2;
+    } else if (message.starts_with("IPHONE_MIRROR_VIDEO_GEOMETRY\t")) {
+        message.remove_prefix(std::string_view("IPHONE_MIRROR_VIDEO_GEOMETRY\t").size());
+        header.type = MessageType::MirrorGeometry;
+        count = 5;
+    } else return std::nullopt;
+    std::array<std::string_view, 5> fields{};
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto separator = message.find('\t');
+        if (index + 1 == count) {
+            if (separator != std::string_view::npos) return std::nullopt;
+            fields[index] = message;
+        } else {
+            if (separator == std::string_view::npos) return std::nullopt;
+            fields[index] = message.substr(0, separator);
+            message.remove_prefix(separator + 1);
+        }
+    }
+    if (fields[0].empty() || fields[0].size() >= DeviceIdBytes ||
+        !std::ranges::all_of(fields[0], [](unsigned char c) { return c >= 32 && c <= 126; }))
+        return std::nullopt;
+    std::memcpy(header.device_id, fields[0].data(), fields[0].size());
+    std::array<std::uint32_t, 4> numbers{};
+    for (std::size_t index = 1; index < count; ++index) {
+        const auto field = fields[index];
+        const auto [end, error] = std::from_chars(field.data(), field.data() + field.size(), numbers[index - 1]);
+        if (error != std::errc{} || end != field.data() + field.size()) return std::nullopt;
+    }
+    if (header.type == MessageType::MirrorState) {
+        if (numbers[0] > static_cast<std::uint32_t>(MirrorSenderState::Reconnecting)) return std::nullopt;
+        header.reserved = numbers[0];
+    } else {
+        if (!std::ranges::all_of(numbers, [](auto value) { return value > 0 && value <= 16384; }))
+            return std::nullopt;
+        header.stride[0] = numbers[0]; header.stride[1] = numbers[1];
+        header.width = numbers[2]; header.height = numbers[3];
+    }
+    return header;
 }
 
 float airplay_decibels_to_linear_gain(float decibels) noexcept {
@@ -771,6 +820,29 @@ public:
 
     void log(int level, const char* message) override {
         const auto text = safe_text(message);
+        constexpr std::string_view video_diagnostic_prefix = "IPHONE_MIRROR_VIDEO_DIAG ";
+        if (text.starts_with(video_diagnostic_prefix)) {
+            auto fields = text.substr(video_diagnostic_prefix.size());
+            std::array<int, 7> numbers{};
+            bool valid = true;
+            for (auto& number : numbers) {
+                const auto separator = fields.find(' ');
+                const auto field = fields.substr(0, separator);
+                const auto [end, error] = std::from_chars(field.data(), field.data() + field.size(), number);
+                if (error != std::errc{} || end != field.data() + field.size()) { valid = false; break; }
+                if (separator == std::string_view::npos) fields = {};
+                else fields.remove_prefix(separator + 1);
+            }
+            if (valid && fields.empty()) {
+                diagnostic(std::format("video_diag event={} values={},{},{},{},{},{}",
+                    numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5], numbers[6]));
+                return;
+            }
+        }
+        if (const auto event = parse_mirror_event(text)) {
+            if (!writer_.send(*event)) send_failures_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
         if (const auto metadata = parse_device_metadata(text)) {
             const auto sent = writer_.send_device_info(*metadata);
             diagnostic(std::format("device metadata device_fp={} model={} os={} sent={}",

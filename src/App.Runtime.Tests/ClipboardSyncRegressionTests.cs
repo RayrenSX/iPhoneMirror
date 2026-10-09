@@ -44,6 +44,10 @@ internal static partial class Program
             Enum.Parse(constructor.GetParameters()[6].ParameterType, "Ready")]);
         var wired = new UsbTouchBridgeHost();
         var wireless = new UsbTouchBridgeHost();
+        // These device-free hosts represent running transports. OnBridgeEvent
+        // intentionally ignores protocol messages before startup/after stop.
+        SetKeyboardField(wired, "_started", 1);
+        SetKeyboardField(wireless, "_started", 1);
         var first = (DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", "clipboard-A")!;
         var second = (DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", "clipboard-B")!;
         first.WiredBridge = wired;
@@ -124,6 +128,14 @@ internal static partial class Program
                 Flush();
                 InteractionAssert(writes.Count == before + 1, "A disconnected read accepted a late reply.");
 
+                Protocol("{\"event\":\"clipboard_read_started\",\"readId\":5}");
+                SetKeyboardField(bridge, "_started", 0);
+                Protocol("{\"event\":\"clipboard_text\",\"readId\":5,\"text\":\"reply after stop\"}");
+                Flush();
+                InteractionAssert(writes.Count == before + 1, "A stopped host accepted a late reply.");
+                sync.ForgetReads(bridge);
+                SetKeyboardField(bridge, "_started", 1);
+
                 var previousStatus = control.Status;
                 KeyboardCall(bridge, "Raise", "warning", "clipboard_poll_failed", "simulated", null);
                 DrainDispatcher();
@@ -149,6 +161,8 @@ internal static partial class Program
         finally
         {
             sync.Stop();
+            SetKeyboardField(wired, "_started", 0);
+            SetKeyboardField(wireless, "_started", 0);
             first.WiredBridge = null;
             second.WirelessBridge = null;
             SetKeyboardField(vm, "_disposed", false);

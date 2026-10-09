@@ -2,6 +2,7 @@
 #include <cfgmgr32.h>
 
 #include "Transport/UsbInterfaceTransitionPolicy.h"
+#include "UsbDeviceReconnect.h"
 
 #include <lusb0_usb.h>
 
@@ -259,9 +260,11 @@ std::string topology_scope(std::string_view value) {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 5) return 21;
+    if (argc != 5 && argc != 6) return 21;
     const std::wstring_view operation(argv[1]);
-    if (operation != L"activate" && operation != L"restore") return 22;
+    if (operation != L"activate" && operation != L"restore" &&
+        operation != L"inspect" && operation != L"reconnect") return 22;
+    if (argc == 6 && operation != L"reconnect") return 21;
     const auto expected_serial = normalize(narrow_ascii(argv[2]));
     if (expected_serial.empty()) return 23;
     const auto expected_topology = narrow_ascii(argv[4]);
@@ -278,6 +281,20 @@ int wmain(int argc, wchar_t** argv) {
     }
     const auto expected_configuration =
         static_cast<std::uint8_t>(parsed_configuration);
+
+    // This path never opens a phone interface or enters the legacy USB API.
+    if (operation == L"reconnect") {
+        std::uint64_t deadline{};
+        if (argc == 6) {
+            try {
+                std::size_t consumed{};
+                deadline = std::stoull(argv[5], &consumed);
+                if (consumed != std::wstring_view(argv[5]).size() || deadline == 0)
+                    return 24;
+            } catch (...) { return 24; }
+        }
+        return reconnect_selected_apple_usb(expected_serial, deadline);
+    }
 
     usb_init();
     if (usb_find_busses() < 0 || usb_find_devices() < 0) return 3;
@@ -329,15 +346,23 @@ int wmain(int argc, wchar_t** argv) {
     auto* handle = usb_open(selected_device);
     if (!handle) return 30;
 
-    if (selected_device->descriptor.iSerialNumber != 0) {
-        char serial[256]{};
-        const int serial_length = usb_get_string_simple(handle,
+    // Synthetic filter slots can be reused after re-enumeration. Topology is
+    // only a way to choose a handle; a fresh, readable serial must authorize
+    // every operation on it, even when exactly one candidate is present.
+    char serial[256]{};
+    const int serial_length = selected_device->descriptor.iSerialNumber == 0
+        ? 0 : usb_get_string_simple(handle,
             selected_device->descriptor.iSerialNumber, serial, sizeof(serial));
-        if (serial_length > 0 && normalize(std::string_view(serial,
-                static_cast<std::size_t>(serial_length))) != expected_serial) {
-            usb_close(handle);
-            return 28;
-        }
+    if (serial_length <= 0 || serial_length > static_cast<int>(sizeof(serial))) {
+        usb_close(handle);
+        std::cerr << "identity_unverified reason=serial_unreadable\n";
+        return 34;
+    }
+    if (normalize(std::string_view(serial,
+            static_cast<std::size_t>(serial_length))) != expected_serial) {
+        usb_close(handle);
+        std::cerr << "identity_unverified reason=serial_mismatch\n";
+        return 28;
     }
 
     char active_value{};
@@ -348,6 +373,12 @@ int wmain(int argc, wchar_t** argv) {
     }
     const auto active_configuration =
         static_cast<std::uint8_t>(active_value);
+    if (operation == L"inspect") {
+        std::cout << "identity_verified=true active_configuration="
+                  << static_cast<unsigned>(active_configuration) << '\n';
+        usb_close(handle);
+        return 0;
+    }
     if (operation == L"activate" &&
         active_configuration == expected_configuration) {
         usb_close(handle);

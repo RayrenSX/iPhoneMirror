@@ -96,7 +96,7 @@ public partial class MainWindow
         // Compare the actual top-level HWND, not process ownership or WPF
         // IsActive: native previews have their own HWNDs, and settings dialogs
         // in this same process must not feed the phone's keyboard.
-        return !_bossKeyHidden && !_keyboardFocusSuspended &&
+        return _viewModel.AutomationHumanAllowed(udid) && !_bossKeyHidden && !_keyboardFocusSuspended &&
             sourceWindow != 0 &&
             sourceWindow == GetControlKeyboardWindow(udid) &&
             sourceWindow == _keyboardForegroundWindow();

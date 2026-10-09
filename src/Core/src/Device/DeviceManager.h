@@ -25,6 +25,23 @@ struct DeviceRecord {
     std::wstring status;
 };
 
+namespace detail {
+
+inline void preserve_cached_device_display_metadata(
+    DeviceRecord& target, const DeviceRecord& cached) {
+    target.name = cached.name;
+    target.product_type = cached.product_type;
+    target.os_version = cached.os_version;
+}
+
+[[nodiscard]] inline bool needs_device_metadata_refresh(
+    bool requested, const DeviceRecord& current, const DeviceRecord* cached) noexcept {
+    return requested || !cached || !cached->lockdown_accessible ||
+        current.device_id != cached->device_id || current.mux_port != cached->mux_port;
+}
+
+} // namespace detail
+
 struct EnvironmentRecord {
     bool service_installed{};
     bool service_running{};

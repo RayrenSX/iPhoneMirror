@@ -45,6 +45,17 @@ public partial class ProjectionSettingsWindow : IPhoneMirror.UI.Controls.Rounded
     private async void OnRefreshClick(object sender, RoutedEventArgs e) =>
         await RunAsync(_refresh);
 
+    private void OnFirstRunSetupClick(object sender, RoutedEventArgs e)
+    {
+        if (_previewOnly) return;
+        if (Application.Current?.MainWindow is MainWindow main)
+        {
+            Hide();
+            try { if (main.ShowFirstRunSetup(rerun: true)) main.StartAfterSetup(); }
+            finally { Show(); }
+        }
+    }
+
     private async void OnFullScreenClick(object sender, RoutedEventArgs e) =>
         await RunAsync(_fullScreen);
 

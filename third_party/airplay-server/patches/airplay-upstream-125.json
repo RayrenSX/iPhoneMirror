@@ -1,0 +1,42 @@
+[
+  {
+    "Path": "AirPlayServerLib/lib/byteutils.c",
+    "Base": "32127dfa6599c9e6a5cd59f262c1278bfd715e3f6dbbd944177bb97b1c73187f",
+    "Target": "500647cf34c684d6220a552f9549805f760ea280cf41c9cc35afbbdbfb3254cd"
+  },
+  {
+    "Path": "AirPlayServerLib/compat.c",
+    "Base": "719998935bc6841fd15ac0c795bb7e81a0c9a681375888c945de887a8f9c57d7",
+    "Target": "3a8ebad5def8e42245ff1fc89068dac5728ec550fb00bb759dad20b6cf41aff5"
+  },
+  {
+    "Path": "AirPlayServerLib/lib/raop_rtp.c",
+    "Base": "e9881513c6bc19cb4cf62176e85ea76a40f19335d30e5fa8849414ec1ec96a29",
+    "Target": "cf17a92a892da5c2b4e125155b61258910b10da300dcd6b6006a6cdb7c1782e5"
+  },
+  {
+    "Path": "AirPlayServerLib/lib/raop_rtp_mirror.c",
+    "Base": "54a978296406e89e6cc9c86c458eb968d49a99e4155661362ec23f68a4edd5b3",
+    "Target": "810a3d65a3f1c01498cf69e756840dff1f74c455f0bef9c7518d00f3ab9a42e3"
+  },
+  {
+    "Path": "AirPlayServerLib/lib/raop_buffer.c",
+    "Base": "7176fbad449e61b8349c931dbc316df0c1e02be4960c1f47ed49623b684b8720",
+    "Target": "19efb8712e71aca5b1d5ddae54cef1796db4ea4618ab4dc63b4bea2f8f3ad589"
+  },
+  {
+    "Path": "AirPlayServerLib/AirPlayLib.vcxproj",
+    "Base": "8e1d59fe228d5af75788256e338a2405a8ae3c4d44757de6eca3ac2306d105f2",
+    "Target": "e39c774a9a3c8e5a2d1905a0fbded12f2dc2d3b6d6e5365baa0eee319570305d"
+  },
+  {
+    "Path": "AirPlayServerLib/lib/mirror_buffer.c",
+    "Base": "3df604b71cbf773f4dc511c4a0e8cc5de1350acd189e1a80c745d6215b2be8ed",
+    "Target": "0125b010c42ad14a612907b48a9e2c37224ce3458b5f79fef91858512092198a"
+  },
+  {
+    "Path": "airplay2dll/FgAirplayChannel.cpp",
+    "Base": "991dc1ece8456a599902e122527ca17567db300a6908534cc34cf26632ab91d8",
+    "Target": "0757a3292c43050f4a75a14a1bf821ffcad4286754d9dd36b87a08a1e81e7272"
+  }
+]

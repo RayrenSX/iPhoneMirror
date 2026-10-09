@@ -6,7 +6,7 @@
 namespace iPhoneMirror::wireless {
 
 inline constexpr std::uint32_t IpcMagic = 0x50414D49U; // IMAP
-inline constexpr std::uint16_t IpcVersion = 7;
+inline constexpr std::uint16_t IpcVersion = 8;
 inline constexpr std::uint32_t MaxPayloadBytes = 64U * 1024U * 1024U;
 inline constexpr std::size_t DeviceIdBytes = 64;
 inline constexpr std::size_t DeviceNameBytes = 128;
@@ -29,6 +29,16 @@ enum class MessageType : std::uint16_t {
     MediaSeek = 13,
     MediaStopRequest = 14,
     MediaVolume = 15,
+    MirrorState = 16,
+    MirrorGeometry = 17,
+};
+
+// MirrorState carries this value in reserved. MirrorGeometry carries output
+// dimensions in width/height and source dimensions in stride[0]/stride[1].
+enum class MirrorSenderState : std::uint32_t {
+    Active = 0,
+    Paused = 1,
+    Reconnecting = 2,
 };
 
 // MediaVolume uses the header's reserved word as an explicit routing tag. A

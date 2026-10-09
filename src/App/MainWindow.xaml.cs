@@ -359,6 +359,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _themeControlReady = true;
         _workspaceControlsReady = true;
         _viewModel = new MainViewModel();
+        InitializeAutomation();
         MainPreviewHost.PointerInput += OnControlPointerInput;
         MainPreviewHost.KeyboardInput += OnControlKeyboardInput;
         _viewModel.SetMediaCastOutputProviders(
@@ -1159,6 +1160,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Controls.PreviewPointerEventArgs e)
     {
         if (e.Kind == Controls.PreviewPointerKind.Reset) _ = ResetPreviewTouchesAsync(udid);
+        // Bluetooth Raw Input owns motion, buttons and wheel across both
+        // surfaces. Keep native reset messages, but discard legacy duplicates.
+        if (_rawMouseInputEnabled && IsBluetoothControlActiveFor(udid) &&
+            e.Kind != Controls.PreviewPointerKind.Reset) return;
         if (TryHandlePointerShortcut(e, udid)) return;
         if (_viewModel.IsUsbControlTarget(udid))
         {
@@ -1552,43 +1557,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _ => (byte)0,
         }).Where(usage => usage != 0);
 
-    private static bool TryMapVirtualKey(int virtualKey, out byte usage, out byte modifier)
-    {
-        usage = 0;
-        modifier = 0;
-        if (virtualKey is >= 0x41 and <= 0x5A) { usage = (byte)(virtualKey - 0x41 + 4); return true; }
-        if (virtualKey is >= 0x31 and <= 0x39) { usage = (byte)(virtualKey - 0x31 + 30); return true; }
-        if (virtualKey == 0x30) { usage = 39; return true; }
-        usage = virtualKey switch
-        {
-            0x10 or 0xA0 or 0xA1 => 0x02,
-            0x11 or 0xA2 or 0xA3 => 0x01,
-            0x12 or 0xA4 or 0xA5 => 0x04,
-            0x20 => 0x2C, 0x0D => 0x28, 0x08 => 0x2A, 0x09 => 0x2B,
-            0x1B => 0x29, 0x14 => 0x39, 0x25 => 0x50, 0x26 => 0x52, 0x27 => 0x4F,
-            0x28 => 0x51, 0x2E => 0x4C, 0x2D => 0x49, 0x24 => 0x4A,
-            0x23 => 0x4D, 0x21 => 0x4B, 0x22 => 0x4E, 0x2C => 0x46,
-            0x90 => 0x53, 0x91 => 0x47, 0x13 => 0x48,
-            0xBA => 0x33, 0xBB => 0x2E, 0xBC => 0x36, 0xBD => 0x2D,
-            0xBE => 0x37, 0xBF => 0x38, 0xC0 => 0x35, 0xDB => 0x2F,
-            0xDC => 0x31, 0xDD => 0x30, 0xDE => 0x34,
-            0x60 => 0x62, 0x61 => 0x59, 0x62 => 0x5A, 0x63 => 0x5B,
-            0x64 => 0x5C, 0x65 => 0x5D, 0x66 => 0x5E, 0x67 => 0x5F,
-            0x68 => 0x60, 0x69 => 0x61, 0x6A => 0x55, 0x6B => 0x57,
-            0x6D => 0x56, 0x6E => 0x63, 0x6F => 0x54,
-            0x72 => 0x3C, 0x73 => 0x3D, 0x74 => 0x3E, 0x75 => 0x3F,
-            0x76 => 0x40, 0x77 => 0x41, 0x78 => 0x42, 0x79 => 0x43,
-            0x7A => 0x44, 0x7B => 0x45, _ => (byte)0,
-        };
-        if (virtualKey is 0x10 or 0xA0 or 0xA1 or 0x11 or 0xA2 or 0xA3 or
-            0x12 or 0xA4 or 0xA5)
-        {
-            modifier = usage;
-            usage = 0;
-            return true;
-        }
-        return usage != 0;
-    }
+    private static bool TryMapVirtualKey(int key, out byte usage, out byte modifier) =>
+        DeviceKeyMap.TryMapVirtualKey(key, out usage, out modifier);
 
     private void OnClosed(object? sender, EventArgs e)
     {
@@ -1629,8 +1599,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         if (message == WmInput &&
             (IsBluetoothControlActive || IsUsbControlActive) &&
-            (_rawMouseInputEnabled || _rawKeyboardInputEnabled) &&
-            _activeControlWindow == 0)
+            (_rawMouseInputEnabled || _rawKeyboardInputEnabled))
         {
             if (_rawMouseInputEnabled && GetRawInputType(lParam) == RimTypeMouse)
                 ProcessLatestQueuedRawMouseInput(hwnd, wParam, lParam);
@@ -1722,13 +1691,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ("win32_error", registered ? 0 : Marshal.GetLastWin32Error())));
         MainPreviewHost.SuppressMouseMove = _rawMouseInputEnabled;
         MainPreviewHost.SuppressLegacyMouseButtons = _rawMouseInputEnabled;
-        if (mouseEnabled || keyboardEnabled)
+        if ((mouseEnabled || keyboardEnabled) && _activeControlWindow == 0)
         {
             MainPreviewHost.Focus();
         }
-        // Reverse control should not trap the Windows pointer inside the
-        // preview surface or an independent preview window. Pointer capture
-        // still supplies relative mouse reports while the cursor remains free.
+        // Clear the previous route's confinement; the caller applies the
+        // bounds of the active surface after registration has completed.
         ClipCursor(IntPtr.Zero);
     }
 
@@ -1806,6 +1774,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         if (input.Header.Type != RimTypeMouse) return;
+        ProcessRawMouseInput(input, includeMouseMovement);
+    }
+
+    private void ProcessRawMouseInput(RawInput input, bool includeMouseMovement)
+    {
+        // INPUTSINK delivers to the main HWND even when an independent preview
+        // owns control. Accept packets only for that route's foreground window.
+        var target = ActiveInputDeviceUdid;
+        if (!_rawMouseInputEnabled || Volatile.Read(ref _bluetoothRouteChanging) != 0 ||
+            !IsBluetoothControlActiveFor(target) ||
+            !CanForwardControlPointer(target, GetControlKeyboardWindow(target))) return;
         if (includeMouseMovement)
         {
             if (IsBluetoothControlActive)
@@ -1869,15 +1848,16 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             down ? Controls.PreviewPointerKind.ButtonDown :
                 Controls.PreviewPointerKind.ButtonUp,
             0, 0, button, 0);
-        if (TryHandlePointerShortcut(input, _viewModel.SelectedDevice?.Udid)) return;
-        HandleControlPointerInput(input);
+        var target = ActiveInputDeviceUdid;
+        if (TryHandlePointerShortcut(input, target)) return;
+        HandleControlPointerInput(input, target);
     }
 
     private void HandleRawWheel(short delta)
     {
         if (delta == 0) return;
         HandleControlPointerInput(new Controls.PreviewPointerEventArgs(
-            Controls.PreviewPointerKind.Wheel, 0, 0, 0, delta));
+            Controls.PreviewPointerKind.Wheel, 0, 0, 0, delta), ActiveInputDeviceUdid);
     }
 
     private void ResetMainControlState()
@@ -2556,6 +2536,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (Application.Current is not App { IsSystemSessionEnding: true } &&
             _mappingWindow?.TryCloseEditor(Close) == false) return;
         _shutdownStarted = true;
+        await ShutdownAutomationAsync();
         DisposeKeyboardInputSubscriptions();
         DisposeKeyboardMapping();
         try { await _keyboardHandoff.WaitAsync(TimeSpan.FromSeconds(2)); }
@@ -2633,11 +2614,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             }
             try
             {
-                var shutdown = _viewModel.ShutdownAsync();
                 var shutdownLimit = (Application.Current as App)?
                     .IsSystemSessionEnding == true
                     ? TimeSpan.FromSeconds(4)
-                    : TimeSpan.FromSeconds(15);
+                    : _viewModel.NormalShutdownTimeout;
+                var shutdown = _viewModel.ShutdownAsync();
                 try
                 {
                     await shutdown.WaitAsync(shutdownLimit);
@@ -4935,6 +4916,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         switch (key)
         {
+            case "first-run-setup":
+                if (ShowFirstRunSetup(rerun: true)) StartAfterSetup();
+                break;
             case "workspace-mirroring":
                 OnNavigateMirroringClick(this, new RoutedEventArgs());
                 break;
@@ -5594,6 +5578,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         OnMappingContextChanged(e.PropertyName);
+        if (_viewModel.SetupActive) return;
         if (e.PropertyName == nameof(MainViewModel.IsTrayApplicationMode))
             Dispatcher.BeginInvoke(ApplyTrayMode);
         if (e.PropertyName is nameof(MainViewModel.IsLightweightApplicationMode) or
@@ -5682,7 +5667,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var controlActive = IsBluetoothControlActive;
         var usbControlActive = IsUsbControlActive;
         var usbControlConnected = _viewModel.IsUsbControlTarget(ActiveInputDeviceUdid);
-        if ((controlActive || usbControlActive) && !IsKeyboardMappingInputModeActive)
+        // Keyboard ownership follows the active device, including independent
+        // USB/wireless previews. usbControlActive only describes the main host.
+        if ((controlActive || usbControlConnected) && !IsKeyboardMappingInputModeActive)
             TryEnterDirectKeyboardInputMode();
         Volatile.Write(ref _activeUsbInputEnabled, usbControlConnected);
         MainPreviewHost.CapturePointerInput =
@@ -5700,7 +5687,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // owns the active control route.
         SetWindowsCursorHidden(controlActive && !usbControlConnected);
         ReconcileKeyboardHook();
-        RegisterRawInput(controlActive && _activeControlWindow == 0,
+        // Keep relative mouse input for independent previews as well: clipped
+        // WM_MOUSEMOVE coordinates stop changing at the window boundary.
+        RegisterRawInput(controlActive,
             (controlActive || usbControlActive) && _activeControlWindow == 0 &&
             !IsKeyboardMappingInputModeActive);
         if (controlActive && _activeControlWindow != 0)
@@ -7374,7 +7363,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern nint GetModuleHandle(string? moduleName);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UnhookWindowsHookEx(nint hook);
 

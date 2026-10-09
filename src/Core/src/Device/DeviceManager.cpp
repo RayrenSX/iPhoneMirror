@@ -178,9 +178,7 @@ void apply_cached_metadata(DeviceRecord& target, const DeviceRecord& cached) {
     target.pair_record_present = cached.pair_record_present;
     target.lockdown_accessible = cached.lockdown_accessible;
     target.state = cached.state;
-    target.name = cached.name;
-    target.product_type = cached.product_type;
-    target.os_version = cached.os_version;
+    detail::preserve_cached_device_display_metadata(target, cached);
     target.status = cached.status;
 }
 
@@ -327,7 +325,9 @@ std::vector<DeviceRecord> DeviceManager::refresh(bool refresh_metadata) {
             item.record = make_presence_record(source);
             const auto cached = metadata_cache_.find(serial);
             item.had_cache = cached != metadata_cache_.end();
-            item.metadata_needed = refresh_metadata || !item.had_cache;
+            item.metadata_needed = detail::needs_device_metadata_refresh(
+                refresh_metadata, item.record,
+                item.had_cache ? &cached->second : nullptr);
             if (item.had_cache) item.cached_snapshot = cached->second;
             if (!item.metadata_needed)
                 apply_cached_metadata(item.record, item.cached_snapshot);
@@ -349,10 +349,12 @@ std::vector<DeviceRecord> DeviceManager::refresh(bool refresh_metadata) {
                 // A transient explicit refresh must not erase known
                 // model/name data.
                 if (!item.record.lockdown_accessible && item.had_cache) {
-                    apply_cached_metadata(item.record, item.cached_snapshot);
-                } else {
-                    metadata_cache_.insert_or_assign(item.serial, item.record);
+                    detail::preserve_cached_device_display_metadata(
+                        item.record, item.cached_snapshot);
                 }
+                // A failed fresh read revokes cached readiness. Keep the
+                // display fields, and retry unreadable devices on later polls.
+                metadata_cache_.insert_or_assign(item.serial, item.record);
             }
             result.push_back(std::move(item.record));
         }

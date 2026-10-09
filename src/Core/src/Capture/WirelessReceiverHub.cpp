@@ -303,6 +303,32 @@ void WirelessClientStream::set_metadata(
     if (!os_version.empty()) os_version_ = std::move(os_version);
 }
 
+void WirelessClientStream::set_mirror_state(wireless::MirrorSenderState state) {
+    std::scoped_lock lock(mutex_);
+    if (!connected_) return;
+    mirror_state_ = state;
+    if (latest_frame_) snapshot_.state = State::Streaming;
+    snapshot_.message = state == wireless::MirrorSenderState::Paused
+        ? L"AirPlay video paused" : state == wireless::MirrorSenderState::Reconnecting
+        ? L"AirPlay video reconnecting" : L"Wireless mirroring";
+    fps_sample_time_ = std::chrono::steady_clock::now();
+    fps_sample_frames_ = snapshot_.video_frames;
+    snapshot_.fps = 0;
+}
+
+void WirelessClientStream::set_mirror_geometry(const wireless::MessageHeader& header) {
+    if (header.width == 0 || header.height == 0 || header.width > 16384 ||
+        header.height > 16384 || header.stride[0] == 0 || header.stride[1] == 0 ||
+        header.stride[0] > 16384 || header.stride[1] > 16384) return;
+    std::scoped_lock lock(mutex_);
+    if (!connected_) return;
+    source_width_ = header.stride[0]; source_height_ = header.stride[1];
+    output_width_ = header.width; output_height_ = header.height;
+    // Retain decoded dimensions and pixels until a new decoded frame arrives.
+    logging::write(std::format("wireless_geometry device_fp={} source={}x{} output={}x{}",
+        anonymous_label(id_), source_width_, source_height_, output_width_, output_height_));
+}
+
 WirelessDeviceSnapshot WirelessClientStream::device() const {
     std::scoped_lock lock(mutex_);
     return {
@@ -324,9 +350,11 @@ void WirelessClientStream::attach(CapturePreferences preferences) {
         std::scoped_lock lock(mutex_);
         reset_video = attachments_ == 0;
         ++attachments_;
-        snapshot_.state = connected_ ? State::Handshaking : State::WaitingForDevice;
-        snapshot_.message = connected_ ? L"AirPlay connected: " + name_
-                                       : L"Waiting for AirPlay device";
+        if (!connected_ || !latest_frame_) {
+            snapshot_.state = connected_ ? State::Handshaking : State::WaitingForDevice;
+            snapshot_.message = connected_ ? L"AirPlay connected: " + name_
+                                           : L"Waiting for AirPlay device";
+        }
     }
     if (reset_video) reset_video_for_attach();
     set_target_fps(preferences.target_fps);
@@ -476,6 +504,7 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     latest_frame_ = frame;
     snapshot_.state = State::Streaming;
     snapshot_.message = L"Wireless mirroring";
+    mirror_state_ = wireless::MirrorSenderState::Active;
     snapshot_.width = header.width;
     snapshot_.height = header.height;
     ++snapshot_.video_frames;
@@ -506,8 +535,9 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
         if (!connected_) return;
         attached = attachments_ != 0;
         snapshot_.state = State::Streaming;
-        snapshot_.message = snapshot_.width == 0 || snapshot_.height == 0
-            ? L"AirPlay music streaming" : L"Wireless mirroring";
+        if (mirror_state_ == wireless::MirrorSenderState::Active)
+            snapshot_.message = snapshot_.width == 0 || snapshot_.height == 0
+                ? L"AirPlay music streaming" : L"Wireless mirroring";
         ++snapshot_.audio_packets;
         snapshot_.audio_sample_rate = header.sample_rate;
         snapshot_.audio_channels = header.channels;
@@ -568,6 +598,8 @@ void WirelessClientStream::clear_media() noexcept {
         std::scoped_lock lock(mutex_);
         latest_frame_.reset();
         snapshot_.width = snapshot_.height = 0;
+        mirror_state_ = wireless::MirrorSenderState::Active;
+        source_width_ = source_height_ = output_width_ = output_height_ = 0;
         snapshot_.fps = snapshot_.latency_ms = 0;
         snapshot_.audio_sample_rate = snapshot_.audio_channels = 0;
     }
@@ -909,6 +941,17 @@ void WirelessReceiverHub::handle_message(const wireless::MessageHeader& header,
     }
     case wireless::MessageType::Video:
         if (const auto stream = find_connected(header)) stream->publish_video(header, payload);
+        break;
+    case wireless::MessageType::MirrorState:
+        if (!payload.empty() || header.reserved >
+            static_cast<std::uint32_t>(wireless::MirrorSenderState::Reconnecting))
+            throw std::runtime_error("invalid mirror state");
+        if (const auto stream = find_connected(header))
+            stream->set_mirror_state(static_cast<wireless::MirrorSenderState>(header.reserved));
+        break;
+    case wireless::MessageType::MirrorGeometry:
+        if (!payload.empty()) throw std::runtime_error("invalid mirror geometry payload");
+        if (const auto stream = find_connected(header)) stream->set_mirror_geometry(header);
         break;
     case wireless::MessageType::Audio:
         // Some RAOP-only senders begin publishing PCM without invoking the

@@ -7,7 +7,43 @@ using System.Text;
 
 [assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
 
+if (args is ["--operation-path-probe"])
+{
+    var paths = DriverConstants.GetOperationPaths("0123456789abcdef0123456789abcdef");
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new[] { paths.ResultPath, paths.LogPath, DriverConstants.BackupsRoot }));
+    return 0;
+}
+
 var failures = new List<string>();
+Run("isolated driver host keeps result logs and rollback backups in the machine data directory", () =>
+{
+    var paths = DriverConstants.GetOperationPaths("0123456789abcdef0123456789abcdef");
+    var expected = new[] { paths.ResultPath, paths.LogPath, DriverConstants.BackupsRoot };
+    True(expected.All(Path.IsPathFullyQualified));
+    foreach (var environmentMode in new[] { "empty", "spoofed" })
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            WorkingDirectory = Path.GetTempPath()
+        };
+        start.ArgumentList.Add("--operation-path-probe");
+        start.Environment.Clear();
+        var windows = Directory.GetParent(Environment.SystemDirectory)!.FullName;
+        start.Environment["SystemRoot"] = windows;
+        start.Environment["WINDIR"] = windows;
+        start.Environment["PATH"] = Environment.SystemDirectory;
+        if (environmentMode == "spoofed") start.Environment["ProgramData"] = Path.GetTempPath();
+        using var child = System.Diagnostics.Process.Start(start)!;
+        var output = child.StandardOutput.ReadToEnd();
+        var errors = child.StandardError.ReadToEnd();
+        True(child.WaitForExit(15000));
+        if (child.ExitCode != 0) throw new Exception(errors);
+        var actual = System.Text.Json.JsonSerializer.Deserialize<string[]>(output)!;
+        True(expected.SequenceEqual(actual, StringComparer.OrdinalIgnoreCase));
+    }
+});
 Run("confirmed parent driver changes and recovery", ParentDriverTests.Run);
 Run("driver failure recovery and download deadlines", DriverFailureTests.Run);
 

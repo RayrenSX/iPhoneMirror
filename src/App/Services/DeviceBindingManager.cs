@@ -30,9 +30,12 @@ internal sealed class DeviceBindingManager
     private readonly object _gate = new();
     private readonly string _path;
     private readonly Dictionary<Guid, DeviceBindingProfile> _profiles = [];
+    internal Exception? LoadError { get; private set; }
+    private readonly bool _readOnly;
 
-    internal DeviceBindingManager(string? path = null)
+    internal DeviceBindingManager(string? path = null, bool readOnly = false)
     {
+        _readOnly = readOnly;
         _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "iPhoneMirror", "device-binding-profiles.json");
         Load();
@@ -40,6 +43,17 @@ internal sealed class DeviceBindingManager
 
     internal IReadOnlyList<DeviceBindingProfile> Profiles
     { get { lock (_gate) return _profiles.Values.OrderBy(profile => profile.DisplayName).ToArray(); } }
+
+    internal void RefreshFromDisk()
+    {
+        var snapshot = new DeviceBindingManager(_path, readOnly: true);
+        if (snapshot.LoadError is not null) throw new IOException("Device profiles could not be read.", snapshot.LoadError);
+        lock (_gate)
+        {
+            _profiles.Clear();
+            foreach (var profile in snapshot.Profiles) _profiles[profile.Id] = profile;
+        }
+    }
 
     /// <summary>Creates a usable profile from its first observed identity.
     /// Empty profiles are invalid because they cannot represent a real device.</summary>
@@ -205,6 +219,25 @@ internal sealed class DeviceBindingManager
             if (!File.Exists(_path)) return;
             var profiles = JsonSerializer.Deserialize<List<DeviceBindingProfile>>(
                 File.ReadAllText(_path)) ?? [];
+            if (_readOnly)
+            {
+                var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var profileIds = new HashSet<Guid>();
+                foreach (var profile in profiles)
+                {
+                    if (profile is null || profile.Id == Guid.Empty || !profileIds.Add(profile.Id))
+                        throw new InvalidDataException("Invalid or duplicate device profile.");
+                    foreach (var (type, value) in new[] {
+                        (DeviceIdentityType.Wired, profile.WiredIdentity?.Udid),
+                        (DeviceIdentityType.AirPlay, profile.AirPlayIdentity?.StableId),
+                        (DeviceIdentityType.Bluetooth, profile.BluetoothIdentity?.StableId) })
+                    {
+                        if (value is null) continue;
+                        if (string.IsNullOrWhiteSpace(value) || !identities.Add(type + ":" + value))
+                            throw new InvalidDataException("Invalid or ambiguous device identity.");
+                    }
+                }
+            }
             var removedEmptyProfiles = false;
             foreach (var profile in profiles)
             {
@@ -216,9 +249,9 @@ internal sealed class DeviceBindingManager
                 }
                 _profiles[profile.Id] = profile;
             }
-            if (removedEmptyProfiles) Persist();
+            if (removedEmptyProfiles && !_readOnly) Persist();
         }
-        catch (Exception error) { DiagnosticLogger.Exception("binding", "profile_load_failed", error); }
+        catch (Exception error) { LoadError = error; DiagnosticLogger.Exception("binding", "profile_load_failed", error); }
     }
 
     private void Persist()

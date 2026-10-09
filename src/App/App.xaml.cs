@@ -146,10 +146,14 @@ public partial class App : Application
 
     private void ShowInitialWindow()
     {
+        var startProjection = false;
+        if (MainWindow is MainWindow setupWindow && !LaunchOptions.Enabled && new FirstRunSetupStore().Load().ShouldOpen)
+            startProjection = setupWindow.ShowFirstRunSetup();
         if (MainWindow is MainWindow { IsTrayMode: true } trayWindow)
             trayWindow.StartInTray();
         else
             MainWindow?.Show();
+        if (startProjection && MainWindow is MainWindow readyWindow) readyWindow.StartAfterSetup();
         _ = CheckForStartupUpdatesAsync();
     }
 

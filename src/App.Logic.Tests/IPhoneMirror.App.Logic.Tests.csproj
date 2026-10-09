@@ -12,6 +12,7 @@
   <ItemGroup>
     <Compile Include="..\App\Services\SingleFlightOperation.cs" Link="SingleFlightOperation.cs" />
     <Compile Include="..\App\Services\ClipboardSyncState.cs" Link="ClipboardSyncState.cs" />
+    <Compile Include="..\App\Services\Automation\AutomationSettings.cs" Link="AutomationSettings.cs" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
   <ItemGroup>
@@ -33,6 +34,7 @@
     <Compile Include="..\App\Services\SingleInstanceCoordinator.cs" Link="SingleInstanceCoordinator.cs" />
     <Compile Include="..\App\Models\DeviceCornerProfile.cs" Link="DeviceCornerProfile.cs" />
     <Compile Include="..\App\Models\DeviceCaptureState.cs" Link="DeviceCaptureState.cs" />
+    <Compile Include="..\App\Models\DeviceVideoPreferences.cs" Link="DeviceVideoPreferences.cs" />
     <Compile Include="..\App\Services\DeviceCornerProfileResolver.cs" Link="DeviceCornerProfileResolver.cs" />
     <Compile Include="..\App\Services\IndependentWindowAudioPolicy.cs" Link="IndependentWindowAudioPolicy.cs" />
     <Compile Include="..\App\Services\DriverManagerLauncher.cs" Link="DriverManagerLauncher.cs" />

@@ -46,7 +46,8 @@ namespace iPhoneMirror::host_common {
         return (width == long_edge && height == short_edge) ||
             (width == short_edge && height == long_edge);
     };
-    return (matches(5120, 2880) && fps == 60) ||
+    return (matches(2880, 2880) && fps == 60) ||
+        (matches(5120, 2880) && fps == 60) ||
         (matches(1920, 1080) && fps == 60) ||
         (matches(1280, 720) && fps == 30) ||
         (matches(960, 540) && fps == 30);

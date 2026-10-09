@@ -1,0 +1,92 @@
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.FirstRunSetupWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls" xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+ Title="{DynamicResource SetupTitle}" Width="880" Height="760" MinWidth="600" MinHeight="540"
+ WindowStartupLocation="CenterScreen" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+ Foreground="{DynamicResource TextBrush}">
+ <chrome:RoundedWindow.Resources>
+  <SolidColorBrush x:Key="DialogSurfaceBrush" Color="{DynamicResource ThemeBackgroundColor}"/>
+  <Style x:Key="SetupChoiceCard" TargetType="RadioButton">
+   <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+   <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+   <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+   <Setter Property="Margin" Value="0,0,12,12"/>
+   <Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="Template">
+    <Setter.Value>
+     <ControlTemplate TargetType="RadioButton">
+      <Border x:Name="Card" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderSoftBrush}"
+              BorderThickness="1.5" CornerRadius="14" Padding="18">
+       <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Background="{DynamicResource BorderSoftBrush}" Opacity="0.45" Width="38" Height="38" CornerRadius="10" HorizontalAlignment="Left" Margin="0,0,0,14"/>
+        <Path Data="{TemplateBinding Tag}" Stroke="{DynamicResource TextBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Stretch="Uniform" Width="22" Height="22" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,8,0,14"/>
+        <TextBlock x:Name="SelectionMark" Text="○" FontSize="16" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,0,0"/>
+        <ContentPresenter Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" RecognizesAccessKey="True"/>
+       </Grid>
+      </Border>
+      <ControlTemplate.Triggers>
+       <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+       <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+       <Trigger Property="IsChecked" Value="True">
+        <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+        <Setter TargetName="SelectionMark" Property="Text" Value="✓"/>
+        <Setter TargetName="SelectionMark" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+       </Trigger>
+       <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Card" Property="Opacity" Value="0.55"/></Trigger>
+      </ControlTemplate.Triggers>
+     </ControlTemplate>
+    </Setter.Value>
+   </Setter>
+  </Style>
+ </chrome:RoundedWindow.Resources>
+ <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="False">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid animations:WindowDragBehavior.IsEnabled="True" Margin="0,0,0,20">
+   <StackPanel Margin="0,0,38,0">
+    <TextBlock Text="iPhone Mirror" FontSize="16" FontWeight="SemiBold" Margin="4,4,0,18"/>
+    <Grid x:Name="StepIndicator" MinHeight="60"/>
+   </StackPanel>
+   <Button Style="{StaticResource SubWindowCloseButton}" Content="×" Click="CloseClick"
+           AutomationProperties.Name="{DynamicResource Close}"/>
+  </Grid>
+  <ScrollViewer x:Name="Scroller" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+   <StackPanel x:Name="Page" MaxWidth="680" Margin="16,6,16,12">
+    <TextBlock x:Name="DeviceLabel" Foreground="{DynamicResource AccentBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,12"/>
+    <Path x:Name="PageSymbol" Stroke="{DynamicResource MutedTextBrush}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Stretch="Uniform" Width="30" Height="30" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+    <TextBlock x:Name="Heading" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center"/>
+    <TextBlock x:Name="Description" Style="{StaticResource SecondaryText}" TextAlignment="Center" Margin="0,10,0,20"/>
+    <StackPanel x:Name="Body"/>
+    <StackPanel x:Name="BusyBar" Orientation="Horizontal" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,16,0,4">
+     <Ellipse Width="5" Height="5" Fill="{DynamicResource MutedTextBrush}" Margin="4"/>
+     <Ellipse Width="5" Height="5" Fill="{DynamicResource MutedTextBrush}" Margin="4"/>
+     <Ellipse Width="5" Height="5" Fill="{DynamicResource MutedTextBrush}" Margin="4"/>
+    </StackPanel>
+    <ProgressBar x:Name="DownloadProgress" Height="4" IsIndeterminate="False" Visibility="Collapsed" Margin="0,12,0,4"/>
+    <TextBlock x:Name="Status" TextWrapping="Wrap" Margin="0,12,0,8" AutomationProperties.LiveSetting="Polite"/>
+    <StackPanel x:Name="PromptPanel" Margin="0,8,0,8"/>
+    <Expander x:Name="Help" Header="{DynamicResource SetupSolutions}" Visibility="Collapsed" Margin="0,12,0,0">
+     <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="HelpText" TextWrapping="Wrap" Margin="0,10,0,12"/></ScrollViewer>
+    </Expander>
+    <Expander x:Name="DetailsExpander" Header="{DynamicResource SetupDetails}" Visibility="Collapsed" Margin="0,16,0,0">
+     <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="Details" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{DynamicResource MutedTextBrush}"/></ScrollViewer>
+    </Expander>
+   </StackPanel>
+  </ScrollViewer>
+  <Grid Grid.Row="2" Margin="0,16,0,0">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <Button x:Name="Previous" Content="{DynamicResource WizardPrevious}" Click="PreviousClick"/>
+   <Button x:Name="CancelOperation" Grid.Column="1" Content="{DynamicResource SetupCancelOperation}" Click="CancelOperationClick" Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Margin="8,0" Visibility="Collapsed"/>
+   <Button x:Name="Skip" Grid.Column="2" Content="{DynamicResource SetupSkip}" Click="SkipClick" Style="{StaticResource GhostButton}" Margin="8,0"/>
+   <Button x:Name="Next" Grid.Column="3" Content="{DynamicResource WizardNext}" Click="NextClick" Style="{StaticResource PrimaryButton}" MinWidth="112"/>
+  </Grid>
+  <Border x:Name="ExitPanel" Grid.RowSpan="3" Background="{DynamicResource WindowBackgroundBrush}" Visibility="Collapsed" CornerRadius="16" Padding="32">
+   <StackPanel VerticalAlignment="Center">
+    <TextBlock Text="{DynamicResource SetupExitTitle}" Style="{StaticResource SubWindowTitle}" TextAlignment="Center"/>
+    <TextBlock Text="{DynamicResource SetupExitHint}" Style="{StaticResource SecondaryText}" TextAlignment="Center" Margin="0,16,0,24"/>
+    <Button Content="{DynamicResource SetupContinue}" Click="ContinueClick" Margin="0,4"/>
+    <Button Content="{DynamicResource SetupExitSave}" Click="ExitClick" Style="{StaticResource GhostButton}" Margin="0,4"/>
+   </StackPanel>
+  </Border>
+ </Grid>
+</chrome:RoundedWindow>

@@ -12,17 +12,17 @@ internal static class RuntimeBinaryIntegrity
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["airplay2dll.dll"] =
-                "4a534dacac5cd36f9aaa6e016db75db899e0678ffb8b0c191cabf230a2002bd9",
+                "d5e1cdd0250f306bf7419dbe971daebd69aede3b517390586df54a60a8057397",
             ["avcodec-58.dll"] =
-                "4da59c6e58d78bb2b751553d2840421850309d42f1534734543b6854205a65c4",
+                "a3bafedd357b33cb35cf47463c95f7c93c805057c2729db4a8c736918b37a823",
             ["avutil-56.dll"] =
-                "85eef85c41cd5661c0ff1f9d78fed41f0f0cbc2bd094eed0449fbb68e710ff0a",
+                "3f9bd71c581fb65602cd8043595d8789ea5a504dcefc70a85c4484b9788915dc",
             ["dnssd.dll"] =
-                "003eeb7ea109df21e62d236e24937971bd9738b6648df81f6effb810524d92bd",
+                "d18d47bf555902dde6faa6817f62dcdbff0535bb1cd62eac0f99fbd324f2d072",
             ["swresample-3.dll"] =
-                "7284ddec63d4583faf645edfdea5e101182e476ae18f9584da5f60fb637536c1",
+                "97bc36e7db8c12b1fcf72681e94bff39b1ca0a0011756d8ca831e51820594bfc",
             ["swscale-5.dll"] =
-                "e34410901819510e2f8c20ca103af4210707badf55ce807a81f2b164dcfa3b15",
+                "412f8a0c90ee10a4131faa3a82b2eeed0a165c9ab10babf5cd95edea892b4fbf",
         };
 
     private const string FfmpegHash =
@@ -171,7 +171,8 @@ internal static class RuntimeBinaryIntegrity
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or
             JsonException or ArgumentException or NotSupportedException)
         {
-            failure = $"bridge runtime could not be verified: {error.GetType().Name}";
+            failure = $"bridge runtime could not be verified: {error.GetType().Name} " +
+                $"(0x{error.HResult:X8}): {AppLog.Sanitize(error.Message)}";
             return false;
         }
     }
@@ -224,7 +225,7 @@ internal static class RuntimeBinaryIntegrity
             if (entry is DirectoryInfo)
                 ValidateBridgeRuntimeTree(root, entry.FullName, expected, ref entries, depth + 1);
             else if (!expected.Remove(Path.GetRelativePath(root, entry.FullName)))
-                throw new IOException("Bridge runtime contains an unlisted file.");
+                throw new IOException($"Bridge runtime contains an unlisted file: {Path.GetRelativePath(root, entry.FullName)}");
         }
     }
 

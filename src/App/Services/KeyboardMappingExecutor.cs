@@ -4,6 +4,14 @@ internal sealed record MappedTouchRoute(string Target, Func<bool> IsCurrent,
     Func<string, double, double, CancellationToken, Task> SendAsync,
     Func<double, double, (double X, double Y)> Transform);
 
+internal sealed record TouchGesture(Guid Id, MappedTouchAction Action, double X, double Y,
+    double EndX, double EndY, int DurationMs, int IntervalMs = 100,
+    IReadOnlyList<(double X, double Y)>? Path = null)
+{
+    internal bool IsSwipe => Action is >= MappedTouchAction.Swipe and <= MappedTouchAction.SwipeRight;
+    internal (double X, double Y) EndPoint => (EndX, EndY);
+}
+
 // Up to five independent gestures. The caller captures an existing route; this
 // class never resolves a device, connects a backend, or converts coordinates.
 internal sealed class KeyboardMappingExecutor : IDisposable
@@ -12,6 +20,7 @@ internal sealed class KeyboardMappingExecutor : IDisposable
     private readonly Dictionary<(string Target, Guid Id), (CancellationTokenSource Cancel, TaskCompletionSource Done)> _running = [];
     internal Task Completion { get { lock (_gate) return Task.WhenAll(_running.Values.Select(v => v.Done.Task)); } }
     internal bool IsBusy { get { lock (_gate) return _running.Count != 0; } }
+    internal bool IsBusyFor(string target) { lock (_gate) return _running.Keys.Any(k => string.Equals(k.Target, target, StringComparison.OrdinalIgnoreCase)); }
     internal void Cancel()
     {
         lock (_gate)
@@ -19,11 +28,19 @@ internal sealed class KeyboardMappingExecutor : IDisposable
     }
     public void Dispose() => Cancel();
 
-    internal async Task<bool> ExecuteAsync(KeyboardMappingEntry mapping, MappedTouchRoute route,
+    internal Task<bool> ExecuteAsync(KeyboardMappingEntry mapping, MappedTouchRoute route,
         CancellationToken keyReleased = default, bool replayCompletedHold = false)
     {
         ArgumentNullException.ThrowIfNull(route);
         if (mapping.Validate() is { } error) throw new ArgumentException(error, nameof(mapping));
+        var end = mapping.EndPoint;
+        return ExecuteGestureAsync(new TouchGesture(mapping.Id, mapping.Action, mapping.X, mapping.Y,
+            end.X, end.Y, mapping.DurationMs, mapping.IntervalMs), route, keyReleased, replayCompletedHold);
+    }
+
+    internal async Task<bool> ExecuteGestureAsync(TouchGesture mapping, MappedTouchRoute route,
+        CancellationToken keyReleased = default, bool replayCompletedHold = false)
+    {
         // A physical press/release can both arrive before the dispatcher runs
         // its queued gesture. Preserve that completed lifetime as a down/up,
         // while generation/focus checks still revoke obsolete input.
@@ -89,18 +106,22 @@ internal sealed class KeyboardMappingExecutor : IDisposable
                 // Keep checking the captured route even when the key stays down.
                 while (true) await Delay(16);
             }
-            else if (mapping.IsSwipe)
+            else if (mapping.IsSwipe || mapping.Path is not null)
             {
                 var start = point;
                 var end = route.Transform(mapping.EndPoint.X, mapping.EndPoint.Y);
+                var path = mapping.Path?.Select(p => route.Transform(p.X, p.Y)).ToArray() ?? [start, end];
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 double progress;
                 do
                 {
                     await Delay(Math.Min(16, mapping.DurationMs));
                     progress = Math.Min(1, clock.Elapsed.TotalMilliseconds / mapping.DurationMs);
-                    await Send("move", start.X + (end.X - start.X) * progress,
-                        start.Y + (end.Y - start.Y) * progress);
+                    var offset = progress * (path.Length - 1);
+                    var index = Math.Min(path.Length - 2, (int)offset);
+                    var fraction = offset - index;
+                    await Send("move", path[index].X + (path[index + 1].X - path[index].X) * fraction,
+                        path[index].Y + (path[index + 1].Y - path[index].Y) * fraction);
                 } while (progress < 1);
             }
             else await Delay(mapping.Action == MappedTouchAction.LongPress ? mapping.DurationMs : 40);

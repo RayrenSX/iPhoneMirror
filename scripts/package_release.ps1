@@ -607,6 +607,7 @@ try {
         'iPhoneMirror.UsbConfigurationSwitch.exe',
         'hostfxr.dll',
         'hostpolicy.dll', 'coreclr.dll', 'PresentationFramework.dll',
+        'Microsoft.AspNetCore.Server.Kestrel.Core.dll', 'Microsoft.AspNetCore.Http.dll',
         'createdump.exe', 'mscordaccore.dll', 'mscordbi.dll', 'mscorrc.dll',
         'tools\iUsbBridge.exe', 'tools\iUsbBridge.runtime.json'
     )

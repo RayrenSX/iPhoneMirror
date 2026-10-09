@@ -40,6 +40,15 @@ int count_disable_actions(std::span<const UsbConfigurationObservation> observati
 } // namespace
 
 int main() {
+    using iPhoneMirror::capture::detail::should_reconnect_normal_usb_device;
+    check(should_reconnect_normal_usb_device(false, true, 3, true, false),
+        "only the restored normal stack missing its exact Apple USB row authorizes a reconnect");
+    check(!should_reconnect_normal_usb_device(true, true, 3, true, false) &&
+        !should_reconnect_normal_usb_device(false, false, 3, true, false) &&
+        !should_reconnect_normal_usb_device(false, true, 5, true, false) &&
+        !should_reconnect_normal_usb_device(false, true, 3, false, false) &&
+        !should_reconnect_normal_usb_device(false, true, 3, true, true),
+        "healthy, unknown, streaming and transitioning devices must never be cycled");
     constexpr std::array normal_exact{
         UsbConfigurationCandidateEvidence{true, true, false},
         UsbConfigurationCandidateEvidence{false, true, true},

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Capture/ICaptureSession.h"
+#include "IpcProtocol.h"
 
 #include <atomic>
 #include <chrono>
@@ -104,6 +105,8 @@ public:
         std::span<const std::uint8_t> payload);
     void publish_audio(const wireless::MessageHeader& header,
         std::span<const std::uint8_t> payload);
+    void set_mirror_state(wireless::MirrorSenderState state);
+    void set_mirror_geometry(const wireless::MessageHeader& header);
 
 private:
     friend struct WirelessReceiverHubTestAccess;
@@ -113,6 +116,8 @@ private:
     std::wstring os_version_;
     mutable std::mutex mutex_;
     bool connected_{};
+    wireless::MirrorSenderState mirror_state_{wireless::MirrorSenderState::Active};
+    std::uint32_t source_width_{}, source_height_{}, output_width_{}, output_height_{};
     std::uint32_t attachments_{};
     Snapshot snapshot_;
     std::shared_ptr<const media::DecodedFrame> latest_frame_;

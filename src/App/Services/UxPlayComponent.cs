@@ -17,13 +17,27 @@ internal sealed record ComponentDescriptor(int Schema, string Version, string Na
 internal static class UxPlayComponent
 {
     private const string ReceiptName = ".verified-package";
+    private const string InstalledDescriptorName = "installed-component.dat";
+    private static readonly byte[] DescriptorProtectionPurpose =
+        System.Text.Encoding.UTF8.GetBytes("iPhoneMirror.UxPlay.ComponentDescriptor.v1");
     private static readonly SemaphoreSlim InstallGate = new(1, 1);
     private static readonly Lazy<ComponentDescriptor?> BundledDescriptor = new(ReadDescriptor);
+    private static readonly Lazy<ComponentDescriptor?> SavedDescriptor = new(() => ReadInstalledDescriptor(CacheRoot));
+    private static ComponentDescriptor? _installedDescriptor;
     private sealed record VerifiedFile(long Length, DateTime Written, DateTime Created, string Hash);
     private static readonly ConcurrentDictionary<string, VerifiedFile> VerifiedFiles = new(StringComparer.OrdinalIgnoreCase);
-    internal static ComponentDescriptor? Descriptor => BundledDescriptor.Value;
+    internal static ComponentDescriptor? Descriptor => SelectDescriptor(
+        Volatile.Read(ref _installedDescriptor) ?? SavedDescriptor.Value, BundledDescriptor.Value);
+    internal static ReleaseInfo? DownloadRelease { get; private set; }
     internal static string CacheRoot => Path.Combine(UpdateSettingsStore.UserDataDirectory,
         "Components", "UxPlay");
+
+    // An application upgrade may require a newer host/IPC version. Keep offline
+    // use for current components, but let the normal unavailable-component flow
+    // fetch an update when the saved component predates this application's bundle.
+    internal static ComponentDescriptor? SelectDescriptor(ComponentDescriptor? installed,
+        ComponentDescriptor? bundled) => installed is null ? bundled : bundled is null ? installed :
+        SemanticVersion.Parse(installed.Version) < SemanticVersion.Parse(bundled.Version) ? bundled : installed;
 
     private static ComponentDescriptor? ReadDescriptor()
     {
@@ -172,10 +186,200 @@ internal static class UxPlayComponent
     internal static async Task InstallAsync(IProgress<UpdateDownloadProgress> progress,
         Action installing, CancellationToken cancellationToken)
     {
-        var descriptor = Descriptor ?? throw new InvalidDataException(
-            Localization.LocalizationService.Get("UxPlayComponentUnavailable"));
         using var client = new GitHubReleaseClient(downloadRoot: Path.Combine(CacheRoot, "Downloads"));
-        await InstallAsync(descriptor, CacheRoot, client, progress, installing, cancellationToken);
+        var descriptor = await InstallLatestAsync(CacheRoot, client, progress, installing, cancellationToken,
+            minimumDescriptor: BundledDescriptor.Value);
+        Volatile.Write(ref _installedDescriptor, descriptor);
+    }
+
+    internal static async Task<ComponentDescriptor> InstallLatestAsync(string cacheRoot,
+        GitHubReleaseClient client, IProgress<UpdateDownloadProgress> progress,
+        Action installing, CancellationToken cancellationToken, bool allowMirrorFallback = true,
+        ComponentDescriptor? minimumDescriptor = null)
+    {
+        await InstallGate.WaitAsync(cancellationToken);
+        try
+        {
+            DownloadRelease = null;
+            var release = await client.GetLatestUxPlayAsync(allowMirrorFallback, cancellationToken);
+            DownloadRelease = release;
+            var asset = release.ZipAsset!;
+            if (minimumDescriptor is not null &&
+                release.Version < SemanticVersion.Parse(minimumDescriptor.Version))
+                throw new System.Net.Http.HttpRequestException(
+                    "The component required by this application has not been published.",
+                    null, System.Net.HttpStatusCode.NotFound);
+            using var cacheLock = await AcquireCacheLockAsync(cacheRoot, cancellationToken);
+            var archivePath = Path.Combine(cacheRoot, "Archives", asset.Sha256!.ToLowerInvariant() + ".zip");
+            var cached = await ReadVerifiedArchiveDescriptorAsync(archivePath, release, cancellationToken);
+            // The embedded manifest remains a trusted migration path for existing
+            // caches. Never reuse a file list supplied by local, editable metadata.
+            if (cached is null && BundledDescriptor.Value is { } bundled &&
+                bundled.Size == asset.Size && string.Equals(bundled.Sha256, asset.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                var current = bundled with { Version = release.TagName[1..], Release = release.TagName,
+                    Name = asset.Name, Url = asset.DownloadUri.AbsoluteUri };
+                if (await Task.Run(() => FindInstalledExecutable(current, cacheRoot), cancellationToken) is not null)
+                    cached = current;
+            }
+            if (cached is not null)
+            {
+                if (await Task.Run(() => FindInstalledExecutable(cached, cacheRoot), cancellationToken) is null)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    installing();
+                    await Task.Run(() => ExtractVerifiedCoreAsync(archivePath, cached, cacheRoot,
+                        cancellationToken), cancellationToken);
+                }
+                await SaveInstalledDescriptorAsync(cached, cacheRoot, cancellationToken);
+                LogState("uxplay_runtime_ready", cached, ("source", "verified_cache"));
+                return cached;
+            }
+            EnsureNoLinks(Path.Combine(cacheRoot, "Downloads", release.TagName));
+            await client.CheckComponentAvailabilityAsync(asset, cancellationToken);
+            var downloaded = await client.DownloadAsync(release, progress, cancellationToken,
+                allowMirrorFallback, preferInstaller: false, stopOnOfficialNotFound: true);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                installing();
+                // The release digest authenticates the complete ZIP. Build the
+                // per-file receipt from those verified bytes, not an old build's manifest.
+                var descriptor = await Task.Run(() => DescribeDownloadedAsync(downloaded, cancellationToken), cancellationToken);
+                await Task.Run(() => ExtractVerifiedCoreAsync(downloaded.Path, descriptor, cacheRoot,
+                    cancellationToken), cancellationToken);
+                EnsureNoLinks(Path.GetDirectoryName(archivePath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
+                EnsureRegularFile(archivePath);
+                File.Move(downloaded.Path, archivePath, overwrite: true);
+                await SaveInstalledDescriptorAsync(descriptor, cacheRoot, cancellationToken);
+                LogState("uxplay_runtime_ready", descriptor, ("source", "latest_release"));
+                return descriptor;
+            }
+            finally
+            {
+                try { File.Delete(downloaded.Path); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                { DiagnosticLogger.Exception("components", "uxplay_archive_cleanup_failed", error); }
+            }
+        }
+        finally { InstallGate.Release(); }
+    }
+
+    private static async Task<ComponentDescriptor?> ReadVerifiedArchiveDescriptorAsync(string archivePath,
+        ReleaseInfo release, CancellationToken cancellationToken)
+    {
+        try
+        {
+            EnsureNoLinks(Path.GetDirectoryName(archivePath)!);
+            EnsureRegularFile(archivePath);
+            if (!File.Exists(archivePath)) return null;
+            var asset = release.ZipAsset!;
+            return await Task.Run(() => DescribeDownloadedAsync(new DownloadedUpdate(
+                release, asset, archivePath, true, asset.Sha256), cancellationToken), cancellationToken);
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            DiagnosticLogger.Exception("components", "uxplay_cached_archive_invalid", error);
+            return null;
+        }
+    }
+
+    internal static async Task<ComponentDescriptor> DescribeDownloadedAsync(DownloadedUpdate downloaded,
+        CancellationToken cancellationToken)
+    {
+        if (!downloaded.HashVerified || !IsHash(downloaded.VerifiedSha256))
+            throw new InvalidDataException("UxPlay package requires a verified release checksum.");
+        await using var input = new FileStream(downloaded.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (input.Length != downloaded.Asset.Size || input.Length > 200_000_000 ||
+            !Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken))
+                .Equals(downloaded.VerifiedSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("UxPlay package checksum failed.");
+        input.Position = 0;
+        using var zip = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
+        var files = zip.Entries.Select(entry => new ComponentFile(entry.FullName, entry.Length,
+            new string('0', 64))).ToArray();
+        var descriptor = new ComponentDescriptor(1, downloaded.Release.TagName[1..], downloaded.Asset.Name,
+            downloaded.Asset.DownloadUri.AbsoluteUri, input.Length, downloaded.VerifiedSha256!, files,
+            downloaded.Release.TagName);
+        // Validate all paths and expansion limits before decompressing any entry.
+        ValidateDescriptor(descriptor);
+        for (var index = 0; index < files.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var entry = zip.Entries[index];
+            if ((entry.ExternalAttributes & (int)FileAttributes.ReparsePoint) != 0 ||
+                ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000)
+                throw new InvalidDataException("Unexpected UxPlay package entry.");
+            await using var source = entry.Open();
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[81920];
+            long length = 0;
+            int count;
+            while ((count = await source.ReadAsync(buffer, cancellationToken)) != 0)
+            {
+                length += count;
+                if (length > entry.Length) throw new InvalidDataException("UxPlay entry exceeds its declared size.");
+                hash.AppendData(buffer, 0, count);
+            }
+            if (length != entry.Length) throw new InvalidDataException("Incomplete UxPlay entry.");
+            files[index] = files[index] with { Sha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant() };
+        }
+        return descriptor;
+    }
+
+    internal static ComponentDescriptor? ReadInstalledDescriptor(string cacheRoot)
+    {
+        try
+        {
+            EnsureNoLinks(cacheRoot);
+            var path = Path.Combine(cacheRoot, InstalledDescriptorName);
+            EnsureRegularFile(path);
+            if (!File.Exists(path)) return null;
+            using var input = File.OpenRead(path);
+            if (input.Length is <= 0 or > 1024 * 1024)
+                throw new InvalidDataException("Invalid installed UxPlay metadata.");
+            var protectedBytes = new byte[(int)input.Length];
+            input.ReadExactly(protectedBytes);
+            var bytes = ProtectedData.Unprotect(protectedBytes, DescriptorProtectionPurpose, DataProtectionScope.CurrentUser);
+            var descriptor = JsonSerializer.Deserialize<ComponentDescriptor>(bytes)
+                ?? throw new InvalidDataException("Missing installed UxPlay metadata.");
+            ValidateDescriptor(descriptor);
+            return descriptor;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or CryptographicException)
+        {
+            DiagnosticLogger.Exception("components", "uxplay_installed_metadata_invalid", error);
+            return null;
+        }
+    }
+
+    private static async Task SaveInstalledDescriptorAsync(ComponentDescriptor descriptor, string cacheRoot,
+        CancellationToken cancellationToken)
+    {
+        EnsureNoLinks(cacheRoot);
+        var temporary = Path.Combine(cacheRoot, ".metadata-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // DPAPI detects modifications to the offline receipt. It is local
+            // storage protection, not a publisher signature; online cache reuse
+            // independently rebuilds the file list from the release-verified ZIP.
+            var bytes = ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(descriptor),
+                DescriptorProtectionPurpose, DataProtectionScope.CurrentUser);
+            await File.WriteAllBytesAsync(temporary, bytes, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var destination = Path.Combine(cacheRoot, InstalledDescriptorName);
+            EnsureRegularFile(destination);
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    private static void EnsureRegularFile(string path)
+    {
+        if ((File.Exists(path) || Directory.Exists(path)) &&
+            (File.GetAttributes(path) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+            throw new IOException("UxPlay metadata and archives must be regular files.");
     }
 
     internal static async Task InstallAsync(ComponentDescriptor descriptor, string cacheRoot,

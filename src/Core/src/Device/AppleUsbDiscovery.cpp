@@ -4,6 +4,10 @@
 #include <appmodel.h>
 #include <SetupAPI.h>
 #include <cfgmgr32.h>
+#include <initguid.h>
+#include <devpkey.h>
+#include <winioctl.h>
+#include <usbioctl.h>
 
 #include <algorithm>
 #include <cctype>
@@ -347,6 +351,101 @@ AppleNormalUsbStackEvidence inspect_apple_normal_usb_stack(
 bool is_apple_normal_usb_stack_present(std::string_view serial) noexcept {
     return is_complete_apple_normal_usb_stack(
         inspect_apple_normal_usb_stack(serial));
+}
+
+std::optional<std::uint8_t> inspect_apple_usb_configuration(
+    std::string_view serial) noexcept {
+    try {
+        if (normalized_serial(serial).empty()) return std::nullopt;
+        HDEVINFO raw = SetupDiGetClassDevsW(nullptr, nullptr, nullptr,
+            DIGCF_ALLCLASSES | DIGCF_PRESENT);
+        if (raw == INVALID_HANDLE_VALUE) return std::nullopt;
+        std::unique_ptr<void, DevInfoDeleter> set(raw);
+        DEVINST selected{};
+        unsigned int expected_product{};
+        for (DWORD index{};; ++index) {
+            SP_DEVINFO_DATA data{.cbSize = sizeof(data)};
+            if (!SetupDiEnumDeviceInfo(raw, index, &data)) {
+                if (GetLastError() == ERROR_NO_MORE_ITEMS) break;
+                continue;
+            }
+            const auto id = instance_id(raw, data);
+            if (!apple_usb_parent_instance_matches_serial(id, serial)) continue;
+            const auto upper_id = uppercase(id);
+            if (swscanf_s(upper_id.c_str(), L"USB\\VID_05AC&PID_%4x",
+                    &expected_product) != 1) return std::nullopt;
+            selected = data.DevInst;
+            break;
+        }
+        if (!selected) return std::nullopt;
+        DEVPROPTYPE type{};
+        ULONG port{};
+        ULONG property_bytes = sizeof(port);
+        if (CM_Get_DevNode_PropertyW(selected, &DEVPKEY_Device_Address,
+                &type, reinterpret_cast<PBYTE>(&port), &property_bytes, 0) !=
+                CR_SUCCESS || type != DEVPROP_TYPE_UINT32 ||
+            property_bytes != sizeof(port) || port == 0)
+            return std::nullopt;
+        DEVINST hub_node{};
+        wchar_t hub_id[MAX_DEVICE_ID_LEN]{};
+        if (CM_Get_Parent(&hub_node, selected, 0) != CR_SUCCESS ||
+            CM_Get_Device_IDW(hub_node, hub_id,
+                static_cast<ULONG>(std::size(hub_id)), 0) != CR_SUCCESS)
+            return std::nullopt;
+        GUID hub_guid{0xf18a0e88, 0xc30c, 0x11d0,
+            {0x88, 0x15, 0x00, 0xa0, 0xc9, 0x06, 0xbe, 0xd8}};
+        ULONG characters{};
+        if (CM_Get_Device_Interface_List_SizeW(&characters, &hub_guid, hub_id,
+                CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != CR_SUCCESS ||
+            characters < 2 || characters > 32768)
+            return std::nullopt;
+        std::wstring links(characters, L'\0');
+        if (CM_Get_Device_Interface_ListW(&hub_guid, hub_id, links.data(),
+                characters, CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != CR_SUCCESS)
+            return std::nullopt;
+        const auto first_end = links.find(L'\0');
+        // Do not guess between multiple hub paths or query another port.
+        if (first_end == 0 || first_end == std::wstring::npos ||
+            first_end + 1 >= links.size() || links[first_end + 1] != L'\0')
+            return std::nullopt;
+        HANDLE hub = CreateFileW(links.c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (hub == INVALID_HANDLE_VALUE) return std::nullopt;
+        struct HubCloser {
+            HANDLE value;
+            ~HubCloser() { CloseHandle(value); }
+        } closer{hub};
+        std::vector<std::uint8_t> request(
+            sizeof(USB_NODE_CONNECTION_INFORMATION_EX) + sizeof(USB_PIPE_INFO) * 32);
+        auto* connection = reinterpret_cast<USB_NODE_CONNECTION_INFORMATION_EX*>(
+            request.data());
+        connection->ConnectionIndex = port;
+        DWORD bytes{};
+        if (!DeviceIoControl(hub, IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX,
+                request.data(), static_cast<DWORD>(request.size()),
+                request.data(), static_cast<DWORD>(request.size()), &bytes,
+                nullptr) || bytes < sizeof(USB_NODE_CONNECTION_INFORMATION_EX))
+            return std::nullopt;
+        if (connection->ConnectionStatus != DeviceConnected ||
+            connection->DeviceDescriptor.idVendor != 0x05ac ||
+            connection->DeviceDescriptor.idProduct != expected_product)
+            return std::nullopt;
+        // Bind the returned port evidence to the same exact parent after the
+        // IOCTL as well; a disconnect/replug must not become another phone's
+        // configuration evidence.
+        wchar_t current_id[MAX_DEVICE_ID_LEN]{};
+        ULONG status{};
+        ULONG problem{};
+        if (CM_Get_Device_IDW(selected, current_id,
+                static_cast<ULONG>(std::size(current_id)), 0) != CR_SUCCESS ||
+            !apple_usb_parent_instance_matches_serial(current_id, serial) ||
+            CM_Get_DevNode_Status(&status, &problem, selected, 0) != CR_SUCCESS ||
+            (status & DN_STARTED) == 0 || problem != 0)
+            return std::nullopt;
+        return connection->CurrentConfigurationValue;
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 bool is_unsafe_apple_usb_filter_combination(

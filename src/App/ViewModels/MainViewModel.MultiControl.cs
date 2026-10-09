@@ -39,7 +39,7 @@ internal sealed partial class MainViewModel
             {
                 if (_disposed || (snapshot.Prompt is null &&
                     !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))) return;
-                if (Application.Current?.MainWindow is { } owner)
+                if (!SetupActive && Application.Current?.MainWindow is { } owner)
                     ReverseControlStatusWindow.Show(owner, control.ControlStatus,
                         () => _ = CancelReverseControlAsync(snapshot.Mode, udid),
                         () => _ = StartDeviceControlAsync(udid, snapshot.Mode == ControlStatusMode.Wireless));
@@ -98,7 +98,7 @@ internal sealed partial class MainViewModel
                 NotifyUsbControlStateChanged();
                 // Every entry (toolbar, shortcut, preview menu, command and retry)
                 // opens the same status surface before inspecting the binding.
-                if (Application.Current?.MainWindow is { } owner)
+                if (!SetupActive && Application.Current?.MainWindow is { } owner)
                     ReverseControlStatusWindow.Show(owner, control.ControlStatus,
                         () => _ = CancelReverseControlAsync(mode, target),
                         () => _ = StartDeviceControlAsync(target, wireless));

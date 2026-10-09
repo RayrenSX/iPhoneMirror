@@ -105,10 +105,12 @@ class FastStreamReconnectGate final {
 public:
     [[nodiscard]] bool request_for_silence(std::chrono::milliseconds video,
         std::chrono::milliseconds media) noexcept {
-        // Live audio proves the current protocol/USB session is still active.
-        // Resetting it loses the outstanding NEED and device video clock.
-        constexpr auto limit = std::chrono::milliseconds(2500);
-        return video >= limit && media >= limit && request();
+        // Give video-only stalls a longer grace period, but do not let live
+        // audio keep a frozen video stream from recovering indefinitely.
+        constexpr auto media_limit = std::chrono::milliseconds(2500);
+        constexpr auto video_limit = std::chrono::seconds(5);
+        return (video >= video_limit ||
+            (video >= media_limit && media >= media_limit)) && request();
     }
 
     [[nodiscard]] bool request() noexcept {

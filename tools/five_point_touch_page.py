@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--bind', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--phone-address', help='Accept phone events only from this selected IPv4 address')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     events = []
@@ -33,6 +34,9 @@ def main():
             pass
 
         def do_GET(self):
+            if args.phone_address and self.client_address[0] not in (args.phone_address, '127.0.0.1'):
+                self.send_error(403)
+                return
             if self.path not in ('/', '/events'):
                 self.send_error(404)
                 return
@@ -46,6 +50,9 @@ def main():
             self.wfile.write(body)
 
         def do_POST(self):
+            if args.phone_address and self.client_address[0] != args.phone_address:
+                self.send_error(403)
+                return
             if self.path != '/events':
                 self.send_error(404)
                 return

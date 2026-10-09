@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -90,6 +91,10 @@ struct AppleUsbFilterSafetyResult {
 // Read-only PnP evidence that the selected parent has restarted its normal
 // Apple management interfaces. This never opens a USB device handle.
 [[nodiscard]] AppleNormalUsbStackEvidence inspect_apple_normal_usb_stack(
+    std::string_view serial) noexcept;
+// Read the selected parent's hub port, without opening/claiming a phone
+// interface. A started PnP tree alone cannot prove its active configuration.
+[[nodiscard]] std::optional<std::uint8_t> inspect_apple_usb_configuration(
     std::string_view serial) noexcept;
 [[nodiscard]] bool is_apple_normal_usb_stack_present(
     std::string_view serial) noexcept;

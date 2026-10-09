@@ -1445,13 +1445,14 @@ Equal(true,
         StringComparison.Ordinal),
     "Bluetooth pointer input preserves current-window speed in one bounded latest slot");
 Equal(true,
-    mainWindowCode.Contains("RegisterRawInput(controlActive && _activeControlWindow == 0",
-        StringComparison.Ordinal) &&
+    // Raw Input routing for independent previews is exercised by the runtime
+    // TestIndependentBluetoothPointer behavior checks. The former source-text
+    // check required disabling their mouse input, contradicting that behavior.
     mainWindowCode.Contains("ClipWindowsCursorToControlSurface();", StringComparison.Ordinal) &&
     mainWindowCode.Contains("ClipCursor(ref bounds)", StringComparison.Ordinal) &&
     !mainWindowCode.Contains("message == WmInput && _activeControlWindow == 0",
         StringComparison.Ordinal),
-    "Bluetooth control uses one raw-input sensitivity path and confines the hidden cursor to the active preview");
+    "Bluetooth control confines the hidden cursor to the active preview without excluding independent input");
 Equal(true,
     mainWindowCode.Contains("var sensitivity = _viewModel.AppliedBluetoothMouseSensitivity / 100.0;",
         StringComparison.Ordinal) &&
@@ -2372,6 +2373,17 @@ try
         "USB touch bridge runtime accepts the complete generated payload");
     Equal(string.Empty, bridgeRuntimeFailure,
         "USB touch bridge runtime has no failure for a complete payload");
+
+    var unlistedRuntimeFile = Path.Combine(bridgeRuntimeInternal, "old-dependency.dll");
+    File.WriteAllText(unlistedRuntimeFile, "old runtime");
+    Equal(false, RuntimeBinaryIntegrity.VerifyUsbTouchBridgeRuntime(
+            bridgeRuntimeExecutable, out bridgeRuntimeFailure),
+        "USB touch bridge rejects upgrade residue");
+    Equal(true, bridgeRuntimeFailure.Contains("unlisted file", StringComparison.Ordinal) &&
+        bridgeRuntimeFailure.Contains("old-dependency.dll", StringComparison.Ordinal) &&
+        bridgeRuntimeFailure.Contains("0x", StringComparison.Ordinal),
+        "Runtime diagnostics retain the reason, relative filename and HRESULT");
+    File.Delete(unlistedRuntimeFile);
 
     File.AppendAllText(bridgeRuntimeDependency, "-tampered");
     Equal(false, RuntimeBinaryIntegrity.VerifyUsbTouchBridgeRuntime(

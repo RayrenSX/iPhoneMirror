@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="IPhoneMirror.App.Runtime.Tests" />
   </ItemGroup>
   <PropertyGroup>
@@ -12,9 +15,9 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.8.5-pre</Version>
-    <AssemblyVersion>1.8.5.0</AssemblyVersion>
-    <FileVersion>1.8.5.0</FileVersion>
+    <Version>1.5.0-pre2</Version>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
+    <FileVersion>1.5.0.0</FileVersion>
     <Authors>RayrenSX</Authors>
     <Product>iPhoneMirror</Product>
     <Description>Low-latency iPhone screen mirroring for Windows over USB and AirPlay.</Description>
@@ -230,7 +233,7 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Content Include="..\..\third_party\airplay-server\LICENSE-*;..\..\third_party\airplay-server\NOTICE-*;..\..\third_party\airplay-server\SOURCE.md;..\..\third_party\airplay-server\SHA256SUMS.txt">
+    <Content Include="..\..\third_party\airplay-server\LICENSE-*;..\..\third_party\airplay-server\NOTICE-*;..\..\third_party\airplay-server\SOURCE.md;..\..\third_party\airplay-server\SHA256SUMS.txt;..\..\third_party\airplay-server\BUILD.json">
       <Link>Wireless\licenses\%(Filename)%(Extension)</Link>
       <TargetPath>Wireless\licenses\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

@@ -698,7 +698,7 @@ std::int32_t IM_CALL im_refresh_devices_ex(iPhoneMirror::DeviceInfo* devices,
 
 std::int32_t IM_CALL im_wireless_receiver_start(const wchar_t* receiver_name,
     const wchar_t* host_path) {
-    return im_wireless_receiver_start_ex(receiver_name, host_path, 5120, 2880, 60);
+    return im_wireless_receiver_start_ex(receiver_name, host_path, 2880, 2880, 60);
 }
 
 std::int32_t IM_CALL im_wireless_receiver_start_ex(const wchar_t* receiver_name,
@@ -724,6 +724,7 @@ std::int32_t IM_CALL im_wireless_receiver_start_ex(const wchar_t* receiver_name,
                 (width == short_edge && height == long_edge);
         };
         const auto supported =
+            (matches(2880, 2880) && frame_rate == 60) ||
             (matches(5120, 2880) && frame_rate == 60) ||
             (matches(1920, 1080) && frame_rate == 60) ||
             (matches(1280, 720) && frame_rate == 30) ||

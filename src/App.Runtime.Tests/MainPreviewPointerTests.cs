@@ -259,7 +259,7 @@ internal static partial class Program
                 InteractionAssert(frames.Length == 2 && frames.All(f =>
                     f.GetProperty("kind").GetString() == "button_event" &&
                     f.GetProperty("usageCode").GetInt32() == 0x40),
-                    $"{context}/{button}/{modifiers}: native mouse shortcut was cancelled or leaked input.");
+                    $"{context}/{button}/{modifiers}: native mouse shortcut was cancelled or leaked input; frames={string.Join(';', frames.Select(f => f.GetRawText()))}.");
                 if (modifiers != 0)
                 {
                     packets.SetLength(0);

@@ -44,6 +44,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
             Surface("workspace-mirroring", SymbolRegular.ProjectionScreen20, "DeveloperMirroring", "DeveloperMirroringDescription"),
             Surface("workspace-devices", SymbolRegular.Phone20, "DeveloperDevices", "DeveloperDevicesDescription"),
             Surface("workspace-settings", SymbolRegular.Settings20, "DeveloperSettings", "DeveloperSettingsDescription"),
+            Surface("first-run-setup", SymbolRegular.Window20, "SetupReopen", "SetupTitle"),
             Surface("workspace-output", SymbolRegular.Speaker220, "DeveloperOutput", "DeveloperOutputDescription"),
             Surface("driver-manager", SymbolRegular.WrenchScrewdriver20, "DeveloperDriver", "DeveloperDriverDescription"),
             Surface("about", SymbolRegular.Info20, "DeveloperAbout", "DeveloperAboutDescription"),
@@ -79,6 +80,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
         ];
         DataContext = this;
         InitializeComponent();
+        InitializeAutomationSettings();
         ThemeService.Attach(this);
         LocalizationService.LanguageChanged += OnLanguageChanged;
         _diagnosticsTimer.Tick += (_, _) => RefreshDiagnostics();
@@ -90,6 +92,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
         };
         Closed += (_, _) =>
         {
+            _owner.AutomationStateChanged -= RefreshAutomationState;
             _diagnosticsTimer.Stop();
             LocalizationService.LanguageChanged -= OnLanguageChanged;
         };
@@ -113,6 +116,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
                     "workspace-mirroring" => "DeveloperMirroring",
                     "workspace-devices" => "DeveloperDevices",
                     "workspace-settings" => "DeveloperSettings",
+                    "first-run-setup" => "SetupReopen",
                     "workspace-output" => "DeveloperOutput",
                     "driver-manager" => "DeveloperDriver",
                     _ => "DeveloperAbout",
@@ -122,6 +126,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
                     "workspace-mirroring" => "DeveloperMirroringDescription",
                     "workspace-devices" => "DeveloperDevicesDescription",
                     "workspace-settings" => "DeveloperSettingsDescription",
+                    "first-run-setup" => "SetupTitle",
                     "workspace-output" => "DeveloperOutputDescription",
                     "driver-manager" => "DeveloperDriverDescription",
                     _ => "DeveloperAboutDescription",

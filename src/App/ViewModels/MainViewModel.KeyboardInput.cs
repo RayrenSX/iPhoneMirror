@@ -8,9 +8,11 @@ internal sealed partial class MainViewModel
         FindControl(target) is { Starting: false, Stopping: false } &&
         GetReadyUsbControlBridge(target) is not null;
 
-    internal DirectKeyboardRoute? CaptureDirectKeyboardRoute(string? target)
+    internal DirectKeyboardRoute? CaptureDirectKeyboardRoute(string? target, bool automation = false)
     {
         if (_disposed || target is null) return null;
+        var humanGuard = automation ? (Func<bool>)(() => true) : AutomationHumanGuard(target);
+        if (!humanGuard()) return null;
         var control = FindControl(target);
         var bridge = GetReadyUsbControlBridge(target);
         if (control is not null && !control.Starting && !control.Stopping && bridge is not null)
@@ -20,7 +22,7 @@ internal sealed partial class MainViewModel
             var apple = control.Router.AppleUdid;
             var generation = control.Router.Generation;
             var bridgeGeneration = bridge.InputGeneration;
-            bool Current() => !_disposed && apple is not null && bridge.IsReady &&
+            bool Current() => humanGuard() && !_disposed && apple is not null && bridge.IsReady &&
                 bridge.InputGeneration == bridgeGeneration && control.Router.Owns(apple, mode, generation);
             if (!Current()) return null;
             return new(target, mode == ReverseControlMode.Usb ? "WiredDirect" : "WirelessDirect",
@@ -37,7 +39,10 @@ internal sealed partial class MainViewModel
         // One route is selected. Bluetooth cannot receive a second copy while
         // a wired/wireless route is ready or still establishing ownership.
         if (control is { Enabled: true } or { Starting: true } or { Stopping: true }) return null;
-        return BluetoothControlIsConnected && IsBluetoothControlTarget(target)
-            ? _bluetoothControl.CaptureKeyboardRoute(target) : null;
+        if (!BluetoothControlIsConnected || (automation && !_bluetoothControl.IsKeyboardReady) || !IsBluetoothControlTarget(target)) return null;
+        var ble = _bluetoothControl.CaptureKeyboardRoute(target);
+        return ble with { IsCurrent = () => humanGuard() && ble.IsCurrent() && (!automation || _bluetoothControl.IsKeyboardReady),
+            SendAsync = (modifiers, usages, guard) => ble.SendAsync(modifiers, usages,
+                () => humanGuard() && guard?.Invoke() != false) };
     }
 }

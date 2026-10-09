@@ -6,6 +6,8 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <span>
+#include <string_view>
 #include <vector>
 
 namespace iPhoneMirror::transport {
@@ -23,6 +25,8 @@ public:
     explicit UsbMuxClient(std::uint16_t port) : port_(port) {}
 
     [[nodiscard]] std::vector<MuxDevice> list_devices();
+    [[nodiscard]] static bool contains_usb_device(
+        std::span<const MuxDevice> devices, std::string_view serial) noexcept;
     [[nodiscard]] bool has_pair_record(const std::string& udid);
     [[nodiscard]] Socket connect_device(std::uint32_t device_id, std::uint16_t device_port);
     [[nodiscard]] std::uint16_t port() const noexcept { return port_; }
@@ -37,4 +41,3 @@ private:
 };
 
 } // namespace iPhoneMirror::transport
-

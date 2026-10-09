@@ -205,13 +205,12 @@ internal static class ComponentDownloadNetworkTests
 
     internal static async Task RunPublicComponentAsync(string output)
     {
-        var descriptor = UxPlayComponent.Descriptor ?? throw new Exception("Missing embedded component descriptor");
         Directory.CreateDirectory(output);
-        Console.WriteLine($"Version: {descriptor.Version}\nPlatform: Windows\nArchitecture: x64\nRelease: {descriptor.ReleaseTag}\nAsset: {descriptor.Name}\nURL: {descriptor.Url}");
         using var client = new GitHubReleaseClient(downloadRoot: Path.Combine(output, "Downloads"));
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        await UxPlayComponent.InstallAsync(descriptor, output, client, new ProgressSink(_ => { }),
+        var descriptor = await UxPlayComponent.InstallLatestAsync(output, client, new ProgressSink(_ => { }),
             () => Console.WriteLine("Download and SHA256 verification completed; extracting component."), timeout.Token);
+        Console.WriteLine($"Version: {descriptor.Version}\nPlatform: Windows\nArchitecture: x64\nRelease: {descriptor.ReleaseTag}\nAsset: {descriptor.Name}\nURL: {descriptor.Url}");
         var executable = UxPlayComponent.FindInstalledExecutable(descriptor, output);
         Check(executable is not null, "Public component must install with all file hashes verified");
         Console.WriteLine("PASS public UxPlay download, hash, extraction and runtime preparation: " + executable);

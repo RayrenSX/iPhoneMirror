@@ -23,6 +23,17 @@ public partial class App : Application
             base.OnStartup(e);
             return;
         }
+        if (e.Args.FirstOrDefault() == FirstRunDriverHost.Switch)
+        {
+            base.OnStartup(e);
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            DriverLocalization.Initialize(e.Args);
+            Resources.MergedDictionaries.Insert(0, DriverLocalization.CreateDictionary());
+            try { Shutdown(await FirstRunDriverHost.RunAsync(e.Args)); }
+            catch (Exception error)
+            { DriverLogger.WriteException("setup", "headless_failed", error); Shutdown(1); }
+            return;
+        }
         DispatcherUnhandledException += (_, args) =>
             DriverLogger.WriteException("runtime", "dispatcher_unhandled_exception",
                 args.Exception);

@@ -51,7 +51,7 @@ public partial class MainWindow
         Dispatcher.VerifyAccess();
         var previous = _keyboardRouter.Mode;
         var generation = _keyboardRouter.BeginHandoff(next, sampleHeldKeys
-            ? Enumerable.Range(8, 248).Where(k => k is not (0x10 or 0x11 or 0x12) && GetAsyncKeyState(k) < 0)
+            ? Enumerable.Range(8, 248).Where(k => k is not (0x10 or 0x11 or 0x12) && _isPhysicalKeyboardKeyDown(k))
             : null);
         PublishKeyboardInputMode(KeyboardInputMode.None);
         if (next == KeyboardInputMode.Mapping) RegisterRawInput(_rawMouseInputEnabled, false);
@@ -97,7 +97,9 @@ public partial class MainWindow
             finally { _systemShortcutGate.Release(); }
             if (!_keyboardRouter.CompleteHandoff(generation)) return;
             if (!_mappingClosing)
-                RegisterRawInput(IsBluetoothControlActive && _activeControlWindow == 0,
+                // Mouse INPUTSINK belongs to the active Bluetooth route,
+                // including independent previews, regardless of keyboard owner.
+                RegisterRawInput(IsBluetoothControlActive,
                     _keyboardRouter.Mode == KeyboardInputMode.Direct &&
                     (IsBluetoothControlActive || IsUsbControlActive) && _activeControlWindow == 0);
             PublishKeyboardInputMode(_keyboardRouter.Mode);
