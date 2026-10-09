@@ -28,6 +28,11 @@ Run("isolated driver host keeps result logs and rollback backups in the machine 
             RedirectStandardOutput = true, RedirectStandardError = true,
             WorkingDirectory = Path.GetTempPath()
         };
+        // CI starts this test through dotnet, so the child needs the assembly
+        // path before its arguments. An apphost already identifies the assembly.
+        if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath),
+                "dotnet", StringComparison.OrdinalIgnoreCase))
+            start.ArgumentList.Add(typeof(DriverConstants).Assembly.Location);
         start.ArgumentList.Add("--operation-path-probe");
         start.Environment.Clear();
         var windows = Directory.GetParent(Environment.SystemDirectory)!.FullName;
