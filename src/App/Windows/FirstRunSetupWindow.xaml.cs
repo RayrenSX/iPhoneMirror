@@ -47,7 +47,17 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
                 _main.SelectedWirelessDisplayProfile = profileOption;
         }
         InitializeComponent();
-        Loaded += (_, _) => { if (checkOnOpen && !_previewOnly) _ = CheckSettingsAsync(); else Enter(); };
+        Loaded += (_, _) =>
+        {
+            // Remember the first display even if the user leaves setup unfinished.
+            // Saved progress remains available through the manual setup entries.
+            if (!_previewOnly && _state.Disposition == SetupDisposition.New)
+            {
+                _state.Disposition = SetupDisposition.InProgress;
+                if (!Save()) return;
+            }
+            if (checkOnOpen && !_previewOnly) _ = CheckSettingsAsync(); else Enter();
+        };
         Closing += OnClosing;
         Closed += (_, _) => { _closed = true; StopDiscovery(); _lifetime.Cancel(); _operation?.Cancel(); _choice?.TrySetCanceled(); StopAssessmentAnimations(); ReleaseSetupOwnership(); };
         LocalizationService.RefreshWhenLanguageChanges(this, () =>

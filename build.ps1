@@ -93,7 +93,9 @@ if ($TestBuild) {
 $VersionProperty = if ([string]::IsNullOrWhiteSpace($Version)) {
     $null
 } else {
-    "-p:Version=$Version"
+    $numericBuildVersion = ($Version -split '-', 2)[0] + '.0'
+    @("-p:Version=$Version", "-p:AssemblyVersion=$numericBuildVersion",
+        "-p:FileVersion=$numericBuildVersion")
 }
 
 $UsbControlRoot = if ([string]::IsNullOrWhiteSpace($env:IPHONE_MIRROR_USB_BRIDGE_ROOT)) {

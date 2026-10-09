@@ -214,7 +214,7 @@ internal static partial class Program
             Step = SetupStep.Bluetooth, DeviceIndex = 1, PreferencesApplied = true,
             Devices = [new() { Id = "a" }, new() { Id = "b", Outcomes = new() { [SetupStep.Profile] = SetupOutcome.Verified, [SetupStep.Wireless] = SetupOutcome.Skipped } }] };
         store.Save(draft); var restored = store.Load();
-        Check(restored.ShouldOpen && restored.DeviceIndex == 1 && restored.Step == SetupStep.Bluetooth && restored.CurrentDevice!.Outcomes[SetupStep.Wireless] == SetupOutcome.Skipped,
+        Check(!restored.ShouldOpen && restored.DeviceIndex == 1 && restored.Step == SetupStep.Bluetooth && restored.CurrentDevice!.Outcomes[SetupStep.Wireless] == SetupOutcome.Skipped,
             "Resume lost device, step or skipped outcome.");
         foreach (var disposition in new[] { SetupDisposition.Deferred, SetupDisposition.Completed })
         { draft.Disposition = disposition; store.Save(draft); Check(!store.Load().ShouldOpen, "Deferred/completed setup reopened automatically."); }
@@ -244,6 +244,21 @@ internal static partial class Program
         var vm = new MainViewModel();
         try
         {
+            var startupStore = new FirstRunSetupStore(Path.Combine(output, "startup-once.json"));
+            if (File.Exists(startupStore.PathName)) File.Delete(startupStore.PathName);
+            Check(startupStore.Load().ShouldOpen, "First startup did not request setup.");
+            var firstDisplay = new FirstRunSetupWindow(vm, startupStore, checkOnOpen: false);
+            firstDisplay.Show(); firstDisplay.UpdateLayout();
+            Check(!startupStore.Load().ShouldOpen, "First display did not persist the automatic-open guard.");
+            typeof(FirstRunSetupWindow).GetField("_allowClose", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(firstDisplay, true);
+            firstDisplay.Close();
+            Check(!startupStore.Load().ShouldOpen, "Unfinished setup reopened on the next startup.");
+            var manualDisplay = new FirstRunSetupWindow(vm, startupStore, rerun: true, checkOnOpen: false);
+            manualDisplay.Show(); manualDisplay.UpdateLayout();
+            Check(manualDisplay.IsVisible && !startupStore.Load().ShouldOpen, "Manual setup entry was blocked or rearmed automatic startup.");
+            typeof(FirstRunSetupWindow).GetField("_allowClose", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(manualDisplay, true);
+            manualDisplay.Close();
+            Console.WriteLine("PASS setup opens automatically once and remains available manually with unfinished progress.");
             var count = 0;
             foreach (var culture in new[] { "zh-CN", "zh-TW", "zh-HK", "en-US" })
             foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })

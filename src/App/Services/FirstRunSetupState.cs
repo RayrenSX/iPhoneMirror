@@ -43,7 +43,7 @@ internal sealed class FirstRunSetupState
     public List<SetupDevice> Devices { get; set; } = [];
     public Dictionary<SetupStep, SetupOutcome> GlobalOutcomes { get; set; } = [];
     [JsonIgnore] public SetupDevice? CurrentDevice => DeviceIndex >= 0 && DeviceIndex < Devices.Count ? Devices[DeviceIndex] : null;
-    [JsonIgnore] public bool ShouldOpen => Disposition is SetupDisposition.New or SetupDisposition.InProgress;
+    [JsonIgnore] public bool ShouldOpen => Disposition == SetupDisposition.New;
     [JsonIgnore] public SetupCategory Category => Step switch
     {
         SetupStep.Welcome or SetupStep.Preferences or SetupStep.ApplicationMode or SetupStep.Appearance or SetupStep.Usage
