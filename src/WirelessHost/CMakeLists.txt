@@ -71,6 +71,24 @@ if(IPHONEMIRROR_BUILD_TESTS)
     add_test(NAME DnsSdRegistrationPolicyTests
         COMMAND iPhoneMirror.DnsSdRegistrationPolicy.Tests)
 
+    # Shim-level issue #19 / PR #50 regression: compiles the shim with mock
+    # dnsapi entry points and inspects the final
+    # DNS_SERVICE_REGISTER_REQUEST.InterfaceIndex. dnsapi.lib is deliberately
+    # absent so the test's mocks capture the request.
+    add_executable(iPhoneMirror.DnsSdShimInterface.Tests
+        tests/DnsSdShimInterfaceTests.cpp DnsSdShim.cpp)
+    target_compile_definitions(iPhoneMirror.DnsSdShimInterface.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+        WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+    target_compile_options(iPhoneMirror.DnsSdShimInterface.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.DnsSdShimInterface.Tests PRIVATE
+        iphlpapi ws2_32)
+    add_test(NAME DnsSdShimInterfaceTests
+        COMMAND iPhoneMirror.DnsSdShimInterface.Tests)
+    set_tests_properties(DnsSdShimInterfaceTests PROPERTIES
+        SKIP_RETURN_CODE 77 TIMEOUT 20)
+
     add_library(iPhoneMirror.WirelessHost.Stub SHARED
         tests/WirelessHostStub.cpp
         tests/WirelessHostStub.def)

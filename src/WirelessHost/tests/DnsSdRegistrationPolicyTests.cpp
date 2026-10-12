@@ -55,6 +55,54 @@ int main() {
         return 1;
     }
 
+    // PR #50 review evidence: the policy output is invariant under the
+    // choice of nonzero preferred adapter, so preferring the default-route
+    // adapter cannot change the effective registration interface. Any
+    // behavior change would have to relax the all-interface contract below.
+    constexpr std::array arrival_adapters{
+        std::uint32_t{0}, std::uint32_t{7}, std::uint32_t{19},
+        std::uint32_t{42}};
+    constexpr std::array preferred_adapters{
+        std::uint32_t{7}, std::uint32_t{19}, std::uint32_t{42},
+        iPhoneMirror::wireless::DnsSdAllInterfaces};
+    for (const auto requested : arrival_adapters) {
+        for (const auto first : preferred_adapters) {
+            for (const auto second : preferred_adapters) {
+                if (iPhoneMirror::wireless::dns_sd_registration_interface(
+                        requested, first) !=
+                    iPhoneMirror::wireless::dns_sd_registration_interface(
+                        requested, second)) {
+                    std::cerr << "DNS-SD registration still depends on the preferred adapter\n";
+                    return 1;
+                }
+            }
+        }
+    }
+
+    // Issue #19 regression contract: whichever adapter the upstream
+    // per-interface call arrives on, the final
+    // DNS_SERVICE_REGISTER_REQUEST.InterfaceIndex must stay 0 (all
+    // interfaces) once any eligible adapter exists. A single nonzero result
+    // reintroduces the Mobile Hotspot discovery failure.
+    for (const auto requested : arrival_adapters) {
+        for (const auto preferred : preferred_adapters) {
+            if (iPhoneMirror::wireless::dns_sd_native_interface(
+                    iPhoneMirror::wireless::dns_sd_registration_interface(
+                        requested, preferred)) != 0) {
+                std::cerr << "DNS-SD registration lost all-interface coverage\n";
+                return 1;
+            }
+        }
+    }
+
+    // Enumeration fallback: with no preferred adapter the explicit upstream
+    // index is still honored.
+    if (iPhoneMirror::wireless::dns_sd_native_interface(
+            iPhoneMirror::wireless::dns_sd_registration_interface(19, 0)) != 19) {
+        std::cerr << "DNS-SD explicit interface fallback was not honored\n";
+        return 1;
+    }
+
     iPhoneMirror::wireless::DnsSdRegistrationLeases leases;
     const auto first = leases.acquire(100, 7);
     if (!first.first || !first.owner || leases.size() != 1 ||
