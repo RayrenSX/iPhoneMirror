@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from audit_taiwan_content import check_changelog, check_web_references, unique_json, web_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
-LANGUAGES = ('zh-CN', 'zh-HK', 'zh-TW', 'en-US')
+LANGUAGES = ('zh-CN', 'zh-HK', 'zh-TW', 'en-US', 'ja-JP')
 XKEY = '{http://schemas.microsoft.com/winfx/2006/xaml}Key'
 TOKEN = re.compile(r'(?<!\{)\{(?:\d+|[A-Za-z_]\w*)(?:,[^}:]+)?(?::[^}]+)?\}(?!\})|%(?:\d+\$)?[sd]|%[1-9]|%[A-Z_][A-Z0-9_]*%|\[(?:name(?:/ver)?|gb|mb)\]')
 EXCLUDED = {'bin', 'obj', 'native', 'Assets', '_internal', '.git', '__pycache__'}
@@ -71,8 +71,9 @@ def installer_resources():
     script_path = ROOT/'installer/iPhoneMirror.iss'
     script = script_path.read_text(encoding='utf-8-sig')
     codes = {'chinesesimp': 'zh-CN', 'chinesetrad': 'zh-HK',
-             'chinesetaiwan': 'zh-TW', 'english': 'en-US'}
-    language_ids = {'zh-CN': '$0804', 'zh-HK': '$0C04', 'zh-TW': '$0404', 'en-US': '$0409'}
+             'chinesetaiwan': 'zh-TW', 'english': 'en-US', 'japanese': 'ja-JP'}
+    language_ids = {'zh-CN': '$0804', 'zh-HK': '$0C04', 'zh-TW': '$0404', 'en-US': '$0409',
+                    'ja-JP': '$0411'}
     # Read the actual compiler inputs. Cached files must not hide a deleted
     # [Languages] entry or a changed MessagesFile path.
     section = re.search(r'^\[Languages\]\s*\n(.*?)(?=^\[|\Z)', script, re.M | re.S)
@@ -152,18 +153,26 @@ def hardcoded_resources(inventory):
     # Conditional Chinese expressions do not end in a semicolon.
     values = re.findall(r'(?:return|\?|:)\s*"([^"\n]+)"', body)
     fallback = {lang: {} for lang in LANGUAGES}
-    if len(values) != 8:
+    # Each message is returned in this order: Taiwan, Hong Kong, Japanese,
+    # then the Simplified Chinese / English conditional.
+    order = ('zh-TW', 'zh-HK', 'ja-JP', 'zh-CN', 'en-US')
+    if len(values) != 2 * len(order):
         raise ValueError('Review StartupDiagnostics fallback inventory after code changes')
     for index, key in enumerate(('NativeComponentLoadFailure', 'StartupFailure')):
-        for lang, value in zip(('zh-TW', 'zh-HK', 'zh-CN', 'en-US'), values[index*4:index*4+4]):
+        for lang, value in zip(order, values[index*len(order):(index+1)*len(order)]):
             fallback[lang][f'StartupDiagnostics.UserMessage/{key}'] = value
     label_body = startup.split('internal static string Label', 1)[1].split('private static bool Find', 1)[0]
-    taiwan_labels = dict(re.findall(r'"(Startup\w+)" => "([^"]+)"', label_body))
+    # Taiwan and Japanese have their own switch blocks before the shared tuple.
+    taiwan_body, rest = label_body.split('== "ja-JP")', 1)
+    japanese_body = rest.split('var labels', 1)[0]
+    taiwan_labels = dict(re.findall(r'"(Startup\w+)" => "([^"]+)"', taiwan_body))
+    japanese_labels = dict(re.findall(r'"(Startup\w+)" => "([^"]+)"', japanese_body))
     for key, simplified, traditional, english in re.findall(r'"(Startup\w+)" => \("([^"]+)", "([^"]+)", "([^"]+)"\)', label_body):
-        for lang, value in zip(LANGUAGES, (simplified, traditional, taiwan_labels.pop(key), english)):
+        for lang, value in zip(LANGUAGES, (simplified, traditional, taiwan_labels.pop(key), english,
+                                           japanese_labels.pop(key))):
             fallback[lang]['StartupDiagnostics.Label/' + key] = value
-    if taiwan_labels:
-        raise ValueError('StartupDiagnostics: unmatched Taiwan fallback labels')
+    if taiwan_labels or japanese_labels:
+        raise ValueError('StartupDiagnostics: unmatched Taiwan or Japanese fallback labels')
     return shared, fallback
 
 
@@ -305,13 +314,14 @@ def audit(require_installer=False):
     if launcher_bytes.startswith(b'\xef\xbb\xbf') or b'\n' in launcher_bytes.replace(b'\r\n', b''):
         errors.append('Launcher: CMD requires BOM-free UTF-8 with CRLF line endings')
     messages = re.findall(r'^\s*echo (.+)$', launcher, re.M)
-    if len(messages) != 6 or 'chcp 65001 >nul' not in launcher:
+    # Each message is echoed as Simplified, Traditional, English, Japanese.
+    if len(messages) != 8 or 'chcp 65001 >nul' not in launcher:
         errors.append('Launcher: review UTF-8 multilingual fallback messages')
     else:
         title = re.search(r'^title (.+)$', launcher, re.M)[1]
         catalogs['Launcher'] = {lang: {'Title': title,
-            'ExecutableMissing': messages[index], 'OperationIncomplete': messages[index+3]}
-            for index, lang in ((0, "zh-CN"), (1, "zh-HK"), (1, "zh-TW"), (2, "en-US"))}
+            'ExecutableMissing': messages[index], 'OperationIncomplete': messages[index+4]}
+            for index, lang in ((0, "zh-CN"), (1, "zh-HK"), (1, "zh-TW"), (2, "en-US"), (3, "ja-JP"))}
         check_catalog('Launcher', catalogs['Launcher'], errors)
     app_languages = set(catalogs['App'])
     for component, catalog in catalogs.items():
@@ -344,7 +354,7 @@ def write_report(catalogs, references, inventory, errors, warnings):
               '缺失翻译按硬编码消息/资源 Key 计数，不按缺少的语言单元格重复计数。静态未发现引用不等于已废弃，全部保留并列出，避免误删外部或动态调用。', '',
               '## 多语言对照', '']
     for project,catalog in catalogs.items():
-        lines += [f'### {project}', '', '| Key / 位置 | 简体中文 | 繁體中文（香港） | 繁體中文（台灣） | English | 其他语言 | 状态（修改前 → 修改后） | 修改内容 / 使用情况 |', '| --- | --- | --- | --- | --- | --- | --- | --- |']
+        lines += [f'### {project}', '', '| Key / 位置 | 简体中文 | 繁體中文（香港） | 繁體中文（台灣） | English | 日本語 | 状态（修改前 → 修改后） | 修改内容 / 使用情况 |', '| --- | --- | --- | --- | --- | --- | --- | --- |']
         for key in sorted(set().union(*(set(v) for v in catalog.values()))):
             issue = changes.get(project+'/'+key)
             status = '✅ 完全一致'
@@ -362,15 +372,15 @@ def write_report(catalogs, references, inventory, errors, warnings):
                 note += '；独立 CMD 启动器无语言字典，异常时同时显示三语回退'
             elif project == 'Installer' and key in {'Messages/BeveledLabel', 'Messages/HelpTextNote', 'Messages/AboutSetupNote', 'Messages/TranslatorNote'}:
                 note += '；可选语言包备注/标签，允许为空或按语言不同'
-            lines.append('| '+' | '.join(cell(v) for v in [key, *(catalog[lang].get(key,'[缺失]') for lang in LANGUAGES), '—', status, note])+' |')
+            lines.append('| '+' | '.join(cell(v) for v in [key, *(catalog[lang].get(key,'[缺失]') for lang in LANGUAGES), status, note])+' |')
         lines.append('')
     code_issues = {key: issue for key, issue in changes.items() if key.startswith('Code/')}
     if code_issues:
-        lines += ['### 代码调用对应关系', '', '| Key / 位置 | 简体中文 | 繁體中文（香港） | 繁體中文（台灣） | English | 其他语言 | 状态（修改前 → 修改后） | 修改内容 |', '| --- | --- | --- | --- | --- | --- | --- | --- |']
+        lines += ['### 代码调用对应关系', '', '| Key / 位置 | 简体中文 | 繁體中文（香港） | 繁體中文（台灣） | English | 日本語 | 状态（修改前 → 修改后） | 修改内容 |', '| --- | --- | --- | --- | --- | --- | --- | --- |']
         for key, issue in code_issues.items():
             status = '、'.join(dict.fromkeys(labels[c] for c in issue['categories']))+' → ✅ 已修复'
             values = issue.get('values', {})
-            lines.append('| '+' | '.join(cell(v) for v in [key, *(values.get(lang, '见对应资源 Key') for lang in LANGUAGES), '—', status, '；'.join(issue['reasons'])])+' |')
+            lines.append('| '+' | '.join(cell(v) for v in [key, *(values.get(lang, '见对应资源 Key') for lang in LANGUAGES), status, '；'.join(issue['reasons'])])+' |')
         lines.append('')
     lines += ['## 代码位置与修改前记录', '', '| Key / 位置 | 修改前文字 | 修改说明 | 当前调用位置 |', '| --- | --- | --- | --- |']
     for key, issue in sorted(changes.items()):

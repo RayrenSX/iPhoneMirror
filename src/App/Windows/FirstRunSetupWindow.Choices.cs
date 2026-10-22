@@ -15,7 +15,7 @@ public partial class FirstRunSetupWindow
     {
         var row = CardRow();
         foreach (var (value, label) in new[] { ("system", "LanguageSystem"), ("zh-CN", "LanguageChinese"),
-            ("zh-TW", "LanguageTraditionalChineseTaiwan"), ("zh-HK", "LanguageTraditionalChineseHongKong"), ("en-US", "LanguageEnglish") })
+            ("zh-TW", "LanguageTraditionalChineseTaiwan"), ("zh-HK", "LanguageTraditionalChineseHongKong"), ("en-US", "LanguageEnglish"), ("ja-JP", "LanguageJapanese") })
         {
             var card = ChoiceCard("language", label, null, LocalizationService.SelectedLanguage == value);
             card.Checked += (_, _) => _main.SelectedLanguage = value;

@@ -65,6 +65,8 @@ Run("localized culture mapping", () =>
         DriverLocalization.ResolveCultureName("zh-CHT"));
     Equal(DriverLocalization.Chinese,
         DriverLocalization.ResolveCultureName("zh-SG"));
+    Equal(DriverLocalization.Japanese,
+        DriverLocalization.ResolveCultureName("ja-JP"));
     Equal(DriverLocalization.English,
         DriverLocalization.ResolveCultureName("de-DE"));
 });

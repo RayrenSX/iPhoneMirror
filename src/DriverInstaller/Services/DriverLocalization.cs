@@ -10,6 +10,7 @@ internal static class DriverLocalization
     internal const string TraditionalChineseHongKong = "zh-HK";
     internal const string TraditionalChineseTaiwan = "zh-TW";
     internal const string English = "en-US";
+    internal const string Japanese = "ja-JP";
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "iPhoneMirror", "settings.json");
@@ -98,6 +99,8 @@ internal static class DriverLocalization
             return TraditionalChineseTaiwan;
         if (string.Equals(value, Chinese, StringComparison.OrdinalIgnoreCase))
             return Chinese;
+        if (string.Equals(value, Japanese, StringComparison.OrdinalIgnoreCase))
+            return Japanese;
         if (value is not null && IsTraditionalChinese(value))
             return TraditionalChineseHongKong;
         return string.Equals(value, English, StringComparison.OrdinalIgnoreCase)
@@ -114,6 +117,8 @@ internal static class DriverLocalization
             return TraditionalChineseTaiwan;
         if (IsTraditionalChinese(cultureName))
             return TraditionalChineseHongKong;
+        if (cultureName.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
+            return Japanese;
         return cultureName.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
             ? Chinese : English;
     }

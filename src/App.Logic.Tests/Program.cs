@@ -194,7 +194,9 @@ foreach (var localizationPath in Directory.GetFiles(
         : (localizationFileName.Contains("zh-HK", StringComparison.OrdinalIgnoreCase) ||
            localizationFileName.Contains("zh-TW", StringComparison.OrdinalIgnoreCase))
             ? "Microsoft JhengHei UI"
-            : "Segoe UI";
+            : localizationFileName.Contains("ja-JP", StringComparison.OrdinalIgnoreCase)
+                ? "Yu Gothic UI"
+                : "Segoe UI";
     Equal(expectedNavigationFont, navigationFont,
         $"navigation font matches the interface language in {Path.GetFileName(localizationPath)}");
     var noPingRecovery = localization.Descendants()
@@ -203,7 +205,8 @@ foreach (var localizationPath in Directory.GetFiles(
     Equal(true,
         noPingRecovery.Contains("Restart", StringComparison.OrdinalIgnoreCase) ||
         noPingRecovery.Contains("重启", StringComparison.Ordinal) ||
-        noPingRecovery.Contains("重新啟動", StringComparison.Ordinal),
+        noPingRecovery.Contains("重新啟動", StringComparison.Ordinal) ||
+        noPingRecovery.Contains("再起動", StringComparison.Ordinal),
         $"no-PING recovery asks the user to restart in {Path.GetFileName(localizationPath)}");
     Equal(true,
         noPingRecovery.Contains("MFi", StringComparison.OrdinalIgnoreCase),
@@ -232,13 +235,15 @@ foreach (var localizationPath in Directory.GetFiles(
     Equal(true,
         usbRecovery.Contains("restart", StringComparison.OrdinalIgnoreCase) ||
         usbRecovery.Contains("重启", StringComparison.Ordinal) ||
-        usbRecovery.Contains("重新啟動", StringComparison.Ordinal),
+        usbRecovery.Contains("重新啟動", StringComparison.Ordinal) ||
+        usbRecovery.Contains("再起動", StringComparison.Ordinal),
         $"USB recovery asks the user to restart in {Path.GetFileName(localizationPath)}");
     Equal(true,
         usbRecovery.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
         usbRecovery.Contains("数据线", StringComparison.Ordinal) ||
         usbRecovery.Contains("數據線", StringComparison.Ordinal) ||
-        usbRecovery.Contains("傳輸線", StringComparison.Ordinal),
+        usbRecovery.Contains("傳輸線", StringComparison.Ordinal) ||
+        usbRecovery.Contains("ケーブル", StringComparison.Ordinal),
         $"USB recovery asks the user to replace/reconnect a cable in {Path.GetFileName(localizationPath)}");
     foreach (var numberedReminder in localization.Descendants()
                  .Select(element => (Key: (string?)element.Attribute(xaml + "Key"),
@@ -268,6 +273,9 @@ Equal(LocalizationService.TraditionalChineseHongKong,
 Equal(LocalizationService.SimplifiedChinese,
     LocalizationService.ResolveCultureName("zh-SG"),
     "other Chinese cultures select the Simplified Chinese dictionary");
+Equal(LocalizationService.Japanese,
+    LocalizationService.ResolveCultureName("ja-JP"),
+    "Japanese system culture selects the Japanese dictionary");
 Equal(LocalizationService.English,
     LocalizationService.ResolveCultureName("fr-FR"),
     "unsupported system cultures use the English dictionary");
@@ -2464,7 +2472,7 @@ Equal(true, CaptureErrorGuidance.IsDeviceSessionClosedWarning(deviceSessionClose
 Equal(false, CaptureErrorGuidance.IsDeviceSessionClosedWarning(
         deviceSessionClosedStatus with { ErrorCode = -2110 }),
     "USB disconnects do not use the phone-side stop warning presentation");
-foreach (var cultureFile in new[] { "Strings.zh-CN.xaml", "Strings.zh-HK.xaml", "Strings.zh-TW.xaml", "Strings.en-US.xaml" })
+foreach (var cultureFile in new[] { "Strings.zh-CN.xaml", "Strings.zh-HK.xaml", "Strings.zh-TW.xaml", "Strings.en-US.xaml", "Strings.ja-JP.xaml" })
 {
     Equal(true, File.ReadAllText(Path.Combine(sourceDirectory, "App", "Localization", cultureFile))
             .Contains("DeviceSessionClosedWarningTitleFormat", StringComparison.Ordinal) &&

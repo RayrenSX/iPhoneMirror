@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('system', 'zh-CN', 'zh-HK', 'zh-TW', 'en-US')]
+    [ValidateSet('system', 'zh-CN', 'zh-HK', 'zh-TW', 'en-US', 'ja-JP')]
     [string]$Language = 'system',
     [switch]$ListOnly,
     [switch]$PreviewOnly,
@@ -386,6 +386,99 @@ $script:CleanupMessages = @'
     "SharedPackagePreserved": "驅動程式套件 {0} 正被其他裝置使用，已保留。",
     "PackagesPreservedUnsupported": "此 Windows 版本無法完整列出驅動程式套件使用者；只會清理所選裝置節點，保留驅動程式套件。",
     "DriverOperationBusy": "另一個驅動操作或復原仍在進行，請等待完成後重試清理。"
+  },
+  "ja-JP": {
+    "Pause": "Enterキーを押すと、このウィンドウを閉じます",
+    "ScanPnp": "現在のPnPデバイスをスキャンしています…",
+    "PnpCached": "PnPのキャッシュの準備ができました。デバイス: {0}",
+    "PnpFallback": "Get-PnpDeviceのスキャンに失敗しました。pnputilに切り替えます: ",
+    "PnpEnumerationFailed": "PnPデバイスを列挙できませんでした。pnputilの終了コード: {0}",
+    "PnpXmlEmpty": "pnputilのPnP XMLが空のため、デバイスを列挙できません。",
+    "PnpXmlInvalid": "pnputilのPnP XMLを解析できませんでした: ",
+    "NoConnectedPnp": "pnputilのPnP XMLに、接続中のデバイスが見つかりませんでした。",
+    "NoCachedPnp": "pnputilのPnPキャッシュの準備ができました。デバイス: 0",
+    "NoAvailablePnp": "pnputilのPnP XMLに、使用できるデバイスが見つかりませんでした。",
+    "PnpUtilCached": "pnputilのPnPキャッシュの準備ができました。デバイス: {0}",
+    "IndexDriverStore": "Driver Storeのパッケージを索引付けしています…",
+    "DriverXmlUnavailable": "Driver StoreのXMLを取得できません。終了コード: {0}",
+    "DriverEnumerationFailed": "pnputilによるDriver Storeの列挙に失敗しました（終了コード {0}）。 ",
+    "StopMissingPackages": "ドライバーパッケージの取りこぼしを避けるため、整理を中止しました。",
+    "DriverXmlEmpty": "Driver StoreのXMLが空です。",
+    "DriverXmlEmptyStopped": "Driver StoreのXMLが空です。ドライバーパッケージの取りこぼしを避けるため、整理を中止しました。",
+    "DriverXmlInvalid": "Driver StoreのXMLを解析できませんでした: ",
+    "DriverXmlInvalidStopped": "Driver StoreのXMLを解析できなかったため、整理を中止しました: ",
+    "DriverNodesMissing": "Driver StoreのXMLにDriverノードがありません。ドライバーパッケージの取りこぼしを避けるため、整理を中止しました。",
+    "DriverIndexReady": "Driver Storeの索引の準備ができました。OEMのINFファイル: {0}",
+    "ClosingProcesses": "iPhoneMirrorのプロセスを終了しています…",
+    "BluetoothExcluded": "BTHLEデバイスを安全のため除外しました: {0}",
+    "DeviceNode": "デバイスノード: {0}",
+    "DeviceNodeRestart": "デバイスノードを削除しました。完了には再起動が必要です: {0}",
+    "DeviceNodeFailedDetail": "デバイスノードを削除できませんでした: {0} ",
+    "DeviceNodeFailed": "デバイスノードを削除できませんでした: {0}",
+    "DriverPackage": "ドライバーパッケージ: {0}",
+    "DriverPackageRestart": "ドライバーパッケージを削除しました。完了には再起動が必要です: {0}",
+    "DriverPackageFailedDetail": "ドライバーパッケージを削除できませんでした: {0} ",
+    "DriverPackageFailed": "ドライバーパッケージを削除できませんでした: {0}",
+    "ManifestWriteFailed": "記録ファイルを書き込めませんでした: ",
+    "ProtectedLaunchRequired": "保護された管理者権限で実行するため、このツールはiPhoneMirror.Driver.exeか、リリースのパッケージにある整理の入口から起動してください。",
+    "PnpUtilMissing": "pnputil.exeが見つかりません: {0}",
+    "ScopeWarning": "整理では、選んだデバイスに関連するデバイスノードと、安全に削除できるドライバーパッケージを削除します。Apple公式のドライバーが含まれることがあります。ほかのデバイスが使っているパッケージは残します。",
+    "ReinstallAdvice": "終わったら、Apple DevicesかiTunesを入れ直して、必要なドライバーを戻してください。",
+    "ScanningDevices": "デバイスをスキャンしています…",
+    "MappingDevices": "Appleデバイスの関係を調べています…",
+    "PhysicalDeviceCount": "Appleの物理デバイスのまとまり: {0}",
+    "NoAppleDevice": "接続されたiPhone/iPadが見つかりませんでした。",
+    "CheckRequirements": "次の点を確認してください:",
+    "RequirementUsb": "  1. iPhone/iPadがUSBで接続されている",
+    "RequirementUnlocked": "  2. デバイスのロックが解除されている",
+    "RequirementTrusted": "  3. デバイスでこのコンピュータを信頼している",
+    "RequirementCable": "  4. ケーブルがデータ通信に対応している",
+    "BluetoothNotListed": "BTHLE / Bluetooth LEデバイスは一覧に出しません。",
+    "MappingDrivers": "ドライバーの関係を調べています…",
+    "MappingReady": "デバイスの関係がわかりました。",
+    "DetectedDevices": "見つかったAppleの物理デバイス:",
+    "PnpNodeCount": "    PnPノード: {0}",
+    "DriverStoreCount": "    Driver Storeのパッケージ: {0}",
+    "ListOnly": "一覧のみのモードです。システムは変更していません。",
+    "SelectDevice": "デバイスの番号を入力してください（Qで取り消し）",
+    "InvalidDeviceNumber": "デバイスの番号が正しくありません。",
+    "CleanupPlan": " 整理の計画",
+    "SelectedDevice": "デバイス: {0}",
+    "OnePhysicalDevice": "物理デバイス: 1",
+    "AssociatedNodes": "関連するPnPノード: {0}",
+    "AssociatedDrivers": "関連するドライバーパッケージの合計: {0}",
+    "PreviewOnly": " 確認のみです。システムは変更していません。",
+    "NoRemovableNodes": "削除の対象のPnPノードはありません。",
+    "Irreversible": "この操作は元に戻せません。",
+    "Confirm": "確認のため{0}と入力してください:",
+    "ConfirmationMismatch": "確認の文字が一致しません。何も変更していません。",
+    "FinalDeviceCheck": "削除の前に、最後のデバイスの確認をしています…",
+    "SelectedDisconnected": "選んだiPhoneが切断されました。",
+    "RemovingNodes": " デバイスノードを削除しています",
+    "RemovingPackages": " Driver Storeのパッケージを削除しています",
+    "WaitingWindows": "Windowsがデバイスの状態を更新するのを待っています…",
+    "FinalVerification": "最後の確認をしています…",
+    "CleanupResults": " 整理の結果",
+    "NodesRemoved": "対象のPnPノードを削除しました。",
+    "UnresolvedNodes": "残っている対象のPnPノード: {0}。",
+    "RemainingNodes": "残っている対象のノード: {0}。",
+    "PackagesHandled": "対象のDriver Storeのパッケージを処理しました。",
+    "UnresolvedPackages": "残っている対象のDriver Storeのパッケージ: {0}。",
+    "RemainingPackages": "残っているドライバーパッケージ: {0}。",
+    "RestartRequired": "一部の操作は再起動が必要だとWindowsが報告しました。",
+    "LogPath": "ログ: {0}",
+    "Error": "エラー: {0}",
+    "Location": "場所:",
+    "StackTrace": "スタックトレース:",
+    "ErrorLog": "エラーログ: {0}",
+    "Title": " iPhone/iPadに関連するドライバーを削除",
+    "Completed": " 整理が完了しました。",
+    "CompletedWithErrors": " 整理が終わりました。エラー: {0}",
+    "InternalError": " 整理ツールの内部エラー",
+    "FatalError": "iPhoneMirrorのドライバー整理で致命的なエラー",
+    "SharedPackagePreserved": "ドライバーパッケージ{0}はほかのデバイスが使っているため、残しました。",
+    "PackagesPreservedUnsupported": "このバージョンのWindowsでは、ドライバーパッケージを使っているものをすべて列挙できません。選んだデバイスのノードだけを削除し、ドライバーパッケージは残します。",
+    "DriverOperationBusy": "ほかのドライバー操作か巻き戻しが進行中です。終わってから、もう一度整理を実行してください。"
   }
 }
 '@ | ConvertFrom-Json
@@ -396,11 +489,12 @@ if ($Language -eq 'system') {
         $Language = $settings.Language
     } catch { $Language = 'system' }
 }
-if ($Language -notin @('zh-CN', 'zh-HK', 'zh-TW', 'en-US')) {
+if ($Language -notin @('zh-CN', 'zh-HK', 'zh-TW', 'en-US', 'ja-JP')) {
     $cultureName = [Globalization.CultureInfo]::InstalledUICulture.Name
     $Language = if ($cultureName -match '^zh-(TW|Hant-TW)$') { 'zh-TW' }
         elseif ($cultureName -match '^zh-(Hant|HK|MO|CHT)') { 'zh-HK' }
-        elseif ($cultureName -match '^zh') { 'zh-CN' } else { 'en-US' }
+        elseif ($cultureName -match '^zh') { 'zh-CN' }
+        elseif ($cultureName -match '^ja') { 'ja-JP' } else { 'en-US' }
 }
 function Get-CleanupText {
     param([string]$Key, [object[]]$Values = @())

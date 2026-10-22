@@ -20,10 +20,11 @@ def web_catalog(path):
     if literal is None:
         raise ValueError(f'{path}: cannot locate browser localization catalog')
     messages = json.loads(literal[1], object_pairs_hook=unique_json)
-    catalog = {language: {} for language in ('zh-CN', 'zh-HK', 'zh-TW', 'en-US')}
+    # Each English key maps to Simplified, Hong Kong, Taiwan and Japanese.
+    catalog = {language: {} for language in ('zh-CN', 'zh-HK', 'zh-TW', 'ja-JP', 'en-US')}
     for key, values in messages.items():
-        if not isinstance(values, list) or len(values) != 3:
-            raise ValueError(f'{path}/{key}: expected three independent Chinese translations')
+        if not isinstance(values, list) or len(values) != 4:
+            raise ValueError(f'{path}/{key}: expected three Chinese and one Japanese translation')
         for language, value in zip(catalog, [*values, key]):
             catalog[language][key] = value
     return catalog

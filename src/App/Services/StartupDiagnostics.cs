@@ -117,6 +117,7 @@ internal static class StartupDiagnostics
             language.Equals("zh-MO", StringComparison.OrdinalIgnoreCase);
         var simplifiedChinese = language.Equals("zh-CN",
             StringComparison.OrdinalIgnoreCase);
+        var japanese = language.StartsWith("ja", StringComparison.OrdinalIgnoreCase);
         var nativeLoadFailure = Find(error, static candidate =>
             candidate is DllNotFoundException or BadImageFormatException or
                 FileNotFoundException);
@@ -126,6 +127,8 @@ internal static class StartupDiagnostics
                 return "無法載入應用程式所需的原生元件。請重新安裝最新的完整安裝套件；詳細診斷資訊已寫入下方記錄檔。";
             if (hongKong)
                 return "無法載入應用程式所需的原生元件。請重新安裝最新的完整安裝程式；詳細診斷資料已寫入下方記錄。";
+            if (japanese)
+                return "アプリに必要なネイティブコンポーネントを読み込めませんでした。最新の完全版セットアップを入れ直してください。詳しい診断は下のログに書き込みました。";
             return simplifiedChinese
                 ? "无法加载程序所需的原生组件。请重新安装最新的完整安装包；详细诊断已写入下方日志。"
                 : "A required native component could not be loaded. Reinstall the latest full Setup package; detailed diagnostics were written to the log below.";
@@ -134,6 +137,8 @@ internal static class StartupDiagnostics
             return "iPhoneMirror 啟動時發生錯誤。詳細診斷資訊已寫入下方記錄檔。";
         if (hongKong)
             return "iPhoneMirror 啟動時發生錯誤。詳細診斷資料已寫入下方記錄。";
+        if (japanese)
+            return "iPhoneMirrorの起動中にエラーが発生しました。詳しい診断は下のログに書き込みました。";
         return simplifiedChinese
             ? "iPhoneMirror 启动时遇到错误。详细诊断已写入下方日志。"
             : "iPhoneMirror encountered an error during startup. Detailed diagnostics were written to the log below.";
@@ -149,6 +154,16 @@ internal static class StartupDiagnostics
                 "StartupErrorDetails" => "錯誤詳細資料",
                 "StartupErrorOpenLog" => "開啟記錄檔位置",
                 "StartupErrorClose" => "關閉",
+                _ => throw new ArgumentOutOfRangeException(nameof(key)),
+            };
+        if (Localization.LocalizationService.ResolveCultureName(language) == "ja-JP")
+            return key switch
+            {
+                "StartupErrorHeading" => "iPhoneMirrorを起動できません",
+                "StartupErrorLogLabel" => "診断ログ",
+                "StartupErrorDetails" => "エラーの詳細",
+                "StartupErrorOpenLog" => "ログの場所を開く",
+                "StartupErrorClose" => "閉じる",
                 _ => throw new ArgumentOutOfRangeException(nameof(key)),
             };
         var labels = key switch

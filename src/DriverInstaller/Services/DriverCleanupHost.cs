@@ -13,7 +13,7 @@ internal static class DriverCleanupHost
     private const string ScriptFileName = "remove_selected_iphone_drivers.ps1";
     private const string ScriptResourceName = "DriverCleanup.Script.ps1";
     private const string ScriptHash =
-        "09F2B297792AE560846AD6E2EDB19D84754B36B7CB262E9365617F439B4AE67F";
+        "8D31AFAFD0C7F7640F04CED6E7F65894EE67553C0CC709B64222F08BBBB27B89";
 
     internal static bool IsRequested(IReadOnlyList<string> arguments) =>
         arguments.Count >= 1 && string.Equals(arguments[0], Switch,

@@ -74,7 +74,7 @@ internal sealed class SetupAssessment
         foreach (var step in new[] { SetupStep.Preferences, SetupStep.ApplicationMode, SetupStep.Appearance })
         {
             var valid = settings.Settings is { } s && step switch {
-                SetupStep.Preferences => new[] { "system", "zh-CN", "zh-TW", "zh-HK", "en-US" }.Contains(s.Language),
+                SetupStep.Preferences => new[] { "system", "zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP" }.Contains(s.Language),
                 SetupStep.ApplicationMode => Enum.IsDefined(s.ApplicationDisplayMode),
                 _ => Enum.IsDefined(s.Theme) };
             await Add(step.ToString(), "SetupCheck" + step, step, 0, _ => Value(settings.Error is not null

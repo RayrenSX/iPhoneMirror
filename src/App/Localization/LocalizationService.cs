@@ -13,8 +13,12 @@ internal static class LocalizationService
     internal const string TraditionalChineseHongKong = "zh-HK";
     internal const string TraditionalChineseTaiwan = "zh-TW";
     internal const string English = "en-US";
+    internal const string Japanese = "ja-JP";
 
     private const string DictionaryPrefix = "Localization/Strings.";
+    private const string AppFontFamilyKey = "AppFontFamily";
+    private const string DefaultFontFamily = "Segoe UI, Microsoft YaHei UI";
+    private const string JapaneseFontFamily = "Segoe UI, Yu Gothic UI";
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "iPhoneMirror", "settings.json");
@@ -74,7 +78,7 @@ internal static class LocalizationService
     private static void ApplyLanguage(string language, bool persist, bool notify)
     {
         if (language is not (SystemLanguage or SimplifiedChinese or
-            TraditionalChineseHongKong or TraditionalChineseTaiwan or English))
+            TraditionalChineseHongKong or TraditionalChineseTaiwan or English or Japanese))
             language = SystemLanguage;
 
         var cultureName = language == SystemLanguage
@@ -107,6 +111,7 @@ internal static class LocalizationService
             }
             if (existingIndex >= 0) dictionaries[existingIndex] = replacement;
             else dictionaries.Insert(0, replacement);
+            ApplyInterfaceFontFamily(dictionaries, cultureName);
         }
 
         _effectiveCulture = culture;
@@ -119,6 +124,25 @@ internal static class LocalizationService
         if (notify) LanguageChanged?.Invoke(null, EventArgs.Empty);
     }
 
+    // DesignTokens falls back to Microsoft YaHei UI for CJK text, which draws
+    // Japanese kana and kanji with Chinese glyph forms. Swap that fallback
+    // before the first window resolves its StaticResource font setters; a
+    // later language switch applies to newly created windows.
+    private static void ApplyInterfaceFontFamily(
+        System.Collections.ObjectModel.Collection<ResourceDictionary> dictionaries,
+        string cultureName)
+    {
+        var family = cultureName == Japanese ? JapaneseFontFamily : DefaultFontFamily;
+        foreach (var dictionary in dictionaries)
+        {
+            if (!dictionary.Contains(AppFontFamilyKey) ||
+                dictionary[AppFontFamilyKey] is System.Windows.Media.FontFamily current &&
+                current.Source == family)
+                continue;
+            dictionary[AppFontFamilyKey] = new System.Windows.Media.FontFamily(family);
+        }
+    }
+
     private static string ResolveSystemCulture() =>
         ResolveCultureName(CultureInfo.InstalledUICulture.Name);
 
@@ -129,6 +153,8 @@ internal static class LocalizationService
             return TraditionalChineseTaiwan;
         if (IsHongKongTraditionalChinese(cultureName))
             return TraditionalChineseHongKong;
+        if (cultureName.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
+            return Japanese;
         return cultureName.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
             ? SimplifiedChinese
             : English;

@@ -166,6 +166,7 @@
                                         <ComboBoxItem Tag="zh-HK" Content="{DynamicResource DeveloperLanguageTraditional}"/>
                                         <ComboBoxItem Tag="zh-TW" Content="{DynamicResource DeveloperLanguageTaiwan}"/>
                                         <ComboBoxItem Tag="en-US" Content="{DynamicResource DeveloperLanguageEnglish}"/>
+                                        <ComboBoxItem Tag="ja-JP" Content="{DynamicResource LanguageJapanese}"/>
                                     </ComboBox>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">

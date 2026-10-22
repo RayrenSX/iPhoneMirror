@@ -125,7 +125,7 @@ internal static class LocalizationAuditTests
         var formats = 0;
         var captions = new[] { "DeviceBindingBound", "ShortcutSettingsWirelessControl", "ShortcutSettingsWiredControl" };
         // Switching back to the first language catches stale/replaced dictionary issues.
-        foreach (var cultureName in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US", "zh-CN" })
+        foreach (var cultureName in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US", "ja-JP", "zh-CN" })
         {
             apply.Invoke(null, [cultureName, false, true]);
             var dictionary = new ResourceDictionary

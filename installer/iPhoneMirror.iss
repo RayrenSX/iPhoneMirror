@@ -90,6 +90,7 @@ Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 Name: "chinesetrad"; MessagesFile: "compiler:Languages\ChineseTraditional.isl"
 Name: "chinesetaiwan"; MessagesFile: "Languages\ChineseTraditionalTaiwan.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 
 [LangOptions]
 chinesetrad.LanguageName=繁體中文（香港）
@@ -186,11 +187,17 @@ chinesetrad.ReadyMemoUserInfo=使用者資料：
 
 chinesetrad.WizardUserInfo=使用者資料
 
+; Inno Setup's Japanese file omits this optional note; keep it empty like the others.
+japanese.HelpTextNote=
+
 [CustomMessages]
+; Give the Japanese label the same Alt+A accelerator as the other languages.
+japanese.AssocFileExtension=ファイル拡張子 %2 に %1 を関連付ける(&A)
 chinesesimp.DeleteUserDataPrompt=是否同时删除 iPhoneMirror 的用户配置和已下载更新？选择“否”将保留这些数据，以便以后重新安装。
 chinesetrad.DeleteUserDataPrompt=是否同時刪除 iPhoneMirror 的使用者設定和已下載的更新？選擇「否」會保留這些資料，以便日後重新安裝。
 chinesetaiwan.DeleteUserDataPrompt=是否同時刪除 iPhoneMirror 的使用者設定和已下載的更新？選擇「否」會保留這些資料，以便日後重新安裝。
 english.DeleteUserDataPrompt=Also delete iPhoneMirror settings and downloaded updates? Choose No to keep this data for a later reinstall.
+japanese.DeleteUserDataPrompt=iPhoneMirrorの設定とダウンロードした更新も削除しますか？「いいえ」を選ぶと、あとで入れ直すときのために残します。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -228,6 +235,8 @@ Name: "{group}\解除安裝"; Filename: "{uninstallexe}"; IconFilename: "{uninst
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"; IconFilename: "{uninstallexe}"; Languages: english
 Name: "{group}\更新記錄"; Filename: "{app}\CHANGELOG.zh-TW.md"; WorkingDir: "{app}"; IconFilename: "{app}\iPhoneMirror.exe"; AppUserModelID: "{#MyAppUserModelId}"; Languages: chinesetaiwan
 Name: "{group}\解除安裝"; Filename: "{uninstallexe}"; IconFilename: "{uninstallexe}"; Languages: chinesetaiwan
+Name: "{group}\更新履歴"; Filename: "{app}\CHANGELOG.md"; WorkingDir: "{app}"; IconFilename: "{app}\iPhoneMirror.exe"; AppUserModelID: "{#MyAppUserModelId}"; Languages: japanese
+Name: "{group}\アンインストール"; Filename: "{uninstallexe}"; IconFilename: "{uninstallexe}"; Languages: japanese
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\iPhoneMirror.exe"; WorkingDir: "{app}"; IconFilename: "{app}\iPhoneMirror.exe"; AppUserModelID: "{#MyAppUserModelId}"; Tasks: desktopicon
 
 [Registry]

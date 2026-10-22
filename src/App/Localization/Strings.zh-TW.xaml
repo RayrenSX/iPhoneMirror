@@ -9,6 +9,7 @@
     <system:String x:Key="LanguageChinese">簡體中文</system:String>
     <system:String x:Key="LanguageTraditionalChineseHongKong">繁體中文（香港）</system:String>
     <system:String x:Key="LanguageEnglish">English</system:String>
+    <system:String x:Key="LanguageJapanese">日本語</system:String>
     <system:String x:Key="LanguageToolTip">介面語言</system:String>
     <system:String x:Key="DriverManagerButton">驅動程式管理員</system:String>
     <system:String x:Key="DriverManagerToolTip">開啟驅動程式安裝、修復與解除安裝工具</system:String>

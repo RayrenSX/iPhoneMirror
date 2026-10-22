@@ -67,6 +67,7 @@ class InstallerLocalizationTests(unittest.TestCase):
             ('chinesesimp', 'compiler:Languages/ChineseSimplified.isl', '$0804'),
             ('chinesetrad', 'compiler:Languages/ChineseTraditional.isl', '$0C04'),
             ('chinesetaiwan', 'Languages/ChineseTraditionalTaiwan.isl', '$0404'),
+            ('japanese', 'compiler:Languages/Japanese.isl', '$0411'),
             ('english', 'compiler:Default.isl', '$0409'),
         ]:
             path = (self.compiler / relative.removeprefix('compiler:') if relative.startswith('compiler:')
