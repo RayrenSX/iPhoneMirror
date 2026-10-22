@@ -76,8 +76,8 @@ installation, registry filter mutation and rollback behavior live in
 - C#: nullable reference types enabled; keep USB/native work off the WPF UI
   thread.
 - Preserve low-latency behavior: do not add unbounded frame or audio queues.
-- Keep Simplified Chinese, Traditional Chinese (Hong Kong), and English
-  resource keys in sync.
+- Keep Simplified Chinese, Traditional Chinese (Hong Kong), Traditional
+  Chinese (Taiwan), English, and Japanese resource keys in sync.
 - Update the README, user guide, architecture/protocol notes, or release notes
   when a user-visible workflow, dependency, port, or output format changes.
 

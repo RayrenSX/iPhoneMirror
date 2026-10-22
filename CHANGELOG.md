@@ -5,6 +5,12 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Japanese (ja-JP) user interface for the app, driver manager, installer,
+  driver cleanup script and SRS test pages. Japanese text uses Yu Gothic UI
+  instead of the Chinese glyph forms of the shared CJK fallback.
+
 ### Fixed
 
 - Apply wired HID lease refresh and inline recovery to media-authenticated

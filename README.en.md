@@ -165,7 +165,7 @@ AirPlay implementation may require updates for future iOS releases.
 | Bluetooth control | Per-device BLE HID mouse/keyboard binding, system navigation, and configurable global shortcuts |
 | USB/wireless reverse control | Separate CoreDevice bridge; requires Developer Mode, a matching DDI and verified device HID services |
 | Image adjustments | Preview-only brightness, contrast, saturation, and gamma |
-| Tools | Screenshot, force refresh, shortcuts, live logs, Simplified Chinese, Traditional Chinese (Hong Kong), and English UI |
+| Tools | Screenshot, force refresh, shortcuts, live logs, Simplified Chinese, Traditional Chinese (Hong Kong), English, and Japanese UI |
 | Driver | Strict per-device check before wired capture; opens the standalone driver manager on failure |
 
 Resolution and FPS options cap local presentation only; they do not reduce the
