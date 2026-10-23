@@ -159,7 +159,7 @@ internal static class StartupDiagnostics
         if (Localization.LocalizationService.ResolveCultureName(language) == "ja-JP")
             return key switch
             {
-                "StartupErrorHeading" => "iPhoneMirrorを起動できません",
+                "StartupErrorHeading" => "iPhoneMirrorを起動できませんでした",
                 "StartupErrorLogLabel" => "診断ログ",
                 "StartupErrorDetails" => "エラーの詳細",
                 "StartupErrorOpenLog" => "ログの場所を開く",

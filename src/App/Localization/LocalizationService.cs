@@ -125,9 +125,9 @@ internal static class LocalizationService
     }
 
     // DesignTokens falls back to Microsoft YaHei UI for CJK text, which draws
-    // Japanese kana and kanji with Chinese glyph forms. Swap that fallback
-    // before the first window resolves its StaticResource font setters; a
-    // later language switch applies to newly created windows.
+    // Japanese kana and kanji with Chinese glyph forms. Font setters use
+    // dynamic resource references, so replacing this fallback refreshes existing
+    // controls and styles that were resolved before the language switch.
     private static void ApplyInterfaceFontFamily(
         System.Collections.ObjectModel.Collection<ResourceDictionary> dictionaries,
         string cultureName)

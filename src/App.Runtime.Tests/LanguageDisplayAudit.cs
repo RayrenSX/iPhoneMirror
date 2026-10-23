@@ -195,7 +195,7 @@ internal static partial class Program
         var service = DisplayType("Localization.LocalizationService");
         foreach (var (culture, expected) in new[] { ("zh-CN", "zh-CN"), ("zh-SG", "zh-CN"), ("zh-Hans", "zh-CN"),
             ("zh-HK", "zh-HK"), ("zh-TW", "zh-TW"), ("zh-MO", "zh-HK"), ("zh-Hant-TW", "zh-TW"), ("zh-CHT", "zh-HK"),
-            ("en-GB", "en-US"), ("ja-JP", "en-US"), ("fr-FR", "en-US") })
+            ("en-GB", "en-US"), ("ja", "ja-JP"), ("ja-JP", "ja-JP"), ("JA-jp", "ja-JP"), ("fr-FR", "en-US") })
             verify((string)service.GetMethod("ResolveCultureName", DisplayStatic)!.Invoke(null, [culture])! == expected,
                 culture + ": wrong system-language fallback");
         DisplayLanguage("invalid-language");
@@ -204,7 +204,7 @@ internal static partial class Program
 
     private static void TestBridgeOutputDisplay(Action<bool, string> verify)
     {
-        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
+        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US", "ja-JP" })
         foreach (var wasReady in new[] { false, true })
         {
             DisplayLanguage(language);
@@ -217,7 +217,7 @@ internal static partial class Program
             try
             {
                 // Feed EOF directly; no subprocess, driver or device is needed.
-                ((Task)DisplayCall(bridge, "ReadLoopAsync", CancellationToken.None)!).GetAwaiter().GetResult();
+                ((Task)DisplayCall(bridge, "ReadLoopAsync", null, reader, CancellationToken.None)!).GetAwaiter().GetResult();
                 verify(terminal?.Code == "bridge_output_closed" && terminal.Message == DisplayL("TouchBridgeOutputDisconnected"),
                     $"{language}/{wasReady}: bridge EOF message is not localized");
                 verify(!bridge.IsReady, $"{language}/{wasReady}: EOF left the bridge ready");
@@ -360,7 +360,7 @@ internal static partial class Program
 
     private static void TestStartupDisplayFallback(Application app, Action<bool, string> verify)
     {
-        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
+        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US", "ja-JP" })
         {
             DisplayLanguage(language);
             var labels = new[] { ("HeadingText", "StartupErrorHeading"), ("LogLabelText", "StartupErrorLogLabel"),

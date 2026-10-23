@@ -11,6 +11,7 @@ for (const relative of ['tools/srs-lab/localize.js', 'tools/srs-test/web/localiz
     ['zh-TW', 'zh-TW'], ['zh-Hant-TW', 'zh-TW'], ['ZH-tw', 'zh-TW'],
     ['zh-CN', 'zh-CN'], ['zh-SG', 'zh-CN'], ['zh-HK', 'zh-HK'],
     ['zh-MO', 'zh-HK'], ['zh-Hant', 'zh-HK'], ['en-US', 'en-US'], ['de-DE', 'en-US'],
+    ['ja', 'ja-JP'], ['ja-JP', 'ja-JP'], ['JA-jp', 'ja-JP'],
   ]) {
     for (const explicit of [false, true]) {
       const nodes = Object.keys(messages).map(textContent => ({ textContent }));
@@ -24,7 +25,7 @@ for (const relative of ['tools/srs-lab/localize.js', 'tools/srs-test/web/localiz
       context.window = context;
       vm.runInNewContext(source, context, { filename: relative });
       assert.equal(document.documentElement.lang, expected);
-      const column = { 'zh-CN': 0, 'zh-HK': 1, 'zh-TW': 2 }[expected];
+      const column = { 'zh-CN': 0, 'zh-HK': 1, 'zh-TW': 2, 'ja-JP': 3 }[expected];
       for (const [i, [key, values]] of Object.entries(messages).entries()) {
         const text = expected === 'en-US' ? key : values[column];
         assert.equal(context.uiText(key, 'first', 'second'), text.replace(/\{(\d+)\}/g, (_, n) => ['first', 'second'][n] ?? ''));

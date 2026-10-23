@@ -4,6 +4,8 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 using System.Xml.Linq;
 using IPhoneMirror.App;
 
@@ -45,7 +47,7 @@ internal static class LocalizationAuditTests
         var formats = 0;
         var outcomes = 0;
         ResourceDictionary? previous = null;
-        foreach (var cultureName in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
+        foreach (var cultureName in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US", "ja-JP" })
         {
             initialize.Invoke(null, [new[] { "--language", cultureName }]);
             if (previous is not null) app.Resources.MergedDictionaries.Remove(previous);
@@ -106,7 +108,7 @@ internal static class LocalizationAuditTests
             }
         }
         app.Shutdown();
-        Console.WriteLine($"Driver localization audit passed: {formats} format cases, 4 dictionary switches, {outcomes} translated outcomes.");
+        Console.WriteLine($"Driver localization audit passed: {formats} format cases, 5 dictionary switches, {outcomes} translated outcomes.");
         return 0;
     }
 
@@ -119,6 +121,7 @@ internal static class LocalizationAuditTests
         var assembly = typeof(App).Assembly;
         var localization = assembly.GetType("IPhoneMirror.App.Localization.LocalizationService")!;
         var apply = localization.GetMethod("ApplyLanguage", BindingFlags.NonPublic | BindingFlags.Static)!;
+        AssertInterfaceFontSwitching(app, apply);
         var get = localization.GetMethod("Get", BindingFlags.NonPublic | BindingFlags.Static)!;
         var serviceType = assembly.GetType("IPhoneMirror.App.Services.ControlStatusService")!;
         var modeType = assembly.GetType("IPhoneMirror.App.Services.ControlStatusMode")!;
@@ -151,6 +154,7 @@ internal static class LocalizationAuditTests
             {
                 "zh-CN" => new[] { "未绑定", "无线控制", "有线控制" },
                 "zh-HK" or "zh-TW" => new[] { "未綁定", "無線控制", "有線控制" },
+                "ja-JP" => new[] { "未紐づけ", "無線操作", "有線操作" },
                 _ => new[] { "Not bound", "Wireless control", "Wired control" },
             };
             for (var i = 0; i < captions.Length; i++)
@@ -178,7 +182,53 @@ internal static class LocalizationAuditTests
             }
         }
         app.Shutdown();
-        Console.WriteLine($"Localization runtime audit passed: {formats} format cases, 5 dictionary switches, 15 control workflows.");
+        Console.WriteLine($"Localization runtime audit passed: {formats} format cases, 6 dictionary switches, 18 control workflows, startup and live font switching.");
         return 0;
+    }
+
+    private static void AssertInterfaceFontSwitching(Application app, MethodInfo apply)
+    {
+        StackPanel CreateControls()
+        {
+            var panel = new StackPanel();
+            panel.Children.Add(new TextBlock { Text = "日本語" });
+            foreach (var key in new[] { "BodyText", "SecondaryText", "CaptionText" })
+                panel.Children.Add(new TextBlock { Text = "日本語", Style = (Style)app.FindResource(key) });
+            panel.Children.Add(new Button { Content = "日本語", Style = (Style)app.FindResource("SecondaryButton") });
+            panel.Children.Add(new TextBox { Text = "日本語", Style = (Style)app.FindResource("RoundedTextBox") });
+            panel.Children.Add(new ComboBox());
+            panel.Children.Add(new CheckBox { Content = "日本語" });
+            panel.Measure(new Size(800, 600));
+            panel.Arrange(new Rect(0, 0, 800, 600));
+            return panel;
+        }
+
+        static void AssertFonts(StackPanel panel, string expected, string scenario)
+        {
+            foreach (FrameworkElement element in panel.Children)
+            {
+                var font = element is TextBlock text ? text.FontFamily : ((Control)element).FontFamily;
+                if (font.Source != expected)
+                    throw new InvalidOperationException($"Stale interface font: {scenario}/{element.GetType().Name}/{element.Style?.TargetType}: {font.Source}");
+            }
+        }
+
+        // Resolve the shared styles before Japanese initialization, as App.xaml
+        // can do before OnStartup. Keep these controls alive across switches.
+        var existing = CreateControls();
+        var window = new Window { Content = existing };
+        try
+        {
+            foreach (var culture in new[] { "ja-JP", "en-US", "ja-JP", "zh-CN", "zh-HK", "zh-TW" })
+            {
+                apply.Invoke(null, [culture, false, false]);
+                var expected = culture == "ja-JP" ? "Segoe UI, Yu Gothic UI" : "Segoe UI, Microsoft YaHei UI";
+                if (((FontFamily)app.FindResource("AppFontFamily")).Source != expected)
+                    throw new InvalidOperationException($"Incorrect interface font resource: {culture}");
+                AssertFonts(existing, expected, culture + "/existing");
+                AssertFonts(CreateControls(), expected, culture + "/new");
+            }
+        }
+        finally { window.Close(); }
     }
 }

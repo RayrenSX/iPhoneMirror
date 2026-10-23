@@ -6443,6 +6443,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         OnPropertyChanged(nameof(KeyboardMappingStatus));
+        OnPropertyChanged(nameof(KeyboardInputModeStatus));
         _selectedLanguage = LocalizationService.SelectedLanguage;
         OnPropertyChanged(nameof(SelectedLanguage));
         foreach (var preset in ResolutionPresets) preset.NotifyLanguageChanged();

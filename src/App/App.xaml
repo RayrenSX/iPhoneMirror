@@ -18,7 +18,7 @@
 
         <Style TargetType="TextBlock">
             <Setter Property="FontSize" Value="{DynamicResource BodyFontSize}"/>
-            <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
+            <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
         </Style>
 
         <Style TargetType="ProgressBar">
@@ -73,7 +73,7 @@
         <Style x:Key="DeviceMenuItemStyle" TargetType="MenuItem">
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
+            <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
             <Setter Property="FontSize" Value="{DynamicResource FontSize13}"/>
             <Setter Property="Padding" Value="14,9"/>
             <Setter Property="MinWidth" Value="150"/>
@@ -102,7 +102,7 @@
         <Style x:Key="DeviceSubmenuItemStyle" TargetType="MenuItem">
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
+            <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
             <Setter Property="FontSize" Value="{DynamicResource FontSize13}"/>
             <Setter Property="Padding" Value="14,9"/>
             <Setter Property="MinWidth" Value="150"/>
