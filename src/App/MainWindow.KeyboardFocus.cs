@@ -102,9 +102,17 @@ public partial class MainWindow
             sourceWindow == _keyboardForegroundWindow();
     }
 
+    // Device full screen collapses every workspace panel. A settings panel
+    // that was open before entering must not keep Esc/F11 from the router.
     private bool IsMainKeyboardEditorFocused() =>
+        !(_isFullScreen && !_viewModel.IsMediaCastSelected) &&
         (MainPreviewHost.WindowHandle == 0 || _keyboardFocusedWindow() != MainPreviewHost.WindowHandle) &&
         (_isSettingsPanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or ComboBox or ButtonBase or Slider);
+
+    private bool IsMainTextEntryFocused() =>
+        !(_isFullScreen && !_viewModel.IsMediaCastSelected) &&
+        (MainPreviewHost.WindowHandle == 0 || _keyboardFocusedWindow() != MainPreviewHost.WindowHandle) &&
+        Keyboard.FocusedElement is TextBoxBase or PasswordBox;
 
     private void OnMainKeyboardFocusChanged(object sender, KeyboardFocusChangedEventArgs e)
     {

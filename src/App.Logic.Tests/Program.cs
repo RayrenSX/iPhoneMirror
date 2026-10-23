@@ -527,7 +527,10 @@ var directDeliveryIndex = keyboardRouterEventsSource.IndexOf(
 Equal(true,
     previewKeyHandlerIndex >= 0 && previewKeyboardRouteIndex > previewKeyHandlerIndex &&
     keyboardRoutingSource.Contains(
-        "Local(0x7A, 0, \"FullScreen\", ToggleKeyboardFullScreen, anyPreview: true)",
+        "Local(0x7A, 0, \"FullScreen\", ToggleKeyboardFullScreen, anyPreview: true, fullScreenKey: true)",
+        StringComparison.Ordinal) &&
+    keyboardRoutingSource.Contains(
+        "fullScreenKey ? IsFullScreenShortcutForeground : IsLocalShortcutForeground",
         StringComparison.Ordinal) &&
     keyboardRoutingSource.Contains(
         "Local(0x1B, 0, \"ExitFullScreen\", ToggleKeyboardFullScreen,",

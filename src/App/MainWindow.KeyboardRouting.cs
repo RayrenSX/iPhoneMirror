@@ -38,17 +38,19 @@ public partial class MainWindow
             IsDeviceClipboardShortcutAvailable, () => QueueDeviceClipboardShortcut(copy: true)));
         bindings.Add(new(new(KeyboardShortcut.Control, 0x56), "PasteToDevice",
             IsDeviceClipboardShortcutAvailable, () => QueueDeviceClipboardShortcut(copy: false)));
-        void Local(int vk, uint modifiers, string name, Action execute, Func<bool>? condition = null, bool anyPreview = false)
+        void Local(int vk, uint modifiers, string name, Action execute, Func<bool>? condition = null, bool anyPreview = false,
+            bool fullScreenKey = false)
         {
             bool Available() => !_mappingClosing && _mappingWindow?.IsEditing != true && !_bossKeyHidden && _shortcutSettingsWindow is null &&
-                !_mappingCapture.Waiting && (IsLocalShortcutForeground ||
+                !_mappingCapture.Waiting && ((fullScreenKey ? IsFullScreenShortcutForeground : IsLocalShortcutForeground) ||
                     (anyPreview && _secondaryMirrors.ContainsWindow(_keyboardForegroundWindow()))) && condition?.Invoke() != false;
             bindings.Add(new(new(modifiers, (uint)vk), name, Available,
                 () => QueueKeyboardShortcut(execute, Available)));
         }
-        Local(0x7A, 0, "FullScreen", ToggleKeyboardFullScreen, anyPreview: true);
+        Local(0x7A, 0, "FullScreen", ToggleKeyboardFullScreen, anyPreview: true, fullScreenKey: true);
         Local(0x1B, 0, "ExitFullScreen", ToggleKeyboardFullScreen,
-            () => _isFullScreen || _secondaryMirrors.IsFullScreenWindow(_keyboardForegroundWindow()), anyPreview: true);
+            () => _isFullScreen || _secondaryMirrors.IsFullScreenWindow(_keyboardForegroundWindow()), anyPreview: true,
+            fullScreenKey: true);
         Local(0x74, 0, "RefreshDevices", () => _ = _viewModel.RefreshAsync(forceDeviceEnumeration: true));
         Local(0x52, KeyboardShortcut.Control, "RefreshPreview", RefreshPreview);
         Local(0x50, KeyboardShortcut.Control | KeyboardShortcut.Shift, "PreviewWindow",
@@ -64,6 +66,13 @@ public partial class MainWindow
 
     private bool IsLocalShortcutForeground =>
         (_keyboardForegroundWindow() == _windowSource?.Handle && !IsMainKeyboardEditorFocused()) ||
+        (_secondaryMirrors.GetWindowHandle(_viewModel.SelectedDevice?.Udid) is var preview &&
+            preview != 0 && _keyboardForegroundWindow() == preview);
+
+    // F11/Esc stay usable beside an open settings panel; only a focused
+    // text entry keeps them for itself.
+    private bool IsFullScreenShortcutForeground =>
+        (_keyboardForegroundWindow() == _windowSource?.Handle && !IsMainTextEntryFocused()) ||
         (_secondaryMirrors.GetWindowHandle(_viewModel.SelectedDevice?.Udid) is var preview &&
             preview != 0 && _keyboardForegroundWindow() == preview);
 
