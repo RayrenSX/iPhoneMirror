@@ -13,6 +13,8 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ### Fixed
 
+- Keep F11 and Esc working for full screen while the settings panel is open.
+  Only a focused text entry keeps these keys.
 - Apply wired HID lease refresh and inline recovery to media-authenticated
   sessions used by Cryptex. Preserve the media gate and capture tunnel, defer
   proactive refresh while input is held, and close replacement HID connections
