@@ -535,14 +535,44 @@ var directDeliveryIndex = keyboardRouterEventsSource.IndexOf(
 Equal(true,
     previewKeyHandlerIndex >= 0 && previewKeyboardRouteIndex > previewKeyHandlerIndex &&
     keyboardRoutingSource.Contains(
-        "Local(0x7A, 0, \"FullScreen\", ToggleKeyboardFullScreen, anyPreview: true)",
+        "Local(0x7A, 0, \"FullScreen\", ToggleKeyboardFullScreen, anyPreview: true, fullScreenKey: true)",
         StringComparison.Ordinal) &&
     keyboardRoutingSource.Contains(
         "Local(0x1B, 0, \"ExitFullScreen\", ToggleKeyboardFullScreen,",
         StringComparison.Ordinal) &&
+    keyboardRoutingSource.Contains(
+        "fullScreenKey ? IsFullScreenShortcutForeground : IsLocalShortcutForeground",
+        StringComparison.Ordinal) &&
     shortcutMatchIndex >= 0 && shortcutExecuteIndex > shortcutMatchIndex &&
     directDeliveryIndex > shortcutExecuteIndex,
     "Escape and F11 stay local before reverse-control keyboard routing");
+var keyboardFocusSource = File.ReadAllText(Path.Combine(sourceDirectory,
+    "App", "MainWindow.KeyboardFocus.cs")).ReplaceLineEndings("\n");
+const string deviceFullScreenException = "!(_isFullScreen && !_viewModel.IsMediaCastSelected)";
+Equal(true,
+    keyboardFocusSource.Contains(
+        "private bool IsMainKeyboardEditorFocused() =>\n" +
+        "        (MainPreviewHost.WindowHandle == 0 || _keyboardFocusedWindow() != MainPreviewHost.WindowHandle) &&\n" +
+        "        (_isSettingsPanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or ComboBox or ButtonBase or Slider);",
+        StringComparison.Ordinal) &&
+    keyboardFocusSource.Contains(
+        "(sourceWindow != _windowSource?.Handle || !IsMainKeyboardEditorFocused())",
+        StringComparison.Ordinal) &&
+    keyboardFocusSource.Contains(
+        "if (_activeControlWindow == 0 && IsMainKeyboardEditorFocused()) ResetKeyboardOwnership();",
+        StringComparison.Ordinal) &&
+    keyboardRoutingSource.Contains(
+        "(_keyboardForegroundWindow() == _windowSource?.Handle && !IsMainKeyboardEditorFocused())",
+        StringComparison.Ordinal),
+    "text entries keep blocking ordinary local shortcuts, device typing and ownership reset");
+Equal(true,
+    keyboardFocusSource.Split(deviceFullScreenException).Length == 2 &&
+    keyboardFocusSource.IndexOf(deviceFullScreenException, StringComparison.Ordinal) >
+        keyboardFocusSource.IndexOf("private bool IsFullScreenShortcutTextEntryFocused()", StringComparison.Ordinal) &&
+    keyboardFocusSource.IndexOf("private bool IsFullScreenShortcutTextEntryFocused()", StringComparison.Ordinal) >= 0 &&
+    !keyboardRoutingSource.Contains(deviceFullScreenException, StringComparison.Ordinal) &&
+    keyboardRoutingSource.Split("IsFullScreenShortcutTextEntryFocused()").Length == 2,
+    "the device full-screen exception is confined to the F11/Esc foreground check");
 Equal(true,
     mainWindowSource.Contains(
         "RouteKeyboardEvent(new(ModifierKeyIdentity(e.VirtualKey, e.ScanCode)",

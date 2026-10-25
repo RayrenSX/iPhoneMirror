@@ -120,6 +120,7 @@ internal static partial class Program
                         mode == "Usb" ? ReverseControlMode.Usb : ReverseControlMode.Wireless);
                 ReleaseTestPhysicalKeys(window);
                 TestIsolatedKeyboardFocusRoute(window, other, udid, packets, mode != "Bluetooth");
+                TestFullScreenKeyEditorGuard(window, udid, mode);
                 if (shortcutReview)
                     TestShortcutReview(window, other, udid, packets, mode);
                 if (initializeHiddenHandle && mode == "Bluetooth")

@@ -18,6 +18,9 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 - Let compact-mode full screen fill the monitor. Entering full screen now
   releases the portrait frame's minimum and maximum width as well as its width.
+- Keep F11 and Esc working for full screen while the settings panel is open.
+  Only a focused text entry keeps these keys. Other local shortcuts and device
+  typing still stay blocked while the settings panel or a text entry has focus.
 - Apply wired HID lease refresh and inline recovery to media-authenticated
   sessions used by Cryptex. Preserve the media gate and capture tunnel, defer
   proactive refresh while input is held, and close replacement HID connections

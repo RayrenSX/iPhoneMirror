@@ -111,6 +111,13 @@ public partial class MainWindow
         if (_activeControlWindow == 0 && IsMainKeyboardEditorFocused()) ResetKeyboardOwnership();
     }
 
+    // Used only by F11/Esc. Device full screen collapses every workspace
+    // panel, so no text entry there can keep Esc/F11 from the router.
+    private bool IsFullScreenShortcutTextEntryFocused() =>
+        !(_isFullScreen && !_viewModel.IsMediaCastSelected) &&
+        (MainPreviewHost.WindowHandle == 0 || _keyboardFocusedWindow() != MainPreviewHost.WindowHandle) &&
+        Keyboard.FocusedElement is TextBoxBase or PasswordBox;
+
     private void DisposeKeyboardInputSubscriptions()
     {
         MainPreviewHost.KeyboardInput -= OnControlKeyboardInput;
