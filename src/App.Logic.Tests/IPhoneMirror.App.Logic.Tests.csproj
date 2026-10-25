@@ -17,6 +17,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="UpdaterHandoffTests.cs" />
     <Compile Include="..\App\Services\AppleDisplayCatalog.cs" Link="AppleDisplayCatalog.cs" />
     <EmbeddedResource Include="..\..\config\apple-display-catalog.json"
                       LogicalName="IPhoneMirror.App.Devices.AppleDisplayCatalog.json" />

@@ -121,6 +121,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         tests/CoreTests.cpp
         tests/PreviewOpacitySmoke.cpp
         tests/PreviewStaticFrameSmoke.cpp
+        tests/WasapiUnderrunSmoke.cpp
         src/Renderer/D3D11PreviewRenderer.cpp
         src/Protocol/Plist.cpp
         src/Protocol/QuickTimePacket.cpp

@@ -170,6 +170,8 @@ internal static partial class Program
                 return RunVirtualCameraRegressionTests();
             if (args is ["--updater-elevation-regression"])
                 return RunUpdaterElevationRegressionTests();
+            if (args is ["--updater-window-regression"])
+                return RunUpdaterWindowRegressionTests();
             if (args is ["--capture-review"])
             {
                 var captureApp = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };

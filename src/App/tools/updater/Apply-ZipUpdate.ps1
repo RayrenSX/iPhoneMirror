@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedSha256,
     [Parameter(Mandatory)][string]$InstallDirectory,
     [Parameter(Mandatory)][string]$RestartExecutable,
+    [string]$ReadyEventName,
+    [string]$CancelEventName,
     [switch]$SkipRestart
 )
 
@@ -29,12 +31,19 @@ $backupRoot = Join-Path $privilegedTempRoot (
     'iPhoneMirror-Rollback-' + [Guid]::NewGuid().ToString('N'))
 $preserveBackup = $false
 $zipLock = $null
+$cancelEvent = $null
 $maximumArchiveBytes = 2L * 1024 * 1024 * 1024
 $maximumEntryCount = 20000
 $maximumEntryBytes = 2L * 1024 * 1024 * 1024
 $maximumExpandedBytes = 4L * 1024 * 1024 * 1024
 $maximumCompressionRatio = 1000L
 $minimumFreeSpaceReserve = 512L * 1024 * 1024
+
+function Assert-UpdateNotCancelled {
+    if ($null -ne $cancelEvent -and $cancelEvent.WaitOne(0)) {
+        throw [OperationCanceledException]::new('The update was cancelled before installation.')
+    }
+}
 
 function Get-NormalizedPath([string]$Path) {
     $fullPath = [IO.Path]::GetFullPath($Path)
@@ -221,6 +230,7 @@ function Assert-SafeZipArchive([IO.Stream]$Stream, [string]$Destination) {
         }
         [long]$expandedBytes = 0
         foreach ($entry in $archive.Entries) {
+            Assert-UpdateNotCancelled
             [void](Get-SafeZipTarget $entry.FullName $Destination)
             if ($entry.Length -gt $maximumEntryBytes) {
                 throw "The update ZIP entry '$($entry.FullName)' exceeds the per-file limit."
@@ -259,6 +269,7 @@ function Expand-SafeZipArchive([IO.Stream]$Stream, [string]$Destination) {
     try {
         [long]$expandedBytes = 0
         foreach ($entry in $archive.Entries) {
+            Assert-UpdateNotCancelled
             $target = Get-SafeZipTarget $entry.FullName $Destination
 
             $isDirectory = $entry.FullName.EndsWith('/', [StringComparison]::Ordinal) -or
@@ -276,6 +287,7 @@ function Expand-SafeZipArchive([IO.Stream]$Stream, [string]$Destination) {
                 $buffer = [byte[]]::new(1024 * 1024)
                 [long]$entryBytes = 0
                 while (($read = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    Assert-UpdateNotCancelled
                     if ($entryBytes -gt $maximumEntryBytes - $read -or
                             $expandedBytes -gt $maximumExpandedBytes - $read) {
                         throw "The update ZIP exceeds its expanded-size limit while extracting '$($entry.FullName)'."
@@ -303,6 +315,10 @@ function Expand-SafeZipArchive([IO.Stream]$Stream, [string]$Destination) {
 }
 
 try {
+    if ($CancelEventName) {
+        $cancelEvent = [Threading.EventWaitHandle]::OpenExisting($CancelEventName)
+    }
+    Assert-UpdateNotCancelled
     $installRoot = Get-NormalizedPath $InstallDirectory
     $installPrefix = Get-ChildPathPrefix $installRoot
     $zipLock = [IO.File]::Open((Get-NormalizedPath $ZipPath),
@@ -313,12 +329,41 @@ try {
         throw 'The update ZIP changed after verification.'
     }
     Assert-SafeZipArchive $zipLock $stagingRoot
+    # Prepare and validate the complete payload before asking the running app
+    # to exit. Bootstrap/extraction failures must leave the current app usable.
+    New-PrivilegedDirectory $stagingRoot
+    Expand-SafeZipArchive $zipLock $stagingRoot
+    $children = @(Get-ChildItem -LiteralPath $stagingRoot -Force)
+    $payloadRoot = if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
+        $children[0].FullName
+    }
+    else { $stagingRoot }
+    foreach ($required in @('iPhoneMirror.exe', 'iPhoneMirror.Driver.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot $required) -PathType Leaf)) {
+            throw "The update ZIP does not contain $required."
+        }
+    }
+    $payloadItems = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -Force)
+    $reparseItem = $payloadItems | Where-Object {
+        ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    } | Select-Object -First 1
+    if ($null -ne $reparseItem) {
+        throw "The update ZIP contains a reparse point: $($reparseItem.Name)"
+    }
+    Assert-NoReparsePath $installRoot $installRoot
+    Assert-UpdateNotCancelled
+    if ($ReadyEventName) {
+        $readyEvent = [Threading.EventWaitHandle]::OpenExisting($ReadyEventName)
+        try { [void]$readyEvent.Set() }
+        finally { $readyEvent.Dispose() }
+    }
     $trackedIds = @($WaitPids -split ';' | ForEach-Object {
         [int]::Parse($_, [Globalization.CultureInfo]::InvariantCulture)
     } | Where-Object { $_ -gt 0 } | Select-Object -Unique)
 
     $ownedProcessIds = @()
     foreach ($trackedId in $trackedIds) {
+        Assert-UpdateNotCancelled
         $process = Get-Process -Id $trackedId -ErrorAction SilentlyContinue
         if ($null -eq $process) { continue }
         try { $processPath = $process.MainModule.FileName } catch { $processPath = $null }
@@ -335,12 +380,18 @@ try {
         }
         if ($owned) {
             $ownedProcessIds += $trackedId
-            try { [void]$process.CloseMainWindow() } catch { }
+            # A caller using the readiness handshake exits explicitly, bypassing
+            # close-to-tray. Keep WM_CLOSE for legacy callers and the driver UI.
+            if (-not $ReadyEventName -or
+                [IO.Path]::GetFileName($fullProcessPath) -eq 'iPhoneMirror.Driver.exe') {
+                try { [void]$process.CloseMainWindow() } catch { }
+            }
         }
         $process.Dispose()
     }
     $deadline = [DateTime]::UtcNow.AddSeconds(120)
     while ($trackedIds.Count -gt 0 -and [DateTime]::UtcNow -lt $deadline) {
+        Assert-UpdateNotCancelled
         $trackedIds = @($trackedIds | Where-Object {
             Get-Process -Id $_ -ErrorAction SilentlyContinue
         })
@@ -351,6 +402,7 @@ try {
     # A standalone driver manager is not a child of the main app. If it did
     # not honor the close request, terminate it only after validating that its
     # executable is inside the target installation directory.
+    Assert-UpdateNotCancelled
     if ($trackedIds.Count -ne 0) {
         foreach ($trackedId in $ownedProcessIds) {
             $process = Get-Process -Id $trackedId -ErrorAction SilentlyContinue
@@ -379,27 +431,7 @@ try {
             throw 'iPhoneMirror or its driver manager did not exit before the update timeout.'
         }
     }
-    New-PrivilegedDirectory $stagingRoot
-    Expand-SafeZipArchive $zipLock $stagingRoot
-    $children = @(Get-ChildItem -LiteralPath $stagingRoot -Force)
-    $payloadRoot = if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
-        $children[0].FullName
-    }
-    else { $stagingRoot }
-    foreach ($required in @('iPhoneMirror.exe', 'iPhoneMirror.Driver.exe')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot $required) -PathType Leaf)) {
-            throw "The update ZIP does not contain $required."
-        }
-    }
-
-    $payloadItems = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -Force)
-    $reparseItem = $payloadItems | Where-Object {
-        ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
-    } | Select-Object -First 1
-    if ($null -ne $reparseItem) {
-        throw "The update ZIP contains a reparse point: $($reparseItem.Name)"
-    }
-
+    Assert-UpdateNotCancelled
     New-Item -ItemType Directory -Force -Path $InstallDirectory | Out-Null
     Assert-NoReparsePath $installRoot $installRoot
 
@@ -561,6 +593,7 @@ try {
     finally { $restartLock.Dispose() }
 }
 finally {
+    if ($null -ne $cancelEvent) { $cancelEvent.Dispose() }
     if ($null -ne $zipLock) { $zipLock.Dispose() }
     if (Test-Path -LiteralPath $stagingRoot) {
         Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -100,8 +100,19 @@ internal static class UpdateInstallerLauncher
         $principal = [Security.Principal.WindowsPrincipal]::new($identity)
         $isElevated = $principal.IsInRole(
             [Security.Principal.WindowsBuiltInRole]::Administrator)
-        if (-not $isElevated) { throw 'The update installer bootstrap is not elevated.' }
-        $directory = [IO.Path]::Combine([Environment]::SystemDirectory,
+        $requiresElevation = $REQUIRES_ELEVATION$
+        if ($requiresElevation -and -not $isElevated) {
+            throw 'The update installer bootstrap is not elevated.'
+        }
+        # Inno Setup's loader is x86 even for x64 payloads. A loader placed in
+        # native System32 reopens its own path through WOW64's SysWOW64 redirect
+        # and fails before it can create an installation log. Program Files is
+        # protected and has no System32 filesystem redirection.
+        $stagingParent = if ($isElevated) {
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+        }
+            else { [IO.Path]::GetTempPath() }
+        $directory = [IO.Path]::Combine($stagingParent,
             'iPhoneMirror-Installer-' + [Guid]::NewGuid().ToString('N'))
         $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
         $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
@@ -119,7 +130,8 @@ internal static class UpdateInstallerLauncher
             $system, $rights, $inheritance, $propagation, $allow))
         $directoryInfo = [IO.DirectoryInfo]::new($directory)
         if ($directoryInfo.Exists) { throw 'The installer staging directory already exists.' }
-        $directoryInfo.Create($security)
+        if ($isElevated) { $directoryInfo.Create($security) }
+        else { $directoryInfo.Create() }
         try {
             $source = [IO.File]::Open($packagePath,
                 [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
@@ -159,7 +171,12 @@ internal static class UpdateInstallerLauncher
                 [Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules')
             $process = [Diagnostics.Process]::Start($start)
             if ($null -eq $process) { throw 'The verified update installer did not start.' }
-            try { $process.WaitForExit() }
+            try {
+                $process.WaitForExit()
+                if ($process.ExitCode -ne 0) {
+                    throw ('The update installer failed with exit code ' + $process.ExitCode)
+                }
+            }
             finally { $process.Dispose() }
         }
         finally {
@@ -167,8 +184,10 @@ internal static class UpdateInstallerLauncher
         }
         """;
 
-    internal static void Launch(DownloadedUpdate update)
+    internal static async Task LaunchAsync(DownloadedUpdate update,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ValidateElevationEnvironment(Environment.GetEnvironmentVariables());
         if (!update.HashVerified)
             throw new InvalidDataException(
@@ -185,18 +204,26 @@ internal static class UpdateInstallerLauncher
             StringComparison.OrdinalIgnoreCase);
         if (isInstaller)
         {
+            var currentUser = DeploymentLayout.GetRegisteredInstallHive(
+                Path.Combine(AppContext.BaseDirectory, "iPhoneMirror.exe")) ==
+                Microsoft.Win32.RegistryHive.CurrentUser;
             // Keep the read handle open through ShellExecuteEx. FileShare.Read
             // prevents a medium-integrity process from replacing or deleting
             // the package between the digest check and the elevated bootstrap
             // opening it for its own verification.
-            using var packageLock = LockAndValidatePackage(
-                update.Path, update.VerifiedSha256!);
-            var processId = StartPowerShell(BuildElevatedPowerShellStartInfo(
-                    Path.GetDirectoryName(update.Path) ?? AppContext.BaseDirectory,
-                    BuildVerifiedInstallerBootstrap(update.Path,
-                        update.VerifiedSha256!, BuildInstallerArguments())));
+            using var packageLock = await Task.Run(() => LockAndValidatePackage(
+                update.Path, update.VerifiedSha256!), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var workingDirectory = Path.GetDirectoryName(update.Path) ?? AppContext.BaseDirectory;
+            var bootstrap = BuildInstallerBootstrap(update.Path, update.VerifiedSha256!,
+                BuildInstallerArguments(AppContext.BaseDirectory, currentUser), !currentUser);
+            using var process = StartPowerShell(currentUser
+                ? BuildUnelevatedPowerShellStartInfo(workingDirectory, bootstrap)
+                : BuildElevatedPowerShellStartInfo(workingDirectory, bootstrap));
             DiagnosticLogger.Info("updater", "installer_launched",
-                ("format", "exe"), ("pid", processId));
+                ("format", "exe"), ("pid", GetProcessId(process)));
+            await WaitForHelperAsync(process);
+            DiagnosticLogger.Info("updater", "installer_completed", ("format", "exe"));
             return;
         }
 
@@ -229,8 +256,15 @@ internal static class UpdateInstallerLauncher
             Path.Combine(AppContext.BaseDirectory, "iPhoneMirror.exe");
         var waitProcessIds = new List<int> { Environment.ProcessId };
         waitProcessIds.AddRange(FindDriverProcessIds(AppContext.BaseDirectory));
+        var readyEventName = @"Local\iPhoneMirror.Update.Ready." + Guid.NewGuid().ToString("N");
+        using var readyEvent = new EventWaitHandle(false, EventResetMode.ManualReset,
+            readyEventName);
+        var cancelEventName = @"Local\iPhoneMirror.Update.Cancel." + Guid.NewGuid().ToString("N");
+        using var cancelEvent = new EventWaitHandle(false, EventResetMode.ManualReset,
+            cancelEventName);
         var scriptArguments = BuildZipArguments(update.Path,
-            AppContext.BaseDirectory, executable, update.VerifiedSha256!, waitProcessIds);
+            AppContext.BaseDirectory, executable, update.VerifiedSha256!, waitProcessIds)
+            .Concat(["-ReadyEventName", readyEventName, "-CancelEventName", cancelEventName]).ToArray();
         var encodedBootstrap = BuildVerifiedScriptBootstrap(helperScript,
             helperSha256, scriptArguments, cleanupDirectory: true);
         var start = requiresElevation
@@ -238,18 +272,28 @@ internal static class UpdateInstallerLauncher
             : BuildUnelevatedPowerShellStartInfo(helperDirectory, encodedBootstrap);
         try
         {
-            _ = StartPowerShell(start);
+            using var process = StartPowerShell(start);
+            DiagnosticLogger.Info("updater", "installer_launched", ("format", "zip"),
+                ("elevated", requiresElevation), ("pid", GetProcessId(process)));
+            // Only hand off shutdown after the helper verified and extracted the
+            // payload. A successfully created PowerShell process alone is not
+            // evidence that its script actually started or accepted the update.
+            await WaitForHelperAsync(process, readyEvent,
+                TimeSpan.FromMinutes(2), cancellationToken);
         }
         catch
         {
+            // The helper holds its own event handle. It must observe cancellation
+            // before any replacement even if this caller closes its handles now.
+            cancelEvent.Set();
             TryDeleteHelperDirectory(helperDirectory);
             throw;
         }
-        DiagnosticLogger.Info("updater", "installer_launched", ("format", "zip"),
+        DiagnosticLogger.Info("updater", "portable_ready", ("format", "zip"),
             ("elevated", requiresElevation));
     }
 
-    private static int StartPowerShell(ProcessStartInfo start)
+    internal static SafeProcessHandle StartPowerShell(ProcessStartInfo start)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException(
@@ -273,16 +317,35 @@ internal static class UpdateInstallerLauncher
                 LocalizationService.Get("UpdateHelperStartFailed"));
         }
 
-        try
+        if (executeInfo.Process == 0)
+            throw new InvalidOperationException(LocalizationService.Get("UpdateHelperStartFailed"));
+        return new SafeProcessHandle(executeInfo.Process, ownsHandle: true);
+    }
+
+    internal static async Task WaitForHelperAsync(SafeProcessHandle process,
+        EventWaitHandle? readyEvent = null, TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (true)
         {
-            return executeInfo.Process == 0
-                ? 0
-                : checked((int)GetProcessId(executeInfo.Process));
-        }
-        finally
-        {
-            if (executeInfo.Process != 0)
-                _ = CloseHandle(executeInfo.Process);
+            cancellationToken.ThrowIfCancellationRequested();
+            var wait = WaitForSingleObject(process, 0);
+            if (wait == 0)
+            {
+                if (!GetExitCodeProcess(process, out var exitCode))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (exitCode != 0 || (readyEvent is not null && !readyEvent.WaitOne(0)))
+                    throw new InvalidOperationException(LocalizationService.Format(
+                        "UpdateHelperExitedFormat", exitCode));
+                return;
+            }
+            if (wait != 0x00000102) // WAIT_TIMEOUT
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (readyEvent?.WaitOne(0) == true) return;
+            if (timeout is { } limit && elapsed.Elapsed >= limit)
+                throw new TimeoutException(LocalizationService.Get("UpdateHelperTimedOut"));
+            await Task.Delay(100, cancellationToken);
         }
     }
 
@@ -479,12 +542,18 @@ internal static class UpdateInstallerLauncher
                 LocalizationService.Get("UpdatePortableRequired"));
     }
 
-    internal static string BuildInstallerArguments()
+    internal static string BuildInstallerArguments(string? installDirectory = null,
+        bool currentUser = false)
     {
         var logPath = Path.Combine(DiagnosticLogger.DirectoryPath,
             $"installer-update-{DateTime.UtcNow:yyyyMMdd-HHmmss}.log");
-        return "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS " +
-            $"/STARTAPP=1 /LOG=\"{logPath}\"";
+        // Restart Manager must be able to finish shutdown even when an older
+        // version turns WM_CLOSE into close-to-tray or cancels an async close.
+        var directory = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(installDirectory ?? AppContext.BaseDirectory));
+        return "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS " +
+            (currentUser ? "/CURRENTUSER " : "/ALLUSERS ") +
+            $"/DIR={QuoteCommandLineArgument(directory)} /STARTAPP=1 /LOG=\"{logPath}\"";
     }
 
     internal static IReadOnlyList<string> BuildZipArguments(string zipPath,
@@ -534,22 +603,65 @@ internal static class UpdateInstallerLauncher
             .Replace("$ARGUMENTS_BASE64$", string.Join(", ", arguments.Select(argument =>
                 "'" + Convert.ToBase64String(Encoding.UTF8.GetBytes(argument)) + "'")),
                 StringComparison.Ordinal);
-        return Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
+        return EncodeFailureReportingBootstrap(command);
     }
 
     internal static string BuildVerifiedInstallerBootstrap(string packagePath,
         string expectedSha256, string argumentLine)
+        => BuildInstallerBootstrap(packagePath, expectedSha256, argumentLine, requiresElevation: true);
+
+    internal static string BuildInstallerBootstrap(string packagePath,
+        string expectedSha256, string argumentLine, bool requiresElevation)
     {
         if (!IsSha256(expectedSha256))
             throw new ArgumentException("A valid installer SHA256 digest is required.",
                 nameof(expectedSha256));
         var command = VerifiedInstallerBootstrap
+            .Replace("$REQUIRES_ELEVATION$", requiresElevation ? "$true" : "$false", StringComparison.Ordinal)
             .Replace("$PACKAGE_PATH_BASE64$", Convert.ToBase64String(
                 Encoding.UTF8.GetBytes(Path.GetFullPath(packagePath))), StringComparison.Ordinal)
             .Replace("$EXPECTED_SHA256$", expectedSha256, StringComparison.Ordinal)
             .Replace("$ARGUMENT_LINE_BASE64$", Convert.ToBase64String(
                 Encoding.UTF8.GetBytes(argumentLine)), StringComparison.Ordinal);
-        return Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
+        return EncodeFailureReportingBootstrap(command);
+    }
+
+    private static string EncodeFailureReportingBootstrap(string command)
+    {
+        // The parent can report failures before shutdown. Once it has exited,
+        // this helper is the only process that can explain a failed replacement
+        // or restart. Use strong-named framework APIs without module discovery.
+        var failureMessage = Convert.ToBase64String(Encoding.UTF8.GetBytes(
+            LocalizationService.Get("UpdateInstallFailed")));
+        var reporter = """
+            catch {
+                $updateFailure = $_
+                $parentRunning = $false
+                try {
+                    $parentProcess = [Diagnostics.Process]::GetProcessById($PARENT_PID$)
+                    try { $parentRunning = -not $parentProcess.HasExited }
+                    finally { $parentProcess.Dispose() }
+                }
+                catch { }
+                if (-not $parentRunning) {
+                    try {
+                        [void][Reflection.Assembly]::Load('System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089')
+                        $failureMessage = [Text.Encoding]::UTF8.GetString(
+                            [Convert]::FromBase64String('$FAILURE_MESSAGE_BASE64$'))
+                        [void][Windows.Forms.MessageBox]::Show(
+                            $failureMessage + "`r`n`r`n" + $updateFailure.Exception.Message,
+                            'iPhoneMirror', 0, 16)
+                    }
+                    catch { }
+                }
+                throw $updateFailure
+            }
+            """
+            .Replace("$PARENT_PID$", Environment.ProcessId.ToString(
+                System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+            .Replace("$FAILURE_MESSAGE_BASE64$", failureMessage, StringComparison.Ordinal);
+        return Convert.ToBase64String(Encoding.Unicode.GetBytes(
+            "try {\n" + command + "\n}\n" + reporter));
     }
 
     private static byte[] ReadZipHelperBytes()
@@ -627,11 +739,14 @@ internal static class UpdateInstallerLauncher
     private static extern bool ShellExecuteExW(ref ShellExecuteInfo executeInfo);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern uint GetProcessId(nint process);
+    private static extern uint GetProcessId(SafeProcessHandle process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(SafeProcessHandle handle, uint milliseconds);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(nint handle);
+    private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint exitCode);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true,
         SetLastError = true)]

@@ -4,6 +4,7 @@
 .vscode/
 .agents/
 .[c]odex/
+.ego/
 *.user
 *.suo
 

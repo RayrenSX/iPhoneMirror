@@ -1,5 +1,45 @@
 [
   {
+    "tag_name": "v1.8.5-pre3",
+    "name": "iPhoneMirror v1.8.5-pre3",
+    "body": "这是用于功能和兼容性测试的预览版。\r\n\r\n### 新增与改进\r\n\r\n- 支持同时录制和直播，可分别停止输出；直播期间可保存或丢弃已完成录制。\r\n- 安装包与便携版内置固定版本的 Personalized DDI 和 iOS 27 Cryptex DDI，使用前校验载荷；Apple 个性化签名仍需联网。\r\n- 设置助手增加工具入口，改进设备绑定、开发者模式引导和错误提示。\r\n- 合并设置助手中的 USB、AirPlay 和蓝牙绑定步骤，打开设备绑定器时自动启动 AirPlay 接收，并支持失败重试。\r\n- 改进 Automation API 的远程文本输入、会话管理、并行输出和启动取消处理。\r\n\r\n### 修复\r\n\r\n- 改进新设备 USB 描述符与活动配置等待，修正部分设备的显示尺寸映射。\r\n- 改进 Apple USBMux 就绪检测，支持探测商店版 Apple Devices，并提供端口占用诊断。\r\n- 修复 Cryptex/DDI 准备阶段的连接释放、取消和超时处理，打包并校验所需运行时能力。\r\n- 修复预览重绘、键盘焦点、设备切换和媒体输出状态处理问题。\r\n- 修复设备绑定器周期刷新时右侧动画重复播放导致的闪烁。\r\n- 修复 SRS 测试服务的 HTTP 错误处理及多语言资源格式问题。\r\n- 应用与驱动管理器版本统一为 1.8.5-pre3。\r\n\r\n### 验证范围\r\n\r\n自动构建执行原生、Python、应用逻辑、驱动及本地化检查。GitHub 托管环境不运行需要交互桌面的 WPF 运行时测试。\r\n目标设备上的 Apple 签名、DDI 安装与控制兼容性，以及最终 ZIP/Setup 的完整安装、升级、卸载和实机验收仍需验证；构建通过不代表这些场景已通过。\r\n\r\n### Added\r\n\r\n- Record and stream simultaneously, stop each output independently, and save or discard a completed recording while streaming continues.\r\n- Bundle pinned Personalized and iOS 27 Cryptex DDI assets in both Setup and portable ZIP builds; Apple personalization still requires network access.\r\n- Add setup tool entry points and improve device binding, developer mode guidance, and error messages.\r\n- Combine USB, AirPlay, and Bluetooth setup into one binding step, start AirPlay reception when the binder opens, and allow retry after startup failure.\r\n- Improve Automation API remote text input, session management, parallel output, and startup cancellation.\r\n\r\n### Fixed\r\n\r\n- Improve USB descriptor and active configuration readiness checks and correct display size mappings for selected devices.\r\n- Detect Apple USBMux readiness, including Microsoft Store Apple Devices support, and report port conflicts.\r\n- Bound Cryptex/DDI connection cleanup, cancellation, and timeouts, and verify the packaged runtime capabilities.\r\n- Fix preview redraw, keyboard focus, device switching, media output state handling, SRS HTTP errors, and localization formatting.\r\n- Prevent periodic device binder refreshes from replaying the right pane entrance animation and causing flicker.\r\n- Align the application and driver manager versions at 1.8.5-pre3.\r\n\r\n### Notes\r\n\r\nAutomated builds check native code, Python, application logic, drivers, and localization. WPF runtime tests requiring an interactive desktop are skipped on GitHub-hosted runners.\r\nApple signing, DDI installation and control on target devices, and full installation, upgrade, removal, and device acceptance of the final ZIP/Setup remain to be verified.\r\n\r\n<!-- release-assets:start -->\r\n## 发布资产\r\n\r\n- `iPhoneMirror-Setup-v1.8.5-pre3-x64.exe`：Windows x64 安装程序，支持覆盖升级与卸载。\r\n- `iPhoneMirror-v1.8.5-pre3-win-x64.zip`：免安装便携版，完整解压后运行。\r\n- `iPhoneMirror-v1.8.5-pre3-win-x64-sbom.spdx.json`：SPDX 2.2 软件物料清单。\r\n- `SHA256SUMS.txt`：全部公开 Release 资产的 SHA-256 校验清单。\r\n- `iPhoneMirror-UxPlay-v1.8.5-pre3-win-x64.zip`：UxPlay 可选无线组件，由应用通过镜像加速按需下载安装。\r\n\r\n| 资产 | 大小 | SHA-256 |\r\n| --- | ---: | --- |\r\n| `iPhoneMirror-Setup-v1.8.5-pre3-x64.exe` | 139,094,154 bytes | `1b99b92418794ae33e31c17feca56f06dec71de28536cb9c4bacffbf95fb925b` |\r\n| `iPhoneMirror-v1.8.5-pre3-win-x64.zip` | 244,435,770 bytes | `bd8642a0d755246e6703c6313525d79b520ea1216b761b537b8574e26cce99dc` |\r\n| `iPhoneMirror-v1.8.5-pre3-win-x64-sbom.spdx.json` | 718,691 bytes | `a8e41f993fa17edd54d550f102a12d9cc0d4e8a9fb8cae3f9712be59b10f22fa` |\r\n| `SHA256SUMS.txt` | 432 bytes | `605fd723b90d3533ab2bf3edb8ffda2668d91e4d63bcaa6b3da00648601632ff` |\r\n| `iPhoneMirror-UxPlay-v1.8.5-pre3-win-x64.zip` | 70,622,394 bytes | `d640170132f030069926aefb956c2e0d834ed08334dec18a3f359bf4dd37dff5` |\r\n<!-- release-assets:end -->\r\n",
+    "published_at": "2026-10-15T23:28:09Z",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.8.5-pre3-x64.exe",
+        "size": 139094154,
+        "digest": "sha256:1b99b92418794ae33e31c17feca56f06dec71de28536cb9c4bacffbf95fb925b",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre3/iPhoneMirror-Setup-v1.8.5-pre3-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-UxPlay-v1.8.5-pre3-win-x64.zip",
+        "size": 70622394,
+        "digest": "sha256:d640170132f030069926aefb956c2e0d834ed08334dec18a3f359bf4dd37dff5",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre3/iPhoneMirror-UxPlay-v1.8.5-pre3-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.5-pre3-win-x64-sbom.spdx.json",
+        "size": 718691,
+        "digest": "sha256:a8e41f993fa17edd54d550f102a12d9cc0d4e8a9fb8cae3f9712be59b10f22fa",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre3/iPhoneMirror-v1.8.5-pre3-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.5-pre3-win-x64.zip",
+        "size": 244435770,
+        "digest": "sha256:bd8642a0d755246e6703c6313525d79b520ea1216b761b537b8574e26cce99dc",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre3/iPhoneMirror-v1.8.5-pre3-win-x64.zip"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 432,
+        "digest": "sha256:605fd723b90d3533ab2bf3edb8ffda2668d91e4d63bcaa6b3da00648601632ff",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre3/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.8.5-pre2",
     "name": "iPhoneMirror v1.8.5-pre2",
     "body": "这是用于功能和兼容性测试的预览版。\n\n### 修复\n\n- 设置助手仅在首次打开应用时自动显示。之后即使设置尚未完成，也不会随每次启动弹出；可通过应用偏好、投屏设置或开发者选项手动进入，并保留已有进度。\n- 应用与驱动版本统一为 1.8.5-pre2。\n- 同步发布对应版本的 UxPlay 无线组件，供应用内下载和安装。\n\n### 下载\n\n- `iPhoneMirror-Setup-v1.8.5-pre2-x64.exe`：Windows x64 安装包，包含运行库。\n- `iPhoneMirror-v1.8.5-pre2-win-x64.zip`：Windows x64 便携版。\n- `iPhoneMirror-UxPlay-v1.8.5-pre2-win-x64.zip`：可选 UxPlay 组件。\n- `SHA256SUMS.txt`：文件校验值。\n\n### 验证与已知问题\n\n16 项原生测试、396 项 Python 测试、应用逻辑、驱动测试和设置助手专项回归通过。最终发布文件的版本、依赖及 SHA-256 已验证，便携 ZIP 的 881 个文件与发布目录逐一匹配。\n\n完整桌面运行时测试输出断言通过后，进程退出时出现 `0xC0000409`；Windows 崩溃记录指向 AMD 显卡驱动 `amdxx64.dll` 32.0.21032.8002。因此该完整测试进程未正常退出，AMD 环境仍需实际使用验证。设置助手专项测试正常退出。\n\n这是本地构建后上传的测试包，不代表 GitHub Actions 发布构建已通过；包内提交标识保留构建时的基线，发布标签同时记录该次构建的源文件修改。\r\n",

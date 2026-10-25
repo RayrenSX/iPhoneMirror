@@ -461,14 +461,9 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
         check(client->GetCurrentPadding(&padding), "get WASAPI padding");
         if (padding >= buffer_frames) return false;
         const UINT32 available = buffer_frames - padding;
-        const auto queued = queued_frames();
-        if (count_underrun && queued < available) {
-            const auto n = underruns_.fetch_add(1, std::memory_order_relaxed) + 1;
-            logging::write(std::format(
-                "wasapi underrun n={} requested={} queued={}",
-                n, available, queued));
-            return true;
-        }
+        // Consume a partial tail and fill the remainder with silence. Skipping
+        // GetBuffer here strands that tail until another source packet arrives
+        // and lets the endpoint run dry during a USB/network interruption.
         BYTE* destination{};
         check(render->GetBuffer(available, &destination), "get WASAPI render buffer");
         const auto copied = dequeue(destination, available);

@@ -1106,6 +1106,10 @@
     <system:String x:Key="UpdateDigestMissing">The update verification digest is missing or invalid.</system:String>
     <system:String x:Key="UpdateFormatUnsupported">This update package format is unsupported.</system:String>
     <system:String x:Key="UpdateHelperStartFailed">Windows could not start the update helper.</system:String>
+    <system:String x:Key="UpdateHelperExitedFormat">The update helper could not complete installation or prepare the handoff (exit code {0}). Retry or run the downloaded update package manually.</system:String>
+    <system:String x:Key="UpdateHelperTimedOut">The update helper timed out while preparing, so this installation was cancelled. Retry or install the update package manually.</system:String>
+    <system:String x:Key="UpdateInstallFailed">The update did not complete. Install the downloaded update package manually. Error details:</system:String>
+    <system:String x:Key="UpdateFailedFormat">Update failed: {0}</system:String>
     <system:String x:Key="UpdateSetupRequired">The installed edition must be updated with the Windows Setup package.</system:String>
     <system:String x:Key="UpdatePortableRequired">The portable edition must be updated with the portable ZIP package.</system:String>
     <system:String x:Key="UpdateHelperMissing">The embedded ZIP update helper is missing.</system:String>

@@ -31,6 +31,23 @@ var diagnosticTestRoot = args is ["--component-public-uxplay", var componentPubl
 Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY",
     diagnosticTestRoot, EnvironmentVariableTarget.Process);
 
+if (args is ["--updater-handoff"])
+{
+    await UpdaterHandoffTests.RunAsync(verifyFailureDialog: true);
+    return;
+}
+if (args is ["--updater-package-e2e", var updaterFixture, var updaterInstall, var updaterIdentity])
+{
+    await UpdaterHandoffTests.RunPackageEndToEndAsync(updaterFixture, updaterInstall, updaterIdentity);
+    return;
+}
+if (args is ["--updater-package-e2e", var elevatedUpdaterFixture, var elevatedUpdaterInstall, var elevatedUpdaterIdentity, "--elevated"])
+{
+    await UpdaterHandoffTests.RunPackageEndToEndAsync(elevatedUpdaterFixture, elevatedUpdaterInstall,
+        elevatedUpdaterIdentity, elevatedInstaller: true);
+    return;
+}
+
 await ReviewFixRegressionTests.RunAsync();
 if (args is ["--review-fixes"]) return;
 
@@ -3628,7 +3645,7 @@ try
         "ranked failover download remains SHA256 verified");
     Sequence(["gh-proxy.net", "github.com"], failoverPackageRequests,
         "a failed fastest mirror immediately switches to the next ranked route");
-    Throws<InvalidDataException>(() => UpdateInstallerLauncher.Launch(
+    await ThrowsAsync<InvalidDataException>(() => UpdateInstallerLauncher.LaunchAsync(
             downloaded with { HashVerified = false }),
         "installer launcher refuses an update without verified integrity");
 }
@@ -3688,6 +3705,7 @@ finally
         Directory.Delete(updateCleanupOutside, recursive: true);
 }
 
+await UpdaterHandoffTests.RunAsync();
 var zipUpdateTestRoot = Path.Combine(Path.GetTempPath(),
     $"iphone-mirror-zip-update-{Guid.NewGuid():N}");
 var zipUpdatePreviousDelayedExit = Environment.GetEnvironmentVariable(

@@ -49,7 +49,9 @@ internal static partial class Program
         var installerScript = Encoding.Unicode.GetString(Convert.FromBase64String(installer));
         InteractionAssert(!installerScript.Contains("ConvertFrom-Json") &&
             installerScript.Contains("$security.SetOwner($administrators)") &&
-            installerScript.Contains("$start.EnvironmentVariables.Clear()"),
+            installerScript.Contains("$start.EnvironmentVariables.Clear()") &&
+            installerScript.Contains("[Environment+SpecialFolder]::ProgramFiles") &&
+            !installerScript.Contains("$stagingParent = if ($isElevated) { [Environment]::SystemDirectory }"),
             "The installer bootstrap still trusts inherited modules or environment paths.");
 
         var fixture = Path.Combine(Path.GetTempPath(), "iPhoneMirror-UpdaterRegression-" + Guid.NewGuid().ToString("N"));

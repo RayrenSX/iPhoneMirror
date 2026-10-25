@@ -1106,6 +1106,10 @@
     <system:String x:Key="UpdateDigestMissing">アップデートの検証用ダイジェストがないか、正しくありません。</system:String>
     <system:String x:Key="UpdateFormatUnsupported">このアップデートパッケージの形式には対応していません。</system:String>
     <system:String x:Key="UpdateHelperStartFailed">Windowsがアップデートヘルパーを起動できませんでした。</system:String>
+    <system:String x:Key="UpdateHelperExitedFormat">アップデートヘルパーがインストールまたは引き継ぎの準備を完了できませんでした（終了コード {0}）。再試行するか、ダウンロードした更新パッケージを手動で実行してください。</system:String>
+    <system:String x:Key="UpdateHelperTimedOut">アップデートヘルパーの準備がタイムアウトしたため、今回のインストールをキャンセルしました。再試行するか、更新パッケージを手動でインストールしてください。</system:String>
+    <system:String x:Key="UpdateInstallFailed">アップデートが完了しませんでした。ダウンロードした更新パッケージを手動でインストールしてください。エラーの詳細：</system:String>
+    <system:String x:Key="UpdateFailedFormat">アップデートに失敗しました：{0}</system:String>
     <system:String x:Key="UpdateSetupRequired">インストール版は、Windows用セットアップパッケージでアップデートする必要があります。</system:String>
     <system:String x:Key="UpdatePortableRequired">ポータブル版は、ポータブル版のZIPパッケージでアップデートする必要があります。</system:String>
     <system:String x:Key="UpdateHelperMissing">組み込みのZIPアップデートヘルパーがありません。</system:String>

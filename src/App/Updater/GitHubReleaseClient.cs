@@ -65,8 +65,15 @@ internal static class DeploymentLayout
         if (expected is null) return false;
         if (registeredExecutablePath is not null)
             return PathsEqual(expected, registeredExecutablePath);
+        return GetRegisteredInstallHive(expected) is not null;
+    }
+
+    internal static RegistryHive? GetRegisteredInstallHive(string executablePath)
+    {
+        var expected = NormalizeExecutablePath(executablePath);
+        if (expected is null) return null;
         var executableName = Path.GetFileName(expected);
-        if (string.IsNullOrWhiteSpace(executableName)) return false;
+        if (string.IsNullOrWhiteSpace(executableName)) return null;
         var appPathsSubKey = AppPathsSubKeyPrefix + executableName;
 
         foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
@@ -78,7 +85,7 @@ internal static class DeploymentLayout
                 using var key = root.OpenSubKey(appPathsSubKey, writable: false);
                 var registered = key?.GetValue(null) as string;
                 if (registered is not null && PathsEqual(expected, registered))
-                    return true;
+                    return hive;
             }
             catch (Exception error) when (error is IOException or
                                            UnauthorizedAccessException or
@@ -91,7 +98,7 @@ internal static class DeploymentLayout
                     ("hive", hive), ("view", view));
             }
         }
-        return false;
+        return null;
     }
 
     private static bool PathsEqual(string expected, string actual)

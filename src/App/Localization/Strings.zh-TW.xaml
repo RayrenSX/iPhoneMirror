@@ -1106,6 +1106,10 @@
     <system:String x:Key="UpdateDigestMissing">更新驗證值遺失或無效。</system:String>
     <system:String x:Key="UpdateFormatUnsupported">不支援此更新套件格式。</system:String>
     <system:String x:Key="UpdateHelperStartFailed">Windows 無法啟動更新助手。</system:String>
+    <system:String x:Key="UpdateHelperExitedFormat">更新助手無法完成安裝或準備交接（結束代碼 {0}）。請重試，或手動執行已下載的更新套件。</system:String>
+    <system:String x:Key="UpdateHelperTimedOut">更新助手準備逾時，已取消本次安裝。請重試或手動安裝更新套件。</system:String>
+    <system:String x:Key="UpdateInstallFailed">更新未完成。請手動安裝已下載的更新套件。錯誤詳細資料：</system:String>
+    <system:String x:Key="UpdateFailedFormat">更新失敗：{0}</system:String>
     <system:String x:Key="UpdateSetupRequired">安裝版必須使用 Windows 安裝套件更新。</system:String>
     <system:String x:Key="UpdatePortableRequired">可攜式版本必須使用可攜式 ZIP 套件更新。</system:String>
     <system:String x:Key="UpdateHelperMissing">缺少內建 ZIP 更新助手。</system:String>

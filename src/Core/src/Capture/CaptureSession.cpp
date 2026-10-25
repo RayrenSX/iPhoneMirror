@@ -1990,10 +1990,12 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         (decode_ms >= 20.0 && video_decode_count % 30 == 1);
                     if (report_decode) {
                         logging::write(std::format(
-                            "video_decode n={} sample_index={} codec={} decoder={} input_bytes={} decode_ms={:.3f} output={} timestamp={}",
+                            "video_decode n={} sample_index={} codec={} decoder={} input_bytes={} decode_ms={:.3f} output={} timestamp={} queue_ms={:.3f}",
                             video_decode_count, sample_index, media::codec_name(format.video_codec()),
                             video_decoder->selected_decoder_name(), encoded_sample.size(), decode_ms,
-                            decoded_frames.empty() ? "no" : "yes", timestamp_100ns));
+                            decoded_frames.empty() ? "no" : "yes", timestamp_100ns,
+                            std::chrono::duration<double, std::milli>(
+                                decode_started - pending.received_at).count()));
                     }
                     std::shared_ptr<const media::DecodedFrame> published;
                     for (auto& decoded_frame : decoded_frames) {
@@ -2040,9 +2042,11 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     }
                     if (published && report_decode) {
                         logging::write(std::format(
-                            "video_output n={} width={} height={} stride={} nv12_bytes={} timestamp={}",
+                            "video_output n={} width={} height={} stride={} nv12_bytes={} timestamp={} receive_to_output_ms={:.3f}",
                             video_decode_count, published->width, published->height,
-                            published->stride, published->nv12.size(), published->timestamp_100ns));
+                            published->stride, published->nv12.size(), published->timestamp_100ns,
+                            std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - published->received_at).count()));
                     }
                     // Keep shared GPU frames on the GPU path. The protected-content
                     // and letterbox heuristics accept unavailable CPU pixels, while
@@ -2089,6 +2093,8 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         auto fps_sample_at = started;
         auto last_activity_log_at = started;
         std::uint64_t fps_sample_frames{};
+        std::uint64_t usb_reads{}, usb_empty_reads{};
+        double max_usb_read_ms{}, max_usb_reply_ms{}, max_packet_batch_ms{};
         detail::DisplayReconfigureGate display_reconfigure;
         bool native_fallback_reconfigure{};
         auto ping_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
@@ -2217,11 +2223,16 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 logging::write(std::format(
                     "stream_activity video_frames={} audio_packets={} need_sent={} "
                     "reply_received={} video_age_ms={} audio_age_ms={} "
-                    "video_silence_ms={} media_silence_ms={}",
+                    "video_silence_ms={} media_silence_ms={} usb_reads={} usb_empty_reads={} "
+                    "usb_read_max_ms={:.3f} usb_reply_max_ms={:.3f} packet_batch_max_ms={:.3f}",
                     protocol.video_frames(), protocol.audio_packets(),
                     protocol.need_sent(), protocol.reply_received(),
                     video_age_ms, audio_age_ms,
-                    video_silence_ms, media_silence_ms));
+                    video_silence_ms, media_silence_ms,
+                    usb_reads, usb_empty_reads, max_usb_read_ms,
+                    max_usb_reply_ms, max_packet_batch_ms));
+                usb_reads = usb_empty_reads = 0;
+                max_usb_read_ms = max_usb_reply_ms = max_packet_batch_ms = 0;
             }
             if (fast_stream_reconnect_requested.exchange(false, std::memory_order_acq_rel)) {
                 try {
@@ -2264,7 +2275,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         error.what()));
                 }
             }
+            const auto usb_read_started = std::chrono::steady_clock::now();
             const auto count = usb->read(read_buffer, 250);
+            ++usb_reads;
+            if (count == 0) ++usb_empty_reads;
+            max_usb_read_ms = std::max(max_usb_read_ms,
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - usb_read_started).count());
             video_worker_failure.rethrow_if_set();
             if (protocol.state() != quicktime::SessionState::WaitingForPing &&
                 protocol.video_frames() == 0) {
@@ -2316,6 +2333,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 }
                 continue;
             }
+            const auto packet_batch_started = std::chrono::steady_clock::now();
             const auto packets = decoder.push(std::span(read_buffer).first(count));
             for (const auto& packet : packets) {
                 if (display_reconfigure.pending() && packet.kind == quicktime::PacketKind::Async &&
@@ -2335,7 +2353,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 }
                 auto event = protocol.process(packet);
                 if (event.state == quicktime::SessionState::Error) throw std::runtime_error(event.warning);
-                for (const auto& response : event.outbound) usb->write(response, 1000);
+                if (!event.outbound.empty()) {
+                    const auto reply_started = std::chrono::steady_clock::now();
+                    for (const auto& response : event.outbound) usb->write(response, 1000);
+                    max_usb_reply_ms = std::max(max_usb_reply_ms,
+                        std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - reply_started).count());
+                }
 
                 if (event.video_sample && !native_fallback_reconfigure) {
                     failure_stage = FailureStage::Decoder;
@@ -2542,6 +2566,9 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     }
                 }
             }
+            max_packet_batch_ms = std::max(max_packet_batch_ms,
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - packet_batch_started).count());
             request_fast_reconnect_for_missing_frame_rate();
             detect_streaming_media_silence();
             const auto probed_size = display_reconfigure.pending() ? 0 :

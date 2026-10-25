@@ -9,6 +9,7 @@ foreach ($name in @('VerifiedScriptBootstrap', 'VerifiedInstallerBootstrap')) {
     foreach ($marker in @('$SCRIPT_PATH_BASE64$', '$PACKAGE_PATH_BASE64$', '$ARGUMENT_LINE_BASE64$')) {
         $script = $script.Replace($marker, 'c2VudGluZWw=')
     }
+    $script = $script.Replace('$REQUIRES_ELEVATION$', '$true')
     $script = $script.Replace('$EXPECTED_SHA256$', ('A' * 64)).Replace(
         '$CLEANUP_DIRECTORY$', '$false').Replace('$ARGUMENTS_BASE64$', "'LU91dHB1dA==', 'c2VudGluZWw='")
     $tokens = $null

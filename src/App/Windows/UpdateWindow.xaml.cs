@@ -17,6 +17,8 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
     private readonly bool _allowMirrorFallback;
     private readonly bool _readOnlyPreview;
     private readonly CancellationTokenSource _cancellation = new();
+    private readonly CancellationToken _token;
+    private bool _closed;
     private bool _downloading;
     private bool _installationStarted;
     private double _progressValue;
@@ -56,6 +58,7 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
         bool readOnlyPreview = false)
     {
         _release = release;
+        _token = _cancellation.Token;
         _client = client;
         _allowMirrorFallback = allowMirrorFallback;
         _readOnlyPreview = readOnlyPreview;
@@ -78,7 +81,7 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
             _ = EnsureTaiwanReleaseNotesAsync();
             if (autoDownload) _ = DownloadAndInstallAsync();
         };
-        Closing += OnClosing;
+        Closed += OnClosed;
     }
 
     private void RefreshReleaseNotes()
@@ -96,7 +99,7 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
             LocalizationService.EffectiveCulture.Name != LocalizationService.TraditionalChineseTaiwan ||
             LocalizedReleaseNotes.TaiwanBody(_release) is not null) return;
         _loadingTaiwanNotes = true;
-        var token = _cancellation.Token;
+        var token = _token;
         try
         {
             _release = await _client.EnrichTaiwanReleaseNotesAsync(_release, token);
@@ -116,11 +119,9 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
 
     private async Task DownloadAndInstallAsync()
     {
-        if (_downloading) return;
-        // Capture the token up front. OnClosing disposes _cancellation; reading
-        // _cancellation.IsCancellationRequested in the catch filter after that
-        // would throw ObjectDisposedException.
-        var token = _cancellation.Token;
+        if (_downloading || _closed || _readOnlyPreview) return;
+        // The captured token remains safe after Closed disposes its source.
+        var token = _token;
         _downloading = true;
         UpdateButtonText = LocalizationService.Get("DownloadingUpdate");
         StatusText = LocalizationService.Get("PreparingDownload");
@@ -157,13 +158,19 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
                 : LocalizationService.Get("UpdateDownloadedNoChecksum");
             SpeedText = string.Empty;
             IsIndeterminate = true;
-            UpdateInstallerLauncher.Launch(downloaded);
-            _installationStarted = true;
             StatusText = LocalizationService.Get("StartingInstaller");
-            // Keep the current version alive until Setup reaches the file
-            // replacement stage. Inno Setup's Restart Manager closes it then;
-            // if Setup is cancelled or fails earlier, the app remains usable.
-            Close();
+            UpdateButtonText = LocalizationService.Get("StartingInstaller");
+            await UpdateInstallerLauncher.LaunchAsync(downloaded, token);
+            _installationStarted = true;
+            // Setup uses Restart Manager and stays observable until it exits.
+            // The ZIP helper has confirmed its payload is ready and is waiting
+            // for this process; explicitly exit so close-to-tray cannot stall it.
+            if (!_closed) Close();
+            if (downloaded.Asset.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Application.Current.MainWindow is MainWindow main) main.ExitApplication();
+                else Application.Current.Shutdown(0);
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -175,7 +182,7 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
         {
             DiagnosticLogger.Exception("updater", "update_workflow_failed", error,
                 ("release", _release.TagName));
-            StatusText = LocalizationService.Format("UpdateDownloadFailedFormat",
+            StatusText = LocalizationService.Format("UpdateFailedFormat",
                 FriendlyError(error));
             UpdateButtonText = LocalizationService.Get("RetryUpdate");
             IsIndeterminate = false;
@@ -204,10 +211,10 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
         return $"{bytesPerSecond:F0} B/s";
     }
 
-    private void OnClosing(object? sender, CancelEventArgs e)
+    private void OnClosed(object? sender, EventArgs e)
     {
+        _closed = true;
         if (!_installationStarted) _cancellation.Cancel();
-        // Release the cancellation source now that the window is closing.
         _cancellation.Dispose();
     }
 

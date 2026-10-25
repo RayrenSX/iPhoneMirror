@@ -1642,8 +1642,13 @@ struct D3D11PreviewRenderer::Impl {
                     do { next_present_due += interval; } while (next_present_due <= now);
                 }
                 if (render_ms >= 20.0 || rendered_frames <= 3 || rendered_frames % 300 == 0) {
-                    logging::write(std::format("d3d_preview timing render={} render_ms={:.3f}",
-                        rendered_frames, render_ms));
+                    const auto frame_age_ms = frame->received_at.time_since_epoch().count() != 0
+                        ? std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - frame->received_at).count()
+                        : -1.0;
+                    logging::write(std::format(
+                        "d3d_preview timing render={} render_ms={:.3f} receive_to_present_ms={:.3f}",
+                        rendered_frames, render_ms, frame_age_ms));
                 }
             } catch (const std::exception& error) {
                 release_shared_gpu_frame();
