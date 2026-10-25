@@ -876,7 +876,10 @@ internal sealed class NativePreviewWindow : IDisposable
                 return 0;
             case WmNcHitTest when _managedContent is null:
                 handled = true;
-                return _isFullScreen || _isFixed ? HtClient : HitTestWindow(lParam);
+                // Input capture is temporary; do not turn it into the user's
+                // persistent "fixed window" preference when control starts.
+                return _isFullScreen || _isFixed || IsPointerInputEnabledForWindow
+                    ? HtClient : HitTestWindow(lParam);
             case WmContextMenu:
             case WmRightButtonUp:
                 handled = true;
@@ -1209,7 +1212,6 @@ internal sealed class NativePreviewWindow : IDisposable
     private void EnableReverseControl()
     {
         if (_disposed || _isFullScreen) return;
-        EnsureFixedWindow();
         _requestReverseControl?.Invoke(_handle);
         UpdateContextMenuLabels();
     }
@@ -1256,12 +1258,6 @@ internal sealed class NativePreviewWindow : IDisposable
             while (ShowCursor(true) < 0) { }
     }
 
-    private void EnsureFixedWindow()
-    {
-        if (_isFixed) return;
-        ToggleFixedWindow();
-    }
-
     internal void PrepareForUsbControl()
     {
         if (_disposed || _handle == 0) return;
@@ -1269,6 +1265,12 @@ internal sealed class NativePreviewWindow : IDisposable
         if (!_isTopMost) ToggleTopMost();
         _ = SetForegroundWindow(_handle);
         UpdateContextMenuLabels();
+    }
+
+    internal void ReleasePointerCapture()
+    {
+        _capturedMouseButtons = 0;
+        if (_handle != 0 && GetCapture() == _handle) _ = ReleaseCapture();
     }
 
     private void DispatchPointer(PreviewPointerKind kind, nint lParam,

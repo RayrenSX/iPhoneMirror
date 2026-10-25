@@ -16,7 +16,7 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($assembly)) {
 }
 # These focused entry points do not create WPF windows or access a phone.
 # Use an installed-app environment, matching build.ps1's managed test runner.
-foreach ($arguments in @(@('--ddi-startup'), @('--control-lifecycle', $pythonPath))) {
+foreach ($arguments in @(@('--ddi-startup'), @('--control-lifecycle', $pythonPath), @('--bluetooth-input-transport'))) {
     $startInfo = [Diagnostics.ProcessStartInfo]::new($dotnetPath)
     $startInfo.UseShellExecute = $false
     $startInfo.WorkingDirectory = $root

@@ -121,6 +121,8 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     private readonly object _mousePumpSync = new();
     private readonly BluetoothClientRouteTable _clientRoutes = new();
     private readonly ConcurrentDictionary<byte, byte[]> _lastReports = new();
+    private readonly Func<byte, byte[], Func<bool>?, Task<bool>> _sendInputReport;
+    private int _submittedInputReports;
     private readonly ConcurrentDictionary<string, ClientState> _clientStates =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, GattSession> _clientSessions =
@@ -147,8 +149,10 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     // before a stop/release transition.
     private long _mousePumpGeneration;
     private byte[]? _pendingMouseReport;
+    private Func<bool>? _pendingMouseCanSend;
     private long _pendingMouseReportTimestamp;
-    private readonly Queue<byte[]> _mousePriorityReports = new();
+    private sealed record MouseInputReport(byte[] Payload, Func<bool>? CanSend);
+    private readonly Queue<MouseInputReport> _mousePriorityReports = new();
     private readonly Queue<(byte ReportId, byte[] Report, TaskCompletionSource<bool> Completion,
         Func<bool>? CanSend)>
         _keyboardPriorityReports = new();
@@ -195,6 +199,17 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     internal bool HasTransportFailure => Volatile.Read(ref _transportFailed) != 0;
 
     public event EventHandler? StatusChanged;
+
+    public BluetoothHidMouseService()
+    {
+        _sendInputReport = (id, report, guard) => SendReportAsync(id, report, canSend: guard);
+    }
+
+    internal BluetoothHidMouseService(Func<byte, byte[], Func<bool>?, Task<bool>> sendInputReport)
+    {
+        ArgumentNullException.ThrowIfNull(sendInputReport);
+        _sendInputReport = sendInputReport;
+    }
     internal string? TargetClientId => Volatile.Read(ref _targetClientId);
     internal bool IsTargetClientConnected => IsMouseConnected;
 
@@ -293,6 +308,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             Interlocked.Exchange(ref _advertisingStopRequested, 0);
             Interlocked.Exchange(ref _transportFailed, 0);
             _lastReports.Clear();
+            Interlocked.Exchange(ref _submittedInputReports, 0);
             TrackSubscribedClients();
             _advertisingStarted = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -335,6 +351,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             generation = Interlocked.Increment(ref _mousePumpGeneration);
             _mousePumpStopping = true;
             _pendingMouseReport = null;
+            _pendingMouseCanSend = null;
             _pendingMouseReportTimestamp = 0;
             _mousePriorityReports.Clear();
             while (_keyboardPriorityReports.Count > 0)
@@ -383,8 +400,23 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         }
     }
 
-    public Task SendMouseAsync(int dx, int dy, byte buttons = 0, int wheel = 0)
+    public Task SendMouseAsync(int dx, int dy, byte buttons = 0, int wheel = 0) =>
+        QueueMouseAsync(dx, dy, buttons, wheel, null, null);
+
+    private Task QueueMouseAsync(int dx, int dy, byte buttons, int wheel,
+        string? expectedTargetDeviceUdid, Func<bool>? canSend)
     {
+        // Capture before admission: a producer can be suspended there while
+        // another thread pauses/resumes or replaces the connection.
+        var generation = Volatile.Read(ref _mousePumpGeneration);
+        var routeGeneration = Volatile.Read(ref _routeGeneration);
+        var target = expectedTargetDeviceUdid ?? Volatile.Read(ref _targetDeviceUdid);
+        bool SameSession() => generation == Volatile.Read(ref _mousePumpGeneration) &&
+            routeGeneration == Volatile.Read(ref _routeGeneration) &&
+            string.Equals(target, Volatile.Read(ref _targetDeviceUdid), StringComparison.OrdinalIgnoreCase);
+        bool Current() => SameSession() && canSend?.Invoke() != false;
+        if (!Current() || Volatile.Read(ref _mousePumpStopping) || !CanQueueReports)
+            return Task.CompletedTask;
         using var admission = InputAdmission?.Invoke();
         var x = (short)Math.Clamp(dx, short.MinValue + 1, short.MaxValue);
         var y = (short)Math.Clamp(dy, short.MinValue + 1, short.MaxValue);
@@ -395,9 +427,13 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         [buttons, (byte)(x & 0xFF), (byte)((x >> 8) & 0xFF),
             (byte)(y & 0xFF), (byte)((y >> 8) & 0xFF),
             unchecked((byte)(sbyte)encodedWheel)];
+        if (!Current()) return Task.CompletedTask;
         lock (_mousePumpSync)
         {
-            if (_mousePumpStopping || !CanQueueReports) return Task.CompletedTask;
+            // External focus/ownership guards can take their own locks. Only
+            // inspect transport state while holding the producer lock; the
+            // pump revalidates the complete guard before actual delivery.
+            if (!SameSession() || _mousePumpStopping || !CanQueueReports) return Task.CompletedTask;
             if (buttons != _lastQueuedMouseButtons)
             {
                 QueuePendingMotionBeforePriorityReport();
@@ -406,12 +442,12 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 // budget so the newest press/release always gets a full set
                 // of delivery attempts even after earlier route failures.
                 Volatile.Write(ref _mouseStateRetryAttempts, 0);
-                EnqueueLatestMousePriorityReport(report);
+                EnqueueLatestMousePriorityReport(report, Current);
             }
             else if (wheel != 0)
             {
                 QueuePendingMotionBeforePriorityReport();
-                EnqueueLatestMousePriorityReport(report);
+                EnqueueLatestMousePriorityReport(report, Current);
             }
             else
             {
@@ -423,6 +459,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 // disposable latest sample instead; old travel is latency.
                 _pendingMouseReport = BluetoothMouseReportCoalescer
                     .MergePendingMotion(_pendingMouseReport, report);
+                _pendingMouseCanSend = Current;
                 _pendingMouseReportTimestamp = Stopwatch.GetTimestamp();
             }
             _lastReports[2] = report;
@@ -434,14 +471,8 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     }
 
     internal Task SendMouseAsync(int dx, int dy, byte buttons = 0, int wheel = 0,
-        string? expectedTargetDeviceUdid = null)
-    {
-        if (expectedTargetDeviceUdid is not null &&
-            !string.Equals(_targetDeviceUdid, expectedTargetDeviceUdid,
-                StringComparison.OrdinalIgnoreCase))
-            return Task.CompletedTask;
-        return SendMouseAsync(dx, dy, buttons, wheel);
-    }
+        string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null) =>
+        QueueMouseAsync(dx, dy, buttons, wheel, expectedTargetDeviceUdid, canSend);
 
     private void QueuePendingMotionBeforePriorityReport()
     {
@@ -449,16 +480,17 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         // GATT stack is stalled, that movement is already stale and replaying
         // it after a button or wheel event causes seconds of visible drift.
         _pendingMouseReport = null;
+        _pendingMouseCanSend = null;
         _pendingMouseReportTimestamp = 0;
     }
 
-    private void EnqueueLatestMousePriorityReport(byte[] report)
+    private void EnqueueLatestMousePriorityReport(byte[] report, Func<bool>? canSend)
     {
         // A button/wheel report is also relative state. Keep one pending
         // transition behind the in-flight BLE notification; retaining a FIFO
         // here would replay stale clicks or scroll ticks after a stall.
         _mousePriorityReports.Clear();
-        _mousePriorityReports.Enqueue(report);
+        _mousePriorityReports.Enqueue(new(report, canSend));
     }
 
     private void StartReportPumpWhileLocked()
@@ -504,12 +536,16 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 }
                 else if (_mousePriorityReports.Count > 0)
                 {
-                    report = _mousePriorityReports.Dequeue();
+                    var item = _mousePriorityReports.Dequeue();
+                    report = item.Payload;
+                    canSend = item.CanSend;
                 }
                 else if (_pendingMouseReport is not null)
                 {
                     report = _pendingMouseReport;
+                    canSend = _pendingMouseCanSend;
                     _pendingMouseReport = null;
+                    _pendingMouseCanSend = null;
                     var queuedAt = _pendingMouseReportTimestamp;
                     _pendingMouseReportTimestamp = 0;
                     if (queuedAt != 0 &&
@@ -531,7 +567,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             {
                 // Recheck after transport waits as well: a dequeued report
                 // must not enter a fresh channel after release or stop.
-                var sent = await SendReportAsync(reportId, report, canSend: () =>
+                var sent = await _sendInputReport(reportId, report, () =>
                     generation == Volatile.Read(ref _mousePumpGeneration) &&
                     canSend?.Invoke() != false)
                     .ConfigureAwait(false);
@@ -574,18 +610,23 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                         {
                             if (generation != Volatile.Read(ref _mousePumpGeneration)) return;
                             _pendingMouseReport = null;
+                            _pendingMouseCanSend = null;
                             _pendingMouseReportTimestamp = 0;
                             var buttonState = report.Length > 0 ? report[0] :
                                 _lastQueuedMouseButtons;
                             while (_mousePriorityReports.Count > 0)
                             {
-                                var pending = _mousePriorityReports.Dequeue();
+                                var item = _mousePriorityReports.Dequeue();
+                                var pending = item.Payload;
                                 if (pending.Length > 0 && pending[5] == 0)
+                                {
                                     buttonState = pending[0];
+                                    canSend = item.CanSend;
+                                }
                             }
                             _mousePriorityReports.Clear();
                             _mousePriorityReports.Enqueue(
-                                [buttonState, 0, 0, 0, 0, 0]);
+                                new([buttonState, 0, 0, 0, 0, 0], canSend));
                             _lastQueuedMouseButtons = buttonState;
                             waitForTransport = !TryAcquireMouseTransportGate();
                             retry = !waitForTransport &&
@@ -690,8 +731,31 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             ("attempt_limit", MouseStateRetryLimit));
     }
 
-    internal async Task ReleaseAllAsync(bool keepPumpStopped = false)
+    internal async Task ReleaseAllAsync(bool keepPumpStopped = false) =>
+        _ = await ReleaseInputReportsAsync(keepPumpStopped, requireDelivery: false).ConfigureAwait(false);
+
+    internal Task<bool> PauseInputAsync() =>
+        ReleaseInputReportsAsync(keepPumpStopped: true, requireDelivery: true);
+
+    internal bool ResumeInput(string targetDeviceUdid)
     {
+        lock (_mousePumpSync)
+        {
+            if (Volatile.Read(ref _disposed) != 0 || HasTransportFailure ||
+                !string.Equals(_targetDeviceUdid, targetDeviceUdid, StringComparison.OrdinalIgnoreCase))
+                return false;
+            _mousePumpStopping = false;
+            _mousePumpRunning = false;
+            _mousePumpTask = null;
+            return true;
+        }
+    }
+
+    private async Task<bool> ReleaseInputReportsAsync(bool keepPumpStopped, bool requireDelivery)
+    {
+        var routeGeneration = Volatile.Read(ref _routeGeneration);
+        var targetDevice = Volatile.Read(ref _targetDeviceUdid);
+        var targetClient = Volatile.Read(ref _targetClientId);
         long generation;
         Task? mousePump;
         lock (_mousePumpSync)
@@ -699,6 +763,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             generation = Interlocked.Increment(ref _mousePumpGeneration);
             _mousePumpStopping = true;
             _pendingMouseReport = null;
+            _pendingMouseCanSend = null;
             _pendingMouseReportTimestamp = 0;
             _mousePriorityReports.Clear();
             _lastQueuedMouseButtons = 0;
@@ -715,9 +780,8 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 DiagnosticLogger.ReverseControlWarning("bluetooth",
                     "mouse_pump_release_timeout");
         }
-        // Do not hold the UI-facing shutdown path on a Bluetooth stack call.
-        // These reports are best-effort; disconnecting the HID session also
-        // releases the phone-side buttons.
+        // Keep the wait bounded. Shutdown can ignore a failed release and
+        // disconnect; callers retaining the connection must check the result.
         try
         {
             if (await _mouseNotificationTransportGate.WaitAsync(
@@ -726,25 +790,42 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         }
         catch (ObjectDisposedException) { }
         var releaseActive = 1;
+        bool SameRoute() => generation == Volatile.Read(ref _mousePumpGeneration) &&
+            routeGeneration == Volatile.Read(ref _routeGeneration) &&
+            string.Equals(targetDevice, Volatile.Read(ref _targetDeviceUdid), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(targetClient, Volatile.Read(ref _targetClientId), StringComparison.OrdinalIgnoreCase);
         bool CanRelease() => Volatile.Read(ref releaseActive) != 0 &&
-            generation == Volatile.Read(ref _mousePumpGeneration);
+            SameRoute();
         var releaseTask = Task.Run(async () =>
         {
             try
             {
-                await Task.WhenAll(
-                    SendReportAsync(2, new byte[6], canSend: CanRelease),
-                    SendReportAsync(1, new byte[8], canSend: CanRelease),
-                    SendReportAsync(4, [0, 0], canSend: CanRelease),
-                    SendReportAsync(5, [0, 0], canSend: CanRelease)).ConfigureAwait(false);
+                // A paused connection cannot rely on disconnect to clear a
+                // missed release. Require mouse delivery and every report that
+                // has submitted input in this session: a cached zero can be an
+                // unsuccessful key-up, not proof the phone released the key.
+                // Unused optional reports need no subscriber.
+                var reports = new (byte Id, byte[] Payload)[]
+                {
+                    (2, new byte[6]), (1, new byte[8]), (4, [0, 0]), (5, [0, 0]),
+                };
+                var results = await Task.WhenAll(reports
+                    .Where(report => !requireDelivery || report.Id == 2 ||
+                        (Volatile.Read(ref _submittedInputReports) & (1 << report.Id)) != 0 ||
+                        (_lastReports.TryGetValue(report.Id, out var previous) && previous.Any(value => value != 0)))
+                    .Select(report => _sendInputReport(report.Id, report.Payload, CanRelease))).ConfigureAwait(false);
+                return results.All(sent => sent);
             }
             catch (Exception error)
             {
                 LogGattCallbackFailure("release_reports", error);
+                return false;
             }
         });
-        if (await Task.WhenAny(releaseTask,
-                Task.Delay(ReleaseReportsTimeout)).ConfigureAwait(false) != releaseTask)
+        var releaseCompleted = await Task.WhenAny(releaseTask,
+            Task.Delay(ReleaseReportsTimeout)).ConfigureAwait(false) == releaseTask;
+        var released = releaseCompleted && await releaseTask.ConfigureAwait(false);
+        if (!releaseCompleted)
         {
             DiagnosticLogger.ReverseControlWarning("bluetooth",
                 "release_reports_timeout");
@@ -762,6 +843,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 }
             }
         }
+        return released && SameRoute();
     }
 
     internal Task<bool> CalibrateAsync(string targetDeviceUdid,
@@ -1289,6 +1371,17 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             channel = isMouse ? _mouseNotificationChannel : _notificationChannel;
             channel.Enter();
         }
+        bool CheckNotificationResult(GattClientNotificationResult result)
+        {
+            if (NotificationSucceeded(result.Status, result.BytesSent, report.Length, result.ProtocolError))
+                return true;
+            if (!channel.Cancellation.IsCancellationRequested &&
+                IsCurrentRouteForClient(expectedDeviceUdid, expectedGeneration, expectedClientId))
+                HandleNotificationFailure(reportId, channel, new IOException(
+                    $"Bluetooth HID notification failed: status={result.Status}, bytes={result.BytesSent}/{report.Length}, protocol_error={result.ProtocolError}."),
+                    expectedGeneration);
+            return false;
+        }
         try
         {
             if (!IsCurrentRouteForClient(expectedDeviceUdid, expectedGeneration,
@@ -1335,6 +1428,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 if (canSend?.Invoke() == false) return true;
                 if (!IsCurrentRouteForClient(expectedDeviceUdid, expectedGeneration,
                         expectedClientId)) return false;
+                Interlocked.Or(ref _submittedInputReports, 1 << reportId);
                 if (!isMouse) _lastReports[reportId] = report;
                 if (isMouse)
                 {
@@ -1357,17 +1451,17 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                                 new TimeoutException("The Bluetooth HID mouse notification timed out."), expectedGeneration);
                         return false;
                     }
-                    await notifyTask.ConfigureAwait(false);
-                    return true;
+                    var result = await notifyTask.ConfigureAwait(false);
+                    return CheckNotificationResult(result);
                 }
                 using var notificationTimeout = CancellationTokenSource.CreateLinkedTokenSource(
                     channel.Cancellation.Token);
                 notificationTimeout.CancelAfter(timeout);
                 try
                 {
-                    await characteristic.NotifyValueAsync(buffer, targetClient)
+                    var result = await characteristic.NotifyValueAsync(buffer, targetClient)
                         .AsTask(notificationTimeout.Token).ConfigureAwait(false);
-                    return true;
+                    return CheckNotificationResult(result);
                 }
                 catch (OperationCanceledException) when (notificationTimeout.IsCancellationRequested)
                 {
@@ -1407,6 +1501,10 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         catch (TimeoutException) when (!notification.IsCompleted) { return false; }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return false; }
     }
+
+    internal static bool NotificationSucceeded(GattCommunicationStatus status, ushort bytesSent,
+        int expectedBytes, byte? protocolError = null) =>
+        status == GattCommunicationStatus.Success && protocolError is null && bytesSent == expectedBytes;
 
     private async Task ReleaseMouseNotificationGateAsync(Task notifyTask)
     {
@@ -1469,6 +1567,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                     _mousePumpStopping = true;
                     _mousePumpRunning = false;
                     _pendingMouseReport = null;
+                    _pendingMouseCanSend = null;
                     _pendingMouseReportTimestamp = 0;
                     _mousePriorityReports.Clear();
                     while (_keyboardPriorityReports.Count > 0)
@@ -1621,6 +1720,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         _preferredClientId = null;
         Interlocked.Exchange(ref _transportFailed, 0);
         _lastReports.Clear();
+        Interlocked.Exchange(ref _submittedInputReports, 0);
         if (!IsAdvertising)
         {
             return null;
