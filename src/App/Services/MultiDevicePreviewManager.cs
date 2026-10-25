@@ -52,6 +52,12 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             ? window.Handle : 0;
 
     internal bool ContainsWindow(nint handle) => handle != 0 && _windows.Values.Any(w => w.Handle == handle);
+
+    internal void ReleasePointerCapture(string? udid)
+    {
+        if (udid is not null && _windows.TryGetValue(udid, out var window))
+            window.ReleasePointerCapture();
+    }
     internal bool IsFullScreenWindow(nint handle) => _windows.Values.Any(w => w.Handle == handle && w.IsFullScreen);
     internal bool ToggleFullScreenWindow(nint handle)
     {

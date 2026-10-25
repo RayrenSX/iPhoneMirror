@@ -270,6 +270,8 @@
     <system:String x:Key="StopMirroring">ミラーリングを停止</system:String>
     <system:String x:Key="StartBluetoothControl">Bluetooth操作を有効にする</system:String>
     <system:String x:Key="StopBluetoothControl">Bluetooth操作を無効にする</system:String>
+    <system:String x:Key="PauseBluetoothControl">Bluetooth操作を一時停止</system:String>
+    <system:String x:Key="ResumeBluetoothControl">Bluetooth操作を再開</system:String>
     <system:String x:Key="BluetoothControlOff">Bluetooth操作はオフです</system:String>
     <system:String x:Key="BluetoothControlWaiting">Bluetooth操作を公開し、iPhone/iPadを待っています</system:String>
     <system:String x:Key="BluetoothControlConnected">Bluetooth操作用にiPhone/iPadが接続されました</system:String>
@@ -309,7 +311,7 @@
     <system:String x:Key="BluetoothControlReportMapChangedStatus">ペアリングのやり直しが必要です</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedConfirm">ペアリングし直しました</system:String>
     <system:String x:Key="BluetoothControlPromptTitle">Bluetooth操作を有効にしました</system:String>
-    <system:String x:Key="BluetoothControlPromptBodyFormat">Windowsのマウス入力がiPhone/iPadに転送されます。{0}を押すとマウスを解放し、リモート操作を停止します。</system:String>
+    <system:String x:Key="BluetoothControlPromptBodyFormat">Windowsのマウス入力がiPhone/iPadに転送されます。{0}を押すとマウスを解放して入力を一時停止し、もう一度押すと操作を再開します。</system:String>
     <system:String x:Key="BluetoothControlPromptDetail">リモート操作中は、Windowsのカーソルが非表示になります。</system:String>
     <system:String x:Key="BluetoothControlPromptShortcutFormat">{0}を押すとマウスを解放します</system:String>
     <system:String x:Key="BluetoothControlPromptAutoCloseFormat">{0}秒後に自動で閉じます</system:String>

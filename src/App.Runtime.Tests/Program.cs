@@ -98,6 +98,10 @@ internal static partial class Program
             }
             if (args is ["--keyboard-router"])
                 return RunKeyboardRouterTests();
+            if (args is ["--bluetooth-input-toggle"])
+                return RunBluetoothInputToggleTests();
+            if (args is ["--bluetooth-input-transport"])
+                return RunBluetoothInputTransportTests();
             if (args is ["--keyboard-ownership"])
                 return RunKeyboardOwnershipTests();
             if (args is ["--keyboard-ownership-live", var ownershipOutput])

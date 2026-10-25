@@ -270,6 +270,8 @@
     <system:String x:Key="StopMirroring">停止投屏</system:String>
     <system:String x:Key="StartBluetoothControl">启用蓝牙控制</system:String>
     <system:String x:Key="StopBluetoothControl">关闭蓝牙控制</system:String>
+    <system:String x:Key="PauseBluetoothControl">暂停蓝牙控制</system:String>
+    <system:String x:Key="ResumeBluetoothControl">恢复蓝牙控制</system:String>
     <system:String x:Key="BluetoothControlOff">蓝牙控制未启用</system:String>
     <system:String x:Key="BluetoothControlWaiting">蓝牙控制已广播，正在等待 iPhone/iPad 连接</system:String>
     <system:String x:Key="BluetoothControlConnected">iPhone/iPad 已连接蓝牙控制</system:String>
@@ -309,7 +311,7 @@
     <system:String x:Key="BluetoothControlReportMapChangedStatus">需要重新配对</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedConfirm">我已重新配对</system:String>
     <system:String x:Key="BluetoothControlPromptTitle">蓝牙控制已开启</system:String>
-    <system:String x:Key="BluetoothControlPromptBodyFormat">Windows 鼠标输入已转发到 iPhone/iPad。按 {0} 释放鼠标并关闭反向控制。</system:String>
+    <system:String x:Key="BluetoothControlPromptBodyFormat">Windows 鼠标输入已转发到 iPhone/iPad。按 {0} 释放鼠标并暂停输入，再按一次恢复控制。</system:String>
     <system:String x:Key="BluetoothControlPromptDetail">反向控制期间 Windows 光标会隐藏。</system:String>
     <system:String x:Key="BluetoothControlPromptShortcutFormat">按 {0} 释放鼠标</system:String>
     <system:String x:Key="BluetoothControlPromptAutoCloseFormat">{0} 秒后自动关闭</system:String>

@@ -219,6 +219,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private bool _bluetoothCalibrationInProgress;
     private CancellationTokenSource? _bluetoothInputCountdownCts;
     private bool _bluetoothControlInputEnabled;
+    private bool _bluetoothControlInputPaused;
+    private long _bluetoothControlInputSession;
+    private long _bluetoothControlInputGeneration;
+    private readonly SemaphoreSlim _bluetoothControlInputGate = new(1, 1);
     private bool _bluetoothControlNoticePending;
     private int _bluetoothBindingPromptInFlight;
     private int _bluetoothWaitingPromptInFlight;
@@ -353,8 +357,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         !_bluetoothControlStopping &&
         (_bluetoothControlEnabled || CanEnableBluetoothControlFor(SelectedDevice?.Udid));
     public string BluetoothControlActionText => LocalizationService.Get(
-        _bluetoothControlEnabled && _bluetoothControlInputEnabled
-            ? "StopBluetoothControl" : "StartBluetoothControl");
+        _bluetoothControlEnabled
+            ? (_bluetoothControlInputPaused ? "ResumeBluetoothControl" : "PauseBluetoothControl")
+            : "StartBluetoothControl");
     public bool IsUsbControlEnabled => _usbControlEnabled || _wirelessControlEnabled;
     internal bool IsWirelessControlEnabled => _wirelessControlEnabled;
     public bool UsbControlIsInputEnabled => (_usbControlEnabled && _usbControlConnected) ||
@@ -1354,17 +1359,33 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     }
 
     internal bool BluetoothControlIsConnected => _bluetoothControlConnected;
+    internal bool BluetoothControlIsInputPaused => _bluetoothControlInputPaused;
     internal bool IsBluetoothControlTarget(string? udid) =>
         _bluetoothControlEnabled && DeviceViewModel.UdidEquals(
             _bluetoothControlDeviceUdid, udid);
     internal int BluetoothWheelResolutionMultiplier =>
         _bluetoothControl.WheelResolutionMultiplier;
 
+    internal Func<bool> CaptureBluetoothInputSendGuard()
+    {
+        var generation = Volatile.Read(ref _bluetoothControlInputGeneration);
+        return () => generation == Volatile.Read(ref _bluetoothControlInputGeneration) &&
+            !Volatile.Read(ref _disposed);
+    }
+
     internal Task SendBluetoothMouseAsync(int dx, int dy, byte buttons = 0, int wheel = 0,
-        string? expectedTargetDeviceUdid = null) =>
-        !AutomationHumanAllowed(expectedTargetDeviceUdid ?? _bluetoothControlDeviceUdid) ? Task.CompletedTask :
-        _bluetoothControl.SendMouseAsync(dx, dy, buttons, wheel,
-            expectedTargetDeviceUdid);
+        string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null)
+    {
+        var target = expectedTargetDeviceUdid ?? _bluetoothControlDeviceUdid;
+        var sessionCurrent = CaptureBluetoothInputSendGuard();
+        var humanGuard = target is null ? (Func<bool>)(() => false) : AutomationHumanGuard(target);
+        var release = dx == 0 && dy == 0 && buttons == 0 && wheel == 0;
+        bool Current() => sessionCurrent() && humanGuard() && canSend?.Invoke() != false &&
+            (release || (Volatile.Read(ref _bluetoothControlInputEnabled) &&
+                !Volatile.Read(ref _bluetoothControlInputPaused)));
+        if (!Current()) return Task.CompletedTask;
+        return _bluetoothControl.SendMouseAsync(dx, dy, buttons, wheel, target, Current);
+    }
 
     internal Task SendBluetoothKeyboardAsync(byte modifiers, IReadOnlyCollection<byte> usages,
         string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null) =>
@@ -1618,6 +1639,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         // The status window owns a five-second hand-off. Never allow a new
         // Bluetooth route to consume input before that hand-off completes.
         _bluetoothControlInputEnabled = false;
+        _bluetoothControlInputPaused = false;
+        Interlocked.Increment(ref _bluetoothControlInputSession);
+        Interlocked.Increment(ref _bluetoothControlInputGeneration);
         _bluetoothControlStarting = true;
         OnPropertyChanged(nameof(CanStartBluetoothControl));
         OnPropertyChanged(nameof(CanStopBluetoothControl));
@@ -3397,7 +3421,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 new Action(BeginBluetoothControlInputAfterStatusCountdown));
             return;
         }
-        if (!_bluetoothControlEnabled || !_bluetoothControlConnected ||
+        if (!_bluetoothControlEnabled || !_bluetoothControlConnected || _bluetoothControlInputPaused ||
             !_bluetoothControlCalibrated || _reverseControlSetupActive)
             return;
         // The model fallback can win the race with the status window's
@@ -3447,29 +3471,80 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void ResetBluetoothControlInputState()
     {
+        Interlocked.Increment(ref _bluetoothControlInputSession);
+        Interlocked.Increment(ref _bluetoothControlInputGeneration);
         _bluetoothInputCountdownCts?.Cancel();
         _bluetoothInputCountdownCts?.Dispose();
         _bluetoothInputCountdownCts = null;
         _bluetoothControlInputEnabled = false;
+        _bluetoothControlInputPaused = false;
         _bluetoothControlNoticePending = false;
         _bluetoothControlDeviceUdid = null;
     }
 
-    internal async Task ToggleBluetoothControlAsync(string? targetDeviceUdid = null)
+    internal async Task ToggleBluetoothControlAsync(string? targetDeviceUdid = null,
+        Func<bool>? canResume = null)
     {
-        if (!IsBluetoothControlEnabled)
+        var target = targetDeviceUdid ?? SelectedDevice?.Udid ?? _bluetoothControlDeviceUdid;
+        var session = Volatile.Read(ref _bluetoothControlInputSession);
+        await _bluetoothControlInputGate.WaitAsync();
+        try
         {
-            await EnableBluetoothControlAsync(targetDeviceUdid);
-            return;
+            // Serialize rapid F9 presses behind the captured session's release.
+            // A delayed press must never resume a replacement connection.
+            if (session != Volatile.Read(ref _bluetoothControlInputSession) || _disposed ||
+                _bluetoothControlStarting || _bluetoothControlStopping) return;
+            if (!_bluetoothControlEnabled)
+            {
+                await EnableBluetoothControlAsync(target);
+                return;
+            }
+            if (!DeviceViewModel.UdidEquals(target, _bluetoothControlDeviceUdid))
+            {
+                await SwitchBluetoothControlTargetAsync(target);
+                return;
+            }
+            if (_bluetoothControlInputPaused)
+            {
+                if (canResume?.Invoke() == false)
+                {
+                    AddDiagnosticLog(AppLog.Event("bluetooth_control_resume_focus_unavailable"));
+                    return;
+                }
+                if (!_bluetoothControlConnected || !_bluetoothControlCalibrated ||
+                    _bluetoothControl.HasTransportFailure || target is null ||
+                    !_bluetoothControl.ResumeInput(target)) return;
+                Interlocked.Increment(ref _bluetoothControlInputGeneration);
+                _bluetoothControlInputPaused = false;
+                AllowBluetoothControlInput();
+                NotifyBluetoothControlStateChanged();
+                AddDiagnosticLog(AppLog.Event("bluetooth_control_input_resumed"));
+                return;
+            }
+            // The initial status countdown still owns the first hand-off.
+            if (!_bluetoothControlInputEnabled) return;
+            Interlocked.Increment(ref _bluetoothControlInputGeneration);
+            _bluetoothControlInputPaused = true;
+            _bluetoothControlInputEnabled = false;
+            // Release local capture immediately, before waiting on WinRT. Keep
+            // the GATT connection and binding so resume needs no setup dialog.
+            NotifyBluetoothControlStateChanged();
+            AddDiagnosticLog(AppLog.Event("bluetooth_control_input_paused"));
+            if (!await _bluetoothControl.PauseInputAsync() &&
+                session == Volatile.Read(ref _bluetoothControlInputSession))
+            {
+                AddDiagnosticLog(AppLog.Event("bluetooth_control_pause_release_failed"));
+                await DisableBluetoothControlAsync();
+            }
         }
-        if (!_bluetoothControlInputEnabled)
+        catch (Exception error)
         {
-            // The independent status countdown owns this transition. A
-            // second toolbar/shortcut press during the countdown must not
-            // bypass it and start sending historical input immediately.
-            return;
+            AddDiagnosticLog(AppLog.Event("bluetooth_control_input_toggle_failed",
+                ("error", AppLog.Error(error))));
+            if (session == Volatile.Read(ref _bluetoothControlInputSession) && _bluetoothControlInputPaused)
+                await DisableBluetoothControlAsync();
         }
-        await DisableBluetoothControlAsync();
+        finally { _bluetoothControlInputGate.Release(); }
     }
 
     private Task StopBluetoothControlAsync() => DisableBluetoothControlAsync();

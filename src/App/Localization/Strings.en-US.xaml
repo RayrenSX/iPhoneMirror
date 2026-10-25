@@ -270,6 +270,8 @@
     <system:String x:Key="StopMirroring">Stop mirroring</system:String>
     <system:String x:Key="StartBluetoothControl">Enable Bluetooth control</system:String>
     <system:String x:Key="StopBluetoothControl">Disable Bluetooth control</system:String>
+    <system:String x:Key="PauseBluetoothControl">Pause Bluetooth control</system:String>
+    <system:String x:Key="ResumeBluetoothControl">Resume Bluetooth control</system:String>
     <system:String x:Key="BluetoothControlOff">Bluetooth control is off</system:String>
     <system:String x:Key="BluetoothControlWaiting">Bluetooth control is advertising and waiting for an iPhone/iPad</system:String>
     <system:String x:Key="BluetoothControlConnected">iPhone/iPad connected for Bluetooth control</system:String>
@@ -309,7 +311,7 @@
     <system:String x:Key="BluetoothControlReportMapChangedStatus">Pairing required again</system:String>
     <system:String x:Key="BluetoothControlReportMapChangedConfirm">I have re-paired</system:String>
     <system:String x:Key="BluetoothControlPromptTitle">Bluetooth control enabled</system:String>
-    <system:String x:Key="BluetoothControlPromptBodyFormat">Windows mouse input is now redirected to the iPhone/iPad. Press {0} to release the mouse and stop reverse control.</system:String>
+    <system:String x:Key="BluetoothControlPromptBodyFormat">Windows mouse input is now redirected to the iPhone/iPad. Press {0} to release the mouse and pause input; press it again to resume control.</system:String>
     <system:String x:Key="BluetoothControlPromptDetail">The Windows cursor is hidden while reverse control is active.</system:String>
     <system:String x:Key="BluetoothControlPromptShortcutFormat">Press {0} to release the mouse</system:String>
     <system:String x:Key="BluetoothControlPromptAutoCloseFormat">Closes automatically in {0} s</system:String>

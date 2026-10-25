@@ -39,10 +39,19 @@ internal sealed partial class MainViewModel
         // One route is selected. Bluetooth cannot receive a second copy while
         // a wired/wireless route is ready or still establishing ownership.
         if (control is { Enabled: true } or { Starting: true } or { Stopping: true }) return null;
-        if (!BluetoothControlIsConnected || (automation && !_bluetoothControl.IsKeyboardReady) || !IsBluetoothControlTarget(target)) return null;
+        if (!BluetoothControlIsInputEnabled || (automation && !_bluetoothControl.IsKeyboardReady) || !IsBluetoothControlTarget(target)) return null;
         var ble = _bluetoothControl.CaptureKeyboardRoute(target);
-        return ble with { IsCurrent = () => humanGuard() && ble.IsCurrent() && (!automation || _bluetoothControl.IsKeyboardReady),
+        var inputGeneration = Volatile.Read(ref _bluetoothControlInputGeneration);
+        // Captured routes are also used by workers. A pause permanently revokes
+        // old presses, including ones delayed until after a later resume.
+        bool BluetoothCurrent() => humanGuard() && !Volatile.Read(ref _disposed) &&
+            inputGeneration == Volatile.Read(ref _bluetoothControlInputGeneration) &&
+            Volatile.Read(ref _bluetoothControlEnabled) && Volatile.Read(ref _bluetoothControlConnected) &&
+            Volatile.Read(ref _bluetoothControlInputEnabled) &&
+            !Volatile.Read(ref _bluetoothControlInputPaused) && !_bluetoothControl.HasTransportFailure && ble.IsCurrent() &&
+            (!automation || _bluetoothControl.IsKeyboardReady);
+        return ble with { IsCurrent = BluetoothCurrent,
             SendAsync = (modifiers, usages, guard) => ble.SendAsync(modifiers, usages,
-                () => humanGuard() && guard?.Invoke() != false) };
+                () => BluetoothCurrent() && guard?.Invoke() != false) };
     }
 }

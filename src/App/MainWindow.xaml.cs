@@ -1016,6 +1016,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _controlWheelRemainder = 0;
             lock (_controlQueueSync)
             {
+                _pendingControlDx = 0;
+                _pendingControlDy = 0;
+                _pendingControlWheel = 0;
+                _pendingControlMotionAt = 0;
                 _pendingControlButtons = 0;
                 _pendingControlStateDirty = true;
             }
@@ -1096,6 +1100,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             var routeUdid = _activeControlWindow != 0
                 ? _activeControlUdid
                 : _viewModel.SelectedDevice?.Udid;
+            // Bind input before dequeuing it. A timer worker can be suspended
+            // between this snapshot and transport admission across an F9 cycle.
+            var sourceWindow = _activeControlWindow != 0 ? _activeControlWindow : _windowSource?.Handle ?? 0;
+            var sessionCanSend = _viewModel.CaptureBluetoothInputSendGuard();
+            var canSend = CapturePointerSendGuard(sourceWindow);
             if (!IsBluetoothControlActiveFor(routeUdid)) return;
             lock (_controlQueueSync)
             {
@@ -1125,8 +1134,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     Stopwatch.Frequency;
                 if (ageMs > 80) { dx = 0; dy = 0; }
             }
+            // A blur must still release held buttons on this same session.
+            // Focus resets revoke presses; only F9/session changes revoke this
+            // empty release so it cannot clear a later resumed press.
+            var release = dx == 0 && dy == 0 && buttons == 0 && wheel == 0;
             await _viewModel.SendBluetoothMouseAsync(dx, dy, buttons, wheel,
-                routeUdid);
+                routeUdid, () => sessionCanSend() && (release || canSend()));
         }
         finally
         {
@@ -1255,9 +1268,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ResetControlRouteState();
             if (_viewModel.IsBluetoothControlEnabled && _activeControlWindow == window)
             {
-                // Context-menu transport entries are start commands. Keep an
-                // already active route instead of treating a second click as
-                // an implicit stop; the registered shortcut remains the exit.
+                // The menu is a start command, including after F9 released
+                // input while retaining this window's Bluetooth connection.
+                if (_viewModel.BluetoothControlIsInputPaused)
+                    await _viewModel.ToggleBluetoothControlAsync(udid);
             }
             else
             {
@@ -5734,6 +5748,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _cursorClipWatchdogTimer.Change(Timeout.Infinite, Timeout.Infinite);
         MainPreviewHost.CapturePointerInput = false;
         MainPreviewHost.ReleasePointerCapture();
+        _secondaryMirrors.ReleasePointerCapture(_activeControlUdid);
         MainPreviewHost.SuppressLegacyMouseButtons = false;
         SetWindowsCursorHidden(false);
         ReconcileKeyboardHook();
@@ -6906,7 +6921,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void ShowReverseControlStatus(ControlStatusMode mode, string? targetUdid = null)
     {
         var target = targetUdid ?? _viewModel.SelectedDevice?.Udid;
-        if (mode == ControlStatusMode.Bluetooth && _viewModel.IsBluetoothControlEnabled) return;
+        if (mode == ControlStatusMode.Bluetooth && _viewModel.IsBluetoothControlTarget(target)) return;
         if (mode != ControlStatusMode.Bluetooth && _viewModel.IsDeviceControlEnabled(target)) return;
         var status = _viewModel.GetControlStatus(mode, target);
         if (status.Current is not { IsTerminal: false } &&
@@ -6930,13 +6945,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (action == BluetoothShortcutAction.BluetoothControl)
         {
             var target = ActiveInputDeviceUdid;
-            // Restore the native/WPF input route synchronously before the
-            // asynchronous HID teardown. A stalled WinRT notification must
-            // never leave the main window with a captured or suppressed mouse.
-            if (_viewModel.IsBluetoothControlEnabled)
-                ClearBluetoothControlInputState();
+            // The model revokes input synchronously before draining held HID
+            // reports. Pausing keeps the connection and skips the setup dialog.
             ShowReverseControlStatus(ControlStatusMode.Bluetooth, target);
-            _ = _viewModel.ToggleBluetoothControlAsync(target);
+            _ = ToggleBluetoothControlInputFromShortcutAsync(target);
         }
         else if (action == BluetoothShortcutAction.WirelessControl)
         {
@@ -6950,6 +6962,32 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         else
             _ = SendConfiguredSystemShortcutAsync(action);
+    }
+
+    private async Task ToggleBluetoothControlInputFromShortcutAsync(string? target)
+    {
+        Func<bool>? canResume = null;
+        if (_viewModel.BluetoothControlIsInputPaused && _viewModel.IsBluetoothControlTarget(target))
+        {
+            var window = GetControlKeyboardWindow(target);
+            if (_keyboardForegroundWindow() != window)
+            {
+                if (_secondaryMirrors.GetWindowHandle(target) != 0) _secondaryMirrors.Activate(target);
+                else Activate();
+            }
+            // Windows may reject foreground activation. Also recheck after a
+            // queued resume waits for BLE release, before hiding/clipping the
+            // desktop cursor or admitting input into the phone.
+            canResume = () => window != 0 && _keyboardForegroundWindow() == window;
+        }
+        await _viewModel.ToggleBluetoothControlAsync(target, canResume);
+        if (!IsBluetoothControlActiveFor(target)) return;
+        if (_activeControlWindow != 0) _secondaryMirrors.Activate(target);
+        else
+        {
+            Activate();
+            MainPreviewHost.Focus();
+        }
     }
 
     private async Task ToggleBossKeyWindowsAsync()
