@@ -513,6 +513,14 @@ Equal(true,
     nativePreviewHostSource.Contains("SetWindowRgn(_window, 0, true)",
         StringComparison.Ordinal),
     "full-screen previews use black WPF fill and a rectangular native surface");
+Equal(true,
+    mainWindowSource.Contains("PreviewPanel.ClearValue(MinWidthProperty);",
+        StringComparison.Ordinal) &&
+    mainWindowSource.Contains("PreviewPanel.ClearValue(MaxWidthProperty);",
+        StringComparison.Ordinal) &&
+    mainWindowSource.Contains("if (!_viewModel.IsLightweightApplicationMode || _isFullScreen) return;",
+        StringComparison.Ordinal),
+    "compact full screen releases the portrait frame so the preview fills the monitor");
 var previewKeyHandlerIndex = mainWindowSource.IndexOf(
     "private void OnPreviewKeyDown", StringComparison.Ordinal);
 var previewKeyboardRouteIndex = mainWindowSource.IndexOf(
