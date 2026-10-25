@@ -18,6 +18,7 @@ internal static partial class Program
     {
         Task.Run(TestBluetoothPauseRouteChangeAsync).GetAwaiter().GetResult();
         Task.Run(TestBluetoothMouseAdmissionAsync).GetAwaiter().GetResult();
+        Task.Run(TestBluetoothHidSessionAdmissionAsync).GetAwaiter().GetResult();
         TestBluetoothNotificationResults();
         return 0;
     }
@@ -606,5 +607,82 @@ internal static partial class Program
             MappingAssert(delivered.IsEmpty, $"Queued {kind} lost its final foreground guard.");
         }
         Console.WriteLine("PASS mouse admission: service rejects producer crossing pause/resume; queued motion/button/wheel preserve their final guard.");
+    }
+
+    private static async Task TestBluetoothHidSessionAdmissionAsync()
+    {
+        foreach (var reportId in new byte[] { 1, 4, 5 })
+        {
+            var delivered = new ConcurrentQueue<(byte Id, byte[] Payload)>();
+            await using var service = new BluetoothHidMouseService((id, payload, guard) =>
+            {
+                if (guard?.Invoke() != false) delivered.Enqueue((id, payload.ToArray()));
+                return Task.FromResult(true);
+            });
+            SetKeyboardField(service, "_targetDeviceUdid", "hid-admission");
+            using var entered = new ManualResetEventSlim();
+            using var proceed = new ManualResetEventSlim();
+            service.InputAdmission = () =>
+            {
+                entered.Set();
+                if (!proceed.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException();
+                return null!;
+            };
+            Task Send() => reportId switch
+            {
+                1 => service.SendKeyboardAsync(0, [4]),
+                4 => (Task)KeyboardCall(service, "SendConsumerAsync", (ushort)0xE9, null)!,
+                _ => (Task)KeyboardCall(service, "SendNavigationAsync", (ushort)2, null)!,
+            };
+            var oldSend = Task.Run(Send);
+            try
+            {
+                MappingAssert(entered.Wait(TimeSpan.FromSeconds(3)), $"HID {reportId} missed admission.");
+                MappingAssert(await service.PauseInputAsync() && service.ResumeInput("hid-admission"),
+                    "HID admission fixture did not pause/resume.");
+                delivered.Clear();
+                proceed.Set();
+                await oldSend;
+                MappingAssert(delivered.IsEmpty, $"HID {reportId} producer crossed pause/resume.");
+                service.InputAdmission = null;
+                await Send();
+                MappingAssert(delivered.Any(report => report.Id == reportId && report.Payload.Any(value => value != 0)),
+                    $"HID {reportId} fresh input did not resume.");
+            }
+            finally { proceed.Set(); await oldSend; service.InputAdmission = null; }
+        }
+
+        var releases = new ConcurrentQueue<byte[]>();
+        await using var shortcutService = new BluetoothHidMouseService((id, payload, guard) =>
+        {
+            if (id == 4 && guard?.Invoke() != false) releases.Enqueue(payload.ToArray());
+            return Task.FromResult(true);
+        });
+        SetKeyboardField(shortcutService, "_targetDeviceUdid", "shortcut-admission");
+        using var releaseEntered = new ManualResetEventSlim();
+        using var releaseAllowed = new ManualResetEventSlim();
+        var admissions = 0;
+        shortcutService.InputAdmission = () =>
+        {
+            if (Interlocked.Increment(ref admissions) == 2)
+            {
+                releaseEntered.Set();
+                if (!releaseAllowed.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException();
+            }
+            return null!;
+        };
+        var shortcut = Task.Run(() => shortcutService.SendIphoneConsumerShortcutAsync(0xE9, 0, "shortcut-admission"));
+        try
+        {
+            MappingAssert(releaseEntered.Wait(TimeSpan.FromSeconds(3)), "Shortcut release missed admission.");
+            MappingAssert(await shortcutService.PauseInputAsync() && shortcutService.ResumeInput("shortcut-admission"),
+                "Shortcut fixture did not pause/resume.");
+            releases.Clear();
+            releaseAllowed.Set();
+            await shortcut;
+            MappingAssert(releases.IsEmpty, "An old shortcut release reached the resumed input session.");
+        }
+        finally { releaseAllowed.Set(); await shortcut; shortcutService.InputAdmission = null; }
+        Console.WriteLine("PASS HID admission: old keyboard/consumer/navigation producers and shortcut releases stay revoked across pause/resume; fresh input works.");
     }
 }

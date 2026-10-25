@@ -1013,8 +1013,12 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     private Func<bool> CaptureReportSessionGuard(Func<bool>? canSend = null)
     {
         var generation = Volatile.Read(ref _routeGeneration);
+        // F9 retains the BLE route but replaces the input session. Fence both
+        // producers suspended at admission and shortcut finally-block releases.
+        var inputGeneration = Volatile.Read(ref _mousePumpGeneration);
         var target = _targetDeviceUdid;
         return () => generation == Volatile.Read(ref _routeGeneration) &&
+            inputGeneration == Volatile.Read(ref _mousePumpGeneration) &&
             string.Equals(target, _targetDeviceUdid, StringComparison.OrdinalIgnoreCase) && canSend?.Invoke() != false;
     }
 
