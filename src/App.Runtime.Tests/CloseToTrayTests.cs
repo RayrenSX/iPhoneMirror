@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
@@ -43,6 +44,8 @@ internal static partial class Program
                 }
                 finally { settings.Close(); }
 
+                TestCloseToTrayWithDirtyMapping(main, vm, mode);
+
                 // A real independent media window exercises native visibility
                 // without requiring a connected phone or a receiver.
                 KeyboardCall(vm, "BeginMediaCast", 1d);
@@ -63,6 +66,15 @@ internal static partial class Program
                     "Closing the workspace interrupted or hid the independent preview.");
                 InteractionAssert(app.UpdateSettings.ApplicationDisplayMode == mode,
                     "Closing to tray changed the next startup's application mode.");
+
+                var hide = (Task)KeyboardCall(main, "ToggleBossKeyWindowsAsync")!;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+                InteractionAssert(hide.IsCompletedSuccessfully && !IsWindowVisible(handle) && !main.IsVisible,
+                    "Boss key did not hide the independent preview while the workspace was in the tray.");
+                var show = (Task)KeyboardCall(main, "ToggleBossKeyWindowsAsync")!;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+                InteractionAssert(show.IsCompletedSuccessfully && IsWindowVisible(handle) && !main.IsVisible,
+                    "Boss key restore lost the independent preview or unexpectedly showed the workspace.");
 
                 KeyboardCall(main, "ShowTrayPanel");
                 var panel = (TrayPanelWindow)KeyboardField(main, "_trayPanel");
@@ -107,6 +119,48 @@ internal static partial class Program
             vm.RestoreMainWindowFromTray();
             app.RestoreUpdateSettings(savedSettings);
             KeyboardCall(main, "ApplyTrayMode");
+        }
+    }
+
+    private static void TestCloseToTrayWithDirtyMapping(MainWindow main, MainViewModel vm,
+        ApplicationDisplayMode mode)
+    {
+        var manager = new KeyboardMappingWindow(new(), _ => null, _ => null,
+            _ => null, () => { }, () => "MappingOff") { Owner = main };
+        SetKeyboardField(main, "_mappingWindow", manager);
+        KeyboardMappingEditorWindow? editor = null;
+        try
+        {
+            manager.Show();
+            KeyboardCall(manager, "Edit", MappingEntry(MappedTouchAction.LongPress));
+            editor = (KeyboardMappingEditorWindow)KeyboardField(manager, "_editor");
+            editor.Wizard.Duration = "1200";
+            main.Close();
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
+            InteractionAssert(!main.IsVisible && vm.CanRestoreMainWindowFromTray &&
+                !editor.IsEditorClosed && editor.Wizard.IsDirty && editor.Wizard.Duration == "1200" &&
+                ((Border)editor.FindName("DiscardPanel")).Visibility != Visibility.Visible &&
+                !(bool)KeyboardField(main, "_shutdownStarted"),
+                $"Closing {mode} prompted to discard, lost the mapping draft or started shutdown.");
+            vm.RestoreMainWindowFromTray();
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(160));
+            InteractionAssert(main.IsVisible && vm.SelectedApplicationDisplayMode == mode &&
+                manager.IsVisible && editor.IsVisible && !editor.IsEditorClosed &&
+                editor.Wizard.IsDirty && editor.Wizard.Duration == "1200",
+                "Restoring from tray lost the original application mode or the mapping draft.");
+            editor.Wizard.Duration = "900";
+            InteractionAssert(editor.Wizard.Duration == "900",
+                "The mapping draft could not be edited after restoring from the tray.");
+        }
+        finally
+        {
+            if (editor is { IsEditorClosed: false })
+            {
+                KeyboardCall(editor, "OnContinueEditingClick", editor, new RoutedEventArgs());
+                DiscardWizard(editor);
+            }
+            manager.Close();
+            SetKeyboardField(main, "_mappingWindow", null);
         }
     }
 }

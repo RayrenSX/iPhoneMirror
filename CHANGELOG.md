@@ -10,6 +10,9 @@ All notable changes to iPhoneMirror are documented here. The project follows
 - Japanese (ja-JP) user interface for the app, driver manager, installer,
   driver cleanup script and SRS test pages. Japanese text uses Yu Gothic UI
   instead of the Chinese glyph forms of the shared CJK fallback.
+- Optional close-to-tray behavior keeps separate projection windows and the
+  current session running, restores the previous workspace mode, and preserves
+  unsaved keyboard mapping drafts. The option is disabled by default. (#60)
 
 ### Fixed
 

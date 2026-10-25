@@ -80,7 +80,7 @@ internal static partial class Program
             TestTrayStartupUpdates(app, main, vm);
             TestCloseMainWindowToTray(app, main, output);
             InteractionAssert(trace.Messages.Count == 0, string.Join(Environment.NewLine, trace.Messages));
-            Console.WriteLine("Tray tests passed: hidden startup, shell panel reopening, Escape, focus loss, busy/error handling, audio settings, media stop notification, startup updates, mode switching, close to tray and restore, settings persistence, and 4 languages × 2 themes.");
+            Console.WriteLine("Tray tests passed: hidden startup, shell panel reopening, Escape, focus loss, busy/error handling, audio settings, media stop notification, startup updates, mode switching, close to tray and restore, mapping draft preservation, settings persistence, and 5 languages × 2 themes.");
             return 0;
         }
         finally
@@ -127,7 +127,7 @@ internal static partial class Program
             var language = typeof(App).Assembly.GetType("IPhoneMirror.App.Localization.LocalizationService")!
                 .GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!;
             var layoutFindings = new HashSet<string>();
-            foreach (var culture in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
+            foreach (var culture in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US", "ja-JP" })
             foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
             {
                 language.Invoke(null, [culture, false, true]);
