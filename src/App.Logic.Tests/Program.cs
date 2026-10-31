@@ -541,14 +541,14 @@ Equal(true,
 var previewKeyHandlerIndex = mainWindowSource.IndexOf(
     "private void OnPreviewKeyDown", StringComparison.Ordinal);
 var previewKeyboardRouteIndex = mainWindowSource.IndexOf(
-    "if (RouteKeyboardEvent", previewKeyHandlerIndex,
+    "if (RouteKeyboardEvent", Math.Max(0, previewKeyHandlerIndex),
     StringComparison.Ordinal);
 var shortcutMatchIndex = keyboardRouterEventsSource.IndexOf(
-    "Shortcuts.Match(key.VirtualKey, modifiers)", StringComparison.Ordinal);
+    "MatchOwnedShortcut(key.VirtualKey, out var reason)", StringComparison.Ordinal);
 var shortcutExecuteIndex = keyboardRouterEventsSource.IndexOf(
-    "match.Execute();", shortcutMatchIndex, StringComparison.Ordinal);
+    "match.Execute();", Math.Max(0, shortcutMatchIndex), StringComparison.Ordinal);
 var directDeliveryIndex = keyboardRouterEventsSource.IndexOf(
-    "Deliver(press, chord: modifiers != 0", shortcutExecuteIndex, StringComparison.Ordinal);
+    "Deliver(press, chord: modifiers != 0", Math.Max(0, shortcutExecuteIndex), StringComparison.Ordinal);
 Equal(true,
     previewKeyHandlerIndex >= 0 && previewKeyboardRouteIndex > previewKeyHandlerIndex &&
     keyboardRoutingSource.Contains(
@@ -596,7 +596,7 @@ Equal(true,
         StringComparison.Ordinal) &&
     previewWindowSource.Contains("case WmKeyDown when IsPointerInputActive:",
         StringComparison.Ordinal) &&
-    keyboardRoutingSource.Contains("return RouteKeyboardEvent(key, down, ActiveInputDeviceUdid,",
+    keyboardRoutingSource.Contains("return RouteObservedKeyboardEvent(key, down, ActiveInputDeviceUdid,",
         StringComparison.Ordinal) &&
     keyboardRoutingSource.Contains("_isFullScreen || _secondaryMirrors.IsFullScreenWindow(_keyboardForegroundWindow())",
         StringComparison.Ordinal) &&
