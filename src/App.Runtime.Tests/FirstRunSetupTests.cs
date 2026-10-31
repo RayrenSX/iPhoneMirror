@@ -79,6 +79,7 @@ internal static partial class Program
     }
     private static int RunFirstRunSetupTests(string output)
     {
+        SetupModeDraftTests.Run();
         Directory.CreateDirectory(output);
         void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
         foreach (var usage in Enum.GetValues<SetupUsage>())

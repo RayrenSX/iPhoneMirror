@@ -686,13 +686,15 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
         var wireGeneration = Interlocked.Read(ref _wireGeneration);
         if (!IsReady || _stdin is null)
             throw new InvalidOperationException(LocalizationService.Get("TouchBridgeNotReady"));
-        if (state is not ("down" or "up" or "canceled"))
+        if (state is not ("down" or "up" or "canceled" or "double_press") ||
+            state == "double_press" && (usagePage != CoreDeviceTouchProtocol.IndigoConsumerUsagePage ||
+                usageCode != CoreDeviceTouchProtocol.IndigoHome))
             throw new ArgumentOutOfRangeException(nameof(state));
         await _sendLock.WaitAsync(ct);
         try
         {
             using var inputAdmission = InputAdmission?.Invoke();
-            if ((state == "down" || guardRelease) && canSend?.Invoke() == false) return;
+            if ((state is "down" or "double_press" || guardRelease) && canSend?.Invoke() == false) return;
             // Recovery may close the gate while this packet waits for the writer.
             if (generation != Interlocked.Read(ref _readyGeneration)) return;
             if (!IsReady || _stdin is null)

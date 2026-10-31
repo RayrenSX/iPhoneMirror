@@ -62,6 +62,12 @@ iPhone/iPad 投屏与蓝牙反向控制工具，目标是
 文档入口：[文档索引](docs/README.md) · [开发与测试](docs/DEVELOPMENT.md) ·
 [架构说明](docs/ARCHITECTURE.md)。
 
+## 最近开发更新
+
+当前 main 在 1.8.5-pre4 基础上改进了中文输入法按键转发、快捷键松开与焦点恢复、剪贴板超时恢复，以及首次设置的模式草稿保留。电脑中文候选结果不会自动同步到手机；发送已输入中文请复制后在预览中按 Ctrl+V。
+
+使用方式见[完整教程](docs/USER_GUIDE.md)，验证范围见[搜狗输入法验证记录](docs/SOGOU_IME_VERIFICATION_2026-10-31.zh-CN.md)，变更见 [Changelog](CHANGELOG.md)。main 的开发改动不代表已发布新的安装包。
+
 ## 核心亮点
 
 ### 按真实 iPhone/iPad 外形适配

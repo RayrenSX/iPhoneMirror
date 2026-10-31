@@ -82,11 +82,20 @@ internal static partial class Program
                     packets.SetLength(0);
                     WaitShortcutTask((Task)KeyboardCall(window, "SendConfiguredSystemShortcutAsync", action)!);
                     var frames = ReadShortcutPackets(packets);
+                    if (action == BluetoothShortcutAction.Dock)
+                    {
+                        InteractionAssert(frames.Length == 0, $"{mode}: iPhone Dock leaked a letter.");
+                        continue;
+                    }
                     InteractionAssert(frames.Length == 4 &&
                         frames[0].GetProperty("usageCode").GetInt32() == 0x29D &&
                         frames[0].GetProperty("state").GetString() == "down" &&
-                        frames[1].GetProperty("usages").EnumerateArray().Single().GetInt32() == usage &&
-                        frames[2].GetProperty("usages").GetArrayLength() == 0 &&
+                        frames[1].GetProperty("usagePage").GetInt32() == 7 &&
+                        frames[1].GetProperty("usageCode").GetInt32() == usage &&
+                        frames[1].GetProperty("state").GetString() == "down" &&
+                        frames[2].GetProperty("usagePage").GetInt32() == 7 &&
+                        frames[2].GetProperty("usageCode").GetInt32() == usage &&
+                        frames[2].GetProperty("state").GetString() == "up" &&
                         frames[3].GetProperty("usageCode").GetInt32() == 0x29D &&
                         frames[3].GetProperty("state").GetString() == "up",
                         $"{mode}/{action}: the keyboard key must be enclosed by Globe press/release.");
@@ -116,9 +125,10 @@ internal static partial class Program
                         Input(false);
                         AdvanceDispatcher(TimeSpan.FromMilliseconds(350));
                         var frames = ReadShortcutPackets(packets);
-                        InteractionAssert(frames.Length == (button == 2 ? 2 : 4) &&
+                        InteractionAssert(frames.Length == (button == 2 ? 2 : 1) &&
                             frames.All(f => f.GetProperty("kind").GetString() == "button_event" &&
-                                f.GetProperty("usageCode").GetInt32() == 0x40),
+                                f.GetProperty("usageCode").GetInt32() == 0x40) &&
+                            (button == 2 || frames[0].GetProperty("state").GetString() == "double_press"),
                             $"{mode}/{route}: mouse binding was skipped, duplicated or leaked a touch.");
                     }
                 }
@@ -177,15 +187,15 @@ internal static partial class Program
                 }
                 var cleanup = new List<string>();
                 var cleanupRoute = new DirectKeyboardRoute(udid, "WiredDirect", new object(), 1, () => true,
-                    (_, _, _) => { cleanup.Add("keyboard-up"); return Task.CompletedTask; },
-                    (_, _, state, _) =>
+                    (_, _, _) => throw new InvalidOperationException("Shortcut cleanup crossed HID channels."),
+                    (page, _, state, _) =>
                     {
-                        cleanup.Add(state);
+                        cleanup.Add((page == 7 ? "letter-" : "globe-") + state);
                         return state == "down" ? Task.FromException(new IOException("pre-write failure")) : Task.CompletedTask;
                     });
                 try { WaitShortcutTask((Task)KeyboardCall(window, "SendUsbSystemShortcutAsync", (byte)6, cleanupRoute, (Func<bool>)(() => true))!); }
                 catch (IOException) { }
-                InteractionAssert(cleanup.SequenceEqual(new[] { "down", "keyboard-up", "up" }),
+                InteractionAssert(cleanup.SequenceEqual(new[] { "globe-down", "letter-up", "globe-up" }),
                     "Shortcut cleanup did not attempt both captured-session releases after a failed down.");
             }
             Console.WriteLine($"{mode}: shortcut regression checks passed.");

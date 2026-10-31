@@ -39,6 +39,12 @@ follow, try, and support their work.
 See each project's README and port notes for feature coverage, release packages,
 build instructions, and known limitations.
 
+## Recent development updates
+
+Current main builds on 1.8.5-pre4 with improvements to keyboard forwarding with Chinese IMEs, shortcut release and focus recovery, clipboard timeout recovery, and first-run mode drafts. Windows IME candidate text is not automatically synchronized to the phone; copy composed text and press Ctrl+V in the preview to send it.
+
+See the [user guide](docs/USER_GUIDE.md), [IME verification scope](docs/SOGOU_IME_VERIFICATION_2026-10-31.zh-CN.md), and [Changelog](CHANGELOG.md). Changes on main do not imply a new published installer.
+
 ## Download
 
 Download `iPhoneMirror-Setup-v*-x64.exe` from

@@ -88,16 +88,23 @@ public partial class MainWindow
     }
 
     private bool CanForwardControlKeyboard(string? udid, nint sourceWindow)
-        => _mappingWindow?.IsEditing != true && CanForwardControlPointer(udid, sourceWindow) &&
+        => _mappingWindow?.IsEditing != true && IsControlWindowForeground(udid, sourceWindow) &&
             (sourceWindow != _windowSource?.Handle || !IsMainKeyboardEditorFocused());
 
     private bool CanForwardControlPointer(string? udid, nint sourceWindow)
+        => !_keyboardFocusSuspended && IsControlWindowForeground(udid, sourceWindow);
+
+    private bool IsControlWindowForeground(string? udid, nint sourceWindow)
     {
         // Compare the actual top-level HWND, not process ownership or WPF
         // IsActive: native previews have their own HWNDs, and settings dialogs
         // in this same process must not feed the phone's keyboard.
-        return _viewModel.AutomationHumanAllowed(udid) && !_bossKeyHidden && !_keyboardFocusSuspended &&
+        // Keyboard admission follows the actual foreground HWND. A delayed
+        // activation notification must not keep a foreground preview disabled.
+        // Pointer capture retains its separate suspension guard above.
+        return _viewModel.AutomationHumanAllowed(udid) && !_bossKeyHidden &&
             sourceWindow != 0 &&
+            _secondaryMirrors.AllowsControlInput(sourceWindow) &&
             sourceWindow == GetControlKeyboardWindow(udid) &&
             sourceWindow == _keyboardForegroundWindow();
     }

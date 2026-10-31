@@ -10,10 +10,25 @@ internal sealed class KeyboardShortcutRecognizer
     internal void Configure(IEnumerable<RoutedShortcut> bindings) =>
         _bindings = bindings.Where(b => b.Keys.IsBound).ToArray();
     internal RoutedShortcut? Match(int virtualKey, uint modifiers)
+        => Match(virtualKey, modifiers, out _);
+
+    internal RoutedShortcut? Match(int virtualKey, uint modifiers, out string reason)
     {
+        reason = "unbound_key";
         foreach (var binding in _bindings)
-            if (binding.Keys.VirtualKey == virtualKey && binding.Keys.Modifiers == modifiers && binding.IsAvailable())
-                return binding;
+        {
+            if (binding.Keys.VirtualKey != virtualKey) continue;
+            if (binding.Keys.Modifiers != modifiers)
+            {
+                if (reason == "unbound_key") reason = "modifiers_mismatch";
+                continue;
+            }
+            // Evaluate availability exactly once; diagnostics must not change
+            // precedence or run a stateful guard a second time.
+            if (!binding.IsAvailable()) { reason = "shortcut_unavailable"; continue; }
+            reason = "shortcut_matched";
+            return binding;
+        }
         return null;
     }
     internal bool IsCandidate(uint modifiers)

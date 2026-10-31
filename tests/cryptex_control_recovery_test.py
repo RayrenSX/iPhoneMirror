@@ -136,14 +136,14 @@ class CryptexControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(session._recovering)
         self.assertTrue(session._hid_transport_failed)
 
-    async def test_wireless_media_auth_remains_on_health_checks_without_wired_rotation(self):
+    async def test_wireless_media_auth_renews_idle_hid_on_the_same_gate(self):
         session = self.session()
         session.transport_mode = 'wireless'
         with patch.object(session, '_refresh_direct_hid', AsyncMock()) as refresh, \
              patch.object(session, '_ping_hid', wraps=session._ping_hid) as ping:
             await self.tick(session)
-        refresh.assert_not_awaited()
-        ping.assert_awaited_once()
+        refresh.assert_awaited_once_with(idle_only=True)
+        ping.assert_not_awaited()
 
     async def test_replacement_hid_closes_before_media_gate_on_stop_and_cancellation(self):
         for cancel in (False, True):

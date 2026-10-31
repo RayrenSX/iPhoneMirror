@@ -369,12 +369,14 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_proactive_refresh_waits_for_held_touch_keyboard_and_buttons(self):
         from types import SimpleNamespace
         real_sleep = asyncio.sleep
-        for kind in ('touch', 'keyboard', 'button', 'touch-and-keyboard'):
-            with self.subTest(kind=kind):
+        for mode, kind in ((mode, kind) for mode in ('usb', 'wireless')
+                           for kind in ('touch', 'keyboard', 'button', 'touch-and-keyboard')):
+            with self.subTest(mode=mode, kind=kind):
                 s = self.session()
+                s.transport_mode = mode
                 await s._verify_touch_surface(s.hid)
                 sm = bridge.FiveSlotStateMachine()
-                s.indigo = SimpleNamespace(send_button=AsyncMock(), __aexit__=AsyncMock())
+                s.indigo = SimpleNamespace(send_button=AsyncMock(), __aexit__=AsyncMock(), service=PingService())
                 if kind in ('touch', 'touch-and-keyboard'):
                     await s._apply_frame(sm, {}, [{'pointerId': 7, 'action': 'down',
                         'normalizedX': .4, 'normalizedY': .5}])
@@ -398,6 +400,13 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                     old_hid = s.hid
                     await watchdog_tick()
                     factory.assert_not_called()
+                    if kind == 'button':
+                        # A healthy short Home pulse must reach its up before
+                        # a health ping can delay it into a long press. A
+                        # prolonged hold still receives the normal watchdog.
+                        ping.assert_not_awaited()
+                        s._button_sent_at[bridge.HOME_BUTTON] -= bridge.HID_OPERATION_TIMEOUT_SECONDS + .1
+                        await watchdog_tick()
                     ping.assert_awaited()
                     self.assertIs(old_hid, s.hid)
                     if kind in ('touch', 'touch-and-keyboard'):
@@ -413,6 +422,17 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                     await watchdog_tick()
                     factory.assert_called_once()
                     self.assertIsNot(old_hid, s.hid)
+
+    async def test_idle_refresh_preserves_home_command_separation(self):
+        from types import SimpleNamespace
+        s = self.session()
+        s.indigo = SimpleNamespace(send_button=AsyncMock(), __aexit__=AsyncMock())
+        s._home_released_at = 123.0
+        s._home_double_released_at = 122.0
+        with patch.object(bridge, 'UniversalHIDServiceService', side_effect=Hid):
+            await s._refresh_direct_hid(idle_only=True)
+        self.assertEqual(123.0, s._home_released_at)
+        self.assertEqual(122.0, s._home_double_released_at)
 
     async def test_failed_release_defers_idle_refresh_but_allows_fault_repair(self):
         s = self.session()

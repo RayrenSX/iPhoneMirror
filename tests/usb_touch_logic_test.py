@@ -1171,7 +1171,7 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
 
         async def connect(_result):
             connect.attempts += 1
-            if connect.attempts == 1:
+            if not prepared:
                 raise bridge.BridgePrerequisiteError(
                     'touch_surface_unavailable', 'no HID surface')
 
@@ -1238,7 +1238,7 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
 
         captured = {}
 
-        async def discover(*, bonjour_timeout, udid):
+        async def discover(*, bonjour_timeout, udid, on_verified=None):
             captured['bonjour_timeout'] = bonjour_timeout
             captured['udid'] = udid
             return []
@@ -1253,7 +1253,7 @@ class TestOptionalDisplayService(unittest.IsolatedAsyncioTestCase):
             pass
 
         with patch.object(bridge, 'iter_remote_paired_identifiers',
-                          return_value=iter(('00008150-abcdef',))), \
+                          side_effect=lambda: iter(('00008150-abcdef',))), \
              patch.object(bridge, 'get_remote_pairing_tunnel_services', discover), \
              patch.object(session, '_create_lockdown_with_retry',
                           usb_preflight_lockdown), \

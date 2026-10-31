@@ -16,6 +16,10 @@ public static class CoreDeviceTouchProtocol
     public const string PasteTextMessageKind = "paste_text";
     public const string ReadClipboardMessageKind = "read_clipboard";
     public const string ClipboardTextEvent = "clipboard_text";
+    // The bridge's complete request budget is 30 seconds, including queueing.
+    // Allow its owned channels to finish cancellation and send their reply.
+    public const int ClipboardRequestTimeoutSeconds = 35;
+    public const int ClipboardCleanupTimeoutSeconds = 5;
 
 
     public const string CapabilityTouch5pt = "iphoneMirror.usb_touch.v2";
@@ -59,6 +63,7 @@ public static class CoreDeviceTouchProtocol
 
     // CoreDevice Indigo hardware-button usages (HID Consumer page).
     public const ushort IndigoConsumerUsagePage = 0x0C;
+    public const ushort IndigoKeyboardUsagePage = 0x07;
     public const ushort IndigoHome = 0x40;
     public const ushort IndigoLock = 0x30;
     public const ushort IndigoVolumeUp = 0xE9;

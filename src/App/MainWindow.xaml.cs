@@ -324,8 +324,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.IsUsbControlTarget(_viewModel.SelectedDevice?.Udid);
 
     private static readonly TimeSpan DeviceDragHoldDuration = TimeSpan.FromMilliseconds(350);
-    private static readonly TimeSpan AppSwitcherDoublePressInterval =
-        TimeSpan.FromMilliseconds(100);
     public MainWindow()
     {
         _keyboardHookProc = KeyboardHookProcedure;
@@ -1195,6 +1193,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.AddDiagnosticLog(AppLog.Event("independent_keyboard_window_event",
             ("device", AppLog.Device(udid)), ("kind", e.Kind),
             ("virtual_key", e.VirtualKey), ("scan_code", e.ScanCode),
+            ("message_time", e.MessageTime), ("repeat", e.IsRepeat),
+            ("received_time", unchecked((uint)Environment.TickCount)),
             ("active_window", _activeControlWindow)));
         // The native preview can deliver a key message while the async route
         // transition is still publishing its active HWND. Route by the event
@@ -1268,10 +1268,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ResetControlRouteState();
             if (_viewModel.IsBluetoothControlEnabled && _activeControlWindow == window)
             {
-                // The menu is a start command, including after F9 released
-                // input while retaining this window's Bluetooth connection.
-                if (_viewModel.BluetoothControlIsInputPaused)
-                    await _viewModel.ToggleBluetoothControlAsync(udid);
+                // The independent-window menu is a toggle.  The complete
+                // workspace already exposes a stop action, so the tray
+                // projection must be able to stop the same session from its
+                // context menu instead of only starting it.
+                await _viewModel.DisableBluetoothControlAsync();
+                _activeControlWindow = 0;
+                _activeControlUdid = null;
             }
             else
             {
@@ -1333,6 +1336,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             var device = _viewModel.Devices.FirstOrDefault(candidate =>
                 DeviceViewModel.UdidEquals(candidate.Udid, udid));
             if (device is null || device.IsMediaCast) return;
+            if (_viewModel.IsUsbControlTarget(udid))
+            {
+                await _viewModel.ToggleWiredControlAsync(udid);
+                ClearBluetoothControlInputState();
+                return;
+            }
             await _viewModel.StartUsbControlAsync(udid);
             if (_viewModel.IsUsbControlTarget(udid))
             {
@@ -1355,6 +1364,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         try
         {
             ShowReverseControlStatus(ControlStatusMode.Wireless, udid);
+            if (_viewModel.IsWirelessControlTarget(udid))
+            {
+                await _viewModel.ToggleWirelessControlAsync(udid);
+                ClearBluetoothControlInputState();
+                return;
+            }
             await _viewModel.StartWirelessControlAsync(udid);
             if (!_viewModel.IsWirelessControlTarget(udid)) return;
             if (_keyboardForegroundWindow() == window) FocusControlDevice(udid, window);
@@ -1414,9 +1429,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.AddDiagnosticLog(AppLog.Event("control_keyboard_window_event",
             ("kind", e.Kind), ("virtual_key", e.VirtualKey),
             ("scan_code", e.ScanCode), ("active_window", _activeControlWindow),
+            ("message_time", e.MessageTime), ("repeat", e.IsRepeat),
+            ("received_time", unchecked((uint)Environment.TickCount)),
             ("selected_device", AppLog.Device(_viewModel.SelectedDevice?.Udid))));
         if (_activeControlWindow != 0) return;
-        if (_rawKeyboardInputEnabled && e.Kind is not (Controls.PreviewKeyboardKind.Reset or Controls.PreviewKeyboardKind.Text)) return;
+        if (_rawKeyboardInputEnabled && e.Kind is not (Controls.PreviewKeyboardKind.Reset or Controls.PreviewKeyboardKind.Text) &&
+            (e.Kind != Controls.PreviewKeyboardKind.Up || _keyboardHook == 0)) return;
         HandleControlKeyboardInput(e, _viewModel.SelectedDevice?.Udid);
     }
 
@@ -1437,7 +1455,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             DispatchControlKeyboardInput(e, sourceUdid, fromRawInput, sourceWindow);
             return;
         }
-        if (_keyboardHook != 0) return; // hook already routed this physical event
+        if (_keyboardHook != 0)
+        {
+            if (!fromRawInput)
+            {
+                RecoverShortcutPressFromWindow(e, sourceUdid ?? ActiveInputDeviceUdid,
+                    sourceWindow ?? _windowSource?.Handle ?? 0);
+                ReleaseShortcutFromWindow(e, sourceUdid ?? ActiveInputDeviceUdid,
+                    sourceWindow ?? _windowSource?.Handle ?? 0);
+            }
+            return;
+        }
         if (e.Kind == Controls.PreviewKeyboardKind.Down)
         {
             if (!CanForwardControlKeyboard(sourceUdid ?? ActiveInputDeviceUdid,
@@ -1498,7 +1526,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         try
         {
             if (Volatile.Read(ref _bluetoothRouteChanging) != 0 || !canSend() || !route.IsCurrent()) return;
-            if (!TryMapVirtualKey(e.VirtualKey, out var usage, out var modifier)) return;
+            if (!TryMapVirtualKey(key, out var usage, out var modifier)) return;
             if (down)
             {
                 if (modifier != 0) _controlModifierKeys.Add(key);
@@ -1908,16 +1936,20 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             fromRawInput: true);
     }
 
-    private static int ModifierKeyIdentity(int virtualKey, int scanCode = 0) => virtualKey switch
+    private static int ModifierKeyIdentity(int virtualKey, int scanCode = 0)
     {
-        0xA0 or 0xA1 => virtualKey,
-        0xA2 or 0xA3 => virtualKey,
-        0xA4 or 0xA5 => virtualKey,
-        0x10 => scanCode == 0x36 ? 0xA1 : 0xA0,
-        0x11 => scanCode == 0x11D ? 0xA3 : 0xA2,
-        0x12 => scanCode == 0x138 ? 0xA5 : 0xA4,
-        _ => virtualKey,
-    };
+        virtualKey = RestoreImeVirtualKey(virtualKey, scanCode);
+        return virtualKey switch
+        {
+            0xA0 or 0xA1 => virtualKey,
+            0xA2 or 0xA3 => virtualKey,
+            0xA4 or 0xA5 => virtualKey,
+            0x10 => scanCode == 0x36 ? 0xA1 : 0xA0,
+            0x11 => scanCode == 0x11D ? 0xA3 : 0xA2,
+            0x12 => scanCode == 0x138 ? 0xA5 : 0xA4,
+            _ => virtualKey,
+        };
+    }
 
     private static byte ModifierMask(IEnumerable<int> keys)
     {
@@ -6855,6 +6887,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 return;
             }
         }
+        else if (RecoverShortcutPressFromWindow(new(Controls.PreviewKeyboardKind.Down,
+            KeyInterop.VirtualKeyFromKey(key))
+            { MessageTime = unchecked((uint)e.Timestamp), IsRepeat = e.IsRepeat },
+            ActiveInputDeviceUdid, _windowSource?.Handle ?? 0))
+        {
+            e.Handled = true;
+            return;
+        }
         if (_mediaCastActive && _viewModel.IsMediaCastSelected &&
             Keyboard.Modifiers == ModifierKeys.None &&
             Keyboard.FocusedElement is not TextBoxBase &&
@@ -6882,6 +6922,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (_keyboardHook == 0)
             e.Handled = RouteKeyboardEvent(new(KeyInterop.VirtualKeyFromKey(ResolvePreviewKey(e)), 0, false),
                 false, ActiveInputDeviceUdid, _windowSource?.Handle ?? 0);
+        else if (ReleaseShortcutFromWindow(new(Controls.PreviewKeyboardKind.Up,
+            KeyInterop.VirtualKeyFromKey(ResolvePreviewKey(e))) { MessageTime = unchecked((uint)e.Timestamp) },
+            ActiveInputDeviceUdid, _windowSource?.Handle ?? 0)) e.Handled = true;
     }
 
     private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -7056,10 +7099,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private async Task SendConfiguredSystemShortcutAsync(
         BluetoothShortcutAction action)
     {
-        if (_keyboardRouter.Mode == KeyboardInputMode.None || !IsControlKeyboardForeground) return;
+        void Skipped(string reason) => DiagnosticLogger.ReverseControl("keyboard_input", "system_shortcut_skipped",
+            ("action", action.ToString()), ("reason", reason));
+        if (_keyboardRouter.Mode == KeyboardInputMode.None) { Skipped("owner_none"); return; }
+        if (!IsControlKeyboardForeground) { Skipped("focus_or_input_guard"); return; }
         var target = _activeControlWindow != 0 ? _activeControlUdid :
             _viewModel.SelectedDevice?.Udid;
         if (action == BluetoothShortcutAction.ReverseControl) return;
+        if (action == BluetoothShortcutAction.Dock && !CanSendDockShortcut(target))
+        {
+            Skipped("dock_requires_ipad");
+            return;
+        }
         var canSend = CapturePointerSendGuard(GetControlKeyboardWindow(target));
         var indigoButton = GetIndigoButton(action);
         var usage = action switch
@@ -7074,16 +7125,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         };
         DirectKeyboardRoute? sentRoute = null;
         SemaphoreSlim? sessionGate = null;
+        DiagnosticLogger.ReverseControl("keyboard_input", "system_shortcut_requested",
+            ("action", action.ToString()), ("gate_busy", _systemShortcutGate.CurrentCount == 0));
         await _systemShortcutGate.WaitAsync();
         try
         {
-            if (!canSend() || _shortcutSettingsWindow is not null) return;
+            if (!canSend() || _shortcutSettingsWindow is not null) { Skipped("invalidated_while_waiting"); return; }
             var route = _viewModel.CaptureDirectKeyboardRoute(target);
-            if (route is null) return;
+            if (route is null) { Skipped("route_unavailable"); return; }
             sessionGate = KeyboardSessionGate(route);
             await sessionGate.WaitAsync();
             sentRoute = route;
-            if (!canSend() || !route.IsCurrent()) return;
+            if (!canSend() || !route.IsCurrent()) { Skipped("route_or_focus_changed"); return; }
             var bluetoothTarget = route.Transport == "BluetoothDirect";
             var usbTarget = !bluetoothTarget;
             if (action == BluetoothShortcutAction.AppSwitcher && bluetoothTarget)
@@ -7095,14 +7148,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     consumer.Code, consumer.HoldMs, target, canSend);
             if (action == BluetoothShortcutAction.AppSwitcher && usbTarget)
             {
-                // iPhone/iPad accepts the hardware Home button twice as the
-                // app-switcher gesture. The direct USB/Wireless HID surface
-                // does not expose the Bluetooth navigation-menu report, so
-                // mirror the already-working Home shortcut instead.
+                // Keep both presses in one bridge command: delays between
+                // separate host writes can exceed iOS's double-click window.
                 var home = GetIndigoButton(BluetoothShortcutAction.Home)!.Value;
-                await SendUsbButtonPulseAsync(home, route, canSend);
-                await Task.Delay(AppSwitcherDoublePressInterval);
-                await SendUsbButtonPulseAsync(home, route, canSend);
+                if (route.SendButtonAsync is not null)
+                    await route.SendButtonAsync(home.Page, home.Code, "double_press", canSend);
             }
             else if (indigoButton is { } button && usbTarget)
             {

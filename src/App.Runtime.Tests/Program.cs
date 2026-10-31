@@ -28,9 +28,15 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--setup-driver-roundtrip", var roundtripDriver, var roundtripOutput])
+                return RunSetupDriverRoundtrip(roundtripDriver, roundtripOutput);
+            if (args is ["--setup-window-rendering", var setupRenderingOutput])
+                return RunSetupWindowRenderingTests(setupRenderingOutput);
             // Set this before any test creates WPF windows, including API and lifecycle tests.
             // Native preview tests retain their own real HWND/D3D rendering paths.
             RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+            if (args is ["--audio-only-output-guards"])
+                return RunAudioOnlyOutputGuardTests();
             if (args is ["--automation-lifecycle"])
                 return RunAutomationLifecycleTests();
             if (args is ["--automation-lifecycle-long-startup"])
@@ -98,6 +104,15 @@ internal static partial class Program
             }
             if (args is ["--keyboard-router"])
                 return RunKeyboardRouterTests();
+            if (args is ["--keyboard-shortcut-recovery"])
+            {
+                TestFunctionKeyRoutingDiagnostics();
+                TestShortcutReleaseRecoveryModel();
+                TestShortcutPressRecoveryModel();
+                TestLostKeyUpReconciliation();
+                TestUnifiedKeyboardDispatch(recoveryOnly: true);
+                return 0;
+            }
             if (args is ["--bluetooth-input-toggle"])
                 return RunBluetoothInputToggleTests();
             if (args is ["--bluetooth-input-transport"])
@@ -130,6 +145,16 @@ internal static partial class Program
                 return RunKeyboardMappingInteractionTests(mappingLifecycleOutput, lifecycleOnly: true);
             if (args is ["--keyboard-mapping-live-probe", var mappingLiveOutput])
                 return RunKeyboardMappingLiveProbe(mappingLiveOutput);
+            if (args is ["--shortcut-recovery-live", var shortcutLiveOutput, var shortcutLiveTransport])
+                return RunKeyboardMappingLiveProbe(shortcutLiveOutput, shortcutRecovery: true, wirelessControl: shortcutLiveTransport == "wireless");
+            if (args is ["--shortcut-timing-live", var timingOutput])
+                return RunKeyboardMappingLiveProbe(timingOutput, shortcutRecovery: true, shortcutTiming: true);
+            if (args is ["--shortcut-timing-live", var buttonTimingOutput, var buttonTimingTransport])
+                return RunKeyboardMappingLiveProbe(buttonTimingOutput, shortcutRecovery: true,
+                    shortcutTiming: true, wirelessControl: buttonTimingTransport == "wireless");
+            if (args is ["--shortcut-soak-live", var soakOutput, var soakTransport, var soakSeconds])
+                return RunKeyboardMappingLiveProbe(soakOutput, shortcutRecovery: true,
+                    wirelessControl: soakTransport == "wireless", shortcutSoakSeconds: int.Parse(soakSeconds));
             if (args is ["--keyboard-mapping-live-interactive", var mappingInteractiveOutput])
                 return RunKeyboardMappingLiveProbe(mappingInteractiveOutput, interactive: true);
             if (args is ["--keyboard-mapping-live-interactive-wireless", var mappingWirelessInteractiveOutput])
@@ -152,6 +177,8 @@ internal static partial class Program
             }
             if (args is ["--clipboard-sync"])
                 return RunClipboardSyncRegressionTests();
+            if (args is ["--clipboard-timeouts"])
+                return RunClipboardTimeoutTests();
             if (args is ["--media-bridge-idle"])
             {
                 Console.In.ReadToEnd();
@@ -239,6 +266,10 @@ internal static partial class Program
                 return RunInteractionRegressionTests();
             if (args is ["--preview-context-menu"])
                 return RunPreviewContextMenuTests();
+            if (args is ["--independent-unfix-live", var unfixOutput])
+                return RunIndependentUnfixLive(unfixOutput);
+            if (args is ["--independent-unfix-usb-supplement", var unfixSupplementOutput])
+                return RunIndependentUnfixLive(unfixSupplementOutput, allowUsbFallback: true);
             if (args is ["--control-states", var controlOutput])
                 return RunControlStateAudit(controlOutput);
             if (args is ["--localization-audit"])
@@ -255,6 +286,8 @@ internal static partial class Program
                 return RunWorkspacePerformanceAudit(workspacePerformanceOutput);
             if (args is ["--keyboard-focus"])
                 return RunKeyboardFocusTests();
+            if (args is ["--keyboard-ime-live", var imeOutput])
+                return RunKeyboardMappingLiveProbe(imeOutput, imeLive: true);
             if (args is ["--shortcuts"])
                 return RunKeyboardFocusTests(shortcutReview: true);
             if (args is ["--mouse-shortcuts"])

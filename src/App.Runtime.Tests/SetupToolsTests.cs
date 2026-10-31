@@ -106,12 +106,24 @@ internal static partial class Program
             window.OpenDriverToolAsync = token => { opens++; return completion.Task.WaitAsync(token); };
             window.PrepareDevice = (_, install, _, _) => { Check(!install, "Assistant performed an inline installation."); probes++; return Task.FromResult(new SetupDriverProgress("Result", true, null)); };
             var pending = Run(); ToolsPump();
+            var setupHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            Check(!window.AllowsTransparency &&
+                (GetSetupWindowStyle(setupHandle, -20).ToInt64() & 0x00080000) == 0,
+                "Setup still uses a layered HWND for its large animated page.");
+            var setupSurface = (Border)window.Template.FindName("RoundedWindowSurface", window);
+            Check(setupSurface.Effect is null && setupSurface.Background is SolidColorBrush { Color.A: 255 },
+                "Setup composites its whole animated content through a shadow or translucent surface.");
+            Check(window.WindowState == WindowState.Normal &&
+                !(bool)typeof(FirstRunSetupWindow).GetField("_activityAnimating", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!,
+                "Driver handoff animated or minimized the setup window.");
             ToolsComplete(Run());
             Check(opens == 1 && probes == 0 && !Verified(), "Handoff was duplicated or verified before tool exit.");
             completion.SetResult(new(true, null, "closed")); ToolsComplete(pending);
             Check(Verified() && probes == 1, "Returned driver tool did not verify actual state.");
+            Check(window.WindowState == WindowState.Normal, "Driver exit did not restore setup.");
             window.OpenDriverToolAsync = _ => Task.FromResult(new DriverManagerLaunchResult(false, null, "missing executable"));
             ToolsComplete(Run()); Check(!Verified() && probes == 1, "Failed launch incorrectly advanced setup.");
+            Check(window.WindowState == WindowState.Normal, "Failed driver launch stranded minimized setup.");
             window.OpenDriverToolAsync = _ => Task.FromResult(new DriverManagerLaunchResult(true, null, "closed"));
             window.PrepareDevice = (_, _, _, _) => Task.FromResult(new SetupDriverProgress("Replug", true, null));
             ToolsComplete(Run()); Check(!Verified(), "A required replug was incorrectly marked ready.");
@@ -119,6 +131,7 @@ internal static partial class Program
             pending = Run(); ToolsPump();
             ((Button)window.FindName("CancelOperation")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             ToolsComplete(pending); Check(!Verified() && !completion.Task.IsCompleted, "Cancelling the assistant completed the independent tool.");
+            Check(window.WindowState == WindowState.Normal, "Cancelling driver handoff did not restore setup.");
             var bindingsPath = Path.Combine(Path.GetFullPath(output), "bindings-" + Guid.NewGuid().ToString("N") + ".json");
             window.CheckRuntime = new() { ReadBindingsAsync = _ => Task.FromResult(new DeviceBindingManager(bindingsPath, readOnly: true)) };
             window.State.Step = SetupStep.Profile;
@@ -204,6 +217,9 @@ internal static partial class Program
         }
         return 0;
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern nint GetSetupWindowStyle(nint window, int index);
 
     private static int RenderDriverTools(string assemblyPath, string output)
     {

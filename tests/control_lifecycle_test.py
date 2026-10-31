@@ -97,11 +97,12 @@ class TunnelLifecycleTests(unittest.IsolatedAsyncioTestCase):
             async def established():
                 session._session_ready.set()
                 await asyncio.sleep(.04)
+            session._wireless_ready_deadline = None  # a new startup, not another candidate
             await session._run_until_ready(established())
 
     async def test_wireless_stalled_tunnel_is_cancelled_and_all_services_closed(self):
         session = self.session()
-        services = [SimpleNamespace(close=AsyncMock()), SimpleNamespace(close=AsyncMock())]
+        services = [SimpleNamespace(close=AsyncMock()) for _ in range(2)]
         closed = asyncio.Event()
         class Tunnel:
             async def __aenter__(self):
@@ -109,13 +110,14 @@ class TunnelLifecycleTests(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, *_):
                 closed.set()
         with patch.object(bridge, 'iter_remote_paired_identifiers', return_value=['test-device']), \
-             patch.object(bridge, 'get_remote_pairing_tunnel_services', AsyncMock(return_value=services)), \
+             patch.object(bridge, 'get_remote_pairing_tunnel_services', AsyncMock(return_value=services)) as discover, \
              patch.object(bridge, 'start_tunnel', return_value=Tunnel()), \
              patch.object(bridge, 'HID_RECOVERY_READY_TIMEOUT_SECONDS', .01):
             with self.assertRaises(bridge.BridgePrerequisiteError) as raised:
                 await asyncio.wait_for(session._connect_via_remote_pairing(), 1)
         self.assertEqual(raised.exception.code, 'control_service_start_timeout')
         self.assertTrue(closed.is_set())
+        discover.assert_awaited_once()
         for service in services:
             service.close.assert_awaited_once()
 

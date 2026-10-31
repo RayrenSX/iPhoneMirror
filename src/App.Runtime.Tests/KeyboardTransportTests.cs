@@ -129,7 +129,8 @@ internal static partial class Program
             focus(other);
             Require(recognizer.Match((int)keys[0], 6) is not null, "Independent activation lost the device shortcut.");
             KeyboardCall(window, "OnIndependentKeyboardFocusChanged", udid, otherHandle, false);
-            Require(recognizer.Match((int)keys[0], 6) is null, "Independent deactivation retained the device shortcut.");
+            Require(recognizer.Match((int)keys[0], 6) is not null,
+                "A delayed deactivation disabled the actual foreground device shortcut.");
             focus(window);
             Require(recognizer.Match((int)keys[0], 6) is not null, "Returning to main did not restore its shortcut.");
             Console.WriteLine("Windows hotkey scope checks passed for main/independent focus and global exceptions.");

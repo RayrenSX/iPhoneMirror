@@ -360,6 +360,20 @@ HRESULT MediaStream::RuntimeClassInitialize(MediaSource* source,
     // channel must carry the selected rate too, including before the app has
     // published its first frame. Keep explicit activation settings authoritative.
     if (frame_rate < 10 || frame_rate > 60) {
+        // Frame Server may activate the media source just before the app has
+        // finished publishing the channel path. A single discovery attempt
+        // would then permanently select the 30 fps fallback even though the
+        // publisher is configured for 60 fps. Give the channel a short
+        // startup window so the advertised media type matches the selection.
+        const auto discovery_deadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds(1);
+        while (reader_.output_frame_rate() == 0 &&
+               std::chrono::steady_clock::now() < discovery_deadline) {
+            if (channel_path_.empty()) discover_channel_path(channel_path_);
+            if (!channel_path_.empty()) reader_.open(channel_path_.c_str());
+            if (reader_.output_frame_rate() != 0) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
         frame_rate = reader_.output_frame_rate();
         if (frame_rate == 0) frame_rate = 30;
     }

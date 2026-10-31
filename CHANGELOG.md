@@ -3,6 +3,15 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
+## [Unreleased]
+
+### Fixed
+
+- Improve Chinese IME key forwarding, shortcut press/release recovery and preview focus handling. See the [Sogou verification record](docs/SOGOU_IME_VERIFICATION_2026-10-31.zh-CN.md) for tested scope.
+- Improve clipboard timeout, resource and converter recovery, with additional protocol regression coverage.
+- Preserve first-run application mode drafts and improve setup window behavior.
+- Add keyboard diagnostics, shortcut soak checks and QA directory packaging helpers.
+
 ## [1.8.5-pre4] - 2026-10-29
 
 ### 新增与修复

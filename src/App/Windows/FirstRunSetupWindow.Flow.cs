@@ -55,13 +55,14 @@ public partial class FirstRunSetupWindow
 
     private void AnimateActivity()
     {
-        if (_activityAnimating == _busy) return;
-        _activityAnimating = _busy;
+        var animate = _busy && !_toolActive;
+        if (_activityAnimating == animate) return;
+        _activityAnimating = animate;
         for (var i = 0; i < BusyBar.Children.Count; i++)
         {
             var dot = (UIElement)BusyBar.Children[i];
             dot.BeginAnimation(OpacityProperty, null);
-            if (_busy && !_previewOnly && SystemParameters.ClientAreaAnimation)
+            if (animate && !_previewOnly && SystemParameters.ClientAreaAnimation)
                 dot.BeginAnimation(OpacityProperty, new DoubleAnimation(.25, .85, TimeSpan.FromMilliseconds(650))
                 { BeginTime = TimeSpan.FromMilliseconds(i * 140), AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
         }

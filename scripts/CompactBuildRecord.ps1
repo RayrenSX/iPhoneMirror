@@ -2,7 +2,9 @@
 # -SkipBuild must not combine a fresh descriptor with stale executables.
 function Get-CompactBuildInputs([string]$Workspace, [bool]$WithUxPlay, [bool]$WithFfmpeg) {
     $paths = @('outputs\iPhoneMirror\iPhoneMirror.exe',
+        'outputs\iPhoneMirror\iPhoneMirror.Driver.exe',
         'outputs\iPhoneMirror.Installer\iPhoneMirror.exe',
+        'outputs\iPhoneMirror.Installer\iPhoneMirror.Driver.exe',
         'outputs\iPhoneMirror.Installer\iPhoneMirror.dll')
     $paths += 'config\uxplay-component.json'
     if ($WithFfmpeg) {

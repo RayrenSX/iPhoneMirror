@@ -59,9 +59,12 @@ internal static partial class Program
     }
 
     private static void AwaitMapping(Task task)
+        => AwaitMapping(task, TimeSpan.FromSeconds(15));
+
+    private static void AwaitMapping(Task task, TimeSpan timeout)
     {
         var clock = Stopwatch.StartNew();
-        while (!task.IsCompleted && clock.Elapsed < TimeSpan.FromSeconds(15))
+        while (!task.IsCompleted && clock.Elapsed < timeout)
             AdvanceDispatcher(TimeSpan.FromMilliseconds(5));
         MappingAssert(task.IsCompleted, "Mapping test timed out.");
         task.GetAwaiter().GetResult();

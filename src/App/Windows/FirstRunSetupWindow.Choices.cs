@@ -26,17 +26,13 @@ public partial class FirstRunSetupWindow
 
     private void ApplicationModeChoices()
     {
-        if (!_state.PreferencesApplied)
-        {
-            _main.SelectedApplicationDisplayMode = ApplicationDisplayMode.Lightweight;
-            _state.PreferencesApplied = true;
-        }
+        var selected = _state.PrepareApplicationModeDraft(_main.SelectedApplicationDisplayMode);
         var row = CardRow();
         foreach (var mode in Enum.GetValues<ApplicationDisplayMode>())
         {
-            var card = ChoiceCard("mode", "ApplicationMode" + mode, "SetupMode" + mode, _main.SelectedApplicationDisplayMode == mode);
+            var card = ChoiceCard("mode", "ApplicationMode" + mode, "SetupMode" + mode, selected == mode);
             card.Tag = Symbol(mode switch { ApplicationDisplayMode.Complete => "monitor", ApplicationDisplayMode.Lightweight => "spark", _ => "pin" });
-            card.Checked += (_, _) => _main.SelectedApplicationDisplayMode = mode;
+            card.Checked += (_, _) => _state.ApplicationModeDraft = mode;
             row.Children.Add(card);
         }
         Body.Children.Add(row);

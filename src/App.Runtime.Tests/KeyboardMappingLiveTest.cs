@@ -13,8 +13,9 @@ internal static partial class Program
 {
     // Opt-in hardware probe. Uses production enumeration, saved identity
     // bindings, capture and reverse-control startup. No ready state is faked.
-    private static int RunKeyboardMappingLiveProbe(string output, bool exercise = false, bool wireless = false, bool interactive = false, bool captureOnly = false, bool ownership = false, bool wiredRestart = false, bool clipboard = false, bool realWindowExit = false, string? selectedUdid = null, bool skipReverseControl = false)
+    private static int RunKeyboardMappingLiveProbe(string output, bool exercise = false, bool wireless = false, bool interactive = false, bool captureOnly = false, bool ownership = false, bool wiredRestart = false, bool clipboard = false, bool realWindowExit = false, string? selectedUdid = null, bool skipReverseControl = false, bool shortcutRecovery = false, bool shortcutTiming = false, bool wirelessControl = false, int shortcutSoakSeconds = 0, bool imeLive = false)
     {
+        var useWirelessControl = wireless || wirelessControl;
         if (skipReverseControl && (selectedUdid is null || !realWindowExit || wiredRestart))
             throw new ArgumentException("Capture isolation requires selected identity and a real window exit.", nameof(skipReverseControl));
         if (selectedUdid is not null && (!realWindowExit || captureOnly || wireless || exercise || interactive || ownership || clipboard))
@@ -93,9 +94,9 @@ internal static partial class Program
             // before running this opt-in probe. This changes no phone setting.
             SetKeyboardField(vm, "_wiredControlPrerequisiteAcknowledged", true);
             SetKeyboardField(vm, "_wirelessControlPrerequisiteAcknowledged", true);
-            var status = vm.GetControlStatus(wireless ? ControlStatusMode.Wireless : ControlStatusMode.Usb, vm.SelectedDevice.Udid);
+            var status = vm.GetControlStatus(useWirelessControl ? ControlStatusMode.Wireless : ControlStatusMode.Usb, vm.SelectedDevice.Udid);
             status.StatusChanged += (_, state) => Console.WriteLine($"HARDWARE control: {state.Stage} — {state.Description}");
-            var start = wireless ? vm.StartWirelessControlAsync(vm.SelectedDevice.Udid) : vm.StartUsbControlAsync(vm.SelectedDevice.Udid);
+            var start = useWirelessControl ? vm.StartWirelessControlAsync(vm.SelectedDevice.Udid) : vm.StartUsbControlAsync(vm.SelectedDevice.Udid);
             if (!Wait(() => start.IsCompleted, 180))
             { Console.WriteLine("HARDWARE BLOCKED: control startup timeout."); return 2; }
             start.GetAwaiter().GetResult();
@@ -106,7 +107,8 @@ internal static partial class Program
             }
             var path = Path.GetFullPath(Path.Combine(output, "iphone-before.png"));
             vm.CaptureScreenshot(path);
-            Console.WriteLine($"HARDWARE READY: {vm.SourceVideoWidth}x{vm.SourceVideoHeight}, existing {(wireless ? "Wireless" : "USB")} mapping route ready. Frame: {path}");
+            Console.WriteLine($"HARDWARE READY: {vm.SourceVideoWidth}x{vm.SourceVideoHeight}, existing {(useWirelessControl ? "Wireless" : "USB")} mapping route ready. Frame: {path}");
+            if (shortcutRecovery) ExerciseLiveShortcutRecovery(main, vm, output, useWirelessControl, shortcutTiming, shortcutSoakSeconds);
             }
             }
             if (wiredRestart)
@@ -130,6 +132,17 @@ internal static partial class Program
                     Console.WriteLine($"RESTART PASS: pause_ms={pause}, ready_ms={timer.ElapsedMilliseconds}, capture={vm.SourceVideoWidth}x{vm.SourceVideoHeight}");
                     AdvanceDispatcher(TimeSpan.FromSeconds(2));
                 }
+            }
+            else if (File.Exists(Path.Combine(output, "script-mode")))
+            {
+                // Scripted HID owns its explicit route. Keep the test window
+                // from collecting unrelated desktop keystrokes while waiting.
+                main.Hide();
+                RunPhoneClipboardScript(vm, output);
+            }
+            else if (imeLive)
+            {
+                ObserveLiveImeKeyboard(main, vm, output);
             }
             else if (ownership)
             {
@@ -249,7 +262,7 @@ internal static partial class Program
                 Console.WriteLine($"WINDOW EXIT: elapsed_seconds={realExitWatch.Elapsed.TotalSeconds:F2}");
             }
             var cleanupWatch = Stopwatch.StartNew();
-            var stop = vm.CancelReverseControlAsync(wireless ? ControlStatusMode.Wireless : ControlStatusMode.Usb);
+            var stop = vm.CancelReverseControlAsync(useWirelessControl ? ControlStatusMode.Wireless : ControlStatusMode.Usb);
             var stopped = Wait(() => stop.IsCompleted, 20);
             var stopSeconds = cleanupWatch.Elapsed.TotalSeconds;
             cleanupWatch.Restart();

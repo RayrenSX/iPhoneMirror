@@ -54,8 +54,9 @@ class MuxInitializationTests(unittest.TestCase):
             release.assert_not_called()
 
 
-
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+
+
     async def test_no_usable_multicast_family_returns_local_error_without_pair_handshake(self):
         s = self.session()
         join_error = OSError('No usable local mDNS multicast interface')
@@ -270,6 +271,8 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
+
+
     async def test_advertised_service_without_addresses_preserves_resolution_failure(self):
         answers = [SimpleNamespace(port=49152, addresses=[])]
         with patch.object(b, 'browse_remotepairing', AsyncMock(return_value=answers)), \
@@ -382,6 +385,7 @@ class InputCleanupTests(unittest.IsolatedAsyncioTestCase):
         hid = SimpleNamespace(SERVICE_NAME='hid', send_report=report, send_keyboard=keyboard)
         @contextlib.asynccontextmanager
         async def media(_):
+            events.append('hid-open')
             try: yield hid
             finally: events.append('closed')
         class Dial:
@@ -393,13 +397,19 @@ class InputCleanupTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self, *_, **kwargs): pass
             async def __aenter__(self): return self
         async def verify(_): s.keyboard_service_id = 512
+        async def prepare():
+            self.assertIsNone(s.hid)
+            self.assertFalse(s._session_ready.is_set())
+            events.append('resources')
+        async def ready(): events.append('ready')
         result = SimpleNamespace(client=SimpleNamespace(tun=SimpleNamespace(set_peer=lambda _: None)), address='phone', port=1)
         with patch('pymobiledevice3.remote.userspace_tunnel.UserspaceDialPlane', Dial), \
              patch.object(b, 'RemoteServiceDiscoveryService', Rsd), patch.object(b, 'touch_session', media), \
-             patch.object(s, '_verify_touch_surface', verify), patch.object(s, '_emit_ready', AsyncMock()), \
+             patch.object(s, '_prepare_pasteboard_resources', prepare), \
+             patch.object(s, '_verify_touch_surface', verify), patch.object(s, '_emit_ready', ready), \
              patch.object(s, '_run_serve', AsyncMock()), patch.object(s, '_cleanup', AsyncMock()):
             await s._connect_with_tunnel_result(result)
-        self.assertEqual(events, ['key-up'] + ['touch-up'] * b.MAX_SLOTS + ['closed'])
+        self.assertEqual(events, ['resources', 'hid-open', 'ready', 'key-up'] + ['touch-up'] * b.MAX_SLOTS + ['closed'])
 
     async def test_cancelled_indigo_open_closes_partial_service(self):
         s = b.TouchSession(SimpleNamespace(emit=AsyncMock()), 120)

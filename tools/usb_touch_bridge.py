@@ -46,6 +46,8 @@ import time
 from typing import Callable, Optional
 from urllib.parse import quote, urlsplit
 from xml.parsers.expat import ExpatError
+from pasteboard_text import inline_rich_text
+from pasteboard_recovery import PasteboardConverterRecovery, PasteboardResourceMonitor, pasteboard_resource_usage
 
 import requests
 import ifaddr
@@ -85,10 +87,11 @@ from pymobiledevice3.remote.common import TunnelProtocol
 from pymobiledevice3.remote.module_imports import start_tunnel
 from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
 from pymobiledevice3.remote.remote_service import RemoteService
+from pymobiledevice3.dtx_service_provider import DtxServiceProvider
 from pymobiledevice3.remote.remotexpc import RemoteXPCConnection
 from pymobiledevice3.remote.tunnel_service import (
     CoreDeviceTunnelProxy,
-    RemotePairingLockdownService,
+    RemotePairingLockdownService as UpstreamRemotePairingLockdownService,
     RemotePairingTunnelService as UpstreamRemotePairingTunnelService,
 )
 from mdns_discovery import MdnsDiscoveryError, browse_remotepairing
@@ -184,6 +187,8 @@ async def _bounded_remote_exit(service, timeout):
         connection = service.service
     elif isinstance(service, RemoteXPCConnection):
         connection = service
+    elif isinstance(service, DtxServiceProvider):
+        connection = service._dtx
     writer = getattr(connection, '_writer', None)
     closed = False
     try:
@@ -285,7 +290,39 @@ async def touch_session(rsd):
             await finish(close(display))
 
 
-class RemotePairingTunnelService(UpstreamRemotePairingTunnelService):
+class _RemotePairingSrpContext:
+    """Adapt the SDK's hex-encoded proof bytes to srptools' text API.
+
+    pymobiledevice3 11.3.1 passes proof.hex().encode(). srptools 2 treats
+    bytes as a binary proof, whereas its str API still accepts hex. Keep
+    the cryptographic verification in srptools; never accept a failed proof.
+    """
+    def __init__(self, context):
+        self._context = context
+
+    def __getattr__(self, name):
+        return getattr(self._context, name)
+
+    def verify_proof(self, proof):
+        if isinstance(proof, bytes):
+            try:
+                proof = proof.decode('ascii')
+            except UnicodeDecodeError:
+                return False
+        return self._context.verify_proof(proof)
+
+
+class _RemotePairingSrpCompatibility:
+    def _init_srp_context(self, consent):
+        super()._init_srp_context(consent)
+        self.srp_context = _RemotePairingSrpContext(self.srp_context)
+
+
+class RemotePairingLockdownService(_RemotePairingSrpCompatibility, UpstreamRemotePairingLockdownService):
+    pass
+
+
+class RemotePairingTunnelService(_RemotePairingSrpCompatibility, UpstreamRemotePairingTunnelService):
     async def close(self):
         writer = self._writer
         try:
@@ -375,93 +412,144 @@ def _remote_pairing_route_hosts(host, peers, adapters):
             else [_remote_pairing_host(host, adapters)])
 
 
-async def get_remote_pairing_tunnel_services(bonjour_timeout, udid):
-    """Verify discovered routes concurrently and close every unreturned service."""
-    answers = await browse_remotepairing(timeout=bonjour_timeout)
+async def get_remote_pairing_tunnel_services(bonjour_timeout, udid, *, on_verified=None):
+    """Verify incremental advertisements; transfer ownership through on_verified."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + bonjour_timeout + REMOTE_PAIRING_ROUTE_TIMEOUT_SECONDS
+    semaphore = asyncio.Semaphore(4)
+    tasks, connected, transferred = {}, [], set()
+    advertised = False
+    resolved = False
+    invalid_scopes = False
     try:
         adapters = ifaddr.get_adapters()
     except OSError:
         adapters = []
-    endpoints = {}
-    invalid_scopes = 0
-    for answer in answers:
-        for address in answer.addresses:
-            try:
-                hosts = _remote_pairing_route_hosts(address.full_ip, answer.addresses, adapters)
-            except (OSError, ValueError):
-                invalid_scopes += 1
-                continue
-            for host in hosts:
-                endpoints[(host, answer.port)] = None
-    if invalid_scopes:
-        log.warning('Skipped %s wireless IPv6 routes without a unique local interface index.', invalid_scopes)
-        if not endpoints:
-            raise BridgePrerequisiteError('wireless_remote_pairing_failed',
-                'Wireless services were advertised, but their IPv6 interfaces could not be resolved. '
-                'Check that the Windows network adapter is enabled; reconnect Wi-Fi and retry.')
-    if answers and not endpoints:
-        # PTR/SRV advertisements can arrive without their A/AAAA replies. This
-        # is an unresolved advertised service, rather than no service at all.
-        raise BridgePrerequisiteError('wireless_address_resolution_failed',
-            'Wireless services were advertised, but no usable addresses were resolved from mDNS. '
-            'Check LAN reachability and mDNS address replies, then retry.')
-    connected = []
 
     async def close(service):
         with contextlib.suppress(Exception):
             await asyncio.wait_for(service.close(), 2)
 
     async def connect(host, port):
-        # Reopen once after a transient peer/socket failure, using the original
-        # route budget and existing credentials. A cancelled or trust-rejected
-        # handshake is never a request to start pairing or to retry indefinitely.
-        deadline = asyncio.get_running_loop().time() + REMOTE_PAIRING_ROUTE_TIMEOUT_SECONDS
-        for attempt in range(2):
-            service = RemotePairingTunnelService(udid, host, port)
-            try:
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    raise TimeoutError('Wireless route verification timed out.')
-                await asyncio.wait_for(service.connect(autopair=False), remaining)
-                connected.append(service)
-                return service
-            except BaseException as error:
-                await close(service)
-                if (attempt or not isinstance(error, (ConnectionTerminatedError, OSError, ConnectionError))
-                        or deadline - asyncio.get_running_loop().time() <= REMOTE_PAIRING_ROUTE_RETRY_DELAY_SECONDS):
-                    raise
-                log.info('Wireless route handshake failed (%s); reopening once.', type(error).__name__)
-                await asyncio.sleep(REMOTE_PAIRING_ROUTE_RETRY_DELAY_SECONDS)
+        async with semaphore:
+            route_deadline = min(deadline, loop.time() + REMOTE_PAIRING_ROUTE_TIMEOUT_SECONDS)
+            for attempt in range(2):
+                service = RemotePairingTunnelService(udid, host, port)
+                try:
+                    remaining = route_deadline - loop.time()
+                    if remaining <= 0:
+                        raise TimeoutError('Wireless route verification timed out.')
+                    await asyncio.wait_for(service.connect(autopair=False), remaining)
+                    connected.append(service)
+                    if on_verified is not None:
+                        on_verified(service)
+                        transferred.add(id(service))
+                    return service
+                except BaseException as error:
+                    await close(service)
+                    if (attempt or not isinstance(error, (ConnectionTerminatedError, OSError, ConnectionError))
+                            or route_deadline - loop.time() <= REMOTE_PAIRING_ROUTE_RETRY_DELAY_SECONDS):
+                        raise
+                    await asyncio.sleep(REMOTE_PAIRING_ROUTE_RETRY_DELAY_SECONDS)
 
-    tasks = [asyncio.create_task(connect(host, port)) for host, port in endpoints]
-    results = []
+    def update(answers):
+        nonlocal advertised, resolved, invalid_scopes
+        advertised |= bool(answers)
+        for answer in answers:
+            for address in answer.addresses:
+                try:
+                    hosts = _remote_pairing_route_hosts(address.full_ip, answer.addresses, adapters)
+                except (OSError, ValueError):
+                    invalid_scopes = True
+                    continue  # a later IPv4 reply can disambiguate an IPv6 scope
+                for host in hosts:
+                    resolved = True
+                    endpoint = (host, answer.port)
+                    if endpoint not in tasks and len(tasks) < 128:
+                        tasks[endpoint] = asyncio.create_task(connect(*endpoint))
+
     try:
-        if tasks:
-            await asyncio.wait(tasks, timeout=REMOTE_PAIRING_ROUTE_TIMEOUT_SECONDS)
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        answers = await browse_remotepairing(timeout=bonjour_timeout, on_update=update)
+        update(answers)  # also supports batch-only discovery adapters
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        if not connected and advertised:
+            if not resolved:
+                if invalid_scopes:
+                    raise BridgePrerequisiteError('wireless_remote_pairing_failed',
+                        'Wireless IPv6 routes could not be resolved to a local interface.')
+                raise BridgePrerequisiteError('wireless_address_resolution_failed',
+                    'Wireless services were advertised but no usable scoped addresses were resolved.')
+            failures = [result for result in results if isinstance(result, BaseException)]
+            reasons = ', '.join(sorted({type(error).__name__ for error in failures}))
+            raise BridgePrerequisiteError('wireless_remote_pairing_failed',
+                f'{len(tasks)} advertised wireless routes could not verify the selected device; failures: {reasons}.') from (
+                    failures[0] if failures else None)
+        return connected
     except BaseException:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        await asyncio.gather(*(close(service) for service in connected))
+        for task in tasks.values():
+            task.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
+        await asyncio.gather(*(close(service) for service in connected if id(service) not in transferred))
         raise
-    if tasks and not connected:
-        # Broadcast discovery succeeded. Do not misreport failed pair verification
-        # or unreachable advertised addresses as an absence of mDNS services.
-        # Addresses may belong to another phone, so preserve error types without
-        # claiming this is definitely the selected device or exposing its data.
-        failures = [TimeoutError('Wireless route verification timed out.')
-                    if isinstance(result, asyncio.CancelledError) else result
-                    for result in results if isinstance(result, BaseException)]
-        reasons = ', '.join(sorted({type(error).__name__ for error in failures}))
-        raise BridgePrerequisiteError('wireless_remote_pairing_failed',
-            f'Found {len(tasks)} advertised wireless routes, but none verified for the selected device; '
-            f'handshake failures: {reasons}. Check LAN reachability and refresh pairing over USB.') from failures[0]
-    return connected
+
+
+class RemotePairingDiscovery:
+    """One discovery lifetime, a queue of verified routes, and explicit ownership."""
+    def __init__(self, udid):
+        self.udid = udid
+        self.queue = asyncio.Queue()
+        self.available = asyncio.Event()
+        self.services = []
+        self.closed = set()
+        self.task = None
+
+    def publish(self, service):
+        if any(service is existing for existing in self.services):
+            return
+        self.services.append(service)
+        self.queue.put_nowait(service)
+        self.available.set()
+
+    async def __aenter__(self):
+        async def produce():
+            try:
+                services = await get_remote_pairing_tunnel_services(
+                    bonjour_timeout=REMOTE_PAIRING_DISCOVERY_TIMEOUT_SECONDS,
+                    udid=self.udid, on_verified=self.publish)
+                for service in services:
+                    self.publish(service)
+            finally:
+                self.available.set()
+        self.task = asyncio.create_task(produce(), name='wireless-discovery')
+        return self
+
+    async def take(self):
+        while self.queue.empty():
+            if self.task.done():
+                await self.task
+                return None
+            self.available.clear()
+            await self.available.wait()
+        service = self.queue.get_nowait()
+        if self.queue.empty():
+            self.available.clear()
+        return service
+
+    async def close_service(self, service):
+        if id(service) not in self.closed:
+            self.closed.add(id(service))
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(service.close(), 2)
+
+    async def stop(self, keep=None):
+        if self.task is not None:
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+        await asyncio.gather(*(self.close_service(service) for service in self.services if service is not keep))
+
+    async def __aexit__(self, *_):
+        await self.stop()
+
 
 APPLE_VENDOR_ID = 0x05AC
 INTERFACE_CLASS_VENDOR = 0xFF
@@ -492,8 +580,17 @@ KEYBOARD_MESSAGE_KIND = 'keyboard_batch'
 PASTE_TEXT_MESSAGE_KIND = 'paste_text'
 READ_CLIPBOARD_MESSAGE_KIND = 'read_clipboard'
 BUTTON_MESSAGE_KIND = 'button_event'
+GLOBE_BUTTON = (0x0C, 0x029D)
+HOME_BUTTON = (0x0C, 0x40)
+SHORTCUT_MODIFIER_LEAD_SECONDS = 0.06
+SHORTCUT_KEY_HOLD_SECONDS = 0.08
+SHORTCUT_MODIFIER_RELEASE_SECONDS = 0.02
+HOME_BUTTON_HOLD_SECONDS = 0.05
+HOME_BUTTON_RELEASE_SECONDS = 0.06
+HOME_COMMAND_SEPARATION_SECONDS = 0.5
+SHORTCUT_TIMING_DIAGNOSTICS = os.environ.get('IPHONE_MIRROR_SHORTCUT_TIMING_DIAGNOSTICS') == '1'
 
-BUTTON_STATES = frozenset(('down', 'up', 'canceled'))
+BUTTON_STATES = frozenset(('down', 'up', 'canceled', 'double_press'))
 LEGACY_UNIVERSAL_HID_SERVICE = 'com.apple.coredevice.hid.universalhid'
 LOCKDOWN_CONNECT_ATTEMPTS = 4
 LOCKDOWN_CONNECT_TIMEOUT_SECONDS = 15
@@ -503,6 +600,19 @@ CAPTURE_MUX_START_ATTEMPTS = 3
 CAPTURE_MUX_RETRY_DELAY_SECONDS = 0.75
 PASTEBOARD_POLL_INTERVAL_SECONDS = 0.8
 PASTEBOARD_POLL_MAX_BACKOFF_SECONDS = 8.0
+PASTEBOARD_RESTART_FAILURES = 3
+PASTEBOARD_RESTART_COOLDOWN_SECONDS = 60.0
+PASTEBOARD_RESTART_TIMEOUT_SECONDS = 6.0
+PASTEBOARD_RESTART_CONNECT_WINDOW_SECONDS = 12.0
+# Deadlines include queueing and recovery. The host waits 35 seconds, leaving
+# room for a 30-second bridge request to finish cancellation and reply. Only
+# a confirmed failure is retried; the Windows clipboard is retained meanwhile.
+PASTEBOARD_FULL_READ_TIMEOUT_SECONDS = 18.0
+PASTEBOARD_READ_TIMEOUT_SECONDS = 25.0
+PASTEBOARD_REQUEST_TIMEOUT_SECONDS = 30.0
+PASTEBOARD_RESOURCE_CHECK_CONNECTIONS = 16
+PASTEBOARD_RESOURCE_FILE_TABLE_LIMIT = 128
+PASTEBOARD_RESOURCE_MIN_LIFETIME_SECONDS = 10.0
 # PasteboardService is a best-effort side channel.  It must never be allowed
 # to stall the HID input reader when iOS or the Windows clipboard companion is
 # busy (for example while Win+Shift+S is committing a screenshot).
@@ -527,12 +637,16 @@ PASTEBOARD_WRITE_QUEUE_TIMEOUT_SECONDS = 20.0
 # freezes the host-side coalescing loop and is visible as a periodic pointer
 # stall. Lifecycle and keyboard operations retain their longer timeout below.
 HID_OPERATION_TIMEOUT_SECONDS = 3.0
+# A valid reply can arrive after a queued reader plus several seconds of
+# wireless delay. Keep writes/motion bounded separately; a slow PING alone
+# must not tear down a connection that is still returning valid replies.
+HID_PING_TIMEOUT_SECONDS = 8.0
 HID_TOUCH_MOTION_TIMEOUT_SECONDS = 0.35
 HID_CLEANUP_TIMEOUT_SECONDS = 2.0
 # iOS can revoke Universal HID without warning even while the USB mirror is
 # healthy, including media-auth sessions used by Cryptex. Refresh only HID on
 # the existing RSD tunnel, keeping any media authentication gate alive.
-DIRECT_HID_ROTATION_SECONDS = 180
+DIRECT_HID_ROTATION_SECONDS = 150
 # An idle HID can fail without ending the tunnel reader. Two small PINGs per
 # second bound that detection delay without changing the round-trip timeout.
 HID_HEALTH_INTERVAL_SECONDS = 0.5
@@ -598,11 +712,97 @@ HID_SERVICE_REGISTRATION_RETRY_SECONDS = 1
 KEYBOARD_SURFACE_CONNECTED = 512
 REMOTE_PAIRING_PROVISION_TIMEOUT_SECONDS = 30
 REMOTE_PAIRING_DISCOVERY_TIMEOUT_SECONDS = 15
-REMOTE_PAIRING_DISCOVERY_GRACE_SECONDS = 12
+WIRELESS_ROUTE_STALL_SECONDS = 5.0
+
+
+def _notes_pasteboard_text(raw) -> Optional[str]:
+    """Decode Notes' inline ICNotePasteboardData without resolving rich alternatives.
+
+    The archive wraps an attributed-string protobuf whose field 2 is the full
+    UTF-8 string. Only traverse the expected archive references; never unarchive
+    Objective-C objects or follow the persister's file URLs/attachments.
+    """
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) > 4 * 1024 * 1024:
+        return None
+    try:
+        archive = plistlib.loads(raw)
+        if archive.get('$archiver') != 'NSKeyedArchiver':
+            return None
+        objects = archive['$objects']
+
+        def resolve(uid):
+            if not isinstance(uid, plistlib.UID) or not 0 <= uid.data < len(objects):
+                raise ValueError('invalid archive reference')
+            return objects[uid.data]
+
+        root = resolve(archive['$top']['root'])
+        if resolve(root['$class']).get('$classname') != 'ICNotePasteboardData':
+            return None
+        payload = resolve(root['attributedStringData'])['NS.data']
+        if not isinstance(payload, bytes):
+            return None
+        offset = 0
+        text = None
+
+        def varint():
+            nonlocal offset
+            value = 0
+            for shift in range(0, 70, 7):
+                byte = payload[offset]
+                offset += 1
+                value |= (byte & 0x7f) << shift
+                if not byte & 0x80:
+                    if value > 0xffffffffffffffff:
+                        raise ValueError('oversized varint')
+                    return value
+            raise ValueError('unterminated varint')
+
+        while offset < len(payload):
+            tag = varint()
+            field, wire = tag >> 3, tag & 7
+            if field == 0 or (field == 2 and wire != 2):
+                return None
+            if wire == 0:
+                varint()
+                continue
+            if wire == 2:
+                size = varint()
+            elif wire in (1, 5):
+                size = 8 if wire == 1 else 4
+            else:
+                return None
+            end = offset + size
+            if end > len(payload):
+                return None
+            if field == 2:
+                if text is not None:
+                    return None
+                text = payload[offset:end].decode('utf-8')
+            offset = end
+        return text
+    except (ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError,
+            plistlib.InvalidFileException):
+        return None
+
+
+def _validate_pasteboard_reply(reply, command: str) -> None:
+    # The SDK returns raw error replies without raising. Do not cache a failed
+    # PULL as empty, or send Command+V after a rejected SET. Never include the
+    # raw reply in exceptions: it can contain clipboard contents.
+    if (not isinstance(reply, dict) or reply.get('error') is not None or
+            reply.get('command', command) != command):
+        raise RuntimeError('device pasteboard request failed: invalid or error reply')
+    if command == 'PULL_REPLY':
+        board = reply.get('pasteboard', reply)
+        if (not isinstance(board, dict) or
+                (board.get('items') is not None and not isinstance(board['items'], list)) or
+                any(not isinstance(item, dict) for item in board.get('items') or [])):
+            raise RuntimeError('device pasteboard request failed: invalid snapshot reply')
 
 
 def _pasteboard_snapshot_text(snapshot: dict) -> tuple[Optional[str], bool]:
     """Read inline text, and distinguish promised text from an empty board."""
+    _validate_pasteboard_reply(snapshot, 'PULL_REPLY')
     representations = (
         ('public.utf8-plain-text', 'utf-8'),
         ('public.utf16-plain-text', 'utf-16'),
@@ -634,7 +834,31 @@ def _pasteboard_snapshot_text(snapshot: dict) -> tuple[Optional[str], bool]:
             try:
                 return raw.decode(encoding), False
             except UnicodeDecodeError:
-                continue
+                unresolved = True
+        # Notes offers its native archive first and promises plain text. Asking
+        # dtpasteboardd for allResolved also loads HTML/WebArchive conversions;
+        # on affected devices that stalls this and subsequent pasteboard reads.
+        # Prefer the complete string already present in the native archive.
+        notes = data.get('com.apple.notes.richtext')
+        if isinstance(notes, dict):
+            text = _notes_pasteboard_text(notes.get('data'))
+            if text is not None:
+                return text, False
+        text = inline_rich_text(data)
+        if text is not None:
+            return text, False
+    if unresolved:
+        # Representation state only: never retain copied bytes or markup.
+        states = []
+        for item in board.get('items', []) or []:
+            for uti, _ in representations:
+                datum = (item.get('data') or {}).get(uti)
+                if isinstance(datum, dict):
+                    raw = datum.get('data')
+                    states.append((uti, type(raw).__name__,
+                                   len(raw) if isinstance(raw, (bytes, bytearray, str)) else None,
+                                   datum.get('isPromised'), datum.get('isAvailable')))
+        log.info('pasteboard_text_pending representations=%s', states)
     return None, unresolved
 
 
@@ -1917,6 +2141,34 @@ class LegacyUniversalHIDServiceService(UniversalHIDServiceService):
         })
 
 
+class PasteboardRecoveryHub(DtxServiceProvider):
+    SERVICE_NAME = 'com.apple.instruments.dtservicehub'
+    RSD_SERVICE_NAME = SERVICE_NAME
+
+    async def connect(self):
+        if self._dtx is not None:
+            return
+        # The SDK assigns _dtx only after its handshake, and its exception
+        # handler omits CancelledError. Retain ownership before that await so
+        # our bounded recovery can always close a timed-out handshake.
+        self._dtx = await self._open_dtx_connection(self._service_name, strip_ssl=self._strip_ssl)
+        self._dtx.sent_capabilities = self.sent_capabilities
+        await self._dtx.connect()
+
+    async def close(self):
+        # This SDK feeds EOF to its StreamReader before closing the transport.
+        # Proactor can still deliver a queued sysmon sample in that interval,
+        # triggering "feed_data after feed_eof". Stop reads on our own channel
+        # before the SDK drains/shuts it down; leave the shared RSD untouched.
+        if self._owns_dtx and self._dtx is not None:
+            writer = getattr(self._dtx, '_writer', None)
+            transport = getattr(writer, 'transport', None)
+            if transport is not None:
+                with contextlib.suppress(Exception):
+                    transport.pause_reading()
+        await super().close()
+
+
 def decode_touch_batch(message: dict) -> tuple[int, Optional[int], list[dict]]:
     """Validate and normalize one application-layer touch message."""
     if not isinstance(message, dict) or message.get('schema') != MESSAGE_SCHEMA:
@@ -1995,6 +2247,8 @@ def decode_button_event(message: dict) -> tuple[int, int, int, str]:
         raise ValueError('button sequence and usages must be non-negative integers')
     if page > 0xFFFF or code > 0xFFFF or state not in BUTTON_STATES:
         raise ValueError('invalid button usage or state')
+    if state == 'double_press' and (page, code) != HOME_BUTTON:
+        raise ValueError('double press is only supported for Home')
     return sequence, page, code, state
 
 
@@ -2224,6 +2478,11 @@ class TouchSession:
         self.hid: Optional[UniversalHIDServiceService] = None
         self.indigo: Optional[IndigoHIDService] = None
         self._held_buttons: set[tuple[int, int]] = set()
+        self._button_sent_at: dict[tuple[int, int], float] = {}
+        self._home_released_at: Optional[float] = None
+        self._home_double_released_at: Optional[float] = None
+        self._globe_letter_sent_at: Optional[float] = None
+        self._globe_letter_released_at: Optional[float] = None
         self._active_touch_ids: set[int] = set()
         self._touch_keepalive_contacts: tuple[tuple[int, int, int, int], ...] = ()
         self._touch_report_sent_at = 0.0
@@ -2253,9 +2512,24 @@ class TouchSession:
         self._usb_mux_resume = None
         self._pasteboard_lock = asyncio.Lock()
         self._pasteboard_service = None
+        self._pasteboard_retiring_service = None
+        self._pasteboard_resource_rsd = None
+        self._pasteboard_resource_monitor = PasteboardResourceMonitor()
+        self._pasteboard_accepts = 0
+        self._pasteboard_resource_last_check = -PASTEBOARD_RESOURCE_CHECK_CONNECTIONS
+        self._pasteboard_resource_started = 0.0
         self._pasteboard_refresh_required = False
+        self._pasteboard_restart_after = 0.0
+        self._pasteboard_restarted_at = None
+        self._pasteboard_restart_read_serial = None
+        self._pasteboard_full_read_task = None
+        self._pasteboard_full_read_serial = 0
+        self._pasteboard_full_read_interrupted = False
+        self._pasteboard_cached_change = None
+        self._pasteboard_cached_text = None
         self._pasteboard_rsd = None
         self._pasteboard_last_text = object()
+        self._pasteboard_last_change_count = None
         self._pasteboard_unconfirmed_writes: set[str] = set()
         self._pasteboard_write_generation = 0
         self._pasteboard_writers_waiting = 0
@@ -2263,6 +2537,7 @@ class TouchSession:
         self._pasteboard_writes_idle.set()
         self._pasteboard_operation_id = 0
         self._pasteboard_read_id = 0
+        self._pasteboard_publishing_read_id = None
         self._pasteboard_publish_lock = asyncio.Lock()
         self._paste_sequence_lock = asyncio.Lock()
         self._keyboard_lock = asyncio.Lock()
@@ -2624,40 +2899,19 @@ class TouchSession:
 
     async def connect(self) -> None:
         await self._emit_status('connecting_device')
-        connection_type = 'Network' if self.transport_mode == 'wireless' else 'USB'
-        await self._start_capture_mux()
-        # Never fall back to a cable here.  The caller selected wireless
-        # control explicitly, and reporting a ready session over USB would
-        # make the UI claim that a network control path is working.
-        try:
-            lockdown = await asyncio.wait_for(self._create_initial_lockdown(connection_type), 15)
-        except BridgePrerequisiteError as error:
-            if self.transport_mode != 'wireless' or error.code != 'apple_device_connection_timeout':
-                raise
-            await self._connect_via_remote_pairing()
+        if self.transport_mode == 'wireless':
+            await self._connect_wireless()
             return
+        await self._start_capture_mux()
+        try:
+            lockdown = await asyncio.wait_for(self._create_initial_lockdown('USB'), 15)
         except (ConnectionFailedToUsbmuxdError, ConnectionFailedError,
                 ConnectionTerminatedError, MuxException, OSError) as error:
-            if self.transport_mode != 'wireless':
-                if isinstance(error, TimeoutError):
-                    raise BridgePrerequisiteError('apple_device_connection_timeout',
-                                                  'Connecting to the selected Apple device timed out.') from error
-                raise
-            # RemotePairing has its own saved credentials and mDNS discovery;
-            # it does not require Apple's Network usbmux service to be running.
-            await self._connect_via_remote_pairing()
-            return
+            if isinstance(error, TimeoutError):
+                raise BridgePrerequisiteError('apple_device_connection_timeout',
+                                              'Connecting to the selected Apple device timed out.') from error
+            raise
         except DeviceNotFoundError as discovery_error:
-            if self.transport_mode == 'wireless':
-                # Wi-Fi Sync only gives us a legacy Network usbmux record. On
-                # current iOS releases the supported wireless CoreDevice route is
-                # RemotePairing over mDNS, so try it when that legacy record is
-                # absent instead of silently changing to the USB path.
-                await self._connect_via_remote_pairing()
-                return
-            # Apple usbmuxd lost the device while the wired mirror holds the
-            # QuickTime configuration. Attach our own usbmux to the active
-            # mirroring configuration before declaring the device missing.
             lockdown = await self._recover_lockdown_via_capture_mux(discovery_error)
         try:
             await self._connect_with_ddi_recovery(lockdown)
@@ -2666,6 +2920,94 @@ class TouchSession:
             # Always close it, including failures before start_tunnel enters.
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(lockdown.close(), 2)
+
+    async def _connect_wireless(self):
+        """Race discovery against Network lookup; only one path initializes HID."""
+        try:
+            identifier = self._remote_pairing_identifier()
+        except BridgePrerequisiteError:
+            identifier = None  # Network can still work without RemotePairing credentials.
+        discovery = RemotePairingDiscovery(identifier) if identifier else None
+        network = asyncio.create_task(asyncio.wait_for(self._create_initial_lockdown('Network'), 15))
+        candidate = None
+        lockdown = None
+        remote_error = None
+        closed_clients = set()
+        self._wireless_ready_deadline = None
+        async def close_client(client):
+            if client is not None and id(client) not in closed_clients:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(client.close(), 2)
+                closed_clients.add(id(client))
+        async def retire_unused_network():
+            await self._session_ready.wait()
+            if getattr(self, '_wireless_selected', None) is not None:
+                network.cancel()
+                result = (await asyncio.gather(network, return_exceptions=True))[0]
+                if not isinstance(result, BaseException):
+                    await close_client(result)
+        retirement = asyncio.create_task(retire_unused_network())
+        try:
+            if discovery is not None:
+                await discovery.__aenter__()
+                self._wireless_discovery = discovery
+                # Observe availability without consuming the first candidate.
+                candidate = asyncio.create_task(discovery.available.wait())
+                while True:
+                    done, _ = await asyncio.wait((network, candidate), return_when=asyncio.FIRST_COMPLETED)
+                    if not discovery.queue.empty():
+                        generation = self._generation
+                        try:
+                            await self._connect_via_remote_pairing()
+                            return
+                        except BridgePrerequisiteError as error:
+                            if (self._generation != generation or self._recovering or error.code not in {
+                                    'wireless_remote_pairing_failed', 'wireless_device_not_discoverable',
+                                    'wireless_discovery_unavailable', 'wireless_address_resolution_failed',
+                                    'control_service_start_timeout', 'apple_connection_lost'}):
+                                raise
+                            remote_error = error
+                            break
+                    if network in done:
+                        break
+                    # Discovery may end with no candidates or a local error;
+                    # allow the independent Network lookup to complete.
+                    if discovery.task.done():
+                        break
+                    discovery.available.clear()
+                    candidate = asyncio.create_task(discovery.available.wait())
+            try:
+                lockdown = await network
+            except (ConnectionFailedToUsbmuxdError, ConnectionFailedError,
+                    ConnectionTerminatedError, MuxException, OSError, DeviceNotFoundError):
+                if remote_error is not None:
+                    raise remote_error
+                await self._connect_via_remote_pairing()
+                return
+            except BridgePrerequisiteError as error:
+                if error.code != 'apple_device_connection_timeout':
+                    raise
+                if remote_error is not None:
+                    raise remote_error
+                await self._connect_via_remote_pairing()
+                return
+            self._wireless_selected = None
+            await self._connect_with_ddi_recovery(lockdown)
+        finally:
+            retirement.cancel()
+            await asyncio.gather(retirement, return_exceptions=True)
+            if candidate is not None:
+                candidate.cancel()
+                await asyncio.gather(candidate, return_exceptions=True)
+            network.cancel()
+            result = (await asyncio.gather(network, return_exceptions=True))[0]
+            # A lookup can finish in the same turn that the RemotePairing path
+            # wins. Close that unused client too, exactly once.
+            client = lockdown if lockdown is not None else (None if isinstance(result, BaseException) else result)
+            await close_client(client)
+            if discovery is not None:
+                await discovery.stop()
+            self._wireless_discovery = None
 
     async def _create_initial_lockdown(self, connection_type: str):
         try:
@@ -2754,6 +3096,13 @@ class TouchSession:
             # its actual HID probe fails, prepare over the exact USB device
             # once, then build a new wireless RSD service snapshot.
             await self._prepare_ddi_for_remote_pairing()
+            self._wireless_ready_deadline = None
+            # Pairing sockets collected before an image refresh may carry
+            # stale service state. A later fallback owns a fresh discovery.
+            previous_discovery = getattr(self, '_wireless_discovery', None)
+            if previous_discovery is not None:
+                await previous_discovery.stop()
+                self._wireless_discovery = None
         elif not self._ddi_uses_cryptex and self._ddi_was_mounted and not self._ddi_refresh_attempted:
             self._ddi_refresh_attempted = True
             await self._refresh_personalized_ddi(lockdown)
@@ -2781,111 +3130,92 @@ class TouchSession:
         if last_error is not None:
             raise last_error
 
-    async def _connect_via_remote_pairing(self, allow_ddi_recovery: bool = True) -> None:
-        """Use RemotePairing when usbmux cannot provide a CoreDevice tunnel."""
+    def _remote_pairing_identifier(self):
         if not self.udid:
-            raise BridgePrerequisiteError(
-                'wireless_remote_pairing_required',
-                'Wireless CoreDevice control requires a known Apple UDID and a USB provisioning pass.',
-            )
+            raise BridgePrerequisiteError('wireless_remote_pairing_required',
+                                          'Wireless control requires a known device and saved pairing record.')
         try:
-            # The public discovery helper compares the requested identifier
-            # byte-for-byte with the pair-record filename.  Keep the exact
-            # stored spelling for that call while accepting the casing used by
-            # Apple device discovery and the WPF host.
-            remote_records = {
-                identifier.replace('-', '').casefold(): identifier
-                for identifier in iter_remote_paired_identifiers()
-            }
+            for identifier in iter_remote_paired_identifiers():
+                if _udid_matches(identifier, self.udid):
+                    return identifier
         except Exception as error:
-            raise BridgePrerequisiteError(
-                'wireless_remote_pairing_failed',
-                f'Unable to inspect local RemotePairing records: {type(error).__name__}: {str(error)[:180]}',
-            ) from error
-        paired_identifier = remote_records.get(self.udid.replace('-', '').casefold())
-        if paired_identifier is None:
-            raise BridgePrerequisiteError(
-                'wireless_remote_pairing_required',
-                'This PC has no RemotePairing record for the device. Connect it by USB once, unlock it, '
-                'and let the bridge finish wireless provisioning before using wireless control.',
-            )
+            raise BridgePrerequisiteError('wireless_remote_pairing_failed',
+                                          'Unable to read saved RemotePairing records.') from error
+        raise BridgePrerequisiteError('wireless_remote_pairing_required',
+                                      'Connect this device over USB once to provision RemotePairing.')
 
+    async def _connect_via_remote_pairing(self, allow_ddi_recovery: bool = True) -> None:
+        discovery = getattr(self, '_wireless_discovery', None)
+        if discovery is not None:
+            return await self._consume_remote_pairing(discovery, allow_ddi_recovery)
+        async with RemotePairingDiscovery(self._remote_pairing_identifier()) as discovery:
+            self._wireless_discovery = discovery
+            try:
+                await self._consume_remote_pairing(discovery, allow_ddi_recovery)
+            finally:
+                self._wireless_discovery = None
+
+    async def _consume_remote_pairing(self, discovery, allow_ddi_recovery):
         await self._emit_status('discovering_wireless_device')
-        try:
-            pairing_services = await asyncio.wait_for(
-                get_remote_pairing_tunnel_services(
-                    bonjour_timeout=REMOTE_PAIRING_DISCOVERY_TIMEOUT_SECONDS,
-                    udid=paired_identifier,
-                ),
-                timeout=(REMOTE_PAIRING_DISCOVERY_TIMEOUT_SECONDS +
-                         REMOTE_PAIRING_DISCOVERY_GRACE_SECONDS),
-            )
-        except asyncio.TimeoutError as error:
-            raise BridgePrerequisiteError(
-                'wireless_device_not_discoverable',
-                'RemotePairing discovery timed out. Keep the iPhone unlocked on the same LAN and allow mDNS '
-                'through the Windows firewall.',
-            ) from error
-        except BridgePrerequisiteError:
-            raise  # keep verified discovery/handshake diagnostics and their cause
-        except MdnsDiscoveryError as error:
-            raise BridgePrerequisiteError('wireless_discovery_unavailable', str(error)) from error
-        except Exception as error:
-            raise BridgePrerequisiteError(
-                'wireless_remote_pairing_failed',
-                f'RemotePairing discovery failed: {type(error).__name__}: {str(error)[:180]}',
-            ) from error
-        if not pairing_services:
-            raise BridgePrerequisiteError(
-                'wireless_device_not_discoverable',
-                'No RemotePairing service was discovered. Keep the iPhone unlocked on the same LAN and allow '
-                'mDNS through the Windows firewall.',
-            )
-
-        needs_ddi_recovery = False
-        try:
-            last_error = None
-            for index, selected in enumerate(pairing_services):
-                self._session_ready.clear()
-                self._hid_transport_failed = False
-                generation = self._generation
-                async def connect_remote():
-                    async with self._bounded_tunnel(selected) as tunnel_result:
-                        await self._run_observed_tunnel(tunnel_result)
-                        if self._hid_transport_failed:
-                            raise BridgePrerequisiteError('apple_connection_lost',
-                                                          'The RemotePairing control transport disconnected.')
-                try:
-                    await self._run_until_ready(connect_remote())
-                    return
-                except Exception as error:
-                    # After readiness, the host owns rediscovery and generation
-                    # changes. Only startup failures may try another LAN route.
-                    if self._generation != generation or self._recovering:
-                        raise
-                    if isinstance(error, BridgePrerequisiteError) and error.code not in {
-                            'touch_surface_unavailable', 'control_service_start_timeout',
-                            'apple_connection_lost', 'wireless_remote_pairing_failed'}:
-                        raise
-                    needs_ddi_recovery |= isinstance(error, BridgePrerequisiteError) and error.code == 'touch_surface_unavailable'
-                    last_error = error
-                    if index + 1 < len(pairing_services):
-                        await self.ipc.emit({'event': 'warning', 'code': 'wireless_route_retry',
-                            'message': f'Wireless route {index + 1} failed; trying the next discovered address.'})
-            if not needs_ddi_recovery or not allow_ddi_recovery or self._wireless_ddi_prepared:
-                if isinstance(last_error, BridgePrerequisiteError):
-                    raise last_error
-                raise BridgePrerequisiteError('wireless_remote_pairing_failed',
-                                              'All discovered wireless control routes failed.') from last_error
-        finally:
-            for service in pairing_services:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(service.close(), 2)
-        if needs_ddi_recovery:
+        last_error, needs_ddi_recovery = None, False
+        while True:
+            try:
+                deadline = getattr(self, '_wireless_ready_deadline', None)
+                remaining = None if deadline is None else max(0, deadline - asyncio.get_running_loop().time())
+                selected = await asyncio.wait_for(discovery.take(), remaining)
+            except TimeoutError as error:
+                raise BridgePrerequisiteError('control_service_start_timeout',
+                                              'Wireless startup exceeded its readiness deadline.') from error
+            except MdnsDiscoveryError as error:
+                raise BridgePrerequisiteError('wireless_discovery_unavailable', str(error)) from error
+            if selected is None:
+                break
+            self._session_ready.clear()
+            self._hid_transport_failed = False
+            self._wireless_selected = selected
+            generation = self._generation
+            async def connect_remote():
+                async with self._bounded_tunnel(selected) as result:
+                    await self._run_observed_tunnel(result)
+                    if self._hid_transport_failed:
+                        raise BridgePrerequisiteError('apple_connection_lost',
+                                                      'Wireless control transport disconnected.')
+            try:
+                await self._run_until_ready(connect_remote())
+                return
+            except Exception as error:
+                if self._generation != generation or self._recovering:
+                    raise
+                if isinstance(error, BridgePrerequisiteError) and error.code not in {
+                        'touch_surface_unavailable', 'control_service_start_timeout',
+                        'apple_connection_lost', 'wireless_remote_pairing_failed'}:
+                    raise
+                needs_ddi_recovery |= isinstance(error, BridgePrerequisiteError) and error.code == 'touch_surface_unavailable'
+                last_error = error
+                await self.ipc.emit({'event': 'warning', 'code': 'wireless_route_retry',
+                                     'message': 'Wireless route failed; waiting for another discovered address.'})
+            finally:
+                await discovery.close_service(selected)
+                self._wireless_selected = None
+        if needs_ddi_recovery and allow_ddi_recovery and not self._wireless_ddi_prepared:
+            await discovery.stop()
             await self._prepare_ddi_for_remote_pairing()
-            # RSD's service inventory is a snapshot. Rediscover and rebuild
-            # the wireless tunnel after changing the device image.
-            await self._connect_via_remote_pairing(allow_ddi_recovery=False)
+            self._wireless_ready_deadline = None
+            # The image changed: old RSD inventories and verified sockets are stale.
+            async with RemotePairingDiscovery(self._remote_pairing_identifier()) as fresh:
+                self._wireless_discovery = fresh
+                try:
+                    await self._consume_remote_pairing(fresh, False)
+                finally:
+                    self._wireless_discovery = discovery
+            return
+        if isinstance(last_error, BridgePrerequisiteError):
+            raise last_error
+        if last_error is not None:
+            raise BridgePrerequisiteError('wireless_remote_pairing_failed',
+                                          'All discovered control routes failed.') from last_error
+        raise BridgePrerequisiteError('wireless_device_not_discoverable',
+                                      'No RemotePairing service was discovered for the selected device.')
 
     async def _prepare_ddi_for_remote_pairing(self) -> None:
         # Network and RemotePairing fallback share one startup. A completed
@@ -3367,6 +3697,9 @@ class TouchSession:
     async def _verify_touch_surface(self, hid) -> None:
         """Require the real mainTouchscreen surface before reporting ready."""
         surfaces = await asyncio.wait_for(hid.list_connected_services(), 8)
+        inventory = os.environ.get('IPHONE_MIRROR_HID_INVENTORY')
+        if inventory:
+            Path(inventory).write_text(json.dumps(surfaces, default=lambda v: v.hex() if isinstance(v, bytes) else str(v), indent=2))
         ids = self._connected_service_ids(surfaces)
         log.info('service=%s surfaces=%s', hid.SERVICE_NAME, sorted(ids))
         # iOS publishes a keyboard surface on some DDIs (service 512). In
@@ -3537,8 +3870,8 @@ class TouchSession:
                 'message': 'Network CoreDevice tunnel failed before readiness; trying RemotePairing.'})
             fallback_remote = True
         if fallback_remote:
-            # RemotePairing owns its own readiness deadline. Its discovery and
-            # optional DDI refresh must not consume the previous tunnel's 45s.
+            # Continue with the same discovery and startup deadline. A genuine
+            # DDI refresh explicitly starts a new readiness budget.
             await self._connect_via_remote_pairing()
 
     @contextlib.asynccontextmanager
@@ -3570,17 +3903,43 @@ class TouchSession:
                     except Exception as error:
                         log.warning('Tunnel stack cleanup failed: %s', type(error).__name__)
 
-    async def _run_until_ready(self, operation):
+    async def _run_until_ready(self, operation, *, timeout=None):
+        loop = asyncio.get_running_loop()
+        limit = HID_RECOVERY_READY_TIMEOUT_SECONDS if timeout is None else timeout
+        deadline = loop.time() + limit
+        discovery = getattr(self, '_wireless_discovery', None)
+        if self.transport_mode == 'wireless':
+            saved = getattr(self, '_wireless_ready_deadline', None)
+            if saved is None:
+                self._wireless_ready_deadline = deadline
+            else:
+                deadline = min(deadline, saved)
+        self._wireless_connect_phase = ('transport', loop.time())
         task = asyncio.create_task(operation, name='hid-transport-session')
         ready = asyncio.create_task(self._session_ready.wait())
         try:
-            done, _ = await asyncio.wait(
-                (task, ready), timeout=HID_RECOVERY_READY_TIMEOUT_SECONDS,
-                return_when=asyncio.FIRST_COMPLETED)
-            if not done:
-                raise BridgePrerequisiteError('control_service_start_timeout',
-                                              'CoreDevice/RSD/HID did not become ready in time.')
-            await task  # the session may run indefinitely AFTER real readiness
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise BridgePrerequisiteError('control_service_start_timeout',
+                                                  'CoreDevice/RSD/HID did not become ready in time.')
+                done, _ = await asyncio.wait((task, ready), timeout=min(remaining, .1),
+                                            return_when=asyncio.FIRST_COMPLETED)
+                if ready in done or self._session_ready.is_set():
+                    # Once HID is ready the session has no startup deadline.
+                    if discovery is not None:
+                        await discovery.stop(keep=getattr(self, '_wireless_selected', None))
+                    await task
+                    return
+                if task in done:
+                    await task
+                    return
+                phase, progressed = self._wireless_connect_phase
+                if (discovery is not None and not discovery.queue.empty()
+                        and phase in ('transport', 'rsd')
+                        and loop.time() - progressed >= WIRELESS_ROUTE_STALL_SECONDS):
+                    raise BridgePrerequisiteError('control_service_start_timeout',
+                                                  'Wireless network stage stalled; trying a verified alternative.')
         finally:
             ready.cancel()
             task.cancel()
@@ -3684,6 +4043,7 @@ class TouchSession:
                 (tunnel_result.address, tunnel_result.port),
                 open_connection=self.dial_plane.dial,
             )
+            self._wireless_connect_phase = ('rsd', asyncio.get_running_loop().time())
             if self._recovering:
                 await self._recovery_event('rsd_reconnect_started')
             try:
@@ -3696,6 +4056,8 @@ class TouchSession:
                 if self._recovering:
                     await self._recovery_event('rsd_reconnect_failed', error)
                 raise
+            self._wireless_connect_phase = ('hid', asyncio.get_running_loop().time())
+            await self._prepare_pasteboard_resources()
             if self._recovering:
                 await self._recovery_event('hid_reinit_started')
             # HID reports are accepted only while the media-stream auth gate
@@ -4048,14 +4410,16 @@ class TouchSession:
         This device closes Universal HID on a second connectedServices request.
         HTTP/2 PING is acknowledged on the same live socket, does not alter HID
         state, and leaves XPC responses available for their original caller.
-        The caller holds _hid_lifecycle_lock throughout.
+        A caller either holds _hid_lifecycle_lock or pins the explicit service
+        and discards failures after a verified replacement. The request lock
+        owns response reads; one-way input writes can continue during a ping.
         """
         self._check_media_auth()
         service = (hid if hid is not None else self.hid).service
-        async with service._request_lock:
+        async with asyncio.timeout(HID_PING_TIMEOUT_SECONDS), service._request_lock:
             ping = PingFrame(0, opaque_data=os.urandom(8))
             service.writer.write(ping.serialize())
-            await asyncio.wait_for(service.writer.drain(), HID_OPERATION_TIMEOUT_SECONDS)
+            await service.writer.drain()
             async def receive_ack():
                 while True:
                     frame = await service._receive_frame()
@@ -4071,7 +4435,7 @@ class TouchSession:
                             service.writer.write(PingFrame(0, flags=['ACK'],
                                 opaque_data=frame.opaque_data).serialize())
                             await service.writer.drain()
-            await asyncio.wait_for(receive_ack(), HID_OPERATION_TIMEOUT_SECONDS)
+            await receive_ack()
         self._check_media_auth()
 
     async def _drain(self) -> None:
@@ -4106,28 +4470,32 @@ class TouchSession:
             result = {'event': 'clipboard_result', 'requestId': request_id,
                       'generation': generation, 'success': False}
             try:
-                kind = frame['kind']
-                text = frame.get('text')
-                if kind != READ_CLIPBOARD_MESSAGE_KIND and (
-                        not isinstance(text, str) or len(text.encode('utf-8')) > 65536):
-                    raise ValueError('invalid automation text')
-                if kind == READ_CLIPBOARD_MESSAGE_KIND:
-                    # Dedicated response: do not publish this read into the
-                    # Windows clipboard synchronization event stream.
-                    async with self._pasteboard_publish_lock:
-                        await self._pasteboard_writes_idle.wait()
-                        value = await self._read_device_pasteboard()
-                    result['text'] = value if isinstance(value, str) else ''
-                elif kind == 'write_clipboard':
-                    await self._write_device_pasteboard(text)
-                else:
-                    async with self._paste_sequence_lock:
-                        if generation != self._generation or self._recovering:
-                            raise RuntimeError('Paste belongs to a previous input generation.')
-                        await self._apply_paste_text(text)
-                result['success'] = generation == self._generation and not self._recovering
-                if not result['success']:
-                    result['code'] = 'DEVICE_NOT_CONNECTED'
+                async with asyncio.timeout(PASTEBOARD_REQUEST_TIMEOUT_SECONDS):
+                    kind = frame['kind']
+                    text = frame.get('text')
+                    if kind != READ_CLIPBOARD_MESSAGE_KIND and (
+                            not isinstance(text, str) or len(text.encode('utf-8')) > 65536):
+                        raise ValueError('invalid automation text')
+                    if kind == READ_CLIPBOARD_MESSAGE_KIND:
+                        # Dedicated response: do not publish this read into the
+                        # Windows clipboard synchronization event stream.
+                        async with self._pasteboard_publish_lock:
+                            await self._pasteboard_writes_idle.wait()
+                            value = await self._read_device_pasteboard()
+                        result['text'] = value if isinstance(value, str) else ''
+                    elif kind == 'write_clipboard':
+                        await self._write_device_pasteboard(text)
+                    else:
+                        async with self._paste_sequence_lock:
+                            if generation != self._generation or self._recovering:
+                                raise RuntimeError('Paste belongs to a previous input generation.')
+                            await self._apply_paste_text(text)
+                    result['success'] = generation == self._generation and not self._recovering
+                    if not result['success']:
+                        result['code'] = 'DEVICE_NOT_CONNECTED'
+            except TimeoutError:
+                result['code'] = 'CLIPBOARD_UNAVAILABLE'
+                log.warning('pasteboard_request_deadline kind=%s generation=%s', frame['kind'], generation)
             except asyncio.CancelledError:
                 result['code'] = 'INPUT_CANCELLED'
                 raise
@@ -4145,10 +4513,11 @@ class TouchSession:
 
         async def run_paste(text: str, generation: int) -> None:
             try:
-                async with self._paste_sequence_lock:
-                    if generation != self._generation or self._recovering:
-                        return
-                    await self._apply_paste_text(text)
+                async with asyncio.timeout(PASTEBOARD_REQUEST_TIMEOUT_SECONDS):
+                    async with self._paste_sequence_lock:
+                        if generation != self._generation or self._recovering:
+                            return
+                        await self._apply_paste_text(text)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -4236,7 +4605,12 @@ class TouchSession:
                                 await self._apply_frame(sm, frame, points)
                             keyboard_release = (frame.get('kind') == KEYBOARD_MESSAGE_KIND
                                                 and not usages)
-                            if not self._input_verified or keyboard_release:
+                            # A round trip between a system-button down/up
+                            # stretches a click or Globe chord when the peer is
+                            # slow. Complete its physical releases first; the
+                            # first input still verifies at the release frame,
+                            # and ordinary keyboard releases keep their fence.
+                            if (not self._input_verified or keyboard_release) and not self._held_buttons:
                                 async with self._hid_lifecycle_lock:
                                     await self._ping_hid()
                                 self._input_verified = True
@@ -4321,37 +4695,62 @@ class TouchSession:
                 await self._recovery_event('hid_reinit_failed', refresh_error)
                 return False
 
+    def _button_pulse_in_progress(self) -> bool:
+        now = time.monotonic()
+        # The healthy path releases system buttons within a short pulse. Do
+        # not put a health round trip inside that pulse, but keep checking a
+        # button that has exceeded the normal operation budget.
+        return any(sent_at is not None and now - sent_at < HID_OPERATION_TIMEOUT_SECONDS
+                   for button in self._held_buttons
+                   for sent_at in (self._button_sent_at.get(button),))
+
     async def _request_direct_hid_rotation(self) -> None:
-        """Watch both transports; renew wired HID under either auth mode."""
+        """Watch both transports and renew idle HID under either auth mode."""
         refresh_due = time.monotonic() + DIRECT_HID_ROTATION_SECONDS
         try:
             while True:
                 await asyncio.sleep(HID_HEALTH_INTERVAL_SECONDS)
                 attempted_hid = self.hid
+                attempted_generation = self._generation
+                attempted_indigo = None
+                checking_indigo = False
                 try:
                     self._check_media_auth()
-                    if (self.transport_mode == 'usb' and self.auth_mode in ('direct', 'mediastream') and
+                    if (self.auth_mode in ('direct', 'mediastream') and
                             time.monotonic() >= refresh_due):
                         refreshed = await self._refresh_direct_hid(idle_only=True)
                         if refreshed is not False:
                             refresh_due = time.monotonic() + DIRECT_HID_ROTATION_SECONDS
-                        else:
-                            # A held key/contact must not be lifted by a healthy
-                            # lease refresh. Still check the old connection;
-                            # actual failure follows the normal repair path.
-                            async with self._hid_lifecycle_lock:
-                                attempted_hid = self.hid
-                                await self._ping_hid()
-                                await self._keep_touch_alive()
-                    else:
-                        # Round-trip on the active HID, also when input is idle.
-                        async with self._hid_lifecycle_lock:
-                            attempted_hid = self.hid
-                            await self._ping_hid()
+                            continue
+                    async with self._hid_lifecycle_lock:
+                        attempted_hid = self.hid
+                        attempted_generation = self._generation
+                        if self._button_pulse_in_progress():
+                            await self._keep_touch_alive()
+                            continue
+                    # A health round trip must not hold the input lifecycle
+                    # lock. Slow replies otherwise queue fresh presses and can
+                    # collapse host timing even though writes remain usable.
+                    await self._ping_hid(attempted_hid)
+                    async with self._hid_lifecycle_lock:
+                        current = (attempted_hid is self.hid and
+                                   attempted_generation == self._generation)
+                        if current and not self._button_pulse_in_progress():
+                            attempted_indigo = self.indigo
+                    if attempted_indigo is not None:
+                        checking_indigo = True
+                        await self._ping_hid(attempted_indigo)
+                    async with self._hid_lifecycle_lock:
+                        if attempted_hid is self.hid and attempted_generation == self._generation:
                             await self._keep_touch_alive()
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
+                    replaced = (attempted_generation != self._generation or
+                                (attempted_indigo is not self.indigo if checking_indigo
+                                 else attempted_hid is not self.hid))
+                    if replaced and self._session_ready.is_set():
+                        continue  # an old peer cannot invalidate verified new HID
                     log.warning('HID health/refresh failed: %s', error)
                     await self.ipc.emit({'event': 'warning', 'code': 'hid_health_failed',
                                          'message': f'{type(error).__name__}: {str(error)[:200]}'})
@@ -4385,7 +4784,14 @@ class TouchSession:
                         old_hid.SERVICE_NAME == LEGACY_UNIVERSAL_HID_SERVICE
                         else UniversalHIDServiceService)
             if self.indigo is not None:
+                previous_home_release = self._home_released_at
+                previous_double_release = self._home_double_released_at
                 await self._release_button_state()
+                if idle_only:
+                    # Healthy idle renewal changes sockets, not the device's
+                    # click history. Keep adjacent Home commands separated.
+                    self._home_released_at = previous_home_release
+                    self._home_double_released_at = previous_double_release
                 await self._close_remote_service(self.indigo, 'refresh_indigo')
                 self.indigo = None
             new_hid = hid_type(self.rsd)
@@ -4424,18 +4830,47 @@ class TouchSession:
         # Caller owns _pasteboard_lock, shared by reads and Windows -> iOS paste.
         # CoreDevice's dtpasteboardd permits one reply-bearing request per
         # RemoteXPC connection.  A service returned here is therefore owned by
-        # exactly one PULL or SET and must be closed by that operation.
+        # exactly one PULL or SET. A successful HTTP/2 handshake does not yet
+        # prove that the helper accepted the new client. Keep the old lease
+        # through the replacement's complete reply, avoiding an accept/close
+        # race in the original DDI's remote-service listener.
         if self.rsd is None:
             raise RuntimeError('pasteboard service is unavailable')
-        await self._close_device_pasteboard()
-        if self._pasteboard_refresh_required:
-            await self._refresh_pasteboard_endpoint()
-        self._pasteboard_operation_id += 1
-        operation_id = self._pasteboard_operation_id
-        self._pasteboard_service = PasteboardService(self.rsd)
-        self._pasteboard_rsd = self.rsd
+        previous, self._pasteboard_service = self._pasteboard_service, None
+        operation_id = self._pasteboard_operation_id + 1
         try:
-            await self._pasteboard_service.__aenter__()
+            for attempt in range(4):
+                try:
+                    if self._pasteboard_refresh_required:
+                        await self._refresh_pasteboard_endpoint()
+                    self._pasteboard_operation_id = operation_id
+                    self._pasteboard_accepts += 1
+                    self._pasteboard_service = PasteboardService(self.rsd)
+                    self._pasteboard_rsd = self.rsd
+                    await self._pasteboard_service.__aenter__()
+                    break
+                except Exception as error:
+                    self._pasteboard_refresh_required = True
+                    await self._close_device_pasteboard()
+                    # After a deliberate helper restart, launchd may briefly
+                    # advertise a port before accepting its new connections.
+                    # Retry only connection setup, within the caller's existing
+                    # deadline; no SET or HID chord has been dispatched yet.
+                    recent_restart = (self._pasteboard_restarted_at is not None and
+                                      time.monotonic() - self._pasteboard_restarted_at <
+                                      PASTEBOARD_RESTART_CONNECT_WINDOW_SECONDS)
+                    transient = isinstance(error, (TimeoutError, ConnectionError, OSError, EOFError,
+                                                   ConnectionTerminatedError))
+                    # A normal TCP/RSD connection can fail once even without a
+                    # helper restart. Reopen that setup once before failing the
+                    # whole read/write; requests and HID are still undispatched.
+                    if (not transient or attempt == 3 or (attempt > 0 and not recent_restart)):
+                        raise
+                    log.info('pasteboard_connect_retry op=%s attempt=%s recent_restart=%s error=%s',
+                             operation_id, attempt + 1, recent_restart, type(error).__name__)
+                    await asyncio.sleep(PASTEBOARD_RETRY_DELAY_SECONDS)
+            self._pasteboard_retiring_service = previous
+            previous = None
         except BaseException as error:
             # A restarted developer service can leave the original RSD service
             # catalogue pointing at a retired port. Retrying that same address
@@ -4446,10 +4881,18 @@ class TouchSession:
             log.warning('pasteboard_connect_failed op=%s generation=%s error=%s',
                         operation_id, self._generation, type(error).__name__)
             raise
+        finally:
+            if previous is not None:
+                await self._close_remote_service(previous, 'pasteboard_previous')
         log.info('pasteboard_connected op=%s generation=%s service=%s',
                  operation_id, self._generation,
                  getattr(self._pasteboard_service, 'service_name', 'unknown'))
         return self._pasteboard_service
+
+    async def _complete_device_pasteboard_request(self):
+        previous, self._pasteboard_retiring_service = self._pasteboard_retiring_service, None
+        if previous is not None and previous is not self._pasteboard_service:
+            await self._close_remote_service(previous, 'pasteboard_previous')
 
     async def _refresh_pasteboard_endpoint(self) -> None:
         rsd = self.rsd
@@ -4481,49 +4924,191 @@ class TouchSession:
 
     async def _close_device_pasteboard(self):
         service, self._pasteboard_service = self._pasteboard_service, None
+        previous, self._pasteboard_retiring_service = self._pasteboard_retiring_service, None
         self._pasteboard_rsd = None
         if service is not None:
             await self._close_remote_service(service, 'pasteboard')
+        if previous is not None and previous is not service:
+            await self._close_remote_service(previous, 'pasteboard_previous')
 
     async def _read_device_pasteboard(self):
+        # One budget for queueing, recovery, all connections and parsing. A
+        # failed diagnostic monitor must not restore the former 128-second wait.
+        async with asyncio.timeout(PASTEBOARD_READ_TIMEOUT_SECONDS):
+            return await self._read_device_pasteboard_once()
+
+    async def _read_device_pasteboard_once(self):
         # Foreground pastes own the next available turn. Every read uses a
         # fresh connection because dtpasteboardd rejects a second reply on one
         # connection; this also prevents a late reply from poisoning the next
         # request after cancellation.
         await self._pasteboard_writes_idle.wait()
+        await self._maintain_pasteboard_resources()
+        if self._pasteboard_full_read_interrupted:
+            # A transport recovery may have prevented shutdown from retiring
+            # its abandoned read. Clear it once the original device is live.
+            if not await self._restart_failed_pasteboard():
+                raise ConnectionError('device pasteboard helper recovery is pending')
         async with self._pasteboard_lock:
+            if self._pasteboard_publishing_read_id is not None:
+                # Queueing and helper maintenance can precede a new Windows
+                # copy. Rebase only before PULL starts; copies during PULL
+                # must still invalidate the eventual reply on the host.
+                await self.ipc.emit({'event': 'clipboard_read_started',
+                                     'readId': self._pasteboard_publishing_read_id})
+            completed = False
             async def read():
-                pasteboard = await self._get_device_pasteboard()
+                pasteboard = await asyncio.wait_for(self._get_device_pasteboard(),
+                                                    PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
                 if hasattr(pasteboard, 'get'):
-                    snapshot = await pasteboard.get(
-                        data_policy=POLICY_PROMISE_SECONDARY)
+                    snapshot = await asyncio.wait_for(pasteboard.get(
+                        data_policy=POLICY_PROMISE_SECONDARY), PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                    await self._complete_device_pasteboard_request()
+                    _validate_pasteboard_reply(snapshot, 'PULL_REPLY')
+                    board = snapshot.get('pasteboard', snapshot)
+                    metadata = board.get('metadata') or {}
+                    change = (metadata.get('nonce'), metadata.get('changeCount'))
+                    if not isinstance(change[0], str) or not isinstance(change[1], int):
+                        change = None
+                    log.info('pasteboard_snapshot op=%s identity=%s cached=%s',
+                             self._pasteboard_operation_id, change is not None,
+                             change is not None and change == self._pasteboard_cached_change)
+                    if change is not None and change == self._pasteboard_cached_change:
+                        return self._pasteboard_cached_text
                     text, unresolved = _pasteboard_snapshot_text(snapshot)
                     if unresolved:
+                        if any('com.apple.notes.richtext' in (item.get('types') or []) or
+                               'com.apple.notes.richtext' in (item.get('data') or {})
+                               for item in board.get('items', []) or []):
+                            # The source can temporarily withdraw its archive
+                            # while editing/copying. Retry the native format on
+                            # the next poll; allResolved would reintroduce the
+                            # HTML conversion stall this path avoids.
+                            raise RuntimeError('device pasteboard text is unresolved')
                         # Rich content can promise its plain-text alternative.
-                        # Resolve only when needed, using a new one-request
-                        # connection within the same timeout and read lock.
-                        pasteboard = await self._get_device_pasteboard()
-                        snapshot = await pasteboard.get(data_policy={'allResolved': {}})
+                        # The original helper waits ~64s for each unavailable
+                        # WebKit conversion. End only converters whose launch
+                        # has failed and whose ownership we can verify.
+                        pasteboard = await asyncio.wait_for(self._get_device_pasteboard(),
+                                                            PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                        if self._pasteboard_writers_waiting:
+                            raise RuntimeError('device pasteboard read superseded by host paste')
+                        task = asyncio.create_task(self._resolve_device_pasteboard(pasteboard))
+                        self._pasteboard_full_read_task = task
+                        try:
+                            snapshot = await asyncio.wait_for(task, PASTEBOARD_FULL_READ_TIMEOUT_SECONDS)
+                        except asyncio.CancelledError:
+                            if not asyncio.current_task().cancelling():
+                                raise RuntimeError('device pasteboard read superseded by host paste')
+                            raise
+                        finally:
+                            self._pasteboard_full_read_task = None
+                        await self._complete_device_pasteboard_request()
                         text, unresolved = _pasteboard_snapshot_text(snapshot)
                         if unresolved:
+                            # A completed allResolved reply that still contains
+                            # promises leaves the helper unable to fulfill this
+                            # change. Retire it before the next read instead of
+                            # repeating slow conversions until the poll threshold.
+                            self._pasteboard_full_read_interrupted = True
                             raise RuntimeError('device pasteboard text is unresolved')
+                        if change is not None:
+                            resolved_metadata = snapshot.get('pasteboard', snapshot).get('metadata') or {}
+                            resolved_change = (resolved_metadata.get('nonce'), resolved_metadata.get('changeCount'))
+                            if resolved_change != change:
+                                raise RuntimeError('device pasteboard changed during resolution')
+                            # Resolution returns the snapshot captured when it
+                            # began, even if the user copied again meanwhile.
+                            # Check the current identity before publishing it.
+                            pasteboard = await asyncio.wait_for(self._get_device_pasteboard(),
+                                                                PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                            current = await asyncio.wait_for(pasteboard.get(
+                                data_policy={'allPromised': {}}), PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                            await self._complete_device_pasteboard_request()
+                            _validate_pasteboard_reply(current, 'PULL_REPLY')
+                            current_metadata = current.get('pasteboard', current).get('metadata') or {}
+                            log.info('pasteboard_resolution op=%s text_length=%s before=%s after=%s '
+                                     'same_nonce=%s error=%s', self._pasteboard_operation_id,
+                                     len(text) if isinstance(text, str) else None,
+                                     change[1], current_metadata.get('changeCount'),
+                                     change[0] == current_metadata.get('nonce'),
+                                     (current.get('error') or {}).get('code'))
+                            if (current_metadata.get('nonce'), current_metadata.get('changeCount')) != change:
+                                raise RuntimeError('device pasteboard changed during resolution')
+                    if change is not None:
+                        self._pasteboard_cached_change = change
+                        self._pasteboard_cached_text = text
                     return text
-                return await pasteboard.get_text()
+                result = await asyncio.wait_for(pasteboard.get_text(), PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                await self._complete_device_pasteboard_request()
+                return result
             try:
-                result = await asyncio.wait_for(read(), PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                # Connections/discovery remain short bounded operations. Only
+                # the explicitly tracked secondary-format read can wait longer.
+                result = await read()  # Every connection/request above has its own deadline.
+                completed = True
                 log.info('pasteboard_pull_reply op=%s generation=%s text=%s',
                          self._pasteboard_operation_id, self._generation,
                          isinstance(result, str))
                 return result
             except (Exception, asyncio.CancelledError) as error:
-                log.warning('pasteboard_pull_failed op=%s generation=%s error=%s',
+                if not isinstance(error, asyncio.CancelledError):
+                    self._pasteboard_refresh_required = True
+                log.warning('pasteboard_pull_failed op=%s generation=%s error=%s reason=%s',
                             self._pasteboard_operation_id, self._generation,
-                            type(error).__name__)
+                            type(error).__name__,
+                            'text_unresolved' if isinstance(error, RuntimeError) and
+                            str(error) == 'device pasteboard text is unresolved' else 'request_failed')
                 raise
             finally:
                 # A cancelled RemoteXPC request cannot be reused: its late reply
                 # could otherwise be mistaken for the next read/write response.
-                await self._close_device_pasteboard()
+                if not completed:
+                    await self._close_device_pasteboard()
+
+    async def _resolve_device_pasteboard(self, pasteboard):
+        rsd, generation = self.rsd, self._generation
+        task = asyncio.current_task()
+        def active():
+            return (self.rsd is rsd and self._generation == generation and
+                    not self._recovering and not self._pasteboard_writers_waiting and
+                    self._pasteboard_full_read_task is task and not task.cancelling())
+        recovery = PasteboardConverterRecovery(rsd, PasteboardRecoveryHub, active)
+        dispatched = False
+        read_task = None
+        def start_read():
+            nonlocal dispatched, read_task
+            if read_task is None and active():
+                recovery.started = True
+                dispatched = True
+                self._pasteboard_full_read_serial += 1
+                read_task = asyncio.create_task(pasteboard.get(data_policy={'allResolved': {}}))
+                # No further converter action is needed once the reply arrives.
+                read_task.add_done_callback(lambda done: setattr(recovery, 'started', False))
+        try:
+            # Observe failures before sending PULL; prepare process monitoring
+            # while iOS starts the read instead of adding that setup to latency.
+            await recovery.prepare(on_log_ready=start_read)
+            if not active():
+                raise asyncio.CancelledError()
+            start_read()  # Diagnostic services can be absent on older devices.
+            snapshot = await read_task
+            board = snapshot.get('pasteboard', snapshot)
+            text, unresolved = _pasteboard_snapshot_text(snapshot)
+            log.info('pasteboard_full_read_finished command=%s error=%s items=%s text_length=%s '
+                     'unresolved=%s converters_cancelled=%s', snapshot.get('command'),
+                     (snapshot.get('error') or {}).get('code'), len(board.get('items') or []),
+                     len(text) if isinstance(text, str) else None, unresolved, len(recovery.cancelled))
+            return snapshot
+        except asyncio.CancelledError:
+            if dispatched:
+                self._pasteboard_full_read_interrupted = True
+            raise
+        finally:
+            if read_task is not None and not read_task.done():
+                read_task.cancel()
+                await asyncio.gather(read_task, return_exceptions=True)
+            await recovery.close()
 
     async def _write_device_pasteboard(self, text: str) -> None:
         self._pasteboard_writers_waiting += 1
@@ -4531,8 +5116,19 @@ class TouchSession:
         # not only after SET succeeds. A pre-paste snapshot is already stale.
         self._pasteboard_write_generation += 1
         self._pasteboard_writes_idle.clear()
+        full_read = self._pasteboard_full_read_task
+        if full_read is not None and not full_read.done():
+            self._pasteboard_full_read_interrupted = True
+            full_read.cancel()
         acquired = False
         try:
+            if self._pasteboard_full_read_interrupted:
+                # Canceling the socket leaves iOS resolving the old content.
+                # Reset only that helper before a foreground SET so paste is
+                # not forced to wait behind a minute-long rich conversion.
+                if not await self._restart_failed_pasteboard(for_write=True):
+                    raise ConnectionError('device pasteboard helper recovery is pending')
+            await self._maintain_pasteboard_resources(for_write=True)
             async with asyncio.timeout(PASTEBOARD_WRITE_QUEUE_TIMEOUT_SECONDS):
                 await self._pasteboard_lock.acquire()
                 acquired = True
@@ -4542,22 +5138,33 @@ class TouchSession:
                 # applied it. Retain its origin until a stable poll reconciles it.
                 # Connection or queue failures before SET do not add a candidate.
                 self._pasteboard_unconfirmed_writes.add(text)
-                await pasteboard.set_text(text)
+                reply = await pasteboard.set_text(text)
+                await self._complete_device_pasteboard_request()
+                # Older providers expose a void setter; current CoreDevice
+                # returns SET_REPLY and its explicit failure must be honored.
+                if reply is not None:
+                    _validate_pasteboard_reply(reply, 'SET_REPLY')
+            completed = False
             try:
                 await asyncio.wait_for(write(), PASTEBOARD_OPERATION_TIMEOUT_SECONDS)
+                completed = True
                 # A host paste is already present on Windows. Treat it as the
                 # polling baseline so it cannot echo over a newer local copy.
                 self._pasteboard_last_text = text
+                self._pasteboard_last_change_count = None
                 self._pasteboard_unconfirmed_writes.clear()
                 log.info('pasteboard_set_reply op=%s generation=%s length=%s',
                          self._pasteboard_operation_id, self._generation, len(text))
             except (Exception, asyncio.CancelledError) as error:
+                if not isinstance(error, asyncio.CancelledError):
+                    self._pasteboard_refresh_required = True
                 log.warning('pasteboard_set_failed op=%s generation=%s length=%s error=%s',
                             self._pasteboard_operation_id, self._generation, len(text),
                             type(error).__name__)
                 raise
             finally:
-                await self._close_device_pasteboard()
+                if not completed:
+                    await self._close_device_pasteboard()
         finally:
             if acquired:
                 self._pasteboard_lock.release()
@@ -4575,6 +5182,7 @@ class TouchSession:
             write_generation = self._pasteboard_write_generation
             session_generation = self._generation
             await self.ipc.emit({'event': 'clipboard_read_started', 'readId': read_id})
+            self._pasteboard_publishing_read_id = read_id
             try:
                 text = await self._read_device_pasteboard()
                 if (write_generation != self._pasteboard_write_generation or
@@ -4583,21 +5191,147 @@ class TouchSession:
                 normalized_text = text if isinstance(text, str) else '' if text is None else None
                 if normalized_text is None:
                     return
+                change_count = (self._pasteboard_cached_change[1]
+                                if self._pasteboard_cached_change is not None else None)
+                # A native Copy advances UIPasteboard.changeCount even when
+                # the text is identical. Helper replacement alone changes its
+                # nonce, so use the device count to avoid replaying old text.
+                copied_again = (change_count is not None and
+                                self._pasteboard_last_change_count is not None and
+                                change_count != self._pasteboard_last_change_count)
                 # A lost SET reply may still have changed the phone. Reconcile
                 # its origin before either polling or an explicit read publishes.
                 unconfirmed_echo = normalized_text in self._pasteboard_unconfirmed_writes
                 if unconfirmed_echo:
                     self._pasteboard_last_text = normalized_text
                 self._pasteboard_unconfirmed_writes.clear()
-                if not unconfirmed_echo and (force or normalized_text != self._pasteboard_last_text):
+                if not unconfirmed_echo and (force or copied_again or normalized_text != self._pasteboard_last_text):
                     await self.ipc.emit({'event': 'clipboard_text', 'readId': read_id,
                                          'text': normalized_text})
                     if write_generation == self._pasteboard_write_generation:
                         self._pasteboard_last_text = normalized_text
+                if write_generation == self._pasteboard_write_generation:
+                    self._pasteboard_last_change_count = change_count
             finally:
+                self._pasteboard_publishing_read_id = None
                 # Also release the host's request snapshot on unchanged content,
                 # errors and cancellation; only live reads retain version tokens.
                 await self.ipc.emit({'event': 'clipboard_read_finished', 'readId': read_id})
+
+    async def _prepare_pasteboard_resources(self):
+        # The first Instruments process snapshot can take several seconds and
+        # interfere with the shared userspace tunnel. Do it before opening HID
+        # and claiming ready, so the first shortcut never races cold setup.
+        if self.rsd is None or not callable(getattr(self.rsd, 'start_lockdown_service', None)):
+            return
+        self._pasteboard_resource_rsd = self.rsd
+        self._pasteboard_accepts = 0
+        self._pasteboard_resource_started = time.monotonic()
+        usage = await self._pasteboard_resource_monitor.read(
+            self.rsd, PasteboardRecoveryHub, timeout_seconds=8.0)
+        self._pasteboard_resource_last_check = (
+            -PASTEBOARD_RESOURCE_CHECK_CONNECTIONS
+            if usage is not None and usage[1] >= PASTEBOARD_RESOURCE_FILE_TABLE_LIMIT else 0)
+
+    async def _maintain_pasteboard_resources(self, *, for_write: bool = False):
+        # The original developer helper leaks accepted descriptors across
+        # otherwise completed connections. At its fd limit libRemoteService
+        # aborts in _remote_service_accept, then launchd can defer restarting it
+        # for minutes. Inspect before exhaustion, never during an active RPC.
+        if self.rsd is None or self._recovering:
+            return
+        if self._pasteboard_resource_rsd is not self.rsd:
+            self._pasteboard_resource_rsd = self.rsd
+            self._pasteboard_accepts = 0
+            self._pasteboard_resource_last_check = -PASTEBOARD_RESOURCE_CHECK_CONNECTIONS
+            self._pasteboard_resource_started = time.monotonic()
+        if (self._pasteboard_accepts - self._pasteboard_resource_last_check < PASTEBOARD_RESOURCE_CHECK_CONNECTIONS or
+                (self._pasteboard_writers_waiting and not for_write)):
+            return
+        if not callable(getattr(self.rsd, 'start_lockdown_service', None)):
+            self._pasteboard_resource_last_check = self._pasteboard_accepts
+            return
+        usage = await pasteboard_resource_usage(self.rsd, PasteboardRecoveryHub,
+                                               self._pasteboard_resource_monitor)
+        if usage is None or usage[1] < PASTEBOARD_RESOURCE_FILE_TABLE_LIMIT:
+            self._pasteboard_resource_last_check = self._pasteboard_accepts
+            return
+        pid, files = usage
+        remaining = (PASTEBOARD_RESOURCE_MIN_LIFETIME_SECONDS -
+                     (time.monotonic() - self._pasteboard_resource_started))
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+        log.info('pasteboard_resource_pressure pid=%s file_table=%s accepts=%s', pid, files, self._pasteboard_accepts)
+        if not await self._restart_failed_pasteboard(for_write=for_write, resource_pid=pid):
+            raise ConnectionError('device pasteboard resource recovery is pending')
+
+    async def _restart_failed_pasteboard(self, *, for_write: bool = False, resource_pid=None) -> bool:
+        """Restart only the stuck developer pasteboard helper on this device.
+
+        Reconnecting its socket cannot recover a wedged dtpasteboardd. Do not
+        remount DDI or replace RSD/HID, and serialize against foreground SETs.
+        """
+        def cooling_down():
+            # A second, distinct rich read can be cancelled immediately after
+            # the first recovery. Give that newly abandoned job one recovery
+            # attempt; failed retries of the same job retain the backoff.
+            new_interruption = (self._pasteboard_full_read_interrupted and
+                                self._pasteboard_full_read_serial != self._pasteboard_restart_read_serial)
+            return (time.monotonic() < self._pasteboard_restart_after and
+                    not new_interruption and resource_pid is None)
+
+        if (self.rsd is None or self._recovering or (self._pasteboard_writers_waiting and not for_write) or
+                cooling_down()):
+            return False
+        async with self._pasteboard_lock:
+            if (self.rsd is None or self._recovering or (self._pasteboard_writers_waiting and not for_write) or
+                    cooling_down()):
+                return False
+            self._pasteboard_restart_after = time.monotonic() + PASTEBOARD_RESTART_COOLDOWN_SECONDS
+            self._pasteboard_restart_read_serial = self._pasteboard_full_read_serial
+            rsd, generation = self.rsd, self._generation
+            hub = None
+            try:
+                hub = PasteboardRecoveryHub(rsd)
+                async with asyncio.timeout(PASTEBOARD_RESTART_TIMEOUT_SECONDS):
+                    await hub.__aenter__()
+                    info = await hub.dtx.open_channel('com.apple.instruments.server.services.deviceinfo')
+                    processes = await info.invoke('runningProcesses')
+                    matches = [p for p in processes if
+                               p.get('name') == 'dtpasteboardd' and
+                               p.get('realAppName') == '/System/Developer/usr/libexec/dtpasteboardd' and
+                               p.get('isApplication') is False and
+                               type(p.get('pid')) is int and p['pid'] > 1]
+                    if len(matches) != 1:
+                        return False
+                    if resource_pid is not None and matches[0]['pid'] != resource_pid:
+                        return False
+                    control = await hub.dtx.open_channel('com.apple.instruments.server.services.processcontrol')
+                    # A tunnel recovery or queued paste can supersede discovery.
+                    if (self.rsd is not rsd or self._generation != generation or
+                            self._recovering or (self._pasteboard_writers_waiting and not for_write)):
+                        return False
+                    self._pasteboard_refresh_required = True
+                    await control.invoke('sendSignal:toPid:', 9, matches[0]['pid'])
+                    self._pasteboard_restarted_at = time.monotonic()
+                    self._pasteboard_full_read_interrupted = False
+                    self._pasteboard_resource_rsd = self.rsd
+                    self._pasteboard_accepts = self._pasteboard_resource_last_check = 0
+                    self._pasteboard_resource_started = time.monotonic()
+                    # The retired helper's lease must be released before the
+                    # replacement connection can become ready.
+                    await self._close_device_pasteboard()
+                    log.warning('pasteboard_service_restart_requested generation=%s', generation)
+                    return True
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                log.warning('pasteboard_service_restart_failed generation=%s error=%s',
+                            generation, type(error).__name__)
+                return False
+            finally:
+                if hub is not None:
+                    await self._close_remote_service(hub, 'pasteboard_recovery')
 
     async def _poll_device_pasteboard(self) -> None:
         if self.rsd is None:
@@ -4617,6 +5351,8 @@ class TouchSession:
                     if failures == 1:
                         await self.ipc.emit({'event': 'warning', 'code': 'clipboard_poll_failed',
                             'message': f'{type(error).__name__}: {str(error)[:200]}'})
+                    if failures >= PASTEBOARD_RESTART_FAILURES:
+                        await self._restart_failed_pasteboard()
                 await asyncio.sleep(min(PASTEBOARD_POLL_MAX_BACKOFF_SECONDS,
                     PASTEBOARD_POLL_INTERVAL_SECONDS * (2 ** min(failures, 4))))
         except asyncio.CancelledError:
@@ -4635,12 +5371,12 @@ class TouchSession:
             await asyncio.gather(*pending, return_exceptions=True)
 
     async def _apply_keyboard(self, frame: dict, timestamp: Optional[int], usages: list[int]) -> None:
-        if timestamp is not None:
-            # Host timestamps are Unix nanoseconds, while the Universal HID
-            # keyboard report reserves six bytes for a Mach-absolute value.
-            timestamp = int(timestamp) & ((1 << 48) - 1)
         async with self._keyboard_lock:
-            await self._send_keyboard_report(usages, timestamp)
+            # UTC IPC timestamps belong to the host's event log. Truncating
+            # them does not turn them into HID's monotonic clock, and queued
+            # reports or a wall-clock correction can move that value backwards.
+            # Let the HID encoder timestamp the actual send, like touch input.
+            await self._send_keyboard_report(usages)
 
     async def _send_keyboard_report(self, usages: list[int],
                                     timestamp: Optional[int] = None) -> None:
@@ -4659,6 +5395,27 @@ class TouchSession:
                 await self.ipc.emit({'event': 'status', 'code': 'keyboard_service_ready',
                                      'message': str(self.keyboard_service_id)})
             async with self._hid_operation_lock:
+                # Host-side delays can expire while the IPC reader waits on
+                # HID. Preserve the chord at the actual send boundary too:
+                # Indigo Globe and Universal HID letters reach separate iOS
+                # consumers, so an immediately following letter can be lost.
+                globe = GLOBE_BUTTON in self._held_buttons
+                if globe:
+                    if usages and self._globe_letter_sent_at is None:
+                        # Older hosts send letters on Universal HID, separate
+                        # from Indigo Globe. Only that cross-channel path
+                        # needs a prefix fence; ordered Indigo button chords
+                        # must never wait for a reply while Globe is held.
+                        await self._ping_hid(self.indigo)
+                        self._button_sent_at[GLOBE_BUTTON] = time.monotonic()
+                    if usages:
+                        pressed_at = self._button_sent_at.get(GLOBE_BUTTON)
+                        minimum = SHORTCUT_MODIFIER_LEAD_SECONDS
+                    else:
+                        pressed_at = self._globe_letter_sent_at
+                        minimum = SHORTCUT_KEY_HOLD_SECONDS
+                    if pressed_at is not None:
+                        await asyncio.sleep(max(0.0, minimum - (time.monotonic() - pressed_at)))
                 # A failed drain may still have delivered the bitmap. Keep the
                 # union until a successful report confirms its replacement.
                 self._held_keyboard_usages |= frozenset(usages)
@@ -4667,6 +5424,16 @@ class TouchSession:
                     timeout=HID_OPERATION_TIMEOUT_SECONDS)
                 self._check_media_auth()
                 self._held_keyboard_usages = frozenset(usages)
+                if globe and SHORTCUT_TIMING_DIAGNOSTICS:
+                    log.info('shortcut_keyboard_sent usages=%s monotonic=%.6f', usages, time.monotonic())
+                if globe:
+                    if usages:
+                        if self._globe_letter_sent_at is None:
+                            self._globe_letter_sent_at = time.monotonic()
+                        self._globe_letter_released_at = None
+                    elif self._globe_letter_sent_at is not None:
+                        self._globe_letter_sent_at = None
+                        self._globe_letter_released_at = time.monotonic()
 
     async def _send_touch_report(self, report: bytes, *, motion: bool = False,
                                  active_pointer_ids: Optional[set[int]] = None,
@@ -4772,28 +5539,129 @@ class TouchSession:
                     with contextlib.suppress(Exception, asyncio.CancelledError):
                         await send([])
 
-    async def _apply_button(self, usage_page: int, usage_code: int, state: str) -> None:
+    async def _ensure_indigo(self) -> None:
+        if self.indigo is None:
+            indigo = IndigoHIDService(self.rsd)
+            try:
+                async with asyncio.timeout(HID_OPERATION_TIMEOUT_SECONDS):
+                    await indigo.__aenter__()
+                    # Device button state can outlive a failed host socket.
+                    # Retire only the system buttons we synthesize, then verify
+                    # this connection before admitting a fresh press/chord.
+                    for page, code in (HOME_BUTTON, GLOBE_BUTTON,
+                                       (7, 0x04), (7, 0x06), (7, 0x0B), (7, 0x11), (7, 0x16)):
+                        await indigo.send_button(page, code, 2)
+                    await self._ping_hid(indigo)
+            except BaseException:
+                await self._close_remote_service(indigo, 'unavailable_indigo')
+                raise
+            self.indigo = indigo
+
+    async def _apply_home_double_press(self) -> None:
+        # Indigo carries discrete events, not a held-state report. Deliver both
+        # clicks together, as the device's native App Switcher command does.
+        # Per-event waits (including transport pings) allow network/scheduling
+        # jitter to turn the double click into two unrelated Home presses.
         async with self._hid_lifecycle_lock:
             self._check_media_auth()
-            if self.indigo is None:
-                indigo = IndigoHIDService(self.rsd)
-                try:
-                    await asyncio.wait_for(indigo.__aenter__(), HID_OPERATION_TIMEOUT_SECONDS)
-                except BaseException:
-                    await self._close_remote_service(indigo, 'unavailable_indigo')
-                    raise
-                self.indigo = indigo
+            await self._ensure_indigo()
+            indigo = self.indigo
+            generation = self._generation
+            try:
+                async with asyncio.timeout(HID_OPERATION_TIMEOUT_SECONDS):
+                    if self._home_released_at is not None:
+                        # Host-side spacing can disappear behind a slow HID
+                        # write. Keep this complete double-click separate from
+                        # the previous Home command, while the four events
+                        # below stay contiguous on the same Indigo service.
+                        await asyncio.sleep(max(0.0, HOME_COMMAND_SEPARATION_SECONDS -
+                            (time.monotonic() - self._home_released_at)))
+                    for state in (1, 2, 1, 2):
+                        if generation != self._generation:
+                            raise RuntimeError('Home sequence invalidated by recovery')
+                        self._check_media_auth()
+                        if state == 1:
+                            # Even a failed send can have reached the phone.
+                            self._held_buttons.add(HOME_BUTTON)
+                        await indigo.send_button(*HOME_BUTTON, state)
+                        if state == 2:
+                            self._held_buttons.discard(HOME_BUTTON)
+                            self._button_sent_at.pop(HOME_BUTTON, None)
+                            self._home_released_at = time.monotonic()
+                            self._home_double_released_at = self._home_released_at
+                self._check_media_auth()
+                if SHORTCUT_TIMING_DIAGNOSTICS:
+                    log.info('shortcut_home_double_press_sent generation=%d', generation)
+            finally:
+                if HOME_BUTTON in self._held_buttons:
+                    await asyncio.wait_for(indigo.send_button(*HOME_BUTTON, 2),
+                                           HID_OPERATION_TIMEOUT_SECONDS)
+                    self._held_buttons.discard(HOME_BUTTON)
+                    self._button_sent_at.pop(HOME_BUTTON, None)
+                    self._home_released_at = time.monotonic()
+                    self._home_double_released_at = self._home_released_at
+
+    async def _apply_button(self, usage_page: int, usage_code: int, state: str) -> None:
+        if state == 'double_press':
+            if (usage_page, usage_code) != HOME_BUTTON:
+                raise ValueError('double press is only supported for Home')
+            await self._apply_home_double_press()
+            return
+        async with self._hid_lifecycle_lock:
+            self._check_media_auth()
+            await self._ensure_indigo()
             state_code = {'down': 1, 'up': 2, 'canceled': 3}[state]
             button = (usage_page, usage_code)
+            system_letter = usage_page == 7 and GLOBE_BUTTON in self._held_buttons
             if state == 'down':
+                if button == HOME_BUTTON and self._home_released_at is not None:
+                    # Queued host commands still need distinct ordinary pulses.
+                    delay = HOME_COMMAND_SEPARATION_SECONDS - (time.monotonic() - self._home_released_at)
+                    if self._home_double_released_at is not None:
+                        delay = max(delay, HOME_COMMAND_SEPARATION_SECONDS -
+                            (time.monotonic() - self._home_double_released_at))
+                    await asyncio.sleep(max(0.0, delay))
+                elif system_letter:
+                    pressed_at = self._button_sent_at.get(GLOBE_BUTTON)
+                    if pressed_at is not None:
+                        await asyncio.sleep(max(0.0, SHORTCUT_MODIFIER_LEAD_SECONDS -
+                            (time.monotonic() - pressed_at)))
                 self._held_buttons.add(button)
+            elif state == 'up':
+                if button == HOME_BUTTON:
+                    pressed_at = self._button_sent_at.get(button)
+                    minimum = HOME_BUTTON_HOLD_SECONDS
+                elif button == GLOBE_BUTTON:
+                    pressed_at = self._globe_letter_released_at
+                    minimum = SHORTCUT_MODIFIER_RELEASE_SECONDS
+                elif system_letter:
+                    pressed_at = self._button_sent_at.get(button)
+                    minimum = SHORTCUT_KEY_HOLD_SECONDS
+                else:
+                    pressed_at, minimum = None, 0.0
+                if pressed_at is not None:
+                    await asyncio.sleep(max(0.0, minimum - (time.monotonic() - pressed_at)))
             await asyncio.wait_for(
                 self.indigo.send_button(usage_page, usage_code, state_code),
                 timeout=HID_OPERATION_TIMEOUT_SECONDS)
+            sent_at = time.monotonic()
             self._check_media_auth()
+            if (button in (HOME_BUTTON, GLOBE_BUTTON) or system_letter) and SHORTCUT_TIMING_DIAGNOSTICS:
+                log.info('shortcut_button_sent code=%d state=%s monotonic=%.6f page=%d',
+                         usage_code, state, sent_at, usage_page)
             if state != 'down':
                 self._held_buttons.discard(button)
-
+                self._button_sent_at.pop(button, None)
+            else:
+                self._button_sent_at.setdefault(button, sent_at)
+            if button == GLOBE_BUTTON:
+                self._globe_letter_sent_at = None
+                self._globe_letter_released_at = None
+            elif system_letter:
+                self._globe_letter_sent_at = sent_at if state == 'down' else None
+                self._globe_letter_released_at = sent_at if state != 'down' else None
+            if button == HOME_BUTTON and state != 'down':
+                self._home_released_at = sent_at if state == 'up' else None
 
     async def _apply_frame(self, sm: FiveSlotStateMachine, frame: dict, points: list[dict]) -> None:
         # Replacing a contact in a full five-point batch needs a release frame
@@ -4849,6 +5717,11 @@ class TouchSession:
 
     async def _release_button_state(self) -> None:
         buttons, self._held_buttons = self._held_buttons, set()
+        self._button_sent_at.clear()
+        self._home_released_at = None
+        self._home_double_released_at = None
+        self._globe_letter_sent_at = None
+        self._globe_letter_released_at = None
         if self.indigo is not None:
             with contextlib.suppress(Exception):
                 async with asyncio.timeout(HID_CLEANUP_TIMEOUT_SECONDS):
@@ -4899,6 +5772,12 @@ class TouchSession:
                 await finish(self._close_remote_service(self.indigo, 'indigo'))
                 self.indigo = None
             await finish(close_pasteboard())
+            if self._pasteboard_full_read_interrupted:
+                # Closing the host socket does not cancel the device's rich
+                # read. Retire that abandoned helper job before releasing RSD,
+                # so reconnecting does not queue behind its minute-long wait.
+                await finish(self._restart_failed_pasteboard())
+            await finish(self._pasteboard_resource_monitor.close())
             if not preserve_capture_mux:
                 self._close_capture_mux()
             if self.drain_task is not None:

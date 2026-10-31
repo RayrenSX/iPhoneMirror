@@ -217,7 +217,8 @@ public partial class MainWindow
         if (_bossKeyHidden || _mappingWindow?.IsEditing == true || _mappingCapture.Waiting || _mappingPick is not null) return false;
         var foreground = _keyboardForegroundWindow();
         if (_viewModel.SelectedDevice is { } device && foreground != 0 &&
-            foreground == _secondaryMirrors.GetWindowHandle(device.Udid)) return true;
+            foreground == _secondaryMirrors.GetWindowHandle(device.Udid))
+            return _secondaryMirrors.AllowsControlInput(foreground);
         if (foreground == _windowSource?.Handle)
         {
             // Native HWND focus is authoritative. WPF logical focus can stay

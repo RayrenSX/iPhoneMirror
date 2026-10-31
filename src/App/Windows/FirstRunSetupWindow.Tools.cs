@@ -71,6 +71,10 @@ public partial class FirstRunSetupWindow
         {
             if (driver)
             {
+                // Waiting for an external tool needs no progress animation.
+                StopAssessmentAnimations();
+                DiagnosticLogger.Info("setup", "driver_handoff_started",
+                    ("layered_window", AllowsTransparency));
                 var result = await OpenDriverToolAsync(token);
                 if (!result.Success) throw new IOException(result.Message);
             }
@@ -85,9 +89,20 @@ public partial class FirstRunSetupWindow
                 await window.CleanupTask;
             }
             token.ThrowIfCancellationRequested();
-            if (!_closed) { Activate(); Status.Text = L("SetupToolsChecking"); }
+            if (!_closed) Status.Text = L("SetupToolsChecking");
         }
-        finally { _toolActive = false; }
+        finally
+        {
+            _toolActive = false;
+            if (driver)
+                DiagnosticLogger.Info("setup", "driver_handoff_finished",
+                    ("cancelled", token.IsCancellationRequested), ("closed", _closed));
+            if (!_closed)
+            {
+                AnimateActivity();
+                Activate();
+            }
+        }
     }
 
     private async Task VerifyStandaloneToolAsync(bool driver, CancellationToken token)

@@ -116,6 +116,12 @@
                         </ui:RoundedContentClip>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="AllowsTransparency" Value="False">
+                            <Setter TargetName="RoundedWindowSurface" Property="Margin" Value="0"/>
+                            <Setter TargetName="RoundedWindowSurface" Property="CornerRadius" Value="0"/>
+                            <Setter TargetName="RoundedWindowSurface" Property="Background" Value="{DynamicResource WindowBackgroundBrush}"/>
+                            <Setter TargetName="RoundedWindowSurface" Property="Effect" Value="{x:Null}"/>
+                        </Trigger>
                         <Trigger Property="WindowState" Value="Maximized">
                             <Setter TargetName="RoundedWindowSurface" Property="Margin" Value="0"/>
                             <Setter TargetName="RoundedWindowSurface" Property="CornerRadius" Value="0"/>

@@ -53,6 +53,9 @@ internal sealed class MultiDevicePreviewManager : IDisposable
 
     internal bool ContainsWindow(nint handle) => handle != 0 && _windows.Values.Any(w => w.Handle == handle);
 
+    internal bool AllowsControlInput(nint handle) =>
+        _windows.Values.All(window => window.Handle != handle || window.AllowsControlInput);
+
     internal void ReleasePointerCapture(string? udid)
     {
         if (udid is not null && _windows.TryGetValue(udid, out var window))

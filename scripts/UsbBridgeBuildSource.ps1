@@ -20,12 +20,16 @@ function New-UsbBridgeBuildSource {
     $runtimeCheck = Join-Path $SourceRoot 'bridge_runtime_check.py'
     $ddiSupport = Join-Path $SourceRoot 'ddi_support.py'
     $mdnsDiscovery = Join-Path $SourceRoot 'mdns_discovery.py'
+    $pasteboardText = Join-Path $SourceRoot 'pasteboard_text.py'
+    $pasteboardRecovery = Join-Path $SourceRoot 'pasteboard_recovery.py'
     $screenOrientation = Join-Path $SourceRoot 'screen_orientation.py'
     $package = Join-Path $SourceRoot 'iostouch'
     if (-not (Test-Path -LiteralPath $bridge -PathType Leaf) -or
         -not (Test-Path -LiteralPath $runtimeCheck -PathType Leaf) -or
         -not (Test-Path -LiteralPath $ddiSupport -PathType Leaf) -or
         -not (Test-Path -LiteralPath $mdnsDiscovery -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $pasteboardText -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $pasteboardRecovery -PathType Leaf) -or
         -not (Test-Path -LiteralPath $screenOrientation -PathType Leaf) -or
         -not (Test-Path -LiteralPath $package -PathType Container)) {
         throw "Audited USB bridge source is incomplete: $SourceRoot"
@@ -68,6 +72,8 @@ function New-UsbBridgeBuildSource {
     Copy-Item -LiteralPath $runtimeCheck -Destination $stageSource
     Copy-Item -LiteralPath $ddiSupport -Destination $stageSource
     Copy-Item -LiteralPath $mdnsDiscovery -Destination $stageSource
+    Copy-Item -LiteralPath $pasteboardText -Destination $stageSource
+    Copy-Item -LiteralPath $pasteboardRecovery -Destination $stageSource
     Copy-Item -LiteralPath $screenOrientation -Destination $stageSource
     # Copy source only: stale bytecode from either checkout must not ship.
     Get-ChildItem -LiteralPath $package -Recurse -File -Filter '*.py' | ForEach-Object {

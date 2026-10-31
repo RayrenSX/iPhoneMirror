@@ -117,6 +117,15 @@ internal static partial class Program
                 Flush();
                 InteractionAssert(writes.Count == before + 1 && writes.Last() == "new device copy",
                     "A fresh read failed after discarding a slow stale reply.");
+                Protocol("{\"event\":\"clipboard_read_started\",\"readId\":6}");
+                sequence++; // External copy while helper maintenance owns the queue.
+                Protocol("{\"event\":\"clipboard_read_started\",\"readId\":6}");
+                Protocol("{\"event\":\"clipboard_text\",\"readId\":6,\"text\":\"copy after maintenance\"}");
+                Protocol("{\"event\":\"clipboard_read_finished\",\"readId\":6}");
+                Flush();
+                InteractionAssert(writes.Count == before + 2 && writes.Last() == "copy after maintenance",
+                    "A read retained a stale Windows baseline across helper maintenance.");
+                before++;
                 Protocol("{\"event\":\"clipboard_read_started\",\"readId\":3}");
                 Protocol("{\"event\":\"clipboard_read_finished\",\"readId\":3}");
                 Protocol("{\"event\":\"clipboard_text\",\"readId\":3,\"text\":\"late cancelled read\"}");

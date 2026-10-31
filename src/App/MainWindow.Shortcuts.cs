@@ -8,6 +8,18 @@ public partial class MainWindow
     private readonly HashSet<(string Device, byte Button)> _mouseShortcutButtons = [];
     private readonly SemaphoreSlim _systemShortcutGate = new(1, 1);
 
+    private bool CanSendDockShortcut(string? target)
+    {
+        // Globe+A is the iPad Dock command. On iPhone the same report can
+        // become an ordinary A in the focused app. Use the actual target's
+        // model, not a different device currently selected in the main list.
+        var device = _viewModel.Devices.FirstOrDefault(candidate =>
+            Models.DeviceViewModel.UdidEquals(candidate.Udid, target));
+        if (device is null && Models.DeviceViewModel.UdidEquals(
+                _viewModel.SelectedDevice?.Udid, target)) device = _viewModel.SelectedDevice;
+        return device?.ProductType.StartsWith("iPad", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
     private bool TryHandlePointerShortcut(PreviewPointerEventArgs e, string? udid)
     {
         var identity = (udid?.ToUpperInvariant() ?? string.Empty, e.Button);
@@ -47,24 +59,30 @@ public partial class MainWindow
         Func<bool> canSend)
     {
         // Globe is a Consumer-page control, not a keyboard modifier bit.
-        // Keep it pressed while the ordinary keyboard usage is delivered.
+        // Keep the complete system chord on one ordered Indigo connection.
         const ushort page = CoreDeviceTouchProtocol.IndigoConsumerUsagePage;
         const ushort globe = CoreDeviceTouchProtocol.GlobeKeyboardLayoutUsage;
         if (route.SendButtonAsync is null) return;
         try
         {
             await route.SendButtonAsync(page, globe, "down", canSend);
+            // The bridge also preserves these intervals at the actual send
+            // boundary if host frames were queued behind a slow operation.
+            await Task.Delay(60);
             if (!canSend()) return;
-            await route.SendAsync(0, [usage], canSend);
-            await Task.Delay(20);
+            await route.SendButtonAsync(CoreDeviceTouchProtocol.IndigoKeyboardUsagePage, usage, "down", canSend);
+            await Task.Delay(80);
         }
         finally
         {
             // Both releases must be attempted even if either transport call
             // fails, and neither may inherit the expired focus guard.
-            var keyboardRelease = route.SendAsync(0, [], null);
-            var globeRelease = route.SendButtonAsync(page, globe, "up", null);
-            await Task.WhenAll(keyboardRelease, globeRelease);
+            try { await route.SendButtonAsync(CoreDeviceTouchProtocol.IndigoKeyboardUsagePage, usage, "up", null); }
+            finally
+            {
+                await Task.Delay(20);
+                await route.SendButtonAsync(page, globe, "up", null);
+            }
         }
     }
 }

@@ -21,6 +21,7 @@ public partial class MainWindow
 
     private void ConfigureKeyboardShortcuts(IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts)
     {
+        _keyboardRouter.InvalidateWindowShortcutMessages(unchecked((uint)Environment.TickCount));
         ++_keyboardShortcutGeneration;
         _keyboardRouter.ReleaseAllPressedKeys();
         var bindings = new List<RoutedShortcut>();
@@ -89,13 +90,24 @@ public partial class MainWindow
         var target = ActiveInputDeviceUdid;
         var foreground = _keyboardForegroundWindow();
         var focusGeneration = _mappingFocus?.Generation;
+        var queuedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         Dispatcher.BeginInvoke(() =>
         {
-            if (!_mappingClosing && generation == _keyboardRouter.Generation &&
+            var guardsValid = !_mappingClosing && generation == _keyboardRouter.Generation &&
                 shortcutGeneration == _keyboardShortcutGeneration &&
                 Models.DeviceViewModel.UdidEquals(target, ActiveInputDeviceUdid) &&
                 foreground == _keyboardForegroundWindow() &&
-                focusGeneration == _mappingFocus?.Generation && available()) execute();
+                focusGeneration == _mappingFocus?.Generation;
+            var stillAvailable = guardsValid && available();
+            if (stillAvailable) execute();
+            else DiagnosticLogger.ReverseControl("keyboard_input", "shortcut_cancelled",
+                ("queue_ms", System.Diagnostics.Stopwatch.GetElapsedTime(queuedAt).TotalMilliseconds),
+                ("closing", _mappingClosing), ("availability_checked", guardsValid), ("available", stillAvailable),
+                ("owner_changed", generation != _keyboardRouter.Generation),
+                ("bindings_changed", shortcutGeneration != _keyboardShortcutGeneration),
+                ("target_changed", !Models.DeviceViewModel.UdidEquals(target, ActiveInputDeviceUdid)),
+                ("foreground_changed", foreground != _keyboardForegroundWindow()),
+                ("focus_changed", focusGeneration != _mappingFocus?.Generation));
         }, DispatcherPriority.Input);
     }
 
@@ -115,20 +127,35 @@ public partial class MainWindow
         if (!down && message is not (0x101 or 0x105)) return false;
         if (data.VirtualKey == 0xE7) // VK_PACKET: ScanCode is a UTF-16 code unit.
             return TryQueueControlText(down ? ((char)data.ScanCode).ToString() : string.Empty);
-        if ((data.Flags & 0x12) != 0 &&
-            !CanForwardControlKeyboard(ActiveInputDeviceUdid, GetControlKeyboardWindow(ActiveInputDeviceUdid)))
-            return false;
-        FlushControlText();
         var scan = (int)data.ScanCode;
         var extended = (data.Flags & 1) != 0;
         var key = new MappedKey(ModifierKeyIdentity((int)data.VirtualKey, scan | (extended ? 0x100 : 0)), scan, extended);
-        return RouteKeyboardEvent(key, down, ActiveInputDeviceUdid,
-            _activeControlWindow != 0 ? _activeControlWindow : _windowSource?.Handle ?? 0);
+        var diagnose = ObserveFunctionKey(key, down, ActiveInputDeviceUdid, "hook", data.Flags);
+        if ((data.Flags & 0x12) != 0 &&
+            !CanForwardControlKeyboard(ActiveInputDeviceUdid, GetControlKeyboardWindow(ActiveInputDeviceUdid)) &&
+            (down || (!_keyboardRouter.HasPressedKey(key) && !_mappingCapture.HasHeldKeys)))
+        {
+            diagnose?.Invoke(new("injected_input_guard"));
+            return false;
+        }
+        // An accepted down still owns its up after focus changes, including
+        // remote-desktop/injected releases. Dropping it leaves a stuck modifier.
+        FlushControlText();
+        return RouteObservedKeyboardEvent(key, down, ActiveInputDeviceUdid,
+            _activeControlWindow != 0 ? _activeControlWindow : _windowSource?.Handle ?? 0, diagnose, data.Time);
     }
 
     private bool RouteKeyboardEvent(MappedKey key, bool down, string? target, nint window)
+        => RouteObservedKeyboardEvent(key, down, target, window,
+            ObserveFunctionKey(key, down, target, "window"));
+
+    private bool RouteObservedKeyboardEvent(MappedKey key, bool down, string? target, nint window,
+        Action<KeyboardRouteDecision>? diagnose, uint? hookTime = null)
     {
         Dispatcher.VerifyAccess();
+        // An IME sentinel without a usable scan code is not a physical key.
+        // Leave it to Windows instead of claiming an untransmittable press.
+        if (key.VirtualKey == 0xE5) return false;
         ObserveKeyboardForeground();
         // Recording is the router's exclusive editor transaction, including
         // the release of a key held when the transaction was cancelled.
@@ -139,6 +166,7 @@ public partial class MainWindow
             // Recording owns its up, but both owners must forget the retired
             // lifetime without dispatching it to a device or a shortcut.
             if (!down) _keyboardRouter.ReleaseCapturedKey(key);
+            diagnose?.Invoke(new("mapping_capture"));
             return true;
         }
         var generation = _keyboardRouter.Generation;
@@ -170,7 +198,34 @@ public partial class MainWindow
         var defer = mappingAllowed && (key.IsModifier || key.IsWindows) &&
             _mappingSettings.Mappings.Any(m => m.Enabled && m.Key!.SamePhysicalKey(key));
         return _keyboardRouter.RouteEvent(key, down, Resolve, ReplayKeyboardEvent, defer,
-            bufferShortcutModifiers: CanForwardControlKeyboard(target, window) && _keyboardRouter.Mode != KeyboardInputMode.None);
+            bufferShortcutModifiers: CanForwardControlKeyboard(target, window) && _keyboardRouter.Mode != KeyboardInputMode.None,
+            diagnose: diagnose, hookTime: hookTime);
+    }
+
+    private bool RecoverShortcutPressFromWindow(PreviewKeyboardEventArgs e, string? target, nint window)
+    {
+        if (e.Kind != PreviewKeyboardKind.Down || e.MessageTime is not { } time ||
+            _rawKeyboardInputEnabled || _mappingClosing || _mappingCapture.Waiting ||
+            _mappingCapture.HasHeldKeys || _shortcutSettingsWindow is not null ||
+            !Models.DeviceViewModel.UdidEquals(target, ActiveInputDeviceUdid) ||
+            !CanForwardControlKeyboard(target, window)) return false;
+        var key = new MappedKey(ModifierKeyIdentity(e.VirtualKey, e.ScanCode),
+            e.ScanCode & 0xFF, (e.ScanCode & 0x100) != 0);
+        return _keyboardRouter.RecoverShortcutPressFromWindow(key, time,
+            unchecked((uint)Environment.TickCount), e.IsRepeat,
+            decision => ObserveFunctionKey(key, true, target, "window_press")?.Invoke(decision));
+    }
+
+    private bool ReleaseShortcutFromWindow(PreviewKeyboardEventArgs e, string? target, nint window)
+    {
+        if (e.Kind != PreviewKeyboardKind.Up || e.MessageTime is not { } time ||
+            !Models.DeviceViewModel.UdidEquals(target, ActiveInputDeviceUdid) ||
+            window == 0 || window != GetControlKeyboardWindow(target)) return false;
+        var key = new MappedKey(ModifierKeyIdentity(e.VirtualKey, e.ScanCode),
+            e.ScanCode & 0xFF, (e.ScanCode & 0x100) != 0);
+        if (!_keyboardRouter.ReleaseShortcutFromWindow(key, time)) return false;
+        ObserveFunctionKey(key, false, target, "window_release")?.Invoke(new("shortcut_release_recovered"));
+        return true;
     }
 
     private static void ReplayKeyboardEvent(MappedKey key, bool down)

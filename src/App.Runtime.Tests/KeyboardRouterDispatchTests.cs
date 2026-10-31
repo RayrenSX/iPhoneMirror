@@ -13,12 +13,16 @@ namespace IPhoneMirror.App.Runtime.Tests;
 
 internal static partial class Program
 {
-    private static void TestUnifiedKeyboardDispatch()
+    private static void TestUnifiedKeyboardDispatch(bool recoveryOnly = false)
     {
         SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext());
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown, IsUiPreviewMode = true };
         app.InitializeComponent();
         var main = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        var hookProc = (Delegate)KeyboardField(main, "_keyboardHookProc");
+        SetKeyboardField(main, "_keyboardHookProc", Delegate.CreateDelegate(hookProc.GetType(),
+            typeof(Program).GetMethod(nameof(RecoveryTestHook), System.Reflection.BindingFlags.Static |
+                System.Reflection.BindingFlags.NonPublic)!));
         // This fixture supplies the foreground HWND and invokes the real
         // handlers itself. Desktop activation while the dispatcher pumps can
         // otherwise race the synthetic focus-away assertion.
@@ -37,6 +41,7 @@ internal static partial class Program
         nint foreground = hwnd;
         SetKeyboardField(main, "_keyboardForegroundWindow", (Func<nint>)(() => foreground));
         SetKeyboardField(main, "_keyboardFocusedWindow", (Func<nint>)(() => (nint)123));
+        SetKeyboardField(main, "_isPhysicalKeyboardKeyDown", (Func<int, bool>)(_ => false));
         var preview = (NativePreviewHost)main.FindName("MainPreviewHost");
         SetKeyboardField(preview, "_window", (nint)123);
         var ctor = typeof(DeviceViewModel).GetConstructors(KeyboardTestMembers).Single();
@@ -92,6 +97,15 @@ internal static partial class Program
         SetKeyboardField(main, "_readClipboardText", (Func<string>)(() => clipboardText));
         try
         {
+            if (recoveryOnly)
+            {
+                control.WiredEnabled = true;
+                control.WirelessEnabled = false;
+                control.Router.Begin(phone.Udid, ReverseControlMode.Usb);
+                KeyboardCall(main, "FocusControlDevice", phone.Udid, (nint)0);
+                SetMapping(false);
+                goto Recovery;
+            }
             foreach (var mode in new[] { ReverseControlMode.Usb, ReverseControlMode.Wireless })
             {
                 control.WiredEnabled = mode == ReverseControlMode.Usb;
@@ -100,6 +114,7 @@ internal static partial class Program
                 KeyboardCall(main, "FocusControlDevice", phone.Udid, (nint)0);
                 SetMapping(true);
                 MappingAssert(vm.GetMappingTargetStatus() == "MappingReady", "Fixture mapping route is not ready.");
+                TestDockShortcutCompatibility(main, phone, packets, Key, Finish);
                 packets.SetLength(0);
                 foreach (var letter in new[] { 0x43, 0x56 })
                 { Key(letter, true); AdvanceDispatcher(TimeSpan.FromMilliseconds(20)); Key(letter, false); Finish(); }
@@ -138,13 +153,16 @@ internal static partial class Program
                     $"{mode}: an obsolete queued paste survived ownership reset.");
                 packets.SetLength(0);
                 Key(0xA2, true); Key(0x43, true); Key(0x43, false); Key(0xA2, false);
-                Finish(); // Copy has started and is holding Command.
+                var copyStartedDeadline = DateTime.UtcNow.AddSeconds(5);
+                while (packets.Length == 0 && DateTime.UtcNow < copyStartedDeadline)
+                    AdvanceDispatcher(TimeSpan.FromMilliseconds(1));
+                MappingAssert(packets.Length > 0, "Copy did not start before cancellation.");
                 KeyboardCall(main, "ResetKeyboardOwnership");
                 AwaitMapping((Task)KeyboardField(main, "_keyboardHandoff")); FinishClipboard();
                 clipboardFrames = MappingFrames(packets);
                 MappingAssert(clipboardFrames.Count > 0 &&
-                    clipboardFrames.All(f => f.GetProperty("kind").GetString() != "read_clipboard") &&
-                    clipboardFrames[^1].GetProperty("usages").GetArrayLength() == 0,
+                    clipboardFrames.All(f => !f.TryGetProperty("kind", out var kind) || kind.GetString() != "read_clipboard") &&
+                    clipboardFrames[^1].TryGetProperty("usages", out var finalUsages) && finalUsages.GetArrayLength() == 0,
                     $"{mode}: cancelling Copy retained Command or pulled an obsolete clipboard.");
                 Console.WriteLine($"PASS {mode}: mapping C/V + Ctrl+C/Ctrl+V, Unicode paste, repeat suppression, Windows editor isolation and stale paste cancellation.");
                 packets.SetLength(0);
@@ -248,7 +266,31 @@ internal static partial class Program
                 SetKeyboardField(main, "_mappingFocus", null);
             }
             Console.WriteLine("PASS queued shortcut focus-away/back cancellation.");
+            Recovery:
+            TestUsbSystemShortcutSequence(main);
             TestIndependentKeyboardReconnect(main, control, packets, hwnd, value => foreground = value, Key, Finish);
+            TestKeyboardAvailabilityRecovery(main, packets, phone.Udid, hwnd, value => foreground = value, Key, Finish);
+            TestFunctionKeyHookDiagnostics(main, phone.Udid, hwnd, value => foreground = value, Finish);
+            TestShortcutReleaseRecoveryWindow(main, packets, phone.Udid, hwnd, value => foreground = value, Finish);
+            TestShortcutPressRecoveryWindow(main, packets, phone.Udid, hwnd, value => foreground = value, Finish);
+            foreach (var modifier in new[] { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C })
+            {
+                KeyboardCall(main, "FocusControlDevice", phone.Udid, (nint)0);
+                foreground = hwnd;
+                Key(modifier, true);
+                foreground = 0;
+                for (var offset = 0; offset < 24; offset += 4) Marshal.WriteInt32(data, offset, 0);
+                Marshal.WriteInt32(data, 0, modifier);
+                Marshal.WriteInt32(data, 8, 0x10); // injected up after focus left
+                KeyboardCall(main, "KeyboardHookProcedure", 0, (nint)0x101, data);
+                Finish();
+                MappingAssert(router.PressedModifiers == 0 && !router.HasRetiredKeys,
+                    $"Injected release after blur left modifier {modifier:X} stuck.");
+            }
+            foreground = hwnd;
+            KeyboardCall(main, "FocusControlDevice", phone.Udid, (nint)0);
+            Finish();
+            Console.WriteLine("PASS injected releases after blur: all eight modifiers clear their old ownership.");
             TestKeyboardHookRecovery(main, packets, Key, Finish);
             TestBluetoothKeyboardTransportGates();
             packets.SetLength(0);

@@ -58,7 +58,8 @@ internal static class ThemeService
         if (AttachedWindows.TryGetValue(window, out _)) return;
         AttachedWindows.Add(window, new WindowBackdropState());
         if (!window.AllowsTransparency)
-            window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
+            window.SetResourceReference(Window.BackgroundProperty,
+                window is IPhoneMirror.UI.Controls.RoundedWindow ? "WindowBackgroundBrush" : "AppBackgroundBrush");
         window.SourceInitialized += (_, _) =>
             RefreshWindowTheme(window, CurrentApplicationTheme);
         window.StateChanged += (_, _) => ApplyBackdrop(window);
@@ -130,6 +131,11 @@ internal static class ThemeService
     private static void RefreshWindowTheme(Window window,
         ApplicationTheme applicationTheme)
     {
+        if (window is IPhoneMirror.UI.Controls.RoundedWindow && !window.AllowsTransparency)
+        {
+            window.SetResourceReference(Window.BackgroundProperty, "WindowBackgroundBrush");
+            return;
+        }
         if (!window.AllowsTransparency)
         {
             var backdrop = window is Wpf.Ui.Controls.FluentWindow fluentWindow
@@ -158,6 +164,7 @@ internal static class ThemeService
 
     internal static void ApplyBackdrop(Window window)
     {
+        if (window is IPhoneMirror.UI.Controls.RoundedWindow) return;
         if (window.AllowsTransparency) return;
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
         var handle = new WindowInteropHelper(window).Handle;

@@ -165,7 +165,7 @@ async def _send_query_all(transports, packet):
                     log.debug('mDNS IPv6 query failed on one interface.', exc_info=True)
 
 
-async def browse_service(service_type, timeout=4.0):
+async def browse_service(service_type, timeout=4.0, *, on_update=None):
     service_type = _dns_name(service_type.rstrip('.')) + '.'
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(0, timeout)
@@ -173,6 +173,10 @@ async def browse_service(service_type, timeout=4.0):
     targets = set()
     services, properties = defaultdict(dict), {}
     addresses = defaultdict(dict)
+    def snapshot():
+        return [ServiceInstance(instance=instance, host=host.rstrip('.'), port=port,
+                    addresses=list(addresses.get(host, {}).values()), properties=properties.get(instance, {}))
+                for instance in sorted(targets) for host, port in services.get(instance, {})]
     try:
         try:
             adapters = _Adapters()
@@ -275,13 +279,15 @@ async def browse_service(service_type, timeout=4.0):
                                 addresses.pop(unrelated)
                     if (name in addresses or len(addresses) < MAX_DISCOVERY_NAMES) and len(addresses[name]) < 32:
                         addresses[name][(ip, iface)] = Address(ip=ip, iface=iface)
+            if on_update is not None:
+                # The callback only queues work; socket reception must never
+                # wait for a peer handshake. Publish split replies as they fill.
+                on_update(snapshot())
     finally:
         for transport, _ in transports:
             transport.close()
-    return [ServiceInstance(instance=instance, host=host.rstrip('.'), port=port,
-                addresses=list(addresses.get(host, {}).values()), properties=properties.get(instance, {}))
-            for instance in sorted(targets) for host, port in services.get(instance, {})]
+    return snapshot()
 
 
-async def browse_remotepairing(timeout=4.0):
-    return await browse_service(REMOTEPAIRING_SERVICE_NAME, timeout)
+async def browse_remotepairing(timeout=4.0, *, on_update=None):
+    return await browse_service(REMOTEPAIRING_SERVICE_NAME, timeout, on_update=on_update)

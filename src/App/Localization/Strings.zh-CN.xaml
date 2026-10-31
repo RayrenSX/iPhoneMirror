@@ -338,7 +338,7 @@
     <system:String x:Key="ShortcutSettingsLockScreen">锁定屏幕</system:String>
     <system:String x:Key="ShortcutSettingsVolumeUp">音量+</system:String>
     <system:String x:Key="ShortcutSettingsVolumeDown">音量-</system:String>
-    <system:String x:Key="ShortcutSettingsDock">显示 Dock</system:String>
+    <system:String x:Key="ShortcutSettingsDock">显示 Dock (iPad)</system:String>
     <system:String x:Key="ShortcutSettingsSearch">打开搜索</system:String>
     <system:String x:Key="ShortcutSettingsKeyboardShortcuts">显示键盘快捷键</system:String>
     <system:String x:Key="ShortcutSettingsAllWindows">显示所有应用窗口</system:String>
@@ -665,6 +665,7 @@
     <system:String x:Key="WirelessMusicStreaming">正在通过 AirPlay 播放音乐</system:String>
     <system:String x:Key="WirelessMusicAudioOnly">仅音频</system:String>
     <system:String x:Key="WirelessMusicNoVideo">无视频流</system:String>
+    <system:String x:Key="MediaOutputRequiresVideo">AirPlay 当前仅播放音频。请先开始包含画面的屏幕镜像，再录制、推流或使用虚拟摄像头。</system:String>
     <system:String x:Key="WirelessMusicAudioFormat">AirPlay PCM 音频</system:String>
     <system:String x:Key="WirelessStopping">正在停止 AirPlay 接收端…</system:String>
     <system:String x:Key="WirelessStopped">无线投屏已停止</system:String>

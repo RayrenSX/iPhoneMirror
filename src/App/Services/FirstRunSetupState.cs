@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Services;
 
@@ -30,6 +31,7 @@ internal sealed class FirstRunSetupState
     public SetupStep Step { get; set; }
     public int DeviceIndex { get; set; }
     public bool PreferencesApplied { get; set; }
+    public ApplicationDisplayMode? ApplicationModeDraft { get; set; }
     // Null means a legacy checkpoint has not made an explicit feature choice.
     public bool? WirelessEnabled { get; set; }
     public bool? BluetoothEnabled { get; set; }
@@ -91,9 +93,17 @@ internal sealed class FirstRunSetupState
         }
         DeviceIndex = 0;
     }
+    internal ApplicationDisplayMode PrepareApplicationModeDraft(ApplicationDisplayMode current)
+    {
+        if (ApplicationModeDraft is not { } draft || !Enum.IsDefined(draft))
+            ApplicationModeDraft = PreferencesApplied ? current : ApplicationDisplayMode.Lightweight;
+        PreferencesApplied = true;
+        return ApplicationModeDraft.Value;
+    }
     internal void Record(SetupOutcome outcome)
     {
         if (outcome == SetupOutcome.Skipped && !CanSkip) throw new InvalidOperationException("Setup is already complete.");
+        if (Step == SetupStep.ApplicationMode) ApplicationModeDraft = null;
         Outcomes[Step] = outcome;
     }
     internal void Skip()

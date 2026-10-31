@@ -390,6 +390,7 @@ internal static partial class Program
             Require(ReadPackets().All(p => p.Length == 0), "Expired shortcut/paste reached the writer.");
         }
         TestKeyboardHotkeyScope(window, other, udid, Focus);
+        TestImeKeyboardForwarding(window, other, packets, Focus, verifyPackets);
         TestRemoteTextInput(window, other, packets, Focus, verifyPackets);
     }
 

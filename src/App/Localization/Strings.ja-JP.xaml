@@ -338,7 +338,7 @@
     <system:String x:Key="ShortcutSettingsLockScreen">ロック画面</system:String>
     <system:String x:Key="ShortcutSettingsVolumeUp">音量を上げる</system:String>
     <system:String x:Key="ShortcutSettingsVolumeDown">音量を下げる</system:String>
-    <system:String x:Key="ShortcutSettingsDock">Dockを表示</system:String>
+    <system:String x:Key="ShortcutSettingsDock">Dockを表示 (iPad)</system:String>
     <system:String x:Key="ShortcutSettingsSearch">検索を開く</system:String>
     <system:String x:Key="ShortcutSettingsKeyboardShortcuts">キーボードショートカットを表示</system:String>
     <system:String x:Key="ShortcutSettingsAllWindows">Appのすべてのウィンドウを表示</system:String>
@@ -665,6 +665,7 @@
     <system:String x:Key="WirelessMusicStreaming">AirPlayで音楽を再生中</system:String>
     <system:String x:Key="WirelessMusicAudioOnly">音声のみ</system:String>
     <system:String x:Key="WirelessMusicNoVideo">映像ストリームなし</system:String>
+    <system:String x:Key="MediaOutputRequiresVideo">AirPlay は音声のみを再生しています。録画、配信、仮想カメラを使用する前に、映像を含む画面ミラーリングを開始してください。</system:String>
     <system:String x:Key="WirelessMusicAudioFormat">AirPlay PCM音声</system:String>
     <system:String x:Key="WirelessStopping">AirPlayレシーバーを停止しています…</system:String>
     <system:String x:Key="WirelessStopped">無線ミラーリングを停止しました</system:String>

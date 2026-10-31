@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Shell;
 
 namespace IPhoneMirror.UI.Controls;
 
@@ -42,6 +43,22 @@ public class RoundedWindow : Window
         SetResourceReference(StyleProperty, typeof(RoundedWindow));
     }
 
+    protected override void OnInitialized(EventArgs e)
+    {
+        base.OnInitialized(e);
+        if (AllowsTransparency) return;
+        // Large, animated pages use an ordinary HWND. Windows owns the
+        // non-client resize frame, shadow and rounded corners in this mode.
+        WindowChrome.SetWindowChrome(this, new WindowChrome
+        {
+            CaptionHeight = 0,
+            ResizeBorderThickness = new Thickness(7),
+            GlassFrameThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(0),
+            UseAeroCaptionButtons = false,
+        });
+    }
+
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
@@ -49,9 +66,22 @@ public class RoundedWindow : Window
         if (_source is null) return;
         SizeForReadingText(this);
         _source.AddHook(WindowProcedure);
-        // The alpha surface owns its silhouette; do not add a second DWM corner.
-        var doNotRound = 1;
-        _ = DwmSetWindowAttribute(_source.Handle, 33, ref doNotRound, sizeof(int));
+        ApplyNativeCorners();
+    }
+
+    protected override void OnStateChanged(EventArgs e)
+    {
+        base.OnStateChanged(e);
+        ApplyNativeCorners();
+    }
+
+    private void ApplyNativeCorners()
+    {
+        if (_source is null) return;
+        // Layered windows already draw their own silhouette. Native windows
+        // can use DWM corners without a per-pixel alpha surface.
+        var corners = !AllowsTransparency && WindowState == WindowState.Normal ? 2 : 1;
+        _ = DwmSetWindowAttribute(_source.Handle, 33, ref corners, sizeof(int));
     }
 
     internal static void SizeForReadingText(Window window)
@@ -98,7 +128,7 @@ public class RoundedWindow : Window
                 handled = true;
             }
         }
-        if (message != 0x0084 || WindowState != WindowState.Normal ||
+        if (!AllowsTransparency || message != 0x0084 || WindowState != WindowState.Normal ||
             ResizeMode is not (ResizeMode.CanResize or ResizeMode.CanResizeWithGrip)) return 0;
         // Layered windows have no native resize border. Keep a 6-DIP resize band
         // around the painted surface; signed coordinates support monitors left of primary.

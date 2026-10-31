@@ -1,6 +1,7 @@
 """Device clipboard polling regressions; no physical device or desktop access."""
 import asyncio
 import collections
+import plistlib
 import sys
 import unittest
 from pathlib import Path
@@ -40,6 +41,72 @@ class Pasteboard:
 
 
 class ClipboardTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def notes_archive(payload, classname='ICNotePasteboardData'):
+        return plistlib.dumps({'$archiver': 'NSKeyedArchiver', '$version': 100000,
+            '$top': {'root': plistlib.UID(1)}, '$objects': ['$null',
+                {'$class': plistlib.UID(3), 'attributedStringData': plistlib.UID(2)},
+                {'NS.data': payload}, {'$classname': classname}]}, fmt=plistlib.FMT_BINARY)
+
+    async def test_notes_native_text_avoids_stalled_rich_format_resolution(self):
+        for text in ('phonecopyalpha\n\nphone copy alpha', '中文 café 😀\n第二行',
+                     '中文😀' * 40 + '\nnext line', ''):
+            raw = text.encode('utf-8')
+            size = len(raw)
+            encoded_size = bytearray()
+            while size >= 128:
+                encoded_size.append((size & 127) | 128)
+                size >>= 7
+            encoded_size.append(size)
+            # Include unrelated style fields before/after the string.
+            archive = self.notes_archive(b'\x08\x01\x12' + encoded_size + raw + b'\x2a\x02\x08\x01')
+            session = self.session()
+            policies = []
+
+            class NotesPasteboard(Pasteboard):
+                async def get(self, data_policy=None):
+                    policies.append(data_policy)
+                    if data_policy != {'promiseSecondary': {}}:
+                        raise TimeoutError('rich format conversion stalled')
+                    return {'items': [{'types': ['com.apple.notes.richtext', 'public.utf8-plain-text'],
+                        'data': {'com.apple.notes.richtext': {'data': archive},
+                                 'public.utf8-plain-text': {}}}]}
+
+            with patch.object(bridge, 'PasteboardService', NotesPasteboard):
+                self.assertEqual(text, await session._read_device_pasteboard())
+            self.assertEqual([{'promiseSecondary': {}}], policies)
+
+    def test_notes_decoder_rejects_malformed_or_unrecognized_data(self):
+        for payload in (b'\x12\x05ab', b'\x12\x01\xff', b'\x12\x01a\x12\x01b',
+                        b'\x12\x01a\x80', b'\x12' + b'\x80' * 11, b'\x10\x01',
+                        b'\x00', b'\x13'):
+            with self.subTest(payload=payload):
+                self.assertIsNone(bridge._notes_pasteboard_text(self.notes_archive(payload)))
+        self.assertIsNone(bridge._notes_pasteboard_text(b'not a plist'))
+        self.assertIsNone(bridge._notes_pasteboard_text(
+            self.notes_archive(b'\x12\x01a', classname='OtherArchive')))
+        archive = plistlib.loads(self.notes_archive(b'\x12\x01a'))
+        archive['$top']['root'] = plistlib.UID(100)
+        self.assertIsNone(bridge._notes_pasteboard_text(plistlib.dumps(archive, fmt=plistlib.FMT_BINARY)))
+
+    async def test_temporarily_promised_notes_retries_without_resolving_html(self):
+        session = self.session()
+        policies = []
+        archive = self.notes_archive(b'\x12\x05ready')
+
+        class NotesPasteboard(Pasteboard):
+            async def get(self, data_policy=None):
+                policies.append(data_policy)
+                return {'items': [{'types': ['com.apple.notes.richtext', 'public.utf8-plain-text'],
+                    'data': {'com.apple.notes.richtext': {} if len(policies) == 1 else {'data': archive},
+                             'public.utf8-plain-text': {}}}]}
+
+        with patch.object(bridge, 'PasteboardService', NotesPasteboard):
+            with self.assertRaisesRegex(RuntimeError, 'unresolved'):
+                await session._read_device_pasteboard()
+            self.assertEqual('ready', await session._read_device_pasteboard())
+        self.assertEqual([{'promiseSecondary': {}}] * 2, policies)
+
     def session(self, mode='usb'):
         session = bridge.TouchSession(Ipc(), 120, 'clipboard-test', transport=mode)
         session.rsd = object()
@@ -261,7 +328,7 @@ class ClipboardTests(unittest.IsolatedAsyncioTestCase):
                                  {'data': 'resolved 中文'.encode('utf-8')})
                         return {'pasteboard': {'items': [{
                             'types': ['public.html', 'public.utf8-plain-text'],
-                            'data': {'public.html': {'data': b'<p>rich text</p>'},
+                            'data': {'public.html': {},
                                      'public.utf8-plain-text': datum},
                         }]}}
 
@@ -273,9 +340,10 @@ class ClipboardTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         self.assertEqual('resolved 中文', await session._read_device_pasteboard())
                 self.assertEqual([{'promiseSecondary': {}}, {'allResolved': {}}], policies)
+                await session._close_device_pasteboard()
                 self.assertTrue(all(connection.closed for connection in connections))
 
-    async def test_promised_text_fallback_shares_the_read_timeout(self):
+    async def test_promised_text_fallback_has_a_separate_bounded_timeout(self):
         session = self.session()
         connections = []
 
@@ -290,11 +358,158 @@ class ClipboardTests(unittest.IsolatedAsyncioTestCase):
                 return {'items': [{'types': ['public.text'], 'data': {'public.text': datum}}]}
 
         with patch.object(bridge, 'PasteboardService', SlowPasteboard), \
-                patch.object(bridge, 'PASTEBOARD_OPERATION_TIMEOUT_SECONDS', 0.25):
+                patch.object(bridge, 'PASTEBOARD_OPERATION_TIMEOUT_SECONDS', 0.25), \
+                patch.object(bridge, 'PASTEBOARD_FULL_READ_TIMEOUT_SECONDS', 0.01):
             with self.assertRaises(TimeoutError):
                 await session._read_device_pasteboard()
         self.assertEqual(2, len(connections))
         self.assertTrue(all(connection.closed for connection in connections))
+
+    async def test_resolved_rich_text_is_cached_only_for_same_device_change(self):
+        session = self.session()
+        revision = 1
+        calls = []
+        class RichPasteboard(Pasteboard):
+            async def get(self, data_policy=None):
+                calls.append(data_policy)
+                datum = {'data': f'text {revision}'.encode()} if data_policy == {'allResolved': {}} else {}
+                return {'items': [{'types': ['public.text'], 'data': {'public.text': datum}}],
+                        'metadata': {'nonce': 'device', 'changeCount': revision}}
+        with patch.object(bridge, 'PasteboardService', RichPasteboard):
+            self.assertEqual('text 1', await session._read_device_pasteboard())
+            self.assertEqual('text 1', await session._read_device_pasteboard())
+            revision = 2
+            self.assertEqual('text 2', await session._read_device_pasteboard())
+        self.assertEqual(2, calls.count({'allResolved': {}}))
+        self.assertEqual(3, calls.count({'promiseSecondary': {}}))
+        self.assertEqual(2, calls.count({'allPromised': {}}))
+
+    async def test_new_copy_during_resolution_never_publishes_the_old_snapshot(self):
+        session = self.session()
+        revision = 1
+        class ChangingPasteboard(Pasteboard):
+            async def get(self, data_policy=None):
+                nonlocal revision
+                captured = revision
+                if data_policy == {'allResolved': {}}:
+                    revision += 1  # User copied again during the slow read.
+                datum = {'data': b'old text'} if data_policy == {'allResolved': {}} else {}
+                return {'items': [{'types': ['public.text'], 'data': {'public.text': datum}}],
+                        'metadata': {'nonce': 'device', 'changeCount': captured}}
+        with patch.object(bridge, 'PasteboardService', ChangingPasteboard):
+            with self.assertRaisesRegex(RuntimeError, 'changed during resolution'):
+                await session._publish_device_pasteboard()
+        self.assertEqual([], [e for e in session.ipc.events if e['event'] == 'clipboard_text'])
+        self.assertIsNone(session._pasteboard_cached_change)
+
+    async def test_error_replies_at_each_read_stage_never_publish_or_cache_and_retry(self):
+        for failed_policy in ('promiseSecondary', 'allResolved', 'allPromised'):
+            with self.subTest(failed_policy=failed_policy):
+                session = self.session()
+                fail = True
+                metadata = {'nonce': 'device', 'changeCount': 12}
+
+                class ErrorReplyPasteboard(Pasteboard):
+                    async def get(self, data_policy=None):
+                        policy = next(iter(data_policy))
+                        if fail and policy == failed_policy:
+                            return {'command': 'PULL_REPLY', 'error': {'code': 7},
+                                    'pasteboard': {'metadata': metadata, 'items': []}}
+                        datum = {'data': b'recovered text'} if policy == 'allResolved' else {}
+                        return {'command': 'PULL_REPLY', 'pasteboard': {
+                            'metadata': metadata, 'items': [{'types': ['public.text'],
+                            'data': {'public.text': datum}}]}}
+
+                with patch.object(bridge, 'PasteboardService', ErrorReplyPasteboard):
+                    with self.assertRaisesRegex(RuntimeError, 'pasteboard.*reply'):
+                        await session._publish_device_pasteboard()
+                    self.assertEqual([], [e for e in session.ipc.events if e['event'] == 'clipboard_text'])
+                    self.assertIsNone(session._pasteboard_cached_change)
+                    fail = False
+                    await session._publish_device_pasteboard()
+                self.assertEqual(['recovered text'],
+                                 [e['text'] for e in session.ipc.events if e['event'] == 'clipboard_text'])
+
+    async def test_failed_set_reply_never_sends_paste_keys_or_changes_baseline(self):
+        session = self.session()
+        baseline = session._pasteboard_last_text
+        calls = []
+
+        class ErrorReplyPasteboard(Pasteboard):
+            async def set_text(self, text):
+                calls.append(text)
+                return {'command': 'SET_REPLY', 'error': {'code': 7}}
+
+        async def keyboard(usages):
+            self.fail('A failed SET reply must not paste the old device clipboard')
+
+        session._send_keyboard_report = keyboard
+        with patch.object(bridge, 'PasteboardService', ErrorReplyPasteboard):
+            with self.assertRaisesRegex(RuntimeError, 'pasteboard.*reply'):
+                await session._apply_paste_text('host text')
+        self.assertEqual(['host text'], calls)
+        self.assertIs(baseline, session._pasteboard_last_text)
+        self.assertIsNone(session._pasteboard_service)
+
+    def test_malformed_pull_reply_and_invalid_encoding_are_not_empty_content(self):
+        for snapshot in ({'command': 'SET_REPLY', 'items': []},
+                         {'pasteboard': {'items': 'invalid'}}, {'pasteboard': {'items': [1]}}):
+            with self.subTest(snapshot=snapshot):
+                with self.assertRaisesRegex(RuntimeError, 'pasteboard.*reply'):
+                    bridge._pasteboard_snapshot_text(snapshot)
+        self.assertEqual((None, False), bridge._pasteboard_snapshot_text({'items': None}))
+        self.assertEqual((None, True), bridge._pasteboard_snapshot_text({'items': [{
+            'types': ['public.utf8-plain-text'],
+            'data': {'public.utf8-plain-text': {'data': b'\xff'}}}]}))
+
+    async def test_foreground_paste_preempts_slow_rich_read_without_stopping_poll(self):
+        from unittest.mock import AsyncMock
+        session = self.session()
+        resolving = asyncio.Event()
+        class RichPasteboard(Pasteboard):
+            async def get(self, data_policy=None):
+                if data_policy == {'allResolved': {}}:
+                    resolving.set()
+                    await asyncio.Event().wait()
+                return {'items': [{'types': ['public.text'], 'data': {'public.text': {}}}]}
+        session._restart_failed_pasteboard = AsyncMock(return_value=True)
+        with patch.object(bridge, 'PasteboardService', RichPasteboard):
+            read = asyncio.create_task(session._read_device_pasteboard())
+            await asyncio.wait_for(resolving.wait(), 1)
+            await asyncio.wait_for(session._write_device_pasteboard('host text'), 1)
+            with self.assertRaisesRegex(RuntimeError, 'superseded'):
+                await read
+        session._restart_failed_pasteboard.assert_awaited_once_with(for_write=True)
+        self.assertFalse(session._pasteboard_lock.locked())
+        self.assertIsNone(session._pasteboard_full_read_task)
+        self.assertEqual('host text', session._pasteboard_last_text)
+
+    async def test_incomplete_full_reply_retires_helper_before_retrying_same_change(self):
+        from unittest.mock import AsyncMock
+        session = self.session()
+        recovered = False
+
+        class IncompletePasteboard(Pasteboard):
+            async def get(self, data_policy=None):
+                datum = {'data': b'recovered'} if recovered else {}
+                return {'items': [{'types': ['public.text'], 'data': {'public.text': datum}}],
+                        'metadata': {'nonce': 'same-device', 'changeCount': 1}}
+
+        async def restart():
+            nonlocal recovered
+            self.assertFalse(session._pasteboard_lock.locked())
+            recovered = True
+            session._pasteboard_full_read_interrupted = False
+            return True
+
+        session._restart_failed_pasteboard = AsyncMock(side_effect=restart)
+        with patch.object(bridge, 'PasteboardService', IncompletePasteboard):
+            with self.assertRaisesRegex(RuntimeError, 'unresolved'):
+                await session._read_device_pasteboard()
+            self.assertTrue(session._pasteboard_full_read_interrupted)
+            self.assertIsNone(session._pasteboard_cached_change)
+            self.assertEqual('recovered', await session._read_device_pasteboard())
+        session._restart_failed_pasteboard.assert_awaited_once()
 
     async def test_non_text_promises_do_not_request_resolution(self):
         session = self.session()
@@ -332,9 +547,11 @@ class ClipboardTests(unittest.IsolatedAsyncioTestCase):
             await session._write_device_pasteboard('Windows / 中文 / 😀')
             self.assertEqual('Windows / 中文 / 😀', await session._read_device_pasteboard())
             self.assertEqual(3, len(instances))
-            self.assertTrue(all(instance.entered == 1 and instance.closed
-                                for instance in instances))
+            self.assertTrue(all(instance.entered == 1 for instance in instances))
+            self.assertTrue(all(instance.closed for instance in instances[:-1]))
+            self.assertFalse(instances[-1].closed)
             await session._close_device_pasteboard()
+            self.assertTrue(all(instance.closed for instance in instances))
 
     async def test_pull_requests_primary_representations_only(self):
         session = self.session()
@@ -355,6 +572,8 @@ class ClipboardTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(bridge, 'PasteboardService', return_value=service):
             self.assertEqual('primary', await session._read_device_pasteboard())
         self.assertEqual([('general', {'promiseSecondary': {}})], service.policies)
+        self.assertFalse(service.closed)
+        await session._close_device_pasteboard()
         self.assertTrue(service.closed)
 
     async def test_timeout_discards_connection_before_retry(self):
@@ -372,9 +591,10 @@ class ClipboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stuck.closed)
             self.assertIsNone(session._pasteboard_service)
             self.assertEqual('device text', await session._read_device_pasteboard())
-            self.assertTrue(replacement.closed)
-            self.assertIsNone(session._pasteboard_service)
+            self.assertFalse(replacement.closed)
+            self.assertIs(session._pasteboard_service, replacement)
             await session._close_device_pasteboard()
+            self.assertTrue(replacement.closed)
 
     async def test_reads_and_writes_are_serialized_and_queued_cancellation_is_safe(self):
         session = self.session()
@@ -594,7 +814,8 @@ class ClipboardTests(unittest.IsolatedAsyncioTestCase):
         async def stop(_delay):
             raise asyncio.CancelledError
 
-        with patch.object(bridge, 'PasteboardService', side_effect=[FailedConnect(session.rsd), ready]):
+        with patch.object(bridge, 'PasteboardService', side_effect=[
+                FailedConnect(session.rsd), FailedConnect(session.rsd), ready]):
             with self.assertRaises(ConnectionError):
                 await session._write_device_pasteboard('A')
             self.assertTrue(session._pasteboard_writes_idle.is_set())
@@ -878,5 +1099,36 @@ class ClipboardTests(unittest.IsolatedAsyncioTestCase):
         await session._publish_device_pasteboard(force=True)
         self.assertEqual(['old Windows copy'], [e['text'] for e in session.ipc.events
                                               if e['event'] == 'clipboard_text'])
+
+    async def test_repeated_native_copy_uses_change_count_without_echoing_set_or_restart(self):
+        session = self.session()
+        count = 1
+        nonce = 'helper-one'
+        class Service(Pasteboard):
+            async def get(self, data_policy=None):
+                return {'metadata': {'nonce': nonce, 'changeCount': count},
+                        'items': [{'types': ['public.text'],
+                                   'data': {'public.text': {'data': b'same text'}}}]}
+            async def set_text(self, text):
+                pass
+        def published():
+            return [e['text'] for e in session.ipc.events if e['event'] == 'clipboard_text']
+        with patch.object(bridge, 'PasteboardService', Service):
+            await session._publish_device_pasteboard()
+            await session._publish_device_pasteboard()
+            self.assertEqual(['same text'], published())
+            count = 2  # Native Copy again after the Windows clipboard changed.
+            await session._publish_device_pasteboard()
+            self.assertEqual(['same text'] * 2, published())
+            nonce = 'replacement-helper'  # Resource retirement alone is not a copy.
+            await session._publish_device_pasteboard()
+            self.assertEqual(['same text'] * 2, published())
+            await session._write_device_pasteboard('same text')
+            count = 3
+            await session._publish_device_pasteboard()
+            self.assertEqual(['same text'] * 2, published())
+            count = 4
+            await session._publish_device_pasteboard()
+            self.assertEqual(['same text'] * 3, published())
 if __name__ == '__main__':
     unittest.main()

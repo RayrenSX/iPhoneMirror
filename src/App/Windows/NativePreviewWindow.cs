@@ -179,6 +179,9 @@ internal sealed class NativePreviewWindow : IDisposable
     private nint _restoreStyle;
 
     internal bool IsFullScreen => _isFullScreen;
+    // Touch control shares the drag surface. Unfixing gives it back to Windows,
+    // including keyboard input admitted through the global hook.
+    internal bool AllowsControlInput => !IsUsbControlEnabledForWindow || _isFixed || _isFullScreen;
     internal event Action<bool>? FullScreenChanged;
 
     private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string title,
@@ -664,6 +667,7 @@ internal sealed class NativePreviewWindow : IDisposable
         if (_isFullScreen)
         {
             _isFullScreen = false;
+            if (!_isFixed && IsUsbControlEnabledForWindow) ResetTouchControlInput();
             _ = RemovePropW(_handle, "iPhoneMirrorFullScreen");
             _ = SetWindowLongPtrW(_handle, GwlStyle, _restoreStyle);
             _ = SetWindowPos(_handle, 0, _restoreRectangle.Left, _restoreRectangle.Top,
@@ -829,7 +833,7 @@ internal sealed class NativePreviewWindow : IDisposable
                     unchecked((short)(wParam.ToInt64() >> 16)));
                 handled = true;
                 return 0;
-            case WmSetCursor when IsUsbControlEnabledForWindow:
+            case WmSetCursor when IsPointerInputEnabledForWindow && IsUsbControlEnabledForWindow:
                 // USB touch control never captures the Windows pointer. A
                 // previous reverse-control route may have left the process
                 // cursor hidden or retained a resize/hand shape. Reassert
@@ -845,7 +849,11 @@ internal sealed class NativePreviewWindow : IDisposable
             case WmKeyDown when IsPointerInputActive:
                 _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
                     PreviewKeyboardKind.Down, wParam.ToInt32(),
-                    (int)((lParam.ToInt64() >> 16) & 0x1FF)));
+                    (int)((lParam.ToInt64() >> 16) & 0x1FF))
+                {
+                    MessageTime = PreviewKeyboardEventArgs.ReadMessageTime(),
+                    IsRepeat = (lParam.ToInt64() & (1L << 30)) != 0,
+                });
                 handled = true;
                 return 0;
             case 0x0102 when IsPointerInputActive && ((lParam.ToInt64() >> 16) & 0xFF) == 0:
@@ -856,14 +864,18 @@ internal sealed class NativePreviewWindow : IDisposable
             case WmSysKeyDown when IsPointerInputActive:
                 _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
                     PreviewKeyboardKind.Down, wParam.ToInt32(),
-                    (int)((lParam.ToInt64() >> 16) & 0x1FF)));
+                    (int)((lParam.ToInt64() >> 16) & 0x1FF))
+                {
+                    MessageTime = PreviewKeyboardEventArgs.ReadMessageTime(),
+                    IsRepeat = (lParam.ToInt64() & (1L << 30)) != 0,
+                });
                 handled = true;
                 return 0;
             case WmKeyUp when IsPointerInputActive:
             case WmSysKeyUp when IsPointerInputActive:
                 _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
                     PreviewKeyboardKind.Up, wParam.ToInt32(),
-                    (int)((lParam.ToInt64() >> 16) & 0x1FF)));
+                    (int)((lParam.ToInt64() >> 16) & 0x1FF)) { MessageTime = PreviewKeyboardEventArgs.ReadMessageTime() });
                 handled = true;
                 return 0;
             case WmContextMenu when IsRightButtonForwardingEnabled:
@@ -1179,6 +1191,8 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed || _handle == 0 || _isFullScreen) return;
         _isFixed = !_isFixed;
+        if (!_isFixed && IsUsbControlEnabledForWindow)
+            ResetTouchControlInput();
         var style = GetWindowLongPtrW(_handle, GwlStyle).ToInt64();
         style = _isFixed ? style & ~WsThickFrame : style | WsThickFrame;
         _ = SetWindowLongPtrW(_handle, GwlStyle, (nint)style);
@@ -1190,8 +1204,19 @@ internal sealed class NativePreviewWindow : IDisposable
             ("mode", WindowMode), ("enabled", _isFixed));
     }
 
+    private void ResetTouchControlInput()
+    {
+        ReleasePointerCapture();
+        _pointerInput?.Invoke(new PreviewPointerEventArgs(
+            PreviewPointerKind.Reset, 0, 0, 0, 0));
+        _keyboardInput?.Invoke(new PreviewKeyboardEventArgs(
+            PreviewKeyboardKind.Reset, 0));
+        NativeCursor.SetArrow();
+        ShowSystemCursor();
+    }
+
     private readonly Func<nint> _inputForegroundWindow = GetForegroundWindow;
-    private bool IsReverseControlActive => _pointerInput is not null &&
+    private bool IsReverseControlActive => AllowsControlInput && _pointerInput is not null &&
         (_isReverseControlEnabled?.Invoke(_handle) ?? false) &&
         _inputForegroundWindow() == _handle;
     private bool IsReverseControlEnabledForWindow => _pointerInput is not null &&
@@ -1204,10 +1229,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool IsRightButtonForwardingEnabled =>
         IsReverseControlEnabledForWindow && !IsUsbControlEnabledForWindow;
     private bool IsPointerInputEnabledForWindow =>
-        IsReverseControlEnabledForWindow || IsUsbControlEnabledForWindow;
+        AllowsControlInput && (IsReverseControlEnabledForWindow || IsUsbControlEnabledForWindow);
     private bool IsPointerInputActive =>
-        IsReverseControlActive || (IsUsbControlEnabledForWindow &&
-            _inputForegroundWindow() == _handle);
+        AllowsControlInput && (IsReverseControlActive || (IsUsbControlEnabledForWindow &&
+            _inputForegroundWindow() == _handle));
 
     private void EnableReverseControl()
     {

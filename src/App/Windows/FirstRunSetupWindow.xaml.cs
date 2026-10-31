@@ -286,7 +286,15 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
                 if (_closed || !_verified || _state.Step != originalStep) return;
                 if (!_main.SetupSaveWirelessPreferences()) throw new IOException(L("SetupSaveFailed"));
             }
-            if (_state.IsChoiceStep && Application.Current is App app && !app.SaveUpdateSettings())
+            if (_state.Step == SetupStep.ApplicationMode)
+            {
+                var mode = _state.PrepareApplicationModeDraft(_main.SelectedApplicationDisplayMode);
+                _main.SelectedApplicationDisplayMode = mode;
+                if (_main.SelectedApplicationDisplayMode != mode)
+                    throw new IOException(L("SetupSaveFailed"));
+            }
+            if (_state.IsChoiceStep && _state.Step != SetupStep.ApplicationMode &&
+                Application.Current is App app && !app.SaveUpdateSettings())
                 throw new IOException(L("SetupSaveFailed"));
             _state.Disposition = SetupDisposition.InProgress;
             if (_state.Step == SetupStep.MirrorConnection) _state.GlobalOutcomes[SetupStep.Usage] = SetupOutcome.Verified;

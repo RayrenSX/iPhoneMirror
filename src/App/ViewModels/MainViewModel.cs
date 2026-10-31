@@ -1111,7 +1111,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _mediaOutput.CanStart(MediaOutputKind.Rtmp, SelectedOutputSessionHandle);
     public bool CanStopMediaOutput => IsMediaOutputRunning && !IsMediaOutputTransitioning;
     public bool CanDiscardRecording => !IsRecordingMediaOutput && PendingRecordingPath is not null && !IsMediaOutputTransitioning;
-    public bool CanStartMediaOutput => (CurrentSessionHandle != 0 ||
+    public bool CanStartMediaOutput => !IsAudioOnlyAirPlay && (CurrentSessionHandle != 0 ||
         (IsMediaCasting && IsMediaCastSelected &&
          _mediaCastNv12FrameProvider is not null)) &&
         !IsBusy && !_virtualCamera.IsRunning &&
@@ -2225,9 +2225,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         else await EnableUsbControlAsync();
     }
 
-    // Toolbar and preview-menu commands intentionally start a selected transport
-    // only. They must not inherit the legacy toggle's "click again to stop"
-    // behavior because each transport now has its own direct entry point.
+    // Toolbar commands start a selected transport directly. Independent preview
+    // windows use the target-specific toggle methods below so their context
+    // menus can both enable and disable control from the tray.
     internal Task StartBluetoothControlAsync(string? targetDeviceUdid = null) =>
         EnableBluetoothControlAsync(targetDeviceUdid);
 
@@ -6309,6 +6309,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private void SetAudioOnlyAirPlay(bool value)
     {
         if (!Set(ref _isAudioOnlyAirPlay, value, nameof(IsAudioOnlyAirPlay))) return;
+        NotifyMediaOutputStateChanged();
         OnPropertyChanged(nameof(CanUseVisualPreviewTools));
         OnPropertyChanged(nameof(TargetResolutionDisplay));
         OnPropertyChanged(nameof(TargetFpsDisplay));
@@ -7070,7 +7071,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         SetMediaOutputTransitioning(true);
         try
         {
+            if (IsAudioOnlyAirPlay)
+                return (false, LocalizationService.Get("MediaOutputRequiresVideo"));
             await EnsureMediaOutputCapabilitiesAsync();
+            if (IsAudioOnlyAirPlay)
+                return (false, LocalizationService.Get("MediaOutputRequiresVideo"));
             if (IsMediaOutputRunning)
                 return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
             var handle = CurrentSessionHandle;
@@ -7254,7 +7259,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         SetMediaOutputTransitioning(true);
         try
         {
+            if (IsAudioOnlyAirPlay)
+                return (false, LocalizationService.Get("MediaOutputRequiresVideo"));
             await EnsureMediaOutputCapabilitiesAsync();
+            if (IsAudioOnlyAirPlay)
+                return (false, LocalizationService.Get("MediaOutputRequiresVideo"));
             if (_virtualCamera.IsRunning)
                 return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
             var handle = CurrentSessionHandle;

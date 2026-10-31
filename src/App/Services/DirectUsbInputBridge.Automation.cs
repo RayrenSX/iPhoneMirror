@@ -53,13 +53,13 @@ public sealed partial class DirectUsbInputBridge
                 }), cancellation);
             }
             finally { _sendLock.Release(); }
-            return await result.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellation);
+            return await result.Task.WaitAsync(TimeSpan.FromSeconds(CoreDeviceTouchProtocol.ClipboardRequestTimeoutSeconds), cancellation);
         }
         catch (Exception) when (sent && !result.Task.IsCompleted)
         {
             try
             {
-                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(CoreDeviceTouchProtocol.ClipboardCleanupTimeoutSeconds));
                 await _sendLock.WaitAsync(cleanup.Token);
                 try
                 {

@@ -365,7 +365,11 @@ internal sealed class NativePreviewHost : HwndHost
                 case 0x0104: // WM_SYSKEYDOWN
                     KeyboardInput?.Invoke(this, new PreviewKeyboardEventArgs(
                         PreviewKeyboardKind.Down, (int)wParam,
-                        (int)(((long)lParam >> 16) & 0x1FF)));
+                        (int)(((long)lParam >> 16) & 0x1FF))
+                    {
+                        MessageTime = PreviewKeyboardEventArgs.ReadMessageTime(),
+                        IsRepeat = ((long)lParam & (1L << 30)) != 0,
+                    });
                     handled = true;
                     return 0;
                 case 0x0102 when (((long)lParam >> 16) & 0xFF) == 0: // Posted WM_CHAR (no physical scan code).
@@ -377,7 +381,7 @@ internal sealed class NativePreviewHost : HwndHost
                 case 0x0105: // WM_SYSKEYUP
                     KeyboardInput?.Invoke(this, new PreviewKeyboardEventArgs(
                         PreviewKeyboardKind.Up, (int)wParam,
-                        (int)(((long)lParam >> 16) & 0x1FF)));
+                        (int)(((long)lParam >> 16) & 0x1FF)) { MessageTime = PreviewKeyboardEventArgs.ReadMessageTime() });
                     handled = true;
                     return 0;
             }
@@ -545,4 +549,9 @@ internal sealed class PreviewKeyboardEventArgs : EventArgs
     internal int VirtualKey { get; }
     internal int ScanCode { get; }
     internal string? Text { get; init; }
+    internal uint? MessageTime { get; init; }
+    internal bool IsRepeat { get; init; }
+    internal static uint ReadMessageTime() => unchecked((uint)GetMessageTime());
+    [DllImport("user32.dll")]
+    private static extern int GetMessageTime();
 }

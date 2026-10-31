@@ -7,13 +7,60 @@ internal static partial class Program
 {
     private static int RunKeyboardRouterTests()
     {
+        TestFunctionKeyRoutingDiagnostics();
+        TestShortcutReleaseRecoveryModel();
+        TestShortcutPressRecoveryModel();
         TestKeyboardReleaseFailureIsolation();
         TestRetiredKeyReconciliation();
+        TestLostKeyUpReconciliation();
         TestMappingCaptureTransactions();
         TestCaptureRecoveryPhysicalIdentity();
         TestUnifiedKeyboardLifetimes();
         TestUnifiedKeyboardDispatch();
         return 0;
+    }
+
+    private static void TestLostKeyUpReconciliation()
+    {
+        var router = new KeyboardInputRouter();
+        router.CompleteHandoff(router.BeginHandoff(KeyboardInputMode.Direct));
+        var calls = new List<(int Key, bool Down)>();
+        var shortcuts = 0;
+        var replays = 0;
+        router.Shortcuts.Configure([
+            new(new(KeyboardShortcut.Control, 0x42), "combo", () => true, () => shortcuts++),
+            new(KeyboardShortcut.HomeDefault, "mouse", () => true, () => shortcuts++)]);
+        void Key(int vk, bool down) => router.RouteEvent(new(vk, 0, false), down,
+            (key, _) => new(KeyboardEventOwner.Direct, true, pressed => calls.Add((key.VirtualKey, pressed))),
+            (_, _) => replays++);
+        Key(0x41, true); Key(0xA2, true);
+        var generation = router.Generation;
+        router.ReconcileReleasedKeys(new HashSet<int> { 0x41 });
+        MappingAssert(router.Generation == generation && calls.SequenceEqual(new[] { (0x41, true) }) &&
+            shortcuts == 0 && replays == 0 && router.PressedModifiers == KeyboardShortcut.Control,
+            "Lost candidate recovery replayed input, fired a shortcut, or interrupted a held key.");
+        for (var i = 0; i < 100; i++) router.ReconcileReleasedKeys(new HashSet<int>());
+        MappingAssert(calls.Count == 1 && router.PressedKeyCount == 2 && replays == 0,
+            "Async state reported suppressed holds as up and periodic recovery released them.");
+        Key(0xA2, false);
+        Key(0x41, false);
+        MappingAssert(calls.SequenceEqual(new[] { (0x41, true), (0xA2, true), (0xA2, false), (0x41, false) }),
+            "Held key or buffered modifier lost its real release.");
+        router.RouteEvent(new(0x5B, 0, false), true, (_, _) => new(KeyboardEventOwner.Windows, false), (_, _) => { });
+        router.CompleteHandoff(router.BeginHandoff(KeyboardInputMode.Direct));
+        MappingAssert(!router.RouteShortcutTrigger((int)KeyboardShortcut.MouseRight), "Fixture did not block mouse shortcut.");
+        router.ReconcileReleasedKeys(new HashSet<int>());
+        MappingAssert(router.RouteShortcutTrigger((int)KeyboardShortcut.MouseRight), "Lost Win up still blocked mouse shortcut.");
+        Key(0xA2, true); Key(0x42, true); Key(0x42, false); Key(0xA2, false);
+        MappingAssert(shortcuts == 2 && replays == 0, "Keyboard/mouse shortcuts did not resume exactly once.");
+        calls.Clear();
+        router.RouteEvent(new(0x43, 0, false), true, (_, _) => new(KeyboardEventOwner.Direct, false,
+            down => calls.Add((0x43, down))), (_, _) => { });
+        router.ReconcileReleasedKeys(new HashSet<int>());
+        router.ReconcileReleasedKeys(new HashSet<int>());
+        Key(0x43, false);
+        MappingAssert(calls.SequenceEqual(new[] { (0x43, true), (0x43, false) }), "Lost direct up was not released exactly once.");
+        Console.WriteLine("PASS healthy-hook reconciliation: 100 empty-state polls preserve suppressed holds/candidates; keyboard/mouse shortcuts restored; direct release once.");
     }
 
     private static void TestRetiredKeyReconciliation()
