@@ -1,5 +1,6 @@
 """Exercise the SDK pairing exchange with real SRP, including invalid proofs."""
 import hashlib
+from binascii import unhexlify
 import sys
 import unittest
 from pathlib import Path
@@ -29,7 +30,7 @@ class RemotePairingProofTests(unittest.IsolatedAsyncioTestCase):
         server.process(service.srp_context.public, salt)
         self.assertEqual(server.key, service.srp_context.key)
         self.assertTrue(server.verify_proof(service.srp_context.key_proof))
-        proof = bytes.fromhex(server.key_proof_hash)
+        proof = unhexlify(server.key_proof_hash)
         if tamper:
             proof = bytes([proof[0] ^ 1]) + proof[1:]
         reply = PairingDataComponentTLVBuf.build([

@@ -309,6 +309,9 @@ class _RemotePairingSrpContext:
                 proof = proof.decode('ascii')
             except UnicodeDecodeError:
                 return False
+        # srptools 1.x exposes hex bytes; 2.x exposes hex text.
+        if isinstance(getattr(self._context, 'key_proof_hash', None), bytes) and isinstance(proof, str):
+            proof = proof.encode('ascii')
         return self._context.verify_proof(proof)
 
 
