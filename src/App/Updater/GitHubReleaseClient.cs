@@ -148,8 +148,8 @@ internal sealed class GitHubReleaseClient : IDisposable
         ("github-raw", new Uri(
             "https://raw.githubusercontent.com/RayrenSX/iPhoneMirror/main/updates/releases.json")),
     ];
-    // Snapshot of all 115 mirrors published by moretools.app/zh-CN/github-proxy
-    // on 2026-08-15. The original trusted GitHub URL is appended separately.
+    // MoreTools snapshot from 2026-08-15, excluding private nodes at their
+    // operators' request. The trusted GitHub URL is appended separately.
     private static readonly string[] DownloadMirrorPrefixes =
     [
         "https://gh-proxy.net/",

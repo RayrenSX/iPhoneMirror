@@ -2670,13 +2670,16 @@ var mirroredAsset = new ReleaseAsset("setup.exe",
     10, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 var mirrorCandidates = GitHubReleaseClient.BuildDownloadCandidates(
     mirroredAsset, allowMirrorFallback: true);
-Equal(116, mirrorCandidates.Count,
-    "verified update assets include all 115 MoreTools mirrors and GitHub");
+Equal(115, mirrorCandidates.Count,
+    "verified update assets include 114 public mirrors and GitHub");
+Equal(false, mirrorCandidates.Any(candidate =>
+        candidate.Host.Equals("ghproxy.imciel.com", StringComparison.OrdinalIgnoreCase)),
+    "private mirror excluded at its operator's request");
 Equal("gh-proxy.net", mirrorCandidates[0].Host,
     "mirror candidates preserve the MoreTools source order");
 Equal("github.com", mirrorCandidates[^1].Host,
     "official GitHub remains the final trusted fallback");
-Equal(116, mirrorCandidates.Select(candidate => candidate.Host)
+Equal(115, mirrorCandidates.Select(candidate => candidate.Host)
         .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
     "download candidate hosts are unique");
 Equal(true, mirrorCandidates.Take(mirrorCandidates.Count - 1).All(candidate =>
@@ -3522,9 +3525,9 @@ try
         "mirror download preserves the verified payload exactly");
     Sequence(["github.cnxiaobai.com"], packageRequests,
         "asset download uses the fastest responsive mirror");
-    Equal(116, pingRequests.Count,
+    Equal(mirrorCandidates.Count, pingRequests.Count,
         "availability probing includes GitHub and all mirrors");
-    Equal(116, throughputRequests.Count,
+    Equal(mirrorCandidates.Count, throughputRequests.Count,
         "throughput probing includes every reachable candidate");
     Equal(true, throughputRequests.Contains("github.com"),
         "official GitHub participates in throughput ranking");
@@ -3566,7 +3569,7 @@ try
         allowMirrorFallback: true, preferInstaller: true);
     Equal(true, officialDownload.HashVerified,
         "official fallback remains SHA256 verified");
-    Equal(116, officialPingRequests.Count,
+    Equal(mirrorCandidates.Count, officialPingRequests.Count,
         "the reachability stage pings every configured candidate");
     Sequence(["github.com"], officialThroughputRequests,
         "only reachable candidates receive a throughput sample");

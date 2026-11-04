@@ -337,8 +337,10 @@ class TestPersonalizedDdiMirrorDownloads(unittest.TestCase):
 
     def test_uses_only_official_github_endpoints(self):
         sources = self.bridge._personalized_ddi_download_sources()
-        self.assertEqual(len(self.bridge.PERSONALIZED_DDI_MIRROR_PREFIXES), 115)
-        self.assertEqual(len(sources), 117)
+        self.assertEqual(len(self.bridge.PERSONALIZED_DDI_MIRROR_PREFIXES), 114)
+        self.assertNotIn('https://ghproxy.imciel.com/',
+                         self.bridge.PERSONALIZED_DDI_MIRROR_PREFIXES)
+        self.assertEqual(len(sources), 116)
         self.assertEqual([source.name for source in sources[:2]],
                          ['github-raw', 'github-api'])
 
@@ -414,8 +416,9 @@ class TestPersonalizedDdiMirrorDownloads(unittest.TestCase):
             with self.subTest(proxy=proxy), patch.dict(os.environ, {
                     'IPHONE_MIRROR_GITHUB_PROXY': proxy}):
                 sources = self.bridge._personalized_ddi_download_sources()
-                expected = (['direct'] * 2 + (['proxy'] * 2 if proxy else []) +
-                            ['mirror'] * 115)
+                official_phases = ['direct'] * 2 + (['proxy'] * 2 if proxy else [])
+                expected = (official_phases + ['mirror'] *
+                            len(self.bridge.PERSONALIZED_DDI_MIRROR_PREFIXES))
                 self.assertEqual([self.bridge._source_phase(source)
                                   for source in sources], expected)
                 mirror = next(source for source in sources if source.kind == 'mirror')
@@ -423,7 +426,7 @@ class TestPersonalizedDdiMirrorDownloads(unittest.TestCase):
                                   return_value=[(mirror, 1.0)]):
                     ranked = self.bridge.rank_personalized_ddi_download_sources()
                 self.assertEqual([self.bridge._source_phase(source)
-                                  for source in ranked], expected[:-115] + ['mirror'])
+                                  for source in ranked], official_phases + ['mirror'])
 
     def test_github_token_is_never_sent_to_a_public_mirror(self):
         mirror = self.bridge.PersonalizedDdiDownloadSource(
