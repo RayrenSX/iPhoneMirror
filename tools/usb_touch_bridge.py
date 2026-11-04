@@ -983,7 +983,6 @@ PERSONALIZED_DDI_MIRROR_PREFIXES = (
     'https://github.boringhex.top/',
     'https://ghfast.top/',
     'https://y.whereisdoge.work/',
-    'https://ghproxy.imciel.com/',
     'https://gh.jdck.fun/',
     'https://xiaomo-station.top/',
     'https://gh.monlor.com/',
