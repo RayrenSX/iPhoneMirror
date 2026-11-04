@@ -5,17 +5,17 @@ changelog:
   categories:
     - title: New features
       labels:
-        - enhancement
+        - "功能改进｜enhancement"
         - feature
     - title: Fixes
       labels:
-        - bug
+        - "缺陷｜bug"
         - fix
     - title: Documentation and maintenance
       labels:
-        - documentation
-        - dependencies
-        - maintenance
+        - "文档｜documentation"
+        - "依赖更新｜dependencies"
+        - "维护｜maintenance"
     - title: Other changes
       labels:
         - "*"

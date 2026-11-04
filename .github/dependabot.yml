@@ -5,6 +5,6 @@ updates:
     schedule:
       interval: monthly
     labels:
-      - dependencies
+      - "依赖更新｜dependencies"
     commit-message:
       prefix: chore

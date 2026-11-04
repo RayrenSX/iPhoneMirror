@@ -1,45 +1,55 @@
-name: Feature request
-description: Suggest an improvement to iPhoneMirror
-title: "[Feature]: "
-labels: [enhancement]
+name: 功能建议｜Feature request
+description: 描述你想改善的使用场景。Suggest a feature or improve an existing workflow.
+labels: ["功能改进｜enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索是否已有类似建议。功能异常请使用「缺陷报告」，操作疑问请使用「使用咨询」。
+        Search for similar requests first. Use “Bug report” for broken behavior or “Usage question” for setup and usage help.
+
+        标题请简述希望增加或改善的功能。中文或英文均可；双语标题使用「中文 ｜ English」，无需 [Feature] 前缀。
+        Give the requested improvement a short title. Chinese or English is welcome; use “中文 ｜ English” for bilingual titles. No [Feature] prefix is needed.
+  - type: dropdown
+    id: area
+    attributes:
+      label: 功能领域｜Feature area
+      options:
+        - USB 有线投屏｜USB mirroring
+        - AirPlay 无线投屏｜AirPlay mirroring
+        - 键鼠、剪贴板与反向控制｜Keyboard, mouse, clipboard and reverse control
+        - 蓝牙控制｜Bluetooth control
+        - 音频与麦克风｜Audio and microphone
+        - 录屏、直播与 OBS｜Recording, streaming and OBS
+        - 界面、窗口与快捷键｜Interface, windows and shortcuts
+        - 驱动、安装与更新｜Drivers, installation and updates
+        - 平台兼容、文档或其他｜Platform support, documentation or other
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:
-      label: Problem or use case
-      description: What workflow is difficult today?
+      label: 使用场景与当前困难｜Use case and current difficulty
+      description: 你想完成什么？目前哪一步不方便？What are you trying to do, and what gets in the way today?
+      placeholder: 例如：直播时需要用麦克风回答观众，但目前只能转发手机声音。Example - I need to answer viewers through a microphone, but currently only the phone audio is forwarded.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed behavior
-      description: Describe the user-visible result, not only an implementation.
-    validations:
-      required: true
-  - type: dropdown
-    id: area
-    attributes:
-      label: Area
-      options:
-        - USB / device discovery
-        - Video / decoder / rendering
-        - Audio
-        - OBS / output
-        - Driver installation
-        - User interface
-        - Documentation / build
-        - Other
+      label: 希望的效果｜Desired behavior
+      description: 描述对用户可见的行为；不需要提供代码或技术方案，也不用重复上一项。Describe what the user should be able to do. Code or an implementation plan is not required; no need to repeat the use case.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives considered
+      label: 替代办法与参考资料（可选）｜Alternatives and references (optional)
+      description: 可附现有替代办法、草图或相关 issue。请勿附私人内容或无权分享的资料。Share workarounds, mockups or related issues without private or unauthorized material.
   - type: checkboxes
     id: scope
     attributes:
-      label: Scope confirmation
+      label: 范围确认｜Scope confirmation
       options:
-        - label: This request stays within the project's supported mirroring, output, driver, Bluetooth, or documentation workflows and does not request bypassing platform/content protections.
+        - label: 此建议不要求绕过 DRM、平台安全机制或内容保护。This request does not ask to bypass DRM, platform security or content protection.
           required: true

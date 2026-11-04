@@ -1,92 +1,105 @@
-name: Bug report
-description: Report a reproducible iPhoneMirror problem
-title: "[Bug]: "
-labels: [bug, triage]
+name: 缺陷报告｜Bug report
+description: 报告投屏、反控、驱动或音视频异常。Report a mirroring, control, driver or media problem.
+labels: ["缺陷｜bug", "待评估｜triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve iPhoneMirror. Remove UDIDs, device names,
-        account details and personal screen content before submitting. Do not
-        attach raw USB captures or pairing records.
+        请先搜索已有 issue，并查看[使用指南](https://github.com/RayrenSX/iPhoneMirror/blob/main/docs/USER_GUIDE.md)和[支持说明](https://github.com/RayrenSX/iPhoneMirror/blob/main/SUPPORT.md)。不确定是否为缺陷时，也可以选择「使用咨询」模板。
+        Search existing issues and check the [user guide](https://github.com/RayrenSX/iPhoneMirror/blob/main/docs/USER_GUIDE.md) and [support guidance](https://github.com/RayrenSX/iPhoneMirror/blob/main/SUPPORT.md) first. Use the question template if you are unsure whether this is a bug.
+
+        标题请简述「什么操作出现什么问题」。可使用中文或英文；能提供双语时，请用「中文 ｜ English」。无需保留 [Bug] 前缀。
+        Use a short title describing the action and symptom. Chinese or English is welcome; for bilingual titles, use “中文 ｜ English”. No [Bug] prefix is needed.
+
+        安全漏洞请[私下报告](https://github.com/RayrenSX/iPhoneMirror/security/advisories/new)，不要在这里公开。
+        Please [report security vulnerabilities privately](https://github.com/RayrenSX/iPhoneMirror/security/advisories/new).
   - type: input
     id: version
     attributes:
-      label: iPhoneMirror version
-      placeholder: v1.8.1
+      label: 软件版本｜App version
+      description: 从「关于」页复制完整版本号，并说明安装版或便携版。Copy the full version from About and specify installer or portable.
+      placeholder: v1.8.5-pre3，安装版｜installer
     validations:
       required: true
   - type: dropdown
     id: windows
     attributes:
-      label: Windows version
+      label: 操作系统｜Operating system
       options:
         - Windows 11 x64
         - Windows 10 x64
-        - Other / unknown
+        - 其他或不清楚｜Other or unknown
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题场景｜Affected area
+      description: 选择最接近的一项。不清楚也可以继续提交。Choose the closest match; it is fine to be unsure.
+      options:
+        - USB 有线投屏与设备发现｜USB mirroring and device discovery
+        - AirPlay 无线投屏与接收器发现｜AirPlay mirroring and receiver discovery
+        - USB 或 Wi-Fi 反向控制｜USB or Wi-Fi reverse control
+        - 蓝牙反向控制与配对｜Bluetooth reverse control and pairing
+        - 驱动安装与设置助手｜Driver installation and setup
+        - 画面、解码与性能｜Video, decoding and performance
+        - 音频与麦克风｜Audio and microphone
+        - 录屏与保存｜Recording and saving
+        - 直播与 OBS 输出｜Live streaming and OBS output
+        - 界面、窗口与快捷键｜Interface, windows and shortcuts
+        - 更新、下载或其他问题｜Updates, downloads or other issues
     validations:
       required: true
   - type: input
     id: device
     attributes:
-      label: iPhone ProductType and iOS version
-      description: ProductType is useful; do not enter the UDID.
-      placeholder: iPhone18,3 / iOS 26.5.2
-    validations:
-      required: true
+      label: 手机或平板型号与系统版本｜Device model and OS version
+      description: 设备相关问题请填写；无需查 ProductType，也不要填写 UDID 或序列号。For device issues; a model name is sufficient. Do not include UDIDs or serial numbers.
+      placeholder: iPhone 15，iOS 18.5；或 iPad Air，iPadOS 18.5
   - type: dropdown
     id: apple-support
     attributes:
-      label: Apple Windows component
+      label: Apple 组件｜Apple software
+      description: 仅用于驱动或 USB 问题，不清楚可留空。Relevant to driver or USB issues; leave blank if unsure.
       options:
-        - Apple Devices (Microsoft Store)
-        - iTunes / Apple Mobile Device Support
-        - Standalone Apple Mobile Device Support MSI
-        - Both
-        - Unknown
-    validations:
-      required: true
-  - type: input
-    id: driver-state
-    attributes:
-      label: Driver state shown by iPhoneMirror
-      placeholder: Ready / reconnect required / missing / error text
-    validations:
-      required: true
+        - Apple Devices（微软商店）｜Apple Devices (Microsoft Store)
+        - iTunes 或 Apple Mobile Device Support｜iTunes or Apple Mobile Device Support
+        - 两种都安装了｜Both installed
+        - 都没有安装｜Neither installed
+        - 不清楚或不适用｜Unknown or not applicable
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce
+      label: 复现步骤｜Steps to reproduce
+      description: 写明连接方式、点击的功能和问题出现的时机。Describe the connection mode, actions and when the problem appears.
       placeholder: |
-        1. Connect and unlock the phone
-        2. Select the device
-        3. Click Start
-    validations:
-      required: true
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected behavior
+        1. 通过 USB 连接并解锁手机｜Connect and unlock the phone over USB
+        2. 点击「开始投屏」｜Click Start mirroring
+        3. 出现……｜Observe…
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
-      label: Actual behavior
+      label: 实际结果与错误提示｜Actual result and error message
+      description: 请复制完整提示或错误码。截图和视频可拖入此处，先遮挡个人信息。Copy the full error text or code. You can drag in redacted screenshots or videos.
+      placeholder: 描述看到的现象，避免只写「不能用」。Describe what happened rather than only saying “not working”.
     validations:
       required: true
   - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果与补充对照（可选）｜Expected result and comparisons (optional)
+      description: 可补充正常工作的旧版本、其他连接方式是否正常、发生频率及已尝试的操作。Include any working older version, comparison with other modes, frequency or steps already tried.
+  - type: textarea
     id: logs
     attributes:
-      label: Sanitized log excerpt
-      description: Remove UDIDs, device names, user paths and personal data.
-      render: text
+      label: 脱敏日志（可选）｜Sanitized logs (optional)
+      description: 从应用的日志目录中摘录问题时段的 application.log、capture.log 或 reverse-control.log；可粘贴文本或上传已脱敏文件。移除 UDID、序列号、配对信息、令牌和私人内容，不要上传原始 USB 抓包。Paste an excerpt from the relevant app log or attach a sanitized file. Remove device IDs, pairing data, tokens and personal content; do not upload raw USB captures.
   - type: checkboxes
     id: privacy
     attributes:
-      label: Privacy confirmation
+      label: 提交前确认｜Before submitting
       options:
-        - label: I removed private identifiers and personal content from this report.
-          required: true
-        - label: This is not a security vulnerability.
+        - label: 我已移除正文和附件中的设备标识、配对信息及私人内容。I have removed device identifiers, pairing data and personal content from the report and attachments.
           required: true

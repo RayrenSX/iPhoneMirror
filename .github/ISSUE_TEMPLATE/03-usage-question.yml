@@ -1,0 +1,36 @@
+name: 使用咨询｜Usage question
+description: 询问设置、兼容性或功能用法。Ask about setup, compatibility or how a feature works.
+labels: ["问题咨询｜question", "待评估｜triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先查看[使用指南](https://github.com/RayrenSX/iPhoneMirror/blob/main/docs/USER_GUIDE.md)和[支持说明](https://github.com/RayrenSX/iPhoneMirror/blob/main/SUPPORT.md)。已能稳定复现的故障建议使用「缺陷报告」。
+        Check the [user guide](https://github.com/RayrenSX/iPhoneMirror/blob/main/docs/USER_GUIDE.md) and [support guidance](https://github.com/RayrenSX/iPhoneMirror/blob/main/SUPPORT.md) first. For a reproducible failure, please use “Bug report”.
+
+        标题请概括问题。中文或英文均可；双语标题使用「中文 ｜ English」。
+        Summarize your question in the title. Chinese or English is welcome; use “中文 ｜ English” for bilingual titles.
+  - type: textarea
+    id: question
+    attributes:
+      label: 想了解的问题｜Your question
+      description: 说明你想完成的事情，以及具体不确定的地方。Describe what you want to do and what you are unsure about.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 使用环境（如适用）｜Environment (if relevant)
+      description: 可填写软件版本、Windows 版本、设备型号与系统版本、USB 或无线连接方式。无需填写 UDID 或序列号。Include the app version, Windows version, device model and OS, and connection mode when relevant. Do not include UDIDs or serial numbers.
+  - type: textarea
+    id: attempted
+    attributes:
+      label: 已查资料或尝试的操作（可选）｜What you have read or tried (optional)
+      description: 可附相关文档链接或已脱敏的错误提示，帮助减少重复排查。Links to relevant docs or redacted errors can help avoid repeated troubleshooting.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 提交前确认｜Before submitting
+      options:
+        - label: 我没有公开设备标识、配对信息、令牌或私人内容。I have not included device identifiers, pairing data, tokens or personal content.
+          required: true
