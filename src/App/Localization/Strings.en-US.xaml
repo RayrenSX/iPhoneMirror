@@ -233,6 +233,7 @@
     <system:String x:Key="ApplyVideoSettings">Apply video settings</system:String>
     <system:String x:Key="PlayAudioWindows">Play audio on Windows</system:String>
     <system:String x:Key="PlaybackVolume">Playback volume</system:String>
+    <system:String x:Key="BluetoothWindowMouse">Use absolute Bluetooth mouse in the preview (no F9)</system:String>
     <system:String x:Key="BluetoothMouseSensitivity">Bluetooth mouse sensitivity</system:String>
     <system:String x:Key="BluetoothMouseSettingsTitle">Reverse control settings</system:String>
     <system:String x:Key="BluetoothWheelSensitivity">Wheel sensitivity</system:String>

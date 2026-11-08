@@ -18,6 +18,8 @@ internal static partial class Program
     {
         Task.Run(TestBluetoothPauseRouteChangeAsync).GetAwaiter().GetResult();
         Task.Run(TestBluetoothMouseAdmissionAsync).GetAwaiter().GetResult();
+        Task.Run(TestWindowBluetoothMouseClickAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteWindowMouseAsync).GetAwaiter().GetResult();
         Task.Run(TestBluetoothHidSessionAdmissionAsync).GetAwaiter().GetResult();
         TestBluetoothNotificationResults();
         return 0;
@@ -380,6 +382,16 @@ internal static partial class Program
             KeyboardCall(shell, "ToggleFixedWindow");
             Require(Hit() == 2, "unfixing a paused independent window did not restore dragging.");
             Console.WriteLine("PASS independent Bluetooth window: temporary input hit-testing, restored caption dragging/capture, explicit fixed preference retained.");
+            Toggle();
+            SetKeyboardField(main, "_controlPointerFlushInFlight", 1);
+            try { TestWindowBluetoothPointer(main, device); }
+            finally
+            {
+                SetKeyboardField(main, "_bluetoothWindowMouseEnabled", false);
+                KeyboardCall(main, "ResetControlRouteState");
+                SetKeyboardField(main, "_controlPointerFlushInFlight", 0);
+            }
+            Toggle();
             AwaitMapping(vm.DisableBluetoothControlAsync());
             Require(!vm.IsBluetoothControlEnabled && !vm.BluetoothControlIsInputPaused &&
                 vm.BluetoothControlTargetUdid is null,
@@ -544,6 +556,117 @@ internal static partial class Program
             !BluetoothHidMouseService.NotificationSucceeded(GattCommunicationStatus.Success, 6, 6, 0x0E),
             "Short notification or protocol error was accepted as delivery.");
         Console.WriteLine("PASS notification result contract: only Success with exact bytes and no protocol error confirms delivery.");
+    }
+
+    private static void TestWindowBluetoothPointer(MainWindow window, DeviceViewModel device)
+    {
+        KeyboardCall(window, "ResetControlRouteState");
+        SetKeyboardField(window, "_bluetoothWindowMouseEnabled", true);
+        KeyboardCall(window, "ApplyBluetoothControlInputState", false);
+        InteractionAssert(!(bool)KeyboardField(window, "_rawMouseInputEnabled") &&
+            !(bool)KeyboardField(window, "_windowsCursorHidden"),
+            "Window mouse must leave Windows mouse messages and cursor available.");
+
+        void Send(PreviewPointerKind kind, short x = 150, byte button = 0, int wheel = 0,
+            int width = 300) => KeyboardCall(window, "OnIndependentPointerInput", device.Udid,
+            new PreviewPointerEventArgs(kind, x, 150, button, wheel, width, 300, 100, 300));
+        byte Buttons() => (byte)KeyboardField(window, "_controlButtons");
+        int Delta() => (int)KeyboardField(window, "_pendingControlDx");
+
+        Send(PreviewPointerKind.ButtonDown, x: 20, button: 1);
+        InteractionAssert(Buttons() == 0, "Clicks on black bars must stay local.");
+        Send(PreviewPointerKind.Move, x: 145);
+        InteractionAssert(Delta() == 0, "Entering the picture must anchor relative movement.");
+        Send(PreviewPointerKind.ButtonDown, button: 1);
+        Send(PreviewPointerKind.Move, x: 170);
+        InteractionAssert(Buttons() == 1 && Delta() != 0, "An in-picture drag must send motion and a held button.");
+        Send(PreviewPointerKind.Move, x: 210);
+        InteractionAssert(Buttons() == 0 && Delta() == 0,
+            "Crossing into a black bar must release the drag and discard queued movement.");
+        Send(PreviewPointerKind.Move, x: 165);
+        Send(PreviewPointerKind.ButtonUp, button: 1);
+        InteractionAssert(Buttons() == 0 && Delta() == 0,
+            "Re-entry must anchor again without restarting the old drag.");
+        Send(PreviewPointerKind.Wheel, wheel: 120);
+        InteractionAssert((int)KeyboardField(window, "_pendingControlWheel") != 0,
+            "The wheel must reach the device inside the picture.");
+        Send(PreviewPointerKind.Move, x: 175, width: 320);
+        InteractionAssert(Delta() == 0, "Resizing must re-anchor without a pointer jump.");
+
+        Send(PreviewPointerKind.ButtonDown, button: 1);
+        Send(PreviewPointerKind.Reset); // WM_MOUSELEAVE or capture/focus loss
+        InteractionAssert(Buttons() == 0 && (int)KeyboardField(window, "_pendingControlWheel") == 0,
+            "Leaving the HWND must release the drag and clear pending wheel input.");
+        Console.WriteLine("Bluetooth window pointer: legacy Windows input, black bars, drag release, re-entry, wheel and resize passed.");
+    }
+
+    private static async Task TestAbsoluteWindowMouseAsync()
+    {
+        var delivered = new ConcurrentQueue<byte[]>();
+        await using var service = new BluetoothHidMouseService((id, payload, guard) =>
+        {
+            if (id == 2 && guard?.Invoke() != false) delivered.Enqueue(payload.ToArray());
+            return Task.FromResult(true);
+        });
+        const string target = "absolute-window-mouse";
+        SetKeyboardField(service, "_useAbsoluteMouse", true);
+        SetKeyboardField(service, "_targetDeviceUdid", target);
+        void HoldPump() => SetKeyboardField(service, "_mousePumpRunning", true);
+        Task Pump() => (Task)KeyboardCall(service, "PumpReportsAsync",
+            KeyboardField(service, "_mousePumpGeneration"))!;
+        Task Point(double x, double y, byte buttons, bool reset = false) =>
+            service.SendAbsoluteMouseAsync(x, y, buttons, 0, target, () => true, reset);
+        static (byte Buttons, int X, int Y) Decode(byte[] report) =>
+            (report[0], report[1] | report[2] << 8, report[3] | report[4] << 8);
+
+        HoldPump();
+        await Point(0, 1, 1); // The first sample is a click.
+        await Point(0, 1, 0);
+        await Pump();
+        MappingAssert(delivered.Select(Decode).SequenceEqual(new[] { ((byte)1, 0, 32767), ((byte)0, 0, 32767) }),
+            "The first absolute click must preserve both button edges at its own coordinates.");
+        delivered.Clear();
+
+        HoldPump();
+        await Point(0.5, 0.25, 1);
+        await Pump();
+        delivered.Clear();
+
+        HoldPump();
+        await Point(0.9, 0.9, 1);
+        await Point(0.75, 0.25, 0, reset: true);
+        await Point(1, 0, 0);
+        await Pump();
+        MappingAssert(delivered.Select(Decode).SequenceEqual(new[]
+            { ((byte)0, 24575, 8192), ((byte)0, 32767, 0) }),
+            "Leaving the surface must drop pending drag motion and release at the last valid point before re-entry.");
+        delivered.Clear();
+
+        MappingAssert(await service.PauseInputAsync(), "Absolute mouse pause could not release the device.");
+        MappingAssert(delivered.Select(Decode).SequenceEqual(new[] { ((byte)0, 32767, 0) }),
+            "Pausing must release at the last absolute position.");
+        Console.WriteLine("PASS absolute window mouse: first click, drag cancellation, re-entry and pause coordinates.");
+    }
+
+    private static async Task TestWindowBluetoothMouseClickAsync()
+    {
+        var delivered = new ConcurrentQueue<byte>();
+        await using var service = new BluetoothHidMouseService((id, payload, guard) =>
+        {
+            if (id == 2 && guard?.Invoke() != false) delivered.Enqueue(payload[0]);
+            return Task.FromResult(true);
+        });
+        SetKeyboardField(service, "_targetDeviceUdid", "window-mouse");
+        SetKeyboardField(service, "_mousePumpRunning", true);
+        Task Send(byte buttons, int wheel = 0) => service.SendMouseAsync(0, 0, buttons, wheel,
+            "window-mouse", preserveButtonTransitions: true);
+        await Send(1);
+        await Send(1, wheel: 1);
+        await Send(0);
+        await (Task)KeyboardCall(service, "PumpReportsAsync", KeyboardField(service, "_mousePumpGeneration"))!;
+        MappingAssert(delivered.SequenceEqual(new byte[] { 1, 0 }),
+            "A fast window click must retain both button transitions while BLE is busy.");
+        Console.WriteLine("PASS Bluetooth window mouse: queued click edges survive a wheel tick and a busy BLE pump.");
     }
 
     private static async Task TestBluetoothMouseAdmissionAsync()

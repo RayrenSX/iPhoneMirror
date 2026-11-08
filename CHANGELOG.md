@@ -5,6 +5,10 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Add opt-in absolute Bluetooth mouse input in the main and independent previews, with seamless cursor movement between Windows and the mirrored image.
+
 ### Fixed
 
 - Improve Chinese IME key forwarding, shortcut press/release recovery and preview focus handling. See the [Sogou verification record](docs/SOGOU_IME_VERIFICATION_2026-10-31.zh-CN.md) for tested scope.

@@ -233,6 +233,7 @@
     <system:String x:Key="ApplyVideoSettings">套用畫面設定</system:String>
     <system:String x:Key="PlayAudioWindows">在 Windows 播放音訊</system:String>
     <system:String x:Key="PlaybackVolume">播放音量</system:String>
+    <system:String x:Key="BluetoothWindowMouse">在投影畫面內使用絕對座標滑鼠（無需 F9）</system:String>
     <system:String x:Key="BluetoothMouseSensitivity">藍牙滑鼠靈敏度</system:String>
     <system:String x:Key="BluetoothMouseSettingsTitle">反向控制設定</system:String>
     <system:String x:Key="BluetoothWheelSensitivity">滾輪靈敏度</system:String>

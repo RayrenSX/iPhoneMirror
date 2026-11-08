@@ -1867,6 +1867,10 @@
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource BluetoothMouseSettingsTitle}"
                                            Style="{StaticResource ControlSectionTitle}"/>
+                                <CheckBox Content="{DynamicResource BluetoothWindowMouse}"
+                                          IsChecked="{Binding BluetoothWindowMouseEnabled, Mode=TwoWay}"
+                                          IsEnabled="{Binding CanConfigureBluetoothWindowMouse}"
+                                          Margin="0,8,0,4"/>
                                 <WrapPanel Style="{StaticResource ControlActions}" Margin="-4,4,-4,-4">
                                     <Button Margin="{StaticResource DialogActionMargin}" Content="{DynamicResource OpenShortcutSettings}"
                                             Click="OnShortcutSettingsClick"

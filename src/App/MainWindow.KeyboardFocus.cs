@@ -155,6 +155,7 @@ public partial class MainWindow
         if (_activeControlWindow == 0)
         {
             _keyboardFocusSuspended = true;
+            ResetWindowBluetoothPointer(_viewModel.SelectedDevice?.Udid);
             HandleControlKeyboardInput(new PreviewKeyboardEventArgs(
                 PreviewKeyboardKind.Reset, 0), _viewModel.SelectedDevice?.Udid);
             _ = HandleUsbPointerInputAsync(new PreviewPointerEventArgs(
@@ -172,6 +173,7 @@ public partial class MainWindow
             if (_activeControlWindow != hwnd ||
                 !DeviceViewModel.UdidEquals(_activeControlUdid, udid)) return;
             _keyboardFocusSuspended = true;
+            ResetWindowBluetoothPointer(udid);
             _mouseShortcutButtons.Clear();
             _viewModel.SetControlInputDevice(null);
             UnregisterDeviceHotkeys();
