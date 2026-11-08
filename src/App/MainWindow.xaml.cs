@@ -255,6 +255,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private string? _activeControlUdid;
     private bool _rawMouseInputEnabled;
     private bool _bluetoothWindowMouseEnabled;
+    private bool _absoluteWindowMouseActive;
     private bool _windowBluetoothPointerInside;
     private (double X, double Y) _absoluteWindowMousePosition;
     private long _windowBluetoothPointerGeneration;
@@ -939,12 +940,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool HandleWindowBluetoothPointer(Controls.PreviewPointerEventArgs e, string? udid)
     {
         if (!_bluetoothWindowMouseEnabled || !IsBluetoothControlActiveFor(udid)) return false;
+        var absolute = _viewModel.BluetoothUsesAbsoluteMouse;
         var sourceWidth = e.SourceWidth != 0 ? e.SourceWidth : _viewModel.SourceVideoWidth;
         var sourceHeight = e.SourceHeight != 0 ? e.SourceHeight : _viewModel.SourceVideoHeight;
         var position = MapPointerToNormalized(e, sourceWidth, sourceHeight);
-        if (e.Kind == Controls.PreviewPointerKind.Reset ||
-            !CanForwardControlPointer(udid, GetControlKeyboardWindow(udid)) ||
-            position is null)
+        var canForward = CanForwardControlPointer(udid, GetControlKeyboardWindow(udid));
+        if (e.Kind == Controls.PreviewPointerKind.Reset || !canForward || position is null)
         {
             ResetWindowBluetoothPointer(udid);
             return true;
@@ -954,15 +955,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // Entering while holding a Windows button must not start an iPad drag.
         if (e.Kind == Controls.PreviewPointerKind.ButtonUp && (_controlButtons & e.Button) == 0)
             return true;
-        if (_viewModel.BluetoothUsesAbsoluteMouse)
+        if (absolute)
         {
             _absoluteWindowMousePosition = BluetoothMouseOrientationMapper.MapNormalized(
                 position.Value.X, position.Value.Y, sourceWidth, sourceHeight, e.Rotation,
                 BluetoothMouseDirection.Up, BluetoothMouseDirection.Up, false, false);
+            var previousButtons = _controlButtons;
             if (e.Kind == Controls.PreviewPointerKind.ButtonDown) _controlButtons |= e.Button;
             if (e.Kind == Controls.PreviewPointerKind.ButtonUp) _controlButtons &= (byte)~e.Button;
+            // The move/wheel snapshot may clear a missed release, but only
+            // an actual in-picture button-down can start a device gesture.
+            if (e.WindowsButtons is byte held) _controlButtons &= held;
             var wheel = e.Kind == Controls.PreviewPointerKind.Wheel ? GetBluetoothWheelUnits(e.Wheel) : 0;
-            if (e.Kind != Controls.PreviewPointerKind.Wheel || wheel != 0)
+            if (e.Kind != Controls.PreviewPointerKind.Wheel || wheel != 0 || previousButtons != _controlButtons)
                 _ = SendAbsoluteWindowMouseAsync(udid!, wheel);
         }
         else
@@ -5872,6 +5877,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         bool activateIndependentWindow = true)
     {
         var controlActive = IsBluetoothControlActive;
+        var absoluteWindowMouseActive = controlActive && _bluetoothWindowMouseEnabled &&
+            _viewModel.BluetoothUsesAbsoluteMouse;
+        if (absoluteWindowMouseActive && !_absoluteWindowMouseActive)
+        {
+            // A Windows drag can be in progress when Bluetooth becomes ready.
+            // Only a new button-down on the picture can start an iPad drag.
+            _windowBluetoothPointerInside = false;
+            _controlButtons = 0;
+            _controlWheelRemainder = 0;
+            _mouseShortcutButtons.Clear();
+            Interlocked.Increment(ref _windowBluetoothPointerGeneration);
+        }
+        _absoluteWindowMouseActive = absoluteWindowMouseActive;
         var captureMouse = IsBluetoothMouseCaptured;
         var usbControlActive = IsUsbControlActive;
         var usbControlConnected = _viewModel.IsUsbControlTarget(ActiveInputDeviceUdid);

@@ -21,6 +21,14 @@ internal sealed class NativePreviewMouse
 
     internal void OnLeave() => _trackingLeave = false;
 
+    internal static byte PressedButtons(nint mouseKeyState)
+    {
+        var flags = mouseKeyState.ToInt64();
+        // Win32 left/right use the same bits as HID. MK_MBUTTON (0x10)
+        // maps to the HID middle-button bit (0x04).
+        return (byte)((flags & 0x03) | ((flags & 0x10) >> 2));
+    }
+
     internal static bool TryGetWheelClientPosition(nint hwnd, nint screenPosition, out nint clientPosition)
     {
         // A focused preview can receive wheel messages while the cursor is

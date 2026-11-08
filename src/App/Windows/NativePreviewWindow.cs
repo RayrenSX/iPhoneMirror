@@ -764,7 +764,7 @@ internal sealed class NativePreviewWindow : IDisposable
         }
         // A normal button-up releases capture after clearing the button mask.
         // Keep queued shortcuts and held keyboard modifiers alive in that case.
-        if (message == WmCaptureChanged && _capturedMouseButtons == 0)
+        if (message == WmCaptureChanged && _capturedMouseButtons == 0 && !UsesBluetoothWindowMouse)
         {
             handled = true;
             return 0;
@@ -792,7 +792,8 @@ internal sealed class NativePreviewWindow : IDisposable
             case WmMouseMove when IsPointerInputActive:
                 if (UsesBluetoothWindowMouse) _windowMouse.TrackLeave(hwnd);
                 else lParam = DrainQueuedMouseMoves(hwnd, lParam);
-                DispatchPointer(PreviewPointerKind.Move, lParam, 0, 0);
+                DispatchPointer(PreviewPointerKind.Move, lParam, 0, 0,
+                    NativePreviewMouse.PressedButtons(wParam));
                 handled = true;
                 return 0;
             case WmLeftButtonDown when IsPointerInputActive:
@@ -846,7 +847,8 @@ internal sealed class NativePreviewWindow : IDisposable
                     _windowMouse.TrackLeave(hwnd);
                 }
                 DispatchPointer(PreviewPointerKind.Wheel, lParam, 0,
-                    unchecked((short)(wParam.ToInt64() >> 16)));
+                    unchecked((short)(wParam.ToInt64() >> 16)),
+                    NativePreviewMouse.PressedButtons(wParam));
                 handled = true;
                 return 0;
             case WmSetCursor when IsReverseControlActive && UsesBluetoothWindowMouse:
@@ -1329,7 +1331,7 @@ internal sealed class NativePreviewWindow : IDisposable
     }
 
     private void DispatchPointer(PreviewPointerKind kind, nint lParam,
-        byte button, int wheel)
+        byte button, int wheel, byte? windowsButtons = null)
     {
         if (_pointerInput is null || !GetClientRect(_handle, out var rect)) return;
         var packed = lParam.ToInt64();
@@ -1339,7 +1341,10 @@ internal sealed class NativePreviewWindow : IDisposable
         var sourceHeight = (_rotation & 1) == 0 ? _sourceHeight : _sourceWidth;
         _pointerInput(new PreviewPointerEventArgs(kind, x, y, button, wheel,
             Math.Max(1, rect.Right - rect.Left), Math.Max(1, rect.Bottom - rect.Top),
-            sourceWidth, sourceHeight, _rotation));
+            sourceWidth, sourceHeight, _rotation)
+        {
+            WindowsButtons = windowsButtons,
+        });
     }
 
     private static nint DrainQueuedMouseMoves(nint hwnd, nint currentLParam)

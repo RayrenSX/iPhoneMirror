@@ -290,7 +290,7 @@ internal sealed class NativePreviewHost : HwndHost
         {
             // Button-up clears our mask before ReleaseCapture synchronously
             // sends WM_CAPTURECHANGED. That is a completed click, not a reset.
-            if (message == 0x0215 && _capturedMouseButtons == 0)
+            if (message == 0x0215 && _capturedMouseButtons == 0 && !BluetoothWindowMouseEnabled)
             {
                 handled = true;
                 return 0;
@@ -316,7 +316,10 @@ internal sealed class NativePreviewHost : HwndHost
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.Move, GetSignedLowWord(lParam),
                         GetSignedHighWord(lParam), 0, 0, GetClientWidth(),
-                        GetClientHeight()));
+                        GetClientHeight())
+                    {
+                        WindowsButtons = NativePreviewMouse.PressedButtons(wParam),
+                    });
                     handled = true;
                     return 0;
                 case 0x0201: // WM_LBUTTONDOWN
@@ -383,7 +386,10 @@ internal sealed class NativePreviewHost : HwndHost
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.Wheel, GetSignedLowWord(lParam),
                         GetSignedHighWord(lParam), 0, (short)((long)wParam >> 16),
-                        GetClientWidth(), GetClientHeight()));
+                        GetClientWidth(), GetClientHeight())
+                    {
+                        WindowsButtons = NativePreviewMouse.PressedButtons(wParam),
+                    });
                     handled = true;
                     return 0;
                 case 0x0100: // WM_KEYDOWN
@@ -558,6 +564,7 @@ internal sealed class PreviewPointerEventArgs : EventArgs
     internal int X { get; }
     internal int Y { get; }
     internal byte Button { get; }
+    internal byte? WindowsButtons { get; init; }
     internal int Wheel { get; }
     internal int SurfaceWidth { get; }
     internal int SurfaceHeight { get; }

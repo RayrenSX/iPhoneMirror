@@ -384,7 +384,11 @@ internal static partial class Program
             Console.WriteLine("PASS independent Bluetooth window: temporary input hit-testing, restored caption dragging/capture, explicit fixed preference retained.");
             Toggle();
             SetKeyboardField(main, "_controlPointerFlushInFlight", 1);
-            try { TestWindowBluetoothPointer(main, device); }
+            try
+            {
+                TestWindowBluetoothMouseHandoff(main, device, shell.Handle, hwnd => foreground = hwnd);
+                TestWindowBluetoothPointer(main, device);
+            }
             finally
             {
                 SetKeyboardField(main, "_bluetoothWindowMouseEnabled", false);
@@ -558,6 +562,75 @@ internal static partial class Program
         Console.WriteLine("PASS notification result contract: only Success with exact bytes and no protocol error confirms delivery.");
     }
 
+    private static void TestWindowBluetoothMouseHandoff(MainWindow window, DeviceViewModel device,
+        nint independent, Action<nint> setForeground)
+    {
+        SetKeyboardField(window, "_bluetoothWindowMouseEnabled", true);
+        var vm = KeyboardField(window, "_viewModel");
+        var service = KeyboardField(vm, "_bluetoothControl");
+        var main = new WindowInteropHelper(window).Handle;
+        var preview = KeyboardField(window, "MainPreviewHost");
+        var sends = (HashSet<Task>)KeyboardField(window, "_keyboardSends");
+        SetKeyboardField(service, "_useAbsoluteMouse", true);
+        try
+        {
+            SetKeyboardField(window, "_controlButtons", (byte)1);
+            KeyboardCall(window, "ApplyBluetoothControlInputState", false);
+            InteractionAssert((byte)KeyboardField(window, "_controlButtons") == 0,
+                "Enabling absolute input must discard previous drag state.");
+
+            foreach (var owner in new[] { main, independent })
+            {
+                var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                sends.Add(pending.Task);
+                try
+                {
+                    setForeground(owner);
+                    KeyboardCall(window, "FocusControlDevice", device.Udid, owner == main ? (nint)0 : owner);
+                    KeyboardCall(window, "ResetKeyboardOwnership");
+                    var handoff = (Task)KeyboardField(window, "_keyboardHandoff");
+                    InteractionAssert(!handoff.IsCompleted &&
+                        !(bool)KeyboardField(window, "_rawMouseInputEnabled"),
+                        "Absolute window mode must keep regular mouse input while keyboard input drains.");
+                    pending.SetResult();
+                    AwaitMapping(handoff);
+                    InteractionAssert(!(bool)KeyboardField(window, "_rawMouseInputEnabled") &&
+                        !(bool)KeyboardField(preview, "SuppressLegacyMouseButtons"),
+                        "A delayed keyboard handoff must not suppress normal mouse clicks in either preview.");
+                }
+                finally
+                {
+                    pending.TrySetResult();
+                    sends.Remove(pending.Task);
+                }
+            }
+
+            void Pointer(PreviewPointerKind kind, byte button = 0, nint? keys = null)
+            {
+                KeyboardCall(window, "OnIndependentPointerInput", device.Udid,
+                    new PreviewPointerEventArgs(kind, 150, 150, button, 0, 300, 300, 100, 300)
+                    {
+                        WindowsButtons = keys is nint state ? NativePreviewMouse.PressedButtons(state) : null,
+                    });
+            }
+            byte Buttons() => (byte)KeyboardField(window, "_controlButtons");
+            Pointer(PreviewPointerKind.Move, keys: 0x01);
+            InteractionAssert(Buttons() == 0, "Movement must not inherit a Windows button held before activation.");
+            Pointer(PreviewPointerKind.ButtonDown, button: 1);
+            Pointer(PreviewPointerKind.ButtonDown, button: 2);
+            Pointer(PreviewPointerKind.ButtonDown, button: 4);
+            Pointer(PreviewPointerKind.Move, keys: 0x12);
+            InteractionAssert(Buttons() == 6, "Movement must clear only the released button and retain right/middle.");
+            Pointer(PreviewPointerKind.Wheel, keys: unchecked((nint)0xFF880000L));
+            InteractionAssert(Buttons() == 0, "A wheel snapshot must clear missed releases even without a scroll tick.");
+        }
+        finally
+        {
+            SetKeyboardField(service, "_useAbsoluteMouse", false);
+        }
+        Console.WriteLine("PASS absolute mouse: both-window handoff, startup drag isolation and missed-release recovery.");
+    }
+
     private static void TestWindowBluetoothPointer(MainWindow window, DeviceViewModel device)
     {
         KeyboardCall(window, "ResetControlRouteState");
@@ -602,10 +675,10 @@ internal static partial class Program
 
     private static async Task TestAbsoluteWindowMouseAsync()
     {
-        var delivered = new ConcurrentQueue<byte[]>();
+        var delivered = new ConcurrentQueue<(byte Id, byte[] Payload)>();
         await using var service = new BluetoothHidMouseService((id, payload, guard) =>
         {
-            if (id == 2 && guard?.Invoke() != false) delivered.Enqueue(payload.ToArray());
+            if (id is 2 or 6 && guard?.Invoke() != false) delivered.Enqueue((id, payload.ToArray()));
             return Task.FromResult(true);
         });
         const string target = "absolute-window-mouse";
@@ -616,15 +689,44 @@ internal static partial class Program
             KeyboardField(service, "_mousePumpGeneration"))!;
         Task Point(double x, double y, byte buttons, bool reset = false) =>
             service.SendAbsoluteMouseAsync(x, y, buttons, 0, target, () => true, reset);
-        static (byte Buttons, int X, int Y) Decode(byte[] report) =>
-            (report[0], report[1] | report[2] << 8, report[3] | report[4] << 8);
+        static int X(byte[] report) => report[1] | report[2] << 8;
 
         HoldPump();
-        await Point(0, 1, 1); // The first sample is a click.
+        await Point(0, 1, 1);
         await Point(0, 1, 0);
         await Pump();
-        MappingAssert(delivered.Select(Decode).SequenceEqual(new[] { ((byte)1, 0, 32767), ((byte)0, 0, 32767) }),
-            "The first absolute click must preserve both button edges at its own coordinates.");
+        MappingAssert(delivered.Select(report => (report.Id, report.Payload[0], X(report.Payload)))
+                .SequenceEqual(new (byte, byte, int)[] { (2, 0, 0), (6, 1, 0), (6, 0, 0), (2, 0, 0) }),
+            "A quick click must position first and preserve both relative button edges.");
+        delivered.Clear();
+
+        for (var i = 0; i < 2; i++)
+        {
+            HoldPump();
+            await Point(0.5, 0.25, 1);
+            await Point(0.75, 0.25, 0);
+            await Pump();
+            MappingAssert(delivered.Select(report => (report.Id, report.Payload[0], X(report.Payload)))
+                    .SequenceEqual(new (byte, byte, int)[] { (2, 0, 16384), (6, 1, 0),
+                        (6, 1, 256), (6, 0, 0), (2, 0, 24575) }),
+                "Each consecutive drag must move and release on report 6, then restore the absolute pointer.");
+            delivered.Clear();
+        }
+
+        HoldPump();
+        await Point(0.5, 0.25, 1);
+        await Point(0.75, 0.25, 1);
+        await Pump();
+        delivered.Clear();
+
+        HoldPump();
+        await Point(0.5, 0.25, 0);
+        await Pump();
+        var returnDrag = delivered.ToArray();
+        MappingAssert(returnDrag.Select(report => report.Id).SequenceEqual(new byte[] { 6, 6, 2, 2 }) &&
+                returnDrag[1].Payload[0] == 0 && X(returnDrag[2].Payload) != 16384 &&
+                X(returnDrag[3].Payload) == 16384,
+            "A drag that returns to its original position needs a changed anchor before restoring that position.");
         delivered.Clear();
 
         HoldPump();
@@ -637,15 +739,16 @@ internal static partial class Program
         await Point(0.75, 0.25, 0, reset: true);
         await Point(1, 0, 0);
         await Pump();
-        MappingAssert(delivered.Select(Decode).SequenceEqual(new[]
-            { ((byte)0, 24575, 8192), ((byte)0, 32767, 0) }),
-            "Leaving the surface must drop pending drag motion and release at the last valid point before re-entry.");
+        MappingAssert(delivered.Select(report => (report.Id, report.Payload[0], X(report.Payload)))
+                .SequenceEqual(new (byte, byte, int)[] { (6, 0, 0), (2, 0, 24575), (2, 0, 32767) }),
+            "Leaving the surface must release without sending stale drag movement before re-entry.");
         delivered.Clear();
 
         MappingAssert(await service.PauseInputAsync(), "Absolute mouse pause could not release the device.");
-        MappingAssert(delivered.Select(Decode).SequenceEqual(new[] { ((byte)0, 32767, 0) }),
-            "Pausing must release at the last absolute position.");
-        Console.WriteLine("PASS absolute window mouse: first click, drag cancellation, re-entry and pause coordinates.");
+        MappingAssert(delivered.Select(report => (report.Id, report.Payload[0], X(report.Payload)))
+                .SequenceEqual(new (byte, byte, int)[] { (6, 0, 0) }),
+            "Pausing must release the relative buttons without repositioning.");
+        Console.WriteLine("PASS hybrid window mouse: click, consecutive drags, re-anchor, re-entry and pause.");
     }
 
     private static async Task TestWindowBluetoothMouseClickAsync()
