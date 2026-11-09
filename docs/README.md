@@ -6,7 +6,7 @@
 
 | 任务 | 入口 |
 |---|---|
-| 下载、了解功能 | [中文 README](../README.md) · [English README](../README.en.md) |
+| 下载、了解功能 | [中文 README](../README.md) · [English README](../README.en.md) · [日本語 README](../README.ja.md) |
 | 安装驱动、投屏、反控、录制 | [完整使用教程](USER_GUIDE.md) |
 | 编译、运行测试、打包 | [开发与测试指南](DEVELOPMENT.md) · [贡献规范](../CONTRIBUTING.md) |
 | 了解模块和进程边界 | [软件架构](ARCHITECTURE.md) |
