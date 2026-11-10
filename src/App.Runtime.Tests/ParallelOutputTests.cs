@@ -73,17 +73,37 @@ internal static partial class Program
                 "The recording button remained disabled while streaming.");
             InteractionAssert(streamButton.IsEnabled && Equals(streamButton.Content, window.FindResource("StopStreamingOnly")),
                 "The live stream action must change to its enabled stop action.");
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+            window.UpdateLayout();
             var recordBounds = recordButton.TransformToAncestor(window).TransformBounds(new Rect(recordButton.RenderSize));
             start = Start(MediaOutputKind.Recording);
             WaitReviewTask(start);
             InteractionAssert(start.Result.Success && vm.IsRecordingMediaOutput &&
                 vm.CanStopRecording && vm.CanStopStreaming && !vm.CanStartRecording && !vm.CanStartStreaming,
                 "The VM did not retain independent live/recording state.");
+            var readOnlyWindow = new MediaOutputSettingsWindow(vm, previewOnly: true)
+                { ShowInTaskbar = false, ShowActivated = false };
+            try
+            {
+                readOnlyWindow.Show();
+                readOnlyWindow.UpdateLayout();
+                InteractionAssert(!((Button)readOnlyWindow.FindName("StopAllOutputsButton")).IsEnabled,
+                    "Read-only preview exposed a live stop-all command.");
+                KeyboardCall(readOnlyWindow, "OnStopAllClick", readOnlyWindow, new RoutedEventArgs());
+                InteractionAssert(vm.IsRecordingMediaOutput && vm.IsStreamingMediaOutput,
+                    "Read-only preview stopped active outputs.");
+            }
+            finally { readOnlyWindow.Close(); }
+            KeyboardCall(vm, "OnMediaOutputStatusChanged", "HTTP 401 fixture", true);
+            InteractionAssert(((TextBlock)window.FindName("FeedbackText")).Text == vm.MediaOutputStatus,
+                "Failure feedback retained a stale success message.");
             KeyboardCall(vm, "OnMediaOutputStatusChanged", "Stopped", false);
             InteractionAssert(vm.MediaOutputStatus == Localization.LocalizationService.Get("MediaOutputRecordingAndStreaming"),
                 "A stale stopped event hid the active parallel outputs.");
             InteractionAssert(!vm.CanUseVirtualCamera, "Virtual camera must remain exclusive.");
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
             window.UpdateLayout();
+            Console.WriteLine($"Recording toggle: enabled={recordButton.IsEnabled}; content={recordButton.Content}; before={recordBounds}; after={recordButton.TransformToAncestor(window).TransformBounds(new Rect(recordButton.RenderSize))}");
             InteractionAssert(recordButton.IsEnabled && Equals(recordButton.Content, window.FindResource("StopRecordingOnly")) &&
                 recordBounds == recordButton.TransformToAncestor(window).TransformBounds(new Rect(recordButton.RenderSize)),
                 "Recording must switch to stop on the same button without moving it.");
@@ -116,6 +136,27 @@ internal static partial class Program
                 streamBounds == streamButton.TransformToAncestor(window).TransformBounds(new Rect(streamButton.RenderSize)),
                 "Streaming did not restart with the same in-place action.");
             WaitReviewTask(vm.StopRecordingAsync());
+            start = Start(MediaOutputKind.Recording);
+            WaitReviewTask(start);
+            var stopAll = (Button)window.FindName("StopAllOutputsButton");
+            window.UpdateLayout();
+            InteractionAssert(stopAll.IsEnabled && vm.IsRecordingMediaOutput && vm.IsStreamingMediaOutput,
+                "The stop-all action must be available with both outputs running.");
+            stopAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+            InteractionAssert(!vm.IsRecordingMediaOutput && !vm.IsStreamingMediaOutput,
+                "The visible stop-all action did not stop both outputs.");
+            start = Start(MediaOutputKind.Rtmp);
+            WaitReviewTask(start);
+            // A canceled auto-save must stay dismissed on repeated status
+            // notifications. Explicit Save remains a separate force request.
+            var dismissed = Path.Combine(Path.GetTempPath(), "dismissed-recording-fixture.mp4");
+            SetKeyboardField(vm, "_pendingRecordingPath", dismissed);
+            SetKeyboardField(window, "_lastPromptedRecordingPath", dismissed);
+            WaitReviewTask((Task)KeyboardCall(window, "PromptToSaveRecordingAsync", false)!);
+            InteractionAssert(!(bool)KeyboardField(window, "_savePromptOpen"),
+                "A previously dismissed recording opened another auto-save dialog.");
+            SetKeyboardField(vm, "_pendingRecordingPath", null);
             // Remaining checks use the VM. Unsubscribe window save prompts
             // before FindLatest can observe unrelated user pending files.
             window.Close();

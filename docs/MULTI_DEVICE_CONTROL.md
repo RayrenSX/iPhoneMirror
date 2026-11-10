@@ -22,13 +22,17 @@
 
 验证入口：
 
+以下命令从仓库根目录、无 CLR/.NET 注入变量的终端运行；环境说明见[开发指南](DEVELOPMENT.md#测试入口与覆盖范围)。
+
 ```powershell
-dotnet build src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release --no-restore
-dotnet run --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release --no-build --no-restore -- --keyboard-focus
-dotnet run --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release --no-build --no-restore -- --preview-pointer
-dotnet run --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release --no-build --no-restore
-dotnet run --project src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj -c Release --no-restore
-dotnet run --project tests/UsbRecovery.Tests/UsbRecovery.Tests.csproj -c Release --no-restore
+dotnet build src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release
+dotnet build src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj -c Release
+dotnet build tests/UsbRecovery.Tests/UsbRecovery.Tests.csproj -c Release
+dotnet ./src/App.Runtime.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --keyboard-focus
+dotnet ./src/App.Runtime.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --preview-pointer
+dotnet ./src/App.Runtime.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll
+dotnet ./src/App.Logic.Tests/bin/Release/net10.0-windows10.0.19041.0/IPhoneMirror.App.Logic.Tests.dll
+dotnet ./tests/UsbRecovery.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/UsbRecovery.Tests.dll
 ./scripts/verify_localization.ps1
 ```
 

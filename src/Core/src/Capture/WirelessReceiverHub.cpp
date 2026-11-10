@@ -395,8 +395,19 @@ void WirelessClientStream::detach() noexcept {
 }
 
 Snapshot WirelessClientStream::snapshot() const {
+    return snapshot_at(std::chrono::steady_clock::now());
+}
+
+Snapshot WirelessClientStream::snapshot_at(std::chrono::steady_clock::time_point now) const {
     std::scoped_lock lock(mutex_);
-    return snapshot_;
+    auto result = snapshot_;
+    if (connected_ && latest_frame_ &&
+        mirror_state_ == wireless::MirrorSenderState::Active &&
+        now - latest_frame_->received_at >= std::chrono::seconds(5)) {
+        result.fps = 0;
+        result.message = L"AirPlay video stalled";
+    }
+    return result;
 }
 
 std::int64_t WirelessClientStream::latest_frame_timestamp() const {

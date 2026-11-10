@@ -298,6 +298,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private const ushort RawMouseRightUp = 0x0008;
     private const ushort RawMouseMiddleDown = 0x0010;
     private const ushort RawMouseMiddleUp = 0x0020;
+    private const ushort RawMouseXButton1Down = 0x0040;
+    private const ushort RawMouseXButton1Up = 0x0080;
+    private const ushort RawMouseXButton2Down = 0x0100;
+    private const ushort RawMouseXButton2Up = 0x0200;
     private const ushort RawMouseWheel = 0x0400;
     private const uint CursorShowing = 0x00000001;
     private const double LightweightDefaultPreviewAspect = 1206d / 2622d;
@@ -350,6 +354,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (Application.Current is App app)
         {
             ThemeComboBox.SelectedValue = app.UpdateSettings.Theme.ToString();
+            RestoreSettingsCategory(app.UpdateSettings.SettingsCategory);
             foreach (var action in Enum.GetValues<BluetoothShortcutAction>())
                 _bluetoothShortcuts[action] = KeyboardShortcut.FromSettings(
                     app.UpdateSettings, action);
@@ -509,8 +514,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             failedAction = action;
             var shortcut = shortcuts[action];
-            if (!shortcut.IsBound || shortcut.VirtualKey is KeyboardShortcut.MouseRight or
-                KeyboardShortcut.MouseMiddle) continue;
+            if (!shortcut.IsBound || shortcut.IsMouse) continue;
             if (!RegisterHotKey(_windowSource.Handle, HotKeyId(action),
                     shortcut.RegistrationModifiers, shortcut.VirtualKey))
             {
@@ -637,6 +641,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         2 => _keyboardRouter.RouteShortcutTrigger((int)KeyboardShortcut.MouseRight),
         4 => _keyboardRouter.RouteShortcutTrigger((int)KeyboardShortcut.MouseMiddle),
+        8 => _keyboardRouter.RouteShortcutTrigger((int)KeyboardShortcut.MouseXButton1),
+        16 => _keyboardRouter.RouteShortcutTrigger((int)KeyboardShortcut.MouseXButton2),
         _ => false,
     };
 
@@ -1888,6 +1894,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if ((flags & RawMouseRightUp) != 0) HandleRawButton(2, false);
         if ((flags & RawMouseMiddleDown) != 0) HandleRawButton(4, true);
         if ((flags & RawMouseMiddleUp) != 0) HandleRawButton(4, false);
+        if ((flags & RawMouseXButton1Down) != 0) HandleRawButton(8, true);
+        if ((flags & RawMouseXButton1Up) != 0) HandleRawButton(8, false);
+        if ((flags & RawMouseXButton2Down) != 0) HandleRawButton(16, true);
+        if ((flags & RawMouseXButton2Up) != 0) HandleRawButton(16, false);
         if ((flags & RawMouseWheel) != 0)
             HandleRawWheel(unchecked((short)input.Mouse.ButtonData));
 
@@ -2175,7 +2185,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // Keep outgoing cards in their existing rows until they have closed.
         // Unstacking a still-wide card would temporarily consume a second column.
         _retainWorkspaceStackDuringTransition = animate && _workspacePanelsStacked;
-        OnWorkspaceLayoutChanged(this, new RoutedEventArgs());
+        // Retarget from the current reveal widths. The previous clock has been
+        // stopped, but expanding to the full layout width here would cause a jump.
+        UpdateWorkspaceLayout(preserveSurfaceWidths: animate);
         if (!animate)
         {
             LeftGapColumn.Width = new GridLength(showLeftPanel ? 18 : 0);
@@ -3519,6 +3531,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // rebuild once at the stable native rate instead.
             var requestedSpeed = _mediaPlaybackSpeed;
             _mediaSpeedFallbackPending = false;
+            SetMediaCastTimelineRunning(_mediaTimelineRunning);
             _mediaPlaybackSpeed = 1.0;
             MediaCastSpeedComboBox.SelectedIndex = 2;
             NotifyMediaCastSpeedFallback(requestedSpeed);
@@ -3912,7 +3925,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             var elapsed = DateTime.UtcNow - _mediaTimelineAnchorUtc;
             if (elapsed > TimeSpan.Zero && elapsed < TimeSpan.FromDays(1))
-                position += elapsed.TotalSeconds;
+                position += elapsed.TotalSeconds * _mediaPlaybackSpeed;
         }
         return ClampMediaPosition(position, clampToDuration: true);
     }
@@ -4704,12 +4717,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _mediaSpeedFallbackPromptShown = false;
             if (!ApplyMediaCastSpeed(MediaCastMediaElement, requested))
             {
+                SetMediaCastTimelineRunning(_mediaTimelineRunning);
                 _mediaPlaybackSpeed = 1.0;
                 _mediaSpeedFallbackPending = false;
                 MediaCastSpeedComboBox.SelectedIndex = 2;
                 NotifyMediaCastSpeedFallback(requested);
                 return;
             }
+            // Re-anchor with the old rate before changing the clock scale.
+            SetMediaCastTimelineRunning(_mediaTimelineRunning);
             _mediaPlaybackSpeed = requested;
             _mediaSpeedFallbackPending = requested != 1.0;
             _mediaSpeedChangedUtc = DateTime.UtcNow;
@@ -5674,7 +5690,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _viewModel.AdvancedSettingsVisibility == Visibility.Visible)
         {
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
-                () => AdvancedSettingsCard.BringIntoView());
+                () =>
+                {
+                    RestoreSettingsCategory("projection");
+                    AdvancedSettingsCard.BringIntoView();
+                });
         }
 
         if ((e.PropertyName == nameof(MainViewModel.IsCapturing) && !_viewModel.IsCapturing) ||
@@ -6365,6 +6385,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void ShowDeviceProfileGuidance(DeviceViewModel device)
     {
+        // Discovery is awaited by the shortcut request. A modal onboarding
+        // dialog here blocks that task until its startup deadline expires.
+        // Cover both cold shortcut startup and requests forwarded to an
+        // already running workspace; setup remains available from its UI.
+        if ((Application.Current as App)?.LaunchOptions.Enabled == true ||
+            _compactLaunchGate.CurrentCount == 0)
+            return;
         if (device.IsMediaCast || string.IsNullOrWhiteSpace(device.Udid) ||
             !_deviceProfileGuidanceShown.Add(device.Udid)) return;
 
@@ -6774,7 +6801,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 new Rect(0, 0, sourceWidth, sourceHeight));
         }
         var bitmap = new RenderTargetBitmap(targetWidth, targetHeight,
-            96, 96, PixelFormats.Bgra32);
+            96, 96, PixelFormats.Pbgra32);
         bitmap.Render(drawing);
         stride = checked((uint)(targetWidth * 4));
         var pixels = new byte[checked((int)(stride * (uint)targetHeight))];
@@ -6930,7 +6957,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_rawMouseInputEnabled || _shortcutSettingsWindow is not null) return;
-        var button = e.ChangedButton switch { MouseButton.Right => (byte)2, MouseButton.Middle => (byte)4, _ => (byte)0 };
+        var button = e.ChangedButton switch { MouseButton.Right => (byte)2, MouseButton.Middle => (byte)4, MouseButton.XButton1 => (byte)8, MouseButton.XButton2 => (byte)16, _ => (byte)0 };
         if (button != 0 && TryHandleMouseShortcut(button))
             e.Handled = true;
     }
@@ -7146,7 +7173,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             else if (indigoButton is { } consumer && bluetoothTarget)
                 await _viewModel.SendBluetoothConsumerShortcutAsync(
                     consumer.Code, consumer.HoldMs, target, canSend);
-            if (action == BluetoothShortcutAction.AppSwitcher && usbTarget)
+            if (usbTarget && action is BluetoothShortcutAction.ControlCenter or
+                    BluetoothShortcutAction.NotificationCenter)
+            {
+                // Globe+C/N is accepted as a keyboard report by iOS but can
+                // do nothing on a CoreDevice touch connection. Use the same
+                // physical edge gesture as the phone on these transports.
+                await SendUsbPanelGestureAsync(route, action, canSend);
+            }
+            else if (action == BluetoothShortcutAction.AppSwitcher && usbTarget)
             {
                 // Keep both presses in one bridge command: delays between
                 // separate host writes can exceed iOS's double-click window.
@@ -7205,6 +7240,42 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             await route.SendButtonAsync(button.Page, button.Code, "up", null);
         }
+    }
+
+    private async Task SendUsbPanelGestureAsync(DirectKeyboardRoute route,
+        BluetoothShortcutAction action, Func<bool> canSend)
+    {
+        var touch = _viewModel.CaptureTouchRoute(route.Target,
+            () => route.IsCurrent() && canSend(), (x, y) => (x, y));
+        if (touch is null) return;
+        var product = _viewModel.Devices.FirstOrDefault(device =>
+            DeviceViewModel.UdidEquals(device.Udid, route.Target))?.ProductType;
+        var panel = AppleDisplayCatalog.Find(product);
+        var fromBottom = action == BluetoothShortcutAction.ControlCenter &&
+            product?.StartsWith("iPhone", StringComparison.Ordinal) == true &&
+            panel is not null && panel.Height < 2 * panel.Width;
+        await SendPanelGestureAsync(touch, action == BluetoothShortcutAction.ControlCenter, fromBottom);
+    }
+
+    private static async Task SendPanelGestureAsync(MappedTouchRoute touch,
+        bool controlCenter, bool fromBottom)
+    {
+        var x = controlCenter && !fromBottom ? 0.98 : 0.5;
+        var startY = fromBottom ? 0.998 : 0.002;
+        var endY = fromBottom ? 0.3 : 0.7;
+        var y = startY;
+        Task Send(string state) => touch.SendAsync(state, x, y, default);
+        try
+        {
+            await Send("down");
+            for (var step = 1; step <= 12 && touch.IsCurrent(); ++step)
+            {
+                await Task.Delay(16);
+                y = startY + (endY - startY) * step / 12;
+                await Send("move");
+            }
+        }
+        finally { await Send("up"); }
     }
 
     private static (ushort Page, ushort Code, int HoldMs)? GetIndigoButton(

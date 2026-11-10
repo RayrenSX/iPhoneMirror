@@ -15,6 +15,8 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
     private readonly MainViewModel _viewModel;
     private readonly bool _previewOnly;
     private bool _savePromptOpen;
+    private bool _discardPromptOpen;
+    private string? _lastPromptedRecordingPath;
     private (uint Width, uint Height)? _lastDefaultSize;
     private (uint Width, uint Height)? _lastDefaultCameraSize;
     private readonly CancellationTokenSource _microphoneCancellation = new();
@@ -83,6 +85,9 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(MainViewModel.MediaOutputStatus) or nameof(MainViewModel.MediaOutputTone) &&
+            _viewModel.MediaOutputTone == "Failed")
+            SetFeedback(_viewModel.MediaOutputStatus, StatusTone.Error);
         if (e.PropertyName is nameof(MainViewModel.CanStartMediaOutput) or
             nameof(MainViewModel.CanRecordMediaOutput) or
             nameof(MainViewModel.CanStartRecording) or
@@ -200,6 +205,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             ? _viewModel.CanStopStreaming : _viewModel.CanStartStreaming && SelectedProtocolSupported());
         StartVirtualCameraButton.IsEnabled = !_previewOnly && (_viewModel.IsVirtualCameraOutputRunning
             ? _viewModel.CanStopVirtualCamera : _viewModel.CanUseVirtualCamera);
+        StopAllOutputsButton.IsEnabled = !_previewOnly && _viewModel.CanStopMediaOutput;
         DiscardRecordingButton.Visibility = pendingRecording ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -222,7 +228,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
         }
         if (_viewModel.PendingRecordingPath is not null)
         {
-            await PromptToSaveRecordingAsync();
+            await PromptToSaveRecordingAsync(force: true);
             return;
         }
         if (!TryReadOutputSettings(RecordWidthBox, RecordHeightBox, RecordFpsBox,
@@ -334,23 +340,37 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
 
     private void OnDiscardClick(object sender, RoutedEventArgs e)
     {
-        if (_viewModel.PendingRecordingPath is null) return;
-        if (!AppPromptWindow.ConfirmDestructive(LocalizationService.Get("DiscardRecording"),
-                LocalizationService.Get("DiscardRecordingConfirmation"),
-                LocalizationService.Get("DiscardRecording"), this))
-            return;
-        var discarded = _viewModel.DiscardPendingRecording();
-        SetFeedback(LocalizationService.Get(discarded ? "RecordingDiscarded" : "RecordingDiscardFailed"),
-            discarded ? StatusTone.Success : StatusTone.Error);
+        if (_viewModel.PendingRecordingPath is null || _savePromptOpen || _discardPromptOpen) return;
+        _discardPromptOpen = true;
+        try
+        {
+            if (!AppPromptWindow.ConfirmDestructive(LocalizationService.Get("DiscardRecording"),
+                    LocalizationService.Get("DiscardRecordingConfirmation"),
+                    LocalizationService.Get("DiscardRecording"), this))
+                return;
+            var discarded = _viewModel.DiscardPendingRecording();
+            SetFeedback(LocalizationService.Get(discarded ? "RecordingDiscarded" : "RecordingDiscardFailed"),
+                discarded ? StatusTone.Success : StatusTone.Error);
+        }
+        finally { _discardPromptOpen = false; }
+    }
+
+    private async void OnStopAllClick(object sender, RoutedEventArgs e)
+    {
+        if (_previewOnly || !_viewModel.CanStopMediaOutput) return;
+        await RunAsync(_viewModel.StopMediaOutputAsync);
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
-    private async Task PromptToSaveRecordingAsync()
+    private async Task PromptToSaveRecordingAsync(bool force = false)
     {
-        if (_savePromptOpen || _viewModel.IsRecordingMediaOutput) return;
+        if (_savePromptOpen || _discardPromptOpen || !IsLoaded || _viewModel.IsRecordingMediaOutput) return;
         var pending = _viewModel.PendingRecordingPath;
         if (pending is null) return;
+        if (!force && string.Equals(pending, _lastPromptedRecordingPath,
+                StringComparison.OrdinalIgnoreCase)) return;
+        _lastPromptedRecordingPath = pending;
         _savePromptOpen = true;
         try
         {
@@ -422,7 +442,8 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             uint.TryParse(heightBox.Text, out height) &&
             int.TryParse(fpsBox.Text, out fps) &&
             int.TryParse(bitrateBox.Text, out bitrate) &&
-            width >= 160 && height >= 160 && fps is >= 10 and <= 60 &&
+            width is >= 160 and <= 3840 && height is >= 160 and <= 2160 &&
+            (width & 1U) == 0 && (height & 1U) == 0 && fps is >= 10 and <= 60 &&
             bitrate is >= 500 and <= 50000)
             return true;
         SetFeedback(LocalizationService.Get("MediaOutputInvalidSettings"), StatusTone.Warning);

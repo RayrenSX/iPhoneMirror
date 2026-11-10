@@ -310,6 +310,7 @@ internal sealed class NativePreviewHost : HwndHost
                 case 0x0201: // WM_LBUTTONDOWN
                 case 0x0204: // WM_RBUTTONDOWN
                 case 0x0207: // WM_MBUTTONDOWN
+                case 0x020B: // WM_XBUTTONDOWN
                     // STATIC children do not take keyboard focus on click.
                     // Restore both WPF and native focus after a toolbar/editor
                     // interaction before dispatching this preview input.
@@ -323,32 +324,33 @@ internal sealed class NativePreviewHost : HwndHost
                     if (SuppressLegacyMouseButtons)
                     {
                         handled = true;
-                        return 0;
+                        return message is 0x020B or 0x020C ? 1 : 0;
                     }
-                    _capturedMouseButtons |= MouseButtonFromMessage(message);
+                    _capturedMouseButtons |= MouseButtonFromMessage(message, wParam);
                     _ = SetCapture(_window);
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.ButtonDown, GetSignedLowWord(lParam),
-                        GetSignedHighWord(lParam), MouseButtonFromMessage(message), 0,
+                        GetSignedHighWord(lParam), MouseButtonFromMessage(message, wParam), 0,
                         GetClientWidth(), GetClientHeight()));
                     handled = true;
-                    return 0;
+                    return message is 0x020B or 0x020C ? 1 : 0;
                 case 0x0202: // WM_LBUTTONUP
                 case 0x0205: // WM_RBUTTONUP
                 case 0x0208: // WM_MBUTTONUP
+                case 0x020C: // WM_XBUTTONUP
                     if (SuppressLegacyMouseButtons)
                     {
                         handled = true;
-                        return 0;
+                        return message is 0x020B or 0x020C ? 1 : 0;
                     }
-                    _capturedMouseButtons = (byte)(_capturedMouseButtons & ~MouseButtonFromMessage(message));
+                    _capturedMouseButtons = (byte)(_capturedMouseButtons & ~MouseButtonFromMessage(message, wParam));
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.ButtonUp, GetSignedLowWord(lParam),
-                        GetSignedHighWord(lParam), MouseButtonFromMessage(message), 0,
+                        GetSignedHighWord(lParam), MouseButtonFromMessage(message, wParam), 0,
                         GetClientWidth(), GetClientHeight()));
                     if (_capturedMouseButtons == 0) _ = ReleaseCapture();
                     handled = true;
-                    return 0;
+                    return message is 0x020B or 0x020C ? 1 : 0;
                 case 0x020A: // WM_MOUSEWHEEL
                     if (SuppressLegacyMouseButtons)
                     {
@@ -400,10 +402,11 @@ internal sealed class NativePreviewHost : HwndHost
 
     private static short GetSignedLowWord(nint value) => unchecked((short)((long)value & 0xFFFF));
     private static short GetSignedHighWord(nint value) => unchecked((short)(((long)value >> 16) & 0xFFFF));
-    private static byte MouseButtonFromMessage(int message) => message switch
+    private static byte MouseButtonFromMessage(int message, nint wParam) => message switch
     {
         0x0201 or 0x0202 => 1,
         0x0204 or 0x0205 => 2,
+        0x020B or 0x020C => ((wParam.ToInt64() >> 16) & 0xffff) == 1 ? (byte)8 : (byte)16,
         _ => 4,
     };
 

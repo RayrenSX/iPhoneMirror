@@ -1,6 +1,6 @@
 # iPhoneMirror 架构
 
-2026-10-01 对照当前工作区核对，主程序/驱动管理器源码版本为 `1.8.4-test4`。
+2026-11-05 对照当前工作区核对，主程序/驱动管理器项目版本为 `1.8.5-pre4`，另含未发布改动。
 本页描述实现边界，不表示测试版已公开发布。构建与测试见[开发指南](DEVELOPMENT.md)，
 全部文档见[索引](README.md)。
 
@@ -90,6 +90,7 @@ src/Core (C++ DLL)
 │  ├─ CoreMedia            CMTime、CMSampleBuffer、fdsc、ASBD
 │  ├─ H264/HEVC            AVCC、SPS/PPS、Annex-B
 │  └─ MFDecoder            Annex-B H264/HEVC → NV12/P010，硬件/软件策略
+│     └─ BundledH264Decoder  AVC High 4:4:4 使用随包 AirPlay FFmpeg 软件解码并输出 NV12
 ├─ Renderer
 │  └─ D3D11PreviewRenderer NV12/P010 纹理、BT.709/HDR shader 色彩转换、DirectComposition
 ├─ Audio
@@ -110,6 +111,7 @@ src/App (WPF/.NET)
 ├─ Interop                 C ABI P/Invoke 与原生预览绑定
 ├─ Models/ViewModels       UI 状态、设备轮询、多设备切换、命令
 ├─ Services               驱动只读检测/管理器启动、媒体输出、虚拟摄像头、BLE/USB/无线反控、截图
+├─ Automation             回环 HTTP API、鉴权、限流、OpenAPI；复用 Services/Automation 的设备与控制租约
 ├─ Updater                Release 解析、下载校验、Setup/ZIP 更新交接与用户设置
 └─ MainWindow/Windows      主窗口、镜像独立窗口、视频投放界面（独立窗口同时供 OBS 捕获）
 
@@ -136,10 +138,10 @@ src/DriverInstaller (独立 WPF/.NET EXE)
 发布关系
 ├─ iPhoneMirror.exe         只读驱动状态并运行 USB/AirPlay 投屏
 ├─ iPhoneMirror.Driver.exe  独立驱动安装器，主程序按需启动
-├─ iUsbBridge.exe + _internal + iUsbBridge.runtime.json  独立反控运行时
+├─ tools/iUsbBridge.exe + tools/_internal + tools/iUsbBridge.runtime.json  独立反控运行时
 ├─ iPhoneMirror.VirtualCamera.dll / .Admin.exe  Windows 11 虚拟摄像头及一次性注册助手
 ├─ tools/ffmpeg/             FFmpeg 8 媒体输出/HLS 桥接运行时（可选精简发布）
-└─ Wireless/                原始宿主和隔离的 AirPlay/FFmpeg 4.4.2；UxPlay/ 下为备用运行时
+└─ Wireless/                原始宿主和 AirPlay/FFmpeg 63b2b0f47d（avcodec 58）；UxPlay/ 下为备用运行时
 ```
 
 ## 接口契约
@@ -147,17 +149,18 @@ src/DriverInstaller (独立 WPF/.NET EXE)
 | 契约 | 当前值 | 定义与边界 |
 |---|---|---|
 | Core C ABI | `18` | `src/Core/include/iPhoneMirror/CoreApi.h` 与 `src/App/Interop/NativeCore.cs` |
-| 无线 IPC | `7` | `src/WirelessHost/IpcProtocol.h`；392 字节消息头，载荷最多 64 MiB |
+| 无线 IPC | `8` | `src/WirelessHost/IpcProtocol.h`；392 字节消息头，载荷最多 64 MiB |
 | 桥接 stdin | `iphoneMirror.touch.v2` | 4 字节 LE 长度（不含前缀）+ UTF-8 JSON；当前 Python 上限 4 MiB |
 | 桥接 stdout | JSON Lines，`ready.protocol=2` | 生命周期、能力、设备身份与恢复事件；不是二进制长度前缀 |
 | 桥接运行时清单 | schema `1` | `iUsbBridge.runtime.json`，用于文件布局/完整性校验，与输入协议版本不同 |
+| 本地 Automation API | HTTP `/api/v1` | 默认关闭，启用后只监听 `127.0.0.1:17890`；鉴权、控制租约和设备管理见[接口文档](api/README.md) |
 
 修改契约时同步发送端、接收端、版本检查和回归测试，详见[桥接协议](USB_TOUCH_BRIDGE_USAGE.md)。
 
 ## 线程与生命周期
 
 - UI 线程只更新界面；设备刷新在后台执行；
-- 每个来源维护独立 SessionHandle；主窗口和多个独立窗口可并行绑定不同来源；
+- 每个来源维护独立 SessionHandle；主窗口和多个独立窗口可并行绑定不同来源；切换选择不停止其他设备会话；
 - USB 会话工作线程执行读取、分帧、协议状态机和 FEED/EAT 分发；视频解码由独立线程执行；
 - 压缩视频使用按样本数、字节数约束的 FIFO；溢出时等待关键帧并重置解码状态，不能随意丢弃参考帧；
 - 解码后帧缓存与压缩包队列分开管理；显示端过载时取最新完整帧，不能把其策略解释成压缩队列只存 1–2 帧；
@@ -184,7 +187,7 @@ src/DriverInstaller (独立 WPF/.NET EXE)
 
 - 不静默替换 Apple 官方 USB 驱动；WinUSB/libusbK 无法切换非首配置，不能误选；
 - 采集过滤驱动由独立工具验证签名、安装、卸载并记录原驱动状态；
-- iPhoneMirror 主程序只做只读状态检测，不提权、不写驱动、不修改 UpperFilters；
+- iPhoneMirror 主程序只做只读驱动状态检测，不写驱动或修改 UpperFilters；驱动变更交给独立管理器，虚拟摄像头注册和必要的 USB 端口恢复由专用助手请求提权；
 - 有线开始投屏前才执行当前设备的严格 `libusb0` 序列号检查；无线 AirPlay 不读取驱动状态；
 - USB 会话退出时尝试停止协议并恢复配置；进程被强制终止不保证清理完成；
 - 独立驱动管理器负责 UAC、备份、事务回滚和日志；

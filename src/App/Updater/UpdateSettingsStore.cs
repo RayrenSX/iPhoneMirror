@@ -21,6 +21,8 @@ public enum ApplicationDisplayMode
 
 internal sealed class UpdateSettings
 {
+    public string SettingsCategory { get; set; } = "projection";
+    public ReverseControlMode MirroringAutoControlMode { get; set; } = ReverseControlMode.None;
     public Services.Automation.AutomationSettings AutomationApi { get; set; } = new();
     public Dictionary<string, DeviceVideoPreferences> DeviceVideoPreferences { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public KeyboardMappingSettings KeyboardMapping { get; set; } = new();
@@ -104,6 +106,8 @@ internal sealed class UpdateSettings
 
     internal UpdateSettings Clone() => new()
     {
+        SettingsCategory = SettingsCategory,
+        MirroringAutoControlMode = MirroringAutoControlMode,
         AutomationApi = (AutomationApi ?? new()).Clone(),
         DeviceVideoPreferences = new(DeviceVideoPreferences ?? [], StringComparer.OrdinalIgnoreCase),
         KeyboardMapping = KeyboardMapping.Clone(),
@@ -232,17 +236,12 @@ internal sealed class UpdateSettingsStore
                 settings.WirelessReceiverBackend = WirelessReceiverBackend.Original;
                 migrationChanged = true;
             }
-            var normalizedProfileId = settings.WirelessDisplayProfileId?.Trim().ToLowerInvariant();
-            if (!WirelessReceiverConfiguration.DisplayProfiles.Any(profile =>
-                    string.Equals(profile.Id, normalizedProfileId, StringComparison.OrdinalIgnoreCase)))
-            {
-                settings.WirelessDisplayProfileId = "1080p";
-                migrationChanged = true;
-            }
-            else if (!string.Equals(settings.WirelessDisplayProfileId, normalizedProfileId,
+            var normalizedProfileId = WirelessReceiverConfiguration.ProfileForSavedId(
+                settings.WirelessDisplayProfileId).Id;
+            if (!string.Equals(settings.WirelessDisplayProfileId, normalizedProfileId,
                 StringComparison.Ordinal))
             {
-                settings.WirelessDisplayProfileId = normalizedProfileId!;
+                settings.WirelessDisplayProfileId = normalizedProfileId;
                 migrationChanged = true;
             }
             var normalizedReceiverName = WirelessReceiverConfiguration.SanitizeReceiverName(

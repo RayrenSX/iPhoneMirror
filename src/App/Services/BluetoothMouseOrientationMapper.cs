@@ -90,16 +90,17 @@ internal static class BluetoothMouseOrientationMapper
             ? landscapeDirection : portraitDirection;
         if (reverseHorizontal) x = 1 - x;
         if (reverseVertical) y = 1 - y;
-        (x, y) = ApplyAbsoluteQuarterTurn(x, y, (4 - (int)direction) % 4);
+        (x, y) = ApplyAbsoluteDirection(x, y,
+            (BluetoothMouseDirection)((4 - (int)direction) % 4));
         return ApplyAbsoluteQuarterTurn(x, y, (4 - turns) % 4);
     }
 
     private static (double X, double Y) ApplyQuarterTurn(double dx, double dy,
         int turns) => turns switch
     {
-        1 => (-dy, dx),
+        1 => (dy, -dx),
         2 => (-dx, -dy),
-        3 => (dy, -dx),
+        3 => (-dy, dx),
         _ => (dx, dy),
     };
 
@@ -115,9 +116,9 @@ internal static class BluetoothMouseOrientationMapper
     private static (double X, double Y) ApplyAbsoluteQuarterTurn(
         double x, double y, int turns) => turns switch
     {
-        1 => (1 - y, x),
+        1 => (y, 1 - x),
         2 => (1 - x, 1 - y),
-        3 => (y, 1 - x),
+        3 => (1 - y, x),
         _ => (x, y),
     };
 

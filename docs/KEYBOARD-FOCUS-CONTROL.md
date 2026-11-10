@@ -23,10 +23,12 @@
 
 ## 验证
 
+以下命令从仓库根目录、无 CLR/.NET 注入变量的终端运行；环境说明见[开发指南](DEVELOPMENT.md#测试入口与覆盖范围)。
+
 ```powershell
 dotnet build src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release --no-restore
-dotnet run --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release --no-build --no-restore -- --keyboard-focus
-dotnet run --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release --no-build --no-restore
+dotnet ./src/App.Runtime.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --keyboard-focus
+dotnet ./src/App.Runtime.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll
 ```
 
 焦点测试使用可控的前台 HWND 快照，触发实际 WPF 激活/失活事件，执行真实输入处理与路由逻辑。USB/无线报告写入内存，验证前台发送、后台阻断、空报告释放、写入队列中的旧事件丢弃，以及粘贴/按钮请求的失效。蓝牙测试使用真实报告队列并阻塞目标锁，验证失效报告正常丢弃及释放报告放行，不连接 GATT 设备。热键测试直接调用 Windows 注册接口，验证主窗口和独立窗口失焦后的组合键占用已释放，同时保留全局例外。

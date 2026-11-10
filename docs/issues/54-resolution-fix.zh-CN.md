@@ -1,5 +1,7 @@
 # Issue #54：iPad 原生分辨率的修复与验收
 
+> 文档整理说明（2026-11-05）：文中构建产物、日志和截图的本地记录路径不随仓库分发，保留用于追溯；历史测试结论未在本次重新执行。
+
 对应 [#54](https://github.com/RayrenSX/iPhoneMirror/issues/54)。本记录区分已有的本地候选修复与仍待目标设备实测的输出能力，不代表已发布或已完成原生分辨率支持。
 
 **最新复审（2026-10-17）**：此前 B 原生补丁仍保持撤回。后续实测推翻了
@@ -174,14 +176,14 @@ A 的固定演示时间和电量是已知代价；B 若要保留真实状态栏�
 
 ### 本地证据
 
-- [测试脚本](../../work/issue54-ipad-native-20261016/probe.py)
-- [六组结果汇总](../../work/issue54-ipad-native-20261016/summary.json)
-- [A 默认日志](../../work/issue54-ipad-native-20261016/A-default.capture.log)
-- [B 默认日志](../../work/issue54-ipad-native-20261016/B-default.capture.log)
-- [B 显式竖向请求日志](../../work/issue54-ipad-native-20261016/B-explicit-portrait.capture.log)
-- [B 显式横向请求日志](../../work/issue54-ipad-native-20261016/B-explicit-landscape.capture.log)
-- [C 兼容日志](../../work/issue54-ipad-native-20261016/C-compatible.capture.log)
-- [A 30 秒复测日志](../../work/issue54-ipad-native-20261016/A-repeat.capture.log)
+- 测试脚本（本地记录：`work/issue54-ipad-native-20261016/probe.py`）
+- 六组结果汇总（本地记录：`work/issue54-ipad-native-20261016/summary.json`）
+- A 默认日志（本地记录：`work/issue54-ipad-native-20261016/A-default.capture.log`）
+- B 默认日志（本地记录：`work/issue54-ipad-native-20261016/B-default.capture.log`）
+- B 显式竖向请求日志（本地记录：`work/issue54-ipad-native-20261016/B-explicit-portrait.capture.log`）
+- B 显式横向请求日志（本地记录：`work/issue54-ipad-native-20261016/B-explicit-landscape.capture.log`）
+- C 兼容日志（本地记录：`work/issue54-ipad-native-20261016/C-compatible.capture.log`）
+- A 30 秒复测日志（本地记录：`work/issue54-ipad-native-20261016/A-repeat.capture.log`）
 
 上述 `work/` 文件为本机保留的忽略产物，没有添加进 Git。
 
@@ -250,13 +252,13 @@ Release 核心与原生测试构建通过，`CoreProtocolTests` 通过。
 
 ### 产物和适用边界
 
-- [本地测试补丁 ZIP](../../outputs/issue54-ipad-b-native-hotfix.zip)：约 1.4 MB，
+- 本地测试补丁 ZIP（本地记录：`outputs/issue54-ipad-b-native-hotfix.zip`）：约 1.4 MB，
   包含 Core DLL、两个配套 FFmpeg DLL、许可证、构建哈希、核心源码补丁及使用说明。
   适用于现有 Windows x64 / v1.8.5-pre3 / 核心 API 18 应用目录，不是完整安装器。
-- [使用说明](../../outputs/issue54-ipad-b-native-hotfix/README.zh-CN.txt)
-- [修复对照结果](../../work/issue54-ipad-native-20261016/fix-summary.json)
-- [最终补丁日志](../../work/issue54-ipad-native-20261016/FIX-final-package.capture.log)
-- [最终补丁解码帧](../../work/issue54-ipad-native-20261016/FIX-final-package.png)
+- 使用说明（本地记录：`outputs/issue54-ipad-b-native-hotfix/README.zh-CN.txt`）
+- 修复对照结果（本地记录：`work/issue54-ipad-native-20261016/fix-summary.json`）
+- 最终补丁日志（本地记录：`work/issue54-ipad-native-20261016/FIX-final-package.capture.log`）
+- 最终补丁解码帧（本地记录：`work/issue54-ipad-native-20261016/FIX-final-package.png`）
 
 该实现优先原生完整镜像，保留真实时间和电量；软件解码的 CPU 开销与原 AirPlay
 外接播放行为不同，不能据此承诺 60 fps 或所有视频 App 的外接播放行为一致。
@@ -300,8 +302,8 @@ Stevenote 不只是画质开关：公开设备端实现中，该用途初始化�
 - 2360 对称档在 **13:30:53** 收到原生 1640×2360 视频；
   **13:32:04** 改为 2360×1640；**13:32:14** 回到 1640×2360。
   核心按无线既有路径在新解码帧到达时原子替换图像和几何尺寸，两个方向均已保存截图。
-- [2360 实测日志](../../work/issue54-ipad-native-20261016/REVIEW-wireless2360-live.capture.log)
-  与[双方向预览](../../work/issue54-ipad-native-20261016/wireless-native-orientation-review.png)
+- 2360 实测日志（本地记录：`work/issue54-ipad-native-20261016/REVIEW-wireless2360-live.capture.log`）
+  与双方向预览（本地记录：`work/issue54-ipad-native-20261016/wireless-native-orientation-review.png`）
   是本机忽略产物，不将其记作 iPad Pro 或全部型号的验收。
 
 热点发现另有环境问题：服务已启动且本机 `/info` 正常，但系统 DNS-SD 没有发布可见
@@ -324,7 +326,7 @@ USB B 的低分辨率与原生旋转兼容仍未共同完成验收。原生候�
 恢复正常 USB 栈，已请求重插数据线后再验收。没有将这次握手失败记作旋转成功，
 也没有重装驱动或反复强制复位。
 
-可运行的[本地复审构建](../../outputs/issue54-reviewed-20261017/iPhoneMirror.exe)
+可运行的本地复审构建（本地记录：`outputs/issue54-reviewed-20261017/iPhoneMirror.exe`）
 与说明已生成，默认关闭 Stevenote。该 App 含当前工作区其他进行中的改动，
 不是隔离后的正式发布；`REVIEW-BUILD.json` 记录实际主程序、核心、宿主与 DNS-SD 哈希。
 
@@ -392,9 +394,9 @@ App Release、应用逻辑测试、四语言资源校验通过。
 启动时未安装的 UsbDk 后端失败一次后按既有逻辑使用 libusb0 成功，
 不把这条初始化错误归类为旋转中断。
 
-- [四方向对照](../../work/issue54-ipad-native-20261016/usb-b-rotation-verified.png)
-- [实测摘要](../../work/issue54-ipad-native-20261016/REVIEW-B-rotation-verification.json)
-- [完整日志](../../work/issue54-ipad-native-20261016/REVIEW-B-rotation-retry1858.capture.log)
+- 四方向对照（本地记录：`work/issue54-ipad-native-20261016/usb-b-rotation-verified.png`）
+- 实测摘要（本地记录：`work/issue54-ipad-native-20261016/REVIEW-B-rotation-verification.json`）
+- 完整日志（本地记录：`work/issue54-ipad-native-20261016/REVIEW-B-rotation-retry1858.capture.log`）
 
 实测核心 SHA256 为 `D3C5C290EAD148EC9A8183F1DE943EA9E2F8D20515828BBE090787A9D7E05681`，
 与 `outputs/issue54-reviewed-20261017/` 测试包内核心一致。旋转修复在这台设备通过；
@@ -423,9 +425,9 @@ App Release、应用逻辑测试、四语言资源校验通过。
 **19:37:03** 恢复竖屏 1640×2360。直接复制解码帧得到的截图中，文字与真实时间、电量均正常。
 同一会话解码 **5085 帧、39.245 fps**，无快速重连，停止返回 0，`normal_observed=true`。
 
-- [原生四方向对照](../../work/issue54-ipad-native-20261016/usb-b-native-rotation-verified.png)
-- [原生验收摘要](../../work/issue54-ipad-native-20261016/NATIVE-B-verification.json)
-- [原生验收日志](../../work/issue54-ipad-native-20261016/NATIVE-B-portrait-start.capture.log)
+- 原生四方向对照（本地记录：`work/issue54-ipad-native-20261016/usb-b-native-rotation-verified.png`）
+- 原生验收摘要（本地记录：`work/issue54-ipad-native-20261016/NATIVE-B-verification.json`）
+- 原生验收日志（本地记录：`work/issue54-ipad-native-20261016/NATIVE-B-portrait-start.capture.log`）
 
 横屏直接启动仍观察到 1502×2160，按当前横屏交换请求轴则降到 1080×1554，
 该交换已撤销。后续继续单独处理启动能力，不能把源画面插值回面板尺寸冒充原生。
@@ -454,9 +456,9 @@ App Release、应用逻辑测试、四语言资源校验通过。
 `capture_mux_shared`，正常退出 0，主视频没有被中断。该测试是只读服务共存，
 不等于新增反控输入准确率或长时间压力验收。
 
-- [最终原生截图对照](../../work/issue54-ipad-native-20261016/usb-b-native-final-verified.png)
-- [最终实测摘要](../../work/issue54-ipad-native-20261016/NATIVE-B-final-verification.json)
-- [最终原始日志](../../work/issue54-ipad-native-20261016/NATIVE-B-final-default4096.capture.log)
+- 最终原生截图对照（本地记录：`work/issue54-ipad-native-20261016/usb-b-native-final-verified.png`）
+- 最终实测摘要（本地记录：`work/issue54-ipad-native-20261016/NATIVE-B-final-verification.json`）
+- 最终原始日志（本地记录：`work/issue54-ipad-native-20261016/NATIVE-B-final-default4096.capture.log`）
 
 最终实测核心 SHA256：`EC2C0675A485025AB1D7D9FAE849EF4331D9FFCB50DF651CF0F5254F1421E325`。
 可运行包位于 `outputs/issue54-native-b-candidate/`，同包更新方向辅助程序及运行库清单。

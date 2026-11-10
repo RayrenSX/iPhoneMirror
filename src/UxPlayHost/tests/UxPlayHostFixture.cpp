@@ -117,12 +117,17 @@ int wmain(int argc, wchar_t** argv) {
         return 3;
     }
 
-    constexpr unsigned int width = 540;
-    constexpr unsigned int height = 960;
+    // The real mini negotiation that exposed striped output has a width
+    // that is not divisible by four. Exercise packed Y4M at that geometry.
+    constexpr unsigned int width = 334;
+    constexpr unsigned int height = 720;
     std::vector<std::uint8_t> frame(static_cast<std::size_t>(width) * height * 3U / 2U,
         0x40);
-    std::fill_n(frame.begin(), static_cast<std::size_t>(width) * height,
-        static_cast<std::uint8_t>(0x80));
+    for (unsigned int row = 0; row < height; ++row)
+        std::fill_n(frame.begin() + static_cast<std::size_t>(row) * width,
+            width, static_cast<std::uint8_t>(row % 200U + 16U));
+    std::fill(frame.begin() + static_cast<std::size_t>(width) * height * 5U / 4U,
+        frame.end(), static_cast<std::uint8_t>(0xC0));
     std::array<std::uint8_t, 1764> pcm{};
     for (std::size_t index = 0; index < pcm.size(); index += 4) {
         pcm[index] = 0x34;
@@ -134,7 +139,7 @@ int wmain(int argc, wchar_t** argv) {
     // Simulate a transport reset in the middle of a decoded frame. The host
     // must discard this partial payload before accepting the next Y4M stream.
     const std::string truncated_header =
-        "YUV4MPEG2 W540 H960 F30:1 Ip A0:0 C420\nFRAME\n";
+        "YUV4MPEG2 W334 H720 F30:1 Ip A0:0 C420mpeg2\nFRAME\n";
     if (!write_all(video_pipe, truncated_header.data(), truncated_header.size()) ||
         !write_all(video_pipe, frame.data(), frame.size() / 3U)) {
         CloseHandle(video_pipe);
@@ -152,7 +157,7 @@ int wmain(int argc, wchar_t** argv) {
     // UxPlay can expose raw media before its connection log reaches the host.
     // Keep that order explicit so the smoke test covers replacement of the
     // provisional identity used for the first video/audio packets.
-    const std::string y4m_header = "YUV4MPEG2 W540 H960 F30:1 Ip A0:0 C420\nFRAME\n";
+    const std::string y4m_header = "YUV4MPEG2 W334 H720 F30:1 Ip A0:0 C420mpeg2\nFRAME\n";
     const auto video_written = write_all(video_pipe, y4m_header.data(), y4m_header.size()) &&
         write_all(video_pipe, frame.data(), frame.size());
     const auto audio_written = write_all(audio_pipe, pcm.data(), pcm.size());

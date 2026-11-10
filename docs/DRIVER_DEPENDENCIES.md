@@ -29,7 +29,7 @@ while starting and stopping a running camera is available to the normal user.
 Wireless AirPlay uses bundled user-mode libraries and Windows network APIs; it
 does not require Bonjour or an additional network driver.
 
-Apple packages are absent from normal public iPhoneMirror Setup and ZIP assets
+Apple USB support installers are absent from normal public iPhoneMirror Setup and ZIP assets
 because Apple has not granted this project redistribution rights. When Apple USB
 support is missing, the driver manager uses this order: a trusted MSI beside the
 application or in its package cache, the standalone `AppleMobileDeviceSupport64.msi`
@@ -37,9 +37,10 @@ from Apple's Software Update catalog, and finally Apple's signed desktop iTunes
 installer from the official HTTPS endpoint. If a supported Apple USB INF is
 already present and only the service is missing, the manager skips driver
 reinstallation and uses the signed compatibility fallback to restore the service.
-The distributable installation therefore
-contains all project-owned or redistributable driver payloads and acquires the
-only proprietary dependency from its vendor-controlled channel.
+The driver payload contains the project-owned or redistributable driver components
+and acquires Apple USB support from its vendor-controlled channel. This describes
+USB driver installation; the separate reverse-control DDI payload is documented in
+[the bridge component inventory](USB_TOUCH_THIRD_PARTY_LICENSES.md#apple-ddi-载荷).
 
 The compatibility fallback does not install the complete iTunes application.
 The driver manager extracts `AppleMobileDeviceSupport64.msi` from Apple's

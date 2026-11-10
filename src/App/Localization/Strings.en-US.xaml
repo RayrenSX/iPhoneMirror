@@ -350,9 +350,11 @@
     <system:String x:Key="ShortcutSettingsUnbound">Unbound</system:String>
     <system:String x:Key="ShortcutSettingsDuplicate">Each action must use a different shortcut.</system:String>
     <system:String x:Key="ShortcutSettingsDuplicateBindingFormat">{0} is already assigned to {1}. Choose another shortcut or clear that binding first.</system:String>
-    <system:String x:Key="ShortcutSettingsCaptureHint">Focus the field, then press a shortcut. Backspace or Delete unbinds it; F1-F11, right mouse, and middle mouse can be used alone.</system:String>
+    <system:String x:Key="ShortcutSettingsCaptureHint">Focus the field, then press a shortcut. Backspace or Delete unbinds it; F1-F11, right, middle, and side mouse buttons 1/2 can be used alone or with Ctrl, Alt, and Shift.</system:String>
     <system:String x:Key="ShortcutMouseRight">Right mouse button</system:String>
     <system:String x:Key="ShortcutMouseMiddle">Middle mouse button</system:String>
+    <system:String x:Key="ShortcutMouseXButton1">Side button 1 (Back)</system:String>
+    <system:String x:Key="ShortcutMouseXButton2">Side button 2 (Forward)</system:String>
     <system:String x:Key="ShortcutSettingsReset">Restore defaults</system:String>
     <system:String x:Key="ShortcutSettingsInvalid">Choose a valid shortcut. F12, Windows-key shortcuts, and modifier-only keys are unavailable.</system:String>
     <system:String x:Key="ShortcutSettingsBossKeyKeyboardOnly">Boss Key requires a keyboard shortcut so hidden windows can still be restored.</system:String>
@@ -638,7 +640,7 @@
     <system:String x:Key="Cancel">Cancel</system:String>
     <system:String x:Key="WirelessResolutionLabel">Connection resolution</system:String>
     <system:String x:Key="WirelessResolutionHelp">Applying re-advertises the AirPlay receiver capability. Use 720p or 540p on a weak network.</system:String>
-    <system:String x:Key="WirelessProfileMaximum">Original quality (2880 long edge in either orientation · 60 fps)</system:String>
+    <system:String x:Key="WirelessProfileMaximum">Original quality (automatic device matching)</system:String>
     <system:String x:Key="WirelessProfileMaximumIpad">Original quality (iPad / Air · 2360 long edge · 60 fps)</system:String>
     <system:String x:Key="WirelessProfileMaximumIpadPro">Original quality (iPad Pro 12.9 · 2732 long edge · 60 fps)</system:String>
     <system:String x:Key="WirelessProfileNativeDimensions">Original ({0} · {1}×{2} · automatic rotation)</system:String>
@@ -1646,4 +1648,25 @@ Pair, select and save.</system:String>
     <system:String x:Key="MicrophoneRefreshFailed">Microphones could not be refreshed. Check the microphone connection and permissions, then try again.</system:String>
     <system:String x:Key="WirelessOriginalStartupFailed">The wireless receiver stopped immediately after startup. Apply the wireless settings to retry.</system:String>
     <system:String x:Key="DlnaRecovering">AirPlay is available; DLNA failed to start and is retrying automatically.</system:String>
+    <system:String x:Key="StreamingUnauthorized">Authentication failed (HTTP 401). Check the WHIP token.</system:String>
+    <system:String x:Key="StreamingForbidden">Access denied (HTTP 403). Check the token and publish permissions.</system:String>
+    <system:String x:Key="StreamingConnectionRefused">The streaming server refused the connection. Check the address, port and server.</system:String>
+    <system:String x:Key="StreamingConnectionTimeout">The streaming server connection timed out. Check the address and network.</system:String>
+    <system:String x:Key="StreamingHostUnreachable">The streaming server is unreachable. Check the address, DNS and network.</system:String>
+    <system:String x:Key="WirelessVideoStalled">The picture has not updated. Check the phone and network connection.</system:String>
+    <system:String x:Key="VirtualCameraInvalidRegistration">The camera registration is invalid (0x8007000D). Reinstall the virtual camera component and try again.</system:String>
+    <system:String x:Key="MirroringAutoControlTitle">Automatically enable reverse control when mirroring</system:String>
+    <system:String x:Key="MirroringAutoControlOff">Off (start manually)</system:String>
+    <system:String x:Key="MirroringAutoControlDescription">Start the selected control method when mirroring connects, without another Continue prompt. Bind the device first; connection failures appear in the control status window.</system:String>
+    <system:String x:Key="SettingsCategoryApplication">App</system:String>
+    <system:String x:Key="SettingsCategoryProjection">Projection</system:String>
+    <system:String x:Key="SettingsCategoryControl">Control</system:String>
+    <system:String x:Key="SettingsScopeApplication">Preferences for the whole application</system:String>
+    <system:String x:Key="SettingsScopeProjection">Picture, sound and projection connections</system:String>
+    <system:String x:Key="SettingsScopeControl">Automatic control, keyboard and mouse</system:String>
+    <system:String x:Key="SettingsAdvancedVideo">Advanced picture settings</system:String>
+    <system:String x:Key="SettingsAdvancedUsb">USB projection mode</system:String>
+    <system:String x:Key="SettingsKeyboard">Keyboard and shortcuts</system:String>
+    <system:String x:Key="SettingsMaintenance">Setup and maintenance</system:String>
+    <system:String x:Key="SettingsBluetoothMouse">Bluetooth mouse</system:String>
 </ResourceDictionary>

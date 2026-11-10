@@ -1,4 +1,4 @@
-"""Python 3 standard-library client. Running this file sends input to a phone."""
+"""Python 3 client. Lists devices by default; opt in explicitly to a sample tap."""
 import json
 import os
 from pathlib import Path
@@ -84,22 +84,26 @@ if __name__ == "__main__":
     devices = client.get_devices()
     if not devices:
         raise SystemExit("Connect and configure a phone in iPhoneMirror first.")
-    device = devices[0]["id"]
+    device = os.environ.get("IPHONEMIRROR_DEVICE_ID")
+    if not device:
+        print(json.dumps(devices, ensure_ascii=False, indent=2))
+        print("Set IPHONEMIRROR_DEVICE_ID to an id above to capture that device.")
+        raise SystemExit(0)
+    if not any(item["id"] == device for item in devices):
+        raise SystemExit("IPHONEMIRROR_DEVICE_ID does not match a connected source.")
     status = client.status(device)
     capabilities = status["capabilities"]
+    if capabilities["screenshot"]:
+        print(client.screenshot(device))
+    if os.environ.get("IPHONEMIRROR_SEND_TAP") != "1":
+        print("Set IPHONEMIRROR_SEND_TAP=1 to send one sample tap.")
+        raise SystemExit(0)
     width, height = status["geometry"]["width"], status["geometry"]["height"]
+    if not capabilities["tap"] or width <= 0 or height <= 0:
+        raise SystemExit("Start capture and absolute touch control for this device first.")
     client.acquire(device)
     try:
-        if capabilities["tap"]:
-            x, y = min(500, width * .5), min(800, height * .8)
-            client.tap(device, x, y)
-            client.long_press(device, x, y, 1.5)
-            client.swipe(device, x, y, x, min(200, height * .2), .5)
-        if capabilities["textInput"]:
-            client.type_text(device, "Hello")
-        if capabilities["clipboardWrite"]:
-            client.set_clipboard(device, "Hello")
-        if capabilities["screenshot"]:
-            print(client.screenshot(device))
+        client.input(device, "tap", x=width * .5, y=height * .5,
+                     geometryVersion=status["geometry"]["version"])
     finally:
         client.release(device)

@@ -5,6 +5,9 @@ iPhoneMirror is a community-maintained public preview. Use the latest
 build when reproducing a problem, and include the exact version from About.
 Source-tree test versions and published releases may differ.
 
+中文用户可先阅读[教程的常见问题](docs/USER_GUIDE.md#常见问题)。反馈时请说明具体安装版本、
+连接方式、操作步骤及失败时间；可直接填写下方模板，设备标识和日志请先脱敏。
+
 ## Before requesting help
 
 1. Use the latest release and read the [README troubleshooting and driver notes](README.md).
@@ -40,3 +43,30 @@ use the Feature Request form.
 
 Security vulnerabilities must be reported privately through
 [GitHub Security Advisories](https://github.com/RayrenSX/iPhoneMirror/security/advisories/new).
+
+## Reproduction details / 问题反馈模板
+
+Copy this template into the Bug Report form. Leave unknown values as unknown.
+For a local build, include its commit and whether the working tree has extra changes.
+
+```text
+App version / 软件版本（About / 关于）:
+Package / 安装方式: Setup / ZIP / local build
+Windows version and architecture / 系统版本与架构:
+Device ProductType and iOS / 设备型号标识与 iOS:
+Connection / 连接方式: USB / AirPlay
+Receiver backend / 无线接收方案（如适用）: original / UxPlay
+Control transport / 反控方式（如适用）: Bluetooth / USB / wireless
+Steps / 复现步骤:
+1.
+2.
+Expected result / 预期结果:
+Actual result and error code / 实际结果与错误码:
+Failure time and time zone / 失败时间与时区:
+Frequency / 复现频率:
+Sanitized logs or screenshots / 已脱敏日志或截图:
+```
+
+Do not include the API key, control session token, UDID, pairing files or private
+screen content. Logs around the failure time are usually more useful than a full
+unfiltered log history. Use the private security reporting link above for vulnerabilities.

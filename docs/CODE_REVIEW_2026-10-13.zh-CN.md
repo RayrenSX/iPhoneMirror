@@ -1,5 +1,7 @@
 # 再次审查（2026-10-13）
 
+> 文档整理说明（2026-11-05）：文中构建产物、日志和截图的本地记录路径不随仓库分发，保留用于追溯；源码链接改为仓库相对路径，原记录中的行号仅适用于当时版本；历史测试结论未在本次重新执行。
+
 ## 修复与复测记录
 
 用户随后要求修复，以下三项已处理；保留下文的修复前审查与复现记录。
@@ -42,11 +44,11 @@ Next prepare: MANAGEMENT_BUSY
 Original request after releasing core gate: AutomationException
 ```
 
-释放锁之前将视图模型标记为已释放，避免触发真实设备操作。程序：[Program.cs](../work/review-20261013/Program.cs)；日志：[cancellation.log](../work/review-20261013-cancellation.log)。建议将取消信号传入锁等待和启动流程，在开始硬件操作前再次检查，并明确取消期间新建会话的清理责任；不要仅取消外层等待而让启动任务继续执行。
+释放锁之前将视图模型标记为已释放，避免触发真实设备操作。程序：Program.cs（本地记录：`work/review-20261013/Program.cs`）；日志：cancellation.log（本地记录：`work/review-20261013-cancellation.log`）。建议将取消信号传入锁等待和启动流程，在开始硬件操作前再次检查，并明确取消期间新建会话的清理责任；不要仅取消外层等待而让启动任务继续执行。
 
 ## 3. [P3] MCP 安装入口指向仓库中不存在的服务
 
-位置：[USER_GUIDE.md:666](USER_GUIDE.md#L666)。
+位置：[USER_GUIDE.md:666](USER_GUIDE.md)（原记录行号 L666）。
 
 新增用户指南宣称仓库提供 `tools/iphone-mcp` 服务，六处文档入口都指向该目录的 README，但工作区没有此目录，`git ls-files tools/iphone-mcp` 也没有结果。用户无法按说明安装或配置此服务。应将实现与 README 一并交付，或改为真实的外部项目链接并修正文案。
 

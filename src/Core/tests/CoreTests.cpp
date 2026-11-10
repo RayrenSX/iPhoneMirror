@@ -2328,11 +2328,17 @@ void test_wireless_i420_conversion() {
     stream.set_identity(L"test", true);
     stream.publish_video(header, i420);
     const auto published = stream.latest_frame();
+    check(stream.snapshot_at(published->received_at + std::chrono::seconds(6)).message ==
+            L"AirPlay video stalled" &&
+        stream.snapshot_at(published->received_at + std::chrono::seconds(6)).fps == 0,
+        "a silent video transport cannot keep reporting active mirroring and stale FPS");
     stream.set_mirror_state(iPhoneMirror::wireless::MirrorSenderState::Paused);
     check(stream.latest_frame() == published &&
         stream.snapshot().state == iPhoneMirror::capture::State::Streaming &&
         stream.snapshot().message == L"AirPlay video paused",
         "sender pause preserves the decoded frame and live capture state");
+    check(stream.snapshot_at(published->received_at + std::chrono::seconds(6)).message ==
+        L"AirPlay video paused", "an explicit sender pause is not a transport stall");
     auto geometry = header;
     geometry.width = 1280; geometry.height = 720;
     geometry.stride[0] = 1920; geometry.stride[1] = 1080;

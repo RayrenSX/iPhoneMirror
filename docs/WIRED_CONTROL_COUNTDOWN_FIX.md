@@ -1,5 +1,7 @@
 # Wired Control success-window countdown investigation
 
+> 文档整理说明（2026-11-05）：文中构建产物、日志和截图的本地记录路径不随仓库分发，保留用于追溯；历史测试结论未在本次重新执行。
+
 Verified on Windows on 2026-09-30. Baseline commit: `76e962f37f55a05e4a7b4c86235338957d879c9f`.
 
 ## Root cause and reproduction
@@ -8,7 +10,7 @@ The original countdown had two owners operating at different times. `OnStatusCha
 
 The display `DispatcherTimer` still ran against the saved deadline. At zero, its original `OnTick` only stopped the display timer and returned. It did not call the completion method, raise `CountdownElapsed`, or request `Close()`. It also returned before notifying the final label change, so the last displayed label could remain at one second. This explains a successful connection followed by a window that stays open.
 
-This was reproduced using the real production XAML window and timers, replacing only the window code-behind with its baseline version in an isolated build. After six seconds: `closed=False`, `visible=True`, `callback=0`; the observed labels progressed from 5 through 1. The test failed specifically because the displayed window did not reach `Closed`. See [original-tests.log](../artifacts/countdown-investigation/original-tests.log).
+This was reproduced using the real production XAML window and timers, replacing only the window code-behind with its baseline version in an isolated build. After six seconds: `closed=False`, `visible=True`, `callback=0`; the observed labels progressed from 5 through 1. The test failed specifically because the displayed window did not reach `Closed`. See original-tests.log（本地记录：`artifacts/countdown-investigation/original-tests.log`）.
 
 Existing device logs also support this sequence: PID 1664 reached `wired_control_connected` and `wired_control_auto_close_countdown_started` at 2026-09-30 01:43:53 UTC, without subsequent countdown-completed/close events. Those historical logs alone did not establish the cause; the baseline reproduction did.
 
@@ -60,7 +62,7 @@ No second status window implementation or extra five-second delay was introduced
 
 ### Build
 
-The Release runtime-test build also builds the application. It succeeded with **0 errors**, with the same five existing nullable warnings emitted twice by WPF's temporary and normal project builds. They concern native capture handles in `MainViewModel`, outside the countdown fix. See [final-build.log](../artifacts/countdown-investigation/final-build.log).
+The Release runtime-test build also builds the application. It succeeded with **0 errors**, with the same five existing nullable warnings emitted twice by WPF's temporary and normal project builds. They concern native capture handles in `MainViewModel`, outside the countdown fix. See final-build.log（本地记录：`artifacts/countdown-investigation/final-build.log`）.
 
 ### Real device: passed
 
@@ -80,7 +82,7 @@ The real bridge returned `ready`, with `gate_open=True` and `auth_mode=direct`. 
 | 02:36:06.876 | `Close()` called | same ID/handle, `visible=True`, UI thread 2 |
 | 02:36:06.898 | `Closed` | same ID/handle, UI thread 2 |
 
-See [live-verified-test.log](../artifacts/countdown-investigation/live-verified-test.log) and [real-device reverse-control.log](../artifacts/countdown-investigation/live-verified-logs/reverse-control.log).
+See live-verified-test.log（本地记录：`artifacts/countdown-investigation/live-verified-test.log`） and real-device reverse-control.log（本地记录：`artifacts/countdown-investigation/live-verified-logs/reverse-control.log`）.
 
 An earlier harness attempt reached real USB Ready but failed because the console harness had not installed WPF's synchronization context around the toolbar call. The harness was corrected to use `DispatcherSynchronizationContext` and rerun successfully. That failed harness attempt is not counted as a passing device test. Desktop automation also could not reliably distinguish the installed app from the test build; the verified run used the exact built test executable instead.
 
@@ -98,11 +100,11 @@ The regression tests simulate status reports only. They show the actual XAML win
 - A queued close for an old window does not close its replacement; queued updates after disposal do not reopen the window or access disposed timers.
 - `Closed` occurs on the window dispatcher, removes that exact instance from `Application.Windows`, and clears the popup manager's reference.
 
-Results: [verified-regressions.log](../artifacts/countdown-investigation/verified-regressions.log). Diagnostic events: [regression reverse-control.log](../artifacts/countdown-investigation/verified-regression-logs/reverse-control.log).
+Results: verified-regressions.log（本地记录：`artifacts/countdown-investigation/verified-regressions.log`）. Diagnostic events: regression reverse-control.log（本地记录：`artifacts/countdown-investigation/verified-regression-logs/reverse-control.log`）.
 
 ### Broader repository suite
 
-The general `App.Logic.Tests` suite was also attempted. Its first invocation from the isolated artifacts directory failed because the existing test runner assumes the standard `src/.../bin` layout when locating localization files. Running it from that standard layout with a separate `CountdownVerification` configuration progressed to an unrelated source assertion and failed: `main-window dragging preserves the configured DWM backdrop without a black/white flash` (`Program.cs:1161`). That assertion checks main-window drag/backdrop code, not the countdown. Concurrent UI work affects that area; this task did not alter it. Therefore the broad repository suite is **not** reported as passing. See [logic-verified-tests.log](../artifacts/countdown-investigation/logic-verified-tests.log).
+The general `App.Logic.Tests` suite was also attempted. Its first invocation from the isolated artifacts directory failed because the existing test runner assumes the standard `src/.../bin` layout when locating localization files. Running it from that standard layout with a separate `CountdownVerification` configuration progressed to an unrelated source assertion and failed: `main-window dragging preserves the configured DWM backdrop without a black/white flash` (`Program.cs:1161`). That assertion checks main-window drag/backdrop code, not the countdown. Concurrent UI work affects that area; this task did not alter it. Therefore the broad repository suite is **not** reported as passing. See logic-verified-tests.log（本地记录：`artifacts/countdown-investigation/logic-verified-tests.log`）.
 
 ### Code-level checks and limits
 

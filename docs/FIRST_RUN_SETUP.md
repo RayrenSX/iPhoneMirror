@@ -153,17 +153,19 @@ dotnet build src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj --no-re
 & 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --ui-preview Light setup
 
 & 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --first-run-setup outputs/first-run-setup-review-v3
-& 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --first-run-driver-probe <本次构建的驱动管理器路径>
+& 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --first-run-driver-probe 'src/DriverInstaller/bin/Debug/net10.0-windows/win-x64/iPhoneMirror.Driver.exe'
 
-# 状态检查模型、实际 WPF 入口/退出、四语言双主题
+# 状态检查模型、实际 WPF 入口/退出与多语言双主题；历史验证范围见下文
 & 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --setup-assessment outputs/setup-assessment-final
 
 # 独立检查页交互预览，使用隔离的设置检查点及检测结果
 & 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --setup-assessment-preview outputs/setup-assessment-windows-mcp
 
 # 实际组件、蓝牙环境和已连接设备的只读前置条件检查
-& 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --setup-runtime-probe <本次构建的驱动管理器路径>
+& 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --setup-runtime-probe 'src/DriverInstaller/bin/Debug/net10.0-windows/win-x64/iPhoneMirror.Driver.exe'
 ```
+
+以下为早期专项验证记录，语言数和场景数保留当时范围；当前界面已支持五种语言，新增语言的专项记录见[台湾本地化](LOCALIZATION-TAIWAN.md)。本次文档整理未重跑 UI 矩阵。
 
 向导测试覆盖两级用途选择、三种分支、设备顺序、全步骤跳过、依赖步骤跳过、回退、恢复及损坏检查点。
 布局覆盖 23 个活动页面 × 4 种语言 × 2 个主题 × 2 个尺寸，共 368 组，检查默认尺寸

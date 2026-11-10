@@ -91,6 +91,7 @@ public:
     void attach(CapturePreferences preferences);
     void detach() noexcept;
     [[nodiscard]] Snapshot snapshot() const;
+    [[nodiscard]] Snapshot snapshot_at(std::chrono::steady_clock::time_point now) const;
     [[nodiscard]] std::int64_t latest_frame_timestamp() const;
     [[nodiscard]] std::shared_ptr<const media::DecodedFrame> latest_frame() const;
     [[nodiscard]] std::shared_ptr<const media::DecodedFrame> next_render_frame();

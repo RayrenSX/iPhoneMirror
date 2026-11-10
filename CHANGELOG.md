@@ -11,6 +11,9 @@ All notable changes to iPhoneMirror are documented here. The project follows
 - Improve clipboard timeout, resource and converter recovery, with additional protocol regression coverage.
 - Preserve first-run application mode drafts and improve setup window behavior.
 - Add keyboard diagnostics, shortcut soak checks and QA directory packaging helpers.
+- Align user/developer documentation with current DDI packaging, multi-device sessions,
+  wireless profiles and Automation API management. Add complete archive/release/issue
+  indexes and an offline documentation checker; repair repository links and examples.
 
 ## [1.8.5-pre4] - 2026-10-29
 

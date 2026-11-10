@@ -1,6 +1,6 @@
 # 开发、测试与发布
 
-本文于 2026-10-01 对照当前工作区脚本核对，源码版本为 `1.8.4-test4`。
+本文于 2026-11-05 对照当前工作区脚本核对，主程序与驱动管理器项目版本为 `1.8.5-pre4`，另含未发布改动。
 以下命令均从仓库根目录运行。模块关系见[架构说明](ARCHITECTURE.md)，文档入口见[索引](README.md)。
 
 ## 环境与依赖
@@ -76,8 +76,8 @@ schema `1`，而 `ready` 的应用协议号为 `2`，二者含义不同。
 
 ## 测试入口与覆盖范围
 
-默认构建依次运行 CTest、Python `unittest`、桥接源码暂存测试、三个托管测试程序、
-VC Runtime 版本解析和 Apple 支持包验证。`CI=true` 时，脚本明确跳过
+默认构建依次运行 CTest、Python `unittest`、桥接源码暂存与三个提权启动脚本、三个托管测试程序、
+Automation 生命周期专项、VC Runtime 版本解析和 Apple 支持包验证。`CI=true` 时，脚本明确跳过
 `App.Runtime.Tests`；它并非自动检测所有无桌面环境。本地运行 WPF 测试会创建窗口。
 本地化校验由 Windows workflow 单独执行，不包含在 `build.ps1` 的测试段中。
 
@@ -94,9 +94,10 @@ SDK/CI 注入的 CLR/.NET 环境覆盖。`dotnet run` 会注入 `DOTNET_ROOT_X64
 
 # 先完成一次同配置构建，确保原生 DLL 与测试程序匹配
 ctest --test-dir build/native -C Release --output-on-failure
-dotnet run --project src/App.Logic.Tests/IPhoneMirror.App.Logic.Tests.csproj -c Release
-dotnet run --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -c Release
-dotnet run --project src/DriverInstaller.Tests/iPhoneMirror.DriverInstaller.Tests.csproj -c Release
+# 在未设置 CLR/.NET 注入变量的终端中执行；完整构建会自动净化测试子进程环境
+dotnet ./src/App.Logic.Tests/bin/Release/net10.0-windows10.0.19041.0/IPhoneMirror.App.Logic.Tests.dll
+dotnet ./src/App.Runtime.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll
+dotnet ./src/DriverInstaller.Tests/bin/Release/net10.0-windows10.0.19041.0/iPhoneMirror.DriverInstaller.Tests.dll
 
 # 使用构建创建的 Python 环境，避免缺少桥接依赖
 $env:PATH = (Join-Path $PWD 'third_party/libusb/bin/x64') + ';' + $env:PATH
@@ -183,11 +184,15 @@ UI smoke、`Test-WiredRecoveryDevice.ps1`、`Test-WiredControlUia.ps1` 和
 `-AllowVersionOverride` 是显式覆盖，不应拿来掩盖主程序与驱动管理器的版本分歧。
 
 Apple 支持包只在拥有再分发权时显式提供；参数及校验要求见
-[驱动依赖说明](DRIVER_DEPENDENCIES.md)。通常公开包不包含 Apple MSI 或 DDI。
+[驱动依赖说明](DRIVER_DEPENDENCIES.md)。通常公开包不包含 Apple USB 支持 MSI；
+DDI 是另一项载荷，当前标准包按 `config/ddi-bundles.json` 内置并校验 Personalized 与 Cryptex 镜像。
+其分发状态见[组件来源说明](USB_TOUCH_THIRD_PARTY_LICENSES.md#apple-ddi-载荷)。
 发布说明放在 `docs/releases`，根目录变更记录汇总版本；不要把工作区验证结果写成已发布事实。
 
 ## 配置、诊断与维护
 
+- 文档检查：`python scripts/verify_docs.py` 离线检查本地链接、图片、锚点、围栏及索引覆盖；
+  外部链接可用性、命令实际行为和真机结论需另行验证。
 - 用户设置由 `UpdateSettingsStore` 保存到 `%LOCALAPPDATA%/iPhoneMirror/settings.json`；
   设备绑定位于同目录的 `device-binding-profiles.json`。
 - 主程序诊断位于 `%LOCALAPPDATA%/iPhoneMirror/Logs`；驱动 UI 日志位于

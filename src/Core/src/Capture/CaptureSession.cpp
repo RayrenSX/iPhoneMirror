@@ -2615,13 +2615,39 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
     } catch (const std::exception& error) {
         // Stop requests intentionally interrupt USB I/O while iOS restores
         // its normal configuration. This is a normal terminal condition.
+        const bool stopped_by_request = stop_token.stop_requested() &&
+            !video_worker_failure.failed() && !peer_session_ended;
+        std::string diagnostic = error.what();
+        if (const auto* usb_error =
+                dynamic_cast<const transport::UsbError*>(&error))
+            failure_code = usb_error->code();
+        // A bulk transfer can fail after the decoder has already accepted
+        // a frame. Do not leave the last sample's Decoder stage attached
+        // to a transport failure; that misclassifies the legacy filter
+        // error and sends the user down the wrong recovery path.
+        const bool bulk_transport_failure =
+            diagnostic.find("bulk read") != std::string::npos ||
+            diagnostic.find("bulk write") != std::string::npos;
+        if (bulk_transport_failure) {
+            failure_stage = FailureStage::VideoStream;
+            failure_kind = FailureKind::Driver;
+        }
+        if (diagnostic.find("disconnected") != std::string::npos ||
+            diagnostic.find("NO_DEVICE") != std::string::npos ||
+            diagnostic.find("no device") != std::string::npos) {
+            failure_kind = FailureKind::DeviceDisconnected;
+        } else if (diagnostic.find("driver") != std::string::npos ||
+            diagnostic.find("libusb0") != std::string::npos) {
+            failure_kind = FailureKind::Driver;
+        }
+        if (!stopped_by_request)
+            set_failure(failure_kind, failure_stage, failure_code,
+                L"采集失败：" + widen(diagnostic));
         acquire_usb_transition_gate();
         stop_audio_renderer();
         prepare_shutdown_usb();
         shutdown_usb();
         configuration_restore.run_now();
-        const bool stopped_by_request = stop_token.stop_requested() &&
-            !video_worker_failure.failed() && !peer_session_ended;
         const bool restored = finalize_configuration_restore(stopped_by_request);
         active_backend_release.run_now();
         libusb0_restore_lease.release();
@@ -2632,33 +2658,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         if (stopped_by_request) {
             if (restored) set_state(State::Stopped, L"投屏已停止");
         } else {
-            std::string diagnostic = error.what();
             if (!restored) {
                 diagnostic += "; teardown released application resources but "
                     "could not confirm that the Apple USB device returned to "
                     "its normal configuration";
-            }
-            if (const auto* usb_error =
-                    dynamic_cast<const transport::UsbError*>(&error))
-                failure_code = usb_error->code();
-            // A bulk transfer can fail after the decoder has already accepted
-            // a frame. Do not leave the last sample's Decoder stage attached
-            // to a transport failure; that misclassifies the legacy filter
-            // error and sends the user down the wrong recovery path.
-            const bool bulk_transport_failure =
-                diagnostic.find("bulk read") != std::string::npos ||
-                diagnostic.find("bulk write") != std::string::npos;
-            if (bulk_transport_failure) {
-                failure_stage = FailureStage::VideoStream;
-                failure_kind = FailureKind::Driver;
-            }
-            if (diagnostic.find("disconnected") != std::string::npos ||
-                diagnostic.find("NO_DEVICE") != std::string::npos ||
-                diagnostic.find("no device") != std::string::npos) {
-                failure_kind = FailureKind::DeviceDisconnected;
-            } else if (diagnostic.find("driver") != std::string::npos ||
-                diagnostic.find("libusb0") != std::string::npos) {
-                failure_kind = FailureKind::Driver;
             }
             set_failure(failure_kind, failure_stage, failure_code,
                 L"采集失败：" + widen(diagnostic));

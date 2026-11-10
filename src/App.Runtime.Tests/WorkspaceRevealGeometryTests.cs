@@ -118,7 +118,7 @@ internal static partial class Program
                 FinishWorkspaceReveal(window);
             }
             finally { window.LayoutUpdated -= capture; }
-            var intermediate = samples.Where(s => s.Width > 1 && s.Width < (closeSettings ? 335 : 299)).ToArray();
+            var intermediate = samples.Where(s => s.Width > 1 && s.Width < (closeSettings ? 361 : 299)).ToArray();
             InteractionAssert(intermediate.Length > 0, "Stacked close skipped intermediate geometry.");
             InteractionAssert(samples.All(s => s.Preview >= beforePreview - 1),
                 $"Closing a stacked card squeezed the preview at {width} DIP: {beforePreview:F1} -> {samples.Min(s => s.Preview):F1}.");
@@ -129,15 +129,15 @@ internal static partial class Program
                 "Stacked rows remained after the close.");
         }
         OpenBoth();
-        InterruptWorkspaceReveal(window, settings, 336, () => Settings(false), () => Settings(true));
+        InterruptWorkspaceReveal(window, settings, 362, () => Settings(false), () => Settings(true));
         FinishWorkspaceReveal(window);
-        InteractionAssert(Grid.GetRow(settings) == 1 && settings.Width == 336, "Reversal lost stacked layout.");
-        InterruptWorkspaceReveal(window, settings, 336, () => Settings(false),
+        InteractionAssert(Grid.GetRow(settings) == 1 && settings.Width == 362, "Reversal lost stacked layout.");
+        InterruptWorkspaceReveal(window, settings, 362, () => Settings(false),
             () => AuditFixCall(window, "ApplyWorkspacePanelState", false));
         InteractionAssert(Grid.GetRow(settings) == 0 && !WorkspaceRevealRunning(window),
             "Immediate state application retained transitional rows.");
         OpenBoth();
-        InterruptWorkspaceReveal(window, settings, 336, () => Settings(false), () => window.Width = 1280);
+        InterruptWorkspaceReveal(window, settings, 362, () => Settings(false), () => window.Width = 1280);
         FinishWorkspaceReveal(window);
         InteractionAssert(Grid.GetRow(settings) == 0 && grid.RowDefinitions.Count == 0,
             "Resize across the breakpoint retained transitional rows.");
@@ -161,7 +161,7 @@ internal static partial class Program
         foreach (var opening in new[] { false, true })
         {
             Settings(!opening); FinishWorkspaceReveal(window);
-            InterruptWorkspaceReveal(window, settings, 336, () => Settings(opening), () =>
+            InterruptWorkspaceReveal(window, settings, 362, () => Settings(opening), () =>
             {
                 if (minimize) window.WindowState = WindowState.Minimized;
                 else window.Hide();
@@ -174,7 +174,7 @@ internal static partial class Program
             var expected = opening ? openWidth : closedWidth;
             InteractionAssert(Math.Abs(window.ActualWidth - expected) <= 1,
                 $"Restore left an intermediate window width (minimize={minimize}, opening={opening}): {window.ActualWidth:F1}, expected {expected:F1}.");
-            InteractionAssert(settings.Width == (opening ? 336 : 0), "Restore lost the requested panel state.");
+            InteractionAssert(settings.Width == (opening ? 362 : 0), "Restore lost the requested panel state.");
         }
 
         // Cancel before the Loaded-priority clock starts, then hide again before
@@ -187,7 +187,7 @@ internal static partial class Program
             "Repeated suspension lost the pending window fit.");
 
         Settings(true); FinishWorkspaceReveal(window);
-        InterruptWorkspaceReveal(window, settings, 336, () => Settings(false), () => window.Width = 900);
+        InterruptWorkspaceReveal(window, settings, 362, () => Settings(false), () => window.Width = 900);
         FinishWorkspaceReveal(window);
         window.Hide(); window.Show(); AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
         InteractionAssert(Math.Abs(window.ActualWidth - 900) <= 1,

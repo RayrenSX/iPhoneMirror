@@ -40,6 +40,8 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int WmLeftButtonUp = 0x0202;
     private const int WmMiddleButtonDown = 0x0207;
     private const int WmMiddleButtonUp = 0x0208;
+    private const int WmXButtonDown = 0x020B;
+    private const int WmXButtonUp = 0x020C;
     private const int WmMouseWheel = 0x020A;
     private const int WmSetCursor = 0x0020;
     private const int WmKillFocus = 0x0008;
@@ -828,6 +830,23 @@ internal sealed class NativePreviewWindow : IDisposable
                 if (_capturedMouseButtons == 0) _ = ReleaseCapture();
                 handled = true;
                 return 0;
+            case WmXButtonDown when IsPointerInputActive:
+            case WmXButtonUp when IsPointerInputActive:
+                var sideButton = ((wParam.ToInt64() >> 16) & 0xffff) == 1 ? (byte)8 : (byte)16;
+                if (message == WmXButtonDown)
+                {
+                    _capturedMouseButtons |= sideButton;
+                    _ = SetCapture(hwnd);
+                    DispatchPointer(PreviewPointerKind.ButtonDown, lParam, sideButton, 0);
+                }
+                else
+                {
+                    _capturedMouseButtons = (byte)(_capturedMouseButtons & ~sideButton);
+                    DispatchPointer(PreviewPointerKind.ButtonUp, lParam, sideButton, 0);
+                    if (_capturedMouseButtons == 0) _ = ReleaseCapture();
+                }
+                handled = true;
+                return 1;
             case WmMouseWheel when IsPointerInputActive:
                 DispatchPointer(PreviewPointerKind.Wheel, lParam, 0,
                     unchecked((short)(wParam.ToInt64() >> 16)));

@@ -80,6 +80,12 @@ installation, registry filter mutation and rollback behavior live in
   Chinese (Taiwan), English, and Japanese resource keys in sync.
 - Update the README, user guide, architecture/protocol notes, or release notes
   when a user-visible workflow, dependency, port, or output format changes.
+- Link new documentation from the [index](docs/README.md), its archive, or the
+  release/issue indexes. Keep historical test results scoped to their original
+  environment; describe untracked logs as local artifact paths, not repository links.
+- Run `python scripts/verify_docs.py` for documentation changes. It checks local
+  links, images, heading anchors, code fences and index coverage without network
+  access or executing device commands.
 
 By contributing, you agree that your contribution may be distributed under the
 project's GNU General Public License v3.0 only (GPL-3.0-only). Third-party material

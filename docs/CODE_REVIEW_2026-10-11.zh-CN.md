@@ -1,5 +1,7 @@
 # 全仓库代码审查与功能探索（2026-10-11）
 
+> 文档整理说明（2026-11-05）：文中构建产物、日志和截图的本地记录路径不随仓库分发，保留用于追溯；源码链接改为仓库相对路径，原记录中的行号仅适用于当时版本；历史测试结论未在本次重新执行。
+
 ## 修复与复测记录
 
 用户随后要求修复，现已修复下述 5 个确认问题，保留工作区原有修改：
@@ -16,7 +18,7 @@
 
 本次复测通过：App.Logic.Tests 全套、完整 Runtime Tests（退出码 0）、`--automation-lifecycle`、`--preview-pointer`、旧 USB recovery、SRS HTTP 测试、本地化检查及主应用/运行时测试/蓝牙工具构建。PowerShell 与 Node 语法、`git diff --check` 通过。新 API 生命周期测试已接入本机构建测试流程，SRS 测试与蓝牙工具构建已接入 Windows CI；远端 CI 未在此次执行。
 
-回归入口：[AutomationLifecycleTests.cs](C:/Users/Ray/Documents/iphoneMirror/src/App.Runtime.Tests/AutomationLifecycleTests.cs)、[App.Logic.Tests/Program.cs](C:/Users/Ray/Documents/iphoneMirror/src/App.Logic.Tests/Program.cs)、[test_srs_lab_server.mjs](C:/Users/Ray/Documents/iphoneMirror/scripts/test_srs_lab_server.mjs)。证据保存在 `work/fix-*-20261011.log`，其中完整运行时为 [fix-runtime-full-20261011.log](C:/Users/Ray/Documents/iphoneMirror/work/fix-runtime-full-20261011.log)。
+回归入口：[AutomationLifecycleTests.cs](../src/App.Runtime.Tests/AutomationLifecycleTests.cs)、[App.Logic.Tests/Program.cs](../src/App.Logic.Tests/Program.cs)、[test_srs_lab_server.mjs](../scripts/test_srs_lab_server.mjs)。证据保存在 `work/fix-*-20261011.log`，其中完整运行时为 fix-runtime-full-20261011.log（本地记录：`work/fix-runtime-full-20261011.log`）。
 
 **此前 AMD 退出崩溃未认定已修复。** 本轮完整套件正常退出；对已有 dump 的检查再次确认故障地址位于 AMD 模块、fast-fail 参数为 7，但原始栈扫描不足以确定根因，也没有据此修改原生图形代码。历史失败及实机验收空白仍保留在下文。此次没有执行驱动变更、升级安装或真机输入。
 
@@ -30,7 +32,7 @@
 
 ### 1. [P2] 普通托盘启动不会自动开启已保存的 Automation API
 
-- 位置：[MainWindow.Automation.cs:34](C:/Users/Ray/Documents/iphoneMirror/src/App/MainWindow.Automation.cs:34)、[MainWindow.Tray.cs:19](C:/Users/Ray/Documents/iphoneMirror/src/App/MainWindow.Tray.cs:19)。
+- 位置：[MainWindow.Automation.cs:34](../src/App/MainWindow.Automation.cs)、[MainWindow.Tray.cs:19](../src/App/MainWindow.Tray.cs)。
 - 触发：保存 `AutomationApi.Enabled=true`，下次以普通托盘模式启动，且不显示主窗口。
 - 原因：自动启动 API 仅挂在主窗口 `Loaded` 事件；`StartInTray()` 只创建 HWND、设置托盘和启动设备服务，不加载主窗口。
 - 影响：用户已启用 API，但托盘运行时没有监听服务；依赖后台自动化的调用失败。以后加载主窗口才可能触发启动。
@@ -39,7 +41,7 @@
 
 ### 2. [P2] 临时后台 API 在重新生成密钥后停止
 
-- 位置：[MainWindow.Automation.cs:108](C:/Users/Ray/Documents/iphoneMirror/src/App/MainWindow.Automation.cs:108)、[MainWindow.AutomationManagement.cs:10](C:/Users/Ray/Documents/iphoneMirror/src/App/MainWindow.AutomationManagement.cs:10)。
+- 位置：[MainWindow.Automation.cs:108](../src/App/MainWindow.Automation.cs)、[MainWindow.AutomationManagement.cs:10](../src/App/MainWindow.AutomationManagement.cs)。
 - 触发：持久化设置中 API 为关闭，通过 `--automation-background` 临时开启，然后重新生成密钥。
 - 原因：后台启动使用 `Enabled=true` 的设置副本，并传入 `save:false`；换密钥先停止服务，随后只根据持久化 `Enabled` 决定是否重启。
 - 影响：密钥操作成功后原本运行中的后台 API 消失，自动化连接中断。
@@ -48,7 +50,7 @@
 
 ### 3. [P2] 设备绑定落盘失败仍报告成功，重启后丢失修改
 
-- 位置：[DeviceBindingManager.cs:87](C:/Users/Ray/Documents/iphoneMirror/src/App/Services/DeviceBindingManager.cs:87)、[DeviceBindingManager.cs:257](C:/Users/Ray/Documents/iphoneMirror/src/App/Services/DeviceBindingManager.cs:257)。
+- 位置：[DeviceBindingManager.cs:87](../src/App/Services/DeviceBindingManager.cs)、[DeviceBindingManager.cs:257](../src/App/Services/DeviceBindingManager.cs)。
 - 触发：绑定文件无法替换，例如被其他进程以不允许删除的方式打开，或目录写入失败。
 - 原因：创建档案先修改内存，再调用 `Persist()`；后者吞掉所有异常，只写日志，调用方继续返回成功。其他使用同一持久化方法的修改也存在相同错误传播问题。
 - 影响：界面可把未保存的档案/绑定当成已保存；重启后修改丢失，设备关联与用户预期不一致。
@@ -57,7 +59,7 @@
 
 ### 4. [P3] BluetoothHidStress 工具无法编译
 
-- 位置：[BluetoothHidStress.csproj:11](C:/Users/Ray/Documents/iphoneMirror/tools/BluetoothHidStress/BluetoothHidStress.csproj:11)。
+- 位置：[BluetoothHidStress.csproj:11](../tools/BluetoothHidStress/BluetoothHidStress.csproj)。
 - 触发：执行 `dotnet build tools/BluetoothHidStress/BluetoothHidStress.csproj -c Release`。
 - 原因：项目链接了生产版 `BluetoothHidMouseService.cs`，没有同步其 Localization 和 `DirectKeyboardRoute` 依赖。
 - 结果：`CS0234`（Localization）、`CS0246`（DirectKeyboardRoute），共 2 个编译错误。
@@ -66,14 +68,14 @@
 
 ### 5. [P3] SRS 实验面板收到非法 URL 编码会退出
 
-- 位置：[server.mjs:97](C:/Users/Ray/Documents/iphoneMirror/tools/srs-lab/server.mjs:97)。
+- 位置：[server.mjs:97](../tools/srs-lab/server.mjs)。
 - 触发：向实验面板发送 `GET /%ZZ`。
 - 原因：异步 HTTP 回调直接调用 `decodeURIComponent`，解码异常未捕获，形成未处理的 Promise rejection。
 - 复现：普通请求返回 200；非法请求 `ECONNRESET`；服务进程以代码 1 退出，输出包含 `URIError`。
 - 影响：本机实验面板中断。该服务绑定 `127.0.0.1`，此结论不应表述为公开互联网服务漏洞。
 - 建议：对 URL 解析和解码错误返回 400；在异步请求入口统一处理异常，并处理文件流错误。
 
-前三项复现日志：[audit-probes-20261011.log](C:/Users/Ray/Documents/iphoneMirror/work/audit-probes-20261011.log)。复现程序位于 [Program.cs](C:/Users/Ray/Documents/iphoneMirror/work/audit-20261011/probes/Program.cs)；仅使用独立测试状态目录，并抑制设备服务启动。SRS 复现程序为 [server-probe.cjs](C:/Users/Ray/Documents/iphoneMirror/work/audit-20261011/probes/server-probe.cjs)，使用自建回环子进程并清理；输出见 [audit-srs-probe-20261011.log](C:/Users/Ray/Documents/iphoneMirror/work/audit-srs-probe-20261011.log)。
+前三项复现日志：audit-probes-20261011.log（本地记录：`work/audit-probes-20261011.log`）。复现程序位于 Program.cs（本地记录：`work/audit-20261011/probes/Program.cs`）；仅使用独立测试状态目录，并抑制设备服务启动。SRS 复现程序为 server-probe.cjs（本地记录：`work/audit-20261011/probes/server-probe.cjs`），使用自建回环子进程并清理；输出见 audit-srs-probe-20261011.log（本地记录：`work/audit-srs-probe-20261011.log`）。
 
 ## 功能地图与实现边界
 
@@ -101,7 +103,7 @@
 
 ## 审查范围
 
-- 建立源码、配置和构建文件清单：668 个文件、187,994 行；包括测试、脚本、部分第三方头文件与补丁。详情及文件散列见 [inventory.json](C:/Users/Ray/Documents/iphoneMirror/work/audit-20261011/inventory.json)。
+- 建立源码、配置和构建文件清单：668 个文件、187,994 行；包括测试、脚本、部分第三方头文件与补丁。详情及文件散列见 inventory.json（本地记录：`work/audit-20261011/inventory.json`）。
 - 检查项目结构、文档与代码一致性；重点人工跟踪 USB/无线采集、IPC、反控、设备身份、键盘所有权、剪贴板、多设备、媒体输出、虚拟摄像头、API、提权/更新和释放链路。
 - 执行构建、语法检查、现有自动测试及针对发现的实际方法复现。
 - 这是全仓库清点和核心链路审查，不是对 18.8 万行逐行形式化验证；不包含第三方二进制审计。
@@ -134,9 +136,9 @@
 
 ### 未通过及待调查项
 
-1. **完整运行时套件退出崩溃，重复两次。** 两次均输出 `App runtime tests passed.`，随后进程退出码为 `-1073740791`（`0xC0000409`）。Windows Application 1000 记录故障模块 `amdxx64.dll`，版本 `32.0.21032.8002`、偏移 `0xdc4bf5`。这表明异常落在 AMD 图形驱动模块，但尚无原生调用栈可判定驱动本身或应用资源生命周期谁是根因。需要抓取 dump，重点检查预览/渲染退出。日志：[首次](C:/Users/Ray/Documents/iphoneMirror/work/audit-runtime-20261011.log)、[重复](C:/Users/Ray/Documents/iphoneMirror/work/audit-runtime-repeat-20261011.log)。
-2. **`--preview-pointer` 的远程文本焦点断言失败。** 报错为 `Remote text leaked from the settings editor into the device.`，位置 [RemoteTextInputTests.cs:104](C:/Users/Ray/Documents/iphoneMirror/src/App.Runtime.Tests/RemoteTextInputTests.cs:104)。夹具只设置“设置面板可见”，没有建立真实编辑器焦点；[MainWindow.KeyboardFocus.cs:105](C:/Users/Ray/Documents/iphoneMirror/src/App/MainWindow.KeyboardFocus.cs:105) 在原生预览持有焦点时明确允许预览输入。夹具替换了前台窗口判断，但原生 `GetFocus` 仍参与结果，普通 `--keyboard-focus` 通过。需先用真实设置编辑器焦点稳定复现，当前不能把这一断言直接认定为实际界面文本泄漏。该进程退出也出现同类 AMD 崩溃。日志：[preview-pointer](C:/Users/Ray/Documents/iphoneMirror/work/audit-runtime-preview-pointer-20261011.log)。
-3. **旧 `tests/UsbRecovery.Tests` 失败。** 前九项桥接检查通过，随后 `host tracks recovery` 失败。夹具创建未启动的 Host 后直接调用私有事件方法；[UsbTouchBridgeHost.cs:186](C:/Users/Ray/Documents/iphoneMirror/src/App/Services/UsbTouchBridgeHost.cs:186) 明确丢弃未启动状态的事件。应先更新夹具以遵循启动生命周期；当前不足以证明实际恢复功能退化。日志：[usb-recovery](C:/Users/Ray/Documents/iphoneMirror/work/audit-usb-recovery-20261011.log)。
+1. **完整运行时套件退出崩溃，重复两次。** 两次均输出 `App runtime tests passed.`，随后进程退出码为 `-1073740791`（`0xC0000409`）。Windows Application 1000 记录故障模块 `amdxx64.dll`，版本 `32.0.21032.8002`、偏移 `0xdc4bf5`。这表明异常落在 AMD 图形驱动模块，但尚无原生调用栈可判定驱动本身或应用资源生命周期谁是根因。需要抓取 dump，重点检查预览/渲染退出。日志：首次（本地记录：`work/audit-runtime-20261011.log`）、重复（本地记录：`work/audit-runtime-repeat-20261011.log`）。
+2. **`--preview-pointer` 的远程文本焦点断言失败。** 报错为 `Remote text leaked from the settings editor into the device.`，位置 [RemoteTextInputTests.cs:104](../src/App.Runtime.Tests/RemoteTextInputTests.cs)。夹具只设置“设置面板可见”，没有建立真实编辑器焦点；[MainWindow.KeyboardFocus.cs:105](../src/App/MainWindow.KeyboardFocus.cs) 在原生预览持有焦点时明确允许预览输入。夹具替换了前台窗口判断，但原生 `GetFocus` 仍参与结果，普通 `--keyboard-focus` 通过。需先用真实设置编辑器焦点稳定复现，当前不能把这一断言直接认定为实际界面文本泄漏。该进程退出也出现同类 AMD 崩溃。日志：preview-pointer（本地记录：`work/audit-runtime-preview-pointer-20261011.log`）。
+3. **旧 `tests/UsbRecovery.Tests` 失败。** 前九项桥接检查通过，随后 `host tracks recovery` 失败。夹具创建未启动的 Host 后直接调用私有事件方法；[UsbTouchBridgeHost.cs:186](../src/App/Services/UsbTouchBridgeHost.cs) 明确丢弃未启动状态的事件。应先更新夹具以遵循启动生命周期；当前不足以证明实际恢复功能退化。日志：usb-recovery（本地记录：`work/audit-usb-recovery-20261011.log`）。
 4. **BluetoothHidStress 构建失败**及 **SRS 面板非法请求退出**已列为确认问题，不与以上待调查项混淆。
 
 初次使用系统 Python 时缺少 `httpx`；改用现有 venv 后 400 项通过。逻辑测试需要清除 `DOTNET_ROOT_X64` 并直接运行已构建 DLL，避免 `dotnet run` 注入的环境覆盖触发既有提权防护。这些环境问题未列为产品缺陷。

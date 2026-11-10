@@ -1,5 +1,10 @@
 # Compact packaging and optional UxPlay
 
+> Historical record from 2026-10-03. Statements about default builds, package sizes
+> and test results below describe that work at that date. For current dependencies,
+> build flags and packaging commands, use the [development guide](DEVELOPMENT.md).
+> The current media-output runtime is described in the [component notices](../THIRD_PARTY_NOTICES.md#ffmpeg-812-media-output-runtime).
+
 ## Compatibility audit update (2026-10-03, third round)
 
 The media-output compact FFmpeg profile is **withdrawn from default builds**.

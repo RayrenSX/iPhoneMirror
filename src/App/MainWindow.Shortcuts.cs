@@ -22,6 +22,9 @@ public partial class MainWindow
 
     private bool TryHandlePointerShortcut(PreviewPointerEventArgs e, string? udid)
     {
+        // Side buttons belong to shortcuts only. Consume unbound clicks too,
+        // so USB does not turn them into touches or release an active drag.
+        var sideButton = e.Button is 8 or 16;
         var identity = (udid?.ToUpperInvariant() ?? string.Empty, e.Button);
         if (e.Kind == PreviewPointerKind.Reset)
         {
@@ -29,11 +32,11 @@ public partial class MainWindow
             return false;
         }
         if (e.Kind == PreviewPointerKind.ButtonUp)
-            return _mouseShortcutButtons.Remove(identity);
+            return _mouseShortcutButtons.Remove(identity) || sideButton;
         if (e.Kind != PreviewPointerKind.ButtonDown ||
-            !CanForwardControlKeyboard(udid, GetControlKeyboardWindow(udid))) return false;
+            !CanForwardControlKeyboard(udid, GetControlKeyboardWindow(udid))) return sideButton;
         if (_mouseShortcutButtons.Contains(identity)) return true;
-        if (!TryHandleMouseShortcut(e.Button)) return false;
+        if (!TryHandleMouseShortcut(e.Button)) return sideButton;
         // Swallow the matching release even if the user releases Ctrl/Alt
         // first. Otherwise a navigation click can release an unrelated touch.
         _mouseShortcutButtons.Add(identity);

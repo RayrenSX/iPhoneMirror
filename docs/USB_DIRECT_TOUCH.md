@@ -4,10 +4,12 @@
 
 它实现 USB 设备发现、4 字节 little-endian 长度前缀 JSON 输入、五点触控状态机及 58 字节触控报告编码，不需要蓝牙或其他外部控制程序。应用层消息使用本项目定义的 `iphoneMirror.touch.v2` schema。
 
-启动前必须开启开发者模式。安装包不包含 Apple DDI；设备未挂载时，桥接器会通过
-GitHub 官方 API 动态解析 commit 和文件清单，校验 Git blob 身份、文件大小及本地计算的
-SHA-256，再通过 Apple 个性化流程挂载；`BuildManifest.plist` 必须匹配当前运行时。首次
-使用需要联网，也可显式提供本地官方镜像。若媒体流认证返回 `9021`，桥接器会验证 direct
+启动前必须开启开发者模式。当前标准 ZIP 和 Setup 内置 Personalized 与 Cryptex DDI，
+构建按 `config/ddi-bundles.json` 固定提交、大小和 SHA-256 校验。应用优先使用随包镜像，
+缺失、损坏或不兼容时按相应流程尝试缓存、下载或受限回退；Apple 个性化签名仍可能需要联网。
+直接调用桥接器时可用 `--ddi-dir` 指定 Personalized 三文件目录。完整准备顺序和 iOS 27
+Cryptex 回退条件见[桥接使用说明](USB_TOUCH_BRIDGE_USAGE.md#usb-模式)。
+若媒体流认证返回 `9021`，桥接器会验证 direct
 Universal HID；只有设备没有 mainTouchscreen（Service ID `257`）时才停止，不会显示为
 “已连接”。已挂载的旧 DDI 缺少该 service 时，桥接器只会自动重挂一次。
 

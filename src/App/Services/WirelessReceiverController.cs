@@ -122,8 +122,9 @@ internal sealed class WirelessReceiverController(
                 receiverName ?? (automaticStart ? ReceiverName : AppliedReceiverName));
             if (receiverName is not null) ReceiverName = sanitized;
             var profile = displayProfile ?? (automaticStart ? SelectedProfile : AppliedProfile);
+            var capability = WirelessReceiverConfiguration.ReceiverCapabilityFor(profile);
             var started = await Task.Run(() => core.StartWirelessReceiver(sanitized, hostPath,
-                profile.Width, profile.Height, profile.FrameRate));
+                capability.Width, capability.Height, capability.FrameRate));
             Running = started.Success;
             Ready = false;
             if (started.Success)

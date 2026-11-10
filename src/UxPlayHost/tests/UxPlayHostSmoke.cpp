@@ -184,11 +184,18 @@ int wmain(int argc, wchar_t** argv) {
             break;
         case iPhoneMirror::wireless::MessageType::Video:
             if (first_video_sequence == 0) first_video_sequence = header.sequence;
-            video = header.width == 540 && header.height == 960 &&
-                header.stride[0] == 540 && header.stride[1] == 270 &&
-                header.stride[2] == 270 &&
-                payload.size() == static_cast<std::size_t>(540) * 960 * 3U / 2U &&
-                !payload.empty() && payload.front() == 0x80;
+            video = header.width == 334 && header.height == 720 &&
+                header.stride[0] == 334 && header.stride[1] == 167 &&
+                header.stride[2] == 167 &&
+                payload.size() == static_cast<std::size_t>(334) * 720 * 3U / 2U;
+            if (video) {
+                for (unsigned int row = 0; row < 720; ++row)
+                    for (unsigned int column = 0; column < 334; ++column)
+                        video = video && payload[static_cast<std::size_t>(row) * 334 + column] ==
+                            static_cast<std::uint8_t>(row % 200U + 16U);
+                video = video && payload[334U * 720U] == 0x40 &&
+                    payload[334U * 720U * 5U / 4U] == 0xC0;
+            }
             break;
         case iPhoneMirror::wireless::MessageType::Audio:
             if (first_audio_sequence == 0) first_audio_sequence = header.sequence;

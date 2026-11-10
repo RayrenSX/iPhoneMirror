@@ -59,8 +59,9 @@ PC → bridge 的 stdin 为 `4B LE 长度 + UTF-8 JSON`；bridge → PC 的 stdo
 - `UsbTouchBridgeHost.cs`: 管理桥接器生命周期、状态事件、输入队列和退出时按键释放
 
 ### 4. 启用条件 (iPhoneMirror 集成)
-- 有线控制：选择有线来源，设备解锁并信任此电脑，按提示开启开发者模式；桥接器会从 GitHub
-  官方 API 获取并校验匹配 DDI，再验证 mainTouchscreen（Service ID 257）。
+- 有线控制：选择有线来源，设备解锁并信任此电脑，按提示开启开发者模式；应用优先使用随包
+  Personalized/Cryptex DDI，必要时尝试缓存与下载，再验证 mainTouchscreen（Service ID 257）。
+  个性化签名、版本选择和回退条件见[桥接使用说明](USB_TOUCH_BRIDGE_USAGE.md#usb-模式)。
 - 无线控制：选择无线来源，设备已完成配对并在同一局域网可达；桥接器使用 `--wireless`，
   不回退到 USB。
 - 首次连接先在设备绑定器建立设备档案，将 USB、AirPlay 和 Bluetooth 身份关联到同一设备。

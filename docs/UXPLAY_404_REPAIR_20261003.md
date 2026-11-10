@@ -1,5 +1,8 @@
 # UxPlay 按需下载 404 排查与修复（2026-10-03）
 
+> 历史修复记录：组件标签、下载验证和“当前状态”均保留当时的范围。
+> 当前使用方式见[无线连接设置](USER_GUIDE.md#连接前设置接收端)，构建方式见[开发指南](DEVELOPMENT.md)。
+
 当前状态：本地修复完成，组件已获用户确认并公开发布。修复后已实际完成公网下载、SHA-256 校验、解压、安装和断网缓存复用。真实 iPhone 投屏仍待设备验收。
 
 公开组件：[uxplay-v1.8.4-test43](https://github.com/RayrenSX/iPhoneMirror/releases/tag/uxplay-v1.8.4-test43)。可运行的修复版位于 `work/uxplay-404/app-verified/iPhoneMirror.exe`；主程序标准包仍不捆绑 UxPlay。

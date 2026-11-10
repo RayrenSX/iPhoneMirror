@@ -76,6 +76,7 @@ internal sealed class MediaOutputService : IMediaOutputSession
     private Process? _process;
     private Task? _runTask;
     private string _lastError = string.Empty;
+    private int _lastErrorPriority;
 
     internal event Action<string, bool>? StatusChanged;
     internal bool IsRunning => _runTask is { IsCompleted: false };
@@ -215,6 +216,7 @@ internal sealed class MediaOutputService : IMediaOutputSession
                 throw new InvalidOperationException(
                     LocalizationService.Get("FfmpegEncoderSizeUnsupported"));
             _lastError = string.Empty;
+            _lastErrorPriority = 0;
             var firstAudio = await TryWaitForAudioAsync(sessionHandle, cancellationToken);
             string? recordingStagingPath = null;
             var processRequest = request;
@@ -247,7 +249,14 @@ internal sealed class MediaOutputService : IMediaOutputSession
                         includeAudio: includeAudio));
                 process.ErrorDataReceived += (_, args) =>
                 {
-                    if (!string.IsNullOrWhiteSpace(args.Data)) _lastError = args.Data;
+                    if (string.IsNullOrWhiteSpace(args.Data)) return;
+                    var (priority, message) = DescribeOutputError(args.Data);
+                    if (priority < _lastErrorPriority) return;
+                    _lastErrorPriority = priority;
+                    var token = NormalizeWhipToken(request.Authorization);
+                    if (token.Length > 0)
+                        message = message.Replace(token, "<redacted>", StringComparison.Ordinal);
+                    _lastError = AppLog.Sanitize(message);
                 };
                 if (!process.Start())
                     throw new InvalidOperationException(LocalizationService.Get("FfmpegStartFailed"));
@@ -387,6 +396,10 @@ internal sealed class MediaOutputService : IMediaOutputSession
             {
                 using var timeout = new CancellationTokenSource(shutdownTimeout);
                 await process.WaitForExitAsync(timeout.Token);
+                // Flush asynchronous stderr callbacks before deciding which
+                // failure to show. The pipe can break before the final network
+                // error has reached ErrorDataReceived.
+                process.WaitForExit();
             }
             catch (OperationCanceledException)
             {
@@ -402,7 +415,10 @@ internal sealed class MediaOutputService : IMediaOutputSession
             }
             if (TryGetExitCode(process, out var exitCode) && exitCode != 0)
             {
-                failure ??= new InvalidOperationException(
+                // The pipe error is a consequence of FFmpeg exiting. Preserve
+                // the upstream authentication/network failure collected first.
+                if (failure is null || _lastErrorPriority > 1)
+                    failure = new InvalidOperationException(
                     string.IsNullOrWhiteSpace(_lastError)
                         ? $"FFmpeg exited with code {exitCode} while finalizing output."
                         : _lastError);
@@ -524,8 +540,38 @@ internal sealed class MediaOutputService : IMediaOutputSession
                 if (frame is not null)
                     latch.Publish(GetNv12FramePayload(frame, width, height));
             }
-            catch { /* Transient frame read failure; best-effort. */ }
+            catch (Exception error)
+            {
+                DiagnosticLogger.ExceptionOnce("media-output-frame-read", "media_output",
+                    "frame_read_failed", error);
+            }
         }
+    }
+
+    internal static (int Priority, string Message) DescribeOutputError(string line)
+    {
+        if (line.Contains("401", StringComparison.Ordinal) &&
+            (line.Contains("HTTP", StringComparison.OrdinalIgnoreCase) ||
+             line.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase)))
+            return (4, LocalizationService.Get("StreamingUnauthorized"));
+        if (line.Contains("403", StringComparison.Ordinal) &&
+            (line.Contains("HTTP", StringComparison.OrdinalIgnoreCase) ||
+             line.Contains("Forbidden", StringComparison.OrdinalIgnoreCase)))
+            return (4, LocalizationService.Get("StreamingForbidden"));
+        if (line.Contains("Connection refused", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Error number -107 occurred", StringComparison.OrdinalIgnoreCase))
+            return (3, LocalizationService.Get("StreamingConnectionRefused"));
+        if (line.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Connection timeout", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Error number -138 occurred", StringComparison.OrdinalIgnoreCase))
+            return (3, LocalizationService.Get("StreamingConnectionTimeout"));
+        if (line.Contains("Network is unreachable", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("No route to host", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Failed to resolve", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Error number -110 occurred", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Error number -118 occurred", StringComparison.OrdinalIgnoreCase))
+            return (3, LocalizationService.Get("StreamingHostUnreachable"));
+        return (1, line);
     }
 
     internal static long CalculateDueVideoFrames(TimeSpan elapsed,

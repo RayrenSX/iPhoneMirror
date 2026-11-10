@@ -350,9 +350,11 @@
     <system:String x:Key="ShortcutSettingsUnbound">未割り当て</system:String>
     <system:String x:Key="ShortcutSettingsDuplicate">操作ごとに異なるショートカットを割り当ててください。</system:String>
     <system:String x:Key="ShortcutSettingsDuplicateBindingFormat">{0}はすでに{1}に割り当てられています。別のショートカットを選ぶか、先にその割り当てを解除してください。</system:String>
-    <system:String x:Key="ShortcutSettingsCaptureHint">欄にフォーカスしてからショートカットを押します。BackspaceまたはDeleteで割り当てを解除できます。F1〜F11、マウスの右ボタン、中ボタンは単独で使えます。</system:String>
+    <system:String x:Key="ShortcutSettingsCaptureHint">欄にフォーカスしてからショートカットを押します。BackspaceまたはDeleteで割り当てを解除できます。F1〜F11、マウスの右・中・サイドボタン1/2は単独でも、Ctrl・Alt・Shiftとの組み合わせでも使えます。</system:String>
     <system:String x:Key="ShortcutMouseRight">マウスの右ボタン</system:String>
     <system:String x:Key="ShortcutMouseMiddle">マウスの中ボタン</system:String>
+    <system:String x:Key="ShortcutMouseXButton1">サイドボタン1（戻る）</system:String>
+    <system:String x:Key="ShortcutMouseXButton2">サイドボタン2（進む）</system:String>
     <system:String x:Key="ShortcutSettingsReset">初期設定に戻す</system:String>
     <system:String x:Key="ShortcutSettingsInvalid">有効なショートカットを選んでください。F12、Windowsキーを使うショートカット、修飾キーだけの指定は使えません。</system:String>
     <system:String x:Key="ShortcutSettingsBossKeyKeyboardOnly">非表示にしたウィンドウを復元できるよう、ボスキーにはキーボードのショートカットが必要です。</system:String>
@@ -638,7 +640,7 @@
     <system:String x:Key="Cancel">キャンセル</system:String>
     <system:String x:Key="WirelessResolutionLabel">接続の解像度</system:String>
     <system:String x:Key="WirelessResolutionHelp">適用すると、AirPlayレシーバーの機能を再度公開します。ネットワークが弱いときは、720pまたは540pをお使いください。</system:String>
-    <system:String x:Key="WirelessProfileMaximum">オリジナル画質（縦横どちらの向きでも長辺2880 · 60fps）</system:String>
+    <system:String x:Key="WirelessProfileMaximum">オリジナル画質（機種を自動判別）</system:String>
     <system:String x:Key="WirelessProfileMaximumIpad">オリジナル画質（iPad / Air · 長辺2360 · 60fps）</system:String>
     <system:String x:Key="WirelessProfileMaximumIpadPro">オリジナル画質（iPad Pro 12.9 · 長辺2732 · 60fps）</system:String>
     <system:String x:Key="WirelessProfileNativeDimensions">オリジナル（{0} · {1}×{2} · 自動回転）</system:String>
@@ -1646,4 +1648,25 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="MicrophoneRefreshFailed">マイク一覧を更新できませんでした。マイクの接続とアクセス権限を確認して、もう一度お試しください。</system:String>
     <system:String x:Key="WirelessOriginalStartupFailed">ワイヤレス受信機が起動直後に終了しました。ワイヤレス設定を再適用して再試行してください。</system:String>
     <system:String x:Key="DlnaRecovering">AirPlay は利用可能です。DLNA の起動に失敗したため、自動的に再試行しています。</system:String>
+    <system:String x:Key="StreamingUnauthorized">認証に失敗しました（HTTP 401）。WHIP トークンを確認してください。</system:String>
+    <system:String x:Key="StreamingForbidden">アクセスが拒否されました（HTTP 403）。トークンと配信権限を確認してください。</system:String>
+    <system:String x:Key="StreamingConnectionRefused">配信サーバーが接続を拒否しました。アドレス、ポート、サーバーの状態を確認してください。</system:String>
+    <system:String x:Key="StreamingConnectionTimeout">配信サーバーへの接続がタイムアウトしました。アドレスとネットワークを確認してください。</system:String>
+    <system:String x:Key="StreamingHostUnreachable">配信サーバーに接続できません。アドレス、DNS、ネットワークを確認してください。</system:String>
+    <system:String x:Key="WirelessVideoStalled">映像が更新されていません。端末とネットワーク接続を確認してください。</system:String>
+    <system:String x:Key="VirtualCameraInvalidRegistration">カメラの登録状態が無効です（0x8007000D）。仮想カメラコンポーネントを再インストールしてください。</system:String>
+    <system:String x:Key="MirroringAutoControlTitle">ミラーリング時にリモート操作を自動で有効にする</system:String>
+    <system:String x:Key="MirroringAutoControlOff">オフ（手動で開始）</system:String>
+    <system:String x:Key="MirroringAutoControlDescription">ミラーリング接続後、選択した方式で操作を自動開始します。「続行」の再確認は不要です。事前にデバイスを関連付けてください。接続失敗時はステータス画面で確認できます。</system:String>
+    <system:String x:Key="SettingsCategoryApplication">アプリ設定</system:String>
+    <system:String x:Key="SettingsCategoryProjection">投影設定</system:String>
+    <system:String x:Key="SettingsCategoryControl">操作設定</system:String>
+    <system:String x:Key="SettingsScopeApplication">アプリ全体に適用</system:String>
+    <system:String x:Key="SettingsScopeProjection">映像・音声と投影接続</system:String>
+    <system:String x:Key="SettingsScopeControl">自動操作・キーボード・マウス</system:String>
+    <system:String x:Key="SettingsAdvancedVideo">映像の詳細設定</system:String>
+    <system:String x:Key="SettingsAdvancedUsb">USB 投影モード</system:String>
+    <system:String x:Key="SettingsKeyboard">キーボードとショートカット</system:String>
+    <system:String x:Key="SettingsMaintenance">セットアップと保守</system:String>
+    <system:String x:Key="SettingsBluetoothMouse">Bluetooth マウス</system:String>
 </ResourceDictionary>

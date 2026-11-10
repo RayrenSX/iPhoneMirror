@@ -3152,6 +3152,26 @@ try
     Equal(true, KeyboardShortcut.DefaultFor(BluetoothShortcutAction.BluetoothControl)
         .Equals(KeyboardShortcut.Default),
         "Bluetooth control shortcut reset value is F9");
+    foreach (var (button, virtualKey) in new[]
+    {
+        (ShortcutMouseButton.XButton1, KeyboardShortcut.MouseXButton1),
+        (ShortcutMouseButton.XButton2, KeyboardShortcut.MouseXButton2),
+    })
+    foreach (var modifiers in new[] { ModifierKeys.None, ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift })
+    {
+        Equal(true, KeyboardShortcut.TryCreateMouse(button, modifiers, out var side), "Side button can be recorded");
+        Equal(virtualKey, side.VirtualKey, "Side buttons retain distinct identities");
+        Equal(true, side.IsMouse && side.MatchesMouse(button, modifiers), "Side button matches its modifiers");
+        Equal(true, side.IsValidFor(BluetoothShortcutAction.Home), "Side button is a valid shortcut");
+        Equal(false, side.IsValidFor(BluetoothShortcutAction.BossKey), "Side button cannot hide windows");
+        Equal(false, KeyboardShortcut.TryCreateMouse(button, ModifierKeys.Windows, out _), "Windows mouse chord stays unavailable");
+        var storedSide = new UpdateSettings
+        {
+            BluetoothHomeShortcutVirtualKey = (int)side.VirtualKey,
+            BluetoothHomeShortcutModifiers = (int)side.Modifiers,
+        };
+        Equal(side, KeyboardShortcut.FromSettings(storedSide, BluetoothShortcutAction.Home), "Stored side binding survives loading");
+    }
     Equal((int)KeyboardShortcut.MouseMiddle,
         defaults.BluetoothAppSwitcherShortcutVirtualKey,
         "Bluetooth app switcher shortcut defaults to the middle mouse button");
@@ -3208,6 +3228,21 @@ try
         ?? throw new InvalidOperationException("invalid wireless backend migration was not persisted");
     Equal(WirelessReceiverBackend.Original, persistedInvalidBackend.WirelessReceiverBackend,
         "invalid wireless backend fallback persists immediately");
+    var wirelessMigrationPath = Path.Combine(defaultSettingsRoot, "wireless-profile.json");
+    foreach (var (savedId, expectedId) in new[]
+    {
+        ("maximum-ipad", "maximum"), ("maximum-ipad-pro", "maximum"),
+        (" NATIVE-2796 ", "maximum"), ("maximum", "maximum"),
+        ("720p", "720p"), ("invalid-profile", "1080p"),
+    })
+    {
+        File.WriteAllText(wirelessMigrationPath, JsonSerializer.Serialize(new { WirelessDisplayProfileId = savedId }));
+        var wirelessStore = new UpdateSettingsStore(wirelessMigrationPath);
+        Equal(expectedId, wirelessStore.Load().WirelessDisplayProfileId,
+            "saved wireless profiles migrate to visible choices on disk load");
+        Equal(expectedId, JsonSerializer.Deserialize<UpdateSettings>(File.ReadAllText(wirelessMigrationPath))!.WirelessDisplayProfileId,
+            "wireless profile migration is persisted for the next application launch");
+    }
 }
 finally
 {
@@ -4190,7 +4225,13 @@ using (var muxEndpoint = new CaptureMuxEndpointLease())
     Equal("127.0.0.1:32124", Environment.GetEnvironmentVariable(muxKey), "Retiring owner does not erase a replacement broker");
     Environment.SetEnvironmentVariable(muxKey, null);
 }
-var tabletOriginal = WirelessReceiverConfiguration.DisplayProfiles.Single(profile => profile.Id == "maximum-ipad");
+Equal(4, WirelessReceiverConfiguration.DisplayProfiles.Count,
+    "wireless settings show one original mode and three scaled quality choices");
+foreach (var legacyProfile in WirelessReceiverConfiguration.SupportedProfiles)
+    Equal(WirelessReceiverConfiguration.RequiresOriginalQualityWarning(legacyProfile) ? "maximum" : legacyProfile.Id,
+        WirelessReceiverConfiguration.ProfileForSavedId(legacyProfile.Id).Id,
+        "saved device-specific profiles migrate without losing original quality");
+var tabletOriginal = WirelessReceiverConfiguration.SupportedProfiles.Single(profile => profile.Id == "maximum-ipad");
 Equal(171, AppleDisplayCatalog.Products.SelectMany(product => product.Identifiers).Distinct().Count(),
     "managed catalog includes every downloaded iPhone and iPad identifier");
 foreach (var catalogProduct in AppleDisplayCatalog.Products)
@@ -4203,7 +4244,32 @@ foreach (var catalogProduct in AppleDisplayCatalog.Products)
             WirelessReceiverConfiguration.RequiresOriginalQualityWarning(nativeProfile),
             "every generated original profile passes validation and keeps the stability notice");
         Equal(false, nativeProfile.Label.Contains('{'), "native resolution labels format all placeholders");
+        var automatic = WirelessReceiverConfiguration.ResolveDisplayProfile(
+            WirelessReceiverConfiguration.DisplayProfiles[0], [catalogIdentifier]);
+        Equal((catalogProduct.LongEdge, catalogProduct.LongEdge, 60u),
+            (automatic.Width, automatic.Height, automatic.FrameRate),
+            $"automatic original matches {catalogIdentifier} and accepts both orientations without restarting");
+        var receiverCapability = WirelessReceiverConfiguration.ReceiverCapabilityFor(automatic);
+        Equal(true, receiverCapability.Width >= catalogProduct.LongEdge &&
+            receiverCapability.Height >= catalogProduct.LongEdge,
+            "original receiver permits both orientations of every catalog model");
+        Equal(WirelessReceiverConfiguration.DisplayProfiles[0], receiverCapability,
+            "a smaller first device cannot limit a later larger device on the shared receiver");
     }
+var originalChoice = WirelessReceiverConfiguration.DisplayProfiles[0];
+Equal(originalChoice, WirelessReceiverConfiguration.ResolveDisplayProfile(originalChoice, []),
+    "first wireless connection negotiates within the full original envelope before model discovery");
+Equal(originalChoice, WirelessReceiverConfiguration.ResolveDisplayProfile(originalChoice, ["iPhone99,1"]),
+    "an unknown model keeps the full envelope instead of guessing a smaller panel");
+var mixedNative = WirelessReceiverConfiguration.ResolveDisplayProfile(originalChoice, ["iPhone14,2", "iPad17,3"]);
+Equal((2752u, 2752u), (mixedNative.Width, mixedNative.Height),
+    "shared original receiver accommodates the largest connected model in either orientation");
+Equal(WirelessReceiverConfiguration.DefaultDisplayProfile,
+    WirelessReceiverConfiguration.ResolveDisplayProfile(WirelessReceiverConfiguration.DefaultDisplayProfile, ["iPad17,3"]),
+    "device detection preserves an explicitly selected scaled quality");
+Equal(WirelessReceiverConfiguration.DefaultDisplayProfile,
+    WirelessReceiverConfiguration.ReceiverCapabilityFor(WirelessReceiverConfiguration.DefaultDisplayProfile),
+    "the shared receiver preserves an explicitly selected scaled quality");
 Equal<WirelessDisplayProfile?>(null, WirelessReceiverConfiguration.NativeProfileFor("iPad99,1"),
     "unknown devices never invent an actual native resolution");
 Equal((2064u, 2752u), (AppleDisplayCatalog.Find("iPad17,3")!.Width, AppleDisplayCatalog.Find("iPad17,3")!.Height),
@@ -4216,7 +4282,7 @@ Equal(true, WirelessReceiverConfiguration.IsSupportedDisplayProfile(2360, 2360, 
     "iPad original capability passes application validation");
 Equal(true, WirelessReceiverConfiguration.IsSupportedDisplayProfile(2732, 2732, 60) &&
     WirelessReceiverConfiguration.RequiresOriginalQualityWarning(
-        WirelessReceiverConfiguration.DisplayProfiles.Single(profile => profile.Id == "maximum-ipad-pro")),
+        WirelessReceiverConfiguration.SupportedProfiles.Single(profile => profile.Id == "maximum-ipad-pro")),
     "12.9-inch iPad Pro has its own panel-sized original capability and stability notice");
 Equal((2880u, 2880u), (WirelessReceiverConfiguration.DisplayProfiles[0].Width,
     WirelessReceiverConfiguration.DisplayProfiles[0].Height),

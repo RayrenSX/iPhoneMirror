@@ -1,6 +1,8 @@
 # 文档索引
 
-本索引按用途组织仓库文档。
+本索引按用途组织仓库文档。2026-11-05 核对基线为项目版本 `1.8.5-pre4` 及工作区未发布改动。
+下载版本以 [GitHub Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 为准；
+某项功能写入 `main` 或通过源码测试，不表示已经发布，也不表示所有设备已通过验收。
 
 ## 从哪里开始
 
@@ -11,8 +13,11 @@
 | 编译、运行测试、打包 | [开发与测试指南](DEVELOPMENT.md) · [贡献规范](../CONTRIBUTING.md) |
 | 了解模块和进程边界 | [软件架构](ARCHITECTURE.md) |
 | 报告问题或安全漏洞 | [支持说明](../SUPPORT.md) · [安全政策](../SECURITY.md) |
-| 查版本变化和待办 | [变更记录](../CHANGELOG.md) · [发布说明目录](releases/) · [路线图](ROADMAP.md) |
+| 查版本变化和待办 | [变更记录](../CHANGELOG.md) · [繁體中文變更記錄](../CHANGELOG.zh-TW.md) · [发布说明索引](releases/README.md) · [路线图](ROADMAP.md) |
 | 查许可与来源 | [项目许可证](../LICENSE) · [第三方声明](../THIRD_PARTY_NOTICES.md) · [桥接组件说明](USB_TOUCH_THIRD_PARTY_LICENSES.md) |
+| 编写自动化脚本 | [本地 HTTP API](api/README.md) · [Python 示例](api/python-example.py) · [PowerShell/curl 示例](api/curl-example.md) |
+| 查历史问题与验证证据 | [审计与设计记录](ARCHIVE.md) · [Issue 记录索引](issues/README.md) |
+| 参与社区 | [行为准则](../CODE_OF_CONDUCT.md) · [PR 模板](../.github/PULL_REQUEST_TEMPLATE.md) |
 
 ## 持续维护的技术说明
 
@@ -21,15 +26,22 @@
 | USB 协议 | [PROTOCOL](PROTOCOL.md)：配置切换、QuickTime 包、CoreMedia 与协商 |
 | 显示与解码 | [D3D11_RENDERING](D3D11_RENDERING.md)：生产显示路径；[DECODER_GUI_ANALYSIS](DECODER_GUI_ANALYSIS.md)：设计依据与历史测量 |
 | 设备外形 | [DEVICE_CORNER_PROFILES](DEVICE_CORNER_PROFILES.md)：ProductType 匹配、圆角与拟合边界 |
+| 面板目录 | [APPLE_DISPLAY_CATALOG](APPLE_DISPLAY_CATALOG.md)：型号、面板像素与实际编码尺寸的区别 |
 | 音频与输出 | [WASAPI_AUDIO](WASAPI_AUDIO.md)：播放与音频输出；[OBS_OUTPUT](OBS_OUTPUT.md)：OBS、录制、推流、虚拟摄像头 |
 | 驱动 | [DRIVER_DEPENDENCIES](DRIVER_DEPENDENCIES.md)：依赖及交付；[PARENT_DRIVER_MANAGEMENT](PARENT_DRIVER_MANAGEMENT.md)：父设备绑定、确认与恢复边界 |
+| 首次设置 | [FIRST_RUN_SETUP](FIRST_RUN_SETUP.md)：设置流程与草稿；[SETUP_TOOLS](SETUP_TOOLS.md)：设置中的检查及修复工具 |
 | 反控概览 | [USB_DIRECT_TOUCH](USB_DIRECT_TOUCH.md)：前置条件；[USB_TOUCH_ARCHITECTURE](USB_TOUCH_ARCHITECTURE.md)：进程与设备链路；[USB_TOUCH_DESIGN](USB_TOUCH_DESIGN.md)：状态机设计 |
 | 反控接口 | [USB_TOUCH_BRIDGE_USAGE](USB_TOUCH_BRIDGE_USAGE.md)：命令行、stdin/stdout、触控与键盘消息 |
 | 五点触控 | [FIVE_POINT_TOUCH](FIVE_POINT_TOUCH.md)：触摸屏、并发键位映射、有线/无线共享触点及报告布局 |
 | 兼容性 | [USB_TOUCH_DEVICE_COMPATIBILITY](USB_TOUCH_DEVICE_COMPATIBILITY.md)：实测记录及 DDI/HID 验证条件 |
 | UI 入口 | [REVERSE_CONTROL_UI_INVENTORY](REVERSE_CONTROL_UI_INVENTORY.md)：反控入口；[ERROR_DIALOG_CATALOG](ERROR_DIALOG_CATALOG.md)：错误和确认窗口 |
 | 输入焦点 | [KEYBOARD-FOCUS-CONTROL](KEYBOARD-FOCUS-CONTROL.md)：本地文本输入、快捷键与手机键盘路由 |
+| 键位映射 | [KEYBOARD_MAPPING](KEYBOARD_MAPPING.md)：创建映射、启停和输入边界 |
 | 多设备控屏 | [MULTI_DEVICE_CONTROL](MULTI_DEVICE_CONTROL.md)：连接保留、选项卡与独立窗口焦点、验证范围 |
+| 自动化接口 | [api/README](api/README.md)：鉴权、设备准备、控制租约、坐标、剪贴板与截图 |
+| 台湾本地化 | [LOCALIZATION-TAIWAN](LOCALIZATION-TAIWAN.md)：资源、术语及验证入口 |
+
+上述技术文档中引用的历史性能数据和真机结果仍只适用于各自记录的环境。
 
 ## 专项审计与验证记录
 
@@ -39,7 +51,7 @@
 
 | 主题 | 记录 |
 |---|---|
-| 项目文档核对 | [DOCUMENTATION_AUDIT_2026-10-01](DOCUMENTATION_AUDIT_2026-10-01.md) |
+| 项目文档核对 | [本次统一完善](DOCUMENTATION_AUDIT_2026-11-05.md) · [2026-10-01 核对](DOCUMENTATION_AUDIT_2026-10-01.md) |
 | GitHub 问题 | [2026-09-23 审计](GITHUB_ISSUE_AUDIT_2026-09-23.md) · [2026-10-01 审计](GITHUB_ISSUE_AUDIT_2026-10-01.md) · [2026-10-01 修复记录](GITHUB_ISSUE_FIXES_2026-10-01.md) |
 | 驱动错误 | [DRIVER_ERROR_AUDIT](DRIVER_ERROR_AUDIT.md) |
 | USB 反控打包与签名错误 | [USB_BACKEND_PACKAGING_REPAIR](USB_BACKEND_PACKAGING_REPAIR.md) |
@@ -49,9 +61,25 @@
 | 布局与圆角 | [UI-ADAPTIVE-LAYOUT-AUDIT](UI-ADAPTIVE-LAYOUT-AUDIT.md) · [UI-ROUNDED-WINDOW-AUDIT](UI-ROUNDED-WINDOW-AUDIT.md) |
 | 本地化 | [LOCALIZATION-AUDIT](LOCALIZATION-AUDIT.md) · [LOCALIZATION-RECHECK](LOCALIZATION-RECHECK.md) · [LOCALIZATION-VALIDATION](LOCALIZATION-VALIDATION.md) · [机器可读改动记录](localization-audit-changes.json) |
 
+此表只列常用入口，全部专项记录见[审计与设计记录索引](ARCHIVE.md)。
+历史报告中的 `work/`、`outputs/`、`outputs-next/`、`artifacts/` 等路径通常是审查者本机产物，
+不随 Git 仓库分发；源码链接已统一为相对路径，历史行号不保证对应当前文件。
+
 [USB_TOUCH_DEMO_README.txt](USB_TOUCH_DEMO_README.txt) 是早期独立 Demo 的交付说明，
 不代表 `build.ps1` 会生成该 Demo。当前桥接器的构建配方见
 [scripts/usb-bridge-recipe/SOURCE.md](../scripts/usb-bridge-recipe/SOURCE.md)。
+
+## 仓库其他说明
+
+| 内容 | 入口 |
+|---|---|
+| 本地推流验证 | [Stream Lab](../tools/srs-lab/README.md) · [旧版 SRS Docker 环境](../tools/srs-test/README.md) |
+| 原生协议测试夹具 | [fixtures/README](../src/Core/tests/fixtures/README.md) |
+| 无线组件来源 | [AirPlay 源码与许可](../third_party/airplay-server/SOURCE.md) · [UxPlay 来源](../third_party/uxplay/SOURCE.md) |
+| USB 桥接构建来源 | [配方来源](../scripts/usb-bridge-recipe/SOURCE.md) · [固定依赖](../scripts/usb-bridge-recipe/requirements.txt) |
+
+第三方许可证及供应商附带说明按原文保留，由[第三方声明](../THIRD_PARTY_NOTICES.md)定位；
+`CMakeLists.txt`、依赖清单和配置文件属于构建输入，不按普通叙述文档改写。
 
 ## 文档维护约定
 
@@ -61,5 +89,6 @@
 - 发布说明描述该版本的变化；审计记录保留日期、范围、证据和未验证项。
 - 截图、日志及示例使用脱敏设备标识；机器绝对路径改为仓库相对路径或明确的占位路径。
 - 新增文档时更新本索引；移动文件时同步所有相对链接。
-
-- [Local Automation API](api/README.md): HTTP v1, authentication, control leases, coordinates and client examples.
+- 当前指南使用“已实现 / 待实机验证 / 计划”区分状态；历史报告保留原日期和结果，新增更正说明而不改写原测试结论。
+- 文档修改后从仓库根目录运行 `python scripts/verify_docs.py`，检查所有 Markdown 的本地链接、图片、标题锚点、围栏和 `docs` 索引可达性。
+  检查仅使用 Git 跟踪及未忽略文件，忽略目录中的本机产物不能使失效链接误报通过；外部 URL 不在离线检查范围内。

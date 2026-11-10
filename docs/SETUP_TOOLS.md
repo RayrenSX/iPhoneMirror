@@ -20,7 +20,7 @@
 
 ## 界面与动画
 
-驱动管理器采用组件状态卡片、设备选择和明确的主操作；设备绑定器使用左侧档案、右侧连接卡片，并提供空状态、操作中和保存反馈。文字与状态支持四种语言，浅色和深色主题共用设计资源。
+驱动管理器采用组件状态卡片、设备选择和明确的主操作；设备绑定器使用左侧档案、右侧连接卡片，并提供空状态、操作中和保存反馈。文字与状态支持简体中文、繁体中文（香港）、繁體中文（台灣）、英文和日文，浅色和深色主题共用设计资源。
 
 新窗口及设备切换使用 300 ms 淡入和 10 px 位移，分组间延迟 40–100 ms；工具入口使用 160 ms、2 px 悬停反馈。新过渡不缩放文字、不动画布局尺寸，重复触发替换旧动画，卸载时释放动画，遵循 Windows 关闭动画的设置。
 
@@ -28,14 +28,17 @@
 
 ## 验证
 
+以下命令从仓库根目录、无 CLR/.NET 注入变量的终端运行；环境说明见[开发指南](DEVELOPMENT.md#测试入口与覆盖范围)。
+
 ```powershell
 dotnet build src/App.Runtime.Tests --no-restore
 dotnet build src/DriverInstaller --no-restore
-dotnet run --no-build --project src/App.Runtime.Tests -- --setup-tools outputs/setup-tools-qa/tools
-dotnet run --no-build --project src/App.Runtime.Tests -- --setup-assessment outputs/setup-tools-qa/assessment
-dotnet run --no-build --project src/App.Runtime.Tests -- --first-run-setup outputs/setup-tools-qa/first-run
-dotnet run --no-build --project src/App.Runtime.Tests -- --driver-ui src/DriverInstaller/bin/Debug/net10.0-windows/win-x64/iPhoneMirror.Driver.dll outputs/setup-tools-qa/driver
-dotnet run --project src/DriverInstaller.Tests
+dotnet build src/DriverInstaller.Tests
+dotnet ./src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --setup-tools outputs/setup-tools-qa/tools
+dotnet ./src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --setup-assessment outputs/setup-tools-qa/assessment
+dotnet ./src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --first-run-setup outputs/setup-tools-qa/first-run
+dotnet ./src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --driver-ui src/DriverInstaller/bin/Debug/net10.0-windows/win-x64/iPhoneMirror.Driver.dll outputs/setup-tools-qa/driver
+dotnet ./src/DriverInstaller.Tests/bin/Debug/net10.0-windows10.0.19041.0/iPhoneMirror.DriverInstaller.Tests.dll
 ```
 
 界面验证使用隔离档案和预览模式，不安装真实驱动、不修改真实配对。真实 UAC 安装、手机信任与蓝牙配对仍需硬件验收。

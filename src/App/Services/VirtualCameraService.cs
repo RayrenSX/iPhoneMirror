@@ -274,6 +274,8 @@ internal sealed class VirtualCameraService : IAsyncDisposable
             using var classKey = machine.OpenSubKey(RegistryClassPath);
             var installed = classKey?.GetValue(null) as string;
             if (string.IsNullOrWhiteSpace(installed)) return false;
+            if (!string.Equals(classKey?.GetValue("ThreadingModel") as string,
+                    "Both", StringComparison.OrdinalIgnoreCase)) return false;
             if (!File.Exists(current) || !File.Exists(installed)) return false;
             using var currentStream = File.OpenRead(current);
             using var installedStream = File.OpenRead(installed);
@@ -548,13 +550,16 @@ internal sealed class VirtualCameraService : IAsyncDisposable
         var sourceDriven = frameRate == 60 && _timestampProvider is not null;
         var lastRead = Stopwatch.StartNew();
         var frameInterval = TimeSpan.FromSeconds(1.0 / frameRate);
-        var timerResolutionSet = sourceDriven && timeBeginPeriod(1) == 0;
+        // A fixed 30/60 Hz source needs the same timer precision as the
+        // timestamp-driven path. Default Windows ticks can otherwise reduce
+        // an unclocked 60 fps source to roughly 30-45 fps.
+        var timerResolutionSet = timeBeginPeriod(1) == 0;
         try
         {
             // Poll only the cheap source timestamp between frames. Sampling the
             // pixels at a separate 60 Hz clock can miss frames whenever source
             // delivery jitters across that clock, even with a fast conversion.
-            using var timer = new PeriodicTimer(sourceDriven
+            using var timer = new CameraFrameTimer(sourceDriven
                 ? TimeSpan.FromMilliseconds(2) : TimeSpan.FromSeconds(1.0 / frameRate));
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
@@ -659,8 +664,10 @@ internal sealed class VirtualCameraService : IAsyncDisposable
     }
 
     private static string HResultMessage(int result) =>
-        Marshal.GetExceptionForHR(result)?.Message ??
-        $"Windows error 0x{unchecked((uint)result):X8}.";
+        result == unchecked((int)0x8007000D)
+            ? LocalizationService.Get("VirtualCameraInvalidRegistration")
+            : Marshal.GetExceptionForHR(result)?.Message ??
+                $"Windows error 0x{unchecked((uint)result):X8}.";
 
     [DllImport("winmm.dll", ExactSpelling = true)]
     private static extern uint timeBeginPeriod(uint period);

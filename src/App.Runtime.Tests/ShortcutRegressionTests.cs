@@ -103,13 +103,15 @@ internal static partial class Program
 
                 bindings[BluetoothShortcutAction.Home] = KeyboardShortcut.HomeDefault;
                 bindings[BluetoothShortcutAction.AppSwitcher] = KeyboardShortcut.AppSwitcherDefault;
+                bindings[BluetoothShortcutAction.VolumeUp] = new(0, KeyboardShortcut.MouseXButton1);
+                bindings[BluetoothShortcutAction.VolumeDown] = new(0, KeyboardShortcut.MouseXButton2);
                 KeyboardCall(window, "ConfigureKeyboardShortcuts", bindings);
                 foreach (var route in new[] { "raw", "main", "independent" })
                 {
                     SetKeyboardField(window, "_activeControlWindow", route == "independent" ? independentHandle : (nint)0);
                     SetKeyboardField(window, "_activeControlUdid", route == "independent" ? udid : null);
                     foreground = route == "independent" ? independentHandle : mainHandle;
-                    foreach (var button in new byte[] { 2, 4 })
+                    foreach (var button in new byte[] { 2, 4, 8, 16 })
                     {
                         packets.SetLength(0);
                         void Input(bool down)
@@ -125,10 +127,10 @@ internal static partial class Program
                         Input(false);
                         AdvanceDispatcher(TimeSpan.FromMilliseconds(350));
                         var frames = ReadShortcutPackets(packets);
-                        InteractionAssert(frames.Length == (button == 2 ? 2 : 1) &&
+                        InteractionAssert(frames.Length == (button == 4 ? 1 : 2) &&
                             frames.All(f => f.GetProperty("kind").GetString() == "button_event" &&
-                                f.GetProperty("usageCode").GetInt32() == 0x40) &&
-                            (button == 2 || frames[0].GetProperty("state").GetString() == "double_press"),
+                                f.GetProperty("usageCode").GetInt32() == (button == 8 ? 0xE9 : button == 16 ? 0xEA : 0x40)) &&
+                            (button != 4 || frames[0].GetProperty("state").GetString() == "double_press"),
                             $"{mode}/{route}: mouse binding was skipped, duplicated or leaked a touch.");
                     }
                 }
@@ -306,7 +308,7 @@ internal static partial class Program
         Directory.CreateDirectory(root);
         try
         {
-            foreach (var button in new[] { KeyboardShortcut.MouseRight, KeyboardShortcut.MouseMiddle })
+            foreach (var button in new[] { KeyboardShortcut.MouseRight, KeyboardShortcut.MouseMiddle, KeyboardShortcut.MouseXButton1, KeyboardShortcut.MouseXButton2 })
             foreach (var modifiers in new[] { 0u, KeyboardShortcut.Control | KeyboardShortcut.Alt })
             {
                 var settings = new UpdateSettings
@@ -383,7 +385,7 @@ internal static partial class Program
             var mode = editor.Rows.Single(r => r.Action == BluetoothShortcutAction.BluetoothControl);
             var switcher = editor.Rows.Single(r => r.Action == BluetoothShortcutAction.AppSwitcher);
             var boss = editor.Rows.Single(r => r.Action == BluetoothShortcutAction.BossKey);
-            foreach (var button in new[] { KeyboardShortcut.MouseRight, KeyboardShortcut.MouseMiddle })
+            foreach (var button in new[] { KeyboardShortcut.MouseRight, KeyboardShortcut.MouseMiddle, KeyboardShortcut.MouseXButton1, KeyboardShortcut.MouseXButton2 })
             foreach (var modifiers in new[] { 0u, KeyboardShortcut.Control | KeyboardShortcut.Alt })
             {
                 var mouse = new KeyboardShortcut(modifiers, button);
@@ -416,6 +418,20 @@ internal static partial class Program
                 !KeyboardShortcut.TryCreate(Key.F12, ModifierKeys.Control | ModifierKeys.Alt, out _) &&
                 !editor.TryAssignShortcut(home, new KeyboardShortcut(2, 0x7B)), "Modified F12 accepted.");
 
+            foreach (var (button, virtualKey) in new[]
+            {
+                (MouseButton.XButton1, KeyboardShortcut.MouseXButton1),
+                (MouseButton.XButton2, KeyboardShortcut.MouseXButton2),
+            })
+            {
+                var input = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, button) { RoutedEvent = Mouse.PreviewMouseDownEvent };
+                KeyboardCall(editor, "OnShortcutPreviewMouseDown", new TextBox { DataContext = home }, input);
+                InteractionAssert(input.Handled && home.Shortcut == new KeyboardShortcut(0, virtualKey) &&
+                    !string.IsNullOrWhiteSpace(home.ShortcutText), "Side button was not captured or displayed.");
+                InteractionAssert(!editor.TryAssignShortcut(switcher, home.Shortcut), "Duplicate side button accepted.");
+            }
+            editor.TryAssignShortcut(home, KeyboardShortcut.Unbound);
+
             var duplicates = new Dictionary<BluetoothShortcutAction, KeyboardShortcut>(bindings)
             {
                 [BluetoothShortcutAction.Home] = bindings[BluetoothShortcutAction.BluetoothControl],
@@ -430,6 +446,8 @@ internal static partial class Program
             var next = new Dictionary<BluetoothShortcutAction, KeyboardShortcut>(bindings)
             {
                 [BluetoothShortcutAction.Home] = new(6, keys[1]),
+                [BluetoothShortcutAction.VolumeUp] = new(0, KeyboardShortcut.MouseXButton1),
+                [BluetoothShortcutAction.VolumeDown] = new(KeyboardShortcut.Control, KeyboardShortcut.MouseXButton2),
             };
             InteractionAssert(Probe(keys[1], retain: true), "Could not reserve a conflicting external hotkey.");
             try

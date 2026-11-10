@@ -93,6 +93,8 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
         {
             MouseButton.Right => ShortcutMouseButton.Right,
             MouseButton.Middle => ShortcutMouseButton.Middle,
+            MouseButton.XButton1 => ShortcutMouseButton.XButton1,
+            MouseButton.XButton2 => ShortcutMouseButton.XButton2,
             _ => ShortcutMouseButton.None,
         };
         if (!KeyboardShortcut.TryCreateMouse(button, Keyboard.Modifiers,

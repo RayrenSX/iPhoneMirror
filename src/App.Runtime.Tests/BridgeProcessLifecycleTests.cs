@@ -35,7 +35,7 @@ internal static partial class Program
     private static int RunBridgeProcessLifecycleTests(string python)
     {
         RunBridgeProcessLifecycleAsync(python).GetAwaiter().GetResult();
-        Console.WriteLine("Bridge process start/stop/restart, cancellation and stale-exit isolation passed.");
+        Console.WriteLine("Bridge process start/stop/restart, output flooding, cancellation and stale-exit isolation passed.");
         return 0;
     }
 
@@ -49,6 +49,13 @@ internal static partial class Program
             import json, pathlib, subprocess, sys, time
             udid = sys.argv[sys.argv.index('--udid') + 1]
             if udid == 'slow-device': time.sleep(.5)
+            if udid == 'noisy-device':
+                # Exceed anonymous-pipe capacity on both streams before ready.
+                # An undrained stream must fail startup instead of passing by luck.
+                for _ in range(128):
+                    print(json.dumps({'event':'diagnostic', 'message':'x' * 1024}), flush=True)
+                for _ in range(128):
+                    print('pipe-drain-regression ' + 'x' * 1024, file=sys.stderr, flush=True)
             if udid in ('stubborn-device', 'orphan-device', 'crash-device'):
                 child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
                                          stdin=subprocess.DEVNULL)
@@ -65,7 +72,7 @@ internal static partial class Program
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             for (var attempt = 0; attempt < 2; attempt++)
             {
-                await bridge.StartAsync(python, script, "test-device", ct: deadline.Token);
+                await bridge.StartAsync(python, script, "noisy-device", ct: deadline.Token);
                 if (!bridge.IsReady) throw new InvalidOperationException("Restart did not reach ready.");
                 // Simulate an old Process.Exited callback arriving after a new
                 // bridge is ready. It must not change the new session's gate.

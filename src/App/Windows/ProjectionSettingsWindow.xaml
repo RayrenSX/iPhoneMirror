@@ -62,6 +62,19 @@
         <Border Grid.Row="2" Style="{StaticResource CardBorder}" Padding="18,4,10,18">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Margin="0,0,8,0">
+                    <Border Style="{StaticResource ControlSectionCard}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource MirroringAutoControlTitle}"
+                                       Style="{StaticResource ControlSectionTitle}"/>
+                            <ComboBox AutomationProperties.Name="{DynamicResource MirroringAutoControlTitle}"
+                                      AutomationProperties.AutomationId="MirroringAutoControlComboBox"
+                                      ItemsSource="{Binding MirroringAutoControlModes}" DisplayMemberPath="Label"
+                                      SelectedItem="{Binding SelectedMirroringAutoControlMode, Mode=TwoWay}"
+                                      Margin="0,8,0,0"/>
+                            <TextBlock Text="{DynamicResource MirroringAutoControlDescription}"
+                                       Style="{StaticResource DetailLabel}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
                     <Border Style="{StaticResource ControlSectionCard}"
                             Visibility="{Binding WirelessTopSettingsVisibility}">
                         <StackPanel>

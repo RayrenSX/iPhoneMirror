@@ -14,7 +14,7 @@ GPL-3.0-only 不会自动改变独立桥接器或第三方代码的许可。
   其许可资料不完整的状态；本次文档核对未补足该授权，不能把这些文件标成已取得 MIT/GPL 授权。
 
 下面直接依赖版本与 [requirements.txt](../scripts/usb-bridge-recipe/requirements.txt) 对齐；
-未固定的传递依赖以实际构建环境元数据和随包许可证为准。Apple DDI 不包含在标准桥接包中。
+未固定的传递依赖以实际构建环境元数据和随包许可证为准。Apple DDI 的实际打包状态见下文。
 
 ## pymobiledevice3 11.3.1
 - 许可证: GPL-3.0-or-later
@@ -59,8 +59,13 @@ GPL-3.0-only 不会自动改变独立桥接器或第三方代码的许可。
 - 用途: 当前默认构建的桥接 onedir 运行时打包
 - 来源: https://github.com/pyinstaller/pyinstaller
 
-## 不分发的组件
-- DDI/Image.dmg/trustcache: Apple 私有二进制，不包含
+## Apple DDI 载荷
+
+当前标准应用 ZIP 和 Setup 在 `tools/ddi` 中包含 Personalized 与 Cryptex DDI。
+[固定载荷清单](../config/ddi-bundles.json)记录 `doronz88/DeveloperDiskImage` 的提交、构建号、
+文件大小和 SHA-256；[打包校验](../scripts/DdiBundle.ps1)检查这两套镜像。
+DDI 不由本项目创作，载荷清单和校验结果仅说明来源与完整性，不构成再分发授权证明，
+也不会将其转换为本项目的 GPL 许可证。Apple USB 支持 MSI 另按[驱动依赖说明](DRIVER_DEPENDENCIES.md)处理。
 
 ## 运行时兼容资源
 - Wintun 预编译 DLL: 上游 `pytun-pmd3` 在 Windows 导入时需要加载该兼容资源，

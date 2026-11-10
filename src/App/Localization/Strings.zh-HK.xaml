@@ -350,9 +350,11 @@
     <system:String x:Key="ShortcutSettingsUnbound">未繫結</system:String>
     <system:String x:Key="ShortcutSettingsDuplicate">每個動作必須使用不同的快捷鍵。</system:String>
     <system:String x:Key="ShortcutSettingsDuplicateBindingFormat">{0} 已用於「{1}」，請選擇其他快捷鍵或先解除原綁定。</system:String>
-    <system:String x:Key="ShortcutSettingsCaptureHint">聚焦輸入框後按下快捷鍵。按 Backspace 或 Delete 可解除繫結；F1-F11、右鍵、中鍵可單獨使用。</system:String>
+    <system:String x:Key="ShortcutSettingsCaptureHint">聚焦輸入框後按下快捷鍵。按 Backspace 或 Delete 可解除繫結；F1-F11、右鍵、中鍵及側鍵 1/2 可單獨使用，也可配合 Ctrl、Alt、Shift。</system:String>
     <system:String x:Key="ShortcutMouseRight">右鍵</system:String>
     <system:String x:Key="ShortcutMouseMiddle">中鍵</system:String>
+    <system:String x:Key="ShortcutMouseXButton1">側鍵 1（上一頁）</system:String>
+    <system:String x:Key="ShortcutMouseXButton2">側鍵 2（下一頁）</system:String>
     <system:String x:Key="ShortcutSettingsReset">還原預設值</system:String>
     <system:String x:Key="ShortcutSettingsInvalid">請選擇有效快捷鍵。F12、Windows 鍵組合及單獨修飾鍵不可用。</system:String>
     <system:String x:Key="ShortcutSettingsBossKeyKeyboardOnly">老闆鍵只能使用鍵盤快捷鍵，以便隱藏視窗後仍可還原。</system:String>
@@ -638,7 +640,7 @@
     <system:String x:Key="Cancel">取消</system:String>
     <system:String x:Key="WirelessResolutionLabel">連接解像度</system:String>
     <system:String x:Key="WirelessResolutionHelp">套用後將重新宣告 AirPlay 接收能力；弱網請選擇 720p 或 540p。</system:String>
-    <system:String x:Key="WirelessProfileMaximum">原畫（橫直向最長邊 2880 · 60 fps）</system:String>
+    <system:String x:Key="WirelessProfileMaximum">原畫（自動配對機型）</system:String>
     <system:String x:Key="WirelessProfileMaximumIpad">原畫（iPad / Air · 最長邊 2360 · 60 fps）</system:String>
     <system:String x:Key="WirelessProfileMaximumIpadPro">原畫（iPad Pro 12.9 · 最長邊 2732 · 60 fps）</system:String>
     <system:String x:Key="WirelessProfileNativeDimensions">原畫（{0} · {1}×{2} · 自動橫直向）</system:String>
@@ -1646,4 +1648,25 @@
     <system:String x:Key="MicrophoneRefreshFailed">無法重新整理咪高峰清單。請檢查咪高峰連線及存取權限後重試。</system:String>
     <system:String x:Key="WirelessOriginalStartupFailed">無線接收器啟動後立即結束，請重新套用無線設定以重試。</system:String>
     <system:String x:Key="DlnaRecovering">AirPlay 可用；DLNA 啟動失敗，正在自動重試。</system:String>
+    <system:String x:Key="StreamingUnauthorized">驗證失敗（HTTP 401），請檢查 WHIP 權杖。</system:String>
+    <system:String x:Key="StreamingForbidden">存取遭拒（HTTP 403），請檢查權杖和串流權限。</system:String>
+    <system:String x:Key="StreamingConnectionRefused">串流伺服器拒絕連線，請檢查位址、連接埠和伺服器狀態。</system:String>
+    <system:String x:Key="StreamingConnectionTimeout">連線至串流伺服器逾時，請檢查位址和網絡。</system:String>
+    <system:String x:Key="StreamingHostUnreachable">無法連線至串流伺服器，請檢查位址、DNS 和網絡。</system:String>
+    <system:String x:Key="WirelessVideoStalled">畫面暫未更新，請檢查手機和網絡連線。</system:String>
+    <system:String x:Key="VirtualCameraInvalidRegistration">相機註冊狀態無效（0x8007000D），請重新安裝虛擬相機元件後再試。</system:String>
+    <system:String x:Key="MirroringAutoControlTitle">投影時自動啟用反向控制</system:String>
+    <system:String x:Key="MirroringAutoControlOff">關閉（手動啟用）</system:String>
+    <system:String x:Key="MirroringAutoControlDescription">投影連接成功後自動啟用所選方式，無需再次按「繼續」。請先完成對應的裝置綁定；連接失敗時可查看狀態提示。</system:String>
+    <system:String x:Key="SettingsCategoryApplication">應用程式設定</system:String>
+    <system:String x:Key="SettingsCategoryProjection">投屏設定</system:String>
+    <system:String x:Key="SettingsCategoryControl">反向控制設定</system:String>
+    <system:String x:Key="SettingsScopeApplication">套用至整個應用程式</system:String>
+    <system:String x:Key="SettingsScopeProjection">畫面、聲音與投屏連線</system:String>
+    <system:String x:Key="SettingsScopeControl">自動反向控制、鍵盤與滑鼠</system:String>
+    <system:String x:Key="SettingsAdvancedVideo">進階畫面設定</system:String>
+    <system:String x:Key="SettingsAdvancedUsb">USB 投屏模式</system:String>
+    <system:String x:Key="SettingsKeyboard">鍵盤與快捷鍵</system:String>
+    <system:String x:Key="SettingsMaintenance">設定與維護</system:String>
+    <system:String x:Key="SettingsBluetoothMouse">藍牙滑鼠</system:String>
 </ResourceDictionary>

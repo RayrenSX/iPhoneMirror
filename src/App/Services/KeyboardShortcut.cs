@@ -6,7 +6,7 @@ using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Services;
 
-internal enum ShortcutMouseButton { None, Right, Middle }
+internal enum ShortcutMouseButton { None, Right, Middle, XButton1, XButton2 }
 
 /// <summary>Represents one user-configurable Windows global hotkey.</summary>
 internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey)
@@ -17,13 +17,15 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     internal const uint NoRepeat = 0x4000;
     internal const uint MouseRight = 0x100;
     internal const uint MouseMiddle = 0x101;
+    internal const uint MouseXButton1 = 0x102;
+    internal const uint MouseXButton2 = 0x103;
     internal static KeyboardShortcut Default { get; } = new(0, 0x78); // F9
     internal static KeyboardShortcut AppSwitcherDefault { get; } = new(0, MouseMiddle);
     internal static KeyboardShortcut HomeDefault { get; } = new(0, MouseRight);
     internal static KeyboardShortcut BossKeyDefault { get; } = new(Control | Alt, 0x42); // Ctrl+Alt+B
     internal static KeyboardShortcut Unbound { get; } = new(0, 0);
     internal bool IsBound => VirtualKey != 0;
-    internal bool IsMouse => VirtualKey is MouseRight or MouseMiddle;
+    internal bool IsMouse => VirtualKey is MouseRight or MouseMiddle or MouseXButton1 or MouseXButton2;
 
     internal bool IsValidFor(BluetoothShortcutAction action) =>
         IsValid((int)Modifiers, (int)VirtualKey) &&
@@ -113,9 +115,16 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
         out KeyboardShortcut shortcut)
     {
         shortcut = default;
-        if (button is not (ShortcutMouseButton.Right or ShortcutMouseButton.Middle) ||
+        if (button is not (ShortcutMouseButton.Right or ShortcutMouseButton.Middle or
+            ShortcutMouseButton.XButton1 or ShortcutMouseButton.XButton2) ||
             modifiers.HasFlag(ModifierKeys.Windows)) return false;
-        var virtualKey = button == ShortcutMouseButton.Right ? MouseRight : MouseMiddle;
+        var virtualKey = button switch
+        {
+            ShortcutMouseButton.Right => MouseRight,
+            ShortcutMouseButton.Middle => MouseMiddle,
+            ShortcutMouseButton.XButton1 => MouseXButton1,
+            _ => MouseXButton2,
+        };
         shortcut = new KeyboardShortcut(ToNativeModifiers(modifiers), virtualKey);
         return true;
     }
@@ -150,7 +159,7 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     internal static bool IsValid(int modifiers, int virtualKey) =>
         (modifiers == 0 && virtualKey == 0) ||
         (modifiers is >= 0 and <= (int)(Alt | Control | Shift) &&
-        ((virtualKey is (int)MouseRight or (int)MouseMiddle) ||
+        ((virtualKey is (int)MouseRight or (int)MouseMiddle or (int)MouseXButton1 or (int)MouseXButton2) ||
          (virtualKey is > 0 and <= 0xFE && virtualKey != 0x7B &&
           TryCreate(KeyInterop.KeyFromVirtualKey(virtualKey),
               ToModifierKeys((uint)modifiers), out _))));
@@ -176,6 +185,8 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     {
         if (VirtualKey == MouseRight) return LocalizationService.Get("ShortcutMouseRight");
         if (VirtualKey == MouseMiddle) return LocalizationService.Get("ShortcutMouseMiddle");
+        if (VirtualKey == MouseXButton1) return LocalizationService.Get("ShortcutMouseXButton1");
+        if (VirtualKey == MouseXButton2) return LocalizationService.Get("ShortcutMouseXButton2");
         var key = KeyInterop.KeyFromVirtualKey((int)VirtualKey);
         if (key is >= Key.A and <= Key.Z)
             return key.ToString();

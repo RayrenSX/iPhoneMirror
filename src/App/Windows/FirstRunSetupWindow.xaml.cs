@@ -45,8 +45,8 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
         {
             if (_state.WirelessBackendDraft is { } backend && _main.WirelessReceiverBackends.FirstOrDefault(v => v.Backend == backend) is { } backendOption)
                 _main.SelectedWirelessReceiverBackend = backendOption;
-            if (_main.WirelessDisplayProfiles.FirstOrDefault(v => v.Id == _state.WirelessProfileDraft) is { } profileOption)
-                _main.SelectedWirelessDisplayProfile = profileOption;
+            if (_state.WirelessProfileDraft is { } profileId)
+                _main.SelectedWirelessDisplayProfile = WirelessReceiverConfiguration.ProfileForSavedId(profileId);
         }
         Loaded += (_, _) =>
         {

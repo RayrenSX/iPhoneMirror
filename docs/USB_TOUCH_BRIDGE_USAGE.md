@@ -11,8 +11,9 @@ JSON 消息，通过标准输出发送 JSON Lines 状态事件。
 dist/iUsbBridge.exe
 ```
 
-上述路径相对仓库根目录；发布包中的 EXE 位于应用目录。它必须与
+上述路径相对仓库根目录；发布包中的 EXE 位于应用目录的 `tools/iUsbBridge.exe`。它必须与
 `iUsbBridge.runtime.json` 和 `_internal` 一起部署，不能只复制单个 EXE。
+发布目录中的对应路径为 `tools/iUsbBridge.runtime.json` 与 `tools/_internal/`。
 构建来源和依赖版本见[开发指南](DEVELOPMENT.md#桥接器构建来源)。
 
 查看参数：
@@ -37,7 +38,7 @@ iUsbBridge.exe --enable-wifi-sync --udid UDID
 | `--udid` | 指定目标设备 UDID；不指定时使用该传输类型发现到的第一个设备。 |
 | `--rate-hz` | 输入速率提示值，默认 `120`。它不会改变键盘报告格式。 |
 | `--enable-wifi-sync` | 为指定 UDID 通过 USB 启用 Apple Wi-Fi 同步后退出；会改变设备设置，不启动通常的输入会话。必须同时提供 `--udid`。 |
-| `--ddi-dir` | 可选的本地 Personalized DDI 目录，仅在设备尚未挂载镜像时使用；目录必须包含 `Image.dmg`、`BuildManifest.plist`、`Image.trustcache`。未传入时桥接器直接从 GitHub 官方 API 动态解析 commit 和文件清单，校验 Git blob 身份、文件大小及本地 SHA-256，并要求 manifest build 与当前运行时匹配。 |
+| `--ddi-dir` | 本地 Personalized DDI 目录，必须包含 `Image.dmg`、`BuildManifest.plist`、`Image.trustcache`。应用会优先传入完整的随包目录；直接调用时也可通过 `IPHONE_MIRROR_DDI_DIR` 提供候选。无可用本地候选时再检查缓存并下载；不用于指定 Cryptex 镜像。 |
 
 `--usb` 与 `--wireless` 互斥，必须最多指定一个。
 
@@ -61,7 +62,7 @@ USB 模式要求 iPhone 通过数据线连接、已解锁并信任此电脑。
 不会提示已成功显示；无线控制和只读配置检查不会发送此请求。
 
 当前源码对 iOS 27 使用 Cryptex DDI 准备流程：通过目标手机的可信 USB 连接建立
-CoreDevice/RSD 隧道，从固定的上游提交下载 Cryptex 镜像，校验大小、SHA-256、
+CoreDevice/RSD 隧道，读取随包或缓存镜像，必要时从固定的上游提交下载 Cryptex 镜像，校验大小、SHA-256、
 manifest 构建号和 payload digest，再请求 Apple 个性化签名并安装。安装完成后关闭
 准备隧道，重新建立控制会话，使 HID 服务列表刷新。已经安装的 Cryptex DDI 会保留；
 缺少真实触控 surface 时仍会报错，不会仅凭安装成功报告反控可用。
@@ -77,6 +78,10 @@ manifest 构建号和 payload digest，再请求 Apple 个性化签名并安装�
 验证失败不会触发此回退。iOS 27 的已有镜像不会在恢复中被自动卸载；最终仍需真实 HID
 检查通过。无线缺少 HID 时会通过同一台手机
 的 USB 连接准备 DDI，然后重建无线会话；未插线时仍需先连接 USB 完成准备。
+
+Personalized 下载首先解析上游 GitHub 提交与文件身份，再按独立的直连、代理和镜像策略
+探测、下载及回退，校验 Git blob、大小、SHA-256 和 manifest。该策略不等同于应用更新的
+测速设置。完整的随包 DDI 与 Apple USB 支持 MSI 是不同载荷，后者通常不随包提供。
 
 ### 无线模式
 

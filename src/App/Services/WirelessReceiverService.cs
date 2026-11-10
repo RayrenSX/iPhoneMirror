@@ -110,20 +110,23 @@ internal static class WirelessReceiverConfiguration
         new(WirelessReceiverBackend.Original, "WirelessBackendOriginal"),
         new(WirelessReceiverBackend.UxPlay, "WirelessBackendUxPlay"),
     ];
-    internal static IReadOnlyList<WirelessDisplayProfile> DisplayProfiles { get; } = CreateDisplayProfiles();
+    // Keep legacy/model-specific capabilities internal. Every settings surface
+    // binds to the same four choices, with one automatic original-quality mode.
+    internal static IReadOnlyList<WirelessDisplayProfile> DisplayProfiles { get; } =
+    [
+        new("maximum", "WirelessProfileMaximum", 2880, 2880, 60),
+        new("1080p", "WirelessProfile1080p", 1920, 1080, 60),
+        new("720p", "WirelessProfile720p", 1280, 720, 30),
+        new("540p", "WirelessProfile540p", 960, 540, 30),
+    ];
+    internal static IReadOnlyList<WirelessDisplayProfile> SupportedProfiles { get; } = CreateDisplayProfiles();
 
     private static IReadOnlyList<WirelessDisplayProfile> CreateDisplayProfiles()
     {
-        var profiles = new List<WirelessDisplayProfile>
-        {
-            // Preserve saved IDs and the verified iPhone envelope.
-            new("maximum", "WirelessProfileMaximum", 2880, 2880, 60),
-            new("1080p", "WirelessProfile1080p", 1920, 1080, 60),
-            new("720p", "WirelessProfile720p", 1280, 720, 30),
-            new("540p", "WirelessProfile540p", 960, 540, 30),
-            new("maximum-ipad", "WirelessProfileMaximumIpad", 2360, 2360, 60),
-            new("maximum-ipad-pro", "WirelessProfileMaximumIpadPro", 2732, 2732, 60),
-        };
+        var profiles = DisplayProfiles.ToList();
+        // Preserve saved IDs and the verified iPhone envelope.
+        profiles.Add(new("maximum-ipad", "WirelessProfileMaximumIpad", 2360, 2360, 60));
+        profiles.Add(new("maximum-ipad-pro", "WirelessProfileMaximumIpadPro", 2732, 2732, 60));
         // Retain saved profile IDs and their ordering. Add every remaining
         // physical display group as a long-edge square, so selecting native
         // pixels never makes a receiver capability depend on orientation.
@@ -141,9 +144,40 @@ internal static class WirelessReceiverConfiguration
 
     internal static WirelessDisplayProfile? NativeProfileFor(string productType) =>
         AppleDisplayCatalog.Find(productType) is { } display
-            ? DisplayProfiles.First(profile => profile.Width == display.LongEdge && profile.Height == display.LongEdge)
+            ? SupportedProfiles.First(profile => profile.Width == display.LongEdge && profile.Height == display.LongEdge)
             : null;
     internal static WirelessDisplayProfile DefaultDisplayProfile => DisplayProfiles[1];
+
+    internal static WirelessDisplayProfile ProfileForSavedId(string? id)
+    {
+        var saved = SupportedProfiles.FirstOrDefault(profile =>
+            string.Equals(profile.Id, id?.Trim(), StringComparison.OrdinalIgnoreCase));
+        return saved is null ? DefaultDisplayProfile :
+            RequiresOriginalQualityWarning(saved) ? DisplayProfiles[0] :
+            DisplayProfiles.First(profile => profile.Id == saved.Id);
+    }
+
+    internal static WirelessDisplayProfile ResolveDisplayProfile(
+        WirelessDisplayProfile selected, IEnumerable<string> productTypes)
+    {
+        if (!RequiresOriginalQualityWarning(selected)) return selected;
+        var models = productTypes.Distinct(StringComparer.Ordinal).ToArray();
+        var native = models.Select(NativeProfileFor).ToArray();
+        // Before discovery (or for an unknown model), let the sender negotiate
+        // within the full envelope. Never guess a smaller panel size.
+        if (native.Length == 0 || native.Any(profile => profile is null))
+            return DisplayProfiles[0];
+        // One receiver serves multiple phones. Both axes must accommodate the
+        // largest phone in either orientation; frames keep their actual size.
+        return native.OrderByDescending(profile => profile!.Width).First()!;
+    }
+
+    internal static WirelessDisplayProfile ReceiverCapabilityFor(WirelessDisplayProfile profile) =>
+        // Capabilities apply to the listening receiver, including phones that
+        // have not connected yet. A small known phone must never cap a later
+        // larger sender. Each sender negotiates its own stream inside this
+        // orientation-symmetric envelope; decoded frames retain their size.
+        RequiresOriginalQualityWarning(profile) ? DisplayProfiles[0] : profile;
 
     internal static WirelessReceiverBackend NormalizeBackend(
         WirelessReceiverBackend backend) => Enum.IsDefined(backend)
@@ -169,7 +203,7 @@ internal static class WirelessReceiverConfiguration
         profile.Id is "maximum" or "maximum-ipad" or "maximum-ipad-pro" || profile.NativeDisplay is not null;
 
     internal static bool IsSupportedDisplayProfile(uint width, uint height, uint frameRate) =>
-        DisplayProfiles.Any(profile => profile.Width == width && profile.Height == height &&
+        SupportedProfiles.Any(profile => profile.Width == width && profile.Height == height &&
             profile.FrameRate == frameRate);
 
     internal static string SanitizeReceiverName(string? value)

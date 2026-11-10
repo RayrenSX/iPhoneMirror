@@ -61,6 +61,7 @@
     </Setter.Value>
    </Setter>
   </Style>
+  <DataTemplate x:Key="SetupFooterText"><TextBlock Text="{Binding}" TextWrapping="Wrap" TextAlignment="Center"/></DataTemplate>
  </chrome:RoundedWindow.Resources>
  <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="False">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -96,11 +97,11 @@
    </StackPanel>
   </ScrollViewer>
   <Grid Grid.Row="2" Margin="0,16,0,0">
-   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-   <Button x:Name="Previous" Content="{DynamicResource WizardPrevious}" Click="PreviousClick"/>
-   <Button x:Name="CancelOperation" Grid.Column="1" Content="{DynamicResource SetupCancelOperation}" Click="CancelOperationClick" Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Margin="8,0" Visibility="Collapsed"/>
-   <Button x:Name="Skip" Grid.Column="2" Content="{DynamicResource SetupSkip}" Click="SkipClick" Style="{StaticResource GhostButton}" Margin="8,0"/>
-   <Button x:Name="Next" Grid.Column="3" Content="{DynamicResource WizardNext}" Click="NextClick" Style="{StaticResource PrimaryButton}" MinWidth="112"/>
+   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <Button x:Name="Previous" ContentTemplate="{StaticResource SetupFooterText}" HorizontalContentAlignment="Center" Content="{DynamicResource WizardPrevious}" Click="PreviousClick"/>
+   <Button x:Name="CancelOperation" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="1" Content="{DynamicResource SetupCancelOperation}" Click="CancelOperationClick" Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Margin="8,0" Visibility="Collapsed"/>
+   <Button x:Name="Skip" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="2" Content="{DynamicResource SetupSkip}" Click="SkipClick" Style="{StaticResource GhostButton}" Margin="8,0"/>
+   <Button x:Name="Next" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="3" Content="{DynamicResource WizardNext}" Click="NextClick" Style="{StaticResource PrimaryButton}" MinWidth="112"/>
   </Grid>
   <Border x:Name="ExitPanel" Grid.RowSpan="3" Background="{DynamicResource WindowBackgroundBrush}" Visibility="Collapsed" CornerRadius="16" Padding="32">
    <StackPanel VerticalAlignment="Center">

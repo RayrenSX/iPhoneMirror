@@ -1,5 +1,7 @@
 # 全项目界面、资源与交互审查
 
+> 文档整理说明（2026-11-05）：文中构建产物、日志和截图的本地记录路径不随仓库分发，保留用于追溯；历史测试结论未在本次重新执行。
+
 审查日期：2026-10-28（Asia/Shanghai）。基线：`main` / `43d7a83`。
 
 ## 后续缺项补验（2026-10-28）
@@ -87,7 +89,7 @@ Python 499/499、原生 18/18、应用逻辑和驱动管理器测试通过。真
 
 建议：副标题使用可换行的共享标题样式，同时检查底部横向操作区在长文本和小工作区下是否应使用 `DialogActions`。
 
-证据：[日语 200% 截图](../outputs/full-ui-audit-2026-10-28/standalone-ui/ja-JP-Light-2-AirPlayDeviceSelectionWindow.png)、[260 组结果](../outputs/full-ui-audit-2026-10-28/standalone-ui/probe-results.json)。
+证据：日语 200% 截图（本地记录：`outputs/full-ui-audit-2026-10-28/standalone-ui/ja-JP-Light-2-AirPlayDeviceSelectionWindow.png`）、260 组结果（本地记录：`outputs/full-ui-audit-2026-10-28/standalone-ui/probe-results.json`）。
 
 ### UI-02 · P2 · 新页面局部文字绕过系统文字放大
 
@@ -99,7 +101,7 @@ Python 499/499、原生 18/18、应用逻辑和驱动管理器测试通过。真
 
 建议：正文、说明、标题和行高使用动态语义资源；确有独立字号需求时增加相应 token。图标尺寸保持独立，不要求随文本同比放大。
 
-证据：[真实字体字号记录](../outputs/full-ui-audit-2026-10-28/font-probe/driver-ja-font.json)、[日语驱动页 200%](../outputs/full-ui-audit-2026-10-28/font-probe/driver-ja-200.png)。
+证据：真实字体字号记录（本地记录：`outputs/full-ui-audit-2026-10-28/font-probe/driver-ja-font.json`）、日语驱动页 200%（本地记录：`outputs/full-ui-audit-2026-10-28/font-probe/driver-ja-200.png`）。
 
 ### UI-03 · P2 · 驱动管理器未采用日语字体回退
 

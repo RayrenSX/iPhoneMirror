@@ -682,6 +682,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     public string EnvironmentStatus { get => LocalizationService.RefreshText(_environmentStatus); private set => Set(ref _environmentStatus, value); }
     public string CaptureStatus { get => LocalizationService.RefreshText(_captureStatus); private set => Set(ref _captureStatus, value); }
+    private bool _wirelessVideoStalled;
+    public Visibility CaptureWarningVisibility => _wirelessVideoStalled
+        ? Visibility.Visible : Visibility.Collapsed;
     public string DriverState { get => LocalizationService.RefreshText(_driverState); private set => Set(ref _driverState, value); }
     public string WirelessReceiverName
     {
@@ -1240,11 +1243,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             _wireless.ReceiverName = WirelessReceiverConfiguration.SanitizeReceiverName(
                 restoredApp.UpdateSettings.WirelessReceiverName);
-            _wireless.SelectedProfile = WirelessReceiverConfiguration.DisplayProfiles
-                .FirstOrDefault(profile => string.Equals(profile.Id,
-                    restoredApp.UpdateSettings.WirelessDisplayProfileId,
-                    StringComparison.OrdinalIgnoreCase))
-                ?? WirelessReceiverConfiguration.DefaultDisplayProfile;
+            _wireless.SelectedProfile = WirelessReceiverConfiguration.ProfileForSavedId(
+                restoredApp.UpdateSettings.WirelessDisplayProfileId);
         }
         _mediaCast = new MediaCastReceiverController(_core, wirelessReceiver,
             () => _wireless.Backend);
@@ -2383,6 +2383,26 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     NotifyUsbControlStateChanged();
                     return;
                 }
+                if (bridgeEvent.EventName == "ready" && control.WirelessEnabled &&
+                    !control.WirelessConnected && !control.Stopping && bridge.IsReady)
+                {
+                    if (!IsControlBindingCurrent(control, device, ControlStatusMode.Wireless) ||
+                        !DeviceViewModel.UdidEquals(control.AppleUdid, bridge.Udid))
+                    {
+                        _ = DisableWirelessControlAsync(control);
+                        return;
+                    }
+                    control.WirelessConnected = true;
+                    control.Failed = false;
+                    control.Router.Begin(bridge.Udid!, ReverseControlMode.Wireless);
+                    control.ControlStatus.Ready(ControlStatusMode.Wireless, device.Name);
+                    control.Status = LocalizationService.Get(bridge.AuthMode == "direct"
+                        ? "ReverseControlWirelessEnabledDirect" : "ReverseControlWirelessEnabled");
+                    DiagnosticLogger.ReverseControl("wireless", "sender_restored",
+                        ("device", AppLog.Device(device.Udid)), ("owner", "existing_bridge"));
+                    NotifyUsbControlStateChanged();
+                    return;
+                }
                 if (bridgeEvent.EventName is not ("error" or "status") ||
                     (bridgeEvent.EventName == "status" && bridgeEvent.Code != "terminated"))
                     return;
@@ -2673,7 +2693,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private async Task<bool> ConfirmReverseControlPrerequisitesAsync(DeviceControlSession control, bool wireless, CancellationToken cancellationToken)
     {
-        if (AutomationControlStartup.Contains(control.DeviceUdid)) return true;
+        if (AutomationControlStartup.Contains(control.DeviceUdid) ||
+            _mirroringControlStartup.Contains(control.DeviceUdid)) return true;
         var acknowledged = wireless
             ? _wirelessControlPrerequisiteAcknowledged
             : _wiredControlPrerequisiteAcknowledged;
@@ -3571,7 +3592,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private Task StopBluetoothControlAsync() => DisableBluetoothControlAsync();
 
-    public async Task RefreshAsync(bool forceDeviceEnumeration = false)
+    public Task RefreshAsync(bool forceDeviceEnumeration = false) =>
+        RefreshDevicesAsync(forceDeviceEnumeration, startReceivers: true);
+
+    internal Task RefreshCompactDeviceAsync() =>
+        RefreshDevicesAsync(forceDeviceEnumeration: true, startReceivers: false);
+
+    private async Task RefreshDevicesAsync(bool forceDeviceEnumeration, bool startReceivers)
     {
         if (_disposed || SetupActive) return;
         if (!_sessions.AnySession)
@@ -3622,12 +3649,15 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             }
             if (_disposed) return;
 
-            var receiverStart = await _wireless.EnsureStartedAsync();
-            if (receiverStart.IsNewError && receiverStart.Error is not null)
-                AddUiLog(receiverStart.Error);
-            RefreshWirelessStatus();
-            await _mediaCast.EnsureStartedAsync();
-            RefreshMediaCastStatus();
+            if (startReceivers)
+            {
+                var receiverStart = await _wireless.EnsureStartedAsync();
+                if (receiverStart.IsNewError && receiverStart.Error is not null)
+                    AddUiLog(receiverStart.Error);
+                RefreshWirelessStatus();
+                await _mediaCast.EnsureStartedAsync();
+                RefreshMediaCastStatus();
+            }
             NativeEnvironmentInfo? environment = null;
             var wiredStates = _sessions.Values.Where(state =>
                     !DeviceViewModel.IsWirelessUdid(state.Udid))
@@ -4024,6 +4054,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 PlayAudio = playAudio,
                 Volume = PlaybackVolume,
             };
+            if (existing is null && Application.Current is App app &&
+                app.UpdateSettings.DeviceVideoPreferences?.TryGetValue(device.Udid, out var saved) == true)
+                saved?.Apply(state);
             _sessions.Set(state);
             AddDiagnosticLog(AppLog.Event("wireless_session_create_begin",
                 ("device", AppLog.Device(device.Udid)),
@@ -4346,6 +4379,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         if (ReferenceEquals(_selectedDevice, value)) return;
         var previous = _selectedDevice;
         _selectedDevice = value;
+        // Restore persisted controls before selection notifications can cause
+        // two-way bindings to write the previous device's defaults back.
+        if (value is { IsMediaCast: false })
+            RestoreSelectedVideoControls(GetOrCreateDeviceState(value));
         OnPropertyChanged(nameof(SelectedDevice));
         if (value?.IsMediaCast == true)
         {
@@ -4516,6 +4553,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 continue;
             }
             if (!IsCurrentSession(state, h)) continue;
+            TryStartMirroringControl(state, status);
             if (status.Width != 0 && status.Height != 0)
             {
                 ObserveAutomationGeometry(state.Udid, status.Width, status.Height);
@@ -4661,6 +4699,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void ResetPreviewState()
     {
+        Set(ref _wirelessVideoStalled, false, nameof(CaptureWarningVisibility));
         SetAudioOnlyAirPlay(false);
         OnPropertyChanged(nameof(IsVideoProtected));
         OnPropertyChanged(nameof(CanUseVisualPreviewTools));
@@ -5813,6 +5852,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void ApplyCaptureStatus(NativeCaptureStatus status)
     {
+        if (CurrentDeviceSession is { } capture) TryStartMirroringControl(capture, status);
+        Set(ref _wirelessVideoStalled,
+            IsWirelessSelected && status.Message == "AirPlay video stalled",
+            nameof(CaptureWarningVisibility));
         UpdateVideoOutputStatus();
         _lastCaptureStatus = status;
         _lastCaptureStatusHandle = CurrentSessionHandle;
@@ -6284,6 +6327,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             return LocalizationService.Get("WirelessVideoPaused");
         if (wireless && status.Message == "AirPlay video reconnecting")
             return LocalizationService.Get("WirelessVideoReconnecting");
+        if (wireless && status.Message == "AirPlay video stalled")
+            return LocalizationService.Get("WirelessVideoStalled");
         if (status.State == CaptureState.Streaming &&
             ProtectedContentStatus.Parse(status.Message, status.AudioSampleRate,
                 status.AudioChannels).IsProtected)
@@ -6570,6 +6615,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         foreach (var preset in ResolutionPresets) preset.NotifyLanguageChanged();
         foreach (var profile in WirelessDisplayProfiles) profile.NotifyLanguageChanged();
         foreach (var backend in WirelessReceiverBackends) backend.NotifyLanguageChanged();
+        foreach (var mode in MirroringAutoControlModes) mode.NotifyLanguageChanged();
         foreach (var mode in UsbProjectionModes) mode.NotifyLanguageChanged();
         foreach (var preference in DecoderPreferences) preference.NotifyLanguageChanged();
         foreach (var direction in BluetoothMouseDirections)
@@ -6918,7 +6964,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             return (false, LocalizationService.Get("RecordingPendingSave"));
         var path = PendingRecordingStore.CreatePath();
         var request = new MediaOutputRequest(MediaOutputKind.Recording, path,
-            NormalizeOutputWidth(width), NormalizeOutputHeight(height), frameRate, bitrateKbps);
+            width, height, frameRate, bitrateKbps);
         var result = await StartMediaOutputAsync(request);
         if (result.Success) _pendingRecordingPath = path;
         else
@@ -6976,8 +7022,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         if (kind is MediaOutputKind.Recording)
             return (false, LocalizationService.Get("MediaOutputInvalidProtocol"));
         var request = new MediaOutputRequest(kind, destination,
-            NormalizeOutputWidth(width), NormalizeOutputHeight(height),
-            frameRate, bitrateKbps, authorization, microphoneDevice);
+            width, height, frameRate, bitrateKbps, authorization, microphoneDevice);
         return await StartMediaOutputAsync(request);
     }
 

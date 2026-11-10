@@ -48,8 +48,9 @@ See the [user guide](docs/USER_GUIDE.md), [IME verification scope](docs/SOGOU_IM
 ## Download
 
 Download `iPhoneMirror-Setup-v*-x64.exe` from
-[Releases](https://github.com/RayrenSX/iPhoneMirror/releases). The three-language
-Setup wizard supports a custom destination, defaults to
+[Releases](https://github.com/RayrenSX/iPhoneMirror/releases). The Setup wizard supports
+Simplified Chinese, Traditional Chinese (Hong Kong), Traditional Chinese (Taiwan),
+English and Japanese. It supports a custom destination, defaults to
 `C:\Program Files\iPhoneMirror` for an administrator install, creates Start menu
 entries, and offers an optional desktop shortcut. A per-user install uses the
 Windows user-program directory. For portable use, download
@@ -82,7 +83,9 @@ uses a trusted local `AppleMobileDeviceSupport64.msi`, then downloads the
 standalone MSI from Apple's Software Update catalog, and finally falls back to
 the official signed desktop iTunes package and extracts its Apple Mobile Device
 Support component. Apple Devices from Microsoft Store remains a supported manual
-option; Apple binaries are not redistributed by this project. Wireless discovery
+option; Apple USB support installers are not included in normal public packages.
+Reverse-control DDI payloads are described separately in the
+[component inventory](docs/USB_TOUCH_THIRD_PARTY_LICENSES.md#apple-ddi-载荷). Wireless discovery
 uses the DNS-SD support built into Windows 10/11 and does not install Bonjour;
 discovery itself does not require administrator access. An administrator Setup
 adds the `iPhoneMirror Wireless AirPlay` local-subnet firewall rule. The rule is
@@ -198,9 +201,11 @@ the selection applies only to the current USB device.
    has a missing or invalid driver, the app cancels that start attempt and opens
    the driver manager automatically.
 
-Selecting another device first sends the QuickTime stop controls to the prior
-session and restores its normal USB configuration. Closing the main window runs
-the same cleanup path.
+Selecting another device changes the main preview and input target; other active
+device sessions can keep running. Stopping a wired device or exiting the app
+releases its control bridge before ending QuickTime and attempting to restore
+normal USB configuration. With **Close main window to tray** enabled, closing the
+main window preserves sessions; use **Exit application** to shut down completely.
 
 > [!WARNING]
 > Do not use Zadig to replace the Apple parent driver with WinUSB/libusb.
@@ -261,8 +266,8 @@ after a sender connects and is auto-selected once at connection time.
 1. Connect the Windows computer and iPhone/iPad to the same private network.
 2. Configure the receiver name and advertised connection profile in the
    **Wireless AirPlay** section.
-3. Choose maximum 5120x2880 at 60 fps, default 1080p at 60 fps, 720p at 30 fps,
-   or 540p at 30 fps.
+3. Choose an original-quality or device-panel profile, default 1080p at 60 fps,
+   720p at 30 fps, or 540p at 30 fps.
 4. Click **Apply**. Name and resolution changes are summarized in one dialog.
 5. Open Screen Mirroring in iOS Control Center and select the configured name.
 6. Use **Stop Mirroring** for a connected wireless session; the receiver keeps running.
@@ -272,6 +277,12 @@ must be advertised before connection. Applying a new name or profile restarts
 the receiver, disconnects all current wireless sessions, and requires the phone
 to select the receiver again. Wireless screen-mirroring sessions still support
 volume, screenshots, detached/full-screen windows, simultaneous previews and OBS.
+
+Original-quality profiles advertise a square based on the panel's long edge to
+support rotation; the sender determines the actual resolution and frame rate.
+See the [connection profiles](docs/USER_GUIDE.md#连接前设置接收端). The optional UxPlay
+fallback is downloaded when first selected in a standard package. URL/HLS/DLNA
+video-app casting requires the original receiver.
 
 There is no fixed application-level wireless device count; practical capacity
 depends on CPU/GPU resources, memory and local-network bandwidth.
@@ -337,8 +348,11 @@ default Boss key is `Ctrl+Alt+B`.
 
 Wired and wireless reverse control use the bundled `iUsbBridge.exe`. Wired
 control requires an unlocked trusted device and Developer Mode when requested;
-the matching Developer Disk Image is resolved and verified from official GitHub
-metadata on first use. Wireless control requires pairing and local-network
+standard packages include pinned Personalized and Cryptex Developer Disk Images.
+The app prefers the verified bundled images, with cache/download fallback as needed;
+Apple personalization may still require network access. See the
+[bridge preparation details](docs/USB_TOUCH_BRIDGE_USAGE.md#usb-模式).
+Wireless control requires pairing and local-network
 reachability. The first USB or AirPlay connection opens device-profile guidance
 so both identities can be associated with the same phone.
 
@@ -357,7 +371,9 @@ so both identities can be associated with the same phone.
 
 Apple Devices, Apple Mobile Device Support, iTunes and Windows system
 components are external prerequisites and are not redistributed by this
-project. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and the
+project. Developer disk images are a separate payload covered by the
+[DDI inventory](docs/USB_TOUCH_THIRD_PARTY_LICENSES.md#apple-ddi-载荷).
+See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and the
 AirPlayServer `SOURCE.md` for copyright, source, version, hash and license
 details.
 

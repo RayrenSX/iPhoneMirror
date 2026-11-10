@@ -120,8 +120,8 @@ public class RoundedWindow : Window
                 limits.MaxSize = new NativePoint(info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top);
                 var scale = _source?.CompositionTarget?.TransformToDevice ?? Matrix.Identity;
                 limits.MinTrackSize = new NativePoint(
-                    Math.Max(limits.MinTrackSize.X, (int)Math.Ceiling(MinWidth * scale.M11)),
-                    Math.Max(limits.MinTrackSize.Y, (int)Math.Ceiling(MinHeight * scale.M22)));
+                    Math.Min(limits.MaxSize.X, Math.Max(limits.MinTrackSize.X, (int)Math.Ceiling(MinWidth * scale.M11))),
+                    Math.Min(limits.MaxSize.Y, Math.Max(limits.MinTrackSize.Y, (int)Math.Ceiling(MinHeight * scale.M22))));
                 if (!double.IsPositiveInfinity(MaxWidth)) limits.MaxTrackSize.X = (int)Math.Ceiling(MaxWidth * scale.M11);
                 if (!double.IsPositiveInfinity(MaxHeight)) limits.MaxTrackSize.Y = (int)Math.Ceiling(MaxHeight * scale.M22);
                 Marshal.StructureToPtr(limits, lParam, false);

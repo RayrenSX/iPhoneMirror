@@ -10,7 +10,7 @@ public partial class MainWindow
     private bool? _workspaceCompactHeader, _workspaceShortHeader;
     private double WorkspaceReadingScale => TryFindResource("BodyFontSize") is double size ? size / 14 : 1;
     private double WorkspaceDeviceWidth => 300 * (1 + .5 * (WorkspaceReadingScale - 1));
-    private double WorkspaceSettingsWidth => 336 * (1 + .5 * (WorkspaceReadingScale - 1));
+    private double WorkspaceSettingsWidth => 362 * (1 + .5 * (WorkspaceReadingScale - 1));
 
     private void OnIdleSurfaceSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -51,12 +51,14 @@ public partial class MainWindow
 
     // At small work-area widths, keep a usable preview and stack the two
     // independently scrollable side panels. Native preview stays in its own cell.
-    private void OnWorkspaceLayoutChanged(object sender, RoutedEventArgs e)
+    private void OnWorkspaceLayoutChanged(object sender, RoutedEventArgs e) => UpdateWorkspaceLayout();
+
+    private void UpdateWorkspaceLayout(bool preserveSurfaceWidths = false)
     {
         if (!IsLoaded || MainContentGrid is null || ControlPanel is null) return;
         LeftPanelHost.ContentWidth = WorkspaceDeviceWidth;
         ControlPanel.ContentWidth = WorkspaceSettingsWidth;
-        if (_workspaceTransition?.IsRunning != true)
+        if (!preserveSurfaceWidths && _workspaceTransition?.IsRunning != true)
         {
             if (LeftPanelHost.Visibility == Visibility.Visible) LeftPanelHost.Width = WorkspaceDeviceWidth;
             if (ControlPanel.Visibility == Visibility.Visible) ControlPanel.Width = WorkspaceSettingsWidth;

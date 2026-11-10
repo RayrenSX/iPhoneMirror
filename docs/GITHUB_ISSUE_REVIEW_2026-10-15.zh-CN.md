@@ -1,5 +1,7 @@
 # 近期 GitHub issue 逐项代码审查报告（2026-10-15）
 
+> 文档整理说明（2026-11-05）：文中构建产物、日志和截图的本地记录路径不随仓库分发，保留用于追溯；历史测试结论未在本次重新执行。
+
 > 本文件保留修复前的审查基线。后续源码修改、复测及尚待实机验证的条目见 [源码修复记录](GITHUB_ISSUE_FIXES_2026-10-15.zh-CN.md)。
 
 审查结论：**没有足够证据把近期故障直接归为用户误操作。** 确定存在项目侧代码/交付问题，另外有新增功能、支持范围限制和需要设备日志继续确认的故障。GitHub 的“已关闭”不能作为“已修复”统计。
@@ -85,7 +87,7 @@
 
 ## 本次实际验证
 
-完整命令输出位于 [validation](../outputs-next/issue-audit-2026-10-15/validation/)。下列是本次重新执行的结果，不沿用历史报告的测试次数。
+完整命令输出位于 validation（本地记录：`outputs-next/issue-audit-2026-10-15/validation`）。下列是本次重新执行的结果，不沿用历史报告的测试次数。
 
 | 验证 | 结果 | 说明 |
 |---|---|---|
@@ -97,10 +99,10 @@
 | 驱动清理安全测试 | 通过 | 只载入定义与模拟，未执行真实清理 |
 | 清理本地化测试 | 1456 例通过 | 未执行清理 |
 | #52 附件 MANIFEST 完整性 | 5/5 长度与 SHA-256 一致 | 只检查累计补丁，没有整体应用，也未运行附件里的命令 |
-| WPF `--keyboard-focus` | 通过，退出 0 | [日志](../outputs-next/issue-audit-2026-10-15/validation/keyboard-focus.log) |
-| WPF `--media-review` | 通过，退出 0 | [日志](../outputs-next/issue-audit-2026-10-15/validation/media-review.log) |
-| WPF `--ddi-startup` | 通过，退出 0 | [日志](../outputs-next/issue-audit-2026-10-15/validation/ddi-startup.log) |
-| WPF `--capture-review` | 通过，退出 0 | [日志](../outputs-next/issue-audit-2026-10-15/validation/capture-review.log) |
+| WPF `--keyboard-focus` | 通过，退出 0 | 日志（本地记录：`outputs-next/issue-audit-2026-10-15/validation/keyboard-focus.log`） |
+| WPF `--media-review` | 通过，退出 0 | 日志（本地记录：`outputs-next/issue-audit-2026-10-15/validation/media-review.log`） |
+| WPF `--ddi-startup` | 通过，退出 0 | 日志（本地记录：`outputs-next/issue-audit-2026-10-15/validation/ddi-startup.log`） |
+| WPF `--capture-review` | 通过，退出 0 | 日志（本地记录：`outputs-next/issue-audit-2026-10-15/validation/capture-review.log`） |
 
 运行时专项首次调用遗漏 `win-x64` 输出目录，四次均未执行到测试代码；已修正路径重新运行，首次错误日志另存 `*-initial-path-error.log`，不计为产品测试失败或通过。专项最终结果以修正后日志为准。
 
@@ -137,9 +139,9 @@
 
 ## 证据文件
 
-- [完整取数与验证目录](../outputs-next/issue-audit-2026-10-15/)：`issues.json`、`issues-rest.json`、`recent-issues.json`、28 条 timeline、Release/tag/main 快照、附件和测试日志。
-- [结构化逐项结论](../outputs-next/issue-audit-2026-10-15/review-results.json)：分类、置信度、优先级、代码位置、处置与验收字段，可继续用于排期。
-- [关键源码 SHA-256](../outputs-next/issue-audit-2026-10-15/source-hashes.json) 与 `source-snapshots/`：固定本次审查基线，防止之后的工作区修改混淆结论。
-- [#59 脱敏关键时间线](../outputs-next/issue-audit-2026-10-15/issue59-evidence.md)：包含原始文件行号；下载的 capture.log 是多会话累计文件。
+- 完整取数与验证目录（本地记录：`outputs-next/issue-audit-2026-10-15`）：`issues.json`、`issues-rest.json`、`recent-issues.json`、28 条 timeline、Release/tag/main 快照、附件和测试日志。
+- 结构化逐项结论（本地记录：`outputs-next/issue-audit-2026-10-15/review-results.json`）：分类、置信度、优先级、代码位置、处置与验收字段，可继续用于排期。
+- 关键源码 SHA-256（本地记录：`outputs-next/issue-audit-2026-10-15/source-hashes.json`） 与 `source-snapshots/`：固定本次审查基线，防止之后的工作区修改混淆结论。
+- #59 脱敏关键时间线（本地记录：`outputs-next/issue-audit-2026-10-15/issue59-evidence.md`）：包含原始文件行号；下载的 capture.log 是多会话累计文件。
 
 证据等级：源码可证的分支与限制为高；用户实机反馈作为该用户环境的证据，不自动外推所有设备；没有日志、堆栈或变量对照的根因推断保留为待证。纯新增功能不归为 bug；正常支持流程失败不归为误操作。

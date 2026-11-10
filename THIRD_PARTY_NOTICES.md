@@ -1,7 +1,10 @@
 # Third-party notices
 
 This file describes third-party material intentionally included in the source
-tree or release package for the current `v1.8.3` baseline. Each component
+tree or standard release payload. It was checked against project version
+`1.8.5-pre4` and unreleased source changes on 2026-11-05. Optional components and
+package contents depend on the build options; use the notices and manifests from
+the particular release when inspecting a downloaded package. Each component
 remains under its upstream license.
 The root GNU General Public License v3.0 only applies to original iPhoneMirror
 material and does not replace, narrow or relicense any component listed below.
@@ -50,7 +53,12 @@ is installed from a signed offline AppleMobileDeviceSupport MSI when available,
 from Apple's Software Update catalog as a standalone MSI, or from Apple's
 official HTTPS iTunes installer as a compatibility fallback. Apple Devices
 from Microsoft Store remains a supported manual installation path. Apple
-software is not redistributed in this repository or its release assets.
+USB support installers are not redistributed in normal public release assets.
+This statement does not cover developer disk images: current standard packages
+include the pinned Personalized and Cryptex DDI payloads described in the
+[DDI component inventory](docs/USB_TOUCH_THIRD_PARTY_LICENSES.md#apple-ddi-载荷).
+Their source and checksums are recorded in [config/ddi-bundles.json](config/ddi-bundles.json);
+those records establish provenance and integrity, not redistribution permission.
 
 ## Microsoft Visual C++ runtime
 

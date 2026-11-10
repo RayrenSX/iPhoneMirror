@@ -1,10 +1,17 @@
 # Local Automation API
 
-Click the main window’s bottom-right version label **five times** to open **Developer tools**. In its **Automation API** section, enable the local API, choose a port (default 17890), click **Apply**, and copy the key. Closing Developer tools keeps the API running; closing iPhoneMirror stops it. The API is disabled by default and listens only on `127.0.0.1`. The controls are no longer in the ordinary mirroring settings panel.
+Checked against the source tree on 2026-11-05 (project version `1.8.5-pre4` plus unreleased changes).
+See the [documentation index](../README.md) and [user guide](../USER_GUIDE.md#自动化控制与调试http-api).
+
+Click the main window’s bottom-right version label **five times** to open **Developer tools**. In its **Automation API** section, enable the local API, choose a port (default 17890), click **Apply**, and copy the key. Closing Developer tools keeps the API running; exiting iPhoneMirror stops it. The API is disabled by default and listens only on `127.0.0.1`. The controls are no longer in the ordinary mirroring settings panel.
 
 A port/key error leaves mirroring usable and appears in the API status. If saving settings fails, the listener stops and the UI reports the save failure.
 
-The existing device connection, binding, mirroring and reverse control must be established in iPhoneMirror. Acquiring API control does not install drivers, download DDI, change the selected device, or start another transport. Use the **Reclaim device control** button to cancel API input and return ownership to manual control.
+Connect, trust and bind the device in iPhoneMirror first. Start mirroring and reverse control in the UI,
+or use the explicit preparation endpoints below for an already configured device. Acquiring a control
+lease only reserves an available input route; it does not install drivers, prepare DDI, change the
+selected device, or start another transport. Use **Reclaim device control** to cancel API input and
+return ownership to manual control. Exiting the app stops the API; closing to tray keeps it running.
 
 - Documentation: `http://127.0.0.1:17890/api/docs` (works offline).
 - OpenAPI 3.1: `http://127.0.0.1:17890/api/v1/openapi.json`.
@@ -41,6 +48,27 @@ Read geometry before input. Optionally include `geometryVersion` in the request.
 
 Durations are **seconds**, `0.05..10` for long press, swipe and path. Tap uses the existing 40ms gesture. Paths have 2..256 points, evenly timed over the total duration and interpolated by the shared gesture executor. Nonfinite/out-of-bounds coordinates are rejected, not clamped.
 
+## Device preparation and windows
+
+`GET /app/status` requires `device.read` and returns `managementVersion`, `background`,
+`mainWindowVisible`, `apiRunning`, and `independentWindowOpen`.
+
+Before acquiring a lease, `POST /devices/{id}/prepare` with `{ "enableControl": false }`
+starts or reuses background capture. Set `enableControl` to `true` to also request the existing
+USB/wireless control startup; omitting the property defaults to `true`. This can prepare DDI and
+requires the same trust, binding, Developer Mode and device confirmations as the UI. It cannot
+automatically satisfy those requirements. The result reports `capturing`, `controlAvailable`,
+`mainWindowVisible`, and `actionRequired`; HTTP 200 alone does not establish control readiness.
+Allow enough client time for first-time DDI preparation, and refresh status after cancellation.
+
+`POST /devices/{id}/window/open` has no body and opens or activates that device's independent
+preview, creating its session if needed. It returns `opened` and `mainWindowVisible`.
+Both operations require `device.control` and `screen.capture`, reject an active lease for the
+same physical device, and serialize application management with `MANAGEMENT_BUSY` on conflict.
+They do not switch the main window's selected device. After preparation, read fresh status/geometry
+and then acquire control. Implementation: [HTTP routes](../../src/App/Automation/AutomationApiHost.cs)
+and [application management](../../src/App/MainWindow.AutomationManagement.cs).
+
 ## Control sessions
 
 1. `POST /devices/{id}/control/acquire` with `{ "durationSeconds": 30 }`.
@@ -56,9 +84,12 @@ Manual held input/in-flight writes prevent acquisition. During an API lease, con
 
 | Method | Path | Body / result |
 |---|---|---|
+| GET | `/app/status` | Application management status |
 | GET | `/devices` | `{devices:[...]}` |
 | GET | `/devices/{id}` | Device details |
 | GET | `/devices/{id}/status` | Status, capabilities, geometry, lease summary |
+| POST | `/devices/{id}/prepare` | `{enableControl:false}` → capture/control readiness and action required |
+| POST | `/devices/{id}/window/open` | No body → independent window status |
 | POST | `/devices/{id}/control/acquire` | `{durationSeconds:30}` → session token |
 | POST | `/devices/{id}/control/release` | No body → 204 |
 | POST | `/devices/{id}/input/tap` | `{x:500,y:800}` |
@@ -81,7 +112,7 @@ Screenshots require an already active capture and a decoded frame. Concurrent ca
 
 ## Limits and errors
 
-Defaults: 60 authenticated requests/s (burst 120), 5 screenshot requests/s, two simultaneous encoders, 64 KiB UTF-8 text, 128 KiB JSON, and 64 HTTP connections. Request rates are per credential; applications sharing a key share its budget. Limits are configurable under `AutomationApi`; the input queue is fail-fast. Release has a separate limited allowance. Path expansion remains bounded by points/duration and the existing transport pacing.
+Defaults: 60 authenticated requests/s (burst 120), 5 screenshot requests/s, two simultaneous encoders, 64 KiB UTF-8 text, 128 KiB JSON, and 64 HTTP connections. Request rates are per credential; applications sharing a key share its budget. Request rate, burst and screenshot rate are configurable under `AutomationApi`; the encoder, payload and connection bounds are implementation limits. The input queue is fail-fast. Release has a separate limited allowance. Path expansion remains bounded by points/duration and the existing transport pacing.
 
 Errors use `{ "error": { "code": "...", "message": "..." }, "requestId": "..." }`:
 
@@ -90,10 +121,11 @@ Errors use `{ "error": { "code": "...", "message": "..." }, "requestId": "..." }
 | 400 | INVALID_REQUEST |
 | 401 / 403 | UNAUTHORIZED / FORBIDDEN |
 | 404 | DEVICE_NOT_FOUND |
-| 409 | CONTROL_LOCKED, CONTROL_NOT_AVAILABLE, GEOMETRY_CHANGED |
+| 409 | CONTROL_LOCKED, CONTROL_NOT_AVAILABLE, GEOMETRY_CHANGED, MANAGEMENT_BUSY, DEVICE_NOT_READY |
 | 422 | CAPABILITY_NOT_SUPPORTED, INVALID_COORDINATE, INVALID_DURATION |
 | 429 | RATE_LIMITED; Retry-After header |
 | 500 | INTERNAL_ERROR / INPUT_FAILED |
+| 501 | UNSUPPORTED_RUNTIME (host without application management) |
 | 503 | DEVICE_NOT_CONNECTED, CONTROL_NOT_AVAILABLE, CLIPBOARD_UNAVAILABLE, SCREENSHOT_UNAVAILABLE |
 
 Future event/frame WebSockets will reuse device identity, ownership, authentication and frame services. No WebSocket stream or script execution endpoint is exposed in v1.

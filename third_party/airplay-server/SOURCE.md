@@ -54,15 +54,16 @@ old workers before installing keys and starting new sockets. Mirror and audio
 remote endpoints retain the complete binary IPv4/IPv6 address.
 The core keeps the last decoded frame and its dimensions until a new frame
 arrives. Sender geometry is stored separately, and pause/reconnect status is
-localized for all four application languages.
+localized through the application's shared language resources.
 Secondary mirroring and RAOP media sockets bind to the local address of the
 accepted AirPlay control connection. This keeps their TCP listeners and UDP
 timing traffic on the same LAN interface when a system proxy or VPN installs a
 lower-metric virtual route.
 iPhoneMirror's receiver build script reapplies all patches and verifies the
 compiled DLL contains the runtime width, height and frame-rate capability
-markers before installation. The host only accepts the predefined maximum,
-1080p, 720p and 540p profiles exposed by the application, and forwards the
+markers before installation. The host validates predefined profiles, including
+square original-quality profiles derived from the bundled Apple panel catalog,
+1080p, 720p and 540p, and retains the legacy 5120x2880 fallback. It forwards the
 configured receiver name into both DNS-SD registration and the `/info` plist.
 iPhoneMirror keeps the v1.1.2 source pin so its custom IPC and capability patches
 remain reproducible; selected upstream fixes are reapplied as source
@@ -147,12 +148,12 @@ Build hashes/toolchain metadata in `BUILD.json` and dependency notices are
 updated in the same installation transaction. `test_install_airplay_runtime.ps1`
 verifies rollback after a late replacement failure and rejects mismatched inputs.
 
-Rebuild and stage the receiver with:
+Rebuild and stage the receiver with (replace each quoted placeholder with its actual path):
 
 ```powershell
-./scripts/build_airplay_receiver.ps1 -SourceRoot <v1.1.2-clone> -OutputDirectory <stage>
-./scripts/test_airplay_upstream.ps1 -ReceiverRoot <stage> -FfmpegBuildRecord <record.json> -MsysRoot <msys64>
-./scripts/install_airplay_runtime.ps1 -ReceiverBinary <stage>/airplay2dll.dll -FfmpegBuildRecord <record.json>
+./scripts/build_airplay_receiver.ps1 -SourceRoot '<v1.1.2-clone>' -OutputDirectory '<stage>'
+./scripts/test_airplay_upstream.ps1 -ReceiverRoot '<stage>' -FfmpegBuildRecord '<record.json>' -MsysRoot '<msys64>'
+./scripts/install_airplay_runtime.ps1 -ReceiverBinary '<stage>/airplay2dll.dll' -FfmpegBuildRecord '<record.json>'
 ```
 
 The receiver build's `-Install` option also requires `-FfmpegBuildRecord` and

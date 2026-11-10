@@ -28,6 +28,14 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--settings-categories", var settingsOutput])
+                return RunSettingsCategoryTests(settingsOutput);
+            if (args is ["--mirroring-auto-control", var autoControlOutput])
+                return RunMirroringAutoControlTests(autoControlOutput);
+            if (args is ["--repair-streaming"])
+                return RunRepairStreamingTests();
+            if (args is ["--failure-repairs"])
+                return RunFailureRepairTests();
             if (args is ["--setup-driver-roundtrip", var roundtripDriver, var roundtripOutput])
                 return RunSetupDriverRoundtrip(roundtripDriver, roundtripOutput);
             if (args is ["--setup-window-rendering", var setupRenderingOutput])
@@ -177,6 +185,8 @@ internal static partial class Program
             }
             if (args is ["--clipboard-sync"])
                 return RunClipboardSyncRegressionTests();
+            if (args is ["--wireless-hid-recovery", var wirelessRecoveryOutput])
+                return RunWirelessHidRecoveryTests(wirelessRecoveryOutput);
             if (args is ["--clipboard-timeouts"])
                 return RunClipboardTimeoutTests();
             if (args is ["--media-bridge-idle"])
@@ -292,6 +302,8 @@ internal static partial class Program
                 return RunKeyboardFocusTests(shortcutReview: true);
             if (args is ["--mouse-shortcuts"])
                 return RunKeyboardFocusTests(initializeHiddenHandle: true, shortcutReview: true, mouseShortcutReview: true);
+            if (args is ["--side-button-shortcuts"])
+                return RunKeyboardFocusTests(initializeHiddenHandle: true, mouseShortcutReview: true);
             if (args is ["--preview-pointer"])
                 return RunKeyboardFocusTests(initializeHiddenHandle: true);
             if (args is ["--driver-localization-audit", var localizedDriverAssembly])

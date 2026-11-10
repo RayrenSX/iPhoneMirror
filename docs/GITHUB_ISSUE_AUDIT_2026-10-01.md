@@ -1,5 +1,7 @@
 # GitHub 全量 Issues 修复核查（2026-10-01）
 
+> 文档整理说明（2026-11-05）：文中构建产物、日志和截图的本地记录路径不随仓库分发，保留用于追溯；历史测试结论未在本次重新执行。
+
 > 此文件保留开始修复前的核查结论；后续代码修改、验证及剩余条件见 [修复跟进报告](GITHUB_ISSUE_FIXES_2026-10-01.md)。
 
 **结论：没有全部完成。** 全量取得 24 条 issues，开放 13 条、关闭 11 条。当前仍存在可直接复现的漏修（#31）、未实现的功能（#26）、部分实现的功能（#29），以及尚未完成发布或报告场景验收的修改。不能用关闭数量或通用测试通过率表示修复完成率。
@@ -14,7 +16,7 @@
 - 本地包含大量未提交修改。本报告分别说明“正式版已有”“main 已有”“仅本地追加”，没有把本地候选修复算作 GitHub 已交付。
 - 本次核查未修改业务源码或 GitHub issue 状态，新增报告、数据快照和只读最小复现程序。测试执行当前工作区源码；本次没有针对报告人的手机、游戏、远程桌面或热点进行实机重现。
 
-原始 API 数据、完整 timeline、附件、测试日志及结构化核查结果保存在 [取数与验证目录](../outputs-next/github-issue-audit-2026-10-01/)。其中 [audit-data.json](../outputs-next/github-issue-audit-2026-10-01/audit-data.json) 包含完整标题、正文、评论、GitHub 状态及本次核查分类。
+原始 API 数据、完整 timeline、附件、测试日志及结构化核查结果保存在 取数与验证目录（本地记录：`outputs-next/github-issue-audit-2026-10-01`）。其中 audit-data.json（本地记录：`outputs-next/github-issue-audit-2026-10-01/audit-data.json`） 包含完整标题、正文、评论、GitHub 状态及本次核查分类。
 
 ## 统计口径
 
@@ -89,7 +91,7 @@
 | main `76e962f` | 通过 | 通过 | **拒绝** | 通过 |
 | 当前工作区 | 通过 | 通过 | **拒绝** | 通过 |
 
-程序与结果：[UdidRepro.csproj](../outputs-next/github-issue-audit-2026-10-01/udid-repro/UdidRepro.csproj)、[udid-repro.log](../outputs-next/github-issue-audit-2026-10-01/udid-repro.log)。退出码 1 是三条 40 位预期失败的结果，不是编译错误。下一步应统一父设备实例名与序列号的长度规则，并补驱动枚举/提权校验层的回归测试。
+程序与结果：UdidRepro.csproj（本地记录：`outputs-next/github-issue-audit-2026-10-01/udid-repro/UdidRepro.csproj`）、udid-repro.log（本地记录：`outputs-next/github-issue-audit-2026-10-01/udid-repro.log`）。退出码 1 是三条 40 位预期失败的结果，不是编译错误。下一步应统一父设备实例名与序列号的长度规则，并补驱动枚举/提权校验层的回归测试。
 
 ## 修复提交与发布情况
 

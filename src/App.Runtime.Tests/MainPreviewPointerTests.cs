@@ -138,7 +138,7 @@ internal static partial class Program
                 $"{context}: native shortcut test requires an enabled HWND.");
             TestNativeMouseShortcuts(window, packets, preview.WindowHandle, 100, 200, context);
             TestIndependentNativeMouseShortcuts(window, device, packets, context);
-            Console.WriteLine($"{context}: main right/middle shortcuts and independent middle shortcut/menu priority passed.");
+            Console.WriteLine($"{context}: main/independent right, middle and side shortcuts, modifier chords and menu priority passed.");
         }
         finally
         {
@@ -171,6 +171,8 @@ internal static partial class Program
         Set("keyboardInput", (Action<Controls.PreviewKeyboardEventArgs>)(e =>
             KeyboardCall(window, "OnIndependentKeyboardInput", device.Udid, e)));
         using var preview = (Windows.NativePreviewWindow)constructor.Invoke(args);
+        // Wired/wireless touch input is admitted only in fixed or full-screen previews.
+        SetKeyboardField(preview, "_isFixed", true);
         var handle = preview.Handle;
         var foreground = KeyboardField(window, "_keyboardForegroundWindow");
         SetKeyboardField(preview, "_inputForegroundWindow", (Func<nint>)(() => handle));
@@ -231,6 +233,8 @@ internal static partial class Program
             {
                 (Services.KeyboardShortcut.MouseRight, 0x0204, 0x0205),
                 (Services.KeyboardShortcut.MouseMiddle, 0x0207, 0x0208),
+                (Services.KeyboardShortcut.MouseXButton1, 0x020B, 0x020C),
+                (Services.KeyboardShortcut.MouseXButton2, 0x020B, 0x020C),
             })
             foreach (var modifiers in new[] { 0u, Services.KeyboardShortcut.Control })
             {
@@ -246,12 +250,14 @@ internal static partial class Program
                 Services.KeyboardPressRoute Resolve(Services.MappedKey key, bool chord) =>
                     throw new InvalidOperationException("Mouse shortcut leaked its Ctrl prefix.");
                 if (modifiers != 0) router.RouteEvent(modifier, true, Resolve, (_, _) => { });
+                var mouseData = button == Services.KeyboardShortcut.MouseXButton1 ? (nint)(1 << 16) :
+                    button == Services.KeyboardShortcut.MouseXButton2 ? (nint)(2 << 16) : 0;
                 var position = (nint)((y << 16) | (x & 0xffff));
                 // Deliver a complete click before queued shortcut execution, including
                 // the synchronous WM_CAPTURECHANGED produced by ReleaseCapture.
-                PreviewStyleSendMessage(hwnd, down, 0, position);
+                PreviewStyleSendMessage(hwnd, down, mouseData, position);
                 var generation = router.Generation;
-                PreviewStyleSendMessage(hwnd, up, 0, position);
+                PreviewStyleSendMessage(hwnd, up, mouseData, position);
                 InteractionAssert(router.Generation == generation,
                     $"{context}/{button}: normal mouse release reset keyboard ownership.");
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
@@ -263,8 +269,8 @@ internal static partial class Program
                 if (modifiers != 0)
                 {
                     packets.SetLength(0);
-                    PreviewStyleSendMessage(hwnd, down, 0, position);
-                    PreviewStyleSendMessage(hwnd, up, 0, position);
+                    PreviewStyleSendMessage(hwnd, down, mouseData, position);
+                    PreviewStyleSendMessage(hwnd, up, mouseData, position);
                     AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
                     InteractionAssert(ReadShortcutPackets(packets).Length == 2,
                         $"{context}/{button}: holding Ctrl across clicks lost the second shortcut.");
@@ -275,9 +281,9 @@ internal static partial class Program
                     foreach (var cancel in new[] { 0x001F, 0x0215 }) // cancel mode / stolen capture
                     {
                         packets.SetLength(0);
-                        PreviewStyleSendMessage(hwnd, down, 0, position);
+                        PreviewStyleSendMessage(hwnd, down, mouseData, position);
                         PreviewStyleSendMessage(hwnd, cancel, 0, 0);
-                        PreviewStyleSendMessage(hwnd, up, 0, position);
+                        PreviewStyleSendMessage(hwnd, up, mouseData, position);
                         AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
                         InteractionAssert(!ReadShortcutPackets(packets).Any(f =>
                             f.GetProperty("kind").GetString() == "button_event" &&

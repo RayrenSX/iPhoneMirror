@@ -75,11 +75,13 @@ USB 和无线模式复用现有绝对触控通道。现有蓝牙 HID 仅提供�
 
 ### 复现软件回归
 
+以下命令从仓库根目录、无 CLR/.NET 注入变量的终端运行；环境说明见[开发指南](DEVELOPMENT.md#测试入口与覆盖范围)。
+
 ```powershell
 dotnet build src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj --no-restore -v:minimal
-dotnet run --no-build --no-restore --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -- --keyboard-mapping artifacts/keyboard-mapping
-dotnet run --no-build --no-restore --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -- --keyboard-focus
-dotnet run --no-build --no-restore --project src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj -- --localization-audit
+dotnet ./src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --keyboard-mapping artifacts/keyboard-mapping
+dotnet ./src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --keyboard-focus
+dotnet ./src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.dll --localization-audit
 ```
 
 UI 和键盘测试应串行运行，避免相互抢焦点。截图和本地验证配置在被 Git 忽略的 `artifacts/keyboard-mapping/` 下。生产设置不会新增默认绑定。

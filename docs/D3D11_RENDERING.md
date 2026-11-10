@@ -1,6 +1,6 @@
 # Windows 低延迟解码与显示路径
 
-实现说明于 2026-10-01 对照工作区核对；下文真机数据保留原测试条件，不表示本次重新测量。
+实现说明于 2026-11-05 对照工作区核对；下文真机数据保留原测试条件，不表示本次重新测量。
 模块关系见[架构说明](ARCHITECTURE.md)。
 
 ## 结论
@@ -28,6 +28,11 @@ WPF 不再逐帧调用 `im_copy_latest_video_frame_scaled`，也不再创建或�
 解码器设备上安全回读为 CPU 帧，再上传到预览设备。这样避免跨设备 keyed-mutex 在
 横竖屏切换时阻塞 USB。软件 MFT 直接产生 CPU 帧；预览路径最终都由同一个 D3D11
 shader 做显示转换，截图和输出则走独立的 CPU 导出接口。
+
+AVC High 4:4:4 是上述 Media Foundation 路径的例外：检测到 H.264 `chroma_format=3`
+时，`BundledH264Decoder` 使用随包 AirPlay FFmpeg 运行库软件解码，转换为 NV12 后交给
+同一显示路径，实际解码状态报告为软件。只有对应运行库和解码器可用时才声明该协商能力。
+这套解码 DLL 与录制/推流使用的 `tools/ffmpeg/ffmpeg.exe` 是不同载荷。
 
 独立窗口使用 `WS_EX_NOREDIRECTIONBITMAP` 与
 `CreateSwapChainForComposition`。像素着色器使用按设备族拟合的圆角半径与曲线指数，

@@ -568,6 +568,7 @@ private:
         if (!line.starts_with("YUV4MPEG2 ")) return false;
         unsigned int width{};
         unsigned int height{};
+        bool supported_chroma = true;
         for (std::size_t begin = 10; begin < line.size();) {
             const auto end = line.find(' ', begin);
             const auto token = line.substr(begin, end == std::string_view::npos
@@ -576,10 +577,13 @@ private:
                 (void)parse_uint(token.substr(1), width);
             else if (token.size() > 1 && token.front() == 'H')
                 (void)parse_uint(token.substr(1), height);
+            else if (token.size() > 1 && token.front() == 'C')
+                supported_chroma = token == "C420" || token == "C420jpeg" ||
+                    token == "C420mpeg2" || token == "C420paldv";
             if (end == std::string_view::npos) break;
             begin = end + 1U;
         }
-        if (width < 2 || height < 2 || width > 8192 || height > 8192 ||
+        if (!supported_chroma || width < 2 || height < 2 || width > 8192 || height > 8192 ||
             (width & 1U) != 0 || (height & 1U) != 0) return false;
         const auto bytes = static_cast<std::uint64_t>(width) * height * 3U / 2U;
         if (bytes == 0 || bytes > iPhoneMirror::wireless::MaxPayloadBytes) return false;

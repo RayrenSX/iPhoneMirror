@@ -1,4 +1,5 @@
 """Wireless DDI preflight and USB preparation must preserve usable routes."""
+import contextlib
 import sys
 import unittest
 from pathlib import Path
@@ -12,6 +13,60 @@ import usb_touch_bridge as bridge
 class WirelessDdiFallbackTests(unittest.IsolatedAsyncioTestCase):
     def session(self, transport='wireless'):
         return bridge.TouchSession(SimpleNamespace(emit=AsyncMock()), 120, 'test-device', transport)
+
+    async def test_ios27_network_and_remote_pairing_prepare_both_image_routes_then_reconnect(self):
+        for route in ('network', 'remote-pairing'):
+            for image in ('cryptex', 'personalized'):
+                with self.subTest(route=route, image=image):
+                    session = self.session()
+                    usb = SimpleNamespace(udid='test-device', product_version='27.0.1',
+                        get_developer_mode_status=AsyncMock(return_value=True), close=AsyncMock())
+                    network = SimpleNamespace(udid=usb.udid, product_version=usb.product_version,
+                        get_developer_mode_status=AsyncMock(return_value=True), close=AsyncMock())
+                    attempts, endpoints = [], []
+                    async def connect(endpoint):
+                        if route == 'network':
+                            self.assertIs(endpoint, network)
+                        attempts.append(session._wireless_ddi_prepared)
+                        if not session._wireless_ddi_prepared:
+                            raise bridge.BridgePrerequisiteError('touch_surface_unavailable', 'missing HID')
+                        self.assertTrue(session._ddi_uses_cryptex)
+                        self.assertEqual(session._ddi_personalized_fallback, image == 'personalized')
+                        self.assertEqual(session.transport_mode, 'wireless')
+                        self.assertEqual(usb.close.await_count, 1)
+                    async def discover(**_):
+                        endpoint = SimpleNamespace(close=AsyncMock())
+                        endpoints.append(endpoint)
+                        return [endpoint]
+                    @contextlib.asynccontextmanager
+                    async def tunnel(_):
+                        yield object()
+                    error = bridge.BridgePrerequisiteError('developer_image_mount_failed', 'Cryptex rejected')
+                    with patch.object(session, '_create_lockdown_with_retry', AsyncMock(return_value=usb)) as create, \
+                         patch.object(session, '_prepare_cryptex_developer_image', AsyncMock(
+                             side_effect=error if image == 'personalized' else None)) as cryptex, \
+                         patch.object(session, '_is_personalized_ddi_mounted', AsyncMock(return_value=False)) as inventory, \
+                         patch.object(session, '_mount_personalized_ddi', AsyncMock()) as mount, \
+                         patch.object(session, '_refresh_personalized_ddi', AsyncMock()) as unmount, \
+                         patch.object(session, '_run_tunnel_attempt', connect), \
+                         patch.object(session, '_run_observed_tunnel', connect), \
+                         patch.object(session, '_bounded_tunnel', tunnel), \
+                         patch.object(bridge, 'iter_remote_paired_identifiers', return_value=['test-device']), \
+                         patch.object(bridge, 'get_remote_pairing_tunnel_services', AsyncMock(side_effect=discover)):
+                        if route == 'network':
+                            await session._connect_with_ddi_recovery(network)
+                        else:
+                            await session._connect_via_remote_pairing()
+                        self.assertEqual(attempts, [False, True])
+                        create.assert_awaited_once_with('USB')
+                        cryptex.assert_awaited_once_with(usb)
+                        self.assertEqual(inventory.await_count, int(image == 'personalized'))
+                        self.assertEqual(mount.await_count, int(image == 'personalized'))
+                        unmount.assert_not_awaited()
+                        usb.close.assert_awaited_once()
+                        network.close.assert_not_awaited()
+                        for endpoint in endpoints:
+                            endpoint.close.assert_awaited_once()
 
     async def test_unavailable_network_image_service_still_probes_control_tunnel(self):
         session = self.session()

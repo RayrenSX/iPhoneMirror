@@ -190,7 +190,7 @@
                                     <ComboBoxItem Content="1280 x 720" Tag="1280x720"/>
                                     <ComboBoxItem Content="1920 x 1080" Tag="1920x1080"/>
                                     <ComboBoxItem Content="720 x 1280" Tag="720x1280"/>
-                                    <ComboBoxItem Content="1080 x 1920" Tag="1080x1920"/>
+                                    <ComboBoxItem Content="1088 x 1920" Tag="1088x1920"/>
                                 </ComboBox>
                             </StackPanel>
                             <StackPanel Grid.Column="2">
@@ -228,6 +228,9 @@
 
         <Grid Grid.Row="3" Margin="0,14,0,0">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button x:Name="StopAllOutputsButton" Grid.Column="1" Content="{DynamicResource StopMediaOutput}" Click="OnStopAllClick"
+                    IsEnabled="False" Margin="12,0,0,0"/>
             <StackPanel VerticalAlignment="Center">
                 <TextBlock x:Name="OutputStatusText" Text="{Binding MediaOutputStatus}" TextWrapping="Wrap"
                            AutomationProperties.LiveSetting="Polite"

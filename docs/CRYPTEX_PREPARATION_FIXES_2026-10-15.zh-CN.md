@@ -1,5 +1,7 @@
 # Cryptex 准备修复与复审（2026-10-15）
 
+> 文档整理说明（2026-11-05）：文中构建产物、日志和截图的本地记录路径不随仓库分发，保留用于追溯；历史测试结论未在本次重新执行。
+
 依据：[修复前全流程审查](CRYPTEX_PREPARATION_REVIEW_2026-10-15.zh-CN.md)。
 
 **审查中已确认的问题已修复；最终复审在本次源码、自动测试和本地桥接产物范围内未再发现可确认缺陷。** 这不是对所有设备、网络及未来系统版本的无错误保证。真实 Apple 签名、目标手机安装及最终 ZIP/Setup 的实机验收仍未完成。
@@ -59,8 +61,8 @@
 - `outputs/iPhoneMirror/tools/` 中同一套桥接载荷；
 - `outputs/iPhoneMirror.Installer/tools/` 中同一套桥接载荷。
 
-三个 EXE 的哈希和具体 manifest 校验结果见 [artifact-results.json](../outputs-next/cryptex-fixes-2026-10-15/artifact-results.json)。两份应用输出的旧桥接载荷保存在本轮输出目录 `previous-runtime/`，可核查或恢复。**更新安装器载荷目录不等于生成了新的 Setup 安装 EXE。** 本轮没有发布 GitHub Release，也没有制作/验收最终 ZIP/Setup。
+三个 EXE 的哈希和具体 manifest 校验结果见 artifact-results.json（本地记录：`outputs-next/cryptex-fixes-2026-10-15/artifact-results.json`）。两份应用输出的旧桥接载荷保存在本轮输出目录 `previous-runtime/`，可核查或恢复。**更新安装器载荷目录不等于生成了新的 Setup 安装 EXE。** 本轮没有发布 GitHub Release，也没有制作/验收最终 ZIP/Setup。
 
 本轮另外尝试对真实固定资源执行 GitHub API 回退下载，当前网络以 `ReadError` 失败；未将这个外部网络失败伪报为下载成功。固定资源完整性的自动回归通过，但本轮没有完成真实五文件下载、Apple ticket 请求或手机安装，仍需在可访问来源和目标设备上验收。
 
-完整日志、构建暂存路径、载荷备份及校验结果：[cryptex-fixes-2026-10-15](../outputs-next/cryptex-fixes-2026-10-15/)。
+完整日志、构建暂存路径、载荷备份及校验结果：cryptex-fixes-2026-10-15（本地记录：`outputs-next/cryptex-fixes-2026-10-15`）。

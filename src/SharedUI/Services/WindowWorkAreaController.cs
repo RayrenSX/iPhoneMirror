@@ -46,6 +46,45 @@ internal static class WindowWorkAreaController
         if (!AttachedWindows.TryAdd(window, new object())) return;
         var designMinWidth = window.MinWidth;
         var designMinHeight = window.MinHeight;
+        HwndSource? source = null;
+        nint lastMonitor = 0;
+
+        nint WindowProcedure(nint hwnd, int message, nint wParam, nint lParam,
+            ref bool handled)
+        {
+            if (message != 0x0024) return 0; // WM_GETMINMAXINFO
+            var info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MonitorDefaultToNearest), ref info)) return 0;
+            var limits = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+            var width = info.WorkArea.Right - info.WorkArea.Left;
+            var height = info.WorkArea.Bottom - info.WorkArea.Top;
+            var dpi = GetDpiForWindow(hwnd);
+            var scale = (dpi == 0 ? 96d : dpi) / 96d;
+            if (double.IsFinite(window.MaxWidth))
+                width = Math.Min(width, (int)Math.Ceiling(window.MaxWidth * scale));
+            if (double.IsFinite(window.MaxHeight))
+                height = Math.Min(height, (int)Math.Ceiling(window.MaxHeight * scale));
+            limits.MaxPosition = new NativePoint(info.WorkArea.Left - info.Monitor.Left,
+                info.WorkArea.Top - info.Monitor.Top);
+            limits.MaxSize = new NativePoint(width, height);
+            if (double.IsFinite(window.MaxWidth)) limits.MaxTrackSize.X = width;
+            if (double.IsFinite(window.MaxHeight)) limits.MaxTrackSize.Y = height;
+            limits.MinTrackSize = new NativePoint(
+                Math.Min(width, Math.Max(limits.MinTrackSize.X, (int)Math.Ceiling(window.MinWidth * scale))),
+                Math.Min(height, Math.Max(limits.MinTrackSize.Y, (int)Math.Ceiling(window.MinHeight * scale))));
+            Marshal.StructureToPtr(limits, lParam, false);
+            handled = true;
+            return 0;
+        }
+
+        void InstallHook()
+        {
+            if (source is not null) return;
+            var handle = new WindowInteropHelper(window).Handle;
+            source = HwndSource.FromHwnd(handle);
+            source?.AddHook(WindowProcedure);
+            lastMonitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
+        }
 
         void FitToCurrentMonitor(bool center)
         {
@@ -69,6 +108,7 @@ internal static class WindowWorkAreaController
 
             window.MinWidth = layout.MinWidth;
             window.MinHeight = layout.MinHeight;
+            if (window.WindowState != WindowState.Normal) return;
             var scale = (dpi == 0 ? 96d : dpi) / 96d;
             window.Width = layout.Width / scale;
             window.Height = layout.Height / scale;
@@ -77,15 +117,30 @@ internal static class WindowWorkAreaController
                 layout.Width, layout.Height, SwpNoZOrder | SwpNoActivate);
         }
 
-        window.SourceInitialized += (_, _) => window.Dispatcher.BeginInvoke(
-            DispatcherPriority.Loaded,
-            new Action(() => FitToCurrentMonitor(center: false)));
+        window.SourceInitialized += (_, _) =>
+        {
+            InstallHook();
+            window.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+                new Action(() => FitToCurrentMonitor(center: false)));
+        };
         window.DpiChanged += (_, _) => window.Dispatcher.BeginInvoke(
             DispatcherPriority.Loaded,
             new Action(() => FitToCurrentMonitor(center: false)));
+        window.LocationChanged += (_, _) =>
+        {
+            var monitor = MonitorFromWindow(new WindowInteropHelper(window).Handle, MonitorDefaultToNearest);
+            if (monitor == lastMonitor) return;
+            lastMonitor = monitor;
+            window.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+                new Action(() => FitToCurrentMonitor(center: false)));
+        };
+        window.Closed += (_, _) => source?.RemoveHook(WindowProcedure);
 
         if (new WindowInteropHelper(window).Handle != 0)
+        {
+            InstallHook();
             FitToCurrentMonitor(center: false);
+        }
     }
 
     internal static WindowWorkAreaLayout CalculateLayout(
@@ -128,6 +183,19 @@ internal static class WindowWorkAreaController
             left, top, width, height,
             Math.Min(Math.Max(0, designMinWidth), width / scale),
             Math.Min(Math.Max(0, designMinHeight), height / scale));
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint(int x, int y)
+    {
+        internal int X = x;
+        internal int Y = y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        internal NativePoint Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize;
     }
 
     [StructLayout(LayoutKind.Sequential)]
