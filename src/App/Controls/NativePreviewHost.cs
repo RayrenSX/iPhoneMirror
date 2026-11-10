@@ -32,6 +32,8 @@ internal sealed class NativePreviewHost : HwndHost
     private (int Width, int Height, int Radius, double Curve)? _appliedRegion;
 
     internal bool CapturePointerInput { get; set; }
+    private readonly NativePreviewMouse _windowMouse = new();
+    internal bool BluetoothWindowMouseEnabled { get; set; }
     internal bool CaptureTouchInput { get; set; }
     internal bool SuppressMouseMove { get; set; }
     // Raw Input owns button and wheel transitions while Bluetooth control is
@@ -146,6 +148,8 @@ internal sealed class NativePreviewHost : HwndHost
     {
         if (_presentationVisible == visible) return;
         _presentationVisible = visible;
+        if (!visible && BluetoothWindowMouseEnabled)
+            PointerInput?.Invoke(this, new PreviewPointerEventArgs(PreviewPointerKind.Reset, 0, 0, 0, 0));
         if (_window != 0) _ = ShowWindow(_window, visible ? SwShowNoActivate : SwHide);
     }
 
@@ -232,12 +236,19 @@ internal sealed class NativePreviewHost : HwndHost
         PreviewAttachmentCoordinator.Unregister(hwnd.Handle);
         if (hwnd.Handle != 0) DestroyWindow(hwnd.Handle);
         _window = 0;
+        _windowMouse.OnLeave();
         _appliedRegion = null;
     }
 
     protected override nint WndProc(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message == NativePreviewMouse.WmMouseLeave)
+        {
+            _windowMouse.OnLeave();
+            if (BluetoothWindowMouseEnabled)
+                PointerInput?.Invoke(this, new PreviewPointerEventArgs(PreviewPointerKind.Reset, 0, 0, 0, 0));
+        }
         if (message == NativeTouchInput.WmTouch)
         {
             NativeTouchInput.Dispatch(hwnd, wParam, lParam, CapturePointerInput && CaptureTouchInput,
@@ -279,7 +290,7 @@ internal sealed class NativePreviewHost : HwndHost
         {
             // Button-up clears our mask before ReleaseCapture synchronously
             // sends WM_CAPTURECHANGED. That is a completed click, not a reset.
-            if (message == 0x0215 && _capturedMouseButtons == 0)
+            if (message == 0x0215 && _capturedMouseButtons == 0 && !BluetoothWindowMouseEnabled)
             {
                 handled = true;
                 return 0;
@@ -300,17 +311,24 @@ internal sealed class NativePreviewHost : HwndHost
                         handled = true;
                         return 0;
                     }
-                    lParam = DrainQueuedMouseMoves(_window, lParam);
+                    if (BluetoothWindowMouseEnabled) _windowMouse.TrackLeave(hwnd);
+                    else lParam = DrainQueuedMouseMoves(_window, lParam);
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.Move, GetSignedLowWord(lParam),
                         GetSignedHighWord(lParam), 0, 0, GetClientWidth(),
-                        GetClientHeight()));
+                        GetClientHeight())
+                    {
+                        WindowsButtons = NativePreviewMouse.PressedButtons(wParam),
+                    });
                     handled = true;
                     return 0;
                 case 0x0201: // WM_LBUTTONDOWN
                 case 0x0204: // WM_RBUTTONDOWN
                 case 0x0207: // WM_MBUTTONDOWN
                 case 0x020B: // WM_XBUTTONDOWN
+                case 0x0203 when BluetoothWindowMouseEnabled: // WM_LBUTTONDBLCLK
+                case 0x0206 when BluetoothWindowMouseEnabled: // WM_RBUTTONDBLCLK
+                case 0x0209 when BluetoothWindowMouseEnabled: // WM_MBUTTONDBLCLK
                     // STATIC children do not take keyboard focus on click.
                     // Restore both WPF and native focus after a toolbar/editor
                     // interaction before dispatching this preview input.
@@ -326,8 +344,12 @@ internal sealed class NativePreviewHost : HwndHost
                         handled = true;
                         return message is 0x020B or 0x020C ? 1 : 0;
                     }
-                    _capturedMouseButtons |= MouseButtonFromMessage(message, wParam);
-                    _ = SetCapture(_window);
+                    if (BluetoothWindowMouseEnabled) _windowMouse.TrackLeave(hwnd);
+                    else
+                    {
+                        _capturedMouseButtons |= MouseButtonFromMessage(message, wParam);
+                        _ = SetCapture(_window);
+                    }
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.ButtonDown, GetSignedLowWord(lParam),
                         GetSignedHighWord(lParam), MouseButtonFromMessage(message, wParam), 0,
@@ -348,7 +370,7 @@ internal sealed class NativePreviewHost : HwndHost
                         PreviewPointerKind.ButtonUp, GetSignedLowWord(lParam),
                         GetSignedHighWord(lParam), MouseButtonFromMessage(message, wParam), 0,
                         GetClientWidth(), GetClientHeight()));
-                    if (_capturedMouseButtons == 0) _ = ReleaseCapture();
+                    if (!BluetoothWindowMouseEnabled && _capturedMouseButtons == 0) _ = ReleaseCapture();
                     handled = true;
                     return message is 0x020B or 0x020C ? 1 : 0;
                 case 0x020A: // WM_MOUSEWHEEL
@@ -357,10 +379,19 @@ internal sealed class NativePreviewHost : HwndHost
                         handled = true;
                         return 0;
                     }
+                    if (BluetoothWindowMouseEnabled)
+                    {
+                        if (!NativePreviewMouse.TryGetWheelClientPosition(hwnd, lParam, out lParam))
+                            break;
+                        _windowMouse.TrackLeave(hwnd);
+                    }
                     PointerInput?.Invoke(this, new PreviewPointerEventArgs(
                         PreviewPointerKind.Wheel, GetSignedLowWord(lParam),
                         GetSignedHighWord(lParam), 0, (short)((long)wParam >> 16),
-                        GetClientWidth(), GetClientHeight()));
+                        GetClientWidth(), GetClientHeight())
+                    {
+                        WindowsButtons = NativePreviewMouse.PressedButtons(wParam),
+                    });
                     handled = true;
                     return 0;
                 case 0x0100: // WM_KEYDOWN
@@ -404,8 +435,8 @@ internal sealed class NativePreviewHost : HwndHost
     private static short GetSignedHighWord(nint value) => unchecked((short)(((long)value >> 16) & 0xFFFF));
     private static byte MouseButtonFromMessage(int message, nint wParam) => message switch
     {
-        0x0201 or 0x0202 => 1,
-        0x0204 or 0x0205 => 2,
+        0x0201 or 0x0202 or 0x0203 => 1,
+        0x0204 or 0x0205 or 0x0206 => 2,
         0x020B or 0x020C => ((wParam.ToInt64() >> 16) & 0xffff) == 1 ? (byte)8 : (byte)16,
         _ => 4,
     };
@@ -536,6 +567,7 @@ internal sealed class PreviewPointerEventArgs : EventArgs
     internal int X { get; }
     internal int Y { get; }
     internal byte Button { get; }
+    internal byte? WindowsButtons { get; init; }
     internal int Wheel { get; }
     internal int SurfaceWidth { get; }
     internal int SurfaceHeight { get; }

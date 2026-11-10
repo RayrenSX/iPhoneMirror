@@ -173,6 +173,9 @@ internal sealed class NativePreviewWindow : IDisposable
     private double _appliedOpacity = 1.0;
     private bool _opaqueOnHover;
     private bool _isPointerOverWindow;
+    private readonly NativePreviewMouse _windowMouse = new();
+    internal bool BluetoothWindowMouseEnabled { get; set; }
+    private bool UsesBluetoothWindowMouse => BluetoothWindowMouseEnabled && !IsUsbControlEnabledForWindow;
     private readonly DispatcherTimer _hoverOpacityTimer = new()
     {
         Interval = TimeSpan.FromMilliseconds(80),
@@ -181,9 +184,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private nint _restoreStyle;
 
     internal bool IsFullScreen => _isFullScreen;
-    // Touch control shares the drag surface. Unfixing gives it back to Windows,
+    private bool UsesWindowPointerControl => IsUsbControlEnabledForWindow || UsesBluetoothWindowMouse;
+    // Position-based control shares the drag surface. Unfixing gives it back to Windows,
     // including keyboard input admitted through the global hook.
-    internal bool AllowsControlInput => !IsUsbControlEnabledForWindow || _isFixed || _isFullScreen;
+    internal bool AllowsControlInput => !UsesWindowPointerControl || _isFixed || _isFullScreen;
     internal event Action<bool>? FullScreenChanged;
 
     private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string title,
@@ -669,7 +673,7 @@ internal sealed class NativePreviewWindow : IDisposable
         if (_isFullScreen)
         {
             _isFullScreen = false;
-            if (!_isFixed && IsUsbControlEnabledForWindow) ResetTouchControlInput();
+            if (!_isFixed && UsesWindowPointerControl) ResetTouchControlInput();
             _ = RemovePropW(_handle, "iPhoneMirrorFullScreen");
             _ = SetWindowLongPtrW(_handle, GwlStyle, _restoreStyle);
             _ = SetWindowPos(_handle, 0, _restoreRectangle.Left, _restoreRectangle.Top,
@@ -747,6 +751,12 @@ internal sealed class NativePreviewWindow : IDisposable
             handled = true;
             return 0;
         }
+        if (message == NativePreviewMouse.WmMouseLeave)
+        {
+            _windowMouse.OnLeave();
+            if (UsesBluetoothWindowMouse && IsReverseControlEnabledForWindow)
+                _pointerInput?.Invoke(new PreviewPointerEventArgs(PreviewPointerKind.Reset, 0, 0, 0, 0));
+        }
         if (message == WmActivate)
             ActivationChanged?.Invoke((wParam.ToInt64() & 0xFFFF) != 0);
         if (WindowsAutoPlayGuard.ShouldCancel(message, _sessionHandle != 0))
@@ -757,7 +767,7 @@ internal sealed class NativePreviewWindow : IDisposable
         }
         // A normal button-up releases capture after clearing the button mask.
         // Keep queued shortcuts and held keyboard modifiers alive in that case.
-        if (message == WmCaptureChanged && _capturedMouseButtons == 0)
+        if (message == WmCaptureChanged && _capturedMouseButtons == 0 && !UsesBluetoothWindowMouse)
         {
             handled = true;
             return 0;
@@ -783,27 +793,28 @@ internal sealed class NativePreviewWindow : IDisposable
         switch (message)
         {
             case WmMouseMove when IsPointerInputActive:
-                lParam = DrainQueuedMouseMoves(hwnd, lParam);
-                DispatchPointer(PreviewPointerKind.Move, lParam, 0, 0);
+                if (UsesBluetoothWindowMouse) _windowMouse.TrackLeave(hwnd);
+                else lParam = DrainQueuedMouseMoves(hwnd, lParam);
+                DispatchPointer(PreviewPointerKind.Move, lParam, 0, 0,
+                    NativePreviewMouse.PressedButtons(wParam));
                 handled = true;
                 return 0;
             case WmLeftButtonDown when IsPointerInputActive:
-                _capturedMouseButtons |= 1;
-                _ = SetCapture(hwnd);
+                BeginPointerButton(hwnd, 1);
                 DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 1, 0);
                 handled = true;
                 return 0;
             case WmLeftButtonUp when IsPointerInputActive:
                 _capturedMouseButtons = (byte)(_capturedMouseButtons & ~1);
                 DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 1, 0);
-                if (_capturedMouseButtons == 0) _ = ReleaseCapture();
+                if (!UsesBluetoothWindowMouse && _capturedMouseButtons == 0) _ = ReleaseCapture();
                 handled = true;
                 return 0;
             case WmRightButtonDown when IsRightButtonForwardingEnabled:
+            case 0x0206 when IsRightButtonForwardingEnabled:
                 if (IsPointerInputActive)
                 {
-                    _capturedMouseButtons |= 2;
-                    _ = SetCapture(hwnd);
+                    BeginPointerButton(hwnd, 2);
                     DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 2, 0);
                 }
                 handled = true;
@@ -819,15 +830,15 @@ internal sealed class NativePreviewWindow : IDisposable
                 handled = true;
                 return 0;
             case WmMiddleButtonDown when IsPointerInputActive:
-                _capturedMouseButtons |= 4;
-                _ = SetCapture(hwnd);
+            case 0x0209 when UsesBluetoothWindowMouse && IsPointerInputActive:
+                BeginPointerButton(hwnd, 4);
                 DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 4, 0);
                 handled = true;
                 return 0;
             case WmMiddleButtonUp when IsPointerInputActive:
                 _capturedMouseButtons = (byte)(_capturedMouseButtons & ~4);
                 DispatchPointer(PreviewPointerKind.ButtonUp, lParam, 4, 0);
-                if (_capturedMouseButtons == 0) _ = ReleaseCapture();
+                if (!UsesBluetoothWindowMouse && _capturedMouseButtons == 0) _ = ReleaseCapture();
                 handled = true;
                 return 0;
             case WmXButtonDown when IsPointerInputActive:
@@ -848,10 +859,21 @@ internal sealed class NativePreviewWindow : IDisposable
                 handled = true;
                 return 1;
             case WmMouseWheel when IsPointerInputActive:
+                if (UsesBluetoothWindowMouse)
+                {
+                    if (!NativePreviewMouse.TryGetWheelClientPosition(hwnd, lParam, out lParam))
+                        break;
+                    _windowMouse.TrackLeave(hwnd);
+                }
                 DispatchPointer(PreviewPointerKind.Wheel, lParam, 0,
-                    unchecked((short)(wParam.ToInt64() >> 16)));
+                    unchecked((short)(wParam.ToInt64() >> 16)),
+                    NativePreviewMouse.PressedButtons(wParam));
                 handled = true;
                 return 0;
+            case WmSetCursor when IsReverseControlActive && UsesBluetoothWindowMouse:
+                NativeCursor.SetArrow();
+                handled = true;
+                return 1;
             case WmSetCursor when IsPointerInputEnabledForWindow && IsUsbControlEnabledForWindow:
                 // USB touch control never captures the Windows pointer. A
                 // previous reverse-control route may have left the process
@@ -1210,7 +1232,7 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed || _handle == 0 || _isFullScreen) return;
         _isFixed = !_isFixed;
-        if (!_isFixed && IsUsbControlEnabledForWindow)
+        if (!_isFixed && UsesWindowPointerControl)
             ResetTouchControlInput();
         var style = GetWindowLongPtrW(_handle, GwlStyle).ToInt64();
         style = _isFixed ? style & ~WsThickFrame : style | WsThickFrame;
@@ -1243,10 +1265,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool IsUsbControlEnabledForWindow => _pointerInput is not null &&
         (_isUsbControlEnabled?.Invoke() ?? false);
     // The reverse-control callback also includes wired/wireless touch targets.
-    // Reserve their right-click for the window menu, even when a phone shortcut
-    // (including the default Home binding) uses it. Only Bluetooth forwards it.
+    // Absolute Bluetooth previews use the same window menu as wired/wireless
+    // touch control. Relative Bluetooth capture keeps device right-clicks.
     private bool IsRightButtonForwardingEnabled =>
-        IsReverseControlEnabledForWindow && !IsUsbControlEnabledForWindow;
+        IsReverseControlEnabledForWindow && !IsUsbControlEnabledForWindow && !UsesBluetoothWindowMouse;
     private bool IsPointerInputEnabledForWindow =>
         AllowsControlInput && (IsReverseControlEnabledForWindow || IsUsbControlEnabledForWindow);
     private bool IsPointerInputActive =>
@@ -1311,14 +1333,30 @@ internal sealed class NativePreviewWindow : IDisposable
         UpdateContextMenuLabels();
     }
 
+    internal void PrepareForBluetoothControl()
+    {
+        if (_disposed || _handle == 0 || !UsesBluetoothWindowMouse) return;
+        if (!_isFixed && !_isFullScreen) ToggleFixedWindow();
+    }
+
     internal void ReleasePointerCapture()
     {
         _capturedMouseButtons = 0;
         if (_handle != 0 && GetCapture() == _handle) _ = ReleaseCapture();
     }
 
+    private void BeginPointerButton(nint hwnd, byte button)
+    {
+        if (UsesBluetoothWindowMouse) _windowMouse.TrackLeave(hwnd);
+        else
+        {
+            _capturedMouseButtons |= button;
+            _ = SetCapture(hwnd);
+        }
+    }
+
     private void DispatchPointer(PreviewPointerKind kind, nint lParam,
-        byte button, int wheel)
+        byte button, int wheel, byte? windowsButtons = null)
     {
         if (_pointerInput is null || !GetClientRect(_handle, out var rect)) return;
         var packed = lParam.ToInt64();
@@ -1328,7 +1366,10 @@ internal sealed class NativePreviewWindow : IDisposable
         var sourceHeight = (_rotation & 1) == 0 ? _sourceHeight : _sourceWidth;
         _pointerInput(new PreviewPointerEventArgs(kind, x, y, button, wheel,
             Math.Max(1, rect.Right - rect.Left), Math.Max(1, rect.Bottom - rect.Top),
-            sourceWidth, sourceHeight, _rotation));
+            sourceWidth, sourceHeight, _rotation)
+        {
+            WindowsButtons = windowsButtons,
+        });
     }
 
     private static nint DrainQueuedMouseMoves(nint hwnd, nint currentLParam)

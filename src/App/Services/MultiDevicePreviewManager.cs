@@ -47,6 +47,12 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         _windows.ContainsKey(device.Udid);
     internal bool HasAnyOpen => _windows.Count != 0;
 
+    internal void SetBluetoothWindowMouseEnabled(bool enabled)
+    {
+        foreach (var window in _windows.Values)
+            window.BluetoothWindowMouseEnabled = enabled;
+    }
+
     internal nint GetWindowHandle(string? udid) =>
         !string.IsNullOrWhiteSpace(udid) && _windows.TryGetValue(udid, out var window)
             ? window.Handle : 0;
@@ -55,6 +61,12 @@ internal sealed class MultiDevicePreviewManager : IDisposable
 
     internal bool AllowsControlInput(nint handle) =>
         _windows.Values.All(window => window.Handle != handle || window.AllowsControlInput);
+
+    internal void PrepareBluetoothControlWindow(string? udid)
+    {
+        if (udid is not null && _windows.TryGetValue(udid, out var window))
+            window.PrepareForBluetoothControl();
+    }
 
     internal void ReleasePointerCapture(string? udid)
     {
@@ -209,6 +221,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                     device.Udid, started.Handle, preserveIfSelected: true);
             return (false, LocalizationService.Get("PreviewRendererAttachFailed"));
         }
+        window.BluetoothWindowMouseEnabled = viewModel.BluetoothWindowMouseEnabled;
         _windows[device.Udid] = window;
         window.ActivationChanged += active =>
             KeyboardFocusChanged?.Invoke(device.Udid, window.Handle, active);

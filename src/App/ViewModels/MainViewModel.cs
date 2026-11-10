@@ -356,6 +356,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     public bool CanToggleBluetoothControl => !_bluetoothControlStarting &&
         !_bluetoothControlStopping &&
         (_bluetoothControlEnabled || CanEnableBluetoothControlFor(SelectedDevice?.Udid));
+    public string BluetoothConnectionActionText => LocalizationService.Get(
+        _bluetoothControlEnabled ? "StopBluetoothControl" : "StartBluetoothControl");
     public string BluetoothControlActionText => LocalizationService.Get(
         _bluetoothControlEnabled
             ? (_bluetoothControlInputPaused ? "ResumeBluetoothControl" : "PauseBluetoothControl")
@@ -593,6 +595,26 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _appliedBluetoothMouseReverseHorizontal;
     internal bool AppliedBluetoothMouseReverseVertical =>
         _appliedBluetoothMouseReverseVertical;
+    public bool CanConfigureBluetoothWindowMouse => !_bluetoothControlEnabled && !_bluetoothControlStarting;
+    internal bool BluetoothUsesAbsoluteMouse => _bluetoothControl.UsesAbsoluteMouse;
+
+    public bool BluetoothWindowMouseEnabled
+    {
+        get => Application.Current is App app && app.UpdateSettings.BluetoothWindowMouseEnabled;
+        set
+        {
+            if (Application.Current is not App app || !CanConfigureBluetoothWindowMouse ||
+                value == BluetoothWindowMouseEnabled) return;
+            app.UpdateSettings.BluetoothWindowMouseEnabled = value;
+            if (!app.SaveUpdateSettings())
+            {
+                app.UpdateSettings.BluetoothWindowMouseEnabled = !value;
+                SetRawSettingsStatus(LocalizationService.Get("BluetoothMouseSettingsSaveFailed"));
+            }
+            OnPropertyChanged(nameof(BluetoothWindowMouseEnabled));
+        }
+    }
+
     public bool HasPendingBluetoothMouseSettings => Application.Current is App app &&
         (Math.Abs(_bluetoothMouseSensitivity - app.UpdateSettings.BluetoothMouseSensitivity) > 0.001 ||
          Math.Abs(_bluetoothWheelSensitivity - app.UpdateSettings.BluetoothWheelSensitivity) > 0.001 ||
@@ -1346,7 +1368,17 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     _ = DisableBluetoothControlAsync();
                 }
                 if (_bluetoothControlEnabled)
+                {
                     _ = EnsureBluetoothControlBindingAsync();
+                    // A pending client enumeration can overlap the final HID
+                    // subscription event. Complete an already-bound route
+                    // directly so that event cannot be lost behind its guard.
+                    var bound = _bluetoothControlDeviceUdid is { } target
+                        ? GetBluetoothControlBinding(target) : null;
+                    if (connected && bound is not null && string.Equals(bound,
+                            _bluetoothControl.TargetClientId, StringComparison.OrdinalIgnoreCase))
+                        _ = CompleteBluetoothConnectionAsync();
+                }
             }
             if (Application.Current?.Dispatcher.CheckAccess() == true) Update();
             else Application.Current?.Dispatcher.BeginInvoke(Update);
@@ -1379,7 +1411,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     }
 
     internal Task SendBluetoothMouseAsync(int dx, int dy, byte buttons = 0, int wheel = 0,
-        string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null)
+        string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null,
+        bool preserveButtonTransitions = false)
     {
         var target = expectedTargetDeviceUdid ?? _bluetoothControlDeviceUdid;
         var sessionCurrent = CaptureBluetoothInputSendGuard();
@@ -1389,8 +1422,25 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             (release || (Volatile.Read(ref _bluetoothControlInputEnabled) &&
                 !Volatile.Read(ref _bluetoothControlInputPaused)));
         if (!Current()) return Task.CompletedTask;
-        return _bluetoothControl.SendMouseAsync(dx, dy, buttons, wheel, target, Current);
+        if (BluetoothUsesAbsoluteMouse)
+            return release ? _bluetoothControl.ReleaseAbsoluteMouseAsync(target, Current) : Task.CompletedTask;
+        return _bluetoothControl.SendMouseAsync(dx, dy, buttons, wheel, target, Current,
+            preserveButtonTransitions);
     }
+
+    internal Task SendBluetoothAbsoluteMouseAsync(double x, double y, byte buttons, int wheel,
+        string udid, Func<bool> canSend, bool reset)
+    {
+        var sessionCurrent = CaptureBluetoothInputSendGuard();
+        var humanGuard = AutomationHumanGuard(udid);
+        bool Current() => sessionCurrent() && humanGuard() && canSend() &&
+            (reset || (Volatile.Read(ref _bluetoothControlInputEnabled) &&
+                !Volatile.Read(ref _bluetoothControlInputPaused)));
+        return _bluetoothControl.SendAbsoluteMouseAsync(x, y, buttons, wheel, udid, Current, reset);
+    }
+    internal void ConfigureBluetoothAbsoluteDragGeometry(string udid, uint width, uint height, int rotation) =>
+        _bluetoothControl.ConfigureAbsoluteDragGeometry(Devices.FirstOrDefault(d => DeviceViewModel.UdidEquals(d.Udid, udid))?.ProductType,
+            width, height, rotation);
 
     internal Task SendBluetoothKeyboardAsync(byte modifiers, IReadOnlyCollection<byte> usages,
         string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null) =>
@@ -1631,7 +1681,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 bindingAdvice);
             return;
         }
-        if (!await AcknowledgeBluetoothHidReportMapChangeAsync())
+        var useAbsoluteMouse = BluetoothWindowMouseEnabled;
+        var reportMapVersion = useAbsoluteMouse ? BluetoothHidProtocol.AbsoluteMouseReportMapVersion
+            : BluetoothHidProtocol.ReportMapVersion;
+        if (!await AcknowledgeBluetoothHidReportMapChangeAsync(reportMapVersion) ||
+            useAbsoluteMouse != BluetoothWindowMouseEnabled)
         {
             ControlStatus.Cancelled(ControlStatusMode.Bluetooth, statusDeviceName,
                 LocalizationService.Get("ControlBluetoothCancelled"), LocalizationService.Get("ControlPrerequisiteCancelled"));
@@ -1648,6 +1702,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         Interlocked.Increment(ref _bluetoothControlInputSession);
         Interlocked.Increment(ref _bluetoothControlInputGeneration);
         _bluetoothControlStarting = true;
+        OnPropertyChanged(nameof(CanConfigureBluetoothWindowMouse));
         OnPropertyChanged(nameof(CanStartBluetoothControl));
         OnPropertyChanged(nameof(CanStopBluetoothControl));
         OnPropertyChanged(nameof(CanToggleBluetoothControl));
@@ -1683,7 +1738,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     statusDeviceName,
                     startupStage == BluetoothHidStartupStage.CheckingBluetooth
                         ? LocalizationService.Get("ControlCheckingBluetoothSupport")
-                        : LocalizationService.Get("ControlSwitchingBluetoothMode")));
+                        : LocalizationService.Get("ControlSwitchingBluetoothMode")),
+                useAbsoluteMouse: useAbsoluteMouse);
             if (!started || _bluetoothControl.HasTransportFailure)
             {
                 var failureDetails = _bluetoothControl.Error ?? _bluetoothControl.Status;
@@ -1746,6 +1802,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         finally
         {
             _bluetoothControlStarting = false;
+            OnPropertyChanged(nameof(CanConfigureBluetoothWindowMouse));
             OnPropertyChanged(nameof(CanStartBluetoothControl));
             OnPropertyChanged(nameof(CanStopBluetoothControl));
             OnPropertyChanged(nameof(CanToggleBluetoothControl));
@@ -1826,11 +1883,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         return true;
     }
 
-    private async Task<bool> AcknowledgeBluetoothHidReportMapChangeAsync()
+    private async Task<bool> AcknowledgeBluetoothHidReportMapChangeAsync(int reportMapVersion)
     {
         if (Application.Current is not App app ||
-            app.UpdateSettings.BluetoothHidReportMapAcknowledgedVersion >=
-                BluetoothHidProtocol.ReportMapVersion)
+            app.UpdateSettings.BluetoothHidReportMapAcknowledgedVersion == reportMapVersion)
             return true;
         var result = await ControlStatus.RequestPromptAsync(new(
             ControlPromptType.UserActionRequired,
@@ -1842,14 +1898,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             _shutdownCancellation.Token);
         if (result.Action == ControlPromptAction.Primary)
         {
-            app.UpdateSettings.BluetoothHidReportMapAcknowledgedVersion =
-                BluetoothHidProtocol.ReportMapVersion;
+            app.UpdateSettings.BluetoothHidReportMapAcknowledgedVersion = reportMapVersion;
             if (!app.SaveUpdateSettings())
                 AddDiagnosticLog(AppLog.Event("bluetooth_hid_report_map_ack_save_failed"));
             return true;
         }
         AddDiagnosticLog(AppLog.Event("bluetooth_hid_report_map_repair_required",
-            ("version", BluetoothHidProtocol.ReportMapVersion)));
+            ("version", reportMapVersion)));
         return false;
     }
 
@@ -3383,6 +3438,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void NotifyBluetoothControlStateChanged()
     {
+        OnPropertyChanged(nameof(BluetoothConnectionActionText));
+        OnPropertyChanged(nameof(CanConfigureBluetoothWindowMouse));
         OnPropertyChanged(nameof(IsBluetoothControlEnabled));
         OnPropertyChanged(nameof(BluetoothControlIsConnected));
         OnPropertyChanged(nameof(BluetoothControlIsInputEnabled));

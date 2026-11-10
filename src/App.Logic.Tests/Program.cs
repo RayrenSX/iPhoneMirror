@@ -1485,8 +1485,8 @@ Equal(true,
 Equal(true,
     bluetoothHidCode.Contains("private void HandleNotificationFailure(byte reportId",
         StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("if (reportId == 2)", StringComparison.Ordinal) &&
-    bluetoothHidCode.Contains("reportId == 2 ? MouseNotificationTimeout : NotificationTimeout",
+    bluetoothHidCode.Contains("if (reportId is 2 or RelativeMouseReportId)", StringComparison.Ordinal) &&
+    bluetoothHidCode.Contains("reportId is 2 or RelativeMouseReportId ? MouseNotificationTimeout : NotificationTimeout",
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("RetireNotificationChannel(channel);",
         StringComparison.Ordinal) &&
@@ -1495,7 +1495,7 @@ Equal(true,
     bluetoothHidCode.Contains("ReleaseMouseNotificationGateAsync(notifyTask)",
         StringComparison.Ordinal) &&
     bluetoothHidCode.Contains("ScheduleMouseStallRecovery(failedRouteGeneration);", StringComparison.Ordinal),
-    "a timed-out mouse notification tears down the route while retaining its transport slot until the native call ends");
+    "a timed-out absolute or relative mouse notification tears down the route while retaining its transport slot until the native call ends");
 Equal(true,
     mainWindowCode.Contains("ProcessLatestQueuedRawMouseInput", StringComparison.Ordinal) &&
     mainWindowCode.Contains("PeekMessageW", StringComparison.Ordinal) &&

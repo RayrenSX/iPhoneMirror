@@ -233,6 +233,7 @@
     <system:String x:Key="ApplyVideoSettings">映像設定を適用</system:String>
     <system:String x:Key="PlayAudioWindows">Windowsで音声を再生</system:String>
     <system:String x:Key="PlaybackVolume">再生音量</system:String>
+    <system:String x:Key="BluetoothWindowMouse">Bluetooth絶対位置（実験）</system:String>
     <system:String x:Key="BluetoothMouseSensitivity">Bluetoothマウスの感度</system:String>
     <system:String x:Key="BluetoothMouseSettingsTitle">リモート操作の設定</system:String>
     <system:String x:Key="BluetoothWheelSensitivity">ホイールの感度</system:String>

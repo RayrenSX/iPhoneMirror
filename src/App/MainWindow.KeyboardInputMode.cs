@@ -99,9 +99,9 @@ public partial class MainWindow
             finally { _systemShortcutGate.Release(); }
             if (!_keyboardRouter.CompleteHandoff(generation)) return;
             if (!_mappingClosing)
-                // Mouse INPUTSINK belongs to the active Bluetooth route,
-                // including independent previews, regardless of keyboard owner.
-                RegisterRawInput(IsBluetoothControlActive,
+                // Only relative capture owns Raw Input. Absolute window
+                // control still needs normal Win32 mouse messages after handoff.
+                RegisterRawInput(IsBluetoothMouseCaptured,
                     _keyboardRouter.Mode == KeyboardInputMode.Direct &&
                     (IsBluetoothControlActive || IsUsbControlActive) && _activeControlWindow == 0);
             PublishKeyboardInputMode(_keyboardRouter.Mode);

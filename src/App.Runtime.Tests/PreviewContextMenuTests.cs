@@ -7,6 +7,77 @@ namespace IPhoneMirror.App.Runtime.Tests;
 
 internal static partial class Program
 {
+    // Real Windows move/resize validation with inert Bluetooth delivery.
+    // This checks desktop behavior without advertising or touching a phone.
+    private static int RunBluetoothUnfixWindowMove()
+    {
+        var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown, IsUiPreviewMode = true };
+        app.InitializeComponent();
+        var constructor = typeof(Windows.NativePreviewWindow).GetConstructors(KeyboardTestMembers).Single();
+        var parameters = constructor.GetParameters();
+        var values = parameters.Select(p => p.DefaultValue).ToArray();
+        object[] required = [390u, 844u, "Bluetooth unfix move regression", (Func<nint, bool>)(_ => true),
+            (Action<nint>)(_ => { }), (Func<nint, bool>)(_ => true), 0UL, 0d, 1d];
+        Array.Copy(required, values, required.Length);
+        var pointers = new List<Controls.PreviewPointerEventArgs>();
+        values[Array.FindIndex(parameters, p => p.Name == "isReverseControlEnabled")] = (Func<nint, bool>)(_ => true);
+        values[Array.FindIndex(parameters, p => p.Name == "pointerInput")] = (Action<Controls.PreviewPointerEventArgs>)pointers.Add;
+        using var preview = (Windows.NativePreviewWindow)constructor.Invoke(values);
+        try
+        {
+            preview.BluetoothWindowMouseEnabled = true;
+            preview.PrepareForBluetoothControl();
+            KeyboardCall(preview, "ShowInitially");
+            preview.Activate();
+            var until = DateTime.UtcNow.AddSeconds(3);
+            while (UnfixForeground() != preview.Handle && DateTime.UtcNow < until)
+            {
+                AbsoluteLiveForeground(preview.Handle);
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            }
+            InteractionAssert(UnfixForeground() == preview.Handle, "Windows refused the test window foreground; movement was not attempted.");
+            KeyboardCall(preview, "ToggleFixedWindow");
+            pointers.Clear();
+            InteractionAssert(UnfixGetWindowRect(preview.Handle, out var before), "Missing native window bounds.");
+            void Drag(int x, int y, int dx, int dy)
+            {
+                MappingSetCursorPos(x, y);
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+                InteractionAssert(AbsoluteLiveWindowFromPoint(new AbsoluteLivePoint { X = x, Y = y }) == preview.Handle,
+                    "The test window is occluded; refusing to drag another app.");
+                var input = Task.Run(() =>
+                {
+                    UnfixMouse(2, 0, 0, 0, 0);
+                    try
+                    {
+                        Thread.Sleep(120);
+                        MappingSetCursorPos(x + dx, y + dy);
+                        Thread.Sleep(180);
+                    }
+                    finally { UnfixMouse(4, 0, 0, 0, 0); }
+                });
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(650));
+                AwaitMapping(input);
+            }
+            Drag((before.Left + before.Right) / 2, (before.Top + before.Bottom) / 2, 40, 25);
+            InteractionAssert(UnfixGetWindowRect(preview.Handle, out var moved) &&
+                (moved.Left != before.Left || moved.Top != before.Top), "Unfixed absolute Bluetooth window did not move in the native Windows drag loop.");
+            Drag(moved.Right - 2, (moved.Top + moved.Bottom) / 2, 30, 0);
+            InteractionAssert(UnfixGetWindowRect(preview.Handle, out var resized) && resized.Right - resized.Left != moved.Right - moved.Left,
+                "Unfixed absolute Bluetooth window did not resize in the native Windows sizing loop.");
+            InteractionAssert(pointers.All(p => p.Kind == Controls.PreviewPointerKind.Reset),
+                "Moving/resizing the unfixed window forwarded input to the device.");
+            Console.WriteLine($"PASS native Windows unfix: moved ({before.Left},{before.Top}) -> ({moved.Left},{moved.Top}); width {moved.Right-moved.Left} -> {resized.Right-resized.Left}; no device input.");
+            return 0;
+        }
+        finally
+        {
+            UnfixMouse(4, 0, 0, 0, 0);
+            preview.Dispose();
+            app.Shutdown();
+        }
+    }
+
     private static int RunPreviewContextMenuTests()
     {
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -17,6 +88,7 @@ internal static partial class Program
             TestPreviewContextMenus();
             TestUnfixTouchControlWindow();
             TestUnfixMappingAdmission(app);
+            TestUnfixMappingAdmission(app, absolute: true);
         }
         finally { app.Shutdown(); }
         return 0;
@@ -103,8 +175,9 @@ internal static partial class Program
         var type = typeof(Windows.NativePreviewWindow);
         var constructor = type.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic).Single();
         var parameters = constructor.GetParameters();
-        foreach (var sharedCallback in new[] { false, true })
+        foreach (var mode in new[] { "wired", "wireless", "absolute-bluetooth" })
         {
+            var absolute = mode == "absolute-bluetooth";
             var values = parameters.Select(p => p.DefaultValue).ToArray();
             object[] required = [390u, 844u, "Unfix touch regression", (Func<nint, bool>)(_ => true),
                 (Action<nint>)(_ => { }), (Func<nint, bool>)(_ => true), 0UL, 0d, 1d];
@@ -113,17 +186,18 @@ internal static partial class Program
             var enabled = false;
             var pointers = new List<Controls.PreviewPointerEventArgs>();
             var keys = new List<Controls.PreviewKeyboardEventArgs>();
-            Set("isUsbControlEnabled", (Func<bool>)(() => enabled));
-            Set("isReverseControlEnabled", (Func<nint, bool>)(_ => sharedCallback && enabled));
+            Set("isUsbControlEnabled", (Func<bool>)(() => !absolute && enabled));
+            Set("isReverseControlEnabled", (Func<nint, bool>)(_ => mode != "wired" && enabled));
             Set("pointerInput", (Action<Controls.PreviewPointerEventArgs>)pointers.Add);
             Set("keyboardInput", (Action<Controls.PreviewKeyboardEventArgs>)keys.Add);
             using var preview = (Windows.NativePreviewWindow)constructor.Invoke(values);
+            preview.BluetoothWindowMouseEnabled = absolute;
             SetKeyboardField(preview, "_inputForegroundWindow", (Func<nint>)(() => preview.Handle));
             nint Message(int message, nint point = 0) =>
                 (nint)KeyboardCall(preview, "WindowProcedure", preview.Handle, message, (nint)0, point, false)!;
-            KeyboardCall(preview, "ToggleFixedWindow");
             enabled = true;
-            preview.PrepareForUsbControl();
+            if (absolute) preview.PrepareForBluetoothControl();
+            else preview.PrepareForUsbControl();
             InteractionAssert(Message(0x84) == 1 && preview.AllowsControlInput,
                 "fixed touch window must admit phone input");
             Message(0x201);
@@ -142,6 +216,9 @@ internal static partial class Program
             var y = ((int)KeyboardField(rect, "Top") + (int)KeyboardField(rect, "Bottom")) / 2;
             InteractionAssert(Message(0x84, (nint)((y << 16) | (x & 0xffff))) == 2,
                 "unfix must restore caption dragging while transport stays enabled");
+            var right = (int)KeyboardField(rect, "Right") - 2;
+            InteractionAssert(Message(0x84, (nint)((y << 16) | (right & 0xffff))) == 11,
+                "unfix must restore edge resizing while transport stays enabled");
             pointers.Clear(); keys.Clear();
             foreach (var message in new[] { 0x200, 0x201, 0x202, 0x20a, 0x100, 0x101 }) Message(message);
             InteractionAssert(pointers.Count == 0 && keys.Count == 0,
@@ -161,10 +238,10 @@ internal static partial class Program
                 "fixing again must restore fresh touch input");
             enabled = false;
         }
-        Console.WriteLine("PASS unfix wired/wireless control: drag restored, held inputs reset, forwarding blocked, refix resumes.");
+        Console.WriteLine("PASS unfix wired/wireless/absolute Bluetooth: drag/resize restored, held inputs reset, forwarding blocked, full-screen exit and refix resume correctly.");
     }
 
-    private static void TestUnfixMappingAdmission(App app)
+    private static void TestUnfixMappingAdmission(App app, bool absolute = false)
     {
         var main = CreateWorkspaceTestWindow(app, includeNativePreview: false);
         var vm = (ViewModels.MainViewModel)KeyboardField(main, "_viewModel");
@@ -181,13 +258,16 @@ internal static partial class Program
             (Action<nint>)(_ => { }), (Func<nint, bool>)(_ => true), 0UL, 0d, 1d];
         Array.Copy(required, values, required.Length);
         values[Array.FindIndex(parameters, p => p.Name == "pointerInput")] = (Action<Controls.PreviewPointerEventArgs>)(_ => { });
-        values[Array.FindIndex(parameters, p => p.Name == "isUsbControlEnabled")] = (Func<bool>)(() => true);
+        values[Array.FindIndex(parameters, p => p.Name == "isUsbControlEnabled")] = (Func<bool>)(() => !absolute);
+        values[Array.FindIndex(parameters, p => p.Name == "isReverseControlEnabled")] = (Func<nint, bool>)(_ => absolute);
         using var preview = (Windows.NativePreviewWindow)ctor.Invoke(values);
+        preview.BluetoothWindowMouseEnabled = absolute;
         windows[device.Udid] = preview;
         SetKeyboardField(main, "_keyboardForegroundWindow", (Func<nint>)(() => preview.Handle));
         try
         {
-            preview.PrepareForUsbControl();
+            if (absolute) manager.PrepareBluetoothControlWindow(device.Udid);
+            else preview.PrepareForUsbControl();
             InteractionAssert((bool)KeyboardCall(main, "MappingFocusAllows")!, "fixed independent window must admit key mappings");
             KeyboardCall(preview, "ToggleFixedWindow");
             InteractionAssert(!(bool)KeyboardCall(main, "MappingFocusAllows")!, "unfixed independent window must pause key mappings");

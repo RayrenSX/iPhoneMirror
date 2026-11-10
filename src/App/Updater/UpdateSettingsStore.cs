@@ -40,6 +40,7 @@ internal sealed class UpdateSettings
     public string WirelessDisplayProfileId { get; set; } = "1080p";
     public string WirelessReceiverName { get; set; } = WirelessReceiverConfiguration.DefaultReceiverName;
     public string Language { get; set; } = "system";
+    public bool BluetoothWindowMouseEnabled { get; set; }
     public double BluetoothMouseSensitivity { get; set; } = 500;
     public int BluetoothMouseSensitivitySchema { get; set; }
     public int BluetoothLandscapeMouseOrientationTurns { get; set; } = 1;
@@ -123,6 +124,7 @@ internal sealed class UpdateSettings
         WirelessDisplayProfileId = WirelessDisplayProfileId,
         WirelessReceiverName = WirelessReceiverName,
         Language = Language,
+        BluetoothWindowMouseEnabled = BluetoothWindowMouseEnabled,
         BluetoothMouseSensitivity = BluetoothMouseSensitivity,
         BluetoothMouseSensitivitySchema = BluetoothMouseSensitivitySchema,
         BluetoothLandscapeMouseOrientationTurns = BluetoothLandscapeMouseOrientationTurns,
