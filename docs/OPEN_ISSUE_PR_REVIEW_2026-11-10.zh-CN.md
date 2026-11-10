@@ -18,7 +18,7 @@
 | [#78：iOS 27.2 无法发现 AirPlay](https://github.com/RayrenSX/iPhoneMirror/issues/78) | 不能判定已解决，保留待原环境复测 | 当前已有所有可用接口的 DNS-SD 发布、接口暂不可用时重试、注册租约及 AirPlay TXT 策略。注册策略、接收端协议及媒体路由测试通过，但不覆盖报告中手机系统的实际发现结果。缺少手机型号精确 ProductType、实际系统构建号、接收端日志与网络环境，无法确认是广播、网络隔离还是客户端兼容性。USB 正常也不证明 AirPlay 发现正常。 |
 | [#77：按住自定义按键临时切换透明度](https://github.com/RayrenSX/iPhoneMirror/issues/77) | 需求仍未实现 | 当前独立窗口提供基础透明度及鼠标悬停时恢复不透明；未找到第二档自定义透明度及配套按下／松开快捷键动作。现有悬停行为不等于该需求。 |
 | [#73：WASD、相对鼠标视角及游戏映射](https://github.com/RayrenSX/iPhoneMirror/issues/73) | 部分基础能力存在，完整需求仍未实现 | USB／无线已有点击、按住直到松开、滑动及多点映射，路由回归验证 WASD 按键与触点独立释放。但未形成需求所述的完整游戏摇杆、无限相对鼠标视角及左右鼠标游戏动作映射。蓝牙相对鼠标控制也不能当作 USB 游戏视角支持。维护者评论已说明此方向暂停，保留讨论；本轮不擅自加入游戏控制功能。 |
-| [#72：搜狗等第三方输入法](https://github.com/RayrenSX/iPhoneMirror/issues/72) | 电脑侧转发已有覆盖；手机侧第三方输入法兼容性仍待验证 | IME 处理后的物理键还原、松开、修饰键和焦点回归通过。历史[搜狗实测](SOGOU_IME_VERIFICATION_2026-10-31.zh-CN.md)只证明 Windows 搜狗中文模式下按键正确发到 iPhone，测试手机当时配置英文／简体手写键盘，没有验证手机搜狗拼音候选。原 issue 提到只适配 iPhone 原生输入法，不能用 Windows 搜狗验证直接认定该请求已解决。 |
+| [#72：Windows 搜狗等第三方输入法](https://github.com/RayrenSX/iPhoneMirror/issues/72) | 已修复并有 Windows 搜狗实机验证，按维护者确认引用修复后关闭 | 修复提交 [`6e609ac`](https://github.com/RayrenSX/iPhoneMirror/commit/6e609ac) 已在远端主线，覆盖 IME 处理后的物理键还原、松开、修饰键和焦点恢复。[搜狗实测](SOGOU_IME_VERIFICATION_2026-10-31.zh-CN.md)确认 Windows 搜狗中文模式下字母、数字、编辑键和重新聚焦后的 USB 反控转发正常。此前将此 issue 误解成 iPhone 端搜狗兼容性，现按维护者确认更正范围；手机输入法候选验证不是本事项的关闭条件。 |
 | [#47：macOS 版本](https://github.com/RayrenSX/iPhoneMirror/issues/47) | 需求仍未实现 | 主程序为 Windows WPF、`net10.0-windows10.0.19041.0`、`win-x64`，采集／渲染依赖 Windows 原生链路；没有可交付 macOS 应用。维护者评论也明确保留 issue 至 Mac 端开发完成。 |
 
 ## 本轮修正
@@ -37,5 +37,11 @@
 - 真实受信任 FFmpeg 的 `--issue-media` 通过：合成手机／麦克风双音轨、音视频时长、输入结束退出、MP4 与本机 SRT 并发及独立停止。
 
 上述输入回归使用内存封包；FFmpeg 使用合成媒体和本机回环。未对用户手机输入操作，
-没有新增 BGMI 4K、报告所称 iOS 27.2、手机搜狗键盘或跨设备蓝牙兼容性真机结论。
+没有新增 BGMI 4K、报告所称 iOS 27.2 或跨设备蓝牙兼容性真机结论。
 本轮没有发现需要修改生产代码的确定回归；未实现功能和待复现报告均保留为开放事项。
+
+## 后续更正：Issue #72
+
+维护者确认 #72 指 Windows 端搜狗输入法，相关修复与实机验证已经完成。
+本记录此前误将手机端第三方输入法兼容性作为待验收条件，现更正结论并单独提交，
+在 GitHub 对应 issue 引用既有修复提交及验证记录后关闭。本节不改变其他事项的历史结论。
