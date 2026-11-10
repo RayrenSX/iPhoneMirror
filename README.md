@@ -9,7 +9,7 @@
   Low-latency USB and AirPlay iPhone mirroring for Windows.
 </p>
 
-<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="README.ja.md">日本語</a></p>
 
 <p align="center">
   <a href="https://github.com/RayrenSX/iPhoneMirror/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/RayrenSX/iPhoneMirror?include_prereleases&sort=semver"></a>
