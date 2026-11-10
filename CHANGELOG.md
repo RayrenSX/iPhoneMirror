@@ -7,10 +7,14 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ### Added
 
-- Add opt-in absolute Bluetooth mouse input in the main and independent previews, with seamless cursor movement between Windows and the mirrored image.
+- Add experimental, off-by-default absolute Bluetooth mouse input in the main and independent previews, with seamless cursor movement between Windows and the mirrored image.
 
 ### Fixed
 
+- Fix Bluetooth absolute-mode first-click and post-scroll positioning, rapid click ordering, failed-press retries, and scrolling via bounded BLE drag gestures. Release safely on queue overflow, preview geometry changes, leave and pause; keep edge scrolling on its requested surface. Complete saved-client startup when HID subscription overlaps binding discovery.
+- Fix first-drag jumps by converting pointer travel to device points and sending bounded relative steps; preserve the final movement before release and let keyboard events interrupt longer paths.
+- Reduce absolute Bluetooth drag latency with larger calibrated steps and no extra per-step delay. Match wired/wireless independent-window right-click menus and double-click full screen in experimental mode; keep relative-mode right-click forwarding. Let the main Bluetooth button stop an active connection.
+- Restore moving/resizing an independent absolute Bluetooth preview after unfixing it: release device input while unfixed, resume on refix/full screen, and prepare the fixed input surface when starting a new session.
 - Improve Chinese IME key forwarding, shortcut press/release recovery and preview focus handling. See the [Sogou verification record](docs/SOGOU_IME_VERIFICATION_2026-10-31.zh-CN.md) for tested scope.
 - Improve clipboard timeout, resource and converter recovery, with additional protocol regression coverage.
 - Preserve first-run application mode drafts and improve setup window behavior.

@@ -1141,10 +1141,10 @@
                                     <TextBlock Text="{DynamicResource WiredControlLabel}" Margin="6,0,0,0"/>
                                 </StackPanel>
                             </Button>
-                            <Button Click="OnStartBluetoothControlClick"
-                                    IsEnabled="{Binding CanStartBluetoothControl}"
+                            <Button x:Name="BluetoothControlButton" Click="OnStartBluetoothControlClick"
+                                    IsEnabled="{Binding CanToggleBluetoothControl}"
                                     Style="{StaticResource PreviewToolButton}"
-                                    ToolTip="{Binding BluetoothControlActionText}"
+                                    ToolTip="{Binding BluetoothConnectionActionText}"
                                     AutomationProperties.Name="{DynamicResource BluetoothControlLabel}"
                                     AutomationProperties.AutomationId="BluetoothControlButton">
                                 <StackPanel Orientation="Horizontal">

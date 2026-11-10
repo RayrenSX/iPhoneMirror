@@ -356,6 +356,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     public bool CanToggleBluetoothControl => !_bluetoothControlStarting &&
         !_bluetoothControlStopping &&
         (_bluetoothControlEnabled || CanEnableBluetoothControlFor(SelectedDevice?.Udid));
+    public string BluetoothConnectionActionText => LocalizationService.Get(
+        _bluetoothControlEnabled ? "StopBluetoothControl" : "StartBluetoothControl");
     public string BluetoothControlActionText => LocalizationService.Get(
         _bluetoothControlEnabled
             ? (_bluetoothControlInputPaused ? "ResumeBluetoothControl" : "PauseBluetoothControl")
@@ -1366,7 +1368,17 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     _ = DisableBluetoothControlAsync();
                 }
                 if (_bluetoothControlEnabled)
+                {
                     _ = EnsureBluetoothControlBindingAsync();
+                    // A pending client enumeration can overlap the final HID
+                    // subscription event. Complete an already-bound route
+                    // directly so that event cannot be lost behind its guard.
+                    var bound = _bluetoothControlDeviceUdid is { } target
+                        ? GetBluetoothControlBinding(target) : null;
+                    if (connected && bound is not null && string.Equals(bound,
+                            _bluetoothControl.TargetClientId, StringComparison.OrdinalIgnoreCase))
+                        _ = CompleteBluetoothConnectionAsync();
+                }
             }
             if (Application.Current?.Dispatcher.CheckAccess() == true) Update();
             else Application.Current?.Dispatcher.BeginInvoke(Update);
@@ -1426,6 +1438,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 !Volatile.Read(ref _bluetoothControlInputPaused)));
         return _bluetoothControl.SendAbsoluteMouseAsync(x, y, buttons, wheel, udid, Current, reset);
     }
+    internal void ConfigureBluetoothAbsoluteDragGeometry(string udid, uint width, uint height, int rotation) =>
+        _bluetoothControl.ConfigureAbsoluteDragGeometry(Devices.FirstOrDefault(d => DeviceViewModel.UdidEquals(d.Udid, udid))?.ProductType,
+            width, height, rotation);
 
     internal Task SendBluetoothKeyboardAsync(byte modifiers, IReadOnlyCollection<byte> usages,
         string? expectedTargetDeviceUdid = null, Func<bool>? canSend = null) =>
@@ -3402,6 +3417,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void NotifyBluetoothControlStateChanged()
     {
+        OnPropertyChanged(nameof(BluetoothConnectionActionText));
         OnPropertyChanged(nameof(CanConfigureBluetoothWindowMouse));
         OnPropertyChanged(nameof(IsBluetoothControlEnabled));
         OnPropertyChanged(nameof(BluetoothControlIsConnected));

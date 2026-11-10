@@ -16,10 +16,21 @@ internal static partial class Program
 {
     private static int RunBluetoothInputTransportTests()
     {
+        Task.Run(TestAbsoluteDragTrackingAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteDragCancellationAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteDragKeyboardPriorityAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteDragReportBudgetAsync).GetAwaiter().GetResult();
         Task.Run(TestBluetoothPauseRouteChangeAsync).GetAwaiter().GetResult();
         Task.Run(TestBluetoothMouseAdmissionAsync).GetAwaiter().GetResult();
         Task.Run(TestWindowBluetoothMouseClickAsync).GetAwaiter().GetResult();
         Task.Run(TestAbsoluteWindowMouseAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteMousePressRetryAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteMouseInputLifecycleAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteMouseBacklogAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteMouseEdgeScrollAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteScrollThenClickAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteScrollFailureMatrixAsync).GetAwaiter().GetResult();
+        Task.Run(TestAbsoluteMouseTimeoutAsync).GetAwaiter().GetResult();
         Task.Run(TestBluetoothHidSessionAdmissionAsync).GetAwaiter().GetResult();
         TestBluetoothNotificationResults();
         return 0;
@@ -32,6 +43,24 @@ internal static partial class Program
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown, IsUiPreviewMode = true };
         app.InitializeComponent();
         var main = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        // Inputs below are supplied explicitly. Ignore unrelated WM_INPUT
+        // packets from the interactive desktop, while retaining registration
+        // and the production processor/queue for the supplied test events.
+        var source = (HwndSource)KeyboardField(main, "_windowSource");
+        var messageHook = (HwndSourceHook)Delegate.CreateDelegate(typeof(HwndSourceHook), main,
+            typeof(MainWindow).GetMethod("WindowMessageHook", KeyboardTestMembers)!);
+        nint FixtureMessageHook(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
+        {
+            if (message == 0x00FF)
+            {
+                handled = true;
+                return (nint)typeof(MainWindow).GetMethod("DefWindowProcW", BindingFlags.Static | BindingFlags.NonPublic)!
+                    .Invoke(null, [hwnd, message, wParam, lParam])!;
+            }
+            return messageHook(hwnd, message, wParam, lParam, ref handled);
+        }
+        source.RemoveHook(messageHook);
+        source.AddHook(FixtureMessageHook);
         // This fixture supplies its own foreground snapshot and physical key
         // events. Unrelated real desktop activation must not invalidate queued
         // shortcuts while the dispatcher pumps transport continuations.
@@ -255,7 +284,8 @@ internal static partial class Program
             Require(!captured.IsCurrent(), "old keyboard route became current again after resume.");
             AwaitMapping(captured.SendAsync(0, [4], () => true));
             Require(delivered.All(report => report.Payload.All(value => value == 0)),
-                "old keyboard press survived pause and resume.");
+                "old keyboard press survived pause and resume: " + string.Join("; ",
+                    delivered.Select(report => $"{report.Id}:{Convert.ToHexString(report.Payload)}")));
             var fresh = vm.CaptureDirectKeyboardRoute(target)!;
             AwaitMapping(fresh.SendAsync(0, [4], () => true));
             Require(delivered.Any(report => report.Id == 1 && report.Payload.Contains((byte)4)),
@@ -383,6 +413,7 @@ internal static partial class Program
             Require(Hit() == 2, "unfixing a paused independent window did not restore dragging.");
             Console.WriteLine("PASS independent Bluetooth window: temporary input hit-testing, restored caption dragging/capture, explicit fixed preference retained.");
             Toggle();
+            TestBluetoothWindowMenus(shell);
             SetKeyboardField(main, "_controlPointerFlushInFlight", 1);
             try
             {
@@ -396,7 +427,7 @@ internal static partial class Program
                 SetKeyboardField(main, "_controlPointerFlushInFlight", 0);
             }
             Toggle();
-            AwaitMapping(vm.DisableBluetoothControlAsync());
+            TestBluetoothToolbarStop(main, vm);
             Require(!vm.IsBluetoothControlEnabled && !vm.BluetoothControlIsInputPaused &&
                 vm.BluetoothControlTargetUdid is null,
                 "explicit stop did not tear down a paused Bluetooth session.");
@@ -430,9 +461,11 @@ internal static partial class Program
             Toggle();
             Console.WriteLine("PASS optional HID reports: an unused keyboard/consumer/navigation channel does not prevent a retained mouse connection.");
 
-            foreach (var failedId in new byte[] { 2, 1, 4, 5 })
+            foreach (var absolute in new[] { false, true })
+            foreach (var failedId in new byte[] { absolute ? (byte)6 : (byte)2, 1, 4, 5 })
             {
                 Ready();
+                SetKeyboardField(service, "_useAbsoluteMouse", absolute);
                 reports[1] = [0, 0, 4, 0, 0, 0, 0, 0];
                 reports[4] = [0xE9, 0];
                 reports[5] = [2, 0];
@@ -443,6 +476,7 @@ internal static partial class Program
                     $"failed release for HID report {failedId} retained the connection.");
             }
             failedReport = null;
+            SetKeyboardField(service, "_useAbsoluteMouse", false);
 
             foreach (var result in new (GattCommunicationStatus Status, ushort Bytes, byte? ProtocolError)[]
             {
@@ -504,10 +538,13 @@ internal static partial class Program
             }
             finally { transportGate.Release(); }
             Console.WriteLine("PASS production release path: target-lock timeout closes the connection instead of reporting a successful pause.");
+            TestAbsoluteMouseSettings(app, vm);
             return 0;
         }
         finally
         {
+            source.RemoveHook(FixtureMessageHook);
+            source.AddHook(messageHook);
             main.Activated += activated;
             main.Deactivated += deactivated;
             main.PreviewGotKeyboardFocus += keyboardFocus;
@@ -525,27 +562,31 @@ internal static partial class Program
 
     private static async Task TestBluetoothPauseRouteChangeAsync()
     {
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var complete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var admitted = 0;
-        await using var service = new BluetoothHidMouseService(async (_, _, guard) =>
+        foreach (var absolute in new[] { false, true })
         {
-            entered.TrySetResult();
-            await complete.Task;
-            if (guard?.Invoke() != false) Interlocked.Increment(ref admitted);
-            return true;
-        });
-        SetKeyboardField(service, "_targetDeviceUdid", "pause-route-A");
-        SetKeyboardField(service, "_targetClientId", "client-A");
-        var release = service.PauseInputAsync();
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        SetKeyboardField(service, "_routeGeneration", (int)KeyboardField(service, "_routeGeneration") + 1);
-        SetKeyboardField(service, "_targetClientId", "client-B");
-        complete.SetResult();
-        MappingAssert(!await release && admitted == 0,
-            "A release belonging to the old BLE route reached a replacement client or reported success.");
-        MappingAssert(!service.ResumeInput("pause-route-B"),
-            "Resume admitted an unrelated target to the stopped pump.");
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var complete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var admitted = 0;
+            await using var service = new BluetoothHidMouseService(async (_, _, guard) =>
+            {
+                entered.TrySetResult();
+                await complete.Task;
+                if (guard?.Invoke() != false) Interlocked.Increment(ref admitted);
+                return true;
+            });
+            SetKeyboardField(service, "_targetDeviceUdid", "pause-route-A");
+            SetKeyboardField(service, "_useAbsoluteMouse", absolute);
+            SetKeyboardField(service, "_targetClientId", "client-A");
+            var release = service.PauseInputAsync();
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            SetKeyboardField(service, "_routeGeneration", (int)KeyboardField(service, "_routeGeneration") + 1);
+            SetKeyboardField(service, "_targetClientId", "client-B");
+            complete.SetResult();
+            MappingAssert(!await release && admitted == 0,
+                "A release belonging to the old BLE route reached a replacement client or reported success.");
+            MappingAssert(!service.ResumeInput("pause-route-B"),
+                "Resume admitted an unrelated target to the stopped pump.");
+        }
         Console.WriteLine("PASS Bluetooth pause route fence: a replaced BLE client rejects delayed releases and wrong-target resume.");
     }
 
@@ -623,6 +664,7 @@ internal static partial class Program
             InteractionAssert(Buttons() == 6, "Movement must clear only the released button and retain right/middle.");
             Pointer(PreviewPointerKind.Wheel, keys: unchecked((nint)0xFF880000L));
             InteractionAssert(Buttons() == 0, "A wheel snapshot must clear missed releases even without a scroll tick.");
+            TestAbsoluteWindowGeometry(window, device);
         }
         finally
         {
@@ -670,6 +712,15 @@ internal static partial class Program
         Send(PreviewPointerKind.Reset); // WM_MOUSELEAVE or capture/focus loss
         InteractionAssert(Buttons() == 0 && (int)KeyboardField(window, "_pendingControlWheel") == 0,
             "Leaving the HWND must release the drag and clear pending wheel input.");
+        KeyboardCall(window, "ResetControlRouteState");
+        for (var i = 0; i < 40; i++)
+        {
+            Send(PreviewPointerKind.ButtonDown, button: 1);
+            Send(PreviewPointerKind.ButtonUp, button: 1);
+        }
+        var queued = (Queue<(int Dx, int Dy, byte Buttons, long At)>)KeyboardField(window, "_windowMouseButtonReports");
+        InteractionAssert(queued.Count <= 9 && queued.Peek() is (0, 0, 0, 0) && queued.Last().Buttons == 0,
+            "The window-level overflow must begin with an empty release before later independent gestures.");
         Console.WriteLine("Bluetooth window pointer: legacy Windows input, black bars, drag release, re-entry, wheel and resize passed.");
     }
 
@@ -696,7 +747,7 @@ internal static partial class Program
         await Point(0, 1, 0);
         await Pump();
         MappingAssert(delivered.Select(report => (report.Id, report.Payload[0], X(report.Payload)))
-                .SequenceEqual(new (byte, byte, int)[] { (2, 0, 0), (6, 1, 0), (6, 0, 0), (2, 0, 0) }),
+                .SequenceEqual(new (byte, byte, int)[] { (6, 0, 1), (2, 0, 327), (2, 0, 0), (6, 1, 0), (6, 0, 0), (2, 0, 0) }),
             "A quick click must position first and preserve both relative button edges.");
         delivered.Clear();
 
@@ -706,10 +757,13 @@ internal static partial class Program
             await Point(0.5, 0.25, 1);
             await Point(0.75, 0.25, 0);
             await Pump();
-            MappingAssert(delivered.Select(report => (report.Id, report.Payload[0], X(report.Payload)))
-                    .SequenceEqual(new (byte, byte, int)[] { (2, 0, 16384), (6, 1, 0),
-                        (6, 1, 256), (6, 0, 0), (2, 0, 24575) }),
-                "Each consecutive drag must move and release on report 6, then restore the absolute pointer.");
+            var drag = delivered.ToArray();
+            var pressed = Array.FindIndex(drag, r => r.Id == 6 && r.Payload[0] == 1);
+            var released = Array.FindLastIndex(drag, r => r.Id == 6 && r.Payload[0] == 0);
+            MappingAssert(pressed > 0 && released > pressed &&
+                drag.Skip(pressed + 1).Take(released - pressed - 1).All(r => r.Id == 6 && r.Payload[0] == 1 && X(r.Payload) is > 0 and <= 48) &&
+                drag.Last().Id == 2 && X(drag.Last().Payload) == 24575,
+                "Consecutive drags must preserve the contact with bounded relative steps, release, then restore the anchor.");
             delivered.Clear();
         }
 
@@ -723,9 +777,9 @@ internal static partial class Program
         await Point(0.5, 0.25, 0);
         await Pump();
         var returnDrag = delivered.ToArray();
-        MappingAssert(returnDrag.Select(report => report.Id).SequenceEqual(new byte[] { 6, 6, 2, 2 }) &&
-                returnDrag[1].Payload[0] == 0 && X(returnDrag[2].Payload) != 16384 &&
-                X(returnDrag[3].Payload) == 16384,
+        MappingAssert(returnDrag[^3].Id == 6 && returnDrag[^3].Payload[0] == 0 &&
+                returnDrag[^2].Id == 2 && X(returnDrag[^2].Payload) != 16384 &&
+                returnDrag[^1].Id == 2 && X(returnDrag[^1].Payload) == 16384,
             "A drag that returns to its original position needs a changed anchor before restoring that position.");
         delivered.Clear();
 
@@ -744,11 +798,139 @@ internal static partial class Program
             "Leaving the surface must release without sending stale drag movement before re-entry.");
         delivered.Clear();
 
+        HoldPump();
+        for (var i = 0; i < 10; i++)
+        {
+            await Point((i + 1) / 11.0, 0.5, 1);
+            await Point((i + 1) / 11.0, 0.5, 0);
+        }
+        await Pump();
+        MappingAssert(delivered.Where(report => report.Id == 6 && report.Payload.Skip(1).All(value => value == 0)).Select(report => report.Payload[0])
+            .SequenceEqual(Enumerable.Range(0, 20).Select(i => (byte)(i % 2 == 0 ? 1 : 0))),
+            "A ten-click burst must retain every down/up, including while the BLE pump is busy.");
+        delivered.Clear();
+
+        foreach (var direction in new[] { -1, 1 })
+        {
+            HoldPump();
+            await service.SendAbsoluteMouseAsync(0.5, 0.5, 0, direction, target, () => true);
+            await Pump();
+            var gesture = delivered.Where(report => report.Id == 6 && report.Payload[1] == 0).Select(report => report.Payload).ToArray();
+            MappingAssert(gesture.First()[0] == 1 && gesture.Last()[0] == 0 &&
+                gesture.All(report => report[5] == 0) &&
+                gesture.Sum(report => (short)(report[3] | report[4] << 8)) == -direction * 24,
+                "Wheel input must produce a bounded BLE drag in the requested direction and release it.");
+            var anchor = delivered.Last();
+            MappingAssert(anchor.Id == 2 && X(anchor.Payload) == 16384 &&
+                (anchor.Payload[3] | anchor.Payload[4] << 8) == 16384,
+                "Scrolling must restore the absolute cursor to its original position.");
+            delivered.Clear();
+        }
+
         MappingAssert(await service.PauseInputAsync(), "Absolute mouse pause could not release the device.");
         MappingAssert(delivered.Select(report => (report.Id, report.Payload[0], X(report.Payload)))
                 .SequenceEqual(new (byte, byte, int)[] { (6, 0, 0) }),
             "Pausing must release the relative buttons without repositioning.");
         Console.WriteLine("PASS hybrid window mouse: click, consecutive drags, re-anchor, re-entry and pause.");
+    }
+
+    private static async Task TestAbsoluteMousePressRetryAsync()
+    {
+        var retried = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = new ConcurrentQueue<byte[]>();
+        await using var service = new BluetoothHidMouseService((id, payload, guard) =>
+        {
+            if (id != 6 || payload[0] != 1) return Task.FromResult(true);
+            attempts.Enqueue(payload.ToArray());
+            if (attempts.Count == 1) return Task.FromResult(false);
+            retried.TrySetResult();
+            return Task.FromResult(true);
+        });
+        const string target = "absolute-press-retry";
+        SetKeyboardField(service, "_useAbsoluteMouse", true);
+        SetKeyboardField(service, "_targetDeviceUdid", target);
+        await service.SendAbsoluteMouseAsync(0.5, 0.5, 1, 0, target, () => true);
+        await retried.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        MappingAssert(attempts.Count == 2 && attempts.All(report => report.Skip(1).All(value => value == 0)),
+            "A failed absolute-mode press must retry the held button without replaying motion.");
+        MappingAssert(await service.PauseInputAsync(), "A retried press must remain releasable.");
+
+        // Even an unacknowledged press might have reached iOS. Cleanup must
+        // release it when input leaves before the next delivery attempt.
+        var reports = new ConcurrentQueue<(byte Id, byte[] Payload)>();
+        await using var uncertain = new BluetoothHidMouseService((id, payload, guard) =>
+        {
+            reports.Enqueue((id, payload.ToArray()));
+            return Task.FromResult(id != 6 || payload[0] == 0);
+        });
+        SetKeyboardField(uncertain, "_useAbsoluteMouse", true);
+        SetKeyboardField(uncertain, "_targetDeviceUdid", target);
+        var generation = KeyboardField(uncertain, "_mousePumpGeneration");
+        byte[] press = [1, 0, 64, 0, 64, 0];
+        MappingAssert(!await (Task<bool>)KeyboardCall(uncertain, "SendHybridMouseAsync",
+            press, false, generation, (Func<bool>)(() => true))!, "The injected press failure was not exercised.");
+        byte[] release = [0, 0, 64, 0, 64, 0];
+        MappingAssert(await (Task<bool>)KeyboardCall(uncertain, "SendHybridMouseAsync",
+            release, true, generation, (Func<bool>)(() => true))!, "Uncertain press cleanup failed.");
+        MappingAssert(reports.Where(report => report.Id == 6).Select(report => report.Payload[0])
+            .SequenceEqual(new byte[] { 0, 1, 0 }), "The first collection activation must be button-free, and leaving after a failed press must still deliver a release.");
+
+        var settings = new IPhoneMirror.App.Updater.UpdateSettings();
+        MappingAssert(!settings.BluetoothWindowMouseEnabled && !settings.Clone().BluetoothWindowMouseEnabled,
+            "Experimental absolute positioning must default to off.");
+        settings.BluetoothWindowMouseEnabled = true;
+        MappingAssert(settings.Clone().BluetoothWindowMouseEnabled,
+            "The experimental positioning opt-in must survive settings copies.");
+        Console.WriteLine("PASS absolute mouse: failed press retry, uncertain press release and default-off setting.");
+    }
+
+    private static async Task TestAbsoluteMouseInputLifecycleAsync()
+    {
+        var samples = new ConcurrentQueue<(byte Id, byte[] Payload, long At)>();
+        var scrollMoved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowInput = true;
+        var cancelScroll = false;
+        await using var service = new BluetoothHidMouseService((id, payload, guard) =>
+        {
+            if (guard?.Invoke() == false) return Task.FromResult(true);
+            samples.Enqueue((id, payload.ToArray(), System.Diagnostics.Stopwatch.GetTimestamp()));
+            if (cancelScroll && id == 6 && payload[0] == 1 && payload[3] != 0)
+            {
+                allowInput = false;
+                scrollMoved.TrySetResult();
+            }
+            return Task.FromResult(true);
+        });
+        const string target = "absolute-lifecycle";
+        SetKeyboardField(service, "_useAbsoluteMouse", true);
+        SetKeyboardField(service, "_targetDeviceUdid", target);
+        SetKeyboardField(service, "_mousePumpRunning", true);
+        foreach (var x in new[] { 0.25, 0.75 })
+        {
+            await service.SendAbsoluteMouseAsync(x, 0.5, 1, 0, target, () => true);
+            await service.SendAbsoluteMouseAsync(x, 0.5, 0, 0, target, () => true);
+        }
+        await (Task)KeyboardCall(service, "PumpReportsAsync", KeyboardField(service, "_mousePumpGeneration"))!;
+        var reports = samples.ToArray();
+        var down = Array.FindIndex(reports, report => report.Id == 6 && report.Payload[0] == 1);
+        var up = Array.FindIndex(reports, down + 1, report => report.Id == 6 && report.Payload[0] == 0);
+        var anchorAfterUp = Array.FindIndex(reports, up + 1, report => report.Id == 2);
+        static double Milliseconds(long elapsed) => elapsed * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        MappingAssert(Milliseconds(reports[up].At - reports[down].At) >= 25 &&
+            Milliseconds(reports[anchorAfterUp].At - reports[up].At) >= 100,
+            "Queued clicks must leave iOS time to observe down/up before repositioning the absolute pointer.");
+
+        samples.Clear();
+        cancelScroll = true;
+        await service.SendAbsoluteMouseAsync(0.5, 0.5, 0, 3, target, () => allowInput);
+        await scrollMoved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await service.SendAbsoluteMouseAsync(0.5, 0.5, 0, 0, target, () => true, reset: true);
+        await ((Task)KeyboardField(service, "_mousePumpTask")).WaitAsync(TimeSpan.FromSeconds(3));
+        var gesture = samples.Where(report => report.Id == 6).Select(report => report.Payload).ToArray();
+        MappingAssert(gesture.Count(report => report[0] == 1 && report[3] != 0) == 1 &&
+            gesture.Last()[0] == 0,
+            "Leaving mid-scroll must cancel the remaining movement and release the synthetic button.");
+        Console.WriteLine("PASS absolute mouse: click pacing and mid-scroll leave cleanup.");
     }
 
     private static async Task TestWindowBluetoothMouseClickAsync()

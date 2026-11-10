@@ -233,7 +233,7 @@
     <system:String x:Key="ApplyVideoSettings">应用画面设置</system:String>
     <system:String x:Key="PlayAudioWindows">在 Windows 播放声音</system:String>
     <system:String x:Key="PlaybackVolume">播放音量</system:String>
-    <system:String x:Key="BluetoothWindowMouse">在投屏画面内使用绝对坐标鼠标（无需 F9）</system:String>
+    <system:String x:Key="BluetoothWindowMouse">蓝牙绝对位置（实验）</system:String>
     <system:String x:Key="BluetoothMouseSensitivity">蓝牙鼠标灵敏度</system:String>
     <system:String x:Key="BluetoothMouseSettingsTitle">反向控制设置</system:String>
     <system:String x:Key="BluetoothWheelSensitivity">滚轮灵敏度</system:String>

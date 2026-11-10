@@ -62,6 +62,12 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal bool AllowsControlInput(nint handle) =>
         _windows.Values.All(window => window.Handle != handle || window.AllowsControlInput);
 
+    internal void PrepareBluetoothControlWindow(string? udid)
+    {
+        if (udid is not null && _windows.TryGetValue(udid, out var window))
+            window.PrepareForBluetoothControl();
+    }
+
     internal void ReleasePointerCapture(string? udid)
     {
         if (udid is not null && _windows.TryGetValue(udid, out var window))

@@ -182,9 +182,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private nint _restoreStyle;
 
     internal bool IsFullScreen => _isFullScreen;
-    // Touch control shares the drag surface. Unfixing gives it back to Windows,
+    private bool UsesWindowPointerControl => IsUsbControlEnabledForWindow || UsesBluetoothWindowMouse;
+    // Position-based control shares the drag surface. Unfixing gives it back to Windows,
     // including keyboard input admitted through the global hook.
-    internal bool AllowsControlInput => !IsUsbControlEnabledForWindow || _isFixed || _isFullScreen;
+    internal bool AllowsControlInput => !UsesWindowPointerControl || _isFixed || _isFullScreen;
     internal event Action<bool>? FullScreenChanged;
 
     private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string title,
@@ -670,7 +671,7 @@ internal sealed class NativePreviewWindow : IDisposable
         if (_isFullScreen)
         {
             _isFullScreen = false;
-            if (!_isFixed && IsUsbControlEnabledForWindow) ResetTouchControlInput();
+            if (!_isFixed && UsesWindowPointerControl) ResetTouchControlInput();
             _ = RemovePropW(_handle, "iPhoneMirrorFullScreen");
             _ = SetWindowLongPtrW(_handle, GwlStyle, _restoreStyle);
             _ = SetWindowPos(_handle, 0, _restoreRectangle.Left, _restoreRectangle.Top,
@@ -797,7 +798,6 @@ internal sealed class NativePreviewWindow : IDisposable
                 handled = true;
                 return 0;
             case WmLeftButtonDown when IsPointerInputActive:
-            case WmLeftButtonDoubleClick when UsesBluetoothWindowMouse && IsPointerInputActive:
                 BeginPointerButton(hwnd, 1);
                 DispatchPointer(PreviewPointerKind.ButtonDown, lParam, 1, 0);
                 handled = true;
@@ -809,7 +809,7 @@ internal sealed class NativePreviewWindow : IDisposable
                 handled = true;
                 return 0;
             case WmRightButtonDown when IsRightButtonForwardingEnabled:
-            case 0x0206 when UsesBluetoothWindowMouse && IsRightButtonForwardingEnabled:
+            case 0x0206 when IsRightButtonForwardingEnabled:
                 if (IsPointerInputActive)
                 {
                     BeginPointerButton(hwnd, 2);
@@ -1213,7 +1213,7 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed || _handle == 0 || _isFullScreen) return;
         _isFixed = !_isFixed;
-        if (!_isFixed && IsUsbControlEnabledForWindow)
+        if (!_isFixed && UsesWindowPointerControl)
             ResetTouchControlInput();
         var style = GetWindowLongPtrW(_handle, GwlStyle).ToInt64();
         style = _isFixed ? style & ~WsThickFrame : style | WsThickFrame;
@@ -1246,10 +1246,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool IsUsbControlEnabledForWindow => _pointerInput is not null &&
         (_isUsbControlEnabled?.Invoke() ?? false);
     // The reverse-control callback also includes wired/wireless touch targets.
-    // Reserve their right-click for the window menu, even when a phone shortcut
-    // (including the default Home binding) uses it. Only Bluetooth forwards it.
+    // Absolute Bluetooth previews use the same window menu as wired/wireless
+    // touch control. Relative Bluetooth capture keeps device right-clicks.
     private bool IsRightButtonForwardingEnabled =>
-        IsReverseControlEnabledForWindow && !IsUsbControlEnabledForWindow;
+        IsReverseControlEnabledForWindow && !IsUsbControlEnabledForWindow && !UsesBluetoothWindowMouse;
     private bool IsPointerInputEnabledForWindow =>
         AllowsControlInput && (IsReverseControlEnabledForWindow || IsUsbControlEnabledForWindow);
     private bool IsPointerInputActive =>
@@ -1312,6 +1312,12 @@ internal sealed class NativePreviewWindow : IDisposable
         if (!_isTopMost) ToggleTopMost();
         _ = SetForegroundWindow(_handle);
         UpdateContextMenuLabels();
+    }
+
+    internal void PrepareForBluetoothControl()
+    {
+        if (_disposed || _handle == 0 || !UsesBluetoothWindowMouse) return;
+        if (!_isFixed && !_isFullScreen) ToggleFixedWindow();
     }
 
     internal void ReleasePointerCapture()

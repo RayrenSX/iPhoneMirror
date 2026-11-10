@@ -63,6 +63,10 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     // HID service lets iOS expose pointer and keyboard input from one pairing.
     private const int AbsoluteMouseProbeMaximum = 32767;
     private const byte RelativeMouseReportId = 6;
+    private const int MouseButtonTransitionQueueLimit = 64;
+    private static readonly TimeSpan HybridGestureInterval = TimeSpan.FromMilliseconds(32);
+    private static readonly TimeSpan HybridAnchorSettleInterval = TimeSpan.FromMilliseconds(64);
+    private static readonly TimeSpan HybridReleaseSettleInterval = TimeSpan.FromMilliseconds(112);
     private GattLocalCharacteristic? _relativeMouseReport;
     private bool _useAbsoluteMouse;
     internal bool UsesAbsoluteMouse => Volatile.Read(ref _useAbsoluteMouse);
@@ -138,7 +142,11 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         internal byte[]? Anchor;
         internal byte[]? HeldPosition;
         internal bool NeedsAnchorRefresh;
+        internal bool ButtonDeliveryUnconfirmed;
+        internal bool SyntheticScroll;
+        internal (double X, double Y)? DragPosition;
     }
+    private (double Width, double Height) _absoluteDragGeometry = (375, 812);
     private readonly ConcurrentDictionary<string, ClientState> _clientStates =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, GattSession> _clientSessions =
@@ -457,6 +465,12 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         QueueMouseAsync(EncodeAbsoluteAxis(x), EncodeAbsoluteAxis(y), buttons, wheel, target,
             canSend, preserveButtonTransitions: true, absolute: true, reset: reset);
 
+    internal void ConfigureAbsoluteDragGeometry(string? productType, uint width, uint height, int previewRotation)
+    {
+        var geometry = BluetoothAbsoluteDragMotion.Geometry(productType, width, height, previewRotation);
+        lock (_mousePumpSync) _absoluteDragGeometry = geometry;
+    }
+
     internal Task ReleaseAbsoluteMouseAsync(string? target, Func<bool> canSend)
     {
         if (!_lastReports.TryGetValue(2, out var report)) return Task.CompletedTask;
@@ -543,7 +557,14 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 {
                     // Preserve a quick press/release while the previous BLE
                     // packet is in flight. Bound the backlog during a stall.
-                    if (_mousePriorityReports.Count >= 8) _mousePriorityReports.Clear();
+                    if (_mousePriorityReports.Count >= MouseButtonTransitionQueueLimit)
+                    {
+                        _mousePriorityReports.Clear();
+                        // The discarded backlog may contain the up for an
+                        // already delivered down. Release before admitting a
+                        // new gesture, without dragging to its new position.
+                        _mousePriorityReports.Enqueue(new(MouseButtonStateReport(0, absolute ? report : null), Current, Reset: true));
+                    }
                     _mousePriorityReports.Enqueue(new(report, Current, reset));
                 }
                 else
@@ -633,19 +654,65 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         var buttons = report[0];
         if (state.HeldPosition is { } previous)
         {
-            if (!reset)
+            if (!reset && !state.SyntheticScroll)
             {
-                var dx = RelativeAxis(report, previous, 1);
-                var dy = RelativeAxis(report, previous, 3);
+                (double Width, double Height) geometry;
+                lock (_mousePumpSync) geometry = _absoluteDragGeometry;
+                var target = (X: (report[1] | report[2] << 8) * geometry.Width / AbsoluteMouseProbeMaximum,
+                    Y: (report[3] | report[4] << 8) * geometry.Height / AbsoluteMouseProbeMaximum);
+                var current = state.DragPosition ?? ((previous[1] | previous[2] << 8) * geometry.Width / AbsoluteMouseProbeMaximum,
+                    (previous[3] | previous[4] << 8) * geometry.Height / AbsoluteMouseProbeMaximum);
                 var wheel = buttons != 0 ? report[5] : (byte)0;
-                if (dx != 0 || dy != 0 || wheel != 0 || (buttons != 0 && buttons != previous[0]))
+                var moved = false;
+                for (var stepCount = 0; stepCount < 4096; stepCount++)
+                {
+                    if (!canSend()) return true;
+                    var step = BluetoothAbsoluteDragMotion.Next(target.X - current.Item1, target.Y - current.Item2);
+                    if (step == (0, 0)) break;
+                    // Unacknowledged relative travel is disposable. Advance
+                    // the prediction before awaiting so retry cannot replay it.
+                    var travel = BluetoothAbsoluteDragMotion.Predict(step.X, step.Y);
+                    current = (current.Item1 + travel.X, current.Item2 + travel.Y);
+                    state.DragPosition = current;
+                    state.HeldPosition = MouseButtonStateReport(previous[0], report);
+                    state.NeedsAnchorRefresh = true;
+                    moved = true;
+                    if (!await SendRelativeAsync(buttons != 0 ? buttons : previous[0], step.X, step.Y, 0).ConfigureAwait(false))
+                        return false;
+                    // The acknowledged GATT notification already serializes
+                    // delivery. Extra pacing per subdivision adds drag lag.
+                    // PumpReportsAsync paces the completed input sample.
+                    var yieldToKeyboard = false;
+                    // Let a newly queued transition replace this obsolete
+                    // movement target. Its final position is handled next.
+                    lock (_mousePumpSync)
+                    {
+                        if (_keyboardPriorityReports.Count != 0)
+                        {
+                            // A multi-step drag must not starve key edges.
+                            // Resume an unfinished up before any later click;
+                            // a held move can defer to newer pointer samples.
+                            if (buttons == 0 || (_mousePriorityReports.Count == 0 && _pendingMouseReport is null))
+                            {
+                                var later = _mousePriorityReports.ToArray();
+                                _mousePriorityReports.Clear();
+                                _mousePriorityReports.Enqueue(new(report, canSend, reset));
+                                foreach (var queued in later) _mousePriorityReports.Enqueue(queued);
+                            }
+                            yieldToKeyboard = true;
+                        }
+                        if (buttons != 0 && (_mousePriorityReports.Count != 0 || _pendingMouseReport is not null)) break;
+                    }
+                    if (yieldToKeyboard) return true;
+                }
+                if (wheel != 0 ||
+                    (buttons != 0 && (buttons != previous[0] || state.ButtonDeliveryUnconfirmed)))
                 {
                     // Include the final movement before releasing, even if the
                     // pending move was coalesced into this button-up sample.
                     var heldButtons = buttons != 0 ? buttons : previous[0];
                     state.HeldPosition = MouseButtonStateReport(previous[0], report);
-                    state.NeedsAnchorRefresh |= dx != 0 || dy != 0;
-                    if (!await SendRelativeAsync(heldButtons, dx, dy, wheel).ConfigureAwait(false))
+                    if (!await SendRelativeAsync(heldButtons, 0, 0, wheel).ConfigureAwait(false))
                         return false;
                     if (!canSend()) return true;
                     if (buttons != 0)
@@ -653,48 +720,108 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                         state.HeldPosition = report;
                         return true;
                     }
-                    await Task.Delay(MouseReportInterval).ConfigureAwait(false);
+                    await Task.Delay(HybridGestureInterval).ConfigureAwait(false);
                 }
                 else if (buttons != 0)
                 {
                     // Keep sub-count travel until it rounds to a usable delta.
                     return true;
                 }
+                if (moved) await Task.Delay(HybridGestureInterval).ConfigureAwait(false);
             }
             if (!await SendRelativeAsync(0, 0, 0, 0).ConfigureAwait(false)) return false;
             if (!canSend()) return true;
             state.HeldPosition = null;
-            await Task.Delay(MouseReportInterval).ConfigureAwait(false);
-        }
-
-        if (state.NeedsAnchorRefresh && state.Anchor is { } anchor &&
-            report.AsSpan(1, 4).SequenceEqual(anchor.AsSpan(1, 4)))
-        {
-            // iPad can ignore a repeat of the pre-drag absolute position.
-            // If the gesture returned there, change the anchor before restoring it.
-            var x = report[1] | report[2] << 8;
-            var offset = AbsoluteMouseProbeMaximum / 100;
-            x += x <= AbsoluteMouseProbeMaximum / 2 ? offset : -offset;
-            byte[] refresh = [0, (byte)x, (byte)(x >> 8), report[3], report[4], 0];
-            if (!await SendAnchorAsync(refresh).ConfigureAwait(false)) return false;
-            if (!canSend()) return true;
-            await Task.Delay(MouseReportInterval).ConfigureAwait(false);
+            state.SyntheticScroll = false;
+            state.DragPosition = null;
+            // Do not move the absolute pointer until iOS has consumed the up.
+            await Task.Delay(HybridReleaseSettleInterval).ConfigureAwait(false);
         }
 
         var position = MouseButtonStateReport(0, report);
-        if (buttons == 0) position[5] = report[5];
-        if (!await SendAnchorAsync(position).ConfigureAwait(false)) return false;
-        if (buttons == 0 || !canSend()) return true;
+        if (!await SendAnchorAsync(position, activateRelative: buttons != 0 || report[5] != 0).ConfigureAwait(false)) return false;
+        if (!canSend()) return true;
+        if (buttons == 0)
+        {
+            if (report[5] == 0 || reset) return true;
+            // AssistiveTouch does not consistently consume a wheel from a
+            // hybrid absolute/relative mouse. Scroll with a short, bounded
+            // pointer drag on the same BLE route, then restore the anchor.
+            var y = report[3] | report[4] << 8;
+            var travel = Math.Clamp(-(sbyte)report[5] * 24, -256, 256);
+            // Keep the press on the requested scroll surface. Moving the
+            // origin into the middle of the screen can activate another pane.
+            // Shorten outward travel at the edge; never turn it into a tap.
+            var upwardRoom = y * 1024 / AbsoluteMouseProbeMaximum;
+            var downwardRoom = (AbsoluteMouseProbeMaximum - y) * 1024 / AbsoluteMouseProbeMaximum;
+            travel = Math.Clamp(travel, -upwardRoom, downwardRoom);
+            // A sub-threshold drag is interpreted as a click by iOS. Ignore
+            // outward scrolling when the edge leaves too little drag room.
+            if (Math.Abs(travel) < 16) return true;
+            await Task.Delay(HybridGestureInterval).ConfigureAwait(false);
+            if (!canSend()) return true;
+            state.SyntheticScroll = true;
+            state.HeldPosition = MouseButtonStateReport(1, position);
+            if (!await SendRelativeAsync(1, 0, 0, 0).ConfigureAwait(false)) return false;
+            for (var remaining = travel; remaining != 0;)
+            {
+                await Task.Delay(HybridGestureInterval).ConfigureAwait(false);
+                if (!canSend()) return true;
+                var step = (short)Math.Clamp(remaining, -32, 32);
+                remaining -= step;
+                state.NeedsAnchorRefresh = true;
+                if (!await SendRelativeAsync(1, 0, step, 0).ConfigureAwait(false)) return false;
+            }
+            await Task.Delay(HybridGestureInterval).ConfigureAwait(false);
+            // Cleanup is also attempted by the queued reset if focus expires.
+            if (!canSend()) return true;
+            if (!await SendRelativeAsync(0, 0, 0, 0).ConfigureAwait(false)) return false;
+            state.HeldPosition = null;
+            state.SyntheticScroll = false;
+            // Do not move the absolute pointer until iOS has consumed the up.
+            await Task.Delay(HybridReleaseSettleInterval).ConfigureAwait(false);
+            return await SendAnchorAsync(position).ConfigureAwait(false);
+        }
 
-        await Task.Delay(MouseReportInterval).ConfigureAwait(false);
+        // iOS switches between two pointer collections asynchronously. A BLE
+        // notification acknowledgment is not a rendered-position acknowledgment.
+        await Task.Delay(HybridAnchorSettleInterval).ConfigureAwait(false);
         if (!canSend()) return true;
         // A timed-out press may still have reached the device. Retain enough
         // state to release it even if WinRT did not acknowledge it.
         state.HeldPosition = report;
-        return await SendRelativeAsync(buttons, 0, 0, report[5]).ConfigureAwait(false);
+        var pressed = await SendRelativeAsync(buttons, 0, 0, report[5]).ConfigureAwait(false);
+        // A queued up can follow immediately after a down. Give iOS at least
+        // one display/input cycle to observe the press before draining the up.
+        if (pressed) await Task.Delay(HybridGestureInterval).ConfigureAwait(false);
+        return pressed;
 
-        async Task<bool> SendAnchorAsync(byte[] position)
+        async Task<bool> SendAnchorAsync(byte[] position, bool activateRelative = false)
         {
+            if (state.Anchor is null || activateRelative)
+            {
+                // Select the relative pointer collection before anchoring the
+                // next press; after scrolling iOS can return to its old
+                // cursor even though the absolute sample was acknowledged.
+                if (!await SendRelativeAsync(0, 1, 0, 0).ConfigureAwait(false)) return false;
+                if (!canSend()) return true;
+                state.NeedsAnchorRefresh = true;
+                await Task.Delay(HybridAnchorSettleInterval).ConfigureAwait(false);
+            }
+            if (state.Anchor is null || (state.NeedsAnchorRefresh &&
+                position.AsSpan(1, 4).SequenceEqual(state.Anchor.AsSpan(1, 4))))
+            {
+                // iOS may ignore the first absolute sample after connecting,
+                // or an unchanged sample after a relative gesture. Change the
+                // sample before sending the actual requested position.
+                var x = position[1] | position[2] << 8;
+                var offset = AbsoluteMouseProbeMaximum / 100;
+                x += x <= AbsoluteMouseProbeMaximum / 2 ? offset : -offset;
+                byte[] refresh = [0, (byte)x, (byte)(x >> 8), position[3], position[4], 0];
+                if (!await _sendInputReport(2, refresh, canSend).ConfigureAwait(false)) return false;
+                if (!canSend()) return true;
+                await Task.Delay(HybridGestureInterval).ConfigureAwait(false);
+            }
             var sent = await _sendInputReport(2, position, canSend).ConfigureAwait(false);
             if (sent && canSend())
             {
@@ -704,16 +831,17 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             return sent;
         }
 
-        Task<bool> SendRelativeAsync(byte held, short dx, short dy, byte wheel) =>
-            _sendInputReport(RelativeMouseReportId, EncodeRelativeMouse(held, dx, dy, wheel), canSend);
-    }
-
-    private static short RelativeAxis(byte[] current, byte[] previous, int offset)
-    {
-        var delta = (current[offset] | current[offset + 1] << 8) -
-            (previous[offset] | previous[offset + 1] << 8);
-        const double countsPerAxis = 1024;
-        return (short)Math.Round(delta * countsPerAxis / AbsoluteMouseProbeMaximum);
+        async Task<bool> SendRelativeAsync(byte held, short dx, short dy, byte wheel)
+        {
+            // Retaining a possibly delivered press is necessary for cleanup,
+            // but must not make a failed press look acknowledged on retry.
+            // Retry the button state without replaying disposable movement.
+            state.ButtonDeliveryUnconfirmed = true;
+            var sent = await _sendInputReport(RelativeMouseReportId,
+                EncodeRelativeMouse(held, dx, dy, wheel), canSend).ConfigureAwait(false);
+            if (sent && canSend()) state.ButtonDeliveryUnconfirmed = false;
+            return sent;
+        }
     }
 
     private static byte[] EncodeRelativeMouse(byte buttons, short dx, short dy, byte wheel) =>
@@ -762,7 +890,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                     _pendingMouseCanSend = null;
                     var queuedAt = _pendingMouseReportTimestamp;
                     _pendingMouseReportTimestamp = 0;
-                    if (queuedAt != 0 &&
+                    if (!UsesAbsoluteMouse && queuedAt != 0 &&
                         (Stopwatch.GetTimestamp() - queuedAt) * 1000.0 /
                             Stopwatch.Frequency > 100)
                     {

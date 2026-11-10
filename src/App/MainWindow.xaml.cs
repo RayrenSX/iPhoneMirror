@@ -950,6 +950,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ResetWindowBluetoothPointer(udid);
             return true;
         }
+        if (absolute)
+        {
+            _viewModel.ConfigureBluetoothAbsoluteDragGeometry(udid!, sourceWidth, sourceHeight, e.Rotation);
+            var surface = (e.SurfaceWidth, e.SurfaceHeight);
+            if (_windowBluetoothPointerInside &&
+                (_windowBluetoothPointerSurface != surface || sourceWidth != _lastControlGeometryWidth ||
+                 sourceHeight != _lastControlGeometryHeight || e.Rotation != _lastControlGeometryRotation))
+                ResetWindowBluetoothPointer(udid);
+            _windowBluetoothPointerSurface = surface;
+            _lastControlGeometryWidth = sourceWidth;
+            _lastControlGeometryHeight = sourceHeight;
+            _lastControlGeometryRotation = e.Rotation;
+        }
         _windowBluetoothPointerInside = true;
         if (TryHandlePointerShortcut(e, udid)) return true;
         // Entering while holding a Windows button must not start an iPad drag.
@@ -1146,7 +1159,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (_bluetoothWindowMouseEnabled)
             {
                 if (_windowMouseButtonReports.Count >= WindowMouseButtonQueueLimit)
+                {
                     _windowMouseButtonReports.Clear();
+                    _windowMouseButtonReports.Enqueue((0, 0, 0, 0));
+                    _pendingControlDx = _pendingControlDy = 0;
+                    _pendingControlMotionAt = 0;
+                }
                 _windowMouseButtonReports.Enqueue((_pendingControlDx, _pendingControlDy,
                     _controlButtons, _pendingControlMotionAt));
                 _pendingControlDx = _pendingControlDy = 0;
@@ -1409,6 +1427,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 _activeControlWindow = window;
                 _activeControlUdid = udid;
                 await _viewModel.EnableBluetoothControlAsync(udid);
+                if (_viewModel.IsBluetoothControlEnabled)
+                    _secondaryMirrors.PrepareBluetoothControlWindow(udid);
                 if (!_viewModel.IsBluetoothControlEnabled)
                 {
                     _activeControlWindow = 0;
@@ -5523,6 +5543,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         try
         {
+            if (!_viewModel.CanToggleBluetoothControl) return;
+            if (_viewModel.IsBluetoothControlEnabled)
+            {
+                await _viewModel.DisableBluetoothControlAsync();
+                return;
+            }
             ShowReverseControlStatus(ControlStatusMode.Bluetooth);
             _viewModel.AddDiagnosticLog(AppLog.Event("bluetooth_control_toolbar_start",
                 ("device", AppLog.Device(_viewModel.SelectedDevice?.Udid))));
@@ -7184,6 +7210,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private async Task ToggleBluetoothControlInputFromShortcutAsync(string? target)
     {
+        var startingSession = !_viewModel.IsBluetoothControlEnabled || !_viewModel.IsBluetoothControlTarget(target);
         Func<bool>? canResume = null;
         if (_viewModel.BluetoothControlIsInputPaused && _viewModel.IsBluetoothControlTarget(target))
         {
@@ -7199,6 +7226,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             canResume = () => window != 0 && _keyboardForegroundWindow() == window;
         }
         await _viewModel.ToggleBluetoothControlAsync(target, canResume);
+        if (startingSession && _viewModel.IsBluetoothControlEnabled)
+            _secondaryMirrors.PrepareBluetoothControlWindow(target);
         if (!IsBluetoothControlActiveFor(target)) return;
         if (_activeControlWindow != 0) _secondaryMirrors.Activate(target);
         else

@@ -117,6 +117,8 @@ internal static partial class Program
                 return RunBluetoothInputToggleTests();
             if (args is ["--bluetooth-input-transport"])
                 return RunBluetoothInputTransportTests();
+            if (args is ["--bluetooth-absolute-window-live", var bluetoothLiveConfig, var bluetoothLiveCommands])
+                return RunAbsoluteBluetoothWindowLive(bluetoothLiveConfig, bluetoothLiveCommands);
             if (args is ["--keyboard-ownership"])
                 return RunKeyboardOwnershipTests();
             if (args is ["--keyboard-ownership-live", var ownershipOutput])
@@ -266,6 +268,8 @@ internal static partial class Program
                 return RunInteractionRegressionTests();
             if (args is ["--preview-context-menu"])
                 return RunPreviewContextMenuTests();
+            if (args is ["--bluetooth-unfix-window-move"])
+                return RunBluetoothUnfixWindowMove();
             if (args is ["--independent-unfix-live", var unfixOutput])
                 return RunIndependentUnfixLive(unfixOutput);
             if (args is ["--independent-unfix-usb-supplement", var unfixSupplementOutput])
