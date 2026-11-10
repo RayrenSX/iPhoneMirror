@@ -846,15 +846,14 @@ internal sealed class NativePreviewWindow : IDisposable
                 var sideButton = ((wParam.ToInt64() >> 16) & 0xffff) == 1 ? (byte)8 : (byte)16;
                 if (message == WmXButtonDown)
                 {
-                    _capturedMouseButtons |= sideButton;
-                    _ = SetCapture(hwnd);
+                    BeginPointerButton(hwnd, sideButton);
                     DispatchPointer(PreviewPointerKind.ButtonDown, lParam, sideButton, 0);
                 }
                 else
                 {
                     _capturedMouseButtons = (byte)(_capturedMouseButtons & ~sideButton);
                     DispatchPointer(PreviewPointerKind.ButtonUp, lParam, sideButton, 0);
-                    if (_capturedMouseButtons == 0) _ = ReleaseCapture();
+                    if (!UsesBluetoothWindowMouse && _capturedMouseButtons == 0) _ = ReleaseCapture();
                 }
                 handled = true;
                 return 1;

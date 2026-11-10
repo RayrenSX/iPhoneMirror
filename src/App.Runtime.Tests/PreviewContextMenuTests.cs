@@ -203,6 +203,21 @@ internal static partial class Program
             Message(0x201);
             InteractionAssert(pointers.Any(p => p.Kind == Controls.PreviewPointerKind.ButtonDown),
                 "fixed touch window must forward the initial press");
+            if (absolute)
+            {
+                foreach (var side in new[] { 1, 2 })
+                {
+                    var beforeSide = pointers.Count;
+                    KeyboardCall(preview, "WindowProcedure", preview.Handle, 0x020B,
+                        (nint)(side << 16), (nint)0, false);
+                    InteractionAssert(InteractionGetCapture() != preview.Handle,
+                        "absolute Bluetooth side buttons must leave Windows capture free during a left drag");
+                    KeyboardCall(preview, "WindowProcedure", preview.Handle, 0x020C,
+                        (nint)(side << 16), (nint)0, false);
+                    InteractionAssert(pointers.Skip(beforeSide).All(p => p.Kind != Controls.PreviewPointerKind.Reset),
+                        "releasing a side button must not reset an active absolute Bluetooth drag");
+                }
+            }
             KeyboardCall(preview, "ToggleFixedWindow");
             InteractionAssert(!preview.AllowsControlInput &&
                 pointers.Any(p => p.Kind == Controls.PreviewPointerKind.Reset) &&
