@@ -1726,16 +1726,8 @@
                                 <ColumnDefinition/>
                             </Grid.ColumnDefinitions>
                             <Border Grid.ColumnSpan="3" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1"/>
-                            <RadioButton x:Name="ApplicationSettingsTab"
-                                Grid.Column="0"
-                                GroupName="SettingsCategory"
-                                Tag="application"
-                                Content="{DynamicResource SettingsCategoryApplication}"
-                                Style="{StaticResource SettingsCategoryTab}"
-                                Checked="OnSettingsCategoryChecked"
-                                AutomationProperties.AutomationId="ApplicationSettingsTab"/>
                             <RadioButton x:Name="ProjectionSettingsTab"
-                                Grid.Column="1"
+                                Grid.Column="0"
                                 GroupName="SettingsCategory"
                                 Tag="projection"
                                 Content="{DynamicResource SettingsCategoryProjection}"
@@ -1744,13 +1736,21 @@
                                 AutomationProperties.AutomationId="ProjectionSettingsTab"
                                 IsChecked="True"/>
                             <RadioButton x:Name="ControlSettingsTab"
-                                Grid.Column="2"
+                                Grid.Column="1"
                                 GroupName="SettingsCategory"
                                 Tag="control"
                                 Content="{DynamicResource SettingsCategoryControl}"
                                 Style="{StaticResource SettingsCategoryTab}"
                                 Checked="OnSettingsCategoryChecked"
                                 AutomationProperties.AutomationId="ControlSettingsTab"/>
+                            <RadioButton x:Name="ApplicationSettingsTab"
+                                Grid.Column="2"
+                                GroupName="SettingsCategory"
+                                Tag="application"
+                                Content="{DynamicResource SettingsCategoryApplication}"
+                                Style="{StaticResource SettingsCategoryTab}"
+                                Checked="OnSettingsCategoryChecked"
+                                AutomationProperties.AutomationId="ApplicationSettingsTab"/>
                         </Grid>
                         <ScrollViewer x:Name="ApplicationSettingsScrollViewer"
                             Grid.Row="2"
@@ -1880,102 +1880,6 @@
                                         </Style>
                                     </TextBlock.Style>
                                 </TextBlock>
-                                <Border>
-                                    <Border.Style>
-                                        <Style TargetType="Border" BasedOn="{StaticResource ControlSectionCard}">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding SelectedDevice}" Value="{x:Null}">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <StackPanel>
-                                        <TextBlock Text="{DynamicResource ImageAndSound}" Style="{StaticResource ControlSectionTitle}"/>
-                                        <StackPanel Visibility="{Binding VideoSettingsVisibility}">
-                                            <TextBlock Text="{DynamicResource RenderLimitHelp}"
-                                                Foreground="{DynamicResource MutedTextBrush}"
-                                                FontSize="{DynamicResource CaptionFontSize}"
-                                                TextWrapping="Wrap"
-                                                Margin="0,4,0,1"
-                                                Visibility="{Binding WiredVideoLimitSettingsVisibility}"/>
-                                            <StackPanel Visibility="{Binding WiredVideoLimitSettingsVisibility}">
-                                                <TextBlock Text="{DynamicResource RenderResolutionLimit}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
-                                                <ComboBox AutomationProperties.Name="{DynamicResource RenderResolutionLimit}"
-                                                    x:Name="ResolutionComboBox"
-                                                    ItemsSource="{Binding ResolutionPresets}"
-                                                    DisplayMemberPath="Label"
-                                                    IsEnabled="{Binding CanChangeVideoPipeline}"
-                                                    SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
-                                                <TextBlock Text="{DynamicResource TargetFrameRate}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
-                                                <ComboBox AutomationProperties.Name="{DynamicResource TargetFrameRate}"
-                                                    x:Name="FrameRateComboBox"
-                                                    ItemsSource="{Binding FrameRates}"
-                                                    IsEnabled="{Binding CanChangeVideoPipeline}"
-                                                    SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
-                                            </StackPanel>
-                                            <Border Style="{StaticResource ControlSectionCard}">
-                                                <StackPanel>
-                                                    <TextBlock Text="{DynamicResource SettingsAdvancedVideo}" Style="{StaticResource ControlSectionTitle}"/>
-                                                <StackPanel Margin="0,10,0,0">
-                                                    <TextBlock Text="{DynamicResource DecoderPreferenceLabel}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
-                                                    <ComboBox AutomationProperties.Name="{DynamicResource DecoderPreferenceLabel}"
-                                                        ItemsSource="{Binding DecoderPreferences}"
-                                                        DisplayMemberPath="Label"
-                                                        IsEnabled="{Binding CanChangeDecoderPipeline}"
-                                                        SelectedItem="{Binding SelectedDecoderPreference, Mode=TwoWay}"/>
-                                                    <TextBlock Text="{DynamicResource VideoPipelinePreferenceHelp}"
-                                                        Foreground="{DynamicResource MutedTextBrush}"
-                                                        FontSize="{DynamicResource CaptionFontSize}"
-                                                        TextWrapping="Wrap"
-                                                        Margin="0,6,0,0"/>
-                                                </StackPanel>
-                                                </StackPanel>
-                                            </Border>
-                                            <StackPanel Margin="0,10,0,0">
-                                                <Button x:Name="ApplyVideoSettingsButton"
-                                                    Content="{DynamicResource ApplyVideoSettings}"
-                                                    Command="{Binding ApplyVideoSettingsCommand}"
-                                                    Style="{StaticResource ToolButton}"/>
-                                                <Button Margin="0,8,0,0"
-                                                    Content="{DynamicResource MoreImageSettingsButton}"
-                                                    Command="{Binding MoreImageSettingsCommand}"
-                                                    Style="{StaticResource ToolButton}"/>
-                                            </StackPanel>
-                                            <TextBlock Text="{Binding SettingsStatus}"
-                                                Foreground="{DynamicResource MutedTextBrush}"
-                                                FontSize="{DynamicResource CaptionFontSize}"
-                                                TextWrapping="Wrap"
-                                                Margin="0,6,0,0"/>
-                                        </StackPanel>
-                                        <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,12,0,11"/>
-                                        <CheckBox x:Name="AudioPlaybackCheckBox" Content="{DynamicResource PlayAudioWindows}" IsChecked="{Binding PlayAudio, Mode=TwoWay}"/>
-                                        <Grid Margin="0,9,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{DynamicResource PlaybackVolume}"
-                                                Foreground="{DynamicResource MutedTextBrush}"
-                                                FontSize="{DynamicResource CaptionFontSize}"
-                                                VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="1"
-                                                Text="{Binding PlaybackVolume, StringFormat={}{0:F0}%}"
-                                                MinWidth="42"
-                                                TextAlignment="Right"
-                                                Foreground="{DynamicResource AccentHoverBrush}"
-                                                FontSize="{DynamicResource CaptionFontSize}"
-                                                FontWeight="SemiBold"/>
-                                        </Grid>
-                                        <Slider AutomationProperties.Name="{DynamicResource PlaybackVolume}"
-                                            x:Name="VolumeSlider"
-                                            Minimum="0"
-                                            Maximum="100"
-                                            Value="{Binding PlaybackVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                            Margin="0,4,0,0"
-                                            VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Border>
                                 <Border Style="{StaticResource ControlSectionCard}" Visibility="{Binding UsbProjectionSettingsVisibility}">
                                     <StackPanel>
                                         <TextBlock Text="{DynamicResource UsbProjectionModeTitle}" Style="{StaticResource ControlSectionTitle}"/>
@@ -2025,9 +1929,6 @@
                                             Margin="0,6,0,0"/>
                                     </StackPanel>
                                 </Border>
-                                <Button x:Name="AdvancedSettingsCard" Content="{DynamicResource AdvancedSettings}"
-                                    Command="{Binding AdvancedSettingsCommand}" Style="{StaticResource ToolButton}"
-                                    Margin="0,14,0,0" Visibility="{Binding AdvancedSettingsVisibility}"/>
                                 <Border Style="{StaticResource ControlSectionCard}" Visibility="{Binding WirelessTopSettingsVisibility}">
                                     <StackPanel>
                                         <StackPanel>
@@ -2193,6 +2094,105 @@
                                         </DockPanel>
                                     </StackPanel>
                                 </Border>
+                                <Border>
+                                    <Border.Style>
+                                        <Style TargetType="Border" BasedOn="{StaticResource ControlSectionCard}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SelectedDevice}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel>
+                                        <TextBlock Text="{DynamicResource ImageAndSound}" Style="{StaticResource ControlSectionTitle}"/>
+                                        <StackPanel Visibility="{Binding VideoSettingsVisibility}">
+                                            <TextBlock Text="{DynamicResource RenderLimitHelp}"
+                                                Foreground="{DynamicResource MutedTextBrush}"
+                                                FontSize="{DynamicResource CaptionFontSize}"
+                                                TextWrapping="Wrap"
+                                                Margin="0,4,0,1"
+                                                Visibility="{Binding WiredVideoLimitSettingsVisibility}"/>
+                                            <StackPanel Visibility="{Binding WiredVideoLimitSettingsVisibility}">
+                                                <TextBlock Text="{DynamicResource RenderResolutionLimit}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                                <ComboBox AutomationProperties.Name="{DynamicResource RenderResolutionLimit}"
+                                                    x:Name="ResolutionComboBox"
+                                                    ItemsSource="{Binding ResolutionPresets}"
+                                                    DisplayMemberPath="Label"
+                                                    IsEnabled="{Binding CanChangeVideoPipeline}"
+                                                    SelectedItem="{Binding SelectedResolutionPreset, Mode=TwoWay}"/>
+                                                <TextBlock Text="{DynamicResource TargetFrameRate}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                                <ComboBox AutomationProperties.Name="{DynamicResource TargetFrameRate}"
+                                                    x:Name="FrameRateComboBox"
+                                                    ItemsSource="{Binding FrameRates}"
+                                                    IsEnabled="{Binding CanChangeVideoPipeline}"
+                                                    SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}"/>
+                                            </StackPanel>
+                                            <Border Style="{StaticResource ControlSectionCard}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{DynamicResource SettingsAdvancedVideo}" Style="{StaticResource ControlSectionTitle}"/>
+                                                <StackPanel Margin="0,10,0,0">
+                                                    <TextBlock Text="{DynamicResource DecoderPreferenceLabel}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+                                                    <ComboBox AutomationProperties.Name="{DynamicResource DecoderPreferenceLabel}"
+                                                        ItemsSource="{Binding DecoderPreferences}"
+                                                        DisplayMemberPath="Label"
+                                                        IsEnabled="{Binding CanChangeDecoderPipeline}"
+                                                        SelectedItem="{Binding SelectedDecoderPreference, Mode=TwoWay}"/>
+                                                    <TextBlock Text="{DynamicResource VideoPipelinePreferenceHelp}"
+                                                        Foreground="{DynamicResource MutedTextBrush}"
+                                                        FontSize="{DynamicResource CaptionFontSize}"
+                                                        TextWrapping="Wrap"
+                                                        Margin="0,6,0,0"/>
+                                                </StackPanel>
+                                                </StackPanel>
+                                            </Border>
+                                            <StackPanel Margin="0,10,0,0">
+                                                <Button x:Name="ApplyVideoSettingsButton"
+                                                    Content="{DynamicResource ApplyVideoSettings}"
+                                                    Command="{Binding ApplyVideoSettingsCommand}"
+                                                    Style="{StaticResource ToolButton}"/>
+                                                <Button Margin="0,8,0,0"
+                                                    Content="{DynamicResource MoreImageSettingsButton}"
+                                                    Command="{Binding MoreImageSettingsCommand}"
+                                                    Style="{StaticResource ToolButton}"/>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding SettingsStatus}"
+                                                Foreground="{DynamicResource MutedTextBrush}"
+                                                FontSize="{DynamicResource CaptionFontSize}"
+                                                TextWrapping="Wrap"
+                                                Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                        <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,12,0,11"/>
+                                        <CheckBox x:Name="AudioPlaybackCheckBox" Content="{DynamicResource PlayAudioWindows}" IsChecked="{Binding PlayAudio, Mode=TwoWay}"/>
+                                        <Grid Margin="0,9,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{DynamicResource PlaybackVolume}"
+                                                Foreground="{DynamicResource MutedTextBrush}"
+                                                FontSize="{DynamicResource CaptionFontSize}"
+                                                VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1"
+                                                Text="{Binding PlaybackVolume, StringFormat={}{0:F0}%}"
+                                                MinWidth="42"
+                                                TextAlignment="Right"
+                                                Foreground="{DynamicResource AccentHoverBrush}"
+                                                FontSize="{DynamicResource CaptionFontSize}"
+                                                FontWeight="SemiBold"/>
+                                        </Grid>
+                                        <Slider AutomationProperties.Name="{DynamicResource PlaybackVolume}"
+                                            x:Name="VolumeSlider"
+                                            Minimum="0"
+                                            Maximum="100"
+                                            Value="{Binding PlaybackVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            Margin="0,4,0,0"
+                                            VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Button x:Name="AdvancedSettingsCard" Content="{DynamicResource AdvancedSettings}"
+                                    Command="{Binding AdvancedSettingsCommand}" Style="{StaticResource ToolButton}"
+                                    Margin="0,14,0,0" Visibility="{Binding AdvancedSettingsVisibility}"/>
                                 <Border Style="{StaticResource ControlSectionCard}" Visibility="Collapsed">
                                     <StackPanel>
                                         <Grid>
