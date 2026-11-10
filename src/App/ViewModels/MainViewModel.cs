@@ -335,6 +335,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     public RelayCommand AdvancedSettingsCommand { get; }
     public RelayCommand ApplyWirelessSettingsCommand { get; }
     public RelayCommand ApplyBluetoothMouseSettingsCommand { get; }
+    public RelayCommand ApplyMouseDirectionSettingsCommand { get; }
+    public RelayCommand ApplyBluetoothSensitivitySettingsCommand { get; }
     public RelayCommand OpenDriverManagerCommand { get; }
     public RelayCommand StartBluetoothControlCommand { get; }
     public RelayCommand StopBluetoothControlCommand { get; }
@@ -508,8 +510,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             var clamped = Math.Clamp(value, 10, 1000);
             if (Set(ref _bluetoothMouseSensitivity, clamped))
             {
-                OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
-                ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+                NotifyMouseSettingsPending();
             }
         }
     }
@@ -521,8 +522,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (!double.IsFinite(value)) return;
             if (Set(ref _bluetoothWheelSensitivity, Math.Clamp(value, 10, 1000)))
             {
-                OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
-                ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+                NotifyMouseSettingsPending();
             }
         }
     }
@@ -534,8 +534,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             if (value is null ||
                 !Set(ref _bluetoothPortraitMouseDirection, value.Direction)) return;
-            OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
-            ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+            NotifyMouseSettingsPending();
         }
     }
     public BluetoothMouseDirectionOption? SelectedBluetoothLandscapeMouseDirection
@@ -546,8 +545,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             if (value is null ||
                 !Set(ref _bluetoothLandscapeMouseDirection, value.Direction)) return;
-            OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
-            ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+            NotifyMouseSettingsPending();
         }
     }
     public bool BluetoothMouseReverseHorizontal
@@ -557,8 +555,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             if (Set(ref _bluetoothMouseReverseHorizontal, value))
             {
-                OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
-                ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+                NotifyMouseSettingsPending();
             }
         }
     }
@@ -569,8 +566,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             if (Set(ref _bluetoothMouseReverseVertical, value))
             {
-                OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
-                ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+                NotifyMouseSettingsPending();
             }
         }
     }
@@ -611,19 +607,50 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 app.UpdateSettings.BluetoothWindowMouseEnabled = !value;
                 MouseSettingsStatus = LocalizationService.Get("BluetoothMouseSettingsSaveFailed");
                 SetRawSettingsStatus(MouseSettingsStatus);
+                BluetoothSensitivitySettingsStatus = MouseSettingsStatus;
             }
-            else ClearMouseSettingsStatus();
+            else
+            {
+                ClearMouseSettingsStatus();
+                BluetoothSensitivitySettingsStatus = string.Empty;
+            }
             OnPropertyChanged(nameof(BluetoothWindowMouseEnabled));
         }
     }
 
-    public bool HasPendingBluetoothMouseSettings => Application.Current is App app &&
+    public bool HasPendingBluetoothSensitivitySettings => Application.Current is App app &&
         (Math.Abs(_bluetoothMouseSensitivity - app.UpdateSettings.BluetoothMouseSensitivity) > 0.001 ||
-         Math.Abs(_bluetoothWheelSensitivity - app.UpdateSettings.BluetoothWheelSensitivity) > 0.001 ||
-         (int)_bluetoothPortraitMouseDirection != app.UpdateSettings.BluetoothPortraitMouseDirection ||
+         Math.Abs(_bluetoothWheelSensitivity - app.UpdateSettings.BluetoothWheelSensitivity) > 0.001);
+    public bool HasPendingMouseDirectionSettings => Application.Current is App app &&
+        ((int)_bluetoothPortraitMouseDirection != app.UpdateSettings.BluetoothPortraitMouseDirection ||
          (int)_bluetoothLandscapeMouseDirection != app.UpdateSettings.BluetoothLandscapeMouseDirection ||
          _bluetoothMouseReverseHorizontal != app.UpdateSettings.BluetoothMouseReverseHorizontal ||
          _bluetoothMouseReverseVertical != app.UpdateSettings.BluetoothMouseReverseVertical);
+    public bool HasPendingBluetoothMouseSettings =>
+        HasPendingBluetoothSensitivitySettings || HasPendingMouseDirectionSettings;
+
+    private void NotifyMouseSettingsPending()
+    {
+        OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
+        OnPropertyChanged(nameof(HasPendingBluetoothSensitivitySettings));
+        OnPropertyChanged(nameof(HasPendingMouseDirectionSettings));
+        ApplyBluetoothMouseSettingsCommand?.NotifyCanExecuteChanged();
+        ApplyMouseDirectionSettingsCommand?.NotifyCanExecuteChanged();
+        ApplyBluetoothSensitivitySettingsCommand?.NotifyCanExecuteChanged();
+    }
+
+    private string _mouseDirectionSettingsStatus = string.Empty;
+    public string MouseDirectionSettingsStatus
+    {
+        get => LocalizationService.RefreshText(_mouseDirectionSettingsStatus);
+        private set => Set(ref _mouseDirectionSettingsStatus, value);
+    }
+    private string _bluetoothSensitivitySettingsStatus = string.Empty;
+    public string BluetoothSensitivitySettingsStatus
+    {
+        get => LocalizationService.RefreshText(_bluetoothSensitivitySettingsStatus);
+        private set => Set(ref _bluetoothSensitivitySettingsStatus, value);
+    }
 
     private string _mouseSettingsStatus = string.Empty;
     public string MouseSettingsStatus
@@ -639,48 +666,65 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         MouseSettingsStatus = string.Empty;
     }
 
-    private void ApplyBluetoothMouseSettings()
+    private void ApplyBluetoothMouseSettings() => ApplyMouseSettings(direction: true, sensitivity: true);
+
+    private void ApplyMouseSettings(bool direction, bool sensitivity)
     {
         if (Application.Current is not App app) return;
         var snapshot = app.UpdateSettings.Clone();
-        app.UpdateSettings.BluetoothMouseSensitivity = _bluetoothMouseSensitivity;
-        app.UpdateSettings.BluetoothMouseSensitivitySchema = 2;
-        app.UpdateSettings.BluetoothWheelSensitivity = _bluetoothWheelSensitivity;
-        app.UpdateSettings.BluetoothMouseSettingsSchema = 1;
-        app.UpdateSettings.BluetoothPortraitMouseDirection =
-            (int)_bluetoothPortraitMouseDirection;
-        app.UpdateSettings.BluetoothLandscapeMouseDirection =
-            (int)_bluetoothLandscapeMouseDirection;
-        app.UpdateSettings.BluetoothMouseReverseHorizontal =
-            _bluetoothMouseReverseHorizontal;
-        app.UpdateSettings.BluetoothMouseReverseVertical =
-            _bluetoothMouseReverseVertical;
-        app.UpdateSettings.BluetoothMouseDirectionSchema = 1;
+        if (sensitivity)
+        {
+            app.UpdateSettings.BluetoothMouseSensitivity = _bluetoothMouseSensitivity;
+            app.UpdateSettings.BluetoothMouseSensitivitySchema = 2;
+            app.UpdateSettings.BluetoothWheelSensitivity = _bluetoothWheelSensitivity;
+            app.UpdateSettings.BluetoothMouseSettingsSchema = 1;
+        }
+        if (direction)
+        {
+            app.UpdateSettings.BluetoothPortraitMouseDirection =
+                (int)_bluetoothPortraitMouseDirection;
+            app.UpdateSettings.BluetoothLandscapeMouseDirection =
+                (int)_bluetoothLandscapeMouseDirection;
+            app.UpdateSettings.BluetoothMouseReverseHorizontal =
+                _bluetoothMouseReverseHorizontal;
+            app.UpdateSettings.BluetoothMouseReverseVertical =
+                _bluetoothMouseReverseVertical;
+            app.UpdateSettings.BluetoothMouseDirectionSchema = 1;
+        }
         if (!app.SaveUpdateSettings())
         {
             app.RestoreUpdateSettings(snapshot);
             MouseSettingsStatus = LocalizationService.Get("BluetoothMouseSettingsSaveFailed");
             SetRawSettingsStatus(MouseSettingsStatus);
-            OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
-            ApplyBluetoothMouseSettingsCommand.NotifyCanExecuteChanged();
+            if (direction) MouseDirectionSettingsStatus = MouseSettingsStatus;
+            if (sensitivity) BluetoothSensitivitySettingsStatus = MouseSettingsStatus;
+            NotifyMouseSettingsPending();
             return;
         }
         ClearMouseSettingsStatus();
-        _appliedBluetoothMouseSensitivity = _bluetoothMouseSensitivity;
-        _appliedBluetoothWheelSensitivity = _bluetoothWheelSensitivity;
-        _appliedBluetoothPortraitMouseDirection = _bluetoothPortraitMouseDirection;
-        _appliedBluetoothLandscapeMouseDirection = _bluetoothLandscapeMouseDirection;
-        _appliedBluetoothMouseReverseHorizontal = _bluetoothMouseReverseHorizontal;
-        _appliedBluetoothMouseReverseVertical = _bluetoothMouseReverseVertical;
+        if (sensitivity)
+        {
+            _appliedBluetoothMouseSensitivity = _bluetoothMouseSensitivity;
+            _appliedBluetoothWheelSensitivity = _bluetoothWheelSensitivity;
+            BluetoothSensitivitySettingsStatus = string.Empty;
+        }
+        if (direction)
+        {
+            _appliedBluetoothPortraitMouseDirection = _bluetoothPortraitMouseDirection;
+            _appliedBluetoothLandscapeMouseDirection = _bluetoothLandscapeMouseDirection;
+            _appliedBluetoothMouseReverseHorizontal = _bluetoothMouseReverseHorizontal;
+            _appliedBluetoothMouseReverseVertical = _bluetoothMouseReverseVertical;
+            MouseDirectionSettingsStatus = string.Empty;
+        }
         AddDiagnosticLog(AppLog.Event("bluetooth_mouse_settings_applied",
-            ("mouse_sensitivity", _bluetoothMouseSensitivity),
-            ("wheel_sensitivity", _bluetoothWheelSensitivity),
-            ("portrait_direction", (int)_bluetoothPortraitMouseDirection),
-            ("landscape_direction", (int)_bluetoothLandscapeMouseDirection),
-            ("reverse_horizontal", _bluetoothMouseReverseHorizontal),
-            ("reverse_vertical", _bluetoothMouseReverseVertical)));
-        OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
-        ApplyBluetoothMouseSettingsCommand.NotifyCanExecuteChanged();
+            ("direction_applied", direction), ("sensitivity_applied", sensitivity),
+            ("mouse_sensitivity", _appliedBluetoothMouseSensitivity),
+            ("wheel_sensitivity", _appliedBluetoothWheelSensitivity),
+            ("portrait_direction", (int)_appliedBluetoothPortraitMouseDirection),
+            ("landscape_direction", (int)_appliedBluetoothLandscapeMouseDirection),
+            ("reverse_horizontal", _appliedBluetoothMouseReverseHorizontal),
+            ("reverse_vertical", _appliedBluetoothMouseReverseVertical)));
+        NotifyMouseSettingsPending();
     }
     public bool IsAdvancedMode { get => _advancedMode; private set { if (Set(ref _advancedMode, value)) OnPropertyChanged(nameof(AdvancedSettingsVisibility)); } }
     public bool IsWirelessSelected => SelectedDevice?.IsWireless == true;
@@ -1398,6 +1442,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             () => !IsBusy);
         ApplyBluetoothMouseSettingsCommand = new RelayCommand(ApplyBluetoothMouseSettings,
             () => HasPendingBluetoothMouseSettings);
+        ApplyMouseDirectionSettingsCommand = new RelayCommand(
+            () => ApplyMouseSettings(direction: true, sensitivity: false), () => HasPendingMouseDirectionSettings);
+        ApplyBluetoothSensitivitySettingsCommand = new RelayCommand(
+            () => ApplyMouseSettings(direction: false, sensitivity: true), () => HasPendingBluetoothSensitivitySettings);
         RefreshWirelessStatus();
         RefreshMediaCastStatus();
         LocalizationService.LanguageChanged += OnLanguageChanged;
@@ -6674,6 +6722,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         OnPropertyChanged(nameof(MouseSettingsStatus));
+        OnPropertyChanged(nameof(MouseDirectionSettingsStatus));
+        OnPropertyChanged(nameof(BluetoothSensitivitySettingsStatus));
         OnPropertyChanged(nameof(KeyboardMappingStatus));
         OnPropertyChanged(nameof(KeyboardInputModeStatus));
         _selectedLanguage = LocalizationService.SelectedLanguage;

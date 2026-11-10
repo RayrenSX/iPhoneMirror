@@ -86,18 +86,15 @@ internal static partial class Program
             Console.WriteLine("Offline fixture ready.");
 
             Select("Control");
-            var actions = Find<StackPanel>("MouseSettingsActions");
-            var controlScroll = Find<ScrollViewer>("ControlSettingsScrollViewer");
-            InteractionAssert(!FindVisualDescendants<Button>(controlScroll).Any(button =>
-                System.Windows.Automation.AutomationProperties.GetAutomationId(button) ==
-                "ApplyBluetoothMouseSettingsButton"), "Apply must stay outside the scrolling settings list.");
-            var applyButton = FindVisualDescendants<Button>(actions).Single();
-            var actionPosition = actions.TranslatePoint(new Point(), window);
-            controlScroll.ScrollToEnd();
-            window.UpdateLayout();
-            InteractionAssert(actions.TranslatePoint(new Point(), window) == actionPosition,
-                "Scrolling moved the mouse settings action away from the visible footer.");
-            controlScroll.ScrollToHome();
+            var directionActions = Find<StackPanel>("MouseDirectionSettingsActions");
+            var sensitivityActions = Find<StackPanel>("BluetoothSensitivitySettingsActions");
+            var applyButton = FindVisualDescendants<Button>(directionActions).Single();
+            var sensitivityButton = FindVisualDescendants<Button>(sensitivityActions).Single();
+            InteractionAssert(FindVisualDescendants<StackPanel>(
+                Find<ScrollViewer>("ControlSettingsScrollViewer")).Contains(directionActions) &&
+                FindVisualDescendants<StackPanel>(
+                Find<ScrollViewer>("ControlSettingsScrollViewer")).Contains(sensitivityActions),
+                "Mouse settings actions must scroll within their individual settings groups.");
             var baselineMouse = vm.BluetoothMouseSensitivity;
             app.UpdateSettings.BluetoothMouseSensitivitySchema = 0;
             app.UpdateSettings.BluetoothMouseSettingsSchema = 0;
@@ -120,12 +117,32 @@ internal static partial class Program
             app.IsUiPreviewMode = false;
             try { applyButton.Command.Execute(null); }
             finally { app.IsUiPreviewMode = true; }
+            InteractionAssert(!vm.HasPendingMouseDirectionSettings && vm.HasPendingBluetoothSensitivitySettings &&
+                vm.MouseDirectionSettingsStatus.Length == 0 && vm.SettingsStatus.Length == 0 &&
+                store.Load().BluetoothMouseSensitivity == baselineMouse &&
+                vm.AppliedBluetoothMouseSensitivity == baselineMouse &&
+                store.Load().BluetoothMouseReverseHorizontal == vm.AppliedBluetoothMouseReverseHorizontal &&
+                !applyButton.Command.CanExecute(null) && sensitivityButton.Command.CanExecute(null),
+                "Applying direction settings also applied sensitivity or left the wrong group enabled.");
+            SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(blockedPath, "settings.json")));
+            app.IsUiPreviewMode = false;
+            try { sensitivityButton.Command.Execute(null); }
+            finally { app.IsUiPreviewMode = true; }
+            InteractionAssert(vm.HasPendingBluetoothSensitivitySettings && !vm.HasPendingMouseDirectionSettings &&
+                vm.BluetoothSensitivitySettingsStatus.Length > 0 && vm.MouseDirectionSettingsStatus.Length == 0 &&
+                vm.AppliedBluetoothMouseSensitivity == baselineMouse &&
+                app.UpdateSettings.BluetoothMouseDirectionSchema == 1 &&
+                app.UpdateSettings.BluetoothMouseSensitivitySchema == 0,
+                "Failed sensitivity save changed direction settings or lost its own retry/error state.");
+            SetKeyboardField(app, "_settingsStore", store);
+            app.IsUiPreviewMode = false;
+            try { sensitivityButton.Command.Execute(null); }
+            finally { app.IsUiPreviewMode = true; }
             InteractionAssert(!vm.HasPendingBluetoothMouseSettings && vm.MouseSettingsStatus.Length == 0 &&
-                vm.SettingsStatus.Length == 0 &&
-                store.Load().BluetoothMouseSensitivity == vm.AppliedBluetoothMouseSensitivity &&
-                store.Load().BluetoothMouseReverseHorizontal == vm.AppliedBluetoothMouseReverseHorizontal,
-                "Retrying mouse save did not persist and apply the shared direction and Bluetooth preferences.");
-            Console.WriteLine("PASS fixed mouse settings action and failed-save rollback/retry.");
+                vm.BluetoothSensitivitySettingsStatus.Length == 0 &&
+                store.Load().BluetoothMouseSensitivity == vm.AppliedBluetoothMouseSensitivity,
+                "Sensitivity retry did not apply its own settings or clear its error.");
+            Console.WriteLine("PASS inline direction/sensitivity actions, independent saves and failed-save rollback/retry.");
 
             foreach (var culture in new[] { "zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP" })
             {

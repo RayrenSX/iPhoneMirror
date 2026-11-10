@@ -1703,7 +1703,6 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid>
                             <TextBlock Text="{DynamicResource NavSettings}" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold" VerticalAlignment="Center"/>
@@ -2337,6 +2336,38 @@
                                                 IsChecked="{Binding BluetoothMouseReverseVertical, Mode=TwoWay}"
                                                 Margin="18,0,0,0"/>
                                         </WrapPanel>
+                                        <StackPanel x:Name="MouseDirectionSettingsActions" Margin="0,12,0,0">
+                                            <Button Content="{DynamicResource SettingsApplyMouseDirection}" Command="{Binding ApplyMouseDirectionSettingsCommand}"
+                                                Style="{StaticResource ToolButton}" AutomationProperties.AutomationId="ApplyMouseDirectionSettingsButton"/>
+                                            <TextBlock Text="{DynamicResource SettingsGroupPendingHint}" TextWrapping="Wrap"
+                                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
+                                                AutomationProperties.LiveSetting="Polite" Margin="0,6,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasPendingMouseDirectionSettings}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding MouseDirectionSettingsStatus}" TextWrapping="Wrap"
+                                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
+                                                AutomationProperties.LiveSetting="Polite">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Margin" Value="0,6,0,0"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding MouseDirectionSettingsStatus}" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
                                     </StackPanel>
                                 </Border>
                                 <Border x:Name="BluetoothMouseSettingsSection" Style="{StaticResource ControlSectionCard}">
@@ -2413,6 +2444,38 @@
                                             Margin="0,4,0,0"
                                             VerticalAlignment="Center"/>
 
+                                        <StackPanel x:Name="BluetoothSensitivitySettingsActions" Margin="0,12,0,0">
+                                            <Button Content="{DynamicResource SettingsApplyBluetoothSensitivity}" Command="{Binding ApplyBluetoothSensitivitySettingsCommand}"
+                                                Style="{StaticResource ToolButton}" AutomationProperties.AutomationId="ApplyBluetoothMouseSettingsButton"/>
+                                            <TextBlock Text="{DynamicResource SettingsGroupPendingHint}" TextWrapping="Wrap"
+                                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
+                                                AutomationProperties.LiveSetting="Polite" Margin="0,6,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasPendingBluetoothSensitivitySettings}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding BluetoothSensitivitySettingsStatus}" TextWrapping="Wrap"
+                                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
+                                                AutomationProperties.LiveSetting="Polite">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Margin" Value="0,6,0,0"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding BluetoothSensitivitySettingsStatus}" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
                                         <Button Margin="0,12,0,0"
                                             Content="{DynamicResource ClearBluetoothBindings}"
                                             Click="OnClearBluetoothBindingsClick"
@@ -2423,50 +2486,7 @@
 
                             </StackPanel>
                         </ScrollViewer>
-                        <StackPanel x:Name="MouseSettingsActions" Grid.Row="3" Margin="0,12,0,0">
-                            <StackPanel.Style>
-                                <Style TargetType="StackPanel">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsChecked, ElementName=ControlSettingsTab}" Value="True">
-                                            <Setter Property="Visibility" Value="Visible"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </StackPanel.Style>
-                            <TextBlock x:Name="MouseSettingsApplyHint" TextWrapping="Wrap"
-                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
-                                AutomationProperties.LiveSetting="Polite" Margin="0,0,0,6">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Text" Value="{DynamicResource SettingsMouseAppliedHint}"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasPendingBluetoothMouseSettings}" Value="True">
-                                                <Setter Property="Text" Value="{DynamicResource SettingsMousePendingHint}"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                            <Button Content="{DynamicResource SettingsApplyMouse}"
-                                Command="{Binding ApplyBluetoothMouseSettingsCommand}"
-                                Style="{StaticResource ToolButton}"
-                                AutomationProperties.AutomationId="ApplyBluetoothMouseSettingsButton"/>
-                            <TextBlock Text="{Binding MouseSettingsStatus}" TextWrapping="Wrap"
-                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
-                                AutomationProperties.LiveSetting="Polite">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Margin" Value="0,6,0,0"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding MouseSettingsStatus}" Value="">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                        </StackPanel>
+
                     </Grid>
                 </Border>
             </controls:WorkspaceRevealPanel>

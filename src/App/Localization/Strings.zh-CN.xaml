@@ -1677,4 +1677,7 @@
     <system:String x:Key="SettingsBluetoothModeLockedHint">请先关闭蓝牙控制，再切换绝对位置模式。仅暂停输入不会解锁此选项。</system:String>
     <system:String x:Key="SettingsMouseAppliedHint">当前鼠标方向与灵敏度已应用。</system:String>
     <system:String x:Key="SettingsMousePendingHint">鼠标设置有未应用的修改，请点击下方按钮。</system:String>
+    <system:String x:Key="SettingsApplyMouseDirection">应用方向设置</system:String>
+    <system:String x:Key="SettingsApplyBluetoothSensitivity">应用灵敏度</system:String>
+    <system:String x:Key="SettingsGroupPendingHint">本组有未应用的修改。</system:String>
 </ResourceDictionary>

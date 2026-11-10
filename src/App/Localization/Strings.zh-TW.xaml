@@ -1677,4 +1677,7 @@
     <system:String x:Key="SettingsBluetoothModeLockedHint">請先關閉藍牙控制，再切換絕對位置模式。僅暫停輸入不會解鎖此選項。</system:String>
     <system:String x:Key="SettingsMouseAppliedHint">目前的滑鼠方向與靈敏度已套用。</system:String>
     <system:String x:Key="SettingsMousePendingHint">滑鼠設定有尚未套用的變更，請按下方按鈕。</system:String>
+    <system:String x:Key="SettingsApplyMouseDirection">套用方向設定</system:String>
+    <system:String x:Key="SettingsApplyBluetoothSensitivity">套用靈敏度</system:String>
+    <system:String x:Key="SettingsGroupPendingHint">此群組有尚未套用的變更。</system:String>
 </ResourceDictionary>

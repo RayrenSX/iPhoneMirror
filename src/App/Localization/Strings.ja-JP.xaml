@@ -1677,4 +1677,7 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="SettingsBluetoothModeLockedHint">絶対位置モードを変更するには、Bluetooth 操作を停止してください。入力の一時停止だけでは変更できません。</system:String>
     <system:String x:Key="SettingsMouseAppliedHint">現在のマウスの方向と感度は適用済みです。</system:String>
     <system:String x:Key="SettingsMousePendingHint">マウス設定に未適用の変更があります。下のボタンで適用してください。</system:String>
+    <system:String x:Key="SettingsApplyMouseDirection">方向設定を適用</system:String>
+    <system:String x:Key="SettingsApplyBluetoothSensitivity">感度を適用</system:String>
+    <system:String x:Key="SettingsGroupPendingHint">このグループに未適用の変更があります。</system:String>
 </ResourceDictionary>

@@ -1677,4 +1677,7 @@ Pair, select and save.</system:String>
     <system:String x:Key="SettingsBluetoothModeLockedHint">Stop Bluetooth control before changing absolute positioning mode. Pausing input does not unlock this option.</system:String>
     <system:String x:Key="SettingsMouseAppliedHint">Current mouse direction and sensitivity are applied.</system:String>
     <system:String x:Key="SettingsMousePendingHint">Mouse settings have unapplied changes. Use the button below.</system:String>
+    <system:String x:Key="SettingsApplyMouseDirection">Apply direction settings</system:String>
+    <system:String x:Key="SettingsApplyBluetoothSensitivity">Apply sensitivity</system:String>
+    <system:String x:Key="SettingsGroupPendingHint">This group has unapplied changes.</system:String>
 </ResourceDictionary>
