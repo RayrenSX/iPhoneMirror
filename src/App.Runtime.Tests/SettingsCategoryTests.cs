@@ -85,6 +85,48 @@ internal static partial class Program
             Find<Border>("ControlPanelContent").DataContext = vm;
             Console.WriteLine("Offline fixture ready.");
 
+            Select("Control");
+            var actions = Find<StackPanel>("MouseSettingsActions");
+            var controlScroll = Find<ScrollViewer>("ControlSettingsScrollViewer");
+            InteractionAssert(!FindVisualDescendants<Button>(controlScroll).Any(button =>
+                System.Windows.Automation.AutomationProperties.GetAutomationId(button) ==
+                "ApplyBluetoothMouseSettingsButton"), "Apply must stay outside the scrolling settings list.");
+            var applyButton = FindVisualDescendants<Button>(actions).Single();
+            var actionPosition = actions.TranslatePoint(new Point(), window);
+            controlScroll.ScrollToEnd();
+            window.UpdateLayout();
+            InteractionAssert(actions.TranslatePoint(new Point(), window) == actionPosition,
+                "Scrolling moved the mouse settings action away from the visible footer.");
+            controlScroll.ScrollToHome();
+            var baselineMouse = vm.BluetoothMouseSensitivity;
+            app.UpdateSettings.BluetoothMouseSensitivitySchema = 0;
+            app.UpdateSettings.BluetoothMouseSettingsSchema = 0;
+            app.UpdateSettings.BluetoothMouseDirectionSchema = 0;
+            vm.BluetoothMouseSensitivity = baselineMouse == 123 ? 124 : 123;
+            vm.BluetoothMouseReverseHorizontal = !app.UpdateSettings.BluetoothMouseReverseHorizontal;
+            var blockedPath = Path.Combine(Path.GetFullPath(output), "blocked-settings-parent");
+            File.WriteAllText(blockedPath, "An ordinary file cannot be a settings directory.");
+            SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(blockedPath, "settings.json")));
+            app.IsUiPreviewMode = false;
+            try { applyButton.Command.Execute(null); }
+            finally { app.IsUiPreviewMode = true; }
+            InteractionAssert(vm.HasPendingBluetoothMouseSettings && vm.MouseSettingsStatus.Length > 0 &&
+                vm.AppliedBluetoothMouseSensitivity == baselineMouse &&
+                app.UpdateSettings.BluetoothMouseSensitivitySchema == 0 &&
+                app.UpdateSettings.BluetoothMouseSettingsSchema == 0 &&
+                app.UpdateSettings.BluetoothMouseDirectionSchema == 0,
+                "Failed mouse save changed live input/schema settings or hid its retry/error state.");
+            SetKeyboardField(app, "_settingsStore", store);
+            app.IsUiPreviewMode = false;
+            try { applyButton.Command.Execute(null); }
+            finally { app.IsUiPreviewMode = true; }
+            InteractionAssert(!vm.HasPendingBluetoothMouseSettings && vm.MouseSettingsStatus.Length == 0 &&
+                vm.SettingsStatus.Length == 0 &&
+                store.Load().BluetoothMouseSensitivity == vm.AppliedBluetoothMouseSensitivity &&
+                store.Load().BluetoothMouseReverseHorizontal == vm.AppliedBluetoothMouseReverseHorizontal,
+                "Retrying mouse save did not persist and apply the shared direction and Bluetooth preferences.");
+            Console.WriteLine("PASS fixed mouse settings action and failed-save rollback/retry.");
+
             foreach (var culture in new[] { "zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP" })
             {
                 typeof(LocalizationService).GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!

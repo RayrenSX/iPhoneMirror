@@ -238,7 +238,7 @@
     <system:String x:Key="BluetoothMouseSettingsTitle">反向控制設定</system:String>
     <system:String x:Key="BluetoothWheelSensitivity">滾輪靈敏度</system:String>
     <system:String x:Key="ApplyBluetoothMouseSettings">套用設定</system:String>
-    <system:String x:Key="BluetoothMouseSettingsSaveFailed">藍牙反向控制滑鼠設定儲存失敗</system:String>
+    <system:String x:Key="BluetoothMouseSettingsSaveFailed">滑鼠設定儲存失敗，請重試。</system:String>
     <system:String x:Key="BluetoothPortraitMouseDirection">直向滑鼠方向</system:String>
     <system:String x:Key="BluetoothLandscapeMouseDirection">橫向滑鼠方向</system:String>
     <system:String x:Key="BluetoothMouseDirectionUp">上</system:String>

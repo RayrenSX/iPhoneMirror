@@ -609,8 +609,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (!app.SaveUpdateSettings())
             {
                 app.UpdateSettings.BluetoothWindowMouseEnabled = !value;
-                SetRawSettingsStatus(LocalizationService.Get("BluetoothMouseSettingsSaveFailed"));
+                MouseSettingsStatus = LocalizationService.Get("BluetoothMouseSettingsSaveFailed");
+                SetRawSettingsStatus(MouseSettingsStatus);
             }
+            else ClearMouseSettingsStatus();
             OnPropertyChanged(nameof(BluetoothWindowMouseEnabled));
         }
     }
@@ -623,15 +625,24 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
          _bluetoothMouseReverseHorizontal != app.UpdateSettings.BluetoothMouseReverseHorizontal ||
          _bluetoothMouseReverseVertical != app.UpdateSettings.BluetoothMouseReverseVertical);
 
+    private string _mouseSettingsStatus = string.Empty;
+    public string MouseSettingsStatus
+    {
+        get => LocalizationService.RefreshText(_mouseSettingsStatus);
+        private set => Set(ref _mouseSettingsStatus, value);
+    }
+
+    private void ClearMouseSettingsStatus()
+    {
+        if (MouseSettingsStatus.Length > 0 && SettingsStatus == MouseSettingsStatus)
+            SetRawSettingsStatus(string.Empty);
+        MouseSettingsStatus = string.Empty;
+    }
+
     private void ApplyBluetoothMouseSettings()
     {
         if (Application.Current is not App app) return;
-        var previousMouse = app.UpdateSettings.BluetoothMouseSensitivity;
-        var previousWheel = app.UpdateSettings.BluetoothWheelSensitivity;
-        var previousPortraitDirection = app.UpdateSettings.BluetoothPortraitMouseDirection;
-        var previousLandscapeDirection = app.UpdateSettings.BluetoothLandscapeMouseDirection;
-        var previousReverseHorizontal = app.UpdateSettings.BluetoothMouseReverseHorizontal;
-        var previousReverseVertical = app.UpdateSettings.BluetoothMouseReverseVertical;
+        var snapshot = app.UpdateSettings.Clone();
         app.UpdateSettings.BluetoothMouseSensitivity = _bluetoothMouseSensitivity;
         app.UpdateSettings.BluetoothMouseSensitivitySchema = 2;
         app.UpdateSettings.BluetoothWheelSensitivity = _bluetoothWheelSensitivity;
@@ -647,17 +658,14 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         app.UpdateSettings.BluetoothMouseDirectionSchema = 1;
         if (!app.SaveUpdateSettings())
         {
-            app.UpdateSettings.BluetoothMouseSensitivity = previousMouse;
-            app.UpdateSettings.BluetoothWheelSensitivity = previousWheel;
-            app.UpdateSettings.BluetoothPortraitMouseDirection = previousPortraitDirection;
-            app.UpdateSettings.BluetoothLandscapeMouseDirection = previousLandscapeDirection;
-            app.UpdateSettings.BluetoothMouseReverseHorizontal = previousReverseHorizontal;
-            app.UpdateSettings.BluetoothMouseReverseVertical = previousReverseVertical;
-            SetRawSettingsStatus(LocalizationService.Get("BluetoothMouseSettingsSaveFailed"));
+            app.RestoreUpdateSettings(snapshot);
+            MouseSettingsStatus = LocalizationService.Get("BluetoothMouseSettingsSaveFailed");
+            SetRawSettingsStatus(MouseSettingsStatus);
             OnPropertyChanged(nameof(HasPendingBluetoothMouseSettings));
             ApplyBluetoothMouseSettingsCommand.NotifyCanExecuteChanged();
             return;
         }
+        ClearMouseSettingsStatus();
         _appliedBluetoothMouseSensitivity = _bluetoothMouseSensitivity;
         _appliedBluetoothWheelSensitivity = _bluetoothWheelSensitivity;
         _appliedBluetoothPortraitMouseDirection = _bluetoothPortraitMouseDirection;
@@ -6665,6 +6673,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        OnPropertyChanged(nameof(MouseSettingsStatus));
         OnPropertyChanged(nameof(KeyboardMappingStatus));
         OnPropertyChanged(nameof(KeyboardInputModeStatus));
         _selectedLanguage = LocalizationService.SelectedLanguage;

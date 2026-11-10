@@ -238,7 +238,7 @@
     <system:String x:Key="BluetoothMouseSettingsTitle">Reverse control settings</system:String>
     <system:String x:Key="BluetoothWheelSensitivity">Wheel sensitivity</system:String>
     <system:String x:Key="ApplyBluetoothMouseSettings">Apply settings</system:String>
-    <system:String x:Key="BluetoothMouseSettingsSaveFailed">Could not save Bluetooth control mouse settings</system:String>
+    <system:String x:Key="BluetoothMouseSettingsSaveFailed">Could not save mouse settings. Please try again.</system:String>
     <system:String x:Key="BluetoothPortraitMouseDirection">Portrait mouse direction</system:String>
     <system:String x:Key="BluetoothLandscapeMouseDirection">Landscape mouse direction</system:String>
     <system:String x:Key="BluetoothMouseDirectionUp">Up</system:String>

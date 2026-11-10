@@ -238,7 +238,7 @@
     <system:String x:Key="BluetoothMouseSettingsTitle">リモート操作の設定</system:String>
     <system:String x:Key="BluetoothWheelSensitivity">ホイールの感度</system:String>
     <system:String x:Key="ApplyBluetoothMouseSettings">設定を適用</system:String>
-    <system:String x:Key="BluetoothMouseSettingsSaveFailed">Bluetooth操作のマウス設定を保存できませんでした</system:String>
+    <system:String x:Key="BluetoothMouseSettingsSaveFailed">マウス設定を保存できませんでした。もう一度お試しください。</system:String>
     <system:String x:Key="BluetoothPortraitMouseDirection">縦向きのマウスの方向</system:String>
     <system:String x:Key="BluetoothLandscapeMouseDirection">横向きのマウスの方向</system:String>
     <system:String x:Key="BluetoothMouseDirectionUp">上</system:String>

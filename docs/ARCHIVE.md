@@ -10,6 +10,7 @@
 
 ## 文档、代码与 Issue 审查
 
+- [设置与本地主线复审（2026-11-10）](SETTINGS_MAIN_REVIEW_2026-11-10.zh-CN.md)
 - [文档统一完善记录（2026-11-05）](DOCUMENTATION_AUDIT_2026-11-05.md)
 - [代码逻辑审查 — 2026-10-02](CODE_LOGIC_REVIEW_2026-10-02.md)
 - [全仓库代码审查与功能探索（2026-10-11）](CODE_REVIEW_2026-10-11.zh-CN.md)

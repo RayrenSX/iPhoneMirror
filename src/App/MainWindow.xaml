@@ -1703,6 +1703,7 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid>
                             <TextBlock Text="{DynamicResource NavSettings}" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold" VerticalAlignment="Center"/>
@@ -2391,13 +2392,28 @@
                                             AutomationProperties.AutomationId="ClearBluetoothBindingsButton"/>
                                     </StackPanel>
                                 </Border>
-                                <Button Content="{DynamicResource SettingsApplyMouse}"
-                                    Command="{Binding ApplyBluetoothMouseSettingsCommand}"
-                                    Style="{StaticResource ToolButton}"
-                                    Margin="0,12,0,0"
-                                    AutomationProperties.AutomationId="ApplyBluetoothMouseSettingsButton"/>
+
                             </StackPanel>
                         </ScrollViewer>
+                        <StackPanel x:Name="MouseSettingsActions" Grid.Row="3" Margin="0,12,0,0">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsChecked, ElementName=ControlSettingsTab}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <Button Content="{DynamicResource SettingsApplyMouse}"
+                                Command="{Binding ApplyBluetoothMouseSettingsCommand}"
+                                Style="{StaticResource ToolButton}"
+                                AutomationProperties.AutomationId="ApplyBluetoothMouseSettingsButton"/>
+                            <TextBlock Text="{Binding MouseSettingsStatus}" TextWrapping="Wrap"
+                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
+                                AutomationProperties.LiveSetting="Polite" Margin="0,6,0,0"/>
+                        </StackPanel>
                     </Grid>
                 </Border>
             </controls:WorkspaceRevealPanel>
