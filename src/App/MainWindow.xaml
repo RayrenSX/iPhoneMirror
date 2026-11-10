@@ -2280,7 +2280,51 @@
                                             FontSize="{DynamicResource CaptionFontSize}"/>
                                     </StackPanel>
                                 </Border>
-                                <Border Style="{StaticResource ControlSectionCard}">
+                                <Border x:Name="MouseDirectionSettingsSection" Style="{StaticResource ControlSectionCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="{DynamicResource SettingsMouseDirection}" Style="{StaticResource ControlSectionTitle}"/>
+                                        <TextBlock Text="{DynamicResource SettingsScopeMouseDirection}" Style="{StaticResource DetailLabel}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                        <TextBlock Text="{Binding BluetoothDeviceOrientationDisplay}"
+                                            Foreground="{DynamicResource MutedTextBrush}"
+                                            FontSize="{DynamicResource CaptionFontSize}"
+                                            TextWrapping="Wrap"
+                                            Margin="0,10,0,0"/>
+                                        <TextBlock Text="{DynamicResource BluetoothMouseDirectionHelp}"
+                                            Foreground="{DynamicResource MutedTextBrush}"
+                                            FontSize="{DynamicResource CaptionFontSize}"
+                                            TextWrapping="Wrap"
+                                            Margin="0,5,0,0"/>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource BluetoothPortraitMouseDirection}" Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
+                                                <ComboBox AutomationProperties.Name="{DynamicResource BluetoothPortraitMouseDirection}"
+                                                    ItemsSource="{Binding BluetoothMouseDirections}"
+                                                    DisplayMemberPath="Label"
+                                                    SelectedItem="{Binding SelectedBluetoothPortraitMouseDirection, Mode=TwoWay}"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="{DynamicResource BluetoothLandscapeMouseDirection}" Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
+                                                <ComboBox AutomationProperties.Name="{DynamicResource BluetoothLandscapeMouseDirection}"
+                                                    ItemsSource="{Binding BluetoothMouseDirections}"
+                                                    DisplayMemberPath="Label"
+                                                    SelectedItem="{Binding SelectedBluetoothLandscapeMouseDirection, Mode=TwoWay}"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <WrapPanel Margin="0,10,0,0">
+                                            <CheckBox Content="{DynamicResource BluetoothReverseHorizontal}"
+                                                IsChecked="{Binding BluetoothMouseReverseHorizontal, Mode=TwoWay}"/>
+                                            <CheckBox Content="{DynamicResource BluetoothReverseVertical}"
+                                                IsChecked="{Binding BluetoothMouseReverseVertical, Mode=TwoWay}"
+                                                Margin="18,0,0,0"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border x:Name="BluetoothMouseSettingsSection" Style="{StaticResource ControlSectionCard}">
                                     <StackPanel>
                                         <TextBlock Text="{DynamicResource SettingsBluetoothMouse}" Style="{StaticResource ControlSectionTitle}"/>
                                         <CheckBox Content="{DynamicResource BluetoothWindowMouse}"
@@ -2288,7 +2332,7 @@
                                             IsEnabled="{Binding CanConfigureBluetoothWindowMouse}"
                                             AutomationProperties.AutomationId="BluetoothWindowMouseCheckBox"
                                             Margin="0,8,0,4"/>
-                                    <StackPanel Margin="0,10,0,0">
+
                                         <Grid Margin="0,10,0,0">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
@@ -2339,57 +2383,19 @@
                                             Value="{Binding BluetoothWheelSensitivity, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                             Margin="0,4,0,0"
                                             VerticalAlignment="Center"/>
-                                        <TextBlock Text="{Binding BluetoothDeviceOrientationDisplay}"
-                                            Foreground="{DynamicResource MutedTextBrush}"
-                                            FontSize="{DynamicResource CaptionFontSize}"
-                                            TextWrapping="Wrap"
-                                            Margin="0,10,0,0"/>
-                                        <TextBlock Text="{DynamicResource BluetoothMouseDirectionHelp}"
-                                            Foreground="{DynamicResource MutedTextBrush}"
-                                            FontSize="{DynamicResource CaptionFontSize}"
-                                            TextWrapping="Wrap"
-                                            Margin="0,5,0,0"/>
-                                        <Grid Margin="0,10,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="8"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="{DynamicResource BluetoothPortraitMouseDirection}" Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
-                                                <ComboBox AutomationProperties.Name="{DynamicResource BluetoothPortraitMouseDirection}"
-                                                    ItemsSource="{Binding BluetoothMouseDirections}"
-                                                    DisplayMemberPath="Label"
-                                                    SelectedItem="{Binding SelectedBluetoothPortraitMouseDirection, Mode=TwoWay}"/>
-                                            </StackPanel>
-                                            <StackPanel Grid.Column="2">
-                                                <TextBlock Text="{DynamicResource BluetoothLandscapeMouseDirection}" Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
-                                                <ComboBox AutomationProperties.Name="{DynamicResource BluetoothLandscapeMouseDirection}"
-                                                    ItemsSource="{Binding BluetoothMouseDirections}"
-                                                    DisplayMemberPath="Label"
-                                                    SelectedItem="{Binding SelectedBluetoothLandscapeMouseDirection, Mode=TwoWay}"/>
-                                            </StackPanel>
-                                        </Grid>
-                                        <WrapPanel Margin="0,10,0,0">
-                                            <CheckBox Content="{DynamicResource BluetoothReverseHorizontal}"
-                                                IsChecked="{Binding BluetoothMouseReverseHorizontal, Mode=TwoWay}"/>
-                                            <CheckBox Content="{DynamicResource BluetoothReverseVertical}"
-                                                IsChecked="{Binding BluetoothMouseReverseVertical, Mode=TwoWay}"
-                                                Margin="18,0,0,0"/>
-                                        </WrapPanel>
-                                        <Button Content="{DynamicResource ApplyBluetoothMouseSettings}"
-                                            Command="{Binding ApplyBluetoothMouseSettingsCommand}"
+
+                                        <Button Margin="0,12,0,0"
+                                            Content="{DynamicResource ClearBluetoothBindings}"
+                                            Click="OnClearBluetoothBindingsClick"
                                             Style="{StaticResource ToolButton}"
-                                            Margin="0,12,0,0"
-                                            AutomationProperties.AutomationId="ApplyBluetoothMouseSettingsButton"/>
-                                    <Button Margin="0,12,0,0"
-                                                Content="{DynamicResource ClearBluetoothBindings}"
-                                                Click="OnClearBluetoothBindingsClick"
-                                                Style="{StaticResource ToolButton}"
-                                                AutomationProperties.AutomationId="ClearBluetoothBindingsButton"/>
-</StackPanel>
+                                            AutomationProperties.AutomationId="ClearBluetoothBindingsButton"/>
                                     </StackPanel>
                                 </Border>
+                                <Button Content="{DynamicResource SettingsApplyMouse}"
+                                    Command="{Binding ApplyBluetoothMouseSettingsCommand}"
+                                    Style="{StaticResource ToolButton}"
+                                    Margin="0,12,0,0"
+                                    AutomationProperties.AutomationId="ApplyBluetoothMouseSettingsButton"/>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>

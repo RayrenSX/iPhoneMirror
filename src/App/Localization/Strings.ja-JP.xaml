@@ -1670,4 +1670,7 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="SettingsKeyboard">キーボードとショートカット</system:String>
     <system:String x:Key="SettingsMaintenance">セットアップと保守</system:String>
     <system:String x:Key="SettingsBluetoothMouse">Bluetooth マウス</system:String>
+    <system:String x:Key="SettingsMouseDirection">マウスの方向</system:String>
+    <system:String x:Key="SettingsScopeMouseDirection">有線・無線タッチ操作と Bluetooth 相対マウスに適用します。</system:String>
+    <system:String x:Key="SettingsApplyMouse">マウス設定を適用</system:String>
 </ResourceDictionary>

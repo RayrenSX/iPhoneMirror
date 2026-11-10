@@ -1670,4 +1670,7 @@ Pair, select and save.</system:String>
     <system:String x:Key="SettingsKeyboard">Keyboard and shortcuts</system:String>
     <system:String x:Key="SettingsMaintenance">Setup and maintenance</system:String>
     <system:String x:Key="SettingsBluetoothMouse">Bluetooth mouse</system:String>
+    <system:String x:Key="SettingsMouseDirection">Mouse direction</system:String>
+    <system:String x:Key="SettingsScopeMouseDirection">Applies to wired/wireless touch control and relative Bluetooth mouse input.</system:String>
+    <system:String x:Key="SettingsApplyMouse">Apply mouse settings</system:String>
 </ResourceDictionary>

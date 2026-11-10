@@ -1670,4 +1670,7 @@
     <system:String x:Key="SettingsKeyboard">键盘与快捷键</system:String>
     <system:String x:Key="SettingsMaintenance">配置与维护</system:String>
     <system:String x:Key="SettingsBluetoothMouse">蓝牙鼠标</system:String>
+    <system:String x:Key="SettingsMouseDirection">鼠标方向</system:String>
+    <system:String x:Key="SettingsScopeMouseDirection">适用于有线、无线触控及蓝牙相对鼠标。</system:String>
+    <system:String x:Key="SettingsApplyMouse">应用鼠标设置</system:String>
 </ResourceDictionary>
