@@ -451,9 +451,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (!app.SaveUpdateSettings())
             {
                 app.UpdateSettings.ApplicationDisplayMode = previous;
+                ApplicationSettingsStatus = LocalizationService.Get("SetupSaveFailed");
                 OnPropertyChanged(nameof(SelectedApplicationDisplayMode));
                 return;
             }
+            ApplicationSettingsStatus = string.Empty;
             _closeToTrayActive = false;
             NotifyApplicationDisplayModeChanged();
             AddDiagnosticLog(AppLog.Event("application_display_mode_changed",
@@ -616,6 +618,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             }
             OnPropertyChanged(nameof(BluetoothWindowMouseEnabled));
         }
+    }
+
+    private string _applicationSettingsStatus = string.Empty;
+    public string ApplicationSettingsStatus
+    {
+        get => LocalizationService.RefreshText(_applicationSettingsStatus);
+        internal set => Set(ref _applicationSettingsStatus, value);
     }
 
     public bool HasPendingBluetoothSensitivitySettings => Application.Current is App app &&
@@ -1060,7 +1069,14 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 IsSettingsInteractionBlocked) return;
             var state = GetOrCreateDeviceState(device);
             if (state.UsbProjectionMode == value.Mode) return;
+            var previousMode = state.UsbProjectionMode;
             state.UsbProjectionMode = value.Mode;
+            if (!PersistDeviceVideoPreferences(state))
+            {
+                state.UsbProjectionMode = previousMode;
+                OnPropertyChanged();
+                return;
+            }
             OnPropertyChanged();
             OnPropertyChanged(nameof(AdvancedSettingsVisibility));
             SetSettingsStatus("UsbProjectionModeSelectedFormat", value.Label);
@@ -4241,6 +4257,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 _wireless.AppliedProfile.Label, profile.Label));
         if (changes.Count == 0)
         {
+            // The running receiver may already match after an earlier failed
+            // disk write. Applying again must retry persistence as well.
+            if (!PersistWirelessReceiverSettings(backend, profile, sanitized)) return;
+            RefreshWirelessStatus();
             AddDiagnosticLog(AppLog.Event("wireless_settings_unchanged"));
             AppPromptWindow.Inform(LocalizationService.Get("WirelessSettingsTitle"),
                 LocalizationService.Get("WirelessSettingsUnchanged"));
@@ -4271,7 +4291,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             RefreshWirelessStatus();
             if (started.Started)
             {
-                PersistWirelessReceiverSettings(backend, profile, sanitized);
+                var saved = PersistWirelessReceiverSettings(backend, profile, sanitized);
                 OnPropertyChanged(nameof(WirelessReceiverName));
                 OnPropertyChanged(nameof(MediaCastReceiverName));
                 OnPropertyChanged(nameof(AppliedWirelessBackendDisplay));
@@ -4280,7 +4300,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 RefreshMediaCastStatus();
                 AddUiLog(WirelessStatus);
                 AddDiagnosticLog(AppLog.Event("wireless_settings_complete",
-                    ("success", true), ("backend", backend.ToString()),
+                    ("success", true), ("saved", saved), ("backend", backend.ToString()),
                     ("profile", profile.Label),
                     ("elapsed_ms", operation.ElapsedMilliseconds)));
             }
@@ -4309,6 +4329,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         await RefreshAsync(forceDeviceEnumeration: true);
     }
 
+    private bool _wirelessSettingsSaveFailed;
     private bool PersistWirelessReceiverSettings(WirelessReceiverBackend backend,
         WirelessDisplayProfile profile, string receiverName)
     {
@@ -4319,10 +4340,16 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         app.UpdateSettings.WirelessReceiverBackend = backend;
         app.UpdateSettings.WirelessDisplayProfileId = profile.Id;
         app.UpdateSettings.WirelessReceiverName = receiverName;
-        if (app.SaveUpdateSettings()) return true;
+        if (app.SaveUpdateSettings())
+        {
+            _wirelessSettingsSaveFailed = false;
+            return true;
+        }
         app.UpdateSettings.WirelessReceiverBackend = previousBackend;
         app.UpdateSettings.WirelessDisplayProfileId = previousProfile;
         app.UpdateSettings.WirelessReceiverName = previousName;
+        _wirelessSettingsSaveFailed = true;
+        RefreshWirelessStatus();
         AddDiagnosticLog(AppLog.Event("wireless_backend_save_failed",
             ("backend", backend.ToString()), ("profile", profile.Id)));
         AddUiLog(LocalizationService.Get("WirelessBackendSettingsSaveFailed"));
@@ -5057,6 +5084,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             ("brightness", requestedBrightness), ("contrast", requestedContrast),
             ("saturation", requestedSaturation), ("gamma", requestedGamma)));
 
+        // An earlier edit may have failed to write its preferences. Retry
+        // before applying to a live session or claiming an offline save.
+        if (!PersistDeviceVideoPreferences(requestedState)) return;
         if (requestedHandle is null || requestedHandle.IsInvalid)
         {
             requestedState.MarkVideoSettingsApplied(
@@ -6515,6 +6545,12 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         WirelessStatusTone = !_wireless.IsAvailable || _wireless.StartError is not null
             ? IPhoneMirror.UI.Controls.StatusTone.Error : _wireless.Ready
             ? IPhoneMirror.UI.Controls.StatusTone.Success : IPhoneMirror.UI.Controls.StatusTone.Info;
+        if (_wirelessSettingsSaveFailed)
+        {
+            WirelessStatus = LocalizationService.Join(Environment.NewLine,
+                [WirelessStatus, LocalizationService.Get("WirelessBackendSettingsSaveFailed")]);
+            WirelessStatusTone = IPhoneMirror.UI.Controls.StatusTone.Error;
+        }
         var signature = $"{_wireless.Backend}:{_wireless.AppliedBackend}:" +
             $"{_wireless.IsAvailable}:{_wireless.Running}:{_wireless.Ready}:" +
             AppLog.Sanitize(_wireless.StartError);
@@ -6721,6 +6757,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        OnPropertyChanged(nameof(ApplicationSettingsStatus));
         OnPropertyChanged(nameof(MouseSettingsStatus));
         OnPropertyChanged(nameof(MouseDirectionSettingsStatus));
         OnPropertyChanged(nameof(BluetoothSensitivitySettingsStatus));

@@ -2658,9 +2658,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             !Enum.TryParse<AppTheme>(value, ignoreCase: true, out var theme) ||
             Application.Current is not App app || app.UpdateSettings.Theme == theme)
             return;
+        var previous = app.UpdateSettings.Theme;
         app.UpdateSettings.Theme = theme;
+        if (!app.SaveUpdateSettings())
+        {
+            app.UpdateSettings.Theme = previous;
+            _themeControlReady = false;
+            try { ThemeComboBox.SelectedValue = previous.ToString(); }
+            finally { _themeControlReady = true; }
+            _viewModel.ApplicationSettingsStatus = LocalizationService.Get("SetupSaveFailed");
+            return;
+        }
+        _viewModel.ApplicationSettingsStatus = string.Empty;
         ThemeService.Apply(theme);
-        app.SaveUpdateSettings();
     }
 
     private void OnMinimizeClick(object sender, RoutedEventArgs e) =>

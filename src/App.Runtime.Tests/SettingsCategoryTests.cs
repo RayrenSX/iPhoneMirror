@@ -143,6 +143,7 @@ internal static partial class Program
                 store.Load().BluetoothMouseSensitivity == vm.AppliedBluetoothMouseSensitivity,
                 "Sensitivity retry did not apply its own settings or clear its error.");
             Console.WriteLine("PASS inline direction/sensitivity actions, independent saves and failed-save rollback/retry.");
+            TestSettingsPersistence(window, app, vm, device, store, blockedPath);
 
             foreach (var culture in new[] { "zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP" })
             {

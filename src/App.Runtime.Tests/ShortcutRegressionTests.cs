@@ -72,11 +72,11 @@ internal static partial class Program
             }
             else
             {
-                foreach (var (action, usage) in new[]
+                foreach (var action in new[]
                 {
-                    (BluetoothShortcutAction.ControlCenter, 6),
-                    (BluetoothShortcutAction.NotificationCenter, 17),
-                    (BluetoothShortcutAction.Dock, 4),
+                    BluetoothShortcutAction.ControlCenter,
+                    BluetoothShortcutAction.NotificationCenter,
+                    BluetoothShortcutAction.Dock,
                 })
                 {
                     packets.SetLength(0);
@@ -87,18 +87,19 @@ internal static partial class Program
                         InteractionAssert(frames.Length == 0, $"{mode}: iPhone Dock leaked a letter.");
                         continue;
                     }
-                    InteractionAssert(frames.Length == 4 &&
-                        frames[0].GetProperty("usageCode").GetInt32() == 0x29D &&
-                        frames[0].GetProperty("state").GetString() == "down" &&
-                        frames[1].GetProperty("usagePage").GetInt32() == 7 &&
-                        frames[1].GetProperty("usageCode").GetInt32() == usage &&
-                        frames[1].GetProperty("state").GetString() == "down" &&
-                        frames[2].GetProperty("usagePage").GetInt32() == 7 &&
-                        frames[2].GetProperty("usageCode").GetInt32() == usage &&
-                        frames[2].GetProperty("state").GetString() == "up" &&
-                        frames[3].GetProperty("usageCode").GetInt32() == 0x29D &&
-                        frames[3].GetProperty("state").GetString() == "up",
-                        $"{mode}/{action}: the keyboard key must be enclosed by Globe press/release.");
+                    // CoreDevice control opens these panels with an edge
+                    // gesture; Globe+C/N reports are accepted but may do nothing.
+                    var touches = ReadPreviewTouchPackets(packets);
+                    var expectedX = action == BluetoothShortcutAction.ControlCenter ? .98 : .5;
+                    InteractionAssert(touches.Length == 14 && touches[0].Action == "down" &&
+                        touches[^1].Action == "up" &&
+                        touches.Skip(1).Take(12).All(point => point.Action == "move") &&
+                        touches.All(point => Math.Abs(point.X - expectedX) < .001) &&
+                        Math.Abs(touches[0].Y - .002) < .001 &&
+                        Math.Abs(touches[^1].Y - .7) < .001 &&
+                        touches.Zip(touches.Skip(1)).All(pair => pair.Second.Y >= pair.First.Y) &&
+                        frames.All(frame => frame.TryGetProperty("points", out _)),
+                        $"{mode}/{action}: panel shortcut must send a complete top-edge swipe and no keyboard chord; packets={string.Join(';', frames.Select(frame => frame.GetRawText()))}.");
                 }
 
                 bindings[BluetoothShortcutAction.Home] = KeyboardShortcut.HomeDefault;
@@ -166,7 +167,9 @@ internal static partial class Program
                 InteractionAssert(ReadShortcutPackets(packets).All(f =>
                     f.GetProperty("kind").GetString() == "keyboard_batch"
                         ? f.GetProperty("usages").GetArrayLength() == 0
-                        : f.GetProperty("state").GetString() == "up"),
+                        : f.TryGetProperty("points", out var points)
+                            ? points.EnumerateArray().All(point => point.GetProperty("action").GetString() == "up")
+                            : f.GetProperty("state").GetString() == "up"),
                     "An expired shortcut sent a press instead of only cleanup releases.");
 
                 foreground = mainHandle;

@@ -116,8 +116,14 @@ internal static partial class Program
                 KeyboardCall(KeyboardField(vm, "_reverseInputRouter"), "Begin", udid,
                     Enum.Parse(assembly.GetType("IPhoneMirror.App.Services.ReverseControlMode")!, mode));
                 if (mode != "Bluetooth")
-                    ((DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", udid)!).Router.Begin(udid,
+                {
+                    var control = (DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", udid)!;
+                    // Real startup captures the Apple identity before admitting
+                    // touch gestures; panel shortcuts now use that same route.
+                    control.AppleUdid = udid;
+                    control.Router.Begin(udid,
                         mode == "Usb" ? ReverseControlMode.Usb : ReverseControlMode.Wireless);
+                }
                 ReleaseTestPhysicalKeys(window);
                 TestIsolatedKeyboardFocusRoute(window, other, udid, packets, mode != "Bluetooth");
                 TestFullScreenKeyEditorGuard(window, udid, mode);

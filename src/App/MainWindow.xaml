@@ -1815,6 +1815,20 @@
                                             <ComboBoxItem Tag="Dark" Content="{DynamicResource ThemeDark}"/>
                                             <ComboBoxItem Tag="Light" Content="{DynamicResource ThemeLight}"/>
                                         </ComboBox>
+                                        <TextBlock Text="{Binding ApplicationSettingsStatus}" TextWrapping="Wrap"
+                                            Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
+                                            AutomationProperties.LiveSetting="Polite">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Margin" Value="0,8,0,0"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding ApplicationSettingsStatus}" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource ControlSectionCard}">

@@ -5,9 +5,9 @@ namespace IPhoneMirror.App.ViewModels;
 
 internal sealed partial class MainViewModel
 {
-    private void PersistDeviceVideoPreferences(DeviceCaptureState state)
+    private bool PersistDeviceVideoPreferences(DeviceCaptureState state)
     {
-        if (System.Windows.Application.Current is not App app) return;
+        if (System.Windows.Application.Current is not App app) return false;
         app.UpdateSettings.DeviceVideoPreferences ??= new(StringComparer.OrdinalIgnoreCase);
         var hadPrevious = app.UpdateSettings.DeviceVideoPreferences.TryGetValue(state.Udid, out var previous);
         app.UpdateSettings.DeviceVideoPreferences[state.Udid] = DeviceVideoPreferences.From(state);
@@ -16,7 +16,9 @@ internal sealed partial class MainViewModel
             if (hadPrevious) app.UpdateSettings.DeviceVideoPreferences[state.Udid] = previous!;
             else app.UpdateSettings.DeviceVideoPreferences.Remove(state.Udid);
             SetSettingsStatus("SetupSaveFailed");
+            return false;
         }
+        return true;
     }
     internal bool SetupSaveVideoPreferences(IEnumerable<string> deviceIds)
     {
