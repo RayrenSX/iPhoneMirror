@@ -1918,21 +1918,16 @@
                                                 </StackPanel>
                                                 </StackPanel>
                                             </Border>
-                                            <Grid Margin="0,10,0,0">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="8"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                </Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,10,0,0">
                                                 <Button x:Name="ApplyVideoSettingsButton"
                                                     Content="{DynamicResource ApplyVideoSettings}"
                                                     Command="{Binding ApplyVideoSettingsCommand}"
                                                     Style="{StaticResource ToolButton}"/>
-                                                <Button Grid.Column="2"
+                                                <Button Margin="0,8,0,0"
                                                     Content="{DynamicResource MoreImageSettingsButton}"
                                                     Command="{Binding MoreImageSettingsCommand}"
                                                     Style="{StaticResource ToolButton}"/>
-                                            </Grid>
+                                            </StackPanel>
                                             <TextBlock Text="{Binding SettingsStatus}"
                                                 Foreground="{DynamicResource MutedTextBrush}"
                                                 FontSize="{DynamicResource CaptionFontSize}"
@@ -2255,15 +2250,10 @@
                                 <Border Style="{StaticResource ControlSectionCard}">
                                     <StackPanel>
                                         <TextBlock Text="{DynamicResource SettingsKeyboard}" Style="{StaticResource ControlSectionTitle}"/>
-                                        <WrapPanel Style="{StaticResource ControlActions}" Margin="-4,0,-4,-4">
-                                            <Button Margin="{StaticResource DialogActionMargin}"
-                                                Content="{DynamicResource OpenShortcutSettings}"
-                                                Click="OnShortcutSettingsClick"
-                                                Style="{StaticResource ToolButton}"
-                                                MinWidth="104"
-                                                AutomationProperties.AutomationId="OpenShortcutSettingsButton"/>
-
-                                        </WrapPanel>
+                                        <Button Content="{DynamicResource OpenShortcutSettings}"
+                                            Click="OnShortcutSettingsClick" Style="{StaticResource ToolButton}"
+                                            Margin="0,10,0,0" HorizontalAlignment="Stretch"
+                                            AutomationProperties.AutomationId="OpenShortcutSettingsButton"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource ControlSectionCard}">
@@ -2308,12 +2298,7 @@
                                             FontSize="{DynamicResource CaptionFontSize}"
                                             TextWrapping="Wrap"
                                             Margin="0,5,0,0"/>
-                                        <Grid Margin="0,10,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="8"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,10,0,0">
                                             <StackPanel>
                                                 <TextBlock Text="{DynamicResource BluetoothPortraitMouseDirection}" Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
                                                 <ComboBox AutomationProperties.Name="{DynamicResource BluetoothPortraitMouseDirection}"
@@ -2321,21 +2306,21 @@
                                                     DisplayMemberPath="Label"
                                                     SelectedItem="{Binding SelectedBluetoothPortraitMouseDirection, Mode=TwoWay}"/>
                                             </StackPanel>
-                                            <StackPanel Grid.Column="2">
+                                            <StackPanel Margin="0,10,0,0">
                                                 <TextBlock Text="{DynamicResource BluetoothLandscapeMouseDirection}" Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
                                                 <ComboBox AutomationProperties.Name="{DynamicResource BluetoothLandscapeMouseDirection}"
                                                     ItemsSource="{Binding BluetoothMouseDirections}"
                                                     DisplayMemberPath="Label"
                                                     SelectedItem="{Binding SelectedBluetoothLandscapeMouseDirection, Mode=TwoWay}"/>
                                             </StackPanel>
-                                        </Grid>
-                                        <WrapPanel Margin="0,10,0,0">
+                                        </StackPanel>
+                                        <StackPanel Margin="0,10,0,0">
                                             <CheckBox Content="{DynamicResource BluetoothReverseHorizontal}"
                                                 IsChecked="{Binding BluetoothMouseReverseHorizontal, Mode=TwoWay}"/>
                                             <CheckBox Content="{DynamicResource BluetoothReverseVertical}"
                                                 IsChecked="{Binding BluetoothMouseReverseVertical, Mode=TwoWay}"
-                                                Margin="18,0,0,0"/>
-                                        </WrapPanel>
+                                                Margin="0,8,0,0"/>
+                                        </StackPanel>
                                         <StackPanel x:Name="MouseDirectionSettingsActions" Margin="0,12,0,0">
                                             <Button Content="{DynamicResource SettingsApplyMouseDirection}" Command="{Binding ApplyMouseDirectionSettingsCommand}"
                                                 Style="{StaticResource ToolButton}" AutomationProperties.AutomationId="ApplyMouseDirectionSettingsButton"/>
