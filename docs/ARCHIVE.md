@@ -10,6 +10,7 @@
 
 ## 文档、代码与 Issue 审查
 
+- [开放 Issue 与 PR 复审（2026-11-10）](OPEN_ISSUE_PR_REVIEW_2026-11-10.zh-CN.md)
 - [设置与本地主线复审（2026-11-10）](SETTINGS_MAIN_REVIEW_2026-11-10.zh-CN.md)
 - [文档统一完善记录（2026-11-05）](DOCUMENTATION_AUDIT_2026-11-05.md)
 - [代码逻辑审查 — 2026-10-02](CODE_LOGIC_REVIEW_2026-10-02.md)
