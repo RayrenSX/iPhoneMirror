@@ -1673,4 +1673,8 @@ Pair, select and save.</system:String>
     <system:String x:Key="SettingsMouseDirection">Mouse direction</system:String>
     <system:String x:Key="SettingsScopeMouseDirection">Applies to wired/wireless touch control and relative Bluetooth mouse input.</system:String>
     <system:String x:Key="SettingsApplyMouse">Apply mouse settings</system:String>
+    <system:String x:Key="SettingsProjectionEmptyHint">Connect and select a device to adjust its picture and sound. Wireless receiver settings are available beforehand.</system:String>
+    <system:String x:Key="SettingsBluetoothModeLockedHint">Stop Bluetooth control before changing absolute positioning mode. Pausing input does not unlock this option.</system:String>
+    <system:String x:Key="SettingsMouseAppliedHint">Current mouse direction and sensitivity are applied.</system:String>
+    <system:String x:Key="SettingsMousePendingHint">Mouse settings have unapplied changes. Use the button below.</system:String>
 </ResourceDictionary>

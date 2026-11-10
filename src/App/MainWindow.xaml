@@ -1853,6 +1853,20 @@
                                     Foreground="{DynamicResource MutedTextBrush}"
                                     FontSize="{DynamicResource CaptionFontSize}"
                                     TextWrapping="Wrap"/>
+                                <TextBlock Text="{DynamicResource SettingsProjectionEmptyHint}" TextWrapping="Wrap"
+                                    Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Setter Property="Margin" Value="0,10,0,0"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SelectedDevice}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                                 <Border>
                                     <Border.Style>
                                         <Style TargetType="Border" BasedOn="{StaticResource ControlSectionCard}">
@@ -2333,6 +2347,20 @@
                                             IsEnabled="{Binding CanConfigureBluetoothWindowMouse}"
                                             AutomationProperties.AutomationId="BluetoothWindowMouseCheckBox"
                                             Margin="0,8,0,4"/>
+                                        <TextBlock Text="{DynamicResource SettingsBluetoothModeLockedHint}" TextWrapping="Wrap"
+                                            Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Setter Property="Margin" Value="0,4,0,8"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CanConfigureBluetoothWindowMouse}" Value="False">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
 
                                         <Grid Margin="0,10,0,0">
                                             <Grid.ColumnDefinitions>
@@ -2406,13 +2434,38 @@
                                     </Style.Triggers>
                                 </Style>
                             </StackPanel.Style>
+                            <TextBlock x:Name="MouseSettingsApplyHint" TextWrapping="Wrap"
+                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
+                                AutomationProperties.LiveSetting="Polite" Margin="0,0,0,6">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="{DynamicResource SettingsMouseAppliedHint}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasPendingBluetoothMouseSettings}" Value="True">
+                                                <Setter Property="Text" Value="{DynamicResource SettingsMousePendingHint}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                             <Button Content="{DynamicResource SettingsApplyMouse}"
                                 Command="{Binding ApplyBluetoothMouseSettingsCommand}"
                                 Style="{StaticResource ToolButton}"
                                 AutomationProperties.AutomationId="ApplyBluetoothMouseSettingsButton"/>
                             <TextBlock Text="{Binding MouseSettingsStatus}" TextWrapping="Wrap"
                                 Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
-                                AutomationProperties.LiveSetting="Polite" Margin="0,6,0,0"/>
+                                AutomationProperties.LiveSetting="Polite">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Margin" Value="0,6,0,0"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding MouseSettingsStatus}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </StackPanel>
                     </Grid>
                 </Border>

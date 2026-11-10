@@ -1673,4 +1673,8 @@
     <system:String x:Key="SettingsMouseDirection">鼠标方向</system:String>
     <system:String x:Key="SettingsScopeMouseDirection">适用于有线、无线触控及蓝牙相对鼠标。</system:String>
     <system:String x:Key="SettingsApplyMouse">应用鼠标设置</system:String>
+    <system:String x:Key="SettingsProjectionEmptyHint">连接并选择设备后，可调整其画面和声音。无线接收端可提前设置。</system:String>
+    <system:String x:Key="SettingsBluetoothModeLockedHint">请先关闭蓝牙控制，再切换绝对位置模式。仅暂停输入不会解锁此选项。</system:String>
+    <system:String x:Key="SettingsMouseAppliedHint">当前鼠标方向与灵敏度已应用。</system:String>
+    <system:String x:Key="SettingsMousePendingHint">鼠标设置有未应用的修改，请点击下方按钮。</system:String>
 </ResourceDictionary>
