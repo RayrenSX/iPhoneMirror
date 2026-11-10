@@ -1680,4 +1680,11 @@
     <system:String x:Key="SettingsApplyMouseDirection">套用方向設定</system:String>
     <system:String x:Key="SettingsApplyBluetoothSensitivity">套用靈敏度</system:String>
     <system:String x:Key="SettingsGroupPendingHint">此群組有尚未套用的變更。</system:String>
+    <system:String x:Key="SettingShortcutsTitle">更多設定項快捷鍵</system:String>
+    <system:String x:Key="SettingShortcutsDescription">按住快捷鍵時暫時套用目標值，放開後還原。僅在獨立投影視窗位於前景時生效，無需開啟反控；失焦或關閉視窗亦會還原原值。</system:String>
+    <system:String x:Key="SettingShortcutsSetting">設定項</system:String>
+    <system:String x:Key="SettingShortcutsRemove">刪除此快捷鍵</system:String>
+    <system:String x:Key="SettingShortcutsHeldValue">按住時的透明度</system:String>
+    <system:String x:Key="SettingShortcutsHeldEnabled">按住時啟用置頂</system:String>
+    <system:String x:Key="SettingShortcutsAdd">新增設定項快捷鍵</system:String>
 </ResourceDictionary>

@@ -1680,4 +1680,11 @@
     <system:String x:Key="SettingsApplyMouseDirection">应用方向设置</system:String>
     <system:String x:Key="SettingsApplyBluetoothSensitivity">应用灵敏度</system:String>
     <system:String x:Key="SettingsGroupPendingHint">本组有未应用的修改。</system:String>
+    <system:String x:Key="SettingShortcutsTitle">更多设置项快捷键</system:String>
+    <system:String x:Key="SettingShortcutsDescription">按住快捷键时临时应用目标值，松开后恢复。仅在独立投屏窗口位于前台时生效，无需开启反控；失焦或关闭窗口也会恢复原值。</system:String>
+    <system:String x:Key="SettingShortcutsSetting">设置项</system:String>
+    <system:String x:Key="SettingShortcutsRemove">删除此快捷键</system:String>
+    <system:String x:Key="SettingShortcutsHeldValue">按住时的透明度</system:String>
+    <system:String x:Key="SettingShortcutsHeldEnabled">按住时启用置顶</system:String>
+    <system:String x:Key="SettingShortcutsAdd">添加设置项快捷键</system:String>
 </ResourceDictionary>

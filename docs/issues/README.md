@@ -6,6 +6,7 @@
 
 ## 专项问题
 
+- [Issue #77：设置项快捷键与按住临时切换透明度](77-setting-shortcuts.zh-CN.md)
 - [Issue #51：直播区域增加自定义叠加层](51-custom-stream-overlay.zh-CN.md)
 - [Issue #52 修复与验证（2026-10-13）](52-fix-validation.zh-CN.md)
 - [Issue #52：iPhone19,2 / iOS 27.0.1 投屏及反控失败](52-iphone19-2-compatibility.zh-CN.md)

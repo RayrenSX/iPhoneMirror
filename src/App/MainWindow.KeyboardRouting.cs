@@ -33,6 +33,7 @@ public partial class MainWindow
             bindings.Add(new(shortcut, action.ToString(), Available,
                 () => QueueKeyboardShortcut(() => HandleConfiguredShortcut(action), Available)));
         }
+        ConfigureSettingShortcutBindings(bindings);
         // User-configured actions keep precedence. Clipboard commands belong
         // to the same recognizer in both Direct and Mapping input modes.
         bindings.Add(new(new(KeyboardShortcut.Control, 0x43), "CopyFromDevice",
@@ -63,6 +64,7 @@ public partial class MainWindow
         Local(0x4D, KeyboardShortcut.Control, "Audio", () => _viewModel.PlayAudio = !_viewModel.PlayAudio);
         Local(0x53, KeyboardShortcut.Control, "Screenshot", () => _ = CaptureScreenshotAsync());
         _keyboardRouter.Shortcuts.Configure(bindings);
+        ReconcileSettingMouseHook();
     }
 
     private bool IsLocalShortcutForeground =>

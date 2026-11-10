@@ -28,6 +28,8 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--setting-shortcuts", var settingShortcutsOutput])
+                return RunSettingShortcutTests(settingShortcutsOutput);
             if (args is ["--settings-categories", var settingsOutput])
                 return RunSettingsCategoryTests(settingsOutput);
             if (args is ["--mirroring-auto-control", var autoControlOutput])

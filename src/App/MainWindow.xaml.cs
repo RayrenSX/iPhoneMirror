@@ -552,11 +552,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
 
         var window = new ShortcutSettingsWindow(GetConfiguredShortcuts(),
-            ApplyBluetoothShortcuts)
+            ApplyBluetoothShortcuts, ConfiguredSettingShortcuts, ApplyShortcutSettings)
         {
             Owner = this,
         };
         _shortcutSettingsWindow = window;
+        ReleaseSettingShortcutOverrides();
         UnregisterConfiguredHotkeys();
         window.Closed += (_, _) =>
         {
@@ -571,14 +572,23 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private string? ApplyBluetoothShortcuts(
         IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts)
+        => ApplyShortcutSettings(shortcuts, ConfiguredSettingShortcuts);
+
+    private string? ApplyShortcutSettings(
+        IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
+        IReadOnlyList<SettingShortcutBinding> settingShortcuts)
     {
+        if (settingShortcuts.Count > 16 || settingShortcuts.Any(binding => binding is null || !binding.IsValid) ||
+            settingShortcuts.Select(binding => binding.Id).Distinct().Count() != settingShortcuts.Count)
+            return LocalizationService.Get("ShortcutSettingsInvalid");
+        var allKeys = shortcuts.Values.Concat(settingShortcuts.Select(binding => binding.Shortcut)).ToArray();
         if (shortcuts.TryGetValue(BluetoothShortcutAction.BossKey, out var bossKey) && bossKey.IsMouse)
             return LocalizationService.Get("ShortcutSettingsBossKeyKeyboardOnly");
         if (_mappingSettings.Mappings.Any(mapping => mapping.Key is { } key &&
-                KeyboardMappingKeys.Conflict(key, shortcuts.Values) is not null))
+                KeyboardMappingKeys.Conflict(key, allKeys) is not null))
             return LocalizationService.Get("MappingShortcutConflict");
         var previous = GetConfiguredShortcuts();
-        if (!KeyboardShortcut.HaveUniqueBoundValues(shortcuts.Values))
+        if (!KeyboardShortcut.HaveUniqueBoundValues(allKeys))
             return LocalizationService.Get("ShortcutSettingsDuplicate");
         if (!TryRegisterShortcutSetCore(shortcuts, out var failedAction, validateAll: true))
         {
@@ -590,6 +600,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (Application.Current is App app)
         {
             var snapshot = app.UpdateSettings.Clone();
+            app.UpdateSettings.SettingShortcuts = settingShortcuts.Select(binding => binding with { }).ToList();
             app.UpdateSettings.BluetoothModeShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.BluetoothControl].VirtualKey;
             app.UpdateSettings.BluetoothModeShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.BluetoothControl].Modifiers;
             app.UpdateSettings.BluetoothModeShortcutSchema = 1;
@@ -1358,6 +1369,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private async void OnIndependentPreviewClosed(string udid)
     {
+        ReleaseSettingShortcutOverrides(device: udid);
         HandleControlKeyboardInput(new Controls.PreviewKeyboardEventArgs(
             Controls.PreviewKeyboardKind.Reset, 0), udid);
         _ = HandleUsbPointerInputAsync(new Controls.PreviewPointerEventArgs(

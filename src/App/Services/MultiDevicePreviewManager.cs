@@ -58,6 +58,11 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             ? window.Handle : 0;
 
     internal bool ContainsWindow(nint handle) => handle != 0 && _windows.Values.Any(w => w.Handle == handle);
+    internal string? DeviceForWindow(nint handle) =>
+        _windows.FirstOrDefault(pair => pair.Value.Handle == handle).Key;
+
+    internal Action? BeginTemporarySetting(nint handle, SettingShortcutBinding binding) =>
+        _windows.Values.FirstOrDefault(window => window.Handle == handle)?.BeginTemporarySetting(binding);
 
     internal bool AllowsControlInput(nint handle) =>
         _windows.Values.All(window => window.Handle != handle || window.AllowsControlInput);

@@ -1680,4 +1680,11 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="SettingsApplyMouseDirection">方向設定を適用</system:String>
     <system:String x:Key="SettingsApplyBluetoothSensitivity">感度を適用</system:String>
     <system:String x:Key="SettingsGroupPendingHint">このグループに未適用の変更があります。</system:String>
+    <system:String x:Key="SettingShortcutsTitle">その他の設定のショートカット</system:String>
+    <system:String x:Key="SettingShortcutsDescription">キーを押している間だけ指定値を適用し、離すと元に戻します。独立プレビューが前面にある場合に有効です。逆操作は不要です。フォーカスを失うかウィンドウを閉じた場合も元に戻ります。</system:String>
+    <system:String x:Key="SettingShortcutsSetting">設定項目</system:String>
+    <system:String x:Key="SettingShortcutsRemove">ショートカットを削除</system:String>
+    <system:String x:Key="SettingShortcutsHeldValue">押している間の不透明度</system:String>
+    <system:String x:Key="SettingShortcutsHeldEnabled">押している間は最前面に表示</system:String>
+    <system:String x:Key="SettingShortcutsAdd">設定のショートカットを追加</system:String>
 </ResourceDictionary>

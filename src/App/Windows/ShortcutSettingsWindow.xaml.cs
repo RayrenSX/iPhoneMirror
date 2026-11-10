@@ -12,15 +12,20 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
     INotifyPropertyChanged
 {
     private readonly Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, string?> _apply;
+    private readonly Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, IReadOnlyList<SettingShortcutBinding>, string?>? _applySettings;
     private string _statusText = string.Empty;
     public ObservableCollection<ShortcutBindingRow> Rows { get; } = [];
     public ObservableCollection<ShortcutBindingSection> Sections { get; } = [];
 
     internal ShortcutSettingsWindow(
         IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
-        Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, string?> apply)
+        Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, string?> apply,
+        IEnumerable<SettingShortcutBinding>? settingShortcuts = null,
+        Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, IReadOnlyList<SettingShortcutBinding>, string?>? applySettings = null)
     {
         _apply = apply;
+        _applySettings = applySettings;
+        foreach (var binding in settingShortcuts ?? []) SettingRows.Add(new(binding));
         foreach (var action in Enum.GetValues<BluetoothShortcutAction>().Where(
             action => action != BluetoothShortcutAction.ReverseControl))
         {
@@ -65,6 +70,11 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
 
     private void OnShortcutPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if ((sender as FrameworkElement)?.DataContext is SettingShortcutRow settingRow)
+        {
+            CaptureSettingKey(settingRow, e);
+            return;
+        }
         if ((sender as FrameworkElement)?.DataContext is not ShortcutBindingRow row) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         // Navigation and dismissal remain local to the settings window.
@@ -88,6 +98,11 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
 
     private void OnShortcutPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if ((sender as FrameworkElement)?.DataContext is SettingShortcutRow settingRow)
+        {
+            CaptureSettingMouse(settingRow, e);
+            return;
+        }
         if ((sender as FrameworkElement)?.DataContext is not ShortcutBindingRow row) return;
         var button = e.ChangedButton switch
         {
@@ -130,6 +145,11 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
                 shortcut.DisplayText, conflict.Label);
             return false;
         }
+        if (shortcut.IsBound && SettingRows.Any(other => other.Shortcut == shortcut))
+        {
+            StatusText = LocalizationService.Get("ShortcutSettingsDuplicate");
+            return false;
+        }
         row.Shortcut = shortcut;
         StatusText = string.Empty;
         return true;
@@ -138,12 +158,13 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
     private void OnSaveClick(object sender, RoutedEventArgs e)
     {
         var shortcuts = Rows.ToDictionary(row => row.Action, row => row.Shortcut);
-        if (!KeyboardShortcut.HaveUniqueBoundValues(shortcuts.Values))
+        if (!KeyboardShortcut.HaveUniqueBoundValues(shortcuts.Values.Concat(SettingRows.Select(row => row.Shortcut))))
         {
             StatusText = LocalizationService.Get("ShortcutSettingsDuplicate");
             return;
         }
-        var error = _apply(shortcuts);
+        var error = _applySettings is null ? _apply(shortcuts) :
+            _applySettings(shortcuts, SettingRows.Select(row => row.ToBinding()).ToArray());
         if (!string.IsNullOrWhiteSpace(error))
         {
             StatusText = error;
@@ -159,6 +180,7 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
     {
         foreach (var section in Sections) section.RefreshTitle();
         foreach (var row in Rows) row.RefreshLabel();
+        foreach (var row in SettingRows) row.RefreshLabels();
         OnPropertyChanged(nameof(StatusText));
     }
 

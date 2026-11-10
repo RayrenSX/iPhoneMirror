@@ -22,6 +22,7 @@ public enum ApplicationDisplayMode
 internal sealed class UpdateSettings
 {
     public string SettingsCategory { get; set; } = "projection";
+    public List<SettingShortcutBinding> SettingShortcuts { get; set; } = [];
     public ReverseControlMode MirroringAutoControlMode { get; set; } = ReverseControlMode.None;
     public Services.Automation.AutomationSettings AutomationApi { get; set; } = new();
     public Dictionary<string, DeviceVideoPreferences> DeviceVideoPreferences { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -108,6 +109,8 @@ internal sealed class UpdateSettings
     internal UpdateSettings Clone() => new()
     {
         SettingsCategory = SettingsCategory,
+        SettingShortcuts = (SettingShortcuts ?? []).Where(binding => binding is not null && binding.IsValid)
+            .Select(binding => binding with { }).ToList(),
         MirroringAutoControlMode = MirroringAutoControlMode,
         AutomationApi = (AutomationApi ?? new()).Clone(),
         DeviceVideoPreferences = new(DeviceVideoPreferences ?? [], StringComparer.OrdinalIgnoreCase),
@@ -421,6 +424,13 @@ internal sealed class UpdateSettingsStore
                     ? settings.BluetoothWheelSensitivity : 100, 10, 1000);
             if (settings.BluetoothLandscapeMouseMode is < 1 or > 4)
                 settings.BluetoothLandscapeMouseMode = 1;
+            var settingIds = new HashSet<Guid>();
+            var settingKeys = Enum.GetValues<BluetoothShortcutAction>()
+                .Select(action => KeyboardShortcut.FromSettings(settings, action))
+                .Where(shortcut => shortcut.IsBound).ToHashSet();
+            settings.SettingShortcuts = (settings.SettingShortcuts ?? [])
+                .Where(binding => binding is not null && binding.IsValid && settingIds.Add(binding.Id) &&
+                    (!binding.Shortcut.IsBound || settingKeys.Add(binding.Shortcut))).Take(16).ToList();
             if (migrationChanged) TrySaveMigration(settings);
             return settings;
         }

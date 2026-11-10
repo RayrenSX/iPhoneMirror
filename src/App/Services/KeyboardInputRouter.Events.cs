@@ -25,6 +25,7 @@ internal sealed partial class KeyboardInputRouter
         internal bool WindowDownObserved;
     }
     private readonly Dictionary<(int Code, bool Extended), Press> _presses = [];
+    private readonly Dictionary<int, RoutedShortcut> _heldMouseShortcuts = [];
     private readonly uint?[] _lastKeyMessageTimes = new uint?[512];
     private readonly bool?[] _lastKeyMessageDown = new bool?[512];
     private uint? _windowShortcutBarrierTime;
@@ -120,6 +121,9 @@ internal sealed partial class KeyboardInputRouter
                     held.Route = new(KeyboardEventOwner.Shortcut, true);
             TraceEvent("ShortcutMatched:" + match.Name, press);
             press.WasShortcut = true;
+            if (match.Release is { } release)
+                press.Route = new(KeyboardEventOwner.Shortcut, true,
+                    pressed => { if (!pressed) release(); });
             diagnose?.Invoke(new(reason, press.Route.Owner, match.Name));
             match.Execute(); // disposition committed before reentrant UI work
             return true;
@@ -205,6 +209,9 @@ internal sealed partial class KeyboardInputRouter
             if (held.Route.Owner == KeyboardEventOwner.ShortcutCandidate)
                 held.Route = new(KeyboardEventOwner.Shortcut, true);
         diagnose?.Invoke(new("shortcut_press_recovered", KeyboardEventOwner.Shortcut, match.Name));
+        if (match.Release is { } release)
+            press.Route = new(KeyboardEventOwner.Shortcut, true,
+                pressed => { if (!pressed) release(); });
         match.Execute();
         return true;
     }
@@ -212,16 +219,25 @@ internal sealed partial class KeyboardInputRouter
     // They never read WPF/async modifier state that may omit buffered prefixes.
     internal bool RouteShortcutTrigger(int virtualKey)
     {
+        if (_heldMouseShortcuts.ContainsKey(virtualKey)) return true;
         if (_retired.Any(k => KeyboardShortcutRecognizer.Modifier(k) != 0)) return false;
         foreach (var held in _presses.Values)
             if (KeyboardShortcutRecognizer.Modifier(held.Key.VirtualKey) != 0 &&
                 held.Route.Owner is not (KeyboardEventOwner.ShortcutCandidate or KeyboardEventOwner.Shortcut or KeyboardEventOwner.Windows)) return false;
         var match = Shortcuts.Match(virtualKey, PressedModifiers);
         if (match is null) return false;
+        if (match.Release is not null) _heldMouseShortcuts[virtualKey] = match;
         foreach (var held in _presses.Values)
             if (held.Route.Owner == KeyboardEventOwner.ShortcutCandidate)
                 held.Route = new(KeyboardEventOwner.Shortcut, true);
         match.Execute();
+        return true;
+    }
+
+    internal bool ReleaseMouseShortcut(int virtualKey)
+    {
+        if (!_heldMouseShortcuts.Remove(virtualKey, out var match)) return false;
+        match.Release?.Invoke();
         return true;
     }
 
@@ -247,6 +263,16 @@ internal sealed partial class KeyboardInputRouter
     }
     internal void ReleaseAllPressedKeys()
     {
+        var mouseReleases = _heldMouseShortcuts.Values.ToArray();
+        _heldMouseShortcuts.Clear();
+        foreach (var match in mouseReleases)
+        {
+            try { match.Release?.Invoke(); }
+            catch (Exception error)
+            {
+                DiagnosticLogger.ReverseControlWarning("keyboard_input", "mouse_shortcut_release_failed", ("error", error.Message));
+            }
+        }
         // Retire every lifetime before calling external dispatchers: cleanup
         // can reenter the router or throw, but may never skip another release.
         var releases = _presses.Values.Select(press => (Press: press, Dispatch: press.Route.Dispatch)).ToArray();
@@ -325,6 +351,7 @@ internal sealed partial class KeyboardInputRouter
                 unchecked((int)(messageTime - downTime)) <= 0) continue;
             _presses.Remove(id);
             _retired.Remove(key.VirtualKey);
+            press.Route.Dispatch?.Invoke(false);
             return true;
         }
         return false;

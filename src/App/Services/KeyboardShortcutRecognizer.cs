@@ -2,7 +2,7 @@ namespace IPhoneMirror.App.Services;
 
 // No transport or mapping dependencies. Rebuilt only when settings change.
 internal sealed record RoutedShortcut(KeyboardShortcut Keys, string Name,
-    Func<bool> IsAvailable, Action Execute);
+    Func<bool> IsAvailable, Action Execute, Action? Release = null);
 
 internal sealed class KeyboardShortcutRecognizer
 {

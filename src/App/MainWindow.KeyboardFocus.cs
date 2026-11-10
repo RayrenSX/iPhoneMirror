@@ -170,6 +170,7 @@ public partial class MainWindow
     {
         if (!active)
         {
+            ReleaseSettingShortcutOverrides(hwnd);
             if (_activeControlWindow != hwnd ||
                 !DeviceViewModel.UdidEquals(_activeControlUdid, udid)) return;
             _keyboardFocusSuspended = true;

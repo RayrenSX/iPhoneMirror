@@ -51,7 +51,7 @@ public partial class MainWindow
         if (_mappingWindow is not null) { _mappingWindow.Activate(); return; }
         CancelMappedGesture();
         var window = new KeyboardMappingWindow(_mappingSettings, ApplyKeyboardMapping,
-            key => KeyboardMappingKeys.Conflict(key, GetConfiguredShortcuts().Values),
+            key => KeyboardMappingKeys.Conflict(key, AllConfiguredShortcutKeys),
             BeginMappingKeyCapture, EndMappingKeyCapture, () => MappingStatusKey(),
             () => _viewModel.SelectedDevice?.DisplayName, BeginMappingPositionPick, CancelMappingPositionPick,
             () => MappingSurfaces().LastOrDefault()) { Owner = this };
@@ -71,7 +71,7 @@ public partial class MainWindow
         foreach (var entry in next.Mappings)
         {
             if (entry.Validate() is { } invalid) return LocalizationService.Get(invalid);
-            if (KeyboardMappingKeys.Conflict(entry.Key!, GetConfiguredShortcuts().Values) is { } conflict)
+            if (KeyboardMappingKeys.Conflict(entry.Key!, AllConfiguredShortcutKeys) is { } conflict)
                 return LocalizationService.Get(conflict);
         }
         if (next.Mappings.Count > 256) return LocalizationService.Get("MappingLimit");
@@ -348,6 +348,8 @@ public partial class MainWindow
     private void DisposeKeyboardMapping()
     {
         _mappingClosing = true;
+        ReleaseSettingShortcutOverrides();
+        ReconcileSettingMouseHook();
         CancelMappingPositionPick();
         RefreshMappingOverlays();
         CancelMappedGesture();

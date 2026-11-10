@@ -1680,4 +1680,11 @@ Pair, select and save.</system:String>
     <system:String x:Key="SettingsApplyMouseDirection">Apply direction settings</system:String>
     <system:String x:Key="SettingsApplyBluetoothSensitivity">Apply sensitivity</system:String>
     <system:String x:Key="SettingsGroupPendingHint">This group has unapplied changes.</system:String>
+    <system:String x:Key="SettingShortcutsTitle">More settings shortcuts</system:String>
+    <system:String x:Key="SettingShortcutsDescription">Hold a shortcut to apply its value temporarily; release to restore. Works in the foreground independent preview, even without reverse control. Losing focus or closing the window also restores the original value.</system:String>
+    <system:String x:Key="SettingShortcutsSetting">Setting</system:String>
+    <system:String x:Key="SettingShortcutsRemove">Remove shortcut</system:String>
+    <system:String x:Key="SettingShortcutsHeldValue">Opacity while held</system:String>
+    <system:String x:Key="SettingShortcutsHeldEnabled">Keep on top while held</system:String>
+    <system:String x:Key="SettingShortcutsAdd">Add setting shortcut</system:String>
 </ResourceDictionary>

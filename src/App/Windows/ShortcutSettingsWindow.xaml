@@ -66,6 +66,7 @@
                           Margin="0,0,0,12"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
             <ItemsControl ItemsSource="{Binding Sections}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
@@ -97,6 +98,49 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <TextBlock Text="{DynamicResource SettingShortcutsTitle}" FontWeight="SemiBold"
+                       Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,8" TextWrapping="Wrap"/>
+            <TextBlock Text="{DynamicResource SettingShortcutsDescription}" TextWrapping="Wrap"
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,0,0,12"/>
+            <ItemsControl ItemsSource="{Binding SettingRows}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="0,0,0,16">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox ItemsSource="{Binding SettingLabels}" SelectedIndex="{Binding SettingIndex}"
+                                          AutomationProperties.Name="{DynamicResource SettingShortcutsSetting}"/>
+                                <Button Grid.Column="1" Click="OnRemoveSettingShortcut" Style="{StaticResource IconButton}"
+                                        Width="36" Height="36" Margin="8,0,0,0"
+                                        ToolTip="{DynamicResource SettingShortcutsRemove}"
+                                        AutomationProperties.Name="{DynamicResource SettingShortcutsRemove}">
+                                    <ui:SymbolIcon Symbol="Dismiss20" FontSize="18"/>
+                                </Button>
+                            </Grid>
+                            <TextBox Text="{Binding ShortcutText, Mode=OneWay}" Style="{StaticResource ShortcutCaptureBox}"
+                                     MinHeight="40" Margin="0,8,0,8" PreviewKeyDown="OnShortcutPreviewKeyDown"
+                                     PreviewMouseDown="OnShortcutPreviewMouseDown"
+                                     AutomationProperties.Name="{DynamicResource ShortcutSettingsCaptureHint}"
+                                     ToolTip="{DynamicResource ShortcutSettingsCaptureHint}"/>
+                            <StackPanel Visibility="{Binding OpacityVisibility}">
+                                <DockPanel Margin="0,0,0,4">
+                                    <TextBlock Text="{DynamicResource SettingShortcutsHeldValue}"/>
+                                    <TextBlock Text="{Binding Value, StringFormat={}{0:0}%}" HorizontalAlignment="Right"/>
+                                </DockPanel>
+                                <Slider Minimum="10" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Value="{Binding Value}" AutomationProperties.Name="{DynamicResource SettingShortcutsHeldValue}"/>
+                            </StackPanel>
+                            <CheckBox Visibility="{Binding BooleanVisibility}" IsChecked="{Binding BooleanValue}"
+                                      Content="{DynamicResource SettingShortcutsHeldEnabled}"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Button Content="{DynamicResource SettingShortcutsAdd}" Click="OnAddSettingShortcut"
+                    IsEnabled="{Binding CanAddSettingShortcut}" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+            </StackPanel>
             </ScrollViewer>
             <TextBlock Text="{DynamicResource ShortcutSettingsCaptureHint}"
                        Grid.Row="2"

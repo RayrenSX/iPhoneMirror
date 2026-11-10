@@ -74,6 +74,7 @@
     <Compile Include="..\App\Services\BluetoothHidProtocol.cs" Link="BluetoothHidProtocol.cs" />
     <Compile Include="..\App\Services\BluetoothClientRouteTable.cs" Link="BluetoothClientRouteTable.cs" />
     <Compile Include="..\App\Services\KeyboardShortcut.cs" Link="KeyboardShortcut.cs" />
+    <Compile Include="..\App\Services\SettingShortcutBinding.cs" Link="SettingShortcutBinding.cs" />
     <Compile Include="..\App\Services\KeyboardMapping.cs" Link="KeyboardMapping.cs" />
     <Compile Include="..\App\Services\BluetoothMouseOrientationMapper.cs" Link="BluetoothMouseOrientationMapper.cs" />
     <Compile Include="..\App\Services\BluetoothMouseReportCoalescer.cs" Link="BluetoothMouseReportCoalescer.cs" />

@@ -170,6 +170,8 @@ internal sealed class NativePreviewWindow : IDisposable
     private ProtectedContentOverlayWindow? _protectedOverlay;
     private WindowStyleSettingsWindow? _styleWindow;
     private double _windowOpacity = 1.0;
+    private readonly Dictionary<Guid, (PreviewShortcutSetting Setting, double Value, long Order)> _temporarySettings = [];
+    private long _temporarySettingOrder;
     private double _appliedOpacity = 1.0;
     private bool _opaqueOnHover;
     private bool _isPointerOverWindow;
@@ -589,7 +591,7 @@ internal sealed class NativePreviewWindow : IDisposable
             _attached = true;
         else if (_attached)
             _ = _attachPreview(_handle);
-        if (_windowOpacity < 1.0) _ = ApplyWindowOpacity(EffectiveWindowOpacity, force: true);
+        if (EffectiveWindowOpacity < 1.0) _ = ApplyWindowOpacity(EffectiveWindowOpacity, force: true);
         _ = SetForegroundWindow(_handle);
         _ = SetFocus(_handle);
         Log("independent_window_activated",
@@ -631,7 +633,7 @@ internal sealed class NativePreviewWindow : IDisposable
     internal bool RefreshPreview()
     {
         var refreshed = !_disposed && _handle != 0 && _refreshPreview(_handle);
-        if (refreshed && _windowOpacity < 1.0) _ = ApplyWindowOpacity(EffectiveWindowOpacity, force: true);
+        if (refreshed && EffectiveWindowOpacity < 1.0) _ = ApplyWindowOpacity(EffectiveWindowOpacity, force: true);
         Log("independent_window_refresh",
             ("mode", WindowMode), ("success", refreshed));
         return refreshed;
@@ -1139,12 +1141,36 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed || _handle == 0 || !double.IsFinite(opacity)) return false;
         opacity = Math.Clamp(opacity, 0.1, 1.0);
-        if (!ApplyWindowOpacity(_opaqueOnHover && _isPointerOverWindow ? 1.0 : opacity)) return false;
+        var previous = _windowOpacity;
         _windowOpacity = opacity;
+        if (!ApplyWindowOpacity(EffectiveWindowOpacity)) { _windowOpacity = previous; return false; }
         return true;
     }
 
-    private double EffectiveWindowOpacity => _opaqueOnHover && _isPointerOverWindow ? 1.0 : _windowOpacity;
+    private double? TemporaryValue(PreviewShortcutSetting setting) =>
+        _temporarySettings.Values.Where(value => value.Setting == setting)
+            .OrderBy(value => value.Order).Select(value => (double?)value.Value).LastOrDefault();
+
+    private double EffectiveWindowOpacity => TemporaryValue(PreviewShortcutSetting.Opacity) is { } percent
+        ? percent / 100 : _opaqueOnHover && _isPointerOverWindow ? 1.0 : _windowOpacity;
+
+    internal Action? BeginTemporarySetting(SettingShortcutBinding binding)
+    {
+        if (_disposed || _handle == 0 || !binding.IsValid) return null;
+        var token = Guid.NewGuid();
+        _temporarySettings[token] = (binding.Setting, binding.Value, ++_temporarySettingOrder);
+        bool Apply() => binding.Setting == PreviewShortcutSetting.Opacity
+            ? ApplyWindowOpacity(EffectiveWindowOpacity)
+            : SetWindowPos(_handle, (TemporaryValue(PreviewShortcutSetting.Topmost) is { } topmost
+                ? topmost != 0 : _isTopMost) ? HwndTopMost : HwndNoTopMost,
+                0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        if (!Apply()) { _temporarySettings.Remove(token); return null; }
+        return () =>
+        {
+            if (!_temporarySettings.Remove(token) || _disposed) return;
+            _ = Apply();
+        };
+    }
 
     private bool SetOpaqueOnHover(bool enabled)
     {
@@ -1220,7 +1246,8 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed || _handle == 0) return;
         _isTopMost = !_isTopMost;
-        _ = SetWindowPos(_handle, _isTopMost ? HwndTopMost : HwndNoTopMost,
+        _ = SetWindowPos(_handle, (TemporaryValue(PreviewShortcutSetting.Topmost) is { } topmost
+            ? topmost != 0 : _isTopMost) ? HwndTopMost : HwndNoTopMost,
             0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
         UpdateContextMenuLabels();
         Log("independent_window_topmost",
