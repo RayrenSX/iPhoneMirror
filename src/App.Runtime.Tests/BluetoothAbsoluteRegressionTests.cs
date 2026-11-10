@@ -279,7 +279,9 @@ internal static partial class Program
                 (long)KeyboardField(window, "_windowBluetoothPointerGeneration") > generation,
                 $"Changing {change} while held continued a drag with incompatible coordinates.");
             var position = ((double X, double Y))KeyboardField(window, "_absoluteWindowMousePosition");
-            var expected = rotation switch { 1 => (.7, .2), 2 => (.8, .7), 3 => (.3, .8), _ => (.2, .3) };
+            // Preview rotation is inverted when mapping the displayed point
+            // back to device coordinates, matching the current mouse mapper.
+            var expected = rotation switch { 1 => (.3, .8), 2 => (.8, .7), 3 => (.7, .2), _ => (.2, .3) };
             MappingAssert(Math.Abs(position.X - expected.Item1) < .01 && Math.Abs(position.Y - expected.Item2) < .01,
                 "Absolute input used the old geometry or incorrect preview rotation.");
             Pointer(PreviewPointerKind.ButtonUp, width, height, sourceWidth, 800, rotation);

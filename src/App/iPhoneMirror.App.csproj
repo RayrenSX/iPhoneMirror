@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <EmbeddedResource Include="../../config/apple-display-catalog.json" LogicalName="IPhoneMirror.App.AppleDisplayCatalog.json" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="IPhoneMirror.App.Runtime.Tests" />

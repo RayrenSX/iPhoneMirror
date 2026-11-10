@@ -223,6 +223,20 @@ internal static partial class Program
     private static void TestNativeMouseShortcuts(MainWindow window, MemoryStream packets,
         nint hwnd, int x, int y, string context)
     {
+        void WaitForShortcutCompletion()
+        {
+            // These are asynchronous commands with a timed down/up pulse.
+            // A fixed 200 ms dispatcher turn can end before the release or
+            // state restoration on a busy desktop, leaking work into the next click.
+            var gate = (SemaphoreSlim)KeyboardField(window, "_systemShortcutGate");
+            var timeout = System.Diagnostics.Stopwatch.StartNew();
+            do
+            {
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(20));
+                if (ReadShortcutPackets(packets).Length >= 2 && gate.CurrentCount == 1) return;
+            } while (timeout.Elapsed < TimeSpan.FromSeconds(2));
+        }
+
         var bindings = (Dictionary<Services.BluetoothShortcutAction, Services.KeyboardShortcut>)
             KeyboardField(window, "_bluetoothShortcuts");
         var saved = new Dictionary<Services.BluetoothShortcutAction, Services.KeyboardShortcut>(bindings);
@@ -260,7 +274,7 @@ internal static partial class Program
                 PreviewStyleSendMessage(hwnd, up, mouseData, position);
                 InteractionAssert(router.Generation == generation,
                     $"{context}/{button}: normal mouse release reset keyboard ownership.");
-                AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
+                WaitForShortcutCompletion();
                 var frames = ReadShortcutPackets(packets);
                 InteractionAssert(frames.Length == 2 && frames.All(f =>
                     f.GetProperty("kind").GetString() == "button_event" &&
@@ -271,7 +285,7 @@ internal static partial class Program
                     packets.SetLength(0);
                     PreviewStyleSendMessage(hwnd, down, mouseData, position);
                     PreviewStyleSendMessage(hwnd, up, mouseData, position);
-                    AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
+                    WaitForShortcutCompletion();
                     InteractionAssert(ReadShortcutPackets(packets).Length == 2,
                         $"{context}/{button}: holding Ctrl across clicks lost the second shortcut.");
                     router.RouteEvent(modifier, false, Resolve, (_, _) => { });

@@ -53,6 +53,15 @@ internal static partial class Program
             app.IsUiPreviewMode = false;
             try { Select("Control"); }
             finally { app.IsUiPreviewMode = true; }
+            var absoluteMouse = FindVisualDescendants<CheckBox>(
+                Find<ScrollViewer>("ControlSettingsScrollViewer"))
+                .Single(check => System.Windows.Automation.AutomationProperties.GetAutomationId(check) ==
+                    "BluetoothWindowMouseCheckBox");
+            InteractionAssert(absoluteMouse.IsVisible &&
+                System.Windows.Data.BindingOperations.GetBinding(absoluteMouse,
+                    System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty)?.Path.Path ==
+                    "BluetoothWindowMouseEnabled",
+                "The integrated Bluetooth absolute mouse setting is missing or bound to the wrong preference.");
             InteractionAssert(store.Load().SettingsCategory == "control" &&
                 app.UpdateSettings.Clone().SettingsCategory == "control",
                 "The selected category did not survive save/load/clone.");

@@ -40,7 +40,7 @@ internal static class BluetoothAbsoluteDragMotion
     private static readonly Lazy<Dictionary<string, double>> ShortEdges = new(() =>
     {
         using var stream = typeof(BluetoothAbsoluteDragMotion).Assembly.GetManifestResourceStream(
-            "IPhoneMirror.App.AppleDisplayCatalog.json")!;
+            "IPhoneMirror.App.Devices.AppleDisplayCatalog.json")!;
         using var json = JsonDocument.Parse(stream);
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var product in json.RootElement.GetProperty("products").EnumerateArray())
