@@ -1681,10 +1681,18 @@
     <system:String x:Key="SettingsApplyBluetoothSensitivity">套用靈敏度</system:String>
     <system:String x:Key="SettingsGroupPendingHint">此群組有尚未套用的變更。</system:String>
     <system:String x:Key="SettingShortcutsTitle">更多設定項快捷鍵</system:String>
-    <system:String x:Key="SettingShortcutsDescription">按住快捷鍵時暫時套用目標值，放開後還原。僅在獨立投影視窗位於前景時生效，無需開啟反控；失焦或關閉視窗亦會還原原值。</system:String>
+    <system:String x:Key="SettingShortcutsDescription">選擇設定項並獨立綁定快捷鍵，可選擇點按切換或按住暫時生效。僅作用於獨立投影視窗，無需開啟反控。</system:String>
     <system:String x:Key="SettingShortcutsSetting">設定項</system:String>
     <system:String x:Key="SettingShortcutsRemove">刪除此快捷鍵</system:String>
     <system:String x:Key="SettingShortcutsHeldValue">按住時的透明度</system:String>
     <system:String x:Key="SettingShortcutsHeldEnabled">按住時啟用置頂</system:String>
     <system:String x:Key="SettingShortcutsAdd">新增設定項快捷鍵</system:String>
+    <system:String x:Key="SettingShortcutsKey">快捷鍵</system:String>
+    <system:String x:Key="SettingShortcutsTrigger">觸發方式</system:String>
+    <system:String x:Key="SettingShortcutsHold">按住暫時切換</system:String>
+    <system:String x:Key="SettingShortcutsToggle">點按切換</system:String>
+    <system:String x:Key="SettingShortcutsHoldHint">按住時套用目標值，放開或視窗失焦後還原原值。</system:String>
+    <system:String x:Key="SettingShortcutsToggleHint">按一次套用目標值，再按一次還原原值；放開按鍵或切到其他視窗不會還原。</system:String>
+    <system:String x:Key="SettingShortcutsToggleValue">切換後的透明度</system:String>
+    <system:String x:Key="SettingShortcutsToggleEnabled">切換後啟用置頂</system:String>
 </ResourceDictionary>

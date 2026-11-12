@@ -130,6 +130,8 @@ internal static partial class Program
                 KeyboardCall(main, "ReconcileSettingMouseHook");
             }
 
+            TestSettingShortcutToggle(main, app, first, second, router, keys,
+                value => foreground = value, Applied, Key);
             TestSettingShortcutPersistence(app, main, keys, output);
             TestSettingShortcutEditor(app, keys, output);
             Console.WriteLine("PASS settings shortcuts: keyboard/mouse holds, repeats, nesting, hover, latest baseline, focus, handoff, isolation, failure rollback, persistence and five-language UI.");
@@ -141,6 +143,58 @@ internal static partial class Program
             windows.Clear();
             CloseWorkspaceTestWindow(main);
             app.Shutdown();
+        }
+    }
+
+    private static void TestSettingShortcutToggle(MainWindow main, App app, NativePreviewWindow first,
+        NativePreviewWindow second, KeyboardInputRouter router,
+        IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> keys, Action<nint> foreground,
+        Func<NativePreviewWindow, double> applied, Func<int, bool, bool> key)
+    {
+        var previous = app.UpdateSettings.SettingShortcuts;
+        var toggle = new SettingShortcutBinding { VirtualKey = 0x75, Value = 80, Trigger = SettingShortcutTrigger.Toggle };
+        var mouse = new SettingShortcutBinding { VirtualKey = (int)KeyboardShortcut.MouseXButton1, Value = 60,
+            Trigger = SettingShortcutTrigger.Toggle };
+        app.UpdateSettings.SettingShortcuts = [toggle, mouse];
+        KeyboardCall(main, "ConfigureKeyboardShortcuts", keys);
+        try
+        {
+            foreground(first.Handle);
+            key(0x75, true); key(0x75, true); key(0x75, false);
+            InteractionAssert(applied(first) == .8, "Toggle must persist after key-up and must ignore key repeat.");
+            KeyboardCall(main, "OnIndependentKeyboardFocusChanged", "setting-test-a", first.Handle, false);
+            router.ReleaseAllPressedKeys();
+            InteractionAssert(applied(first) == .8, "Toggle must persist across focus loss and input handoff.");
+            key(0x75, true); key(0x75, false);
+            InteractionAssert(applied(first) == .35, "A second complete key press must restore the original opacity.");
+            for (var click = 0; click < 2; click++)
+            {
+                InteractionAssert((bool)KeyboardCall(main, "ProcessSettingMouseButton", mouse.VirtualKey, true)!,
+                    "Toggle mouse down was not consumed.");
+                KeyboardCall(main, "ProcessSettingMouseButton", mouse.VirtualKey, false);
+                InteractionAssert(applied(first) == (click == 0 ? .6 : .35),
+                    "Mouse toggle must apply and restore on separate clicks, not on release.");
+            }
+            key(0x75, true); key(0x75, false);
+            foreground(second.Handle);
+            KeyboardCall(main, "ObserveKeyboardForeground");
+            InteractionAssert(applied(first) == .8 && applied(second) == 1, "Changing foreground must not move or reset a toggle.");
+            key(0x75, true); key(0x75, false);
+            InteractionAssert(applied(first) == .35 && applied(second) == .8,
+                "A fresh toggle on another window must restore the previous window and target the new one.");
+            KeyboardCall(main, "ConfigureKeyboardShortcuts", keys);
+            InteractionAssert(applied(second) == 1, "Reconfiguring shortcuts must remove toggled overrides.");
+            var legacy = System.Text.Json.JsonSerializer.Deserialize<SettingShortcutBinding>("{\"VirtualKey\":117,\"Value\":80}")!;
+            InteractionAssert(legacy.Trigger == SettingShortcutTrigger.Hold && legacy.IsValid,
+                "Older settings without Trigger must retain hold behavior.");
+            InteractionAssert(!(toggle with { Trigger = (SettingShortcutTrigger)999 }).IsValid, "An invalid trigger was accepted.");
+            Console.WriteLine("PASS toggle: keyboard/mouse clicks, no key-repeat toggle, persistent focus/handoff, second-press restore, cross-window isolation and legacy hold migration.");
+        }
+        finally
+        {
+            router.ReleaseAllPressedKeys();
+            app.UpdateSettings.SettingShortcuts = previous;
+            KeyboardCall(main, "ConfigureKeyboardShortcuts", keys);
         }
     }
 
@@ -192,7 +246,12 @@ internal static partial class Program
         {
             SetAuditCulture(culture);
             ThemeService.Apply(theme);
-            var editor = new ShortcutSettingsWindow(keys, _ => null, app.UpdateSettings.SettingShortcuts);
+            var previewRows = new[]
+            {
+                new SettingShortcutBinding { VirtualKey = (int)KeyboardShortcut.MouseXButton1, Value = 85, Trigger = SettingShortcutTrigger.Toggle },
+                new SettingShortcutBinding { VirtualKey = (int)KeyboardShortcut.MouseXButton2, Value = 100, Trigger = SettingShortcutTrigger.Hold },
+            };
+            var editor = new ShortcutSettingsWindow(keys, _ => null, previewRows);
             try
             {
                 editor.Show();
@@ -210,10 +269,15 @@ internal static partial class Program
                 row.SettingIndex = 0;
                 editor.UpdateLayout();
                 InteractionAssert(row.ToBinding().IsValid, "A hidden boolean checkbox corrupted the opacity target.");
-                editor.TryAssignSettingShortcut(row, new(0, 0x75));
+                editor.TryAssignSettingShortcut(row, new(0, KeyboardShortcut.MouseXButton1));
+                row.Value = 85;
                 foreach (var scroll in FindVisualDescendants<ScrollViewer>(editor)) scroll.ScrollToEnd();
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
                 SaveWindowRender(editor, Path.Combine(output, $"shortcuts-{culture}-{theme}.png"));
+                var heading = (TextBlock)editor.FindName("MoreSettingsHeading");
+                heading.BringIntoView();
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+                SaveWindowRender(editor, Path.Combine(output, $"cards-{culture}-{theme}.png"));
             }
             finally { editor.Close(); }
         }

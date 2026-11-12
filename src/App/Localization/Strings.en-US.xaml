@@ -1681,10 +1681,18 @@ Pair, select and save.</system:String>
     <system:String x:Key="SettingsApplyBluetoothSensitivity">Apply sensitivity</system:String>
     <system:String x:Key="SettingsGroupPendingHint">This group has unapplied changes.</system:String>
     <system:String x:Key="SettingShortcutsTitle">More settings shortcuts</system:String>
-    <system:String x:Key="SettingShortcutsDescription">Hold a shortcut to apply its value temporarily; release to restore. Works in the foreground independent preview, even without reverse control. Losing focus or closing the window also restores the original value.</system:String>
+    <system:String x:Key="SettingShortcutsDescription">Bind each setting separately and choose toggle or hold behavior. Applies to independent preview windows without requiring reverse control.</system:String>
     <system:String x:Key="SettingShortcutsSetting">Setting</system:String>
     <system:String x:Key="SettingShortcutsRemove">Remove shortcut</system:String>
     <system:String x:Key="SettingShortcutsHeldValue">Opacity while held</system:String>
     <system:String x:Key="SettingShortcutsHeldEnabled">Keep on top while held</system:String>
     <system:String x:Key="SettingShortcutsAdd">Add setting shortcut</system:String>
+    <system:String x:Key="SettingShortcutsKey">Shortcut</system:String>
+    <system:String x:Key="SettingShortcutsTrigger">Trigger</system:String>
+    <system:String x:Key="SettingShortcutsHold">Hold temporarily</system:String>
+    <system:String x:Key="SettingShortcutsToggle">Press to toggle</system:String>
+    <system:String x:Key="SettingShortcutsHoldHint">Apply while held; release or lose window focus to restore the original value.</system:String>
+    <system:String x:Key="SettingShortcutsToggleHint">Press once to apply, then press again to restore. Releasing the key or switching windows keeps the change.</system:String>
+    <system:String x:Key="SettingShortcutsToggleValue">Opacity when toggled</system:String>
+    <system:String x:Key="SettingShortcutsToggleEnabled">Keep on top when toggled</system:String>
 </ResourceDictionary>

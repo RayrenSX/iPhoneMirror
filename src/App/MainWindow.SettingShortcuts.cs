@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using IPhoneMirror.App.Services;
 
@@ -6,7 +6,7 @@ namespace IPhoneMirror.App;
 
 public partial class MainWindow
 {
-    private readonly Dictionary<Guid, (nint Window, string? Device, Action Restore)> _settingShortcutOverrides = [];
+    private readonly Dictionary<Guid, (nint Window, string? Device, SettingShortcutTrigger Trigger, Action Restore)> _settingShortcutOverrides = [];
     private nint _settingMouseHook;
     private LowLevelKeyboardProc? _settingMouseHookProc;
 
@@ -27,20 +27,29 @@ public partial class MainWindow
             bindings.Add(new(binding.Shortcut, $"Setting:{binding.Id}", Available, () =>
             {
                 var window = _keyboardForegroundWindow();
-                if (Available() && !_settingShortcutOverrides.ContainsKey(binding.Id) &&
-                    _secondaryMirrors.BeginTemporarySetting(window, binding) is { } restore)
-                    _settingShortcutOverrides[binding.Id] = (window, _secondaryMirrors.DeviceForWindow(window), restore);
+                if (!Available()) return;
+                if (_settingShortcutOverrides.TryGetValue(binding.Id, out var active))
+                {
+                    if (binding.Trigger != SettingShortcutTrigger.Toggle) return;
+                    _settingShortcutOverrides.Remove(binding.Id);
+                    active.Restore();
+                    if (active.Window == window) return;
+                }
+                if (_secondaryMirrors.BeginTemporarySetting(window, binding) is { } restore)
+                    _settingShortcutOverrides[binding.Id] = (window, _secondaryMirrors.DeviceForWindow(window), binding.Trigger, restore);
             }, () =>
             {
-                if (_settingShortcutOverrides.Remove(binding.Id, out var held)) held.Restore();
+                if (binding.Trigger == SettingShortcutTrigger.Hold &&
+                    _settingShortcutOverrides.Remove(binding.Id, out var held)) held.Restore();
             }));
         }
     }
 
-    private void ReleaseSettingShortcutOverrides(nint window = 0, string? device = null)
+    private void ReleaseSettingShortcutOverrides(nint window = 0, string? device = null, bool holdsOnly = false)
     {
         foreach (var (id, held) in _settingShortcutOverrides.ToArray())
             if ((window == 0 || held.Window == window) &&
+                (!holdsOnly || held.Trigger == SettingShortcutTrigger.Hold) &&
                 (device is null || string.Equals(held.Device, device, StringComparison.OrdinalIgnoreCase)))
             {
                 _settingShortcutOverrides.Remove(id);

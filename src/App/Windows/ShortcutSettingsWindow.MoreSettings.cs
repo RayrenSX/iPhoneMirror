@@ -15,7 +15,7 @@ public partial class ShortcutSettingsWindow
     private void OnAddSettingShortcut(object sender, RoutedEventArgs e)
     {
         if (SettingRows.Count >= 16) return;
-        SettingRows.Add(new(new SettingShortcutBinding()));
+        SettingRows.Add(new(new SettingShortcutBinding { Trigger = SettingShortcutTrigger.Toggle }));
         OnPropertyChanged(nameof(CanAddSettingShortcut));
     }
 
@@ -78,6 +78,25 @@ public sealed class SettingShortcutRow : INotifyPropertyChanged
     internal SettingShortcutRow(SettingShortcutBinding binding) => _binding = binding with { };
     public IReadOnlyList<string> SettingLabels =>
         [LocalizationService.Get("IndependentWindowOpacity"), LocalizationService.Get("IndependentWindowPin")];
+    public string CardTitle => SettingLabels[SettingIndex];
+    public IReadOnlyList<string> TriggerLabels =>
+        [LocalizationService.Get("SettingShortcutsHold"), LocalizationService.Get("SettingShortcutsToggle")];
+    public int TriggerIndex
+    {
+        get => (int)_binding.Trigger;
+        set
+        {
+            if (value is < 0 or > 1 || value == TriggerIndex) return;
+            _binding = _binding with { Trigger = (SettingShortcutTrigger)value };
+            RefreshLabels();
+        }
+    }
+    public string TriggerDescription => LocalizationService.Get(TriggerIndex == 1
+        ? "SettingShortcutsToggleHint" : "SettingShortcutsHoldHint");
+    public string TargetLabel => LocalizationService.Get(TriggerIndex == 1
+        ? "SettingShortcutsToggleValue" : "SettingShortcutsHeldValue");
+    public string BooleanLabel => LocalizationService.Get(TriggerIndex == 1
+        ? "SettingShortcutsToggleEnabled" : "SettingShortcutsHeldEnabled");
     public int SettingIndex
     {
         get => (int)_binding.Setting;
@@ -122,7 +141,8 @@ public sealed class SettingShortcutRow : INotifyPropertyChanged
     internal SettingShortcutBinding ToBinding() => _binding with { };
     internal void RefreshLabels()
     {
-        foreach (var name in new[] { nameof(SettingLabels), nameof(SettingIndex), nameof(Value),
+        foreach (var name in new[] { nameof(SettingLabels), nameof(CardTitle), nameof(SettingIndex), nameof(Value),
+            nameof(TriggerLabels), nameof(TriggerIndex), nameof(TriggerDescription), nameof(TargetLabel), nameof(BooleanLabel),
             nameof(BooleanValue), nameof(OpacityVisibility), nameof(BooleanVisibility), nameof(ShortcutText) }) Notify(name);
     }
     private void Notify(string name) => PropertyChanged?.Invoke(this, new(name));

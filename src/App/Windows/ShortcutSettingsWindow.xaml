@@ -5,7 +5,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="{DynamicResource ShortcutSettingsTitle}"
-        Width="582" Height="672" MinWidth="522" MinHeight="542"
+        Width="620" Height="760" MinWidth="522" MinHeight="542"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         Foreground="{DynamicResource TextBrush}"
         xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
@@ -31,6 +31,27 @@
             <Setter Property="Margin" Value="8,0,0,0"/>
             <Setter Property="ToolTip" Value="{DynamicResource ShortcutSettingsReset}"/>
             <Setter Property="AutomationProperties.Name" Value="{DynamicResource ShortcutSettingsReset}"/>
+        </Style>
+        <Style x:Key="SettingShortcutCaptureBox" TargetType="TextBox" BasedOn="{StaticResource ShortcutCaptureBox}">
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource ControlCornerRadius}">
+                            <TextBlock Text="{TemplateBinding Text}" Margin="{TemplateBinding Padding}"
+                                       VerticalAlignment="Center" TextWrapping="Wrap"
+                                       FontFamily="{TemplateBinding FontFamily}" FontSize="{TemplateBinding FontSize}"
+                                       FontWeight="Normal" Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </chrome:RoundedWindow.Resources>
 
@@ -59,7 +80,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock Text="{DynamicResource ShortcutSettingsDescription}"
+            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource ShortcutSettingsDescription}"
                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,0,0,12"/>
             <ScrollViewer Grid.Row="1"
@@ -98,43 +119,75 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <TextBlock Text="{DynamicResource SettingShortcutsTitle}" FontWeight="SemiBold"
+            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,16"/>
+            <TextBlock x:Name="MoreSettingsHeading" Text="{DynamicResource SettingShortcutsTitle}" FontWeight="SemiBold"
+                       FontSize="{DynamicResource FontSize16}"
                        Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,8" TextWrapping="Wrap"/>
-            <TextBlock Text="{DynamicResource SettingShortcutsDescription}" TextWrapping="Wrap"
+            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource SettingShortcutsDescription}" TextWrapping="Wrap"
                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,0,0,12"/>
             <ItemsControl ItemsSource="{Binding SettingRows}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <StackPanel Margin="0,0,0,16">
-                            <Grid>
+                        <Border Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,16">
+                        <StackPanel TextBlock.FontSize="{DynamicResource FontSize14}">
+                            <Grid Margin="0,0,0,12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <ComboBox ItemsSource="{Binding SettingLabels}" SelectedIndex="{Binding SettingIndex}"
-                                          AutomationProperties.Name="{DynamicResource SettingShortcutsSetting}"/>
+                                <TextBlock Text="{Binding CardTitle}" FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
                                 <Button Grid.Column="1" Click="OnRemoveSettingShortcut" Style="{StaticResource IconButton}"
-                                        Width="36" Height="36" Margin="8,0,0,0"
+                                        Width="28" Height="28" MinHeight="28" Padding="4"
                                         ToolTip="{DynamicResource SettingShortcutsRemove}"
                                         AutomationProperties.Name="{DynamicResource SettingShortcutsRemove}">
-                                    <ui:SymbolIcon Symbol="Dismiss20" FontSize="18"/>
+                                    <ui:SymbolIcon Symbol="Dismiss20" FontSize="16"/>
                                 </Button>
                             </Grid>
-                            <TextBox Text="{Binding ShortcutText, Mode=OneWay}" Style="{StaticResource ShortcutCaptureBox}"
-                                     MinHeight="40" Margin="0,8,0,8" PreviewKeyDown="OnShortcutPreviewKeyDown"
-                                     PreviewMouseDown="OnShortcutPreviewMouseDown"
-                                     AutomationProperties.Name="{DynamicResource ShortcutSettingsCaptureHint}"
-                                     ToolTip="{DynamicResource ShortcutSettingsCaptureHint}"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110"/><ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="12"/>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="12"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="{DynamicResource SettingShortcutsSetting}" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,12,0" TextWrapping="Wrap"/>
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding SettingLabels}" SelectedIndex="{Binding SettingIndex}"
+                                          Height="40" MinHeight="40" Padding="12,0" FontSize="{DynamicResource FontSize14}"
+                                          AutomationProperties.Name="{DynamicResource SettingShortcutsSetting}"/>
+                                <TextBlock Grid.Row="2" Text="{DynamicResource SettingShortcutsKey}" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,12,0" TextWrapping="Wrap"/>
+                                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ShortcutText, Mode=OneWay}"
+                                         Style="{StaticResource SettingShortcutCaptureBox}" Height="40" MinHeight="40" Padding="12,0"
+                                         FontSize="{DynamicResource FontSize14}" FontWeight="Normal" HorizontalContentAlignment="Left"
+                                         PreviewKeyDown="OnShortcutPreviewKeyDown" PreviewMouseDown="OnShortcutPreviewMouseDown"
+                                         AutomationProperties.Name="{DynamicResource ShortcutSettingsCaptureHint}"
+                                         ToolTip="{DynamicResource ShortcutSettingsCaptureHint}"/>
+                                <TextBlock Grid.Row="4" Text="{DynamicResource SettingShortcutsTrigger}" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,12,0" TextWrapping="Wrap"/>
+                                <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding TriggerLabels}" SelectedIndex="{Binding TriggerIndex}"
+                                          Height="40" MinHeight="40" Padding="12,0" FontSize="{DynamicResource FontSize14}"
+                                          AutomationProperties.Name="{DynamicResource SettingShortcutsTrigger}"/>
+                            </Grid>
+                            <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0" Margin="0,14,0,12"/>
                             <StackPanel Visibility="{Binding OpacityVisibility}">
-                                <DockPanel Margin="0,0,0,4">
-                                    <TextBlock Text="{DynamicResource SettingShortcutsHeldValue}"/>
-                                    <TextBlock Text="{Binding Value, StringFormat={}{0:0}%}" HorizontalAlignment="Right"/>
+                                <DockPanel Margin="0,0,0,6">
+                                    <TextBlock Text="{Binding TargetLabel}" FontSize="{DynamicResource FontSize14}"/>
+                                    <TextBlock Text="{Binding Value, StringFormat={}{0:0}%}" HorizontalAlignment="Right"
+                                               FontSize="{DynamicResource FontSize14}" FontWeight="SemiBold"/>
                                 </DockPanel>
                                 <Slider Minimum="10" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
-                                        Value="{Binding Value}" AutomationProperties.Name="{DynamicResource SettingShortcutsHeldValue}"/>
+                                        MinHeight="24" Value="{Binding Value}" AutomationProperties.Name="{Binding TargetLabel}"/>
                             </StackPanel>
                             <CheckBox Visibility="{Binding BooleanVisibility}" IsChecked="{Binding BooleanValue}"
-                                      Content="{DynamicResource SettingShortcutsHeldEnabled}"/>
+                                      Content="{Binding BooleanLabel}"/>
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding TriggerDescription}" TextWrapping="Wrap" Margin="0,10,0,0"
+                                       FontSize="{DynamicResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}"/>
                         </StackPanel>
+                        </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -142,7 +195,7 @@
                     IsEnabled="{Binding CanAddSettingShortcut}" HorizontalAlignment="Left" Margin="0,0,0,12"/>
             </StackPanel>
             </ScrollViewer>
-            <TextBlock Text="{DynamicResource ShortcutSettingsCaptureHint}"
+            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource ShortcutSettingsCaptureHint}"
                        Grid.Row="2"
                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,2,0,0"/>

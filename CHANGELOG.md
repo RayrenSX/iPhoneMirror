@@ -7,7 +7,7 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ### Added
 
-- Add configurable hold shortcuts for independent-window settings at the bottom of shortcut settings. Choose opacity (10–100%) or topmost, bind a keyboard chord or mouse button, and restore the original setting on release or focus loss. (#77)
+- Add configurable shortcuts for independent-window settings in separate cards at the bottom of shortcut settings. Choose opacity (10–100%) or topmost, bind a keyboard chord or mouse button, and select press-to-toggle or hold behavior. New bindings default to toggle; older bindings keep hold behavior. (#77)
 - Add experimental, off-by-default absolute Bluetooth mouse input in the main and independent previews, with seamless cursor movement between Windows and the mirrored image.
 
 ### Fixed
