@@ -290,7 +290,6 @@
         <Style.Resources>
             <Thickness x:Key="ScrollBarVerticalInset">2,6,0,6</Thickness>
             <Thickness x:Key="ScrollBarHorizontalInset">6,2,6,0</Thickness>
-            <GridLength x:Key="ScrollBarHorizontalGutterHeight">Auto</GridLength>
         </Style.Resources>
         <!-- Retain keyboard scrolling without drawing a full-panel focus frame. -->
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -305,7 +304,9 @@
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*"/>
-                            <RowDefinition Height="{DynamicResource ScrollBarHorizontalGutterHeight}"/>
+                            <!-- A hidden scrollbar must not leave bottom-only space
+                                 that shifts toolbar and status content above center. -->
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Border Width="8" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
                         <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Grid.Column="1"

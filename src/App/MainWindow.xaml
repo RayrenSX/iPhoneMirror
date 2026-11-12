@@ -1332,10 +1332,6 @@
                         </Grid.ColumnDefinitions>
                         <controls:AdaptiveToolbar x:Name="PreviewToolbarScrollViewer" Grid.ColumnSpan="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                                       Style="{StaticResource HorizontalContentScrollViewer}">
-                        <controls:AdaptiveToolbar.Resources>
-                            <!-- Keep the picture height stable when horizontal overflow appears. -->
-                            <GridLength x:Key="ScrollBarHorizontalGutterHeight">8</GridLength>
-                        </controls:AdaptiveToolbar.Resources>
                         <StackPanel x:Name="PreviewQuickActions"
                                     Orientation="Horizontal" VerticalAlignment="Center">
                             <Button Click="OnStartWirelessControlClick"
@@ -1876,9 +1872,6 @@
                                    Visibility="{Binding CaptureWarningVisibility}"
                                    AutomationProperties.AutomationId="CaptureWarningText"/>
                         <ScrollViewer x:Name="StatisticsViewport" Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" SizeChanged="OnStatisticsSizeChanged">
-                        <ScrollViewer.Resources>
-                            <GridLength x:Key="ScrollBarHorizontalGutterHeight">8</GridLength>
-                        </ScrollViewer.Resources>
                         <StackPanel x:Name="StatisticsItems" Orientation="Horizontal">
 
                         <StackPanel Grid.Column="0" Margin="13">
