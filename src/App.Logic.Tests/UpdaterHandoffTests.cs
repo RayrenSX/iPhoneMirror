@@ -12,8 +12,24 @@ using System.Runtime.InteropServices;
 
 internal static class UpdaterHandoffTests
 {
+    private static async Task VerifyShellStartupAsync()
+    {
+        var marker = Path.Combine(Path.GetTempPath(), "iphone-shell-probe-" + Guid.NewGuid().ToString("N"));
+        var command = "[IO.File]::WriteAllText('" + marker.Replace("'", "''") + "', 'started')";
+        using var handle = UpdateInstallerLauncher.StartPowerShell(
+            UpdateInstallerLauncher.BuildUnelevatedPowerShellStartInfo(Path.GetTempPath(),
+                Convert.ToBase64String(Encoding.Unicode.GetBytes(command))));
+        using var process = Process.GetProcessById(checked((int)GetProcessId(handle)));
+        try
+        {
+            await UpdateInstallerLauncher.WaitForHelperAsync(handle, timeout: TimeSpan.FromSeconds(15));
+            Require(File.Exists(marker), "The shell helper did not execute on a thread without a message loop.");
+        }
+        finally { await StopAsync(process); File.Delete(marker); }
+    }
     internal static async Task RunAsync(bool verifyFailureDialog = false)
     {
+        await Task.Run(VerifyShellStartupAsync);
         using (var failed = StartPowerShell("exit 23"))
             await ExpectFailureAsync(UpdateInstallerLauncher.WaitForHelperAsync(failed.SafeHandle));
         using (var ready = new EventWaitHandle(false, EventResetMode.ManualReset))
@@ -145,6 +161,12 @@ internal static class UpdaterHandoffTests
                         .WaitAsync(TimeSpan.FromSeconds(15));
                     Require(File.ReadAllText(Path.Combine(install, "iPhoneMirror.exe")) == "new-app",
                         "ZIP helper did not install after the old process exited: " + await errors);
+                }
+                catch (Exception error)
+                {
+                    await StopAsync(updater);
+                    throw new InvalidOperationException("ZIP helper handoff failed. Output: " + await output +
+                        " Errors: " + await errors, error);
                 }
                 finally { await StopAsync(updater); }
                 await output;
@@ -284,6 +306,7 @@ internal static class UpdaterHandoffTests
     {
         var pid = GetProcessId(process);
         var elapsed = Stopwatch.StartNew();
+        var lastDialogText = string.Empty;
         while (elapsed.Elapsed < TimeSpan.FromSeconds(10))
         {
             nint dialog = 0;
@@ -299,14 +322,16 @@ internal static class UpdaterHandoffTests
                     text.Append(buffer);
                     return true;
                 }, 0);
-                if (!text.ToString().Contains("UPDATER_POST_SHUTDOWN_TEST")) return true;
+                lastDialogText = text.ToString();
+                if (!lastDialogText.Contains("UPDATER_POST_SHUTDOWN_TEST")) return true;
                 dialog = window;
                 return false;
             }, 0);
             if (dialog != 0) return dialog;
             await Task.Delay(100);
         }
-        throw new InvalidOperationException("A failure after app shutdown did not show its error details.");
+        GetExitCodeProcess(process, out var exitCode);
+        throw new InvalidOperationException($"A failure after app shutdown did not show its error details. Helper PID={pid}, exit={exitCode}, dialog={lastDialogText}");
     }
 
     private delegate bool WindowCallback(nint window, nint data);
@@ -316,6 +341,7 @@ internal static class UpdaterHandoffTests
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextW(nint window, StringBuilder text, int maximum);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool PostMessageW(nint window, uint message, nint wParam, nint lParam);
     [DllImport("kernel32.dll")] private static extern uint GetProcessId(SafeProcessHandle process);
+    [DllImport("kernel32.dll")] private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint exitCode);
 
     private static Process StartZipHelper(string helper, string zip, string digest,
         string install, int waitPid, string eventName)

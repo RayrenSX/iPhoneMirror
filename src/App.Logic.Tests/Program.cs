@@ -36,6 +36,11 @@ if (args is ["--updater-handoff"])
     await UpdaterHandoffTests.RunAsync(verifyFailureDialog: true);
     return;
 }
+if (args is ["--updater-handoff", "--no-dialog"])
+{
+    await UpdaterHandoffTests.RunAsync();
+    return;
+}
 if (args is ["--updater-package-e2e", var updaterFixture, var updaterInstall, var updaterIdentity])
 {
     await UpdaterHandoffTests.RunPackageEndToEndAsync(updaterFixture, updaterInstall, updaterIdentity);

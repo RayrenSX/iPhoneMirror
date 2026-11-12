@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
@@ -15,6 +16,7 @@ namespace IPhoneMirror.App.Updater;
 internal static class UpdateInstallerLauncher
 {
     private const uint SeeMaskNoCloseProcess = 0x00000040;
+    private const uint SeeMaskNoAsync = 0x00000100;
     private const uint SeeMaskNoConsole = 0x00008000;
     private const int SwHide = 0;
     private const uint FileAddFile = 0x00000002;
@@ -299,24 +301,39 @@ internal static class UpdateInstallerLauncher
             throw new PlatformNotSupportedException(
                 "Windows update helpers are only supported on Windows.");
 
+        if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
+            return StartPowerShellOnStaThread(start);
+        // The shell requires an initialized STA context. Async continuations
+        // can arrive on a pool thread without one, leaving the child unstarted.
+        SafeProcessHandle? handle = null;
+        ExceptionDispatchInfo? failure = null;
+        var thread = new Thread(() =>
+        {
+            try { handle = StartPowerShellOnStaThread(start); }
+            catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        failure?.Throw();
+        return handle!;
+    }
+
+    private static SafeProcessHandle StartPowerShellOnStaThread(ProcessStartInfo start)
+    {
         var executeInfo = new ShellExecuteInfo
         {
             Size = (uint)Marshal.SizeOf<ShellExecuteInfo>(),
-            Mask = SeeMaskNoCloseProcess | SeeMaskNoConsole,
+            Mask = SeeMaskNoCloseProcess | SeeMaskNoConsole | SeeMaskNoAsync,
             Verb = string.IsNullOrWhiteSpace(start.Verb) ? null : start.Verb,
             File = start.FileName,
-            Parameters = string.Join(" ",
-                start.ArgumentList.Select(QuoteCommandLineArgument)),
+            Parameters = string.Join(" ", start.ArgumentList.Select(QuoteCommandLineArgument)),
             Directory = start.WorkingDirectory,
             Show = SwHide,
         };
         if (!ShellExecuteExW(ref executeInfo))
-        {
-            var error = Marshal.GetLastWin32Error();
-            throw new Win32Exception(error,
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
                 LocalizationService.Get("UpdateHelperStartFailed"));
-        }
-
         if (executeInfo.Process == 0)
             throw new InvalidOperationException(LocalizationService.Get("UpdateHelperStartFailed"));
         return new SafeProcessHandle(executeInfo.Process, ownsHandle: true);
