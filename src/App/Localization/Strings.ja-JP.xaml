@@ -315,6 +315,7 @@
     <system:String x:Key="BluetoothControlPromptBodyFormat">Windowsのマウス入力がiPhone/iPadに転送されます。{0}を押すとマウスを解放して入力を一時停止し、もう一度押すと操作を再開します。</system:String>
     <system:String x:Key="BluetoothControlPromptDetail">リモート操作中は、Windowsのカーソルが非表示になります。</system:String>
     <system:String x:Key="BluetoothControlPromptShortcutFormat">{0}を押すとマウスを解放します</system:String>
+    <system:String x:Key="BluetoothControlReleaseHintFormat">{0}を押すとマウスを解放して入力を一時停止し、もう一度押すと操作を再開します。</system:String>
     <system:String x:Key="BluetoothControlPromptAutoCloseFormat">{0}秒後に自動で閉じます</system:String>
     <system:String x:Key="IndependentWindowReverseControl">リモート操作</system:String>
     <system:String x:Key="IndependentWindowBluetoothControl">Bluetooth操作</system:String>

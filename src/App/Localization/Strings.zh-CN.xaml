@@ -315,6 +315,7 @@
     <system:String x:Key="BluetoothControlPromptBodyFormat">Windows 鼠标输入已转发到 iPhone/iPad。按 {0} 释放鼠标并暂停输入，再按一次恢复控制。</system:String>
     <system:String x:Key="BluetoothControlPromptDetail">反向控制期间 Windows 光标会隐藏。</system:String>
     <system:String x:Key="BluetoothControlPromptShortcutFormat">按 {0} 释放鼠标</system:String>
+    <system:String x:Key="BluetoothControlReleaseHintFormat">按 {0} 释放鼠标并暂停输入，再按一次恢复控制。</system:String>
     <system:String x:Key="BluetoothControlPromptAutoCloseFormat">{0} 秒后自动关闭</system:String>
     <system:String x:Key="IndependentWindowReverseControl">反向控制</system:String>
     <system:String x:Key="IndependentWindowBluetoothControl">蓝牙控制</system:String>

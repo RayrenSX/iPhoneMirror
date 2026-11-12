@@ -32,6 +32,12 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
     public string DeviceSummary => $"{_snapshot?.DeviceName ?? "iPhone"} · {_snapshot?.Mode switch { ControlStatusMode.Usb => LocalizationService.Get("WiredControlLabel"), ControlStatusMode.Wireless => LocalizationService.Get("WirelessControlLabel"), ControlStatusMode.Bluetooth => LocalizationService.Get("BluetoothControlLabel"), _ => "" }}";
     public string StageTitle => GetStageTitle(_snapshot?.Stage);
     public string StageDescription => LocalizationService.RefreshText(_snapshot?.Error ?? _snapshot?.Description ?? LocalizationService.Get("ControlPreparing"));
+    public Visibility BluetoothReleaseHintVisibility => _snapshot is
+        { Mode: ControlStatusMode.Bluetooth, Stage: ControlStage.Ready, Prompt: null }
+        ? Visibility.Visible : Visibility.Collapsed;
+    public string BluetoothReleaseHintText => LocalizationService.Format("BluetoothControlReleaseHintFormat",
+        KeyboardShortcut.FromSettings((Application.Current as App)?.UpdateSettings ?? new(),
+            BluetoothShortcutAction.BluetoothControl).DisplayText);
     public string CountdownText => _snapshot?.Stage == ControlStage.Ready ? LocalizationService.Format("ControlCloseCountdown", _remaining) : string.Empty;
     public string TotalDurationText => _snapshot?.Duration is { } duration
         ? LocalizationService.Format("ControlTotalDuration", duration.TotalSeconds) : string.Empty;
@@ -248,6 +254,7 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
         _snapshot?.Stage == ControlStage.Ready && _snapshot.Prompt is null;
     internal void RefreshActions()
     {
+        OnPropertyChanged(nameof(BluetoothReleaseHintText));
         OnPropertyChanged(nameof(CancelVisibility));
         OnPropertyChanged(nameof(CloseVisibility));
         OnPropertyChanged(nameof(RetryVisibility));
@@ -259,6 +266,8 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
     }
     private void NotifyAll()
     {
+        OnPropertyChanged(nameof(BluetoothReleaseHintVisibility));
+        OnPropertyChanged(nameof(BluetoothReleaseHintText));
         foreach (var p in new[] { nameof(DeviceSummary), nameof(StageTitle), nameof(StageDescription), nameof(CountdownText), nameof(TotalDurationText), nameof(CancelVisibility), nameof(CloseVisibility), nameof(RetryVisibility), nameof(PromptVisibility), nameof(BluetoothPairingStepsVisibility), nameof(PromptTitle), nameof(PromptMessage), nameof(PromptPrimaryText), nameof(PromptSecondaryText), nameof(PromptPrimaryVisibility), nameof(PromptSecondaryVisibility), nameof(PromptOptionsVisibility), nameof(PromptTechnicalDetails), nameof(PromptTechnicalDetailsVisibility), nameof(IsPromptPrimaryEnabled), nameof(PromptTone), nameof(PromptSymbol) }) OnPropertyChanged(p);
     }
     public event PropertyChangedEventHandler? PropertyChanged;

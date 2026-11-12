@@ -19,6 +19,34 @@ internal static partial class Program
         var vm = (MainViewModel)KeyboardField(main, "_viewModel");
         try
         {
+            var hintStatus = new ControlStatusService();
+            var hintView = new ReverseControlStatusViewModel(hintStatus);
+            try
+            {
+                foreach (var mode in Enum.GetValues<ControlStatusMode>())
+                {
+                    hintStatus.Begin(mode, "Hint test phone"); ToolsPump();
+                    MappingAssert(hintView.BluetoothReleaseHintVisibility == Visibility.Collapsed,
+                        "The release shortcut appeared before control was ready.");
+                    hintStatus.Ready(mode, "Hint test phone"); ToolsPump();
+                    MappingAssert(hintView.BluetoothReleaseHintVisibility ==
+                        (mode == ControlStatusMode.Bluetooth ? Visibility.Visible : Visibility.Collapsed),
+                        "The release hint did not follow the ready transport.");
+                    hintStatus.Failed(mode, "Hint test phone", "Offline failure"); ToolsPump();
+                    MappingAssert(hintView.BluetoothReleaseHintVisibility == Visibility.Collapsed,
+                        "A failed connection retained its release shortcut.");
+                }
+                hintStatus.Begin(ControlStatusMode.Bluetooth, "Hint test phone");
+                hintStatus.Report(ControlStatusMode.Bluetooth, ControlStage.WaitingForPhoneConnection,
+                    "Hint test phone", "Waiting"); ToolsPump();
+                MappingAssert(hintView.BluetoothReleaseHintVisibility == Visibility.Collapsed,
+                    "Waiting for a Bluetooth connection showed a release shortcut.");
+                hintStatus.Cancelled(ControlStatusMode.Bluetooth, "Hint test phone", "Cancelled"); ToolsPump();
+                MappingAssert(hintView.BluetoothReleaseHintVisibility == Visibility.Collapsed,
+                    "Cancelled Bluetooth control showed a release shortcut.");
+            }
+            finally { hintView.Dispose(); }
+            Console.WriteLine("Release shortcut appears only for ready Bluetooth control; hidden while connecting, failed or cancelled.");
             vm.ControlStatus.Begin(ControlStatusMode.Wireless, "Test phone");
             KeyboardCall(vm, "ShowReverseControlError", "wireless", "Original wireless failure",
                 "ReverseControlStartErrorTitle", "wireless_remote_pairing_failed: original diagnostic", null, null);

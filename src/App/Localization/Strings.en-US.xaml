@@ -315,6 +315,7 @@
     <system:String x:Key="BluetoothControlPromptBodyFormat">Windows mouse input is now redirected to the iPhone/iPad. Press {0} to release the mouse and pause input; press it again to resume control.</system:String>
     <system:String x:Key="BluetoothControlPromptDetail">The Windows cursor is hidden while reverse control is active.</system:String>
     <system:String x:Key="BluetoothControlPromptShortcutFormat">Press {0} to release the mouse</system:String>
+    <system:String x:Key="BluetoothControlReleaseHintFormat">Press {0} to release the mouse and pause input; press it again to resume control.</system:String>
     <system:String x:Key="BluetoothControlPromptAutoCloseFormat">Closes automatically in {0} s</system:String>
     <system:String x:Key="IndependentWindowReverseControl">Reverse control</system:String>
     <system:String x:Key="IndependentWindowBluetoothControl">Bluetooth control</system:String>
