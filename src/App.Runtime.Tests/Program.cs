@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -28,6 +28,67 @@ internal static partial class Program
     {
         try
         {
+            // Native hub fixture: capture the real child command line without
+            // opening a network receiver, enumerating devices or sending input.
+            if (args.FirstOrDefault() == "--pipe" && args.Contains("RAOP port test") &&
+                Environment.GetEnvironmentVariable("IPHONE_MIRROR_TEST_RAOP_ARGUMENTS") is { } raopArguments)
+            {
+                File.WriteAllLines(raopArguments + ".tmp", args);
+                File.Move(raopArguments + ".tmp", raopArguments, overwrite: true);
+                return 0;
+            }
+            if (args is ["--wireless-raop-ports", var portOutput]) return RunWirelessRaopPortTests(portOutput);
+            if (args is ["--device-context-menu", var deviceMenuOutput]) return RunDeviceContextMenuTests(deviceMenuOutput);
+            if (args is ["--toolbar-customization", var customizeToolbarOutput]) return RunPreviewToolbarCustomizationTests(customizeToolbarOutput);
+            if (args is ["--toolbar-drag", var toolbarDragOutput]) return RunToolbarDragTests(toolbarDragOutput);
+            if (args is ["--toolbar-motion", var toolbarMotionOutput]) return RunToolbarMotionTests(toolbarMotionOutput);
+            if (args is ["--toolbar-motion-default", var toolbarDefaultMotionOutput]) return RunToolbarMotionTests(toolbarDefaultMotionOutput, softwareOnly: false);
+            if (args is ["--toolbar-hidden-motion", var hiddenToolbarOutput]) return RunHiddenToolbarMotionTests(hiddenToolbarOutput);
+            if (args is ["--toolbar-hidden-motion-default", var hiddenToolbarDefaultOutput]) return RunHiddenToolbarMotionTests(hiddenToolbarDefaultOutput, softwareOnly: false);
+            if (args is ["--toolbar-focus-geometry", var toolbarGeometryOutput]) return RunToolbarFocusGeometryTests(toolbarGeometryOutput);
+            if (args is ["--toolbar-focus-video", var toolbarVideoOutput]) return RunToolbarFocusVideoTests(toolbarVideoOutput);
+            if (args is ["--application-mode-visibility", var modeVisibilityOutput]) return RunApplicationModeVisibilityTests(modeVisibilityOutput);
+            if (args is ["--complete-window-resize", var completeResizeOutput]) return RunCompleteWindowResizeTests(completeResizeOutput);
+            if (args is ["--complete-preview-width-limit", var previewLimitOutput]) return RunCompletePreviewWidthTests(previewLimitOutput);
+            if (args is ["--lightweight-preview-bounds", var lightweightBoundsOutput]) return RunLightweightPreviewBoundsTests(lightweightBoundsOutput);
+            if (args is ["--workspace-lifecycle-review"]) return RunWorkspaceLifecycleReview();
+            if (args is ["--window-interaction-performance-live", var interactionOutput])
+                return RunPreviewViewportResizeTests(interactionOutput, live: true, performance: true);
+            if (args is ["--preview-viewport-resize-live", var liveResizeOutput])
+                return RunPreviewViewportResizeTests(liveResizeOutput, live: true);
+            if (args is ["--preview-viewport-resize", var resizeOutput])
+                return RunPreviewViewportResizeTests(resizeOutput);
+            if (args is ["--preview-bars-live", var liveBarsOutput])
+                return RunPreviewViewportResizeTests(liveBarsOutput, live: true, previewBars: true);
+            if (args is ["--preview-bars", var barsOutput])
+                return RunPreviewViewportResizeTests(barsOutput, previewBars: true);
+            if (args is ["--workspace-motion", var motionOutput])
+                return RunWorkspaceMotionTests(motionOutput);
+            if (args is ["--preview-edge-anchor", var anchorOutput])
+                return RunPreviewEdgeAnchorTests(anchorOutput);
+            if (args is ["--reveal-frame-review", var frameOutput])
+                return RunRevealFrameReview(frameOutput);
+            if (args is ["--opposite-sidebar-stability"])
+                return RunOppositeSidebarStabilityTests();
+            if (args is ["--workspace-row-occupancy", var occupancyOutput])
+                return RunWorkspaceRowOccupancyTests(occupancyOutput);
+            if (args is ["--preview-resize-redraw"])
+                return RunPreviewResizeRedrawTests();
+            if (args is ["--preview-resize-containment"])
+                return RunPreviewResizeContainmentTests();
+            if (args is ["--interface-descriptions", var descriptionsOutput])
+                return RunInterfaceDescriptionsTests(descriptionsOutput);
+            if (args is ["--workspace-scroll-focus", var focusOutput])
+                return RunWorkspaceScrollFocusTests(focusOutput);
+            if (args is ["--silent-auto-control"])
+                return RunSilentAutomaticControlTests();
+            if (args is ["--setup-mode-draft"])
+            {
+                SetupModeDraftTests.Run();
+                return 0;
+            }
+            if (args is ["--selector-identities"])
+                return RunSelectorIdentityTests();
             if (args is ["--setting-shortcuts", var settingShortcutsOutput])
                 return RunSettingShortcutTests(settingShortcutsOutput);
             if (args is ["--settings-categories", var settingsOutput])
@@ -263,6 +324,8 @@ internal static partial class Program
                 return RunUiAuditFixTests(fixesOutput);
             if (args is ["--adaptive-toolbar", var toolbarOutput])
                 return RunAdaptiveToolbarTests(toolbarOutput);
+            if (args is ["--mirroring-sidebar", var sidebarOutput])
+                return RunMirroringSidebarTests(sidebarOutput);
             if (args is ["--tray-startup-theme", var trayThemeOutput])
                 return RunTrayStartupThemeTests(trayThemeOutput);
             if (args is ["--theme-content", var themeContentOutput])
@@ -1284,12 +1347,7 @@ internal static partial class Program
         owner.Show();
         try
         {
-            var versionClick = typeof(MainWindow).GetMethod("OnVersionClick",
-                BindingFlags.Instance | BindingFlags.NonPublic) ??
-                throw new MissingMethodException(typeof(MainWindow).FullName,
-                    "OnVersionClick");
-            for (var index = 0; index < 5; ++index)
-                versionClick.Invoke(owner, [owner, new RoutedEventArgs()]);
+            OpenDeveloperThroughAbout(owner);
 
             var window = application.Windows.Cast<Window>().FirstOrDefault(
                 candidate => candidate.GetType().Name == "DeveloperToolsWindow") ??
@@ -1621,6 +1679,7 @@ internal static partial class Program
             throw new MissingMemberException(settings.GetType().FullName,
                 "ApplicationDisplayMode");
         property.SetValue(settings, value);
+        app.RefreshInterfaceDescriptionVisibility();
     }
 
     private static void AdvanceDispatcher(TimeSpan duration)

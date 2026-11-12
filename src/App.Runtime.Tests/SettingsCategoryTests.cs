@@ -157,6 +157,26 @@ internal static partial class Program
                     {
                         Select(category);
                         var viewport = Find<ScrollViewer>(category + "SettingsScrollViewer");
+                        TestSettingsScrollbarAlignment(window, viewport);
+                        var actionStyle = (Style)window.FindResource("SettingsActionButton");
+                        foreach (var action in FindVisualDescendants<Button>(viewport).Where(button =>
+                            ReferenceEquals(button.Style, actionStyle) && button.IsVisible && button.ActualWidth > 0))
+                        {
+                            var parent = (FrameworkElement)System.Windows.Media.VisualTreeHelper.GetParent(action);
+                            InteractionAssert(Math.Abs(action.ActualWidth + action.Margin.Left + action.Margin.Right - parent.ActualWidth) <= 1 &&
+                                action.ActualHeight >= 40,
+                                $"{culture}/{theme}/{category}: settings action button does not fill its row or is too short: {action.Content}.");
+                            if (System.Windows.Data.BindingOperations.GetBinding(action, Button.CommandProperty)?.Path.Path == "ApplyWirelessSettingsCommand")
+                            {
+                                var input = FindVisualDescendants<TextBox>(parent).Single();
+                                var inputBounds = input.TransformToAncestor(parent).TransformBounds(new Rect(input.RenderSize));
+                                var buttonBounds = action.TransformToAncestor(parent).TransformBounds(new Rect(action.RenderSize));
+                                InteractionAssert(Math.Abs(input.ActualWidth - action.ActualWidth) <= 1 &&
+                                    Math.Abs(input.ActualHeight - 40) <= 1 &&
+                                    buttonBounds.Top >= inputBounds.Bottom + 7,
+                                    "The wireless name and Apply button must use equal-width separate rows with an 8px gap.");
+                            }
+                        }
                         InteractionAssert(viewport.ViewportWidth > 240 && viewport.ScrollableWidth < 1,
                             $"Settings overflow horizontally: {culture}/{theme}/{category}.");
                         var header = Find<RadioButton>(category + "SettingsTab");
@@ -186,6 +206,12 @@ internal static partial class Program
             window.UpdateLayout();
             var headerAfter = Find<RadioButton>("ApplicationSettingsTab").TranslatePoint(new Point(), window);
             InteractionAssert(headerBefore == headerAfter, "The category header scrolled with settings.");
+
+            foreach (var category in new[] { "Application", "Projection", "Control" })
+            {
+                Select(category);
+                TestSettingsScrollbarAlignment(window, Find<ScrollViewer>(category + "SettingsScrollViewer"));
+            }
 
             Console.WriteLine("PASS settings categories: exclusive pages, fallback, save/load/clone, reopen, picture shortcut, stable header, retained scroll and five languages in both themes.");
             return 0;

@@ -31,7 +31,7 @@
         </Grid>
         <StackPanel Grid.Row="2">
             <TextBlock TextWrapping="Wrap" Text="{Binding TargetText}" FontSize="{DynamicResource FontSize15}" FontWeight="SemiBold"/>
-            <TextBlock Text="{DynamicResource BluetoothClientBindingHint}"
+            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource BluetoothClientBindingHint}"
                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,5,0,0"/>
         </StackPanel>

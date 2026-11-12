@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:system="clr-namespace:System;assembly=mscorlib"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
@@ -167,10 +167,17 @@
 
     <system:String x:Key="DevicesTitle">螢幕鏡像來源</system:String>
     <system:String x:Key="RefreshDevices">重新整理裝置</system:String>
-    <system:String x:Key="MirrorSimultaneously">同時鏡像多台裝置</system:String>
-    <system:String x:Key="DeviceAlreadyMirroring">這台裝置已在主預覽中進行螢幕鏡像</system:String>
-    <system:String x:Key="SimultaneousMirrorStartedFormat">已為 {0} 開啟同時螢幕鏡像視窗</system:String>
-    <system:String x:Key="SimultaneousMirrorFailedFormat">同時螢幕鏡像啟動失敗：{0}</system:String>
+    <system:String x:Key="DeviceActionCopyInfo">複製裝置資訊</system:String>
+    <system:String x:Key="DeviceActionRestart">重新啟動裝置…</system:String>
+    <system:String x:Key="DeviceActionShutdown">關閉裝置…</system:String>
+    <system:String x:Key="DeviceActionUsbRequired">請透過 USB 連接裝置，並在裝置上信任此電腦。</system:String>
+    <system:String x:Key="DeviceActionRuntimeMissing">缺少裝置操作元件，請重新安裝 iPhoneMirror。</system:String>
+    <system:String x:Key="DeviceActionNoAcknowledgement">裝置未確認操作結果。請先檢查裝置狀態，避免重複傳送指令。</system:String>
+    <system:String x:Key="DeviceActionConfirmRestart">確定重新啟動「{0}」嗎？這將中斷該裝置的螢幕鏡像與控制連線，重新啟動後須解鎖裝置。</system:String>
+    <system:String x:Key="DeviceActionConfirmShutdown">確定關閉「{0}」嗎？這將中斷該裝置的螢幕鏡像與控制連線，須手動開機。</system:String>
+    <system:String x:Key="DeviceActionSentFormat">已向「{0}」傳送「{1}」指令。</system:String>
+    <system:String x:Key="DeviceActionFailedFormat">無法確認「{0}」的操作結果：{1}</system:String>
+    <system:String x:Key="DeviceActionInfoFormat">裝置名稱：{0}&#10;型號：{1}&#10;系統：{2}&#10;連線：{3}&#10;裝置識別碼：{4}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">{0} 螢幕鏡像錯誤</system:String>
     <system:String x:Key="DeviceSessionClosedWarningTitleFormat">{0} 螢幕鏡像已停止</system:String>
     <system:String x:Key="DeviceSessionClosedWarningBody">偵測到您已在控制中心按一下停止螢幕鏡像，下次使用此裝置進行有線螢幕鏡像前需重新啟動 iPhone/iPad</system:String>
@@ -218,6 +225,7 @@
     <system:String x:Key="LatencyLabel">延遲</system:String>
     <system:String x:Key="EndToEndLabel">端對端</system:String>
     <system:String x:Key="AudioLabel">音訊</system:String>
+    <system:String x:Key="AudioStatisticsDescription">取樣率與聲道</system:String>
     <system:String x:Key="LiveLogHeader" xml:space="preserve">即時記錄檔  ·  Ctrl+L</system:String>
     <system:String x:Key="ClearView">清除檢視</system:String>
 
@@ -402,13 +410,14 @@
     <system:String x:Key="ConnectionError">裝置連線異常</system:String>
 
     <system:String x:Key="ResolutionNative">原始（不限制繪製尺寸）</system:String>
+    <system:String x:Key="ResolutionNativeShort">原始</system:String>
     <system:String x:Key="Resolution1080p">1080p（1920×1080）</system:String>
     <system:String x:Key="Resolution720p">720p（1280×720）</system:String>
     <system:String x:Key="Resolution540p">540p（960×540）</system:String>
     <system:String x:Key="PendingSettingsLocalFormat">待套用：{0} · {1} fps（僅本機繪製）</system:String>
     <system:String x:Key="PendingSettingsFormat">待套用：{0} · {1} fps</system:String>
     <system:String x:Key="RenderLimitFormat">繪製上限 {0}</system:String>
-    <system:String x:Key="TargetFpsFormat">本機上限 {0} fps</system:String>
+    <system:String x:Key="TargetFpsFormat">本機上限 {0}</system:String>
     <system:String x:Key="AppliedRenderFormat">已套用本機繪製：{0} · {1} fps</system:String>
     <system:String x:Key="AppliedRenderLogFormat">本機繪製設定：{0} / {1} fps — {2}；來源串流未重新連線</system:String>
     <system:String x:Key="ApplySettingsFailedFormat">套用畫面設定失敗：{0}</system:String>
@@ -569,7 +578,7 @@
     <system:String x:Key="UsbModeDemoNotice">此模式不會啟用影片 App 的 AirPlay 或外接播放畫面。</system:String>
     <system:String x:Key="UsbModeAirPlayAdvantage">保留真實狀態列。iPad 使用橫直向對稱的顯示能力，避免方向變化時重新啟動 USB；實際來源解析度由裝置決定，可能低於面板原生像素。影片 App 可以嘗試外接播放。</system:String>
     <system:String x:Key="UsbModeAirPlayDisadvantage">外接內容的解析度無法保證與手機和視窗完美自適應，可能出現裁切、比例異常或畫面顯示不全。</system:String>
-    <system:String x:Key="UsbModeAirPlayNotice">需要自訂時，連續按右下角版本號 5 次開啟進階模式。自訂 HPD1 尺寸存在風險，錯誤參數可能導致黑畫面、裁切或 USB 重新連線失敗。</system:String>
+    <system:String x:Key="UsbModeAirPlayNotice">需要自訂時，連續按「關於」頁版本號 5 次開啟進階模式。自訂 HPD1 尺寸存在風險，錯誤參數可能導致黑畫面、裁切或 USB 重新連線失敗。</system:String>
     <system:String x:Key="UsbModeAisiAdvantage">採用愛思同類方案，傳送 Valeria=false 並固定請求 1565×1565，減少不同裝置之間的解析度協商差異。</system:String>
     <system:String x:Key="UsbModeAisiDisadvantage">方形目標會限制原始畫面的畫質，不適合畫質優先；橫向螢幕內容還可能出現縮放、黑邊或比例不理想。</system:String>
     <system:String x:Key="UsbModeAisiNotice">此模式不會使用本專案的原始解析度偵測和橫直向自動調整。</system:String>
@@ -620,6 +629,12 @@
     <system:String x:Key="AppSubtitleConnectivity">Windows USB 低延遲與 AirPlay 無線螢幕鏡像</system:String>
     <system:String x:Key="WirelessReceiverTitle">無線 AirPlay</system:String>
     <system:String x:Key="WirelessReceiverNameLabel">接收端名稱</system:String>
+    <system:String x:Key="WirelessRaopPortLabel">RAOP 連接埠</system:String>
+    <system:String x:Key="WirelessRaopPortHelp">預設為 5001。連接埠被占用時可變更；套用後重新啟動無線接收，裝置會自動探索新連接埠。</system:String>
+    <system:String x:Key="WirelessRaopPortInvalid">請輸入 1–65535 的整數，不能使用 AirPlay/DLNA 已使用的 7001、8090。</system:String>
+    <system:String x:Key="WirelessRaopPortUnavailableFormat">RAOP 連接埠 {0} 已被占用或無法使用，請選擇其他連接埠後套用。</system:String>
+    <system:String x:Key="WirelessRaopPortChangeFormat">RAOP 連接埠：{0} → {1}</system:String>
+    <system:String x:Key="WirelessReceiverRetry">重新啟動無線接收器</system:String>
     <system:String x:Key="WirelessBackendLabel">接收方案</system:String>
     <system:String x:Key="WirelessBackendOriginal">原始方案</system:String>
     <system:String x:Key="WirelessBackendUxPlay">UxPlay（備用）</system:String>
@@ -679,7 +694,11 @@
     <system:String x:Key="WirelessRuntimeIncompatible">無線解碼元件版本不相容，請重新安裝最新版本。</system:String>
     <system:String x:Key="WirelessRuntimeProbeTimedOut">無線解碼元件檢查逾時，請重新啟動應用程式後重試。</system:String>
     <system:String x:Key="WirelessRuntimeLoadFailedFormat">無線解碼元件無法載入（檢查代碼 {0}），請重新安裝最新版本。</system:String>
-    <system:String x:Key="FooterConnectivity">本機 USB / AirPlay，無需雲端中轉</system:String>
+    <system:String x:Key="HideInterfaceDescriptionsLabel">隱藏介面說明文字</system:String>
+    <system:String x:Key="HidePreviewToolbarLabel">隱藏預覽快捷列</system:String>
+    <system:String x:Key="HidePreviewStatusBarLabel">隱藏預覽狀態列</system:String>
+    <system:String x:Key="ApplicationModeLightweightVisibilityHint">輕量模式會自動隱藏以上內容，切回完整模式後恢復你的選擇。</system:String>
+    <system:String x:Key="ApplicationModeTrayVisibilityHint">系統匣模式不顯示主介面，切回完整模式後恢復你的選擇。</system:String>
     <system:String x:Key="MediaCastTitle">影片 App 投放</system:String>
     <system:String x:Key="MediaCastDescription">接收影片 App 內「投放」按鈕傳送的影片，不是控制中心的螢幕鏡像。</system:String>
     <system:String x:Key="MediaCastReady">影片投放接收端已就緒</system:String>
@@ -710,8 +729,8 @@
     <system:String x:Key="MediaCastDeviceModel">AirPlay / DLNA 影片投放</system:String>
     <system:String x:Key="MediaCastDeviceConnection">網路媒體投放</system:String>
     <system:String x:Key="MediaCastDeviceActive">正在投放影片</system:String>
-    <system:String x:Key="MediaCastFpsDisplayFormat">≤ {0} fps</system:String>
-    <system:String x:Key="MediaCastFpsCapabilityFormat">接收上限 {0} fps</system:String>
+    <system:String x:Key="MediaCastFpsDisplayFormat">≤ {0}</system:String>
+    <system:String x:Key="MediaCastFpsCapabilityFormat">接收上限 {0}</system:String>
     <system:String x:Key="MediaCastOriginalResolution">媒體原始解析度</system:String>
     <system:String x:Key="MediaCastNetworkStream">網路串流</system:String>
     <system:String x:Key="MediaCastAudioActive">媒體音訊</system:String>
@@ -1307,6 +1326,9 @@
     <system:String x:Key="MappingPicking">正在螢幕鏡像畫面取點</system:String>
     <system:String x:Key="MappingPickInside">將滑鼠移入影片內容區域</system:String>
     <system:String x:Key="MappingPickClick">點選目標位置。Esc 取消。</system:String>
+    <system:String x:Key="MappingPickClickCompact">點選目標位置</system:String>
+    <system:String x:Key="MappingPickDragCompact">拖曳至終點，放開完成</system:String>
+    <system:String x:Key="MappingPickCancel">取消 · Esc</system:String>
     <system:String x:Key="MappingPickDrag">按下並拖曳到終點，放開完成。Esc 取消。</system:String>
     <system:String x:Key="MappingStateIdle">第 1 步：擷取 Windows 按鍵</system:String>
     <system:String x:Key="MappingStateWaitingForKey">請按下一個按鍵並放開；再次點選可取消擷取</system:String>
@@ -1661,13 +1683,10 @@
     <system:String x:Key="VirtualCameraInvalidRegistration">攝影機註冊狀態無效（0x8007000D），請重新安裝虛擬攝影機元件後再試。</system:String>
     <system:String x:Key="MirroringAutoControlTitle">投影時自動啟用反向控制</system:String>
     <system:String x:Key="MirroringAutoControlOff">關閉（手動啟用）</system:String>
-    <system:String x:Key="MirroringAutoControlDescription">投影連線成功後自動啟用所選方式，無需再次按「繼續」。請先完成對應的裝置綁定；連線失敗時可查看狀態提示。</system:String>
-    <system:String x:Key="SettingsCategoryApplication">應用程式設定</system:String>
-    <system:String x:Key="SettingsCategoryProjection">投影設定</system:String>
-    <system:String x:Key="SettingsCategoryControl">反向控制設定</system:String>
-    <system:String x:Key="SettingsScopeApplication">套用至整個應用程式</system:String>
-    <system:String x:Key="SettingsScopeProjection">畫面、聲音與投影連線</system:String>
-    <system:String x:Key="SettingsScopeControl">自動反向控制、鍵盤與滑鼠</system:String>
+    <system:String x:Key="MirroringAutoControlDescription">投影連線成功後自動啟用所選方式，無需再次按「繼續」。變更後也會對正在投影且未啟用反向控制的裝置嘗試一次；選「關閉」不會停止已啟用的控制。請先完成裝置綁定，連線失敗時查看狀態提示。正常連線及成功時在背景完成，不顯示反向控制視窗；僅出錯或需要處理時顯示提示。</system:String>
+    <system:String x:Key="SettingsCategoryApplication">應用程式</system:String>
+    <system:String x:Key="SettingsCategoryProjection">投影</system:String>
+    <system:String x:Key="SettingsCategoryControl">反向控制</system:String>
     <system:String x:Key="SettingsAdvancedVideo">進階畫面設定</system:String>
     <system:String x:Key="SettingsAdvancedUsb">USB 投影模式</system:String>
     <system:String x:Key="SettingsKeyboard">鍵盤與快速鍵</system:String>
@@ -1698,4 +1717,20 @@
     <system:String x:Key="SettingShortcutsToggleHint">按一次套用目標值，再按一次還原原值；放開按鍵或切到其他視窗不會還原。</system:String>
     <system:String x:Key="SettingShortcutsToggleValue">切換後的透明度</system:String>
     <system:String x:Key="SettingShortcutsToggleEnabled">切換後啟用置頂</system:String>
+    <sys:String x:Key="ToolbarCustomize">自訂頂端工具列</sys:String>
+    <sys:String x:Key="ToolbarEarlier">向前移動</sys:String>
+    <sys:String x:Key="ToolbarLater">向後移動</sys:String>
+    <sys:String x:Key="ToolbarReset">還原預設</sys:String>
+    <sys:String x:Key="ToolbarCancel">取消</sys:String>
+    <sys:String x:Key="ToolbarDone">完成</sys:String>
+    <sys:String x:Key="ToolbarIconsOnly">僅圖示</sys:String>
+    <sys:String x:Key="ToolbarSaveFailed">儲存失敗，變更仍保留。請重試或取消。</sys:String>
+    <sys:String x:Key="ToolbarBasicHelp">按住工具拖曳排序，點選後可隱藏；元件庫可新增及找回工具。</sys:String>
+    <sys:String x:Key="ToolbarBasicEmpty">未顯示任何按鈕，可從元件庫找回。</sys:String>
+    <sys:String x:Key="ToolbarLibrary">元件庫</sys:String>
+    <sys:String x:Key="ToolbarHide">隱藏</sys:String>
+    <sys:String x:Key="ToolbarAdd">新增</sys:String>
+    <sys:String x:Key="ToolbarAdded">已新增</sys:String>
+    <sys:String x:Key="ToolbarScrollEarlier">向左捲動</sys:String>
+    <sys:String x:Key="ToolbarScrollLater">向右捲動</sys:String>
 </ResourceDictionary>

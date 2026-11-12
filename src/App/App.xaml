@@ -16,6 +16,8 @@
                 <ResourceDictionary Source="Controls/ModernControls.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
+        <Visibility x:Key="InterfaceDescriptionsVisibility">Collapsed</Visibility>
+
         <Style TargetType="TextBlock">
             <Setter Property="FontSize" Value="{DynamicResource BodyFontSize}"/>
             <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>

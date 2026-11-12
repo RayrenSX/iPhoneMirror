@@ -67,6 +67,7 @@ public partial class App : Application
             AutomationBackground = LaunchOptions.AutomationBackground;
             AppIdentity.Initialize();
             UpdateSettings = _settingsStore.Load();
+            RefreshInterfaceDescriptionVisibility();
             ThemeService.Apply(UpdateSettings.Theme);
             EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
                 new RoutedEventHandler((sender, _) =>
@@ -282,7 +283,13 @@ public partial class App : Application
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         UpdateSettings = snapshot.Clone();
+        RefreshInterfaceDescriptionVisibility();
     }
+
+    internal void RefreshInterfaceDescriptionVisibility(bool? hidden = null) =>
+        Resources["InterfaceDescriptionsVisibility"] = (hidden ??
+            (UpdateSettings.ApplicationDisplayMode != ApplicationDisplayMode.Complete || UpdateSettings.HideInterfaceDescriptions))
+            ? Visibility.Collapsed : Visibility.Visible;
 
     protected override void OnExit(ExitEventArgs e)
     {

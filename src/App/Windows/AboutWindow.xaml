@@ -31,7 +31,7 @@
             <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="{DynamicResource AboutTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Text="{DynamicResource AboutSubtitle}"
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource AboutSubtitle}"
                            Style="{StaticResource SubWindowSubtitle}"/>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
@@ -63,11 +63,14 @@
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock Text="iPhoneMirror"
                                                Style="{StaticResource SubWindowTitle}"/>
-                                    <TextBlock Text="{Binding VersionText}"
+                                    <Button x:Name="AboutVersionButton" Content="{Binding VersionText}"
+                                               Click="OnVersionClick" Background="Transparent" BorderThickness="0" Padding="0"
+                                               HorizontalAlignment="Left" MinHeight="24" Cursor="Hand"
+                                               AutomationProperties.AutomationId="AboutVersionButton"
                                                Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="{DynamicResource SecondaryFontSize}" FontWeight="SemiBold"
                                                Margin="0,4,0,0"/>
-                                    <TextBlock Text="{DynamicResource AboutDescription}"
+                                    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource AboutDescription}"
                                                Style="{StaticResource SubWindowSubtitle}"
                                                Margin="0,6,0,0"/>
                                 </StackPanel>
@@ -77,7 +80,7 @@
                                     Margin="0,20"/>
                             <TextBlock Text="{DynamicResource UpdateStatusTitle}"
                                        Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Text="{Binding UpdateStatus}"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding UpdateStatus}"
                                        Style="{StaticResource SubWindowSubtitle}"
                                        Margin="0,6,0,14"/>
                             <WrapPanel>
@@ -105,7 +108,7 @@
                     <StackPanel Margin="0,14,0,0">
                             <TextBlock Text="{DynamicResource UpdateSettingsTitle}"
                                        Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Text="{DynamicResource UpdateSettingsDescription}"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource UpdateSettingsDescription}"
                                        Style="{StaticResource SubWindowSubtitle}"
                                        Margin="0,6,0,18"/>
                             <CheckBox Content="{DynamicResource CheckOnStartup}"
@@ -130,7 +133,7 @@
                     <StackPanel Margin="0,14,0,0">
                             <TextBlock Text="{DynamicResource DiagnosticsTitle}"
                                        Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Text="{DynamicResource DiagnosticsDescription}"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DiagnosticsDescription}"
                                        Style="{StaticResource SubWindowSubtitle}"
                                        Margin="0,6,0,18"/>
                             <TextBlock Text="{DynamicResource DiagnosticsLocation}"
@@ -138,7 +141,7 @@
                             <TextBox Text="{Binding DiagnosticPath, Mode=OneWay}"
                                      IsReadOnly="True" Margin="0,9,0,14"
                                      Padding="10,7" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding DiagnosticStatus}"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding DiagnosticStatus}"
                                        Style="{StaticResource SubWindowSubtitle}"
                                        Margin="0,0,0,14"/>
                             <WrapPanel>

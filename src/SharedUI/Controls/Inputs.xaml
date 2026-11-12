@@ -50,6 +50,44 @@
             </Setter>
         </Style>
 
+        <Style x:Key="ReceiverTextBox" TargetType="TextBox" BasedOn="{StaticResource RoundedTextBox}">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="ReceiverInputRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{StaticResource ControlCornerRadius}"
+                                SnapsToDevicePixels="True">
+                            <!-- TextBoxView applies Padding itself. A second
+                                 margin on the host would double the text inset. -->
+                            <ScrollViewer x:Name="PART_ContentHost"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ReceiverInputRoot" Property="Background" Value="{DynamicResource ComboHoverBrush}"/>
+                                <Setter TargetName="ReceiverInputRoot" Property="BorderBrush" Value="{DynamicResource ComboBorderHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="ReceiverInputRoot" Property="Background" Value="{DynamicResource ComboOpenBrush}"/>
+                                <Setter TargetName="ReceiverInputRoot" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource DisabledTextBrush}"/>
+                                <Setter TargetName="ReceiverInputRoot" Property="Background" Value="{DynamicResource PrimaryActionDisabledBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="{x:Type ComboBox}"
                BasedOn="{StaticResource DefaultComboBoxStyle}">
             <Style.Resources>

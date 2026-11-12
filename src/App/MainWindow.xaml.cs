@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -38,7 +38,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Devices,
     }
 
-    public string VersionText => $"iPhoneMirror {VersionManager.DisplayVersion}";
+    public string VersionText => VersionManager.DisplayVersion;
 
     private readonly MainViewModel _viewModel;
     private readonly DispatcherTimer _refreshTimer;
@@ -65,8 +65,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private Rect _restoreBounds;
     private bool _shutdownStarted;
     private bool _allowClose;
-    private int _versionClickCount;
-    private DateTime _lastVersionClickUtc;
     private DeviceViewModel? _pressedDevice;
     private Point _devicePressPoint;
     private DateTime _devicePressStartedUtc;
@@ -422,6 +420,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             null, Timeout.Infinite, Timeout.Infinite);
         StateChanged += OnWindowStateChanged;
         Loaded += OnLoaded;
+        Loaded += (_, _) => { InitializePreviewToolbar(); UpdatePreviewStatusPresentation(); };
         SourceInitialized += OnSourceInitialized;
         Deactivated += OnMainKeyboardDeactivated;
         Activated += OnMainKeyboardActivated;
@@ -431,6 +430,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         IsVisibleChanged += OnWorkspaceWindowVisibilityChanged;
         Unloaded += OnWorkspaceUnloaded;
         Closed += OnClosed;
+        Closed += (_, _) => _deviceActionLifetime.Cancel();
         Closing += OnClosing;
         InitializeKeyboardMapping();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_created",
@@ -1805,6 +1805,96 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private nint WindowMessageHook(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message is 0x0231 or 0x0232) // WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE
+            _horizontalProjectionResize = null;
+        if (message == 0x0046 && lParam != 0 && CanConstrainCompletePreview && GetWindowRect(hwnd, out var completeBounds))
+        {
+            var position = Marshal.PtrToStructure<WorkspaceWindowPosition>(lParam);
+            if ((position.Flags & 0x0001) == 0 && position.Width > 0 && position.Height > 0)
+            {
+                var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
+                var minimum = (int)Math.Ceiling(GetCompletePreviewMinimumWindowWidth(completeBounds, position.Height, scale) * scale - .001);
+                if (position.Width < minimum)
+                {
+                    if ((position.Flags & 0x0002) == 0 && position.X + position.Width == completeBounds.Right)
+                        position.X = completeBounds.Right - minimum;
+                    position.Width = minimum;
+                    Marshal.StructureToPtr(position, lParam, false);
+                }
+            }
+        }
+        if (message == 0x0214 && lParam != 0 && CanConstrainCompletePreview && GetWindowRect(hwnd, out var completeCurrent))
+        {
+            var proposed = Marshal.PtrToStructure<NativeRect>(lParam);
+            var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
+            var minimum = (int)Math.Ceiling(GetCompletePreviewMinimumWindowWidth(completeCurrent,
+                proposed.Bottom - proposed.Top, scale) * scale - .001);
+            if (proposed.Right - proposed.Left < minimum)
+            {
+                if ((int)wParam is 1 or 4 or 7) proposed.Left = proposed.Right - minimum;
+                else proposed.Right = proposed.Left + minimum;
+                Marshal.StructureToPtr(proposed, lParam, false);
+                handled = true;
+                return 1;
+            }
+        }
+        if (message == 0x0046 && lParam != 0 && !_applyingWorkspaceWindowBounds &&
+            CanTrimLightweightWorkspace)
+        {
+            // Constrain the native proposal once, before WPF/DWM and the video
+            // HWND consume it. Applying an oversized frame and correcting it
+            // after layout doubles synchronous resize/measure/present work.
+            var position = Marshal.PtrToStructure<WorkspaceWindowPosition>(lParam);
+            if ((position.Flags & 0x0001) == 0 && position.Width > 0 && position.Height > 0 &&
+                GetWindowRect(hwnd, out var currentBounds))
+            {
+                var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
+                var height = PreviewPanel.ActualHeight +
+                    (position.Height - (currentBounds.Bottom - currentBounds.Top)) / scale;
+                var currentWidth = currentBounds.Right - currentBounds.Left;
+                var width = (int)Math.Round(CalculateLightweightSnugWidth(height, currentWidth / scale) * scale);
+                if (position.Width > width + 1)
+                {
+                    position.Width = width;
+                    if (width == currentWidth && position.Height == currentBounds.Bottom - currentBounds.Top)
+                        position.Flags |= 0x0001; // SWP_NOSIZE: preserve the existing frame
+                    Marshal.StructureToPtr(position, lParam, false);
+                }
+            }
+        }
+        if (message == 0x0214 && lParam != 0 && CanTrimLightweightWorkspace && GetWindowRect(hwnd, out var current))
+        {
+            // WM_SIZING: constrain the proposed rectangle before Windows paints
+            // the oversized frame, including a corner drag that changes height.
+            var proposed = Marshal.PtrToStructure<NativeRect>(lParam);
+            var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
+            var edge = (int)wParam;
+            if (edge is 1 or 2 or 3 or 6 && PreviewPanel.ActualHeight > 0)
+            {
+                if (edge is 1 or 2) // WMSZ_LEFT / WMSZ_RIGHT
+                    ScaleLightweightProjectionFromSide(ref proposed, current, scale, fromLeft: edge == 1);
+                else // WMSZ_TOP / WMSZ_BOTTOM
+                    ScaleLightweightProjectionFromVerticalEdge(ref proposed, current, scale, fromTop: edge == 3);
+                Marshal.StructureToPtr(proposed, lParam, false);
+                handled = true;
+                return 1;
+            }
+            var height = PreviewPanel.ActualHeight +
+                ((proposed.Bottom - proposed.Top) - (current.Bottom - current.Top)) / scale;
+            var width = (int)Math.Round(CalculateLightweightSnugWidth(height,
+                (current.Right - current.Left) / scale) * scale);
+            if (proposed.Right - proposed.Left > width + 1)
+            {
+                if (edge is 1 or 4 or 7) proposed.Left = proposed.Right - width;
+                else proposed.Right = proposed.Left + width;
+                Marshal.StructureToPtr(proposed, lParam, false);
+                handled = true;
+                return 1;
+            }
+        }
+        if (message == 0x0046 && (_viewModel.IsCapturing || _mediaCastActive ||
+            _workspaceSurfaceAnimationActive || _lightweightWindowAnimationActive))
+            Controls.NativePreviewHost.DisableClientPixelCopy(lParam, resizeOnly: true);
         if ((IsBluetoothControlActive || IsUsbControlActive) && _activeControlWindow == 0 &&
             (message == WmKillFocus || message == WmCancelMode ||
              message == WmCaptureChanged ||
@@ -2187,7 +2277,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
-        if (WindowState == WindowState.Minimized) SettleWorkspaceForEnvironmentChange();
+        if (WindowState == WindowState.Minimized)
+        {
+            SettleWorkspaceForEnvironmentChange();
+        }
         if (!_handlingNativeMaximize && !_isFullScreen &&
             WindowState == WindowState.Maximized)
         {
@@ -2328,8 +2421,43 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var showDevices = _leftWorkspacePanel == LeftWorkspacePanel.Devices;
         var showSettings = _isSettingsPanelVisible;
         var showLeftPanel = showMirroring || showDevices;
+        var previewStartWidth = Math.Min(PreviewPanel.ActualWidth, PreviewPanel.MaxWidth);
+        // A partially revealed panel is not an established viewport. Pinning its
+        // transient width while retargeting the opposite panel prevents it from reopening.
+        var leftInFlight = _workspaceSurfaceAnimationActive &&
+            Math.Abs(_workspaceLeftSurfaceTargetWidth - LeftPanelHost.Width) > .5;
+        var rightInFlight = _workspaceSurfaceAnimationActive &&
+            Math.Abs(_workspaceRightSurfaceTargetWidth - ControlPanel.Width) > .5;
+        // Snapshot the current frame before stopping its clock. ActualWidth
+        // may still describe the preceding Arrange when clicks share a turn.
+        if (_workspaceTransition?.IsRunning == true)
+        {
+            var leftFrame = Math.Min(Math.Max(0, LeftPanelHost.Width), LeftPanelHost.MaxWidth);
+            var rightFrame = Math.Min(Math.Max(0, ControlPanel.Width), ControlPanel.MaxWidth);
+            CancelLightweightWindowWidthAnimation(preserveLayout: true);
+            LeftPanelHost.Width = leftFrame;
+            ControlPanel.Width = rightFrame;
+        }
+        // Capture the already-open opposite card before changing any widths.
+        // Opening another card must never redistribute that existing viewport.
+        var leftWasOpen = LeftPanelHost.Visibility == Visibility.Visible && LeftPanelHost.ActualWidth > 1;
+        var rightWasOpen = ControlPanel.Visibility == Visibility.Visible && ControlPanel.ActualWidth > 1;
+        if (!animate || leftInFlight) _workspacePinnedLeftWidth = 0;
+        if (!animate || rightInFlight) _workspacePinnedRightWidth = 0;
+        if (showSettings && (!rightWasOpen || rightInFlight) && leftWasOpen && !leftInFlight)
+        {
+            _workspacePinnedLeftWidth = showLeftPanel ? LeftPanelHost.ActualWidth : 0;
+            _workspacePinnedRightWidth = 0;
+        }
+        else if (showLeftPanel && (!leftWasOpen || leftInFlight) && rightWasOpen && !rightInFlight)
+        {
+            _workspacePinnedRightWidth = showSettings ? ControlPanel.ActualWidth : 0;
+            _workspacePinnedLeftWidth = 0;
+        }
+        if (!showLeftPanel) _workspacePinnedLeftWidth = 0;
+        if (!showSettings) _workspacePinnedRightWidth = 0;
         CancelLightweightWindowWidthAnimation(preserveLayout: true);
-        ApplyLightweightPreviewFramePolicy();
+        if (!animate) ApplyLightweightPreviewFramePolicy();
         _isSynchronizingWorkspacePanelControls = true;
         try
         {
@@ -2342,12 +2470,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         DeviceColumn.Width = GridLength.Auto;
         ControlColumn.Width = GridLength.Auto;
         PrepareWorkspacePages(showDevices, showMirroring);
-        // Keep outgoing cards in their existing rows until they have closed.
-        // Unstacking a still-wide card would temporarily consume a second column.
-        _retainWorkspaceStackDuringTransition = animate && _workspacePanelsStacked;
         // Retarget from the current reveal widths. The previous clock has been
         // stopped, but expanding to the full layout width here would cause a jump.
-        UpdateWorkspaceLayout(preserveSurfaceWidths: animate);
+        _preparingWorkspaceReveal = animate;
+        try { UpdateWorkspaceLayout(preserveSurfaceWidths: animate); }
+        finally { _preparingWorkspaceReveal = false; }
+        if (animate)
+        {
+            // A newly opening card must be measured at its final content width
+            // before the reveal starts, never at the old window's leftover space.
+            if (showLeftPanel && !leftWasOpen) LeftPanelHost.ContentWidth = WorkspaceDeviceWidth;
+            if (showSettings && !rightWasOpen) ControlPanel.ContentWidth = WorkspaceSettingsWidth;
+        }
         if (!animate)
         {
             LeftGapColumn.Width = new GridLength(showLeftPanel ? 18 : 0);
@@ -2365,12 +2499,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (_viewModel.IsLightweightApplicationMode && !_isWindowMaximized &&
             !_isFullScreen && CenterColumn.ActualWidth > 0 &&
             new WindowInteropHelper(this).Handle != 0)
-            AnimateLightweightWindowForWorkspace(showLeftPanel, showSettings);
+            AnimateLightweightWindowForWorkspace(showLeftPanel, showSettings, previewStartWidth);
         else
             AnimateCompleteWorkspace(showLeftPanel, showSettings);
     }
     private void AnimateLightweightWindowForWorkspace(bool showLeftPanel,
-        bool showSettings)
+        bool showSettings, double previewStartWidth)
     {
         if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
             _isWindowMaximized || CenterColumn.ActualWidth <= 0 ||
@@ -2437,6 +2571,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             : canUseNormalPortraitFrame
             ? LightweightNormalPortraitPreviewWidth
             : LightweightMinimumPreviewWidth;
+        // Retarget the preview along with the HWND and sidebars. Applying the
+        // new max width immediately makes an interrupted close jump to fill
+        // the center before the replacement animation has even started.
+        _workspacePreviewStartWidth = Math.Max(1, previewStartWidth);
+        _workspacePreviewTargetWidth = targetPreviewWidth;
+        _workspacePreviewAnimationActive = true;
+        SetLightweightPreviewMaximumWidth(_workspacePreviewStartWidth);
         var minimumWindowWidth = Math.Max(LightweightMinimumWindowWidth,
             baseChromeWidth + targetSideWidth + requiredPreviewWidth);
         _lightweightTargetMinWidth = Math.Min(minimumWindowWidth,
@@ -2447,9 +2588,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _lightweightCenterTargetWidth = targetPreviewWidth;
         var targetWindowWidth = Math.Min(anchoredMaximumWindowWidth, baseChromeWidth +
             targetSideWidth + _lightweightCenterTargetWidth);
-        // Keep the center column star-sized. Its rendered preview width then
-        // follows the current HWND width on every frame while the side panels
-        // and their gaps advance in lockstep with the outer window.
+        // The center column fills up to the same animated width as its preview.
+        // Spare space from the minimum HWND width stays after the cards rather
+        // than between the preview and the right sidebar.
         _workspaceSurfaceAnimationActive = true;
         ReserveLightweightWorkspaceSurface(LeftPanelHost,
             currentLeftWidth);
@@ -2464,6 +2605,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         SetLightweightCenterColumnFill();
         var plannedWindowWidth = Math.Clamp(targetWindowWidth,
             _lightweightTargetMinWidth, anchoredMaximumWindowWidth);
+        if (!hasTargetPanels && !hasContentPreviewWidth)
+        {
+            // Once the last card closes, the idle preview fills the window.
+            // Include the minimum-window-width surplus in this transition;
+            // releasing the portrait cap only at completion causes a second
+            // abrupt expansion after the sidebar has already stopped moving.
+            _workspacePreviewTargetWidth = Math.Max(1, plannedWindowWidth - baseChromeWidth);
+            _lightweightCenterTargetWidth = _workspacePreviewTargetWidth;
+        }
         _lightweightWindowStartX = bounds.Left;
         // Keep the left navigation rail fixed while either workspace panel
         // expands or contracts. The available width changes to the right.
@@ -2472,8 +2622,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     private static double GetLightweightElementWidth(FrameworkElement element) =>
-        double.IsFinite(element.Width) ? Math.Max(0, element.Width) :
-            Math.Max(0, element.ActualWidth);
+        element.Visibility != Visibility.Visible ? 0 :
+        double.IsFinite(element.Width)
+            ? Math.Min(Math.Max(0, element.Width), element.MaxWidth) :
+                Math.Max(0, element.ActualWidth);
 
     private static double GetLightweightColumnWidth(ColumnDefinition column) =>
         column.Width.IsAbsolute ? Math.Max(0, column.Width.Value) :
@@ -2518,7 +2670,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // its first source-size update. Resize the HWND once instead of
         // generating a 280 ms WM_SIZE burst that churns the D3D swap chain.
         _ = SetWindowPos(handle, 0, bounds.Left, bounds.Top, targetPixels,
-            Math.Max(1, bounds.Bottom - bounds.Top), SwpNoZOrder | SwpNoActivate);
+            Math.Max(1, bounds.Bottom - bounds.Top), SwpNoZOrder | SwpNoActivate | SwpNoCopyBits);
         Width = targetWidth;
     }
 
@@ -2602,14 +2754,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             targetPreviewWidth, _lightweightTargetMinWidth, maximumWindowWidth);
         ApplyLightweightPreviewFramePolicy(useNormalPortraitFrame,
             hasContentPreviewWidth ? targetPreviewWidth : null);
-        var windowUsesTargetPreviewWidth = targetWindowWidth <= chromeWidth +
-            sideWidth + targetPreviewWidth + 0.5;
-        if (useNormalPortraitFrame ||
-            (hasContentPreviewWidth && windowUsesTargetPreviewWidth))
-            CenterColumn.Width = new GridLength(
-                targetPreviewWidth);
-        else
-            SetLightweightCenterColumnFill();
+        // The shared preview/column MaxWidth already provides the exact source
+        // cap. Do not reintroduce an absolute column from a queued source-size
+        // fit after a user's resize has released it.
+        SetLightweightCenterColumnFill();
 
         var targetPixels = Math.Max(1, (int)Math.Round(targetWindowWidth * scale));
         var targetX = bounds.Left;
@@ -2617,7 +2765,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             targetX = Math.Clamp(targetX, workArea.Left, Math.Max(workArea.Left,
                 workArea.Right - targetPixels));
         _ = SetWindowPos(handle, 0, targetX, bounds.Top, targetPixels,
-            Math.Max(1, bounds.Bottom - bounds.Top), SwpNoZOrder | SwpNoActivate);
+            Math.Max(1, bounds.Bottom - bounds.Top), SwpNoZOrder | SwpNoActivate | SwpNoCopyBits);
         Left = targetX / scale;
         Top = bounds.Top / scale;
         Width = targetWindowWidth;
@@ -2753,13 +2901,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void RestoreWindowFromMaximized()
     {
         if (!_isWindowMaximized) return;
-        _isWindowMaximized = false;
-        WindowState = WindowState.Normal;
-        ApplyWindowFramePolicy();
-        Left = _windowMaximizeRestoreBounds.Left;
-        Top = _windowMaximizeRestoreBounds.Top;
-        Width = _windowMaximizeRestoreBounds.Width;
-        Height = _windowMaximizeRestoreBounds.Height;
+        var applyingBounds = _applyingWorkspaceWindowBounds;
+        _applyingWorkspaceWindowBounds = true;
+        try
+        {
+            _isWindowMaximized = false;
+            WindowState = WindowState.Normal;
+            ApplyWindowFramePolicy();
+            Left = _windowMaximizeRestoreBounds.Left;
+            Top = _windowMaximizeRestoreBounds.Top;
+            Width = _windowMaximizeRestoreBounds.Width;
+            Height = _windowMaximizeRestoreBounds.Height;
+        }
+        finally { _applyingWorkspaceWindowBounds = applyingBounds; }
         ApplyApplicationDisplayMode();
     }
 
@@ -5115,13 +5269,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnRefreshPreviewClick(object sender, RoutedEventArgs e) => RefreshPreview();
 
-    private void OnVersionClick(object sender, RoutedEventArgs e)
+    internal void EnableDeveloperToolsFromAbout()
     {
-        var now = DateTime.UtcNow;
-        if ((now - _lastVersionClickUtc).TotalSeconds > 2) _versionClickCount = 0;
-        _lastVersionClickUtc = now;
-        if (++_versionClickCount < 5) return;
-        _versionClickCount = 0;
         _viewModel.EnableAdvancedMode();
         _viewModel.AddUiLog(LocalizationService.Get("AdvancedModeEnabled"));
         OpenDeveloperTools();
@@ -5339,29 +5488,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (sender is not FrameworkElement { DataContext: UsbProjectionModeOption option }) return;
         e.Handled = true;
         new Windows.UsbProjectionModeInfoWindow(option) { Owner = this }.ShowDialog();
-    }
-
-    private async void OnMirrorSimultaneouslyClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not MenuItem item ||
-            ItemsControl.ItemsControlFromItemContainer(item) is not ContextMenu menu ||
-            menu.PlacementTarget is not FrameworkElement { DataContext: Models.DeviceViewModel device } ||
-            device.IsMediaCast) return;
-        try
-        {
-            if (_viewModel.IsBluetoothControlEnabled)
-                await _viewModel.DisableBluetoothControlAsync();
-            var result = await _secondaryMirrors.ShowAsync(device);
-            if (result.Success) QueueMainPreviewHostSync();
-            _viewModel.AddUiLog(result.Success
-                ? LocalizationService.Format("SimultaneousMirrorStartedFormat", device.DisplayName)
-                : LocalizationService.Format("SimultaneousMirrorFailedFormat", result.Message));
-        }
-        catch (Exception error)
-        {
-            _viewModel.AddUiLog(LocalizationService.Format(
-                "SimultaneousMirrorFailedFormat", error.Message));
-        }
     }
 
     private void OnDeviceListRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -5834,6 +5960,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         OnMappingContextChanged(e.PropertyName);
+        if (e.PropertyName == nameof(MainViewModel.HideInterfaceDescriptions)) UpdatePreviewStatusPresentation();
+        // A mode switch also notifies both effective checkbox values. Its
+        // IsLightweightApplicationMode notification applies geometry once.
+        if (e.PropertyName is nameof(MainViewModel.HidePreviewToolbar) or nameof(MainViewModel.HidePreviewStatusBar) &&
+            !_viewModel.IsUpdatingApplicationDisplayMode)
+            ApplyApplicationDisplayMode();
         if (e.PropertyName == nameof(MainViewModel.BluetoothWindowMouseEnabled))
         {
             var enabled = _viewModel.BluetoothWindowMouseEnabled;
@@ -6036,6 +6168,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void ApplyApplicationDisplayMode()
     {
+        _completeResizePreviewWidth = 0;
+        if (_isFullScreen || !_viewModel.IsLightweightApplicationMode)
+            MainContentGrid.ClearValue(WidthProperty);
         if (_isFullScreen)
         {
             // Compact mode pins Width, MinWidth and MaxWidth to the portrait
@@ -6045,6 +6180,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             PreviewPanel.ClearValue(WidthProperty);
             PreviewPanel.ClearValue(MinWidthProperty);
             PreviewPanel.ClearValue(MaxWidthProperty);
+            CenterColumn.MaxWidth = double.PositiveInfinity;
             PreviewPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
             return;
         }
@@ -6052,12 +6188,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (!_viewModel.IsLightweightApplicationMode)
         {
             CancelLightweightWindowWidthAnimation();
-            EnvironmentPanel.ClearValue(VisibilityProperty);
-            StatsPanel.ClearValue(VisibilityProperty);
-            StatsGapRow.Height = new GridLength(14);
             PreviewPanel.ClearValue(WidthProperty);
             PreviewPanel.ClearValue(MinWidthProperty);
             PreviewPanel.ClearValue(MaxWidthProperty);
+            CenterColumn.MaxWidth = double.PositiveInfinity;
             PreviewPanel.ClearValue(HorizontalAlignmentProperty);
             PreviewPanel.SetResourceReference(Panel.BackgroundProperty,
                 "PreviewChromeBrush");
@@ -6066,7 +6200,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             PreviewPanel.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
             MainPreviewHost.SetDeviceCornerProfile(DeviceCornerProfile.Rectangular,
                 enabled: false);
-            MinWidth = 1280;
+            MinWidth = Math.Min(CompleteMinimumWindowWidth, IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(this).Width);
             if (_lightweightModeApplied && !_isWindowMaximized)
             {
                 SizeToContent = SizeToContent.Manual;
@@ -6083,9 +6217,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _lightweightModeApplied = true;
             _lightweightWidthNeedsFit = true;
         }
-        EnvironmentPanel.Visibility = Visibility.Collapsed;
-        StatsPanel.Visibility = Visibility.Collapsed;
-        StatsGapRow.Height = new GridLength(0);
         PreviewPanel.MinWidth = 0;
         PreviewPanel.ClearValue(WidthProperty);
         if (HasLightweightVideoPresentation)
@@ -6141,6 +6272,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Dispatcher.BeginInvoke(DispatcherPriority.Render, () =>
         {
             _lightweightPreviewWidthQueued = false;
+            // This request may have been queued before a sidebar click. The
+            // replacement transition now owns preview and window geometry.
+            if (_workspaceTransition?.IsRunning == true ||
+                _workspaceSurfaceAnimationActive || HasLightweightWorkspacePanels) return;
             if (!_viewModel.IsLightweightApplicationMode || _isFullScreen ||
                 _isWindowMaximized)
             {
@@ -6211,11 +6346,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             requestedContentPreviewWidth = 0;
         if (requestedContentPreviewWidth > 0)
         {
-            PreviewPanel.BeginAnimation(WidthProperty, null);
-            PreviewPanel.Width = requestedContentPreviewWidth;
-            PreviewPanel.MinWidth = requestedContentPreviewWidth;
-            PreviewPanel.MaxWidth = requestedContentPreviewWidth;
-            PreviewPanel.HorizontalAlignment = HorizontalAlignment.Center;
+            ApplyLightweightPreviewWidthLimit(requestedContentPreviewWidth);
             return;
         }
         var canUseNormalPortraitFrame = useNormalPortraitFrame ??
@@ -6224,32 +6355,47 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // workspace can fit the requested 340 DIP portrait frame.
         if (!canUseNormalPortraitFrame)
         {
-            PreviewPanel.BeginAnimation(WidthProperty, null);
-            PreviewPanel.Width = double.NaN;
-            PreviewPanel.MinWidth = 0;
-            PreviewPanel.MaxWidth = double.PositiveInfinity;
-            PreviewPanel.ClearValue(WidthProperty);
-            PreviewPanel.ClearValue(MinWidthProperty);
-            PreviewPanel.ClearValue(MaxWidthProperty);
-            PreviewPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            ApplyLightweightPreviewWidthLimit(double.PositiveInfinity);
             return;
         }
 
-        PreviewPanel.Width = LightweightNormalPortraitPreviewWidth;
-        PreviewPanel.MinWidth = LightweightNormalPortraitPreviewWidth;
-        PreviewPanel.MaxWidth = LightweightNormalPortraitPreviewWidth;
-        PreviewPanel.HorizontalAlignment = HorizontalAlignment.Center;
+        ApplyLightweightPreviewWidthLimit(LightweightNormalPortraitPreviewWidth);
+    }
+
+    private void ApplyLightweightPreviewWidthLimit(double maximumWidth)
+    {
+        PreviewPanel.MinWidth = 0;
+        SetLightweightPreviewMaximumWidth(maximumWidth);
+    }
+
+    private bool ShouldCenterLightweightPreview => !HasLightweightWorkspacePanels &&
+        !_workspaceSurfaceAnimationActive && _workspaceTransition?.IsRunning != true &&
+        GetLightweightElementWidth(LeftPanelHost) <= 0 && GetLightweightElementWidth(ControlPanel) <= 0;
+
+    private void SetLightweightPreviewMaximumWidth(double maximumWidth)
+    {
+        // The preview and its grid slot must share their width limit. Capping
+        // only the border leaves invisible center space before the right card.
+        var center = ShouldCenterLightweightPreview;
+        PreviewViewportSlot.CenterContent = center;
+        CenterColumn.MaxWidth = center ? double.PositiveInfinity : maximumWidth;
+        if (PreviewPanel.MaxWidth != maximumWidth)
+        {
+            PreviewPanel.MaxWidth = maximumWidth;
+            // The child's natural desired width can stay unchanged (e.g. a
+            // native host). The slot still has a new cap and must arrange it.
+            PreviewViewportSlot.InvalidateArrange();
+        }
     }
 
     private void OnPreviewPanelSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // Width is derived from the actual preview height in compact mode.
-        // A title-bar/DPI/workspace transition can change that height after
-        // the initial source-size notification; refit once so the native
-        // surface remains source-aspect and cannot retain top/bottom bars.
+        // SizeChanged has the newly arranged height. Update its width cap now
+        // so WPF can arrange it before the same frame is presented. Do not fit
+        // the outer window or wait for another queued layout notification.
         if (e.HeightChanged && _viewModel.IsLightweightApplicationMode &&
             HasLightweightVideoPresentation && HasLightweightContentDimensions)
-            RequestLightweightWindowFit();
+            RefreshLightweightPreviewViewport();
     }
 
     private bool TryGetLightweightContentPreviewWidth(double maximumWidth,
@@ -6335,10 +6481,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // Frame values are ordinary local values. Stopping the sole progress
         // clock preserves the exact current widths/opacity for retargeting.
         _workspaceTransition?.Stop();
+        _workspacePreviewAnimationActive = false;
         _lightweightWindowAnimationActive = false;
         _workspaceAnimationWindow = 0;
         _workspaceSurfaceAnimationActive = false;
-        _retainWorkspaceStackDuringTransition = false;
         if (!preserveLayout)
         {
             SetLightweightCenterColumnFill();
@@ -6363,7 +6509,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             if (handle != 0)
                 _ = SetWindowPos(handle, 0, x, _lightweightWindowTopPixels, width,
-                    _lightweightWindowHeightPixels, SwpNoZOrder | SwpNoActivate);
+                    _lightweightWindowHeightPixels, SwpNoZOrder | SwpNoActivate | SwpNoCopyBits);
         }
         finally { _applyingWorkspaceWindowBounds = false; }
         _lightweightWindowLastAppliedWidthPixels = width;
@@ -6391,6 +6537,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (ControlPanel.Width != right) ControlPanel.Width = right;
         if (LeftGapColumn.Width.Value != leftGap) LeftGapColumn.Width = new GridLength(leftGap);
         if (RightGapColumn.Width.Value != rightGap) RightGapColumn.Width = new GridLength(rightGap);
+        UpdateWorkspaceViewportConstraints();
     }
 
     private void CompleteWorkspaceSurfaceAnimation()
@@ -6461,8 +6608,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private double GetLightweightFixedChromeWidth(double currentWindowWidth)
     {
-        if (MainContentGrid.ActualWidth > 0)
-            return Math.Max(0, currentWindowWidth - MainContentGrid.ActualWidth);
+        if (RootLayout.ActualWidth > 0)
+            return Math.Max(0, currentWindowWidth - RootLayout.ActualWidth);
 
         var contentWidth = GetLightweightElementWidth(LeftPanelHost) +
             GetLightweightColumnWidth(LeftGapColumn) +
@@ -6732,16 +6879,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             RootLayout.Margin = new Thickness(12, 18, 18, 18);
             SetFullScreenPreviewBackground(false);
             HeaderGapRow.Height = new GridLength(18);
-            StatsGapRow.Height = new GridLength(14);
             PreviewPanel.BorderThickness = new Thickness(1);
             PreviewPanel.CornerRadius = new CornerRadius(16);
             PreviewPanel.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
             HeaderPanel.Visibility = Visibility.Visible;
             // Entering full screen applies a temporary local Collapsed value.
-            // Clear it on exit so the selected session controls toolbar visibility again.
+            // Restore the normal visibility rules for both preview bars.
             EnvironmentPanel.ClearValue(UIElement.VisibilityProperty);
-            StatsPanel.Visibility = Visibility.Visible;
-            FooterPanel.Visibility = Visibility.Visible;
+            StatsPanel.ClearValue(UIElement.VisibilityProperty);
             ApplyWorkspacePanelState();
             _isFullScreen = false;
             WindowState = _restoreWindowState == WindowState.Minimized
@@ -6776,6 +6921,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             CancelLightweightWindowWidthAnimation();
             SizeToContent = SizeToContent.Manual;
             PreviewPanel.ClearValue(WidthProperty);
+            PreviewPanel.ClearValue(MinWidthProperty);
+            PreviewPanel.ClearValue(MaxWidthProperty);
+            PreviewPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            CenterColumn.MaxWidth = double.PositiveInfinity;
+            SetLightweightCenterColumnFill();
+            MainContentGrid.ClearValue(WidthProperty);
+            MainContentGrid.MaxWidth = double.PositiveInfinity;
+            MainContentGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
             SetNavigationPaneVisible(false);
             SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: WorkspaceDeviceWidth);
             SetWorkspacePageImmediate(DevicePanel, visible: false);
@@ -6784,7 +6937,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             HeaderPanel.Visibility = Visibility.Collapsed;
             EnvironmentPanel.Visibility = Visibility.Collapsed;
             StatsPanel.Visibility = Visibility.Collapsed;
-            FooterPanel.Visibility = Visibility.Collapsed;
             DeviceColumn.Width = new GridLength(0);
             LeftGapColumn.Width = new GridLength(0);
             RightGapColumn.Width = new GridLength(0);
@@ -6792,7 +6944,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             RootLayout.Margin = new Thickness(0);
             SetFullScreenPreviewBackground(true);
             HeaderGapRow.Height = new GridLength(0);
-            StatsGapRow.Height = new GridLength(0);
             PreviewPanel.BorderThickness = new Thickness(0);
             PreviewPanel.CornerRadius = new CornerRadius(0);
             PreviewPanel.BorderBrush = Brushes.Black;
@@ -7217,6 +7368,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (mode == ControlStatusMode.Bluetooth && _viewModel.IsBluetoothControlTarget(target)) return;
         if (mode != ControlStatusMode.Bluetooth && _viewModel.IsDeviceControlEnabled(target)) return;
         var status = _viewModel.GetControlStatus(mode, target);
+        status.QuietAutomaticStartup = false;
         if (status.Current is not { IsTerminal: false } &&
             !_viewModel.IsUsbControlTarget(target))
             status.Begin(mode, _viewModel.Devices.FirstOrDefault(d =>
@@ -7650,6 +7802,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
+    private const uint SwpNoCopyBits = 0x0100;
     private const uint SwpFrameChanged = 0x0020;
     private const uint SwpShowWindow = 0x0040;
     private static readonly nint HwndTopMost = new(-1);
@@ -7661,6 +7814,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         internal int Top;
         internal int Right;
         internal int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WorkspaceWindowPosition
+    {
+        internal nint Window, InsertAfter;
+        internal int X, Y, Width, Height;
+        internal uint Flags;
     }
 
     [StructLayout(LayoutKind.Sequential)]

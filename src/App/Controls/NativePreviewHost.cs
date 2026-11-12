@@ -1,4 +1,6 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Media;
 using System.Windows.Input;
 using System.Windows.Interop;
 using IPhoneMirror.App.Localization;
@@ -20,6 +22,9 @@ internal sealed class NativePreviewHost : HwndHost
     private const int SsBlackRect = 0x00000004;
     private const int SwHide = 0;
     private const int SwShowNoActivate = 4;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpNoCopyBits = 0x0100;
     // PreviewPanel has a 16 DIP outer radius and a 1 DIP border. The native
     // child occupies the inner rectangle, so its clipping radius is 15 DIP.
     private const double MainPreviewInnerCornerRadius = 15.0;
@@ -30,6 +35,12 @@ internal sealed class NativePreviewHost : HwndHost
     private DeviceCornerProfile _cornerProfile = DeviceCornerProfile.Rectangular;
     private bool _usesDeviceCornerProfile;
     private (int Width, int Height, int Radius, double Curve)? _appliedRegion;
+    private (int Left, int Top, int Right, int Bottom)? _appliedClip;
+    private (int X, int Y, int Width, int Height)? _appliedPosition;
+    private const int CornerPointCount = 65;
+    private (double X, double Y)[]? _cornerOffsets;
+    private NativePoint[]? _cornerPoints;
+    private double _cornerOffsetExponent;
 
     internal bool CapturePointerInput { get; set; }
     private readonly NativePreviewMouse _windowMouse = new();
@@ -73,6 +84,9 @@ internal sealed class NativePreviewHost : HwndHost
 
     public NativePreviewHost()
     {
+        // Ancestor bounds can change without changing this HWND's size (for
+        // example a sidebar reveal or a NavigationView width transition).
+        LayoutUpdated += (_, _) => UpdateWindowRegion();
     }
 
     protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
@@ -155,7 +169,15 @@ internal sealed class NativePreviewHost : HwndHost
 
     protected override void OnWindowPositionChanged(System.Windows.Rect rcBoundingBox)
     {
-        base.OnWindowPositionChanged(rcBoundingBox);
+        // The default HwndHost move preserves client pixels. During a sidebar
+        // transition those pixels belong to the previous DComp/WPF geometry,
+        // leaving a second phone outline until both surfaces repaint.
+        var position = ((int)rcBoundingBox.X, (int)rcBoundingBox.Y,
+            Math.Max(0, (int)rcBoundingBox.Width), Math.Max(0, (int)rcBoundingBox.Height));
+        if (_window != 0 && _appliedPosition != position &&
+            SetWindowPos(_window, 0, position.Item1, position.Item2, position.Item3, position.Item4,
+                SwpNoZOrder | SwpNoActivate | SwpNoCopyBits))
+            _appliedPosition = position;
         UpdateWindowRegion();
     }
 
@@ -179,53 +201,103 @@ internal sealed class NativePreviewHost : HwndHost
             _usesDeviceCornerProfile ? _cornerProfile.CurveExponent : 0.0);
         // Position-only updates do not change the child silhouette. Avoid
         // rebuilding a 260-point HRGN and forcing a repaint on every drag tick.
-        if (_appliedRegion == shape) return;
-        if (radius == 0)
+        var clip = GetAncestorClip(width, height);
+        if (_appliedRegion == shape && _appliedClip == clip) return;
+        if (radius == 0 && clip == (0, 0, width, height))
         {
-            if (SetWindowRgn(_window, 0, true) != 0) _appliedRegion = shape;
+            if (SetWindowRgn(_window, 0, true) != 0) { _appliedRegion = shape; _appliedClip = clip; }
             return;
         }
         // The D3D shader uses the device profile's superellipse and smooths
         // its edge. Keep the HWND's opaque region on that same curve so the
         // child does not expose a generic circular iPhone corner underneath
         // the shader when compact mode removes the WPF preview frame.
-        var region = _usesDeviceCornerProfile
+        var region = radius == 0 ? CreateRectRgn(0, 0, width, height) : _usesDeviceCornerProfile
             ? CreateDeviceCornerRegion(width, height, radius,
                 _cornerProfile.CurveExponent)
             : CreateRoundRectRgn(0, 0, width, height, radius * 2, radius * 2);
         if (region == 0) return;
+        if (clip != (0, 0, width, height))
+        {
+            var clipRegion = CreateRectRgn(clip.Left, clip.Top, clip.Right, clip.Bottom);
+            if (clipRegion == 0) { DeleteObject(region); return; }
+            var combined = CombineRgn(region, region, clipRegion, 1); // RGN_AND
+            DeleteObject(clipRegion);
+            if (combined == 0) { DeleteObject(region); return; }
+        }
         // SetWindowRgn owns the region after success.
         if (SetWindowRgn(_window, region, true) == 0) _ = DeleteObject(region);
-        else _appliedRegion = shape;
+        else { _appliedRegion = shape; _appliedClip = clip; }
     }
 
-    private static nint CreateDeviceCornerRegion(int width, int height, int radius,
+    private (int Left, int Top, int Right, int Bottom) GetAncestorClip(int width, int height)
+    {
+        var left = 0; var top = 0; var right = width; var bottom = height;
+        if (!GetWindowRect(_window, out var nativeBounds) || PresentationSource.FromVisual(this) is null)
+            return (left, top, right, bottom);
+        for (var ancestor = VisualTreeHelper.GetParent(this); ancestor is not null;
+            ancestor = VisualTreeHelper.GetParent(ancestor))
+        {
+            if (ancestor is not FrameworkElement { ClipToBounds: true } element) continue;
+            var first = element.PointToScreen(new Point());
+            var last = element.PointToScreen(new Point(element.ActualWidth, element.ActualHeight));
+            left = Math.Max(left, (int)Math.Ceiling(first.X - nativeBounds.Left));
+            top = Math.Max(top, (int)Math.Ceiling(first.Y - nativeBounds.Top));
+            right = Math.Min(right, (int)Math.Floor(last.X - nativeBounds.Left));
+            bottom = Math.Min(bottom, (int)Math.Floor(last.Y - nativeBounds.Top));
+        }
+        left = Math.Clamp(left, 0, width); top = Math.Clamp(top, 0, height);
+        return (left, top, Math.Clamp(right, left, width), Math.Clamp(bottom, top, height));
+    }
+
+    private nint CreateDeviceCornerRegion(int width, int height, int radius,
         double exponent)
     {
-        const int segmentsPerCorner = 64;
         if (radius <= 0 || width <= radius * 2 || height <= radius * 2)
             return CreateRoundRectRgn(0, 0, width, height, radius * 2, radius * 2);
 
         var curve = Math.Clamp(exponent, 1.5, 4.0);
-        var points = new NativePoint[segmentsPerCorner * 4 + 4];
+        var offsets = _cornerOffsets ??= new (double X, double Y)[CornerPointCount * 4];
+        var points = _cornerPoints ??= new NativePoint[offsets.Length];
+        if (_cornerOffsetExponent != curve)
+        {
+            FillOffsets(0, -Math.PI / 2, 0);
+            FillOffsets(1, 0, Math.PI / 2);
+            FillOffsets(2, Math.PI / 2, Math.PI);
+            FillOffsets(3, Math.PI, Math.PI * 1.5);
+            _cornerOffsetExponent = curve;
+        }
+
         var index = 0;
-        AddCorner(width - radius, radius, -Math.PI / 2, 0);
-        AddCorner(width - radius, height - radius, 0, Math.PI / 2);
-        AddCorner(radius, height - radius, Math.PI / 2, Math.PI);
-        AddCorner(radius, radius, Math.PI, Math.PI * 1.5);
+        AddCorner(width - radius, radius);
+        AddCorner(width - radius, height - radius);
+        AddCorner(radius, height - radius);
+        AddCorner(radius, radius);
         return CreatePolygonRgn(points, index, Windings);
 
-        void AddCorner(double centerX, double centerY, double from, double to)
+        void FillOffsets(int corner, double from, double to)
         {
-            for (var segment = 0; segment <= segmentsPerCorner; segment++)
+            for (var segment = 0; segment < CornerPointCount; segment++)
             {
-                var angle = from + (to - from) * segment / segmentsPerCorner;
-                var x = Math.Pow(Math.Abs(Math.Cos(angle)), 2.0 / curve);
-                var y = Math.Pow(Math.Abs(Math.Sin(angle)), 2.0 / curve);
+                var angle = from + (to - from) * segment / (CornerPointCount - 1);
+                var x = Math.Cos(angle);
+                var y = Math.Sin(angle);
+                offsets[corner * CornerPointCount + segment] = (
+                    Math.Sign(x) * Math.Pow(Math.Abs(x), 2.0 / curve),
+                    Math.Sign(y) * Math.Pow(Math.Abs(y), 2.0 / curve));
+            }
+        }
+
+        void AddCorner(double centerX, double centerY)
+        {
+            var end = index + CornerPointCount;
+            while (index < end)
+            {
+                var offset = offsets[index];
                 points[index++] = new NativePoint
                 {
-                    X = (int)Math.Round(centerX + radius * Math.Sign(Math.Cos(angle)) * x),
-                    Y = (int)Math.Round(centerY + radius * Math.Sign(Math.Sin(angle)) * y),
+                    X = (int)Math.Round(centerX + radius * offset.X),
+                    Y = (int)Math.Round(centerY + radius * offset.Y),
                 };
             }
         }
@@ -238,11 +310,19 @@ internal sealed class NativePreviewHost : HwndHost
         _window = 0;
         _windowMouse.OnLeave();
         _appliedRegion = null;
+        _appliedClip = null;
+        _appliedPosition = null;
     }
 
     protected override nint WndProc(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message == 0x0046 && lParam != 0) // WM_WINDOWPOSCHANGING
+        {
+            // SetWindowRgn also issues a position transaction. Cover that path
+            // as well as explicit host moves so it cannot retain stale pixels.
+            DisableClientPixelCopy(lParam);
+        }
         if (message == NativePreviewMouse.WmMouseLeave)
         {
             _windowMouse.OnLeave();
@@ -482,6 +562,26 @@ internal sealed class NativePreviewHost : HwndHost
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct NativeWindowPosition
+    {
+        internal nint Window, InsertAfter;
+        internal int X, Y, Width, Height;
+        internal uint Flags;
+    }
+
+    internal static void DisableClientPixelCopy(nint windowPosition, bool resizeOnly = false)
+    {
+        if (windowPosition == 0) return;
+        var position = Marshal.PtrToStructure<NativeWindowPosition>(windowPosition);
+        // A pure top-level move keeps all client geometry unchanged. Let DWM
+        // move its retained surface; invalidating that surface on every mouse
+        // move adds repaint work without preventing any stale resize pixels.
+        if (resizeOnly && (position.Flags & 0x0001) != 0) return; // SWP_NOSIZE
+        position.Flags |= SwpNoCopyBits;
+        Marshal.StructureToPtr(position, windowPosition, false);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint
     {
         internal int X;
@@ -504,6 +604,19 @@ internal sealed class NativePreviewHost : HwndHost
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetClientRect(nint window, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(nint window, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(nint window, nint insertAfter,
+        int x, int y, int width, int height, uint flags);
+
+    [DllImport("gdi32.dll")]
+    private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll")]
+    private static extern int CombineRgn(nint destination, nint first, nint second, int mode);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

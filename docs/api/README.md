@@ -3,7 +3,7 @@
 Checked against the source tree on 2026-11-05 (project version `1.8.5-pre4` plus unreleased changes).
 See the [documentation index](../README.md) and [user guide](../USER_GUIDE.md#自动化控制与调试http-api).
 
-Click the main window’s bottom-right version label **five times** to open **Developer tools**. In its **Automation API** section, enable the local API, choose a port (default 17890), click **Apply**, and copy the key. Closing Developer tools keeps the API running; exiting iPhoneMirror stops it. The API is disabled by default and listens only on `127.0.0.1`. The controls are no longer in the ordinary mirroring settings panel.
+Click the version label on the About page **five times** to open **Developer tools**. In its **Automation API** section, enable the local API, choose a port (default 17890), click **Apply**, and copy the key. Closing Developer tools keeps the API running; exiting iPhoneMirror stops it. The API is disabled by default and listens only on `127.0.0.1`. The controls are no longer in the ordinary mirroring settings panel.
 
 A port/key error leaves mirroring usable and appears in the API status. If saving settings fails, the listener stops and the UI reports the save failure.
 

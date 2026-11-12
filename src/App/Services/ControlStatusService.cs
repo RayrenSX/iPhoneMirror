@@ -104,6 +104,10 @@ internal sealed record ControlPromptOption(
     string? Detail = null,
     bool IsEnabled = true) : System.ComponentModel.INotifyPropertyChanged
 {
+    // Localized-label subscribers must not invalidate WPF's selected-item index.
+    public bool Equals(ControlPromptOption? other) => other is not null &&
+        Id == other.Id && Title == other.Title && Detail == other.Detail && IsEnabled == other.IsEnabled;
+    public override int GetHashCode() => HashCode.Combine(Id, Title, Detail, IsEnabled);
     public string DisplayTitle => LocalizationService.RefreshText(Title);
     public string DisplayDetail => LocalizationService.RefreshText(Detail ?? string.Empty);
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -144,6 +148,10 @@ internal sealed class ControlStatusService
     private TaskCompletionSource<ControlPromptResult>? _promptCompletion;
 
     internal event EventHandler<ControlStatusSnapshot>? StatusChanged;
+    internal bool QuietAutomaticStartup { get; set; }
+    internal bool ShouldShowWindow => !QuietAutomaticStartup || Current is
+        { Stage: ControlStage.Failed or ControlStage.WaitingForDeveloperMode } or
+        { Prompt: { IsBlocking: true } };
     internal IReadOnlyList<ControlDiagnosticEntry> Diagnostics
     {
         get { lock (_gate) return _diagnostics.ToArray(); }

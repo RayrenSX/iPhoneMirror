@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Windows;
@@ -25,7 +25,7 @@ internal static partial class Program
         app.InitializeComponent();
         var owner = CreateWorkspaceTestWindow(app, includeNativePreview: false);
         var toolbar = (AdaptiveToolbar)owner.FindName("PreviewToolbarScrollViewer");
-        var actions = (StackPanel)owner.FindName("PreviewQuickActions");
+        var actions = (Panel)owner.FindName("PreviewQuickActions");
         var buttons = actions.Children.OfType<Button>().ToArray();
         var labels = buttons.Select(b => b.Content).OfType<StackPanel>()
             .SelectMany(p => p.Children.OfType<TextBlock>()).ToArray();
@@ -55,6 +55,12 @@ internal static partial class Program
             }
             var parent = (Panel)toolbar.Parent;
             parent.Children.Remove(toolbar);
+            // Reuse the production single-row controls for exact-width boundary checks.
+            toolbar.Content = null;
+            var compactActions = new StackPanel { Orientation = Orientation.Horizontal };
+            foreach (var button in buttons) { actions.Children.Remove(button); compactActions.Children.Add(button); }
+            actions = compactActions; toolbar.Content = actions;
+            toolbar.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
             // Keep the render origin at (0, 0) for tightly cropped screenshots.
             toolbar.HorizontalAlignment = HorizontalAlignment.Left;
             toolbar.VerticalAlignment = VerticalAlignment.Top;
@@ -156,10 +162,10 @@ internal static partial class Program
                 }
                 // A resource change on a hidden label must restore it without a resize.
                 Resize(boundaries[1]);
-                host.Resources["SeparateWindow"] = "";
+                host.Resources["FullScreenPreview"] = "";
                 host.UpdateLayout(); DrainDispatcher(); host.UpdateLayout();
                 ToolbarAssert(labels[^1].Visibility == Visibility.Visible, "Hidden label resource updates must trigger measurement.");
-                host.Resources.Remove("SeparateWindow");
+                host.Resources.Remove("FullScreenPreview");
                 host.UpdateLayout(); DrainDispatcher(); host.UpdateLayout();
                 ToolbarAssert(labels[^1].Visibility == Visibility.Collapsed, "Restoring a longer resource must compact again.");
                 for (var i = 0; i < buttons.Length; i++)
@@ -177,7 +183,7 @@ internal static partial class Program
                             "Icons must remain visible and follow the button theme.");
                 }
                 Resize(fullWidth);
-                results.Add($"PASS {culture}/{theme}/{dpi:P0}: full labels, 6 right-to-left steps, exact-width/one-pixel boundaries, forced remeasure, restore, fractional/live resize, resource change, scrolling, bindings and accessibility.");
+                results.Add($"PASS {culture}/{theme}/{dpi:P0}: full labels, {labels.Length} right-to-left steps, exact-width/one-pixel boundaries, forced remeasure, restore, fractional/live resize, resource change, scrolling, bindings and accessibility.");
             }
             ToolbarAssert(trace.Messages.Count == 0, string.Join(Environment.NewLine, trace.Messages));
             File.WriteAllLines(Path.Combine(output, "results.txt"), results);
@@ -204,9 +210,13 @@ internal static partial class Program
             else ToolbarAssert(!hidden, "Collapsed labels must form a suffix from the right.");
         }
         var previousRight = double.NegativeInfinity;
+        var previousTop = double.NegativeInfinity;
         foreach (var button in buttons)
         {
             var bounds = button.TransformToAncestor(toolbar).TransformBounds(new Rect(button.RenderSize));
+            if (!double.IsNegativeInfinity(previousTop))
+                ToolbarAssert(Math.Abs(bounds.Top - previousTop) < 1, "Toolbar actions wrapped into a second row.");
+            previousTop = bounds.Top;
             ToolbarAssert(bounds.Left >= previousRight - 0.01, "Toolbar buttons must not overlap.");
             previousRight = bounds.Right;
             if (toolbar.ComputedHorizontalScrollBarVisibility != Visibility.Visible)

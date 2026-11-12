@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using IPhoneMirror.UI.Animations;
@@ -11,8 +11,31 @@ public partial class MainWindow
     private bool _applyingWorkspaceWindowBounds;
     private bool _settlingWorkspace;
     private bool _workspaceWindowFitOnResume;
+    private bool _workspaceTreeSettlementQueued;
+    private int _workspaceLayoutPassDepth;
+    private bool _workspaceFrameDeferred;
+    private double _workspaceDeferredProgress;
+    private int _workspaceDeferredRevision;
+    private int _workspaceDeferredLayoutWrites;
+    private readonly Dictionary<FrameworkElement, Visibility> _workspaceExternalVisibility = [];
     private nint _workspaceAnimationWindow;
     private double _devicePageStartOpacity, _mirroringPageStartOpacity;
+    private double _workspacePreviewStartWidth, _workspacePreviewTargetWidth;
+    private bool _workspacePreviewAnimationActive;
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        _workspaceLayoutPassDepth++;
+        try { return base.MeasureOverride(availableSize); }
+        finally { _workspaceLayoutPassDepth--; }
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        _workspaceLayoutPassDepth++;
+        try { return base.ArrangeOverride(finalSize); }
+        finally { _workspaceLayoutPassDepth--; }
+    }
 
     private void PrepareWorkspacePages(bool showDevices, bool showMirroring)
     {
@@ -36,6 +59,7 @@ public partial class MainWindow
 
     private void StartWorkspaceTransition()
     {
+        _completeResizePreviewWidth = 0;
         _workspaceTransition ??= new RevealTransition(ApplyWorkspaceTransitionFrame,
             CompleteWorkspaceTransition);
         _workspaceTransition.Start(this);
@@ -59,6 +83,21 @@ public partial class MainWindow
 
     private void ApplyWorkspaceTransitionFrame(double progress)
     {
+        if (_workspaceLayoutPassDepth > 0)
+        {
+            _workspaceDeferredLayoutWrites++;
+            _workspaceDeferredProgress = progress;
+            _workspaceDeferredRevision = _workspaceTransition?.Revision ?? -1;
+            if (_workspaceFrameDeferred) return;
+            _workspaceFrameDeferred = true;
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+            {
+                _workspaceFrameDeferred = false;
+                if (_workspaceTransition?.IsRunning == true && _workspaceTransition.Revision == _workspaceDeferredRevision)
+                    ApplyWorkspaceTransitionFrame(_workspaceDeferredProgress);
+            });
+            return;
+        }
         // Widths and gaps use the SAME eased value as the native window. No
         // business work, forced UpdateLayout, per-frame subscription or timer.
         ApplyWorkspaceSurfaceWidths(progress);
@@ -71,17 +110,33 @@ public partial class MainWindow
             if (MirroringPanel.IsVisible && _mirroringPageStartOpacity != mirroringOpacity)
                 MirroringPanel.Opacity = Interpolate(_mirroringPageStartOpacity, mirroringOpacity, progress);
         }
+        if (_workspacePreviewAnimationActive)
+        {
+            SetLightweightPreviewMaximumWidth(Interpolate(_workspacePreviewStartWidth,
+                _workspacePreviewTargetWidth, progress));
+        }
         if (_lightweightWindowAnimationActive)
+        {
             ApplyLightweightWindowAnimationFrame(_workspaceAnimationWindow, progress);
+        }
     }
 
     private void CompleteWorkspaceTransition()
     {
+        if (_workspaceLayoutPassDepth > 0)
+        {
+            _workspaceDeferredLayoutWrites++;
+            QueueWorkspaceSettlementForTreeChange(this, force: true);
+            return;
+        }
         if (_settlingWorkspace) return;
         _settlingWorkspace = true;
         try
         {
             ApplyWorkspaceSurfaceWidths(1);
+            if (_workspacePreviewAnimationActive)
+                SetLightweightPreviewMaximumWidth(_workspacePreviewTargetWidth);
+            _workspacePreviewAnimationActive = false;
             if (_lightweightWindowAnimationActive)
             {
                 _workspaceWindowFitOnResume = false;
@@ -98,7 +153,6 @@ public partial class MainWindow
             SetWorkspacePageImmediate(DevicePanel, _leftWorkspacePanel == LeftWorkspacePanel.Devices);
             SetWorkspacePageImmediate(MirroringPanel, _leftWorkspacePanel == LeftWorkspacePanel.Mirroring);
             ReleaseLightweightCenterWidth();
-            _retainWorkspaceStackDuringTransition = false;
             OnWorkspaceLayoutChanged(this, new RoutedEventArgs());
         }
         finally { _settlingWorkspace = false; }
@@ -135,18 +189,53 @@ public partial class MainWindow
 
     private void OnWorkspaceWindowSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (e.WidthChanged && !_viewModel.IsLightweightApplicationMode &&
+            !_applyingWorkspaceWindowBounds && !_settlingWorkspace && !_isFullScreen)
+            _workspacePinnedLeftWidth = _workspacePinnedRightWidth = 0;
         if (!_applyingWorkspaceWindowBounds && !_settlingWorkspace)
             SettleWorkspaceForEnvironmentChange();
     }
 
     private void OnWorkspaceWindowVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (!IsVisible) SettleWorkspaceForEnvironmentChange();
-        else ResumeWorkspaceWindowFit();
+        if (!IsVisible)
+        {
+            SettleWorkspaceForEnvironmentChange();
+        }
+        else
+        {
+            ResumeWorkspaceWindowFit();
+        }
     }
 
-    private void OnWorkspaceUnloaded(object sender, RoutedEventArgs e) =>
-        SettleWorkspaceForEnvironmentChange();
+    private void QueueWorkspaceSettlementForTreeChange(FrameworkElement element, bool force = false)
+    {
+        if (_settlingWorkspace || (!force && _workspaceTransition?.IsRunning != true && !_workspaceSurfaceAnimationActive && !_workspaceTreeSettlementQueued)) return;
+        if (element.Visibility != Visibility.Visible) _workspaceExternalVisibility[element] = element.Visibility;
+        // Unload/IsVisibleChanged can run inside UIElementCollection.Remove.
+        // Stop the clock immediately, but do not resize the HWND or complete
+        // Grid geometry until the parent has finished changing its children.
+        _workspaceTransition?.Stop();
+        _lightweightWindowAnimationActive = false;
+        if (_workspaceTreeSettlementQueued) return;
+        _workspaceTreeSettlementQueued = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            _workspaceTreeSettlementQueued = false;
+            var preserve = _workspaceExternalVisibility.Where(pair => pair.Key.Visibility == pair.Value).ToArray();
+            _workspaceExternalVisibility.Clear();
+            if (_workspaceTransition?.IsRunning == true || _shutdownStarted || !IsLoaded) return;
+            CompleteWorkspaceTransition();
+            _settlingWorkspace = true;
+            try { foreach (var (item, visibility) in preserve) item.Visibility = visibility; }
+            finally { _settlingWorkspace = false; }
+        });
+    }
+
+    private void OnWorkspaceUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement element) QueueWorkspaceSettlementForTreeChange(element);
+    }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     {

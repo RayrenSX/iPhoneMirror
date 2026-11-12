@@ -90,6 +90,7 @@ internal static partial class Program
             InteractionAssert(receiverSaved && store.Load().WirelessReceiverName == "Settings persistence test" &&
                 !vm.WirelessStatus.Contains(LocalizationService.Get("WirelessBackendSettingsSaveFailed")),
                 "Wireless retry did not save preferences or clear the persistence error.");
+            TestSettingsComboSelections(window, vm);
         }
         finally
         {
@@ -97,5 +98,51 @@ internal static partial class Program
             SetKeyboardField(app, "_settingsStore", store);
         }
         Console.WriteLine("PASS settings persistence: theme/mode rollback, USB-mode disk roundtrip/legacy default, offline video failure and retry.");
+    }
+
+    private static void TestSettingsComboSelections(MainWindow window, MainViewModel vm)
+    {
+        var paths = new HashSet<string>
+        {
+            "SelectedMirroringAutoControlMode", "SelectedUsbProjectionMode", "SelectedWirelessReceiverBackend",
+            "SelectedWirelessDisplayProfile", "SelectedResolutionPreset", "SelectedFrameRate",
+            "SelectedDecoderPreference", "SelectedBluetoothPortraitMouseDirection", "SelectedBluetoothLandscapeMouseDirection",
+        };
+        var checkedPaths = new HashSet<string>();
+        foreach (var combo in FindVisualDescendants<System.Windows.Controls.Primitives.Selector>(window))
+        {
+            var expression = System.Windows.Data.BindingOperations.GetBindingExpression(combo,
+                System.Windows.Controls.Primitives.Selector.SelectedItemProperty);
+            var path = expression?.ParentBinding.Path.Path;
+            if (path is null || !paths.Contains(path) || !ReferenceEquals(combo.DataContext, vm)) continue;
+            var property = typeof(MainViewModel).GetProperty(path)!;
+            var original = combo.SelectedItem;
+            var choices = combo.Items.Cast<object>().Where(item => item is not WirelessDisplayProfile profile ||
+                !WirelessReceiverConfiguration.RequiresOriginalQualityWarning(profile)).ToArray();
+            foreach (var item in choices.Concat(choices.Reverse()))
+            {
+                // WPF subscribes to Label. Mutable event subscriptions must never change
+                // an option's hash code and invalidate Selector's selected-item lookup.
+                if (item is System.ComponentModel.INotifyPropertyChanged observable)
+                {
+                    var before = item.GetHashCode();
+                    System.ComponentModel.PropertyChangedEventHandler observer = (_, _) => { };
+                    observable.PropertyChanged += observer;
+                    var subscribed = item.GetHashCode();
+                    observable.PropertyChanged -= observer;
+                    InteractionAssert(before == subscribed && before == item.GetHashCode(),
+                        $"{path}: option identity changes when localization bindings subscribe.");
+                }
+                combo.SelectedItem = item;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(15));
+                InteractionAssert(Equals(combo.SelectedItem, item) && Equals(property.GetValue(vm), item),
+                    $"{path}: selecting {item} did not update both the actual dropdown and the view model.");
+            }
+            combo.SelectedItem = original;
+            checkedPaths.Add(path);
+        }
+        InteractionAssert(paths.SetEquals(checkedPaths),
+            $"Missing settings dropdowns in the binding audit: {string.Join(", ", paths.Except(checkedPaths))}.");
+        Console.WriteLine($"PASS real settings dropdowns: {checkedPaths.Count} binding paths, forward/back selections and stable option identity.");
     }
 }

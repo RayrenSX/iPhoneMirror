@@ -21,7 +21,7 @@
         <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
             <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="{DynamicResource IndependentWindowStyleTitle}" Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Text="{DynamicResource IndependentWindowStyleSubtitle}" Style="{StaticResource SubWindowSubtitle}"/>
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource IndependentWindowStyleSubtitle}" Style="{StaticResource SubWindowSubtitle}"/>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
@@ -41,13 +41,13 @@
                             Margin="0,14,0,12" ValueChanged="OnOpacityChanged"
                             AutomationProperties.AutomationId="IndependentWindowOpacitySlider"
                             AutomationProperties.Name="{DynamicResource IndependentWindowOpacity}"/>
-                    <TextBlock Text="{DynamicResource IndependentWindowOpacityHelp}" TextWrapping="Wrap"
+                    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource IndependentWindowOpacityHelp}" TextWrapping="Wrap"
                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
                     <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,18"/>
                     <CheckBox x:Name="OpaqueOnHoverCheckBox" Checked="OnOpaqueOnHoverChanged" Unchecked="OnOpaqueOnHoverChanged"
                               AutomationProperties.AutomationId="IndependentWindowOpaqueOnHover"
                               Content="{DynamicResource IndependentWindowOpaqueOnHover}"/>
-                    <TextBlock Text="{DynamicResource IndependentWindowOpaqueOnHoverHelp}" TextWrapping="Wrap" Margin="0,8,0,0"
+                    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource IndependentWindowOpaqueOnHoverHelp}" TextWrapping="Wrap" Margin="0,8,0,0"
                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
                 </StackPanel>
             </ScrollViewer>

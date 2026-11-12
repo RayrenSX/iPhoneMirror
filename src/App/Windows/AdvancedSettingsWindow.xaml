@@ -11,7 +11,7 @@
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/><RowDefinition Height="16"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid Style="{StaticResource SubWindowHeader}"
         animations:WindowDragBehavior.IsEnabled="True">
-   <StackPanel Margin="0,0,48,0"><TextBlock Text="{DynamicResource AdvancedSettingsTitle}" Style="{StaticResource SubWindowTitle}"/><TextBlock Text="{DynamicResource AdvancedSettingsIntro}" Style="{StaticResource SubWindowSubtitle}"/></StackPanel>
+   <StackPanel Margin="0,0,48,0"><TextBlock Text="{DynamicResource AdvancedSettingsTitle}" Style="{StaticResource SubWindowTitle}"/><TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource AdvancedSettingsIntro}" Style="{StaticResource SubWindowSubtitle}"/></StackPanel>
    <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
    </Button>
@@ -32,7 +32,7 @@
      </StackPanel>
     </Grid>
     <TextBlock x:Name="ErrorText" Foreground="{DynamicResource ErrorBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,10,0,0" TextWrapping="Wrap"/>
-    <TextBlock Text="{DynamicResource AdvancedUsbResolutionHelp}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource AdvancedUsbResolutionHelp}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" Margin="0,12,0,0"/>
    </StackPanel></ScrollViewer>
   </Border>
   <Grid Grid.Row="4"><Button Content="{DynamicResource DisableAdvancedMode}" MinWidth="150" HorizontalAlignment="Left" Click="OnDisableClick"/><Button Content="{DynamicResource Apply}" MinWidth="112" HorizontalAlignment="Right" Style="{StaticResource PrimaryButton}" IsDefault="True" Click="OnApplyClick"/></Grid>

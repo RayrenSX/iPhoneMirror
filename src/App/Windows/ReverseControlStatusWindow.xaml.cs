@@ -341,6 +341,7 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
     internal static void Show(Window owner, ControlStatusService service, Action? cancel = null,
         Action? retry = null, Action? countdownElapsed = null)
     {
+        if (!service.ShouldShowWindow) return;
         var active = Application.Current.Windows.OfType<ReverseControlStatusWindow>()
             .FirstOrDefault(window => window.IsVisible && ReferenceEquals(window._service, service));
         if (active is not null)

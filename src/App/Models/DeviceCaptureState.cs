@@ -23,6 +23,7 @@ internal sealed class DeviceCaptureState
     internal bool IsStarting { get; set; }
     internal bool IsStopping { get; set; }
     internal bool AutoControlAttempted { get; set; }
+    internal bool AutoControlStreaming { get; set; }
     internal uint RenderWidth { get; set; }
     internal uint RenderHeight { get; set; }
     internal int FrameRate { get; set; } = 60;
@@ -73,6 +74,7 @@ internal sealed class DeviceCaptureState
     internal void ResetRuntimeObservations()
     {
         AutoControlAttempted = false;
+        AutoControlStreaming = false;
         VideoProtected = false;
         ProtectedAudioActive = false;
         ProtectedAudioSampleRate = 0;

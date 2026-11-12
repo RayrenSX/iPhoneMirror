@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -9,6 +9,17 @@ namespace IPhoneMirror.App.Runtime.Tests;
 
 internal static partial class Program
 {
+    private static int RunWorkspaceLifecycleReview()
+    {
+        RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
+        var app = new App { IsUiPreviewMode = true, ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        app.InitializeComponent();
+        SetApplicationDisplayMode(app, IPhoneMirror.App.Updater.ApplicationDisplayMode.Lightweight);
+        var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        try { TestWorkspaceRevealWindow(window, IPhoneMirror.App.Updater.ApplicationDisplayMode.Lightweight); return 0; }
+        finally { CloseWorkspaceTestWindow(window); app.Shutdown(); }
+    }
+
     private static int RunWorkspaceRegressionTests()
     {
         RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;

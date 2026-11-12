@@ -21,7 +21,7 @@ internal static partial class Program
                 var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
                 try
                 {
-                    if (mode == ApplicationDisplayMode.Complete) TestStackedWorkspaceClose(window);
+                    if (mode == ApplicationDisplayMode.Complete) TestHorizontalWorkspaceClose(window);
                     else TestSuspendedWorkspaceGeometry(window);
                 }
                 finally { CloseWorkspaceTestWindow(window); }
@@ -78,7 +78,7 @@ internal static partial class Program
         }
     }
 
-    private static void TestStackedWorkspaceClose(MainWindow window)
+    private static void TestHorizontalWorkspaceClose(MainWindow window)
     {
         var settings = (FrameworkElement)window.FindName("ControlPanel");
         var left = (FrameworkElement)window.FindName("LeftPanelHost");
@@ -93,7 +93,7 @@ internal static partial class Program
             Left(true); Settings(true);
             AuditFixCall(window, "ApplyWorkspacePanelState", false);
             window.UpdateLayout();
-            InteractionAssert(Grid.GetRow(settings) == 1, "Fixture did not enter stacked layout.");
+            InteractionAssert(Grid.GetRow(settings) == 0 && Grid.GetColumn(settings) == 4, "Settings must stay in the right column.");
         }
         window.MinWidth = 0; // Exercise the layout used on small/high-DPI work areas.
         window.Height = 700;
@@ -107,31 +107,37 @@ internal static partial class Program
             var beforeLeftHeight = left.ActualHeight;
             var samples = new List<(double Width, double Preview, double SettingsHeight, double LeftHeight, int Row)>();
             var outgoing = closeSettings ? settings : left;
+            var outgoingWidth = outgoing.ActualWidth;
+            var renderedWidths = new List<double>();
             EventHandler capture = (_, _) => samples.Add((outgoing.Width, preview.ActualWidth,
                 settings.ActualHeight, left.ActualHeight, Grid.GetRow(settings)));
+            EventHandler renderCapture = (_, _) => renderedWidths.Add(outgoing.ActualWidth);
             window.LayoutUpdated += capture;
+            window.LayoutUpdated += renderCapture;
             try
             {
                 if (closeSettings) Settings(false); else Left(false);
                 window.UpdateLayout();
-                InteractionAssert(Grid.GetRow(settings) == 1, "Closing card moved before the reveal began.");
+                InteractionAssert(Grid.GetRow(settings) == 0 && Grid.GetColumn(settings) == 4, "Closing card moved out of its horizontal position.");
                 FinishWorkspaceReveal(window);
             }
-            finally { window.LayoutUpdated -= capture; }
+            finally { window.LayoutUpdated -= capture; window.LayoutUpdated -= renderCapture; }
+            InteractionAssert(renderedWidths.All(value => value <= outgoingWidth + 1.5),
+                $"Closing sidebar first expanded from its rendered width {outgoingWidth}: {string.Join(",", renderedWidths.Take(12))}.");
             var intermediate = samples.Where(s => s.Width > 1 && s.Width < (closeSettings ? 361 : 299)).ToArray();
             InteractionAssert(intermediate.Length > 0, "Stacked close skipped intermediate geometry.");
             InteractionAssert(samples.All(s => s.Preview >= beforePreview - 1),
                 $"Closing a stacked card squeezed the preview at {width} DIP: {beforePreview:F1} -> {samples.Min(s => s.Preview):F1}.");
-            InteractionAssert(intermediate.All(s => s.Row == 1 &&
+            InteractionAssert(intermediate.All(s => s.Row == 0 &&
                 Math.Abs(s.SettingsHeight - beforeSettingsHeight) < 1 && Math.Abs(s.LeftHeight - beforeLeftHeight) < 1),
-                "Stacked card changed rows/heights before closing.");
+                "A horizontal reveal changed the sidebar row or height.");
             InteractionAssert(Grid.GetRow(settings) == 0 && grid.RowDefinitions.Count == 0,
                 "Stacked rows remained after the close.");
         }
         OpenBoth();
         InterruptWorkspaceReveal(window, settings, 362, () => Settings(false), () => Settings(true));
         FinishWorkspaceReveal(window);
-        InteractionAssert(Grid.GetRow(settings) == 1 && settings.Width == 362, "Reversal lost stacked layout.");
+        InteractionAssert(Grid.GetRow(settings) == 0 && Grid.GetColumn(settings) == 4 && settings.Width == 362, "Reversal moved Settings out of the right column.");
         InterruptWorkspaceReveal(window, settings, 362, () => Settings(false),
             () => AuditFixCall(window, "ApplyWorkspacePanelState", false));
         InteractionAssert(Grid.GetRow(settings) == 0 && !WorkspaceRevealRunning(window),

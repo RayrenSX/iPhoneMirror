@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using IPhoneMirror.App.Services;
@@ -103,9 +103,15 @@ internal static partial class Program
             InteractionAssert(!vm.CanUseVirtualCamera, "Virtual camera must remain exclusive.");
             AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
             window.UpdateLayout();
-            Console.WriteLine($"Recording toggle: enabled={recordButton.IsEnabled}; content={recordButton.Content}; before={recordBounds}; after={recordButton.TransformToAncestor(window).TransformBounds(new Rect(recordButton.RenderSize))}");
+            var stopBounds = recordButton.TransformToAncestor(window).TransformBounds(new Rect(recordButton.RenderSize));
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(window);
+            // An asynchronously settling WPF transform can differ by a fraction of a DIP.
+            // Verify that all four edges stay on the same physical pixels.
+            static bool SamePixel(double a, double b, double scale) => Math.Round(a * scale) == Math.Round(b * scale);
+            Console.WriteLine($"Recording toggle: enabled={recordButton.IsEnabled}; content={recordButton.Content}; before={recordBounds}; after={stopBounds}");
             InteractionAssert(recordButton.IsEnabled && Equals(recordButton.Content, window.FindResource("StopRecordingOnly")) &&
-                recordBounds == recordButton.TransformToAncestor(window).TransformBounds(new Rect(recordButton.RenderSize)),
+                SamePixel(recordBounds.Left, stopBounds.Left, dpi.DpiScaleX) && SamePixel(recordBounds.Right, stopBounds.Right, dpi.DpiScaleX) &&
+                SamePixel(recordBounds.Top, stopBounds.Top, dpi.DpiScaleY) && SamePixel(recordBounds.Bottom, stopBounds.Bottom, dpi.DpiScaleY),
                 "Recording must switch to stop on the same button without moving it.");
             Capture("record-running");
             // A stop action must bypass any invalid edits to future start settings.

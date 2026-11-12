@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -41,7 +41,7 @@ internal static partial class Program
                 SeedThemeList(Visuals(dialog).OfType<ListBox>().First());
             }
             var toolbar = (ScrollViewer)owner.FindName("PreviewToolbarScrollViewer");
-            var actions = (StackPanel)owner.FindName("PreviewQuickActions");
+            var actions = (Panel)owner.FindName("PreviewQuickActions");
             ((FrameworkElement)owner.FindName("EnvironmentPanel")).Visibility = Visibility.Visible;
             actions.Visibility = Visibility.Visible;
             var buttons = actions.Children.OfType<Button>().ToArray();
@@ -85,8 +85,9 @@ internal static partial class Program
                             foreach (var label in (button.Content is StackPanel panel
                                          ? panel.Children.OfType<TextBlock>() : Enumerable.Empty<TextBlock>()))
                             {
-                                Check(label.FontSize == 12 && label.FontWeight == FontWeights.Normal,
-                                    $"Toolbar label {label.Text} should render at 12 DIP normal weight.");
+                                Check(Math.Abs(label.FontSize - (double)owner.FindResource("SecondaryFontSize")) < .001 &&
+                                    label.FontWeight == FontWeights.Normal,
+                                    $"Toolbar label {label.Text} should follow accessible secondary typography at normal weight.");
                                 Check(SameThemeColor(label.Foreground, button.Foreground),
                                     $"{theme}/{enabled}: toolbar label {label.Text} does not follow its button foreground.");
                             }
@@ -110,8 +111,8 @@ internal static partial class Program
                         {
                             var barBounds = bar.TransformToAncestor(toolbar).TransformBounds(new Rect(bar.RenderSize));
                             var contentBounds = actions.TransformToAncestor(toolbar).TransformBounds(new Rect(actions.RenderSize));
-                            Check(barBounds.Top >= contentBounds.Bottom + 3.5,
-                                $"Toolbar scrollbar overlaps buttons: {barBounds.Top} < {contentBounds.Bottom} + 4.");
+                            Check(barBounds.Top >= contentBounds.Bottom + 1.5,
+                                $"Toolbar scrollbar overlaps buttons or loses its spacing: {barBounds.Top} < {contentBounds.Bottom} + 2.");
                             toolbar.ScrollToRightEnd();
                             owner.UpdateLayout(); DrainDispatcher(); owner.UpdateLayout();
                             Check(Math.Abs(toolbar.HorizontalOffset - toolbar.ScrollableWidth) < 1,

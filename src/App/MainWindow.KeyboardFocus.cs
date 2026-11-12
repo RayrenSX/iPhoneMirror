@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -170,7 +170,7 @@ public partial class MainWindow
     {
         if (!active)
         {
-            ReleaseSettingShortcutOverrides(hwnd);
+            ReleaseSettingShortcutOverrides(hwnd, holdsOnly: true);
             if (_activeControlWindow != hwnd ||
                 !DeviceViewModel.UdidEquals(_activeControlUdid, udid)) return;
             _keyboardFocusSuspended = true;

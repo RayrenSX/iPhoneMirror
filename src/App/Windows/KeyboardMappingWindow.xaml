@@ -15,7 +15,7 @@
         <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
             <StackPanel Margin="0,0,48,16">
                 <TextBlock Text="{DynamicResource MappingTitle}" Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Text="{DynamicResource MappingDescription}" Style="{StaticResource SubWindowSubtitle}" TextWrapping="Wrap"/>
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource MappingDescription}" Style="{StaticResource SubWindowSubtitle}" TextWrapping="Wrap"/>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
                 <ui:SymbolIcon Symbol="Dismiss20" Style="{StaticResource ButtonSymbolIcon}"/>
@@ -30,7 +30,7 @@
                           AutomationProperties.Name="{DynamicResource MappingSuppress}">
                     <TextBlock Text="{DynamicResource MappingSuppress}" TextWrapping="Wrap"/>
                 </CheckBox>
-                <TextBlock Text="{DynamicResource MappingGlobalHelp}" TextWrapping="Wrap" Margin="0,6,0,0"
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource MappingGlobalHelp}" TextWrapping="Wrap" Margin="0,6,0,0"
                     Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
             </StackPanel>
         </Border>

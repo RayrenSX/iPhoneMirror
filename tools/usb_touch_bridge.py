@@ -5863,6 +5863,47 @@ async def main_async(rate_hz: int, udid: Optional[str], transport: str,
                                 'state': session._mux_checkpoint.export_checkpoint()})
 
 
+async def device_action_async(udid: str, action: str) -> bool:
+    """Send one explicit power request to the selected trusted USB device.
+
+    Reuse an existing capture mux when mirroring; never mount DDI, pair,
+    enable Wi-Fi, or retry a power command whose outcome is uncertain.
+    """
+    if action not in ('restart', 'shutdown') or not udid:
+        raise ValueError('invalid device action')
+    from pymobiledevice3.services.diagnostics import DiagnosticsService
+    ipc = BridgeChannel()
+    session = TouchSession(ipc, 120, udid, 'usb')
+    lockdown = None
+    diagnostics = None
+    try:
+        async with asyncio.timeout(20):
+            await session._start_capture_mux(attempts=1)
+            lockdown = await create_using_usbmux(serial=udid, connection_type='USB', autopair=False)
+            if not _udid_matches(lockdown.udid, udid):
+                raise ConnectionError('device identity mismatch')
+            if not lockdown.paired:
+                raise NotPairedError('Trust this computer on the device first.')
+            diagnostics = DiagnosticsService(lockdown)
+            await diagnostics.connect()
+            await getattr(diagnostics, action)()
+        await ipc.emit({'event': 'device_action_result', 'success': True,
+                        'udid': udid, 'action': action})
+        return True
+    except Exception as error:
+        await ipc.emit({'event': 'device_action_result', 'success': False,
+                        'udid': udid, 'action': action,
+                        'message': str(error)[:300] or type(error).__name__})
+        return False
+    finally:
+        for resource in (diagnostics, lockdown):
+            if resource is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(resource.close(), 2)
+        session._close_capture_mux()
+        await ipc.close()
+
+
 async def enable_wifi_sync_async(udid: str) -> bool:
     ipc = BridgeChannel()
     lockdown = None
@@ -5939,6 +5980,8 @@ def main() -> int:
                            dest='transport', help='仅连接已通过 usbmux 配对的无线设备')
     parser.add_argument('--enable-wifi-sync', action='store_true',
                         help='通过 USB 为指定设备启用 Apple Wi-Fi 同步')
+    parser.add_argument('--device-action', choices=('restart', 'shutdown'),
+                        help='对指定的受信任 USB 设备执行一次重启或关机操作')
     parser.add_argument('--check-runtime', action='store_true',
                         help='验证反控运行时依赖，不连接设备')
     parser.add_argument('--observe-orientation', action='store_true',
@@ -5947,6 +5990,11 @@ def main() -> int:
                         help='只读检查指定设备的现有信任、开发者模式及无线控制设置')
     parser.set_defaults(transport='usb')
     args = parser.parse_args()
+    if args.device_action:
+        if not args.udid or args.transport != 'usb' or any((
+                args.observe_orientation, args.check_setup, args.check_runtime, args.enable_wifi_sync)):
+            parser.error('--device-action requires --usb and --udid and cannot be combined with other modes')
+        return 0 if asyncio.run(device_action_async(args.udid, args.device_action)) else 1
     if args.observe_orientation:
         if not args.udid or args.transport != 'usb':
             parser.error('--observe-orientation requires --usb and --udid')
@@ -5971,6 +6019,7 @@ def main() -> int:
             'pymobiledevice3.remote.core_device.pasteboard_service',
             'pymobiledevice3.services.mobile_image_mounter',
             'pymobiledevice3.services.cryptexd',
+            'pymobiledevice3.services.diagnostics',
             'developer_disk_image', 'pyimg4', 'qh3', 'pytun_pmd3.wintun',
             'usb.backend.libusb0', 'usb.backend.libusb1',
         )

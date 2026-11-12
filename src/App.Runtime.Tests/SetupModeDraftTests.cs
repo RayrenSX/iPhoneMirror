@@ -17,8 +17,8 @@ internal static class SetupModeDraftTests
         {
             var saved = original;
             var state = new FirstRunSetupState { Step = SetupStep.ApplicationMode };
-            Check(state.PrepareApplicationModeDraft(saved) == ApplicationDisplayMode.Lightweight,
-                "First setup must recommend Lightweight.");
+            Check(state.PrepareApplicationModeDraft(saved) == ApplicationDisplayMode.Complete,
+                "First setup must default to Complete.");
             Check(saved == original, "Rendering the recommendation changed the saved mode.");
             state.ApplicationModeDraft = ApplicationDisplayMode.Tray;
             Check(saved == original, "Selecting a card changed the saved mode.");
@@ -60,6 +60,11 @@ internal static class SetupModeDraftTests
         legacy.ApplicationModeDraft = (ApplicationDisplayMode)999;
         Check(legacy.PrepareApplicationModeDraft(ApplicationDisplayMode.Complete) == ApplicationDisplayMode.Complete,
             "Invalid draft values must fall back to the current mode.");
+        legacy.ApplicationModeDraft = null;
+        Check(legacy.PrepareApplicationModeDraft((ApplicationDisplayMode)999) == ApplicationDisplayMode.Complete,
+            "An invalid saved mode must fall back to Complete.");
+        Check(new UpdateSettings().ApplicationDisplayMode == ApplicationDisplayMode.Complete,
+            "New application settings must agree with the first-run default.");
         Console.WriteLine("PASS setup mode draft: recommendation, selection, close/resume, back, skip, commit, rerun and legacy checkpoints.");
     }
 }

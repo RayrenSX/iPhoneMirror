@@ -96,7 +96,8 @@ internal sealed class FirstRunSetupState
     internal ApplicationDisplayMode PrepareApplicationModeDraft(ApplicationDisplayMode current)
     {
         if (ApplicationModeDraft is not { } draft || !Enum.IsDefined(draft))
-            ApplicationModeDraft = PreferencesApplied ? current : ApplicationDisplayMode.Lightweight;
+            ApplicationModeDraft = PreferencesApplied && Enum.IsDefined(current)
+                ? current : ApplicationDisplayMode.Complete;
         PreferencesApplied = true;
         return ApplicationModeDraft.Value;
     }

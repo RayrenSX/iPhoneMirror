@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -62,7 +62,7 @@ internal static partial class Program
 
                     // Reveal the real toolbar without starting a device session.
                     ((FrameworkElement)main.FindName("EnvironmentPanel")).Visibility = Visibility.Visible;
-                    var actions = (StackPanel)main.FindName("PreviewQuickActions");
+                    var actions = (Panel)main.FindName("PreviewQuickActions");
                     actions.Visibility = Visibility.Visible;
                     foreach (var nextTheme in new[] { theme, theme == AppTheme.Dark ? AppTheme.Light : AppTheme.Dark })
                     {

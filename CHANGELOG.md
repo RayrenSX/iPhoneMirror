@@ -7,11 +7,14 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ### Added
 
+- Add a persistent RAOP TCP port setting for the original AirPlay receiver, with validation, occupied-port feedback and receiver restart on Apply. The default remains 5001; UxPlay keeps its own ports.
 - Add configurable shortcuts for independent-window settings in separate cards at the bottom of shortcut settings. Choose opacity (10–100%) or topmost, bind a keyboard chord or mouse button, and select press-to-toggle or hold behavior. New bindings default to toggle; older bindings keep hold behavior. (#77)
 - Add experimental, off-by-default absolute Bluetooth mouse input in the main and independent previews, with seamless cursor movement between Windows and the mirrored image.
 
 ### Fixed
 
+- Allow complete mode to shrink below 800 DIP (down to 480 DIP where space permits), while preserving the currently displayed picture width and keeping the header and preview bars in one row.
+- Fix the automatic reverse-control dropdown reverting selections when WPF subscribes to localized labels. Apply a changed preference to existing streams once, retain manual stop behavior, and show persistence failures in the settings group.
 - Fix Bluetooth absolute-mode first-click and post-scroll positioning, rapid click ordering, failed-press retries, and scrolling via bounded BLE drag gestures. Release safely on queue overflow, preview geometry changes, leave and pause; keep edge scrolling on its requested surface. Complete saved-client startup when HID subscription overlaps binding discovery.
 - Fix first-drag jumps by converting pointer travel to device points and sending bounded relative steps; preserve the final movement before release and let keyboard events interrupt longer paths.
 - Reduce absolute Bluetooth drag latency with larger calibrated steps and no extra per-step delay. Match wired/wireless independent-window right-click menus and double-click full screen in experimental mode; keep relative-mode right-click forwarding. Let the main Bluetooth button stop an active connection.

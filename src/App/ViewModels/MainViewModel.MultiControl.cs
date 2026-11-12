@@ -38,6 +38,7 @@ internal sealed partial class MainViewModel
             dispatcher.BeginInvoke(new Action(() =>
             {
                 if (_disposed || (snapshot.Prompt is null &&
+                    !control.ControlStatus.QuietAutomaticStartup &&
                     !DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))) return;
                 if (!SetupActive && !AutomationControlStartup.Contains(udid) && Application.Current?.MainWindow is { } owner)
                     ReverseControlStatusWindow.Show(owner, control.ControlStatus,
@@ -69,6 +70,7 @@ internal sealed partial class MainViewModel
         if (_disposed || target is null) return Task.CompletedTask;
         var device = Devices.FirstOrDefault(d => DeviceViewModel.UdidEquals(d.Udid, target));
         var control = GetOrCreateControl(target);
+        control.ControlStatus.QuietAutomaticStartup = _mirroringControlStartup.Contains(target);
         var mode = wireless ? ControlStatusMode.Wireless : ControlStatusMode.Usb;
         if (control.Enabled || control.Starting || control.Stopping) return Task.CompletedTask;
         if (IsDeviceControlBusy(target))

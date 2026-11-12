@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:system="clr-namespace:System;assembly=mscorlib"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
@@ -167,10 +167,17 @@
 
     <system:String x:Key="DevicesTitle">ソース</system:String>
     <system:String x:Key="RefreshDevices">デバイスを更新</system:String>
-    <system:String x:Key="MirrorSimultaneously">同時にミラーリング</system:String>
-    <system:String x:Key="DeviceAlreadyMirroring">このデバイスは、すでにメインのプレビューでミラーリング中です</system:String>
-    <system:String x:Key="SimultaneousMirrorStartedFormat">{0}の同時ミラーリング用ウィンドウを開きました</system:String>
-    <system:String x:Key="SimultaneousMirrorFailedFormat">同時ミラーリングを開始できませんでした: {0}</system:String>
+    <system:String x:Key="DeviceActionCopyInfo">デバイス情報をコピー</system:String>
+    <system:String x:Key="DeviceActionRestart">デバイスを再起動…</system:String>
+    <system:String x:Key="DeviceActionShutdown">デバイスの電源を切る…</system:String>
+    <system:String x:Key="DeviceActionUsbRequired">デバイスをUSBで接続し、デバイス側でこのコンピュータを信頼してください。</system:String>
+    <system:String x:Key="DeviceActionRuntimeMissing">デバイス操作用コンポーネントがありません。iPhoneMirrorを再インストールしてください。</system:String>
+    <system:String x:Key="DeviceActionNoAcknowledgement">デバイスから操作の確認がありません。再送信する前にデバイスの状態を確認してください。</system:String>
+    <system:String x:Key="DeviceActionConfirmRestart">「{0}」を再起動しますか？ミラーリングと操作の接続が切断されます。再起動後にロックを解除してください。</system:String>
+    <system:String x:Key="DeviceActionConfirmShutdown">「{0}」の電源を切りますか？ミラーリングと操作の接続が切断されます。電源は手動で入れる必要があります。</system:String>
+    <system:String x:Key="DeviceActionSentFormat">「{0}」に「{1}」を送信しました。</system:String>
+    <system:String x:Key="DeviceActionFailedFormat">「{0}」の結果を確認できませんでした: {1}</system:String>
+    <system:String x:Key="DeviceActionInfoFormat">デバイス名: {0}&#10;モデル: {1}&#10;システム: {2}&#10;接続: {3}&#10;デバイスID: {4}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">ミラーリングエラー — {0}</system:String>
     <system:String x:Key="DeviceSessionClosedWarningTitleFormat">ミラーリングを停止しました — {0}</system:String>
     <system:String x:Key="DeviceSessionClosedWarningBody">コントロールセンターからミラーリングを停止しました。このデバイスで有線ミラーリングをもう一度使うには、先にiPhoneまたはiPadを再起動してください。</system:String>
@@ -218,6 +225,7 @@
     <system:String x:Key="LatencyLabel">遅延</system:String>
     <system:String x:Key="EndToEndLabel">エンドツーエンド</system:String>
     <system:String x:Key="AudioLabel">音声</system:String>
+    <system:String x:Key="AudioStatisticsDescription">サンプルレートとチャンネル</system:String>
     <system:String x:Key="LiveLogHeader" xml:space="preserve">ライブログ  ·  Ctrl+L</system:String>
     <system:String x:Key="ClearView">表示をクリア</system:String>
 
@@ -402,13 +410,14 @@
     <system:String x:Key="ConnectionError">デバイス接続エラー</system:String>
 
     <system:String x:Key="ResolutionNative">ネイティブ（描画の上限なし）</system:String>
+    <system:String x:Key="ResolutionNativeShort">ネイティブ</system:String>
     <system:String x:Key="Resolution1080p">1080p（1920×1080）</system:String>
     <system:String x:Key="Resolution720p">720p（1280×720）</system:String>
     <system:String x:Key="Resolution540p">540p（960×540）</system:String>
     <system:String x:Key="PendingSettingsLocalFormat">保留中: {0} · {1}fps（ローカル描画のみ）</system:String>
     <system:String x:Key="PendingSettingsFormat">保留中: {0} · {1}fps</system:String>
     <system:String x:Key="RenderLimitFormat">描画の上限: {0}</system:String>
-    <system:String x:Key="TargetFpsFormat">ローカルの上限: {0}fps</system:String>
+    <system:String x:Key="TargetFpsFormat">ローカルの上限: {0}</system:String>
     <system:String x:Key="AppliedRenderFormat">ローカル描画を適用しました: {0} · {1}fps</system:String>
     <system:String x:Key="AppliedRenderLogFormat">ローカル描画: {0} / {1}fps — {2}。ソースのストリームは再接続していません</system:String>
     <system:String x:Key="ApplySettingsFailedFormat">映像設定を適用できませんでした: {0}</system:String>
@@ -569,7 +578,7 @@
     <system:String x:Key="UsbModeDemoNotice">このモードでは、AirPlayや動画アプリからの外部再生は使えません。</system:String>
     <system:String x:Key="UsbModeAirPlayAdvantage">本物のステータスバーを残します。iPadは向きを変えても同じ表示範囲を伝えるため、回転してもUSBを再起動しません。元の解像度はデバイスが決めるため、画面本来の画素数より低くなることがあります。動画アプリは外部再生を使えます。</system:String>
     <system:String x:Key="UsbModeAirPlayDisadvantage">外部コンテンツの解像度は、iPhoneとウィンドウの両方に完全に合わせられるとは限りません。コンテンツが切り取られたり、縦横比が合わなかったり、一部が画面の外に出たりすることがあります。</system:String>
-    <system:String x:Key="UsbModeAirPlayNotice">サイズを自由に指定するには、右下のバージョンを5回クリックして詳細モードを有効にします。HPD1のサイズを自由に変えると、画面が黒くなる、切り取られる、USBを再接続できなくなるなどの危険があります。</system:String>
+    <system:String x:Key="UsbModeAirPlayNotice">サイズを自由に指定するには、「バージョン情報」ページのバージョンを5回クリックして詳細モードを有効にします。HPD1のサイズを自由に変えると、画面が黒くなる、切り取られる、USBを再接続できなくなるなどの危険があります。</system:String>
     <system:String x:Key="UsbModeAisiAdvantage">Valeria=falseと固定の1565×1565の要求による、Aisi方式の設定を使います。デバイスごとのディスプレイ交渉の違いを減らせます。</system:String>
     <system:String x:Key="UsbModeAisiDisadvantage">正方形の目標サイズのため、ソースの鮮明さが制限され、画質を優先する用途には向きません。横向きのコンテンツは、拡大縮小されたり、レターボックスになったり、比率が崩れたりすることがあります。</system:String>
     <system:String x:Key="UsbModeAisiNotice">このモードでは、このアプリのネイティブ解像度の検出と、向きに合わせた自動再構成は使われません。</system:String>
@@ -620,6 +629,12 @@
     <system:String x:Key="AppSubtitleConnectivity">Windows向けの低遅延なUSBミラーリングと、無線のAirPlayミラーリング</system:String>
     <system:String x:Key="WirelessReceiverTitle">無線AirPlay</system:String>
     <system:String x:Key="WirelessReceiverNameLabel">レシーバー名</system:String>
+    <system:String x:Key="WirelessRaopPortLabel">RAOPポート</system:String>
+    <system:String x:Key="WirelessRaopPortHelp">既定は5001です。使用中の場合は変更できます。適用すると受信機が再起動し、デバイスは新しいポートを自動検出します。</system:String>
+    <system:String x:Key="WirelessRaopPortInvalid">1～65535の整数を入力してください。AirPlay/DLNA用の7001と8090は使用できません。</system:String>
+    <system:String x:Key="WirelessRaopPortUnavailableFormat">RAOPポート{0}は使用中か利用できません。別のポートを選択して適用してください。</system:String>
+    <system:String x:Key="WirelessRaopPortChangeFormat">RAOPポート：{0} → {1}</system:String>
+    <system:String x:Key="WirelessReceiverRetry">ワイヤレス受信機を再起動</system:String>
     <system:String x:Key="WirelessBackendLabel">レシーバーの実装</system:String>
     <system:String x:Key="WirelessBackendOriginal">オリジナル</system:String>
     <system:String x:Key="WirelessBackendUxPlay">UxPlay（フォールバック）</system:String>
@@ -679,7 +694,11 @@
     <system:String x:Key="WirelessRuntimeIncompatible">無線デコーダーのバージョンに互換性がありません。最新版をインストールし直してください。</system:String>
     <system:String x:Key="WirelessRuntimeProbeTimedOut">無線デコーダーの確認がタイムアウトしました。アプリを再起動して、もう一度お試しください。</system:String>
     <system:String x:Key="WirelessRuntimeLoadFailedFormat">無線デコーダーを読み込めませんでした（確認コード{0}）。最新版をインストールし直してください。</system:String>
-    <system:String x:Key="FooterConnectivity">ローカルのUSB / AirPlay。クラウド経由はありません</system:String>
+    <system:String x:Key="HideInterfaceDescriptionsLabel">画面の説明文を非表示</system:String>
+    <system:String x:Key="HidePreviewToolbarLabel">プレビューのツールバーを非表示</system:String>
+    <system:String x:Key="HidePreviewStatusBarLabel">プレビューのステータスバーを非表示</system:String>
+    <system:String x:Key="ApplicationModeLightweightVisibilityHint">コンパクトモードでは上記の項目が自動的に非表示になります。標準モードに戻すと設定が復元されます。</system:String>
+    <system:String x:Key="ApplicationModeTrayVisibilityHint">システムトレイモードではメイン画面が非表示になります。標準モードに戻すと設定が復元されます。</system:String>
     <system:String x:Key="MediaCastTitle">動画アプリのキャスト</system:String>
     <system:String x:Key="MediaCastDescription">動画アプリのキャストボタンから送られた動画を受信します。コントロールセンターの「画面ミラーリング」とは別の機能です。</system:String>
     <system:String x:Key="MediaCastReady">動画キャストのレシーバーの準備完了</system:String>
@@ -710,8 +729,8 @@
     <system:String x:Key="MediaCastDeviceModel">AirPlay / DLNA動画</system:String>
     <system:String x:Key="MediaCastDeviceConnection">ネットワークメディアのキャスト</system:String>
     <system:String x:Key="MediaCastDeviceActive">動画をキャスト中</system:String>
-    <system:String x:Key="MediaCastFpsDisplayFormat">≤ {0}fps</system:String>
-    <system:String x:Key="MediaCastFpsCapabilityFormat">レシーバーの上限 {0}fps</system:String>
+    <system:String x:Key="MediaCastFpsDisplayFormat">≤ {0}</system:String>
+    <system:String x:Key="MediaCastFpsCapabilityFormat">レシーバーの上限 {0}</system:String>
     <system:String x:Key="MediaCastOriginalResolution">メディア本来の解像度</system:String>
     <system:String x:Key="MediaCastNetworkStream">ネットワークストリーム</system:String>
     <system:String x:Key="MediaCastAudioActive">メディアの音声</system:String>
@@ -1307,6 +1326,9 @@
     <system:String x:Key="MappingPicking">ミラーリング画面で位置を選択中</system:String>
     <system:String x:Key="MappingPickInside">ポインターを映像の内側に移動してください</system:String>
     <system:String x:Key="MappingPickClick">対象をクリックしてください。Escでキャンセルします。</system:String>
+    <system:String x:Key="MappingPickClickCompact">対象位置をクリック</system:String>
+    <system:String x:Key="MappingPickDragCompact">終点までドラッグして離す</system:String>
+    <system:String x:Key="MappingPickCancel">キャンセル · Esc</system:String>
     <system:String x:Key="MappingPickDrag">押したまま終点までドラッグして離してください。Escでキャンセルします。</system:String>
     <system:String x:Key="MappingStateIdle">手順1: Windowsのキーを記録</system:String>
     <system:String x:Key="MappingStateWaitingForKey">キーを押して離してください。もう一度クリックすると記録をキャンセルします</system:String>
@@ -1661,13 +1683,10 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="VirtualCameraInvalidRegistration">カメラの登録状態が無効です（0x8007000D）。仮想カメラコンポーネントを再インストールしてください。</system:String>
     <system:String x:Key="MirroringAutoControlTitle">ミラーリング時にリモート操作を自動で有効にする</system:String>
     <system:String x:Key="MirroringAutoControlOff">オフ（手動で開始）</system:String>
-    <system:String x:Key="MirroringAutoControlDescription">ミラーリング接続後、選択した方式で操作を自動開始します。「続行」の再確認は不要です。事前にデバイスを関連付けてください。接続失敗時はステータス画面で確認できます。</system:String>
-    <system:String x:Key="SettingsCategoryApplication">アプリ設定</system:String>
-    <system:String x:Key="SettingsCategoryProjection">投影設定</system:String>
-    <system:String x:Key="SettingsCategoryControl">操作設定</system:String>
-    <system:String x:Key="SettingsScopeApplication">アプリ全体に適用</system:String>
-    <system:String x:Key="SettingsScopeProjection">映像・音声と投影接続</system:String>
-    <system:String x:Key="SettingsScopeControl">自動操作・キーボード・マウス</system:String>
+    <system:String x:Key="MirroringAutoControlDescription">接続後に選択した方式で自動開始します。変更時は、操作が未開始の既存のミラーリングでも一度試行します。「オフ」は開始済みの操作を停止しません。事前にデバイスを関連付けてください。失敗時は状態を確認できます。通常の接続と成功時はバックグラウンドで処理し、エラーや対応が必要な場合のみウィンドウを表示します。</system:String>
+    <system:String x:Key="SettingsCategoryApplication">アプリ</system:String>
+    <system:String x:Key="SettingsCategoryProjection">投影</system:String>
+    <system:String x:Key="SettingsCategoryControl">操作</system:String>
     <system:String x:Key="SettingsAdvancedVideo">映像の詳細設定</system:String>
     <system:String x:Key="SettingsAdvancedUsb">USB 投影モード</system:String>
     <system:String x:Key="SettingsKeyboard">キーボードとショートカット</system:String>
@@ -1698,4 +1717,20 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="SettingShortcutsToggleHint">一度押すと適用し、もう一度押すと元に戻ります。キーを離したり別のウィンドウに切り替えても維持します。</system:String>
     <system:String x:Key="SettingShortcutsToggleValue">切り替え後の不透明度</system:String>
     <system:String x:Key="SettingShortcutsToggleEnabled">切り替え後は最前面に表示</system:String>
+    <sys:String x:Key="ToolbarCustomize">上部ツールバーのカスタマイズ</sys:String>
+    <sys:String x:Key="ToolbarEarlier">前へ移動</sys:String>
+    <sys:String x:Key="ToolbarLater">後ろへ移動</sys:String>
+    <sys:String x:Key="ToolbarReset">既定値に戻す</sys:String>
+    <sys:String x:Key="ToolbarCancel">キャンセル</sys:String>
+    <sys:String x:Key="ToolbarDone">完了</sys:String>
+    <sys:String x:Key="ToolbarIconsOnly">アイコンのみ</sys:String>
+    <sys:String x:Key="ToolbarSaveFailed">保存できませんでした。変更は保持されています。再試行またはキャンセルしてください。</sys:String>
+    <sys:String x:Key="ToolbarBasicHelp">ツールをドラッグして並べ替え、選択して非表示にできます。ライブラリから追加できます。</sys:String>
+    <sys:String x:Key="ToolbarBasicEmpty">ボタンが表示されていません。ライブラリから復元できます。</sys:String>
+    <sys:String x:Key="ToolbarLibrary">コンポーネントライブラリ</sys:String>
+    <sys:String x:Key="ToolbarHide">非表示</sys:String>
+    <sys:String x:Key="ToolbarAdd">追加</sys:String>
+    <sys:String x:Key="ToolbarAdded">追加済み</sys:String>
+    <sys:String x:Key="ToolbarScrollEarlier">左へスクロール</sys:String>
+    <sys:String x:Key="ToolbarScrollLater">右へスクロール</sys:String>
 </ResourceDictionary>

@@ -13,11 +13,9 @@ namespace IPhoneMirror.App.Windows;
 
 // Like ProtectedContentOverlayWindow, use an owned transparent HWND above
 // native D3D airspace. Normal markers never activate or intercept the mouse.
-internal sealed class KeyboardMappingOverlayWindow : Window
+internal sealed partial class KeyboardMappingOverlayWindow : Window
 {
     private readonly MappingVisual _visual;
-    private readonly Border _toolbar;
-    private readonly TextBlock _hint;
     private HwndSource? _source;
     private MappingPositionPick? _pick;
     private (double X, double Y)? _start, _cursor;
@@ -31,6 +29,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
 
     internal KeyboardMappingOverlayWindow(MappingPreviewSurface surface)
     {
+        IPhoneMirror.SharedUI.Services.WindowWorkAreaController.UseOwnerBounds(this);
         Surface = surface;
         Title = LocalizationService.Get("MappingPicking");
         WindowStyle = WindowStyle.None;
@@ -43,22 +42,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
         _visual = new MappingVisual(this) { IsHitTestVisible = false };
         var root = new Grid();
         root.Children.Add(_visual);
-        _hint = new TextBlock { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
-        _hint.SetResourceReference(TextBlock.ForegroundProperty, "PreviewTextBrush");
-        var cancel = new Button { Margin = new Thickness(6, 0, 0, 0), Padding = new Thickness(8, 4, 8, 4) };
-        cancel.SetResourceReference(ContentControl.ContentProperty, "Cancel");
-        cancel.Click += (_, _) => Complete(null);
-        var retry = new Button { Margin = new Thickness(6, 0, 0, 0), Padding = new Thickness(8, 4, 8, 4) };
-        retry.SetResourceReference(ContentControl.ContentProperty, "MappingRepick");
-        retry.Click += (_, _) => { _start = null; _dragging = false; ReleaseMouseCapture(); RefreshDrawing(); };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        buttons.Children.Add(retry); buttons.Children.Add(cancel);
-        var panel = new StackPanel(); panel.Children.Add(_hint); panel.Children.Add(buttons);
-        _toolbar = new Border { Child = panel, Padding = new Thickness(8), Margin = new Thickness(8),
-            CornerRadius = new CornerRadius(8), VerticalAlignment = VerticalAlignment.Top,
-            HorizontalAlignment = HorizontalAlignment.Center, MaxWidth = 420, Visibility = Visibility.Collapsed };
-        _toolbar.SetResourceReference(Border.BackgroundProperty, "PreviewPanelAltBrush");
-        root.Children.Add(_toolbar);
+        InitializePickingToolbar();
         Content = root;
         new WindowInteropHelper(this).Owner = surface.Owner;
         SourceInitialized += (_, _) =>
@@ -67,7 +51,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
             _source?.AddHook(Hook);
             ApplyInputMode();
         };
-        Closed += (_, _) => { _closed = true; _source?.RemoveHook(Hook); _source = null; Complete(null); };
+        Closed += (_, _) => { _closed = true; _source?.RemoveHook(Hook); _source = null; _pickingToolbar?.Close(); Complete(null); };
         Deactivated += (_, _) => { if (IsPicking) Complete(null); };
         KeyDown += (_, e) =>
         {
@@ -77,11 +61,12 @@ internal sealed class KeyboardMappingOverlayWindow : Window
         {
             if (!IsPicking) return;
             _cursor = Normalize(e.GetPosition(this));
+            UpdatePickingToolbarOcclusion(e.GetPosition(this));
             RefreshDrawing();
         };
         MouseLeftButtonDown += (_, e) =>
         {
-            if (!IsPicking || e.Handled || IsToolbarSource(e.OriginalSource)) return;
+            if (!IsPicking || e.Handled) return;
             _start = Normalize(e.GetPosition(this));
             if (_start is null) return;
             _cursor = _start; _dragging = true;
@@ -106,13 +91,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
                     : entry.DurationMs });
         };
         LostMouseCapture += (_, _) => { if (_dragging) { _dragging = false; _start = null; RefreshDrawing(); } };
-    }
-
-    private bool IsToolbarSource(object source)
-    {
-        for (var element = source as DependencyObject; element is not null; element = VisualTreeHelper.GetParent(element))
-            if (ReferenceEquals(element, _toolbar)) return true;
-        return false;
+        MouseLeave += (_, _) => { if (_pickingToolbar is not null) { _pickingToolbar.Opacity = 1; _pickingToolbar.IsHitTestVisible = true; } };
     }
 
     internal static (double X, double Y) ConstrainEnd(MappedTouchAction action,
@@ -132,7 +111,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
         _entries = entries;
         if (cancel) Complete(null);
         if (_closed) return;
-        if (!UpdateBounds()) { Hide(); if (IsPicking) Complete(null); return; }
+        if (!UpdateBounds()) { _pickingToolbar?.Hide(); Hide(); if (IsPicking) Complete(null); return; }
         if (!IsVisible) Show();
         if (!IsPicking && GetCursorPos(out var cursor))
         {
@@ -145,7 +124,6 @@ internal sealed class KeyboardMappingOverlayWindow : Window
     internal void BeginPick(MappingPositionPick pick)
     {
         _pick = pick; _start = _cursor = null;
-        _toolbar.Visibility = Visibility.Visible;
         Cursor = Cursors.Cross;
         ApplyInputMode();
         Show(); Activate(); Focus();
@@ -159,7 +137,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
         if (_pick is not { } pick) return;
         _pick = null; _dragging = false; _start = _cursor = null;
         ReleaseMouseCapture();
-        _toolbar.Visibility = Visibility.Collapsed; Cursor = Cursors.Arrow;
+        _pickingToolbar?.Hide(); Cursor = Cursors.Arrow;
         ApplyInputMode(); RefreshDrawing();
         pick.Completed(entry);
     }
@@ -188,6 +166,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
         // overlay's per-monitor DPI after Windows positions the owned HWND.
         var handle = new WindowInteropHelper(this).EnsureHandle();
         SetWindowPos(handle, 0, origin.X, origin.Y, _pixelWidth, _pixelHeight, 0x0014);
+        if (IsPicking) UpdatePickingToolbar();
         return true;
     }
 
@@ -214,8 +193,7 @@ internal sealed class KeyboardMappingOverlayWindow : Window
     {
         if (_pick is { } pick)
         {
-            _hint.Text = LocalizationService.Get(_dragging && pick.Entry.IsSwipe ? "WizardRecording" :
-                pick.Entry.IsSwipe ? "MappingPickDrag" : "MappingPickClick");
+            UpdatePickingToolbar();
         }
         _visual.InvalidateVisual();
     }

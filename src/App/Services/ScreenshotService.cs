@@ -36,7 +36,7 @@ internal static class ScreenshotService
         return stream.ToArray();
     }
 
-    private static BitmapSource CreateBitmap(VideoFrame frame)
+    internal static BitmapSource CreateBitmap(VideoFrame frame)
     {
         var requiredBytes = checked((int)(frame.Stride * frame.Height));
         if (frame.Width == 0 || frame.Height == 0 || frame.Stride < frame.Width * 4U ||

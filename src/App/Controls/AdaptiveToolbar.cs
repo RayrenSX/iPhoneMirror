@@ -12,23 +12,44 @@ public sealed class AdaptiveToolbar : ScrollViewer
     private static readonly DependencyPropertyDescriptor LabelTextDescriptor =
         DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock));
     private readonly List<TextBlock> _observedLabels = [];
+    private bool _iconsOnly;
+    public bool IconsOnly
+    {
+        get => _iconsOnly;
+        set
+        {
+            var changed = _iconsOnly != value;
+            _iconsOnly = value;
+            RefreshWrapLabels();
+            if (changed) InvalidateMeasure();
+        }
+    }
 
     public AdaptiveToolbar()
     {
+        PreviewMouseWheel += (_, e) =>
+        {
+            if (e.Delta == 0 || ScrollableWidth <= 0) return;
+            ScrollToHorizontalOffset(HorizontalOffset - Math.Sign(e.Delta) * 72);
+            e.Handled = true;
+        };
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
 
     protected override Size MeasureOverride(Size constraint)
     {
-        if (Content is not StackPanel actions) return base.MeasureOverride(constraint);
+        if (Content is not Panel actions) return base.MeasureOverride(constraint);
 
+        // The wrapping toolbar's chosen display mode is applied when configuration
+        // or content changes. Never invalidate ancestor Grid caches while measuring.
+        if (actions is WrapPanel) return base.MeasureOverride(constraint);
         var naturalSize = new Size(double.PositiveInfinity, double.PositiveInfinity);
         var buttons = actions.Children.OfType<Button>().ToArray();
         var width = 0.0;
         foreach (var button in buttons)
         {
-            if (GetLabel(button) is { } label) SetLabelVisibility(button, label, Visibility.Visible);
+            if (GetLabel(button) is { } label) SetLabelVisibility(button, label, IconsOnly ? Visibility.Collapsed : Visibility.Visible);
             button.Measure(naturalSize);
             width += button.DesiredSize.Width;
         }
@@ -56,6 +77,13 @@ public sealed class AdaptiveToolbar : ScrollViewer
         return base.MeasureOverride(constraint);
     }
 
+    private void RefreshWrapLabels()
+    {
+        if (Content is not WrapPanel actions) return;
+        foreach (var button in actions.Children.OfType<Button>())
+            if (GetLabel(button) is { } label) SetLabelVisibility(button, label, IconsOnly ? Visibility.Collapsed : Visibility.Visible);
+    }
+
     private static TextBlock? GetLabel(Button button) =>
         button.Content is StackPanel content ? content.Children.OfType<TextBlock>().FirstOrDefault() : null;
 
@@ -73,7 +101,8 @@ public sealed class AdaptiveToolbar : ScrollViewer
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (Content is not StackPanel actions) return;
+        if (Content is not Panel actions) return;
+        RefreshWrapLabels();
         foreach (var button in actions.Children.OfType<Button>())
         {
             if (GetLabel(button) is not { } label || _observedLabels.Contains(label)) continue;

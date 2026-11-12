@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
@@ -20,6 +20,8 @@ internal sealed class RevealTransition : Animatable
     private readonly Action? _completed;
     private AnimationClock? _clock;
     private DispatcherOperation? _pendingStart;
+    private int _revision;
+    internal int Revision => _revision;
     internal bool IsRunning => _clock is not null || _pendingStart is not null;
 
     private RevealTransition() { }
@@ -32,11 +34,13 @@ internal sealed class RevealTransition : Animatable
     internal void Start(FrameworkElement owner)
     {
         Stop();
+        var revision = _revision;
         // A formerly collapsed card has to realize templates and measure once.
         // Do that at width zero before starting time, so first-use layout does
         // not consume the reveal. Loaded runs after layout, before user input.
         _pendingStart = owner.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
+            if (revision != _revision) return;
             _pendingStart = null;
             if (!owner.IsLoaded || !owner.IsVisible)
             {
@@ -65,6 +69,7 @@ internal sealed class RevealTransition : Animatable
 
     internal void Stop()
     {
+        _revision++;
         _pendingStart?.Abort();
         _pendingStart = null;
         var clock = _clock;
@@ -77,6 +82,7 @@ internal sealed class RevealTransition : Animatable
 
     private void OnCompleted(object? sender, EventArgs args)
     {
+        if (!ReferenceEquals(sender, _clock)) return;
         Stop();
         _completed?.Invoke();
     }

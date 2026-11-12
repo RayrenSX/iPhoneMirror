@@ -22,6 +22,8 @@ internal sealed class WirelessReceiverController(
     private WirelessReceiverBackend _backend = WirelessReceiverBackend.Original;
 
     internal string ReceiverName { get; set; } = WirelessReceiverConfiguration.DefaultReceiverName;
+    internal int RaopPort { get; set; } = WirelessReceiverConfiguration.DefaultRaopPort;
+    internal int AppliedRaopPort { get; private set; } = WirelessReceiverConfiguration.DefaultRaopPort;
     internal WirelessDisplayProfile SelectedProfile { get; set; } =
         WirelessReceiverConfiguration.DefaultDisplayProfile;
     internal WirelessReceiverBackend Backend
@@ -44,7 +46,7 @@ internal sealed class WirelessReceiverController(
 
     internal async Task<WirelessReceiverStartResult> EnsureStartedAsync(
         string? receiverName = null, WirelessDisplayProfile? displayProfile = null,
-        WirelessReceiverBackend? backend = null)
+        WirelessReceiverBackend? backend = null, int? raopPort = null)
     {
         await _lifecycleGate.WaitAsync();
         try
@@ -60,7 +62,7 @@ internal sealed class WirelessReceiverController(
             }
 
             var automaticStart = receiverName is null && displayProfile is null &&
-                backend is null;
+                backend is null && raopPort is null;
             if (!automaticStart)
             {
                 _automaticRestartBlocked = false;
@@ -123,8 +125,18 @@ internal sealed class WirelessReceiverController(
             if (receiverName is not null) ReceiverName = sanitized;
             var profile = displayProfile ?? (automaticStart ? SelectedProfile : AppliedProfile);
             var capability = WirelessReceiverConfiguration.ReceiverCapabilityFor(profile);
+            var port = raopPort ?? RaopPort;
+            if (selectedBackend == WirelessReceiverBackend.Original &&
+                WirelessReceiverConfiguration.CheckRaopPortAvailability(port) is { } portError)
+            {
+                var isNewPortError = !string.Equals(StartError, portError, StringComparison.Ordinal);
+                StartError = portError;
+                _automaticStartNotBeforeUtc = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+                return new(false, portError, isNewPortError);
+            }
             var started = await Task.Run(() => core.StartWirelessReceiver(sanitized, hostPath,
-                capability.Width, capability.Height, capability.FrameRate));
+                capability.Width, capability.Height, capability.FrameRate,
+                selectedBackend == WirelessReceiverBackend.Original ? port : WirelessReceiverConfiguration.DefaultRaopPort));
             Running = started.Success;
             Ready = false;
             if (started.Success)
@@ -136,6 +148,8 @@ internal sealed class WirelessReceiverController(
                 _lastReceiverReachedReady = false;
                 AppliedReceiverName = sanitized;
                 AppliedProfile = profile;
+                RaopPort = port;
+                AppliedRaopPort = port;
                 // Retain the previous failure until a status probe confirms Ready.
                 return new(true, null, false);
             }

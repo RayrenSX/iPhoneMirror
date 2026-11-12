@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
@@ -36,10 +36,15 @@ internal sealed class UpdateSettings
     public ApplicationDisplayMode ApplicationDisplayMode { get; set; } =
         ApplicationDisplayMode.Complete;
     public bool CloseMainWindowToTray { get; set; }
+    public bool HideInterfaceDescriptions { get; set; } = true;
+    public bool HidePreviewToolbar { get; set; }
+    public bool HidePreviewStatusBar { get; set; }
+    public PreviewToolbarSettings? PreviewToolbar { get; set; }
     public WirelessReceiverBackend WirelessReceiverBackend { get; set; } =
         WirelessReceiverBackend.Original;
     public string WirelessDisplayProfileId { get; set; } = "1080p";
     public string WirelessReceiverName { get; set; } = WirelessReceiverConfiguration.DefaultReceiverName;
+    public int WirelessRaopPort { get; set; } = WirelessReceiverConfiguration.DefaultRaopPort;
     public string Language { get; set; } = "system";
     public bool BluetoothWindowMouseEnabled { get; set; }
     public double BluetoothMouseSensitivity { get; set; } = 500;
@@ -123,9 +128,14 @@ internal sealed class UpdateSettings
         Theme = Theme,
         ApplicationDisplayMode = ApplicationDisplayMode,
         CloseMainWindowToTray = CloseMainWindowToTray,
+        HideInterfaceDescriptions = HideInterfaceDescriptions,
+        HidePreviewToolbar = HidePreviewToolbar,
+        HidePreviewStatusBar = HidePreviewStatusBar,
+        PreviewToolbar = PreviewToolbar?.Clone(),
         WirelessReceiverBackend = WirelessReceiverBackend,
         WirelessDisplayProfileId = WirelessDisplayProfileId,
         WirelessReceiverName = WirelessReceiverName,
+        WirelessRaopPort = WirelessRaopPort,
         Language = Language,
         BluetoothWindowMouseEnabled = BluetoothWindowMouseEnabled,
         BluetoothMouseSensitivity = BluetoothMouseSensitivity,
@@ -251,6 +261,12 @@ internal sealed class UpdateSettingsStore
             }
             var normalizedReceiverName = WirelessReceiverConfiguration.SanitizeReceiverName(
                 settings.WirelessReceiverName);
+            var normalizedRaopPort = WirelessReceiverConfiguration.NormalizeRaopPort(settings.WirelessRaopPort);
+            if (settings.WirelessRaopPort != normalizedRaopPort)
+            {
+                settings.WirelessRaopPort = normalizedRaopPort;
+                migrationChanged = true;
+            }
             if (!string.Equals(settings.WirelessReceiverName, normalizedReceiverName,
                 StringComparison.Ordinal))
             {

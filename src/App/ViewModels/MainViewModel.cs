@@ -1,7 +1,8 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -160,12 +161,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private int _activeSessionStatusPolls;
     private string? _activeCaptureUdid;
     private int _manualRefreshPending;
-    private string _resolution = "—";
+    private const string NoStatistic = "—";
+    private string _resolution = NoStatistic;
     private uint _sourceVideoWidth;
     private uint _sourceVideoHeight;
-    private string _fpsDisplay = "— fps";
-    private string _latencyDisplay = "— ms";
-    private string _audioDisplay = string.Empty;
+    private string _fpsDisplay = NoStatistic;
+    private string _latencyDisplay = NoStatistic;
+    private string _audioDisplay = NoStatistic;
     private string _protectedAudioDisplay = string.Empty;
     private ResolutionPreset _selectedResolutionPreset = null!;
     private int _selectedFrameRate = 60;
@@ -397,6 +399,64 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _wirelessControlEnabled ? LocalizationService.Get("UsbControlDisableWireless") : _usbControlEnabled ? LocalizationService.Get("UsbControlDisable") : LocalizationService.Get("UsbControlDefault");
 
     private bool _closeToTrayActive;
+    internal bool IsUpdatingApplicationDisplayMode { get; private set; }
+
+    public bool CanCustomizeInterfaceVisibility => SelectedApplicationDisplayMode == ApplicationDisplayMode.Complete;
+    public string ApplicationModeVisibilityHint => IsLightweightApplicationMode
+        ? LocalizationService.Get("ApplicationModeLightweightVisibilityHint")
+        : IsTrayApplicationMode ? LocalizationService.Get("ApplicationModeTrayVisibilityHint") : string.Empty;
+
+    public bool HideInterfaceDescriptions
+    {
+        get => !CanCustomizeInterfaceVisibility || Application.Current is not App app || app.UpdateSettings.HideInterfaceDescriptions;
+        set
+        {
+            if (!CanCustomizeInterfaceVisibility) { OnPropertyChanged(); return; }
+            if (Application.Current is not App app || app.UpdateSettings.HideInterfaceDescriptions == value) return;
+            var previous = app.UpdateSettings.HideInterfaceDescriptions;
+            app.UpdateSettings.HideInterfaceDescriptions = value;
+            if (!app.SaveUpdateSettings())
+            {
+                app.UpdateSettings.HideInterfaceDescriptions = previous;
+                ApplicationSettingsStatus = LocalizationService.Get("SetupSaveFailed");
+            }
+            else ApplicationSettingsStatus = string.Empty;
+            app.RefreshInterfaceDescriptionVisibility();
+            OnPropertyChanged();
+        }
+    }
+
+    public bool HidePreviewToolbar
+    {
+        get => !CanCustomizeInterfaceVisibility || Application.Current is App app && app.UpdateSettings.HidePreviewToolbar;
+        set => SetPreviewBarPreference(value, static settings => settings.HidePreviewToolbar,
+            static (settings, hidden) => settings.HidePreviewToolbar = hidden);
+    }
+
+    public bool HidePreviewStatusBar
+    {
+        get => !CanCustomizeInterfaceVisibility || Application.Current is App app && app.UpdateSettings.HidePreviewStatusBar;
+        set => SetPreviewBarPreference(value, static settings => settings.HidePreviewStatusBar,
+            static (settings, hidden) => settings.HidePreviewStatusBar = hidden);
+    }
+
+    private void SetPreviewBarPreference(bool value, Func<UpdateSettings, bool> get,
+        Action<UpdateSettings, bool> set, [CallerMemberName] string? propertyName = null)
+    {
+        if (!CanCustomizeInterfaceVisibility) { OnPropertyChanged(propertyName); return; }
+        if (Application.Current is not App app) return;
+        var settings = app.UpdateSettings;
+        var previous = get(settings);
+        if (previous == value) return;
+        set(settings, value);
+        if (!app.SaveUpdateSettings())
+        {
+            set(settings, previous);
+            ApplicationSettingsStatus = LocalizationService.Get("SetupSaveFailed");
+        }
+        else ApplicationSettingsStatus = string.Empty;
+        OnPropertyChanged(propertyName);
+    }
 
     public bool CloseMainWindowToTray
     {
@@ -431,10 +491,23 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void NotifyApplicationDisplayModeChanged()
     {
-        OnPropertyChanged(nameof(SelectedApplicationDisplayMode));
-        OnPropertyChanged(nameof(IsLightweightApplicationMode));
-        OnPropertyChanged(nameof(IsTrayApplicationMode));
-        OnPropertyChanged(nameof(CanRestoreMainWindowFromTray));
+        // Compact modes control effective visibility without replacing the
+        // user's saved complete-mode preferences, including temporary tray use.
+        IsUpdatingApplicationDisplayMode = true;
+        try
+        {
+            if (Application.Current is App app) app.RefreshInterfaceDescriptionVisibility(HideInterfaceDescriptions);
+            OnPropertyChanged(nameof(CanCustomizeInterfaceVisibility));
+            OnPropertyChanged(nameof(ApplicationModeVisibilityHint));
+            OnPropertyChanged(nameof(HideInterfaceDescriptions));
+            OnPropertyChanged(nameof(HidePreviewToolbar));
+            OnPropertyChanged(nameof(HidePreviewStatusBar));
+            OnPropertyChanged(nameof(SelectedApplicationDisplayMode));
+            OnPropertyChanged(nameof(IsLightweightApplicationMode));
+            OnPropertyChanged(nameof(IsTrayApplicationMode));
+            OnPropertyChanged(nameof(CanRestoreMainWindowFromTray));
+        }
+        finally { IsUpdatingApplicationDisplayMode = false; }
     }
 
     public ApplicationDisplayMode SelectedApplicationDisplayMode
@@ -781,6 +854,29 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         }
     }
     public string WirelessStatus { get => LocalizationService.RefreshText(_wirelessStatus); private set => Set(ref _wirelessStatus, value); }
+    private string _wirelessRaopPortText = WirelessReceiverConfiguration.DefaultRaopPort.ToString(CultureInfo.InvariantCulture);
+    private int? _wirelessRaopUnavailablePort;
+    public string WirelessRaopPortText
+    {
+        get => _wirelessRaopPortText;
+        set
+        {
+            if (!Set(ref _wirelessRaopPortText, value)) return;
+            _wirelessRaopUnavailablePort = null;
+            OnPropertyChanged(nameof(WirelessRaopPortValidation));
+            OnPropertyChanged(nameof(WirelessRaopPortValidationVisibility));
+        }
+    }
+    public Visibility WirelessRaopPortVisibility => _selectedWirelessReceiverBackend == WirelessReceiverBackend.Original
+        ? Visibility.Visible : Visibility.Collapsed;
+    private bool TryGetWirelessRaopPort(out int port) =>
+        int.TryParse(WirelessRaopPortText, NumberStyles.None, CultureInfo.InvariantCulture, out port) &&
+        WirelessReceiverConfiguration.IsValidRaopPort(port);
+    public string WirelessRaopPortValidation => !TryGetWirelessRaopPort(out var port)
+        ? LocalizationService.Get("WirelessRaopPortInvalid") : _wirelessRaopUnavailablePort == port
+        ? LocalizationService.Format("WirelessRaopPortUnavailableFormat", port) : string.Empty;
+    public Visibility WirelessRaopPortValidationVisibility => string.IsNullOrEmpty(WirelessRaopPortValidation)
+        ? Visibility.Collapsed : Visibility.Visible;
     public string MediaCastReceiverName => _wireless.AppliedReceiverName;
     public string MediaCastStatus { get => LocalizationService.RefreshText(_mediaCastStatus); private set => Set(ref _mediaCastStatus, value); }
     public WirelessReceiverBackendOption SelectedWirelessReceiverBackend
@@ -794,6 +890,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (_selectedWirelessReceiverBackend == backend) return;
             _selectedWirelessReceiverBackend = backend;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(WirelessRaopPortVisibility));
             ApplyWirelessSettingsCommand.NotifyCanExecuteChanged();
         }
     }
@@ -893,7 +990,14 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     public uint SourceVideoHeight => _sourceVideoHeight;
     public string FpsDisplay { get => _fpsDisplay; private set => Set(ref _fpsDisplay, value); }
     public string LatencyDisplay { get => _latencyDisplay; private set => Set(ref _latencyDisplay, value); }
-    public string AudioDisplay { get => LocalizationService.RefreshText(_audioDisplay); private set => Set(ref _audioDisplay, value); }
+    public string AudioDisplay
+    {
+        get => LocalizationService.RefreshText(_audioDisplay);
+        private set
+        {
+            if (Set(ref _audioDisplay, value)) OnPropertyChanged(nameof(AudioDetailDisplay));
+        }
+    }
     public string ProtectedAudioDisplay
     {
         get => LocalizationService.RefreshText(_protectedAudioDisplay);
@@ -902,7 +1006,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     public string AudioDetailDisplay => IsMediaCastSelected
         ? LocalizationService.Get("MediaCastSystemDecoder")
         : IsAudioOnlyAirPlay ? LocalizationService.Get("WirelessMusicAudioFormat")
-        : "48 kHz PCM";
+        : _audioDisplay == NoStatistic ? LocalizationService.Get("AudioStatisticsDescription") : "PCM";
     public ResolutionPreset SelectedResolutionPreset
     {
         get => _selectedResolutionPreset;
@@ -1253,7 +1357,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         ? LocalizationService.Get("WirelessMusicNoVideo")
         : IsMediaCastSelected
         ? LocalizationService.Get("MediaCastOriginalResolution")
-        : LocalizationService.Format("RenderLimitFormat", SelectedResolutionPreset.Label);
+        : LocalizationService.Format("RenderLimitFormat", SelectedResolutionPreset is { Width: 0, Height: 0 }
+            ? LocalizationService.Get("ResolutionNativeShort") : SelectedResolutionPreset.Label);
     public string TargetFpsDisplay => IsAudioOnlyAirPlay
         ? LocalizationService.Get("WirelessMusicNoVideo")
         : IsMediaCastSelected
@@ -1298,7 +1403,6 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _environmentStatus = LocalizationService.Get("StatusCheckingEnvironment");
         _captureStatus = LocalizationService.Get("StatusWaitingDevice");
         _driverState = LocalizationService.Get("StatusDetecting");
-        _audioDisplay = LocalizationService.Get("StatusWaiting");
         _protectedAudioDisplay = LocalizationService.Get("StatusWaiting");
         _settingsStatus = LocalizationService.Get("StatusDefaultSettings");
         _mediaOutputStatus = LocalizationService.Get("MediaOutputIdle");
@@ -1343,6 +1447,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 restoredApp.UpdateSettings.WirelessReceiverName);
             _wireless.SelectedProfile = WirelessReceiverConfiguration.ProfileForSavedId(
                 restoredApp.UpdateSettings.WirelessDisplayProfileId);
+            _wireless.RaopPort = WirelessReceiverConfiguration.NormalizeRaopPort(restoredApp.UpdateSettings.WirelessRaopPort);
+            _wirelessRaopPortText = _wireless.RaopPort.ToString(CultureInfo.InvariantCulture);
         }
         _mediaCast = new MediaCastReceiverController(_core, wirelessReceiver,
             () => _wireless.Backend);
@@ -1741,6 +1847,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         var startupToken = startupCancellation.Token;
         startupToken.ThrowIfCancellationRequested();
         var controlDeviceUdid = targetDeviceUdid ?? SelectedDevice?.Udid;
+        ControlStatus.QuietAutomaticStartup = controlDeviceUdid is not null &&
+            _mirroringControlStartup.Contains(controlDeviceUdid);
         var statusDeviceName = Devices.FirstOrDefault(device =>
             DeviceViewModel.UdidEquals(device.Udid, controlDeviceUdid))?.Name ?? "iPhone";
         _bluetoothControlStartSucceeded = false;
@@ -4268,6 +4376,28 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         var backend = _selectedWirelessReceiverBackend;
         var backendOption = WirelessReceiverConfiguration.GetBackendOption(backend);
         var sanitized = WirelessReceiverConfiguration.SanitizeReceiverName(WirelessReceiverName);
+        var raopPort = _wireless.RaopPort;
+        _wirelessRaopUnavailablePort = null;
+        OnPropertyChanged(nameof(WirelessRaopPortValidation));
+        OnPropertyChanged(nameof(WirelessRaopPortValidationVisibility));
+        if (backend == WirelessReceiverBackend.Original && !TryGetWirelessRaopPort(out raopPort))
+        {
+            WirelessStatus = LocalizationService.Get("WirelessRaopPortInvalid");
+            WirelessStatusTone = IPhoneMirror.UI.Controls.StatusTone.Error;
+            return;
+        }
+        if (backend == WirelessReceiverBackend.Original &&
+            (!_wireless.Running || raopPort != _wireless.AppliedRaopPort || _wireless.AppliedBackend != backend) &&
+            WirelessReceiverConfiguration.CheckRaopPortAvailability(raopPort) is { } portError)
+        {
+            _wirelessRaopUnavailablePort = raopPort;
+            OnPropertyChanged(nameof(WirelessRaopPortValidation));
+            OnPropertyChanged(nameof(WirelessRaopPortValidationVisibility));
+            WirelessStatus = portError;
+            WirelessStatusTone = IPhoneMirror.UI.Controls.StatusTone.Error;
+            AddUiLog(portError);
+            return;
+        }
         var operation = Stopwatch.StartNew();
         if (backend == WirelessReceiverBackend.UxPlay && !_wireless.IsBackendAvailable(backend))
         {
@@ -4308,6 +4438,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         if (!ReferenceEquals(profile, _wireless.AppliedProfile))
             changes.Add(LocalizationService.Format("WirelessResolutionChangeFormat",
                 _wireless.AppliedProfile.Label, profile.Label));
+        if (backend == WirelessReceiverBackend.Original && raopPort != _wireless.AppliedRaopPort)
+            changes.Add(LocalizationService.Format("WirelessRaopPortChangeFormat", _wireless.AppliedRaopPort, raopPort));
+        if (changes.Count == 0 && (!_wireless.Running || !_wireless.Ready))
+            changes.Add(LocalizationService.Get("WirelessReceiverRetry"));
         if (changes.Count == 0)
         {
             // The running receiver may already match after an earlier failed
@@ -4340,7 +4474,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (!WirelessReceiverConfiguration.SupportsMediaCast(backend))
                 await _mediaCast.StopAsync();
             await _wireless.StopAsync();
-            var started = await _wireless.EnsureStartedAsync(sanitized, profile, backend);
+            var started = await _wireless.EnsureStartedAsync(sanitized, profile, backend, raopPort);
             RefreshWirelessStatus();
             if (started.Started)
             {
@@ -4390,9 +4524,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         var previousBackend = app.UpdateSettings.WirelessReceiverBackend;
         var previousProfile = app.UpdateSettings.WirelessDisplayProfileId;
         var previousName = app.UpdateSettings.WirelessReceiverName;
+        var previousPort = app.UpdateSettings.WirelessRaopPort;
         app.UpdateSettings.WirelessReceiverBackend = backend;
         app.UpdateSettings.WirelessDisplayProfileId = profile.Id;
         app.UpdateSettings.WirelessReceiverName = receiverName;
+        app.UpdateSettings.WirelessRaopPort = _wireless.RaopPort;
         if (app.SaveUpdateSettings())
         {
             _wirelessSettingsSaveFailed = false;
@@ -4401,6 +4537,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         app.UpdateSettings.WirelessReceiverBackend = previousBackend;
         app.UpdateSettings.WirelessDisplayProfileId = previousProfile;
         app.UpdateSettings.WirelessReceiverName = previousName;
+        app.UpdateSettings.WirelessRaopPort = previousPort;
         _wirelessSettingsSaveFailed = true;
         RefreshWirelessStatus();
         AddDiagnosticLog(AppLog.Event("wireless_backend_save_failed",
@@ -4907,10 +5044,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SourceVideoWidth));
         OnPropertyChanged(nameof(SourceVideoHeight));
         OnPropertyChanged(nameof(BluetoothDeviceOrientationDisplay));
-        Resolution = "—";
-        FpsDisplay = "— fps";
-        LatencyDisplay = "— ms";
-        AudioDisplay = LocalizationService.Get("StatusWaiting");
+        Resolution = NoStatistic;
+        FpsDisplay = NoStatistic;
+        LatencyDisplay = NoStatistic;
+        AudioDisplay = NoStatistic;
     }
 
     private async Task StartAsync()
@@ -5712,7 +5849,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private void ApplyMediaCastStatistics()
     {
         Resolution = _mediaCastWidth > 0 && _mediaCastHeight > 0
-            ? $"{_mediaCastWidth}×{_mediaCastHeight}" : "—";
+            ? $"{_mediaCastWidth}×{_mediaCastHeight}" : NoStatistic;
         if (_sourceVideoWidth != _mediaCastWidth || _sourceVideoHeight != _mediaCastHeight)
         {
             _sourceVideoWidth = _mediaCastWidth;
@@ -5721,8 +5858,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(SourceVideoHeight));
             OnPropertyChanged(nameof(BluetoothDeviceOrientationDisplay));
         }
-        FpsDisplay = LocalizationService.Format("MediaCastFpsDisplayFormat",
-            _wireless.AppliedProfile.FrameRate);
+        FpsDisplay = LocalizationService.Format("MediaCastFpsDisplayFormat", _wireless.AppliedProfile.FrameRate);
         LatencyDisplay = LocalizationService.Get("MediaCastNetworkStream");
         AudioDisplay = LocalizationService.Get(_mediaCastAudioEnabled
             ? "MediaCastAudioActive" : "MediaCastAudioMuted");
@@ -6030,6 +6166,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     internal string CaptureScreenshot(string path) =>
         ScreenshotService.CapturePng(_core.GetLatestVideoFrame, path);
 
+    internal System.Windows.Media.Imaging.BitmapSource? CaptureToolbarPreviewFrame()
+    {
+        if (!IsCapturing) return null;
+        var frame = _core.GetLatestVideoFrame();
+        return frame is null ? null : ScreenshotService.CreateBitmap(frame);
+    }
+
     private void AddLogLine(string line)
     {
         _visibleLogLines.Enqueue(line);
@@ -6115,9 +6258,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     failedSession, failedHandle, status, errorTitle, errorBody);
             }
         }
-        Resolution = audioOnlyAirPlay
-            ? LocalizationService.Get("WirelessMusicAudioOnly")
-            : status.Width > 0 && status.Height > 0 ? $"{status.Width}×{status.Height}" : "—";
+        Resolution = captureActive && !audioOnlyAirPlay && status.Width > 0 && status.Height > 0
+            ? $"{status.Width}×{status.Height}" : NoStatistic;
         if (status.Width > 0 && status.Height > 0 &&
             (status.Width != _sourceVideoWidth || status.Height != _sourceVideoHeight))
         {
@@ -6132,13 +6274,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             ObserveAutomationGeometry(selected.Udid, status.Width, status.Height);
             DeviceVideoSizeChanged?.Invoke(selected.Udid, status.Width, status.Height);
         }
-        FpsDisplay = audioOnlyAirPlay
-            ? LocalizationService.Get("WirelessMusicNoVideo")
-            : status.Fps > 0 ? $"{status.Fps:F1} fps" : "— fps";
-        LatencyDisplay = status.LatencyMs > 0 ? $"{status.LatencyMs:F1} ms" : "— ms";
-        AudioDisplay = status.AudioSampleRate > 0
-            ? $"{status.AudioSampleRate / 1000.0:F0} kHz · {status.AudioChannels} ch"
-            : LocalizationService.Get("StatusWaiting");
+        FpsDisplay = captureActive && !audioOnlyAirPlay && status.Fps > 0 ? $"{status.Fps:F1}" : NoStatistic;
+        LatencyDisplay = captureActive && status.LatencyMs > 0 ? $"{status.LatencyMs:F1}" : NoStatistic;
+        AudioDisplay = captureActive && status.AudioSampleRate > 0
+            ? $"{status.AudioSampleRate / 1000.0:0.#} · {(status.AudioChannels > 0 ? status.AudioChannels.ToString() : NoStatistic)}"
+            : NoStatistic;
         ProtectedAudioDisplay = protection.AudioDisplay;
         EvaluateWirelessStall(status);
     }
@@ -6810,6 +6950,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        OnPropertyChanged(nameof(ApplicationModeVisibilityHint));
+        OnPropertyChanged(nameof(MirroringAutoControlStatus));
         OnPropertyChanged(nameof(ApplicationSettingsStatus));
         OnPropertyChanged(nameof(MouseSettingsStatus));
         OnPropertyChanged(nameof(MouseDirectionSettingsStatus));
@@ -6847,6 +6989,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(AudioDetailDisplay));
         OnPropertyChanged(nameof(VirtualCameraInstallActionText));
         OnPropertyChanged(nameof(SelectedWirelessReceiverBackend));
+        OnPropertyChanged(nameof(WirelessRaopPortValidation));
         OnPropertyChanged(nameof(AppliedWirelessBackendDisplay));
         OnPropertyChanged(nameof(AppliedWirelessProfileDisplay));
         OnPropertyChanged(nameof(BluetoothControlActionText));

@@ -35,7 +35,7 @@
             <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="{DynamicResource MediaOutputTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Text="{Binding SelectedName}"
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding SelectedName}"
                            Style="{StaticResource SubWindowSubtitle}"/>
                 <TextBlock Text="{Binding MediaOutputCapabilitiesText}" FontSize="{DynamicResource CaptionFontSize}"
                            Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
@@ -50,7 +50,7 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Border Style="{StaticResource SectionCard}">
                         <StackPanel>
-                            <TextBlock Text="{DynamicResource RecordDescription}" TextWrapping="Wrap"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource RecordDescription}" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}"/>
                             <Grid Margin="0,12,0,0">
                                 <Grid.ColumnDefinitions>
@@ -98,7 +98,7 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Border Style="{StaticResource SectionCard}">
                         <StackPanel>
-                            <TextBlock Text="{DynamicResource StreamDescription}" TextWrapping="Wrap"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource StreamDescription}" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}"/>
                             <TextBlock Text="{DynamicResource StreamProtocol}" Style="{StaticResource DetailLabel}"/>
                             <ComboBox AutomationProperties.Name="{DynamicResource StreamProtocol}" x:Name="StreamProtocolBox" SelectedIndex="0"
@@ -158,7 +158,7 @@
                                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ArrowClockwise20" FontSize="18"/>
                                 </Button>
                             </Grid>
-                            <TextBlock Text="{DynamicResource StreamMicrophoneHint}" TextWrapping="Wrap"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource StreamMicrophoneHint}" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,0"/>
                             <Button x:Name="StartStreamingButton"
                                     Content="{DynamicResource StartStreaming}" Click="OnStartStreamingClick"
@@ -173,7 +173,7 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <TextBlock Text="{DynamicResource VirtualCameraDescription}" TextWrapping="Wrap"
+                        <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource VirtualCameraDescription}" TextWrapping="Wrap"
                                    Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}"/>
                         <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>

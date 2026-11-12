@@ -415,16 +415,21 @@ var previewToolbar = mainWindow.Descendants()
     .SingleOrDefault(element =>
         string.Equals((string?)element.Attribute(xaml + "Name"),
             "EnvironmentPanel", StringComparison.Ordinal));
-Equal("{Binding PreviewAndObsVisibility}",
+Equal<string?>(null,
     (string?)previewQuickActions?.Attribute("Visibility"),
-    "preview quick actions follow the active projection session");
+    "toolbar customization keeps the action list available before a session starts");
 Equal(true, previewToolbar?.Descendants().Any(element =>
-        string.Equals(element.Name.LocalName, "DataTrigger", StringComparison.Ordinal) &&
+        string.Equals(element.Name.LocalName, "Condition", StringComparison.Ordinal) &&
         string.Equals((string?)element.Attribute("Binding"),
-            "{Binding PreviewAndObsVisibility}", StringComparison.Ordinal) &&
-        string.Equals((string?)element.Attribute("Value"), "Visible",
+            "{Binding IsLightweightApplicationMode}", StringComparison.Ordinal) &&
+        string.Equals((string?)element.Attribute("Value"), "False",
             StringComparison.Ordinal)) == true,
-    "the complete preview toolbar is collapsed when the selected device is not mirroring");
+    "the toolbar preserves the existing lightweight-mode visibility rule");
+Equal(true, previewToolbar?.Descendants().Any(element =>
+        string.Equals(element.Name.LocalName, "Condition", StringComparison.Ordinal) &&
+        string.Equals((string?)element.Attribute("Binding"), "{Binding HidePreviewToolbar}", StringComparison.Ordinal) &&
+        string.Equals((string?)element.Attribute("Value"), "False", StringComparison.Ordinal)) == true,
+    "the toolbar preserves the explicit hide preference");
 Equal("0,0,0,14", (string?)previewToolbar?.Attribute("Margin"),
     "the active preview toolbar owns its spacing so collapsing it removes the gap");
 Equal(false, mainWindow.Descendants().Any(element =>
@@ -1207,6 +1212,18 @@ foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
         $"{windowName} does not hard-code theme colors");
     Equal(true, windowText.Contains("{DynamicResource", StringComparison.Ordinal),
         $"{windowName} uses dynamic theme resources");
+    // The existing toolbar editor is an owner-aligned visual stage, with its
+    // own reverse transition and Cancel/Done controls rather than dialog chrome.
+    if (windowName == "PreviewToolbarSettingsWindow.xaml")
+    {
+        Equal(true, new[] { "SceneImage", "SurroundShade", "ToolbarSurface", "SettingsPanel", "DoneButton" }
+            .All(name => windowDocument.Descendants().Any(e => (string?)e.Attribute(xaml + "Name") == name)),
+            "toolbar stage retains the scene, focus layer, editing surface and global completion");
+        Equal(true, windowText.Contains("Click=\"OnCancel\"", StringComparison.Ordinal) &&
+            windowText.Contains("PreviewKeyDown=\"OnKeyDown\"", StringComparison.Ordinal),
+            "toolbar stage provides explicit cancel and keyboard exit");
+        continue;
+    }
     Equal(true,
         windowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal),
         $"{windowName} uses a shared themed window surface");
@@ -1815,7 +1832,7 @@ Equal(true,
     mainWindowCode.Contains("GridUnitType.Star", StringComparison.Ordinal) &&
     !mainWindowCode.Contains("CenterColumn.ClearValue(WidthProperty)",
         StringComparison.Ordinal) &&
-    mainWindowCode.Contains("PreviewPanel.Width = double.NaN", StringComparison.Ordinal) &&
+    mainWindowCode.Contains("PreviewPanel.ClearValue(WidthProperty)", StringComparison.Ordinal) &&
     !mainWindowCode.Contains("centerInsets", StringComparison.Ordinal) &&
     mainWindowCode.Contains("targetSideWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("_workspaceLeftGapTargetWidth", StringComparison.Ordinal) &&
@@ -1829,7 +1846,7 @@ Equal(true,
     mainWindowCode.Contains("canUseNormalPortraitFrame", StringComparison.Ordinal) &&
     mainWindowCode.Contains("LightweightNormalPortraitPreviewWidth = 340", StringComparison.Ordinal) &&
     !mainWindowCode.Contains("targetUsesPortraitFrame", StringComparison.Ordinal) &&
-    mainWindowCode.Contains("PreviewPanel.MaxWidth = LightweightNormalPortraitPreviewWidth",
+    mainWindowCode.Contains("ApplyLightweightPreviewWidthLimit(LightweightNormalPortraitPreviewWidth)",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("PreviewPanel.ClearValue(MaxWidthProperty)",
         StringComparison.Ordinal) &&

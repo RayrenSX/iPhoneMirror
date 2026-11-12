@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:system="clr-namespace:System;assembly=mscorlib"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
@@ -167,10 +167,17 @@
 
     <system:String x:Key="DevicesTitle">Sources</system:String>
     <system:String x:Key="RefreshDevices">Refresh devices</system:String>
-    <system:String x:Key="MirrorSimultaneously">Mirror simultaneously</system:String>
-    <system:String x:Key="DeviceAlreadyMirroring">This device is already mirrored in the main preview</system:String>
-    <system:String x:Key="SimultaneousMirrorStartedFormat">Opened a simultaneous mirror window for {0}</system:String>
-    <system:String x:Key="SimultaneousMirrorFailedFormat">Could not start simultaneous mirroring: {0}</system:String>
+    <system:String x:Key="DeviceActionCopyInfo">Copy device information</system:String>
+    <system:String x:Key="DeviceActionRestart">Restart device…</system:String>
+    <system:String x:Key="DeviceActionShutdown">Shut down device…</system:String>
+    <system:String x:Key="DeviceActionUsbRequired">Connect the device over USB and trust this computer on the device.</system:String>
+    <system:String x:Key="DeviceActionRuntimeMissing">The device action component is missing. Reinstall iPhoneMirror.</system:String>
+    <system:String x:Key="DeviceActionNoAcknowledgement">The device did not acknowledge the action. Check its state before sending another command.</system:String>
+    <system:String x:Key="DeviceActionConfirmRestart">Restart “{0}”? This will interrupt its mirroring and control connections. Unlock the device after it restarts.</system:String>
+    <system:String x:Key="DeviceActionConfirmShutdown">Shut down “{0}”? This will interrupt its mirroring and control connections. You will need to turn it on manually.</system:String>
+    <system:String x:Key="DeviceActionSentFormat">Sent “{1}” to “{0}”.</system:String>
+    <system:String x:Key="DeviceActionFailedFormat">Could not confirm the result of “{0}”: {1}</system:String>
+    <system:String x:Key="DeviceActionInfoFormat">Name: {0}&#10;Model: {1}&#10;System: {2}&#10;Connection: {3}&#10;Device ID: {4}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">Mirroring error — {0}</system:String>
     <system:String x:Key="DeviceSessionClosedWarningTitleFormat">Mirroring stopped — {0}</system:String>
     <system:String x:Key="DeviceSessionClosedWarningBody">You stopped mirroring from Control Center. Restart the iPhone or iPad before using wired mirroring with this device again.</system:String>
@@ -218,6 +225,7 @@
     <system:String x:Key="LatencyLabel">Latency</system:String>
     <system:String x:Key="EndToEndLabel">End to end</system:String>
     <system:String x:Key="AudioLabel">Audio</system:String>
+    <system:String x:Key="AudioStatisticsDescription">Sample rate and channels</system:String>
     <system:String x:Key="LiveLogHeader" xml:space="preserve">Live log  ·  Ctrl+L</system:String>
     <system:String x:Key="ClearView">Clear view</system:String>
 
@@ -402,13 +410,14 @@
     <system:String x:Key="ConnectionError">Device connection error</system:String>
 
     <system:String x:Key="ResolutionNative">Native (no render limit)</system:String>
+    <system:String x:Key="ResolutionNativeShort">Native</system:String>
     <system:String x:Key="Resolution1080p">1080p (1920×1080)</system:String>
     <system:String x:Key="Resolution720p">720p (1280×720)</system:String>
     <system:String x:Key="Resolution540p">540p (960×540)</system:String>
     <system:String x:Key="PendingSettingsLocalFormat">Pending: {0} · {1} fps (local rendering only)</system:String>
     <system:String x:Key="PendingSettingsFormat">Pending: {0} · {1} fps</system:String>
     <system:String x:Key="RenderLimitFormat">Render limit: {0}</system:String>
-    <system:String x:Key="TargetFpsFormat">Local limit: {0} fps</system:String>
+    <system:String x:Key="TargetFpsFormat">Local limit: {0}</system:String>
     <system:String x:Key="AppliedRenderFormat">Local rendering applied: {0} · {1} fps</system:String>
     <system:String x:Key="AppliedRenderLogFormat">Local rendering: {0} / {1} fps — {2}; source stream was not reconnected</system:String>
     <system:String x:Key="ApplySettingsFailedFormat">Could not apply video settings: {0}</system:String>
@@ -569,7 +578,7 @@
     <system:String x:Key="UsbModeDemoNotice">This mode does not enable AirPlay or external playback from video apps.</system:String>
     <system:String x:Key="UsbModeAirPlayAdvantage">Keeps the real status bar. iPad advertises the same display bounds in both orientations to avoid restarting USB on rotation. The device chooses the source resolution, which may be below panel-native pixels. Video apps may use external playback.</system:String>
     <system:String x:Key="UsbModeAirPlayDisadvantage">External-content resolution cannot be guaranteed to adapt perfectly to both the phone and the window. Content may be cropped, use the wrong aspect ratio, or be partly off-screen.</system:String>
-    <system:String x:Key="UsbModeAirPlayNotice">For custom sizing, click the version in the lower-right corner five times to enable Advanced mode. Custom HPD1 dimensions are risky and can cause a black screen, cropping, or failed USB reconnection.</system:String>
+    <system:String x:Key="UsbModeAirPlayNotice">For custom sizing, click the version on the About page five times to enable Advanced mode. Custom HPD1 dimensions are risky and can cause a black screen, cropping, or failed USB reconnection.</system:String>
     <system:String x:Key="UsbModeAisiAdvantage">Uses an Aisi-style configuration with Valeria=false and a fixed 1565×1565 request, reducing display-negotiation differences between devices.</system:String>
     <system:String x:Key="UsbModeAisiDisadvantage">The square target limits source clarity and is unsuitable when image quality is the priority. Landscape content may also be scaled, letterboxed, or shown at an imperfect ratio.</system:String>
     <system:String x:Key="UsbModeAisiNotice">This mode does not use this application's native-resolution probing or adaptive orientation reconfiguration.</system:String>
@@ -620,6 +629,12 @@
     <system:String x:Key="AppSubtitleConnectivity">Low-latency USB and wireless AirPlay mirroring for Windows</system:String>
     <system:String x:Key="WirelessReceiverTitle">Wireless AirPlay</system:String>
     <system:String x:Key="WirelessReceiverNameLabel">Receiver name</system:String>
+    <system:String x:Key="WirelessRaopPortLabel">RAOP port</system:String>
+    <system:String x:Key="WirelessRaopPortHelp">Default: 5001. Change it if occupied; Apply restarts the receiver and devices automatically discover the new port.</system:String>
+    <system:String x:Key="WirelessRaopPortInvalid">Enter an integer from 1 to 65535, excluding the AirPlay/DLNA ports 7001 and 8090.</system:String>
+    <system:String x:Key="WirelessRaopPortUnavailableFormat">RAOP port {0} is occupied or unavailable. Choose another port and apply.</system:String>
+    <system:String x:Key="WirelessRaopPortChangeFormat">RAOP port: {0} → {1}</system:String>
+    <system:String x:Key="WirelessReceiverRetry">Restart the wireless receiver</system:String>
     <system:String x:Key="WirelessBackendLabel">Receiver implementation</system:String>
     <system:String x:Key="WirelessBackendOriginal">Original</system:String>
     <system:String x:Key="WirelessBackendUxPlay">UxPlay (fallback)</system:String>
@@ -679,7 +694,11 @@
     <system:String x:Key="WirelessRuntimeIncompatible">The wireless decoder version is incompatible. Reinstall the latest version.</system:String>
     <system:String x:Key="WirelessRuntimeProbeTimedOut">The wireless decoder check timed out. Restart the application and try again.</system:String>
     <system:String x:Key="WirelessRuntimeLoadFailedFormat">The wireless decoder could not be loaded (check code {0}). Reinstall the latest version.</system:String>
-    <system:String x:Key="FooterConnectivity">Local USB / AirPlay; no cloud relay</system:String>
+    <system:String x:Key="HideInterfaceDescriptionsLabel">Hide interface descriptions</system:String>
+    <system:String x:Key="HidePreviewToolbarLabel">Hide preview toolbar</system:String>
+    <system:String x:Key="HidePreviewStatusBarLabel">Hide preview status bar</system:String>
+    <system:String x:Key="ApplicationModeLightweightVisibilityHint">Lightweight mode hides these items automatically. Complete mode restores your choices.</system:String>
+    <system:String x:Key="ApplicationModeTrayVisibilityHint">Tray mode hides the main window. Complete mode restores your choices.</system:String>
     <system:String x:Key="MediaCastTitle">Video app casting</system:String>
     <system:String x:Key="MediaCastDescription">Receives movies sent from a video app's Cast button. This is separate from Control Center Screen Mirroring.</system:String>
     <system:String x:Key="MediaCastReady">Video casting receiver ready</system:String>
@@ -710,8 +729,8 @@
     <system:String x:Key="MediaCastDeviceModel">AirPlay / DLNA video</system:String>
     <system:String x:Key="MediaCastDeviceConnection">Network media cast</system:String>
     <system:String x:Key="MediaCastDeviceActive">Video is being cast</system:String>
-    <system:String x:Key="MediaCastFpsDisplayFormat">≤ {0} fps</system:String>
-    <system:String x:Key="MediaCastFpsCapabilityFormat">Receiver limit {0} fps</system:String>
+    <system:String x:Key="MediaCastFpsDisplayFormat">≤ {0}</system:String>
+    <system:String x:Key="MediaCastFpsCapabilityFormat">Receiver limit {0}</system:String>
     <system:String x:Key="MediaCastOriginalResolution">Original media resolution</system:String>
     <system:String x:Key="MediaCastNetworkStream">network stream</system:String>
     <system:String x:Key="MediaCastAudioActive">media audio</system:String>
@@ -1307,6 +1326,9 @@
     <system:String x:Key="MappingPicking">Choosing a position on the mirror</system:String>
     <system:String x:Key="MappingPickInside">Move the pointer into the video content</system:String>
     <system:String x:Key="MappingPickClick">Click the target. Esc cancels.</system:String>
+    <system:String x:Key="MappingPickClickCompact">Click the target</system:String>
+    <system:String x:Key="MappingPickDragCompact">Drag to the end, release to finish</system:String>
+    <system:String x:Key="MappingPickCancel">Cancel · Esc</system:String>
     <system:String x:Key="MappingPickDrag">Press, drag to the endpoint, then release. Esc cancels.</system:String>
     <system:String x:Key="MappingStateIdle">Step 1: capture a Windows key</system:String>
     <system:String x:Key="MappingStateWaitingForKey">Press and release a key; click again to cancel capture</system:String>
@@ -1661,13 +1683,10 @@ Pair, select and save.</system:String>
     <system:String x:Key="VirtualCameraInvalidRegistration">The camera registration is invalid (0x8007000D). Reinstall the virtual camera component and try again.</system:String>
     <system:String x:Key="MirroringAutoControlTitle">Automatically enable reverse control when mirroring</system:String>
     <system:String x:Key="MirroringAutoControlOff">Off (start manually)</system:String>
-    <system:String x:Key="MirroringAutoControlDescription">Start the selected control method when mirroring connects, without another Continue prompt. Bind the device first; connection failures appear in the control status window.</system:String>
+    <system:String x:Key="MirroringAutoControlDescription">Start the selected method when mirroring connects, without another Continue prompt. A change also attempts control once for existing streams without active control. Off does not stop active control. Bind the device first; see status for connection failures. Connects in the background without opening a progress or success window; shows a window only for errors or required actions.</system:String>
     <system:String x:Key="SettingsCategoryApplication">App</system:String>
     <system:String x:Key="SettingsCategoryProjection">Projection</system:String>
     <system:String x:Key="SettingsCategoryControl">Control</system:String>
-    <system:String x:Key="SettingsScopeApplication">Preferences for the whole application</system:String>
-    <system:String x:Key="SettingsScopeProjection">Picture, sound and projection connections</system:String>
-    <system:String x:Key="SettingsScopeControl">Automatic control, keyboard and mouse</system:String>
     <system:String x:Key="SettingsAdvancedVideo">Advanced picture settings</system:String>
     <system:String x:Key="SettingsAdvancedUsb">USB projection mode</system:String>
     <system:String x:Key="SettingsKeyboard">Keyboard and shortcuts</system:String>
@@ -1698,4 +1717,20 @@ Pair, select and save.</system:String>
     <system:String x:Key="SettingShortcutsToggleHint">Press once to apply, then press again to restore. Releasing the key or switching windows keeps the change.</system:String>
     <system:String x:Key="SettingShortcutsToggleValue">Opacity when toggled</system:String>
     <system:String x:Key="SettingShortcutsToggleEnabled">Keep on top when toggled</system:String>
+    <sys:String x:Key="ToolbarCustomize">Customize top toolbar</sys:String>
+    <sys:String x:Key="ToolbarEarlier">Move earlier</sys:String>
+    <sys:String x:Key="ToolbarLater">Move later</sys:String>
+    <sys:String x:Key="ToolbarReset">Restore defaults</sys:String>
+    <sys:String x:Key="ToolbarCancel">Cancel</sys:String>
+    <sys:String x:Key="ToolbarDone">Done</sys:String>
+    <sys:String x:Key="ToolbarIconsOnly">Icons only</sys:String>
+    <sys:String x:Key="ToolbarSaveFailed">Could not save. Your draft is retained. Retry or cancel.</sys:String>
+    <sys:String x:Key="ToolbarBasicHelp">Drag tools to reorder. Select a tool to hide it; use the library to add it back.</sys:String>
+    <sys:String x:Key="ToolbarBasicEmpty">No buttons shown. Restore buttons from the component library.</sys:String>
+    <sys:String x:Key="ToolbarLibrary">Component library</sys:String>
+    <sys:String x:Key="ToolbarHide">Hide</sys:String>
+    <sys:String x:Key="ToolbarAdd">Add</sys:String>
+    <sys:String x:Key="ToolbarAdded">Added</sys:String>
+    <sys:String x:Key="ToolbarScrollEarlier">Scroll left</sys:String>
+    <sys:String x:Key="ToolbarScrollLater">Scroll right</sys:String>
 </ResourceDictionary>

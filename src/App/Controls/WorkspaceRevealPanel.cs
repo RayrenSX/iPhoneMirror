@@ -32,7 +32,8 @@ public sealed class WorkspaceRevealPanel : Grid
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        base.ArrangeOverride(new Size(ContentWidth, finalSize.Height));
+        foreach (UIElement child in InternalChildren)
+            child.Arrange(new Rect(0, 0, ContentWidth, finalSize.Height));
         return finalSize;
     }
 }

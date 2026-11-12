@@ -56,7 +56,10 @@ internal static partial class Program
             window.ShowInTaskbar = true;
             window.Title = "iPhoneMirror preview pointer regression";
             ActivateMappingTestWindow(window);
-            var toolbar = (FrameworkElement)window.FindName("VersionButton");
+            // The version badge is passive text. Use a real enabled toolbar
+            // button so this test actually transfers keyboard focus to WPF.
+            var toolbar = ((System.Windows.Controls.Panel)window.FindName("PreviewQuickActions"))
+                .Children.OfType<System.Windows.Controls.Button>().First(button => button.IsVisible && button.IsEnabled);
             toolbar.Focus();
             AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
             InteractionAssert((bool)KeyboardCall(window, "IsMainKeyboardEditorFocused")!,

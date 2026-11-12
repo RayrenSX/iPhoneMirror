@@ -43,7 +43,7 @@
             <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="{DynamicResource MoreImageSettingsTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Text="{DynamicResource MoreImageSettingsSubtitle}"
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource MoreImageSettingsSubtitle}"
                            Style="{StaticResource SubWindowSubtitle}"/>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnBackClick">

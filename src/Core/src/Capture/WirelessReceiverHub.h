@@ -154,7 +154,8 @@ public:
     WirelessReceiverHub& operator=(const WirelessReceiverHub&) = delete;
 
     void start(std::wstring receiver_name, std::wstring host_path,
-        std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate);
+        std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate,
+        std::uint32_t raop_port = 5001);
     void stop() noexcept;
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] bool ready() const noexcept;

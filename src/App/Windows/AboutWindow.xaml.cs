@@ -20,6 +20,18 @@ public partial class AboutWindow : IPhoneMirror.UI.Controls.RoundedWindow, INoti
     private readonly MainViewModel _mainViewModel;
     private readonly DispatcherTimer _logTimer;
     private string _updateStatus;
+    private int _versionClickCount;
+    private DateTime _lastVersionClickUtc;
+
+    private void OnVersionClick(object sender, RoutedEventArgs e)
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _lastVersionClickUtc).TotalSeconds > 2) _versionClickCount = 0;
+        _lastVersionClickUtc = now;
+        if (++_versionClickCount < 5) return;
+        _versionClickCount = 0;
+        (Owner as MainWindow ?? Application.Current.MainWindow as MainWindow)?.EnableDeveloperToolsFromAbout();
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public string VersionText => VersionManager.DisplayVersion;

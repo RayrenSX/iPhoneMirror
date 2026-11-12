@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Collections.Specialized;
 using System.IO;
 using System.Windows;
@@ -37,7 +37,7 @@ internal static partial class Program
         SetKeyboardField(vm, "_identityResolver", resolver);
         // Read the existing XAML buttons from their logical parent; realizing the
         // preview toolbar normally requires an active capture session.
-        var buttons = ((StackPanel)main.FindName("PreviewQuickActions")).Children.OfType<Button>().ToArray();
+        var buttons = ((Panel)main.FindName("PreviewQuickActions")).Children.OfType<Button>().ToArray();
         var wired = buttons.Single(b => AutomationProperties.GetAutomationId(b) == "UsbControlButton");
         var wireless = buttons.Single(b => AutomationProperties.GetAutomationId(b) == "WirelessControlButton");
         var controls = (Dictionary<string, DeviceControlSession>)KeyboardField(vm, "_deviceControls");

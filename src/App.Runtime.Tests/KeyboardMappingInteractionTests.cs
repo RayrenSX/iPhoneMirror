@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Windows;
 
@@ -212,6 +213,23 @@ internal static partial class Program
                 _ => constrained == (.5, .5), }, "Directional picking reversed the selected gesture.");
         }
         Console.WriteLine("PASS shared letterbox rejection, content coordinates, iPhone/iPad portrait/landscape, four rotations, direction/reversal, 100/125/150/200% scaling.");
+        foreach (var dpi in new[] { 1d, 1.25, 1.5, 2 })
+        foreach (var (preview, picture, area) in new[] {
+            (new Rect(100,100,1000,600), new Rect(450,100,300,600), new Rect(0,0,1920,1080)),
+            (new Rect(100,100,600,900), new Rect(100,400,600,300), new Rect(0,0,1920,1080)),
+            (new Rect(500,100,300,650), new Rect(500,100,300,650), new Rect(0,0,1920,1080)),
+            (new Rect(-1500,100,800,700), new Rect(-1200,100,200,700), new Rect(-1920,0,1920,1080)) })
+        {
+            Rect Scale(Rect value) => new(value.X * dpi, value.Y * dpi, value.Width * dpi, value.Height * dpi);
+            var placement = KeyboardMappingOverlayWindow.PlacePickingToolbar(Scale(preview), Scale(picture), Scale(area),
+                new Size(200 * dpi, 40 * dpi), 8 * dpi);
+            MappingAssert(!placement.IntersectsWith(Scale(picture)) && Scale(area).Contains(placement),
+                "The picking toolbar covers the picture or escapes its monitor at different DPI/origins.");
+        }
+        var full = new Rect(0, 0, 1920, 1080);
+        MappingAssert(full.Contains(KeyboardMappingOverlayWindow.PlacePickingToolbar(full, full, full, new Size(200, 40), 8)),
+            "Fullscreen fallback left its visible display.");
+        Console.WriteLine("PASS picking hint placement: side/top bars, outside narrow preview, negative monitor origin and 100/125/150/200% DPI.");
     }
 
     private static void TestMappingOverlayInteraction(App app, string output)
@@ -254,10 +272,26 @@ internal static partial class Program
             MappingAssert(overlay.ActualWidth > 1000, "Overlay failed to follow owner client resize.");
             KeyboardMappingEntry? picked = null;
             var completions = 0;
+            ActivateMappingTestWindow(owner);
             overlay.BeginPick(new(entry, surface, result => { picked = result; ++completions; }));
             AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
             MappingAssert(overlay.IsPicking && overlay.IsHitTestVisible, "Picking did not enable input.");
             SaveWindowRender(overlay, Path.Combine(output, "overlay-picking.png"));
+            var pickingToolbar = (Window)KeyboardField(overlay, "_pickingToolbar");
+            var toolbarBounds = (Rect)KeyboardField(overlay, "_toolbarScreenBounds");
+            var videoBounds = PreviewCoordinateMapper.ContentRect((int)KeyboardField(overlay, "_pixelWidth"),
+                (int)KeyboardField(overlay, "_pixelHeight"), surface.Width, surface.Height);
+            var nativeOrigin = overlay.PointToScreen(new Point()); videoBounds.Offset(nativeOrigin.X, nativeOrigin.Y);
+            MappingAssert(!toolbarBounds.IntersectsWith(videoBounds), "The picking hint covers the video instead of its black bars.");
+            MappingAssert(pickingToolbar.ActualHeight < 50 && pickingToolbar.ActualWidth < 500,
+                $"The single-row picking hint is oversized: {pickingToolbar.ActualWidth}x{pickingToolbar.ActualHeight}.");
+            var hintOrigin = pickingToolbar.PointToScreen(new Point());
+            var hintEnd = pickingToolbar.PointToScreen(new Point(pickingToolbar.ActualWidth, pickingToolbar.ActualHeight));
+            MappingAssert((hintOrigin - toolbarBounds.TopLeft).Length < 2 && (hintEnd - toolbarBounds.BottomRight).Length < 3,
+                $"The actual hint window differs from its clear-of-video placement: actual={hintOrigin}..{hintEnd}, requested={toolbarBounds}.");
+            MappingAssert(MappingSendMessage(new WindowInteropHelper(pickingToolbar).Handle, 0x21, 0, 0) == 3 &&
+                MappingGetForeground() == hwnd, "Showing or clicking the hint steals the picking window's activation.");
+            SaveWindowRender(pickingToolbar, Path.Combine(output, "picking-toolbar.png"));
             // Real native mouse messages enter WPF's input pipeline. Coordinates
             // stay below the small toolbar and inside the known video rectangle.
             var x = (int)(overlay.ActualWidth * .5);
@@ -281,24 +315,27 @@ internal static partial class Program
                 inputTrace.Clear();
                 var current = entry with { Action = action };
                 overlay.BeginPick(new(current, surface, result => picked = result));
-                AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
                 var end = action switch
                 {
                     MappedTouchAction.SwipeUp => (.5, .35), MappedTouchAction.SwipeDown => (.5, .8),
                     MappedTouchAction.SwipeLeft => (.3, .6), MappedTouchAction.SwipeRight => (.7, .6),
                     MappedTouchAction.Swipe => (.7, .35), _ => (.5, .6),
                 };
-                var pointerDown = false;
                 void Pointer(int message, double nx, double ny)
                 {
                     var point = PreviewCoordinateMapper.Project(nx, ny, (int)KeyboardField(overlay, "_pixelWidth"),
                         (int)KeyboardField(overlay, "_pixelHeight"), surface.Width, surface.Height);
                     var basePoint = overlay.PointToScreen(new Point());
-                    MappingSetCursorPos((int)(basePoint.X + point.X), (int)(basePoint.Y + point.Y));
-                    if (message == 0x201) pointerDown = true;
-                    if (message == 0x202) pointerDown = false;
-                    MappingSendMessage(hwnd, message, pointerDown ? 1 : 0,
-                        (nint)(((int)point.Y << 16) | (int)point.X));
+                    var target = new MappingInputPoint((int)(basePoint.X + point.X), (int)(basePoint.Y + point.Y));
+                    MappingSetCursorPos(target.X, target.Y);
+                    AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
+                    if (message == 0x201)
+                    {
+                        MappingAssert(MappingWindowFromPoint(target) == hwnd, "The test target is covered by another window.");
+                        MappingMouseEvent(2, 0, 0, 0, 0);
+                    }
+                    if (message == 0x202) MappingMouseEvent(4, 0, 0, 0, 0);
                 }
                 // BeginPick changes a click-through HWND into an input surface.
                 // Deliver the move/enter transition before the button event,
@@ -317,15 +354,80 @@ internal static partial class Program
                     MappingAssert(Math.Abs(picked!.EndX - end.Item1) < .01 && Math.Abs(picked.EndY - end.Item2) < .01 &&
                         picked.DurationMs >= 80, $"{action} picking lost drag endpoint or measured duration.");
             }
+            // The old panel covered the top of a portrait phone. Pick there
+            // using the same native input route as ordinary point selection.
+            overlay.BeginPick(new(entry, surface, result => picked = result));
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+            var topTarget = (Point)KeyboardCall(overlay, "Project", .5d, .02d)!;
+            var topScreen = overlay.PointToScreen(topTarget);
+            var baseScreen = overlay.PointToScreen(new Point());
+            var topX = (int)(topScreen.X - baseScreen.X); var topY = (int)(topScreen.Y - baseScreen.Y);
+            MappingSetCursorPos((int)topScreen.X, (int)topScreen.Y);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
+            MappingAssert(MappingWindowFromPoint(new((int)topScreen.X, (int)topScreen.Y)) == hwnd,
+                "The top-of-picture test target is covered by another window.");
+            MappingMouseEvent(2, 0, 0, 0, 0); AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
+            MappingMouseEvent(4, 0, 0, 0, 0); AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
+            MappingAssert(!overlay.IsPicking && picked is not null && Math.Abs(picked.Y - .02) < .01,
+                $"The former hint location still blocks selecting the top of the picture: picking={overlay.IsPicking}, point={picked?.X:F3},{picked?.Y:F3}, target={topTarget}, native={topX},{topY}, foreground={MappingGetForeground()}, overlay={hwnd}.");
+            overlay.BeginPick(new(entry with { Action = MappedTouchAction.Swipe }, surface, result => picked = result));
+            var retry = (Button)KeyboardField(overlay, "_retry");
+            SetKeyboardField(overlay, "_start", ((double, double)?)(.2, .3));
+            void ClickHintButton(Button button)
+            {
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+                var target = button.PointToScreen(new Point(button.ActualWidth / 2, button.ActualHeight / 2));
+                MappingSetCursorPos((int)target.X, (int)target.Y);
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(40));
+                MappingAssert(MappingWindowFromPoint(new((int)target.X, (int)target.Y)) == new WindowInteropHelper(pickingToolbar).Handle,
+                    "The hint button is covered by another window.");
+                MappingMouseEvent(2, 0, 0, 0, 0); AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
+                MappingMouseEvent(4, 0, 0, 0, 0); AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
+            }
+            ClickHintButton(retry);
+            MappingAssert(overlay.IsPicking && KeyboardField(overlay, "_start") is null,
+                "Retry cancelled the picker or retained the previous drag start.");
+            MappingAssert(MappingGetForeground() == hwnd, "The hint button stole activation from the picker.");
+            var hintRow = (StackPanel)((Border)KeyboardField(overlay, "_toolbar")).Child;
+            ClickHintButton(hintRow.Children.OfType<Button>().Last());
+            MappingAssert(!overlay.IsPicking && picked is null && !pickingToolbar.IsVisible,
+                "Cancel left the picker or its hint window visible.");
+            var exclusion = new Rect(nativeOrigin.X + 100, nativeOrigin.Y + 100, 200, 40);
+            SetKeyboardField(overlay, "_toolbarOverVideo", true);
+            SetKeyboardField(overlay, "_toolbarScreenBounds", exclusion);
+            KeyboardCall(overlay, "UpdatePickingToolbarOcclusion", overlay.PointFromScreen(exclusion.TopLeft + new Vector(30, 20)));
+            MappingAssert(pickingToolbar.Opacity == 0 && !pickingToolbar.IsHitTestVisible,
+                "The fullscreen hint does not get out of the picking pointer's way.");
+            KeyboardCall(overlay, "UpdatePickingToolbarOcclusion", new Point(0, 0));
+            MappingAssert(pickingToolbar.Opacity == 1 && pickingToolbar.IsHitTestVisible,
+                "The fullscreen hint does not return after the pointer leaves it.");
+            // The fallback over a full-screen image must never swallow a
+            // target, including a pointer that jumps directly onto the hint.
+            KeyboardCall(pickingToolbar, "SetClickThrough", true);
+            MappingAssert(MappingSendMessage(new WindowInteropHelper(pickingToolbar).Handle, 0x84, 0, 0) == -1 &&
+                (MappingGetStyle(new WindowInteropHelper(pickingToolbar).Handle, -20).ToInt64() & 0x20) != 0,
+                "Fullscreen fallback can intercept a click intended for the video.");
+            foreach (var language in new[] { "zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP" })
+            {
+                LocalizationService.SetLanguage(language);
+                overlay.BeginPick(new(entry with { Action = MappedTouchAction.Swipe }, surface, _ => { }));
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(20));
+                MappingAssert(pickingToolbar.ActualHeight < 50 && ReferenceEquals(pickingToolbar, KeyboardField(overlay, "_pickingToolbar")),
+                    "Picking rebuilt its hint window or wrapped it to multiple rows.");
+                SaveWindowRender(pickingToolbar, Path.Combine(output, "toolbar-" + language + ".png"));
+                overlay.CancelPick();
+            }
+            LocalizationService.SetLanguage("zh-CN");
             overlay.BeginPick(new(entry, surface, result => { picked = result; ++completions; }));
             overlay.Update(surface with { Rotation = 1 }, [entry]);
             MappingAssert(completions == 2 && picked is null && !overlay.IsPicking, "Rotation left an invalid pick active.");
             overlay.BeginPick(new(entry, surface with { Rotation = 1 }, result => { picked = result; ++completions; }));
             owner.Hide(); overlay.Update(surface with { Rotation = 1 }, []);
             MappingAssert(completions == 3 && !overlay.IsVisible, "Hidden/disconnected surface retained a ghost picker.");
+            MappingAssert(!pickingToolbar.IsVisible, "Hiding the owner left its picking hint behind.");
             Console.WriteLine("PASS real owned HWND overlay, rendered enabled/disabled/deleted markers, click-through, resize, native click and all eight action picks, timed drag, automatic exit, rotation cancellation and hidden-owner cleanup.");
         }
-        finally { overlay.Close(); owner.Close(); }
+        finally { MappingMouseEvent(4, 0, 0, 0, 0); overlay.Close(); owner.Close(); }
     }
 
     private static int MappingOverlayPixelCount(Window window)
@@ -434,6 +536,9 @@ internal static partial class Program
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint MappingGetStyle(nint hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SendMessageW")] private static extern nint MappingSendMessage(nint hwnd, int message, nint wParam, nint lParam);
     [DllImport("user32.dll", EntryPoint = "SetCursorPos")] private static extern bool MappingSetCursorPos(int x, int y);
+    [StructLayout(LayoutKind.Sequential)] private readonly record struct MappingInputPoint(int X, int Y);
+    [DllImport("user32.dll", EntryPoint = "WindowFromPoint")] private static extern nint MappingWindowFromPoint(MappingInputPoint point);
+    [DllImport("user32.dll", EntryPoint = "mouse_event")] private static extern void MappingMouseEvent(uint flags, uint dx, uint dy, uint data, nuint extra);
     [DllImport("user32.dll", EntryPoint = "SetFocus")] private static extern nint MappingSetFocus(nint hwnd);
     [DllImport("user32.dll", EntryPoint = "SetForegroundWindow")] private static extern bool MappingSetForeground(nint hwnd);
     [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")] private static extern uint MappingWindowThread(nint hwnd, out uint process);

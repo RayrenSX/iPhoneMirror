@@ -9,6 +9,23 @@ remains under its upstream license.
 The root GNU General Public License v3.0 only applies to original iPhoneMirror
 material and does not replace, narrow or relicense any component listed below.
 
+## ClassIsland toolbar editing reference
+
+The toolbar customization flow was initially adapted from ClassIsland's component
+editor, copyright its contributors, under the GNU General Public License v3.
+The earlier container wrapping and drag insertion adaptations have since been
+removed. The current basic editor retains the idea of an action library and
+contextual selection tools, with WPF-specific focus animation and app settings.
+Direct card reordering now uses a local WPF mouse-capture implementation, rather
+than the earlier upstream drag insertion adaptation.
+
+- Upstream: https://github.com/ClassIsland/ClassIsland
+- Referenced revision: `235914a2fac1733cc2a169457c7bad4edb2ca2f6`
+- Reference UI: `ClassIsland/Controls/EditMode/EditModeView.axaml` and
+  `ClassIsland/MainWindow.axaml`.
+- Local UI: `src/App/Windows/PreviewToolbarSettingsWindow.xaml` and `.xaml.cs`.
+- License text: the root `LICENSE` contains GPLv3.
+
 ## quicktime_video_hack protocol fixtures
 
 The binary fixtures in `src/Core/tests/fixtures/quicktime_video_hack/` are

@@ -277,6 +277,12 @@ IM_API std::int32_t IM_CALL im_wireless_receiver_start(
 IM_API std::int32_t IM_CALL im_wireless_receiver_start_ex(
     const wchar_t* receiver_name, const wchar_t* host_path,
     std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate);
+// The original AirPlay backend advertises this RAOP TCP port via DNS-SD.
+// Existing entry points retain their default port for ABI compatibility.
+IM_API std::int32_t IM_CALL im_wireless_receiver_start_with_port(
+    const wchar_t* receiver_name, const wchar_t* host_path,
+    std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate,
+    std::uint32_t raop_port);
 IM_API void IM_CALL im_wireless_receiver_stop();
 IM_API std::int32_t IM_CALL im_wireless_receiver_get_status(
     std::int32_t* running, std::int32_t* ready);

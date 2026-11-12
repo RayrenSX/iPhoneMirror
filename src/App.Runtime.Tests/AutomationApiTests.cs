@@ -38,7 +38,7 @@ internal static partial class Program
         }
         void OpenDeveloper()
         {
-            for (var i = 0; i < 5; i++) KeyboardCall(window, "OnVersionClick", window, new System.Windows.RoutedEventArgs());
+            OpenDeveloperThroughAbout(window);
             developer = (IPhoneMirror.App.Windows.DeveloperToolsWindow)KeyboardField(window, "_developerToolsWindow");
             Verify(developer.IsVisible, "Version click entry did not open developer tools.");
         }

@@ -727,9 +727,19 @@ std::int32_t IM_CALL im_wireless_receiver_start(const wchar_t* receiver_name,
 std::int32_t IM_CALL im_wireless_receiver_start_ex(const wchar_t* receiver_name,
     const wchar_t* host_path, std::uint32_t width, std::uint32_t height,
     std::uint32_t frame_rate) {
+    return im_wireless_receiver_start_with_port(receiver_name, host_path,
+        width, height, frame_rate, 5001);
+}
+
+std::int32_t IM_CALL im_wireless_receiver_start_with_port(const wchar_t* receiver_name,
+    const wchar_t* host_path, std::uint32_t width, std::uint32_t height,
+    std::uint32_t frame_rate, std::uint32_t raop_port) {
     if (!receiver_name || !*receiver_name || !host_path || !*host_path)
         return fail(iPhoneMirror::Result::InvalidArgument,
             L"Wireless receiver name and host path are required");
+    if (raop_port == 0 || raop_port > 65535 || raop_port == 7001 || raop_port == 8090)
+        return fail(iPhoneMirror::Result::InvalidArgument,
+            L"RAOP port must be 1-65535 and differ from AirPlay (7001) and DLNA (8090)");
     std::shared_lock initialization_lock(initialization_mutex);
     std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
     {
@@ -758,7 +768,7 @@ std::int32_t IM_CALL im_wireless_receiver_start_ex(const wchar_t* receiver_name,
         if (!supported)
             return fail(iPhoneMirror::Result::InvalidArgument,
                 L"Unsupported AirPlay display capability profile");
-        receiver->start(receiver_name, host_path, width, height, frame_rate);
+        receiver->start(receiver_name, host_path, width, height, frame_rate, raop_port);
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
     } catch (const std::exception& error) {

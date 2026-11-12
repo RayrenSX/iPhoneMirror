@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -9,6 +9,7 @@ namespace IPhoneMirror.App.Runtime.Tests;
 
 internal static partial class Program
 {
+
     // Explicit hardware entry point; no fault injection or synthetic Ready state.
     private static int RunLiveCaptureValidation(string udid, string output)
     {
@@ -21,6 +22,20 @@ internal static partial class Program
         try
         {
             using var core = new NativeCore();
+            const string modelPrefix = "auto-product:";
+            var selectedModel = udid.StartsWith(modelPrefix, StringComparison.Ordinal) ? udid[modelPrefix.Length..] : null;
+            if (udid == "auto" || selectedModel is not null)
+            {
+                var devices = core.GetDevices(refreshMetadata: selectedModel is not null)
+                    .Where(d => string.Equals(d.ConnectionType, "USB", StringComparison.OrdinalIgnoreCase))
+                    .Where(d => selectedModel is null || string.Equals(d.ProductType, selectedModel, StringComparison.OrdinalIgnoreCase)).ToArray();
+                InteractionAssert(devices.Length == 1, selectedModel is null
+                    ? "Auto capture requires exactly one connected USB device."
+                    : "Selected model must match exactly one connected USB device.");
+                udid = devices[0].Udid;
+                Console.WriteLine(selectedModel is null ? "Auto-selected the sole connected USB device; identifier omitted."
+                    : $"Selected authorized USB model: {IPhoneMirror.App.Services.AppleProductNames.Resolve(selectedModel)}; identifier omitted.");
+            }
             for (var cycle = 1; cycle <= 2; cycle++)
             {
                 var start = core.StartCapture(udid, playAudio: false);

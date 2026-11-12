@@ -6,6 +6,11 @@ namespace IPhoneMirror.App.Services;
 public sealed record BluetoothClientInfo(string Id, string Name, string Address,
     DateTimeOffset ConnectedAt, string? BoundDeviceName = null) : System.ComponentModel.INotifyPropertyChanged
 {
+    // UI event subscriptions are not device data and must not change Selector identity.
+    public bool Equals(BluetoothClientInfo? other) => other is not null &&
+        Id == other.Id && Name == other.Name && Address == other.Address &&
+        ConnectedAt == other.ConnectedAt && BoundDeviceName == other.BoundDeviceName;
+    public override int GetHashCode() => HashCode.Combine(Id, Name, Address, ConnectedAt, BoundDeviceName);
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     internal void NotifyLanguageChanged() => PropertyChanged?.Invoke(this, new(null));
     public string DisplayName => string.IsNullOrWhiteSpace(Name)

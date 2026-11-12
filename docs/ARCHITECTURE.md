@@ -25,7 +25,7 @@ iPhone USB
                                  ├─ WASAPI playback / OBS app-audio capture
                                  └─ bounded output pipe → FFmpeg AAC/Opus
 
-iPhone/iPad AirPlay/DLNA (one receiver identity, fixed RAOP 5001/AirPlay 7001/
+iPhone/iPad AirPlay/DLNA (one receiver identity, configurable RAOP TCP port, default 5001; AirPlay 7001/
 DLNA 8090/SSDP 1900 plus per-session negotiated media ports)
   └─ combined-mode `iPhoneMirror.WirelessHost.exe`
        ├─ screen-mirroring I420/PCM ─ named pipe IPC

@@ -56,6 +56,35 @@ internal sealed class WirelessDisplayProfile(
 
 internal static class WirelessReceiverConfiguration
 {
+    internal const int DefaultRaopPort = 5001;
+    internal static bool IsValidRaopPort(int port) => port is >= 1 and <= 65535 && port is not (7001 or 8090);
+    internal static int NormalizeRaopPort(int port) => IsValidRaopPort(port) ? port : DefaultRaopPort;
+
+    internal static string? CheckRaopPortAvailability(int port)
+    {
+        if (!IsValidRaopPort(port)) return LocalizationService.Get("WirelessRaopPortInvalid");
+        // An exclusive bind catches occupied/reserved ports without taking
+        // over another application's listener. The receiver binds after this
+        // probe, so the host remains the authority if another process races it.
+        try
+        {
+            using var ipv4 = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp) { ExclusiveAddressUse = true };
+            ipv4.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Any, port));
+            if (System.Net.Sockets.Socket.OSSupportsIPv6)
+            {
+                using var ipv6 = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetworkV6,
+                    System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp) { ExclusiveAddressUse = true, DualMode = false };
+                ipv6.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.IPv6Any, port));
+            }
+            return null;
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            return LocalizationService.Format("WirelessRaopPortUnavailableFormat", port);
+        }
+    }
+
     internal const string DefaultReceiverName = "iPhoneMirror AirPlay";
     internal const string ExecutableName = "iPhoneMirror.WirelessHost.exe";
     internal const string UxPlayExecutableName = "iPhoneMirror.UxPlayHost.exe";

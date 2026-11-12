@@ -52,7 +52,7 @@
             <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="iPhone Mirror  /  DEVICES" FontSize="{DynamicResource CaptionFontSize}" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,10"/>
                 <TextBlock Text="{DynamicResource DeviceBindingTitle}" Style="{StaticResource SubWindowTitle}" FontSize="{DynamicResource PageTitleFontSize}" FontWeight="SemiBold"/>
-                <TextBlock Text="{DynamicResource DeviceBindingWorkspaceHint}" Style="{StaticResource BindingNote}" Margin="0,8,0,0"/>
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DeviceBindingWorkspaceHint}" Style="{StaticResource BindingNote}" Margin="0,8,0,0"/>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="CloseClick" AutomationProperties.Name="{DynamicResource Close}">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
@@ -98,7 +98,7 @@
                         <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasProfiles}" Value="False"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                     </TextBlock>
                     <StackPanel Grid.Row="2" Margin="4,16,4,4">
-                        <TextBlock Text="{DynamicResource DeviceBindingSidebarHint}" Style="{StaticResource BindingNote}" Margin="0,0,0,12"/>
+                        <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DeviceBindingSidebarHint}" Style="{StaticResource BindingNote}" Margin="0,0,0,12"/>
                         <TextBlock Text="{Binding AirPlayReceiverText}" Style="{StaticResource BindingNote}" AutomationProperties.LiveSetting="Polite"/>
                         <Button Content="{DynamicResource SetupRetry}" Click="StartAirPlayClick" Padding="10,10" Margin="0,8,0,0">
                             <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding CanRetryAirPlay}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Button.Style>
@@ -111,7 +111,7 @@
                     <StackPanel animations:SurfaceMotion.Enabled="True" animations:SurfaceMotion.Delay="80" animations:SurfaceMotion.RefreshKey="{Binding SelectedProfile.Id}">
                         <StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasProfile}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></StackPanel.Style>
                         <TextBlock Text="{Binding ProfileTitle}" FontSize="{DynamicResource FontSize22}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                        <TextBlock Text="{DynamicResource DeviceBindingProfileDescription}" Style="{StaticResource BindingNote}" Margin="0,6,0,20"/>
+                        <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DeviceBindingProfileDescription}" Style="{StaticResource BindingNote}" Margin="0,6,0,20"/>
                         <Border Style="{StaticResource BindingSectionCard}">
                             <Grid IsEnabled="{Binding CanInteract}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

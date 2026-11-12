@@ -21,6 +21,15 @@ internal static class WindowWorkAreaController
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
     private static readonly ConditionalWeakTable<Window, object> AttachedWindows = new();
+    private static readonly ConditionalWeakTable<Window, object> OwnerBoundWindows = new();
+
+    // An overlay follows an existing window, including maximized/fullscreen
+    // bounds. Applying ordinary dialog fitting would shrink it independently.
+    internal static void UseOwnerBounds(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        OwnerBoundWindows.TryAdd(window, new object());
+    }
 
     internal static Size GetAvailableSize(Window window)
     {
@@ -43,6 +52,7 @@ internal static class WindowWorkAreaController
     internal static void Attach(Window window)
     {
         ArgumentNullException.ThrowIfNull(window);
+        if (OwnerBoundWindows.TryGetValue(window, out _)) return;
         if (!AttachedWindows.TryAdd(window, new object())) return;
         var designMinWidth = window.MinWidth;
         var designMinHeight = window.MinHeight;

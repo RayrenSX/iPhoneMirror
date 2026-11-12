@@ -44,6 +44,10 @@ internal static partial class Program
                 findings.Add($"{label} scrollbar extends beyond its viewer ({bounds} in {viewer.RenderSize}).");
             if (bar.Orientation == Orientation.Vertical)
             {
+                // Settings deliberately place the gutter outside the content's
+                // symmetric frame padding; their own audit compares frame insets.
+                if (viewer.Name is "ApplicationSettingsScrollViewer" or "ProjectionSettingsScrollViewer" or "ControlSettingsScrollViewer")
+                    continue;
                 var left = viewport.Left - viewer.Padding.Left;
                 var right = viewer.ActualWidth - viewport.Right - viewer.Padding.Right;
                 if (Math.Abs(left - right) > 1)
