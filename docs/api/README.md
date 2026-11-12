@@ -1,6 +1,6 @@
 # Local Automation API
 
-Checked against the source tree on 2026-11-05 (project version `1.8.5-pre4` plus unreleased changes).
+Checked against the source tree on 2026-11-12 (project version `1.8.5-pre5`, source baseline `1eb833a`).
 See the [documentation index](../README.md) and [user guide](../USER_GUIDE.md#自动化控制与调试http-api).
 
 Click the version label on the About page **five times** to open **Developer tools**. In its **Automation API** section, enable the local API, choose a port (default 17890), click **Apply**, and copy the key. Closing Developer tools keeps the API running; exiting iPhoneMirror stops it. The API is disabled by default and listens only on `127.0.0.1`. The controls are no longer in the ordinary mirroring settings panel.
@@ -34,7 +34,7 @@ Ordinary settings are saved in the existing `%LOCALAPPDATA%/iPhoneMirror/setting
 
 `GET /devices/{id}` returns details; `GET /devices/{id}/status` exposes `online`, `connection`, `capturing`, `control`, `capabilities`, and `geometry`. Paths in this document that start with `/devices` are relative to `/api/v1`.
 
-USB/wireless direct control can provide absolute touch, keys and clipboard/text when the appropriate existing service is ready. BLE provides the existing keyboard route; it does **not** promise absolute coordinate taps or arbitrary Unicode text/clipboard. A capture without reverse control can still provide screenshots. Missing metadata stays unknown. Aggregate video-app playback is not represented as a controllable phone.
+USB/wireless direct control can provide absolute touch, keys and clipboard/text when the appropriate existing service is ready. BLE provides the existing keyboard route through this API; the experimental absolute Bluetooth mouse in the preview UI does not extend the API touch capability. BLE does **not** promise absolute coordinate taps or arbitrary Unicode text/clipboard. A capture without reverse control can still provide screenshots. Missing metadata stays unknown. Aggregate video-app playback is not represented as a controllable phone.
 
 Clipboard RPC requires a bridge advertising `iphoneMirror.clipboard.rpc.v1`. Older bridges remain compatible with their existing commands but report this API capability as unavailable. Ship the app and rebuilt bridge together.
 

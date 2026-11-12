@@ -41,7 +41,9 @@ build instructions, and known limitations.
 
 ## Recent development updates
 
-Current main builds on 1.8.5-pre4 with improvements to keyboard forwarding with Chinese IMEs, shortcut release and focus recovery, clipboard timeout recovery, and first-run mode drafts. Windows IME candidate text is not automatically synchronized to the phone; copy composed text and press Ctrl+V in the preview to send it.
+The project version on main is **1.8.5-pre5**. It adds toolbar drag reordering, visibility and icon-only options; toggle/hold shortcuts for independent-window opacity and topmost; and experimental absolute Bluetooth mouse input, disabled by default. Settings retain Application, Projection and Reverse control categories. The Automation API screenshot budget is configurable from 1 to 30 requests per second. See the [pre5 notes](docs/releases/v1.8.5-pre5.md).
+
+Chinese IME key forwarding, shortcut release and focus recovery, clipboard timeout recovery, and first-run mode drafts have also improved. Windows IME candidate text is not automatically synchronized to the phone; copy composed text and press Ctrl+V in the preview to send it.
 
 See the [user guide](docs/USER_GUIDE.md), [IME verification scope](docs/SOGOU_IME_VERIFICATION_2026-10-31.zh-CN.md), and [Changelog](CHANGELOG.md). Changes on main do not imply a new published installer.
 
@@ -286,9 +288,8 @@ video-app casting requires the original receiver.
 
 There is no fixed application-level wireless device count; practical capacity
 depends on CPU/GPU resources, memory and local-network bandwidth.
-The same receiver identity also handles video-app AirPlay/DLNA casting. Fixed
-control/discovery ports are RAOP `5001`, AirPlay `7001`, DLNA `8090`, and SSDP
-`1900`; mirroring and RAOP media ports are negotiated dynamically per session.
+The same receiver identity also handles video-app AirPlay/DLNA casting. The original receiver defaults to RAOP TCP port `5001`; change it under Settings → Projection → Wireless AirPlay and apply. UxPlay uses its own port configuration.
+Fixed control/discovery ports are AirPlay `7001`, DLNA `8090`, and SSDP `1900`; mirroring and RAOP media ports are negotiated dynamically per session.
 
 An administrator Setup creates the `iPhoneMirror Wireless AirPlay` local-subnet
 firewall rule for the wireless host. It is scoped to the host process and local

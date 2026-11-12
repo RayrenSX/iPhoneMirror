@@ -1,6 +1,6 @@
 # 文档索引
 
-本索引按用途组织仓库文档。2026-11-05 核对基线为项目版本 `1.8.5-pre4` 及工作区未发布改动。
+本索引按用途组织仓库文档。2026-11-12 核对基线为项目版本 `1.8.5-pre5`（源码基线 `1eb833a`）。
 下载版本以 [GitHub Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 为准；
 某项功能写入 `main` 或通过源码测试，不表示已经发布，也不表示所有设备已通过验收。
 
@@ -52,7 +52,7 @@
 
 | 主题 | 记录 |
 |---|---|
-| 项目文档核对 | [本次统一完善](DOCUMENTATION_AUDIT_2026-11-05.md) · [2026-10-01 核对](DOCUMENTATION_AUDIT_2026-10-01.md) |
+| 项目文档核对 | [2026-11-12 复审](DOCUMENTATION_AUDIT_2026-11-12.md) · [2026-11-05 完善](DOCUMENTATION_AUDIT_2026-11-05.md) · [2026-10-01 核对](DOCUMENTATION_AUDIT_2026-10-01.md) |
 | GitHub 问题 | [2026-09-23 审计](GITHUB_ISSUE_AUDIT_2026-09-23.md) · [2026-10-01 审计](GITHUB_ISSUE_AUDIT_2026-10-01.md) · [2026-10-01 修复记录](GITHUB_ISSUE_FIXES_2026-10-01.md) |
 | 驱动错误 | [DRIVER_ERROR_AUDIT](DRIVER_ERROR_AUDIT.md) |
 | USB 反控打包与签名错误 | [USB_BACKEND_PACKAGING_REPAIR](USB_BACKEND_PACKAGING_REPAIR.md) |
@@ -84,7 +84,7 @@
 
 ## 文档维护约定
 
-- 用户操作变化：同步中英文 README 和使用教程，再补技术说明。
+- 用户操作变化：同步中文、英文和日文 README 及使用教程，再补技术说明。
 - 协议、驱动、端口、进程或输出行为变化：更新对应专题和架构说明，写明实现入口。
 - 构建与测试变化：同步开发指南、贡献规范和实际脚本；示例默认读取项目版本，避免锁死旧版本。
 - 发布说明描述该版本的变化；审计记录保留日期、范围、证据和未验证项。
