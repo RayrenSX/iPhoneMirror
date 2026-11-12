@@ -1531,6 +1531,8 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="AutomationTitle">開発者 / Automation API</sys:String>
     <sys:String x:Key="AutomationEnable">ローカルAPIを有効にする</sys:String>
     <sys:String x:Key="AutomationPort">ポート</sys:String>
+    <sys:String x:Key="AutomationScreenshotRate">スクリーンショット上限（1～30回/秒）</sys:String>
+    <sys:String x:Key="AutomationInvalidScreenshotRate">1秒あたりのスクリーンショット上限を1～30で入力してください。</sys:String>
     <sys:String x:Key="AutomationApply">適用</sys:String>
     <sys:String x:Key="AutomationRegenerate">キーを再生成</sys:String>
     <sys:String x:Key="AutomationCopyKey">キーをコピー</sys:String>

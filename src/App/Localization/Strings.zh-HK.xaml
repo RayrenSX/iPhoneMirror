@@ -1531,6 +1531,8 @@
     <sys:String x:Key="AutomationTitle">開發者 / Automation API</sys:String>
     <sys:String x:Key="AutomationEnable">啟用本機 API</sys:String>
     <sys:String x:Key="AutomationPort">連接埠</sys:String>
+    <sys:String x:Key="AutomationScreenshotRate">擷取畫面頻率（1–30 次/秒）</sys:String>
+    <sys:String x:Key="AutomationInvalidScreenshotRate">請輸入 1 到 30 之間的每秒擷取畫面次數。</sys:String>
     <sys:String x:Key="AutomationApply">套用</sys:String>
     <sys:String x:Key="AutomationRegenerate">重新產生金鑰</sys:String>
     <sys:String x:Key="AutomationCopyKey">複製金鑰</sys:String>

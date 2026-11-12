@@ -11,6 +11,7 @@ public partial class DeveloperToolsWindow
         var settings = _owner.AutomationConfiguration;
         ApiEnabled.IsChecked = settings.Enabled;
         ApiPort.Text = settings.Port.ToString();
+        ApiScreenshotRate.Text = settings.ScreenshotsPerSecond.ToString();
         _owner.AutomationStateChanged += RefreshAutomationState;
         RefreshAutomationState();
     }
@@ -25,9 +26,12 @@ public partial class DeveloperToolsWindow
     {
         if (!int.TryParse(ApiPort.Text, out var port) || port is < 1024 or > 65535)
         { ApiStatus.SetResourceReference(TextBlock.TextProperty, "AutomationInvalidPort"); return; }
+        if (!int.TryParse(ApiScreenshotRate.Text, out var screenshotRate) || screenshotRate is < 1 or > 30)
+        { ApiStatus.SetResourceReference(TextBlock.TextProperty, "AutomationInvalidScreenshotRate"); return; }
         var settings = _owner.AutomationConfiguration;
         settings.Enabled = ApiEnabled.IsChecked == true;
         settings.Port = port;
+        settings.ScreenshotsPerSecond = screenshotRate;
         await _owner.ConfigureAutomationAsync(settings, save: true);
     }
 

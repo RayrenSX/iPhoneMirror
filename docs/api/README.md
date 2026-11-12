@@ -112,7 +112,7 @@ Screenshots require an already active capture and a decoded frame. Concurrent ca
 
 ## Limits and errors
 
-Defaults: 60 authenticated requests/s (burst 120), 5 screenshot requests/s, two simultaneous encoders, 64 KiB UTF-8 text, 128 KiB JSON, and 64 HTTP connections. Request rates are per credential; applications sharing a key share its budget. Request rate, burst and screenshot rate are configurable under `AutomationApi`; the encoder, payload and connection bounds are implementation limits. The input queue is fail-fast. Release has a separate limited allowance. Path expansion remains bounded by points/duration and the existing transport pacing.
+Defaults: 60 authenticated requests/s (burst 120), 30 screenshot requests/s, two simultaneous encoders, 64 KiB UTF-8 text, 128 KiB JSON, and 64 HTTP connections. The screenshot limit can be set from 1 to 30 per second in **Developer tools → Automation API**, next to the port; click **Apply** to save it and restart the listener. Existing saved limits are retained until changed there. This is a request budget, not a guarantee of 30 distinct PNG frames per second; frame availability and encoding time still apply. Request rates are per credential; applications sharing a key share its budget. Request rate, burst and screenshot rate are configurable under `AutomationApi`; the encoder, payload and connection bounds are implementation limits. The input queue is fail-fast. Release has a separate limited allowance. Path expansion remains bounded by points/duration and the existing transport pacing.
 
 Errors use `{ "error": { "code": "...", "message": "..." }, "requestId": "..." }`:
 

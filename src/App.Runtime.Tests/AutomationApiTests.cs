@@ -27,7 +27,7 @@ internal static partial class Program
         var keyPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "iphoneMirror-ui-key-" + Guid.NewGuid().ToString("N"));
         var settingsPath = keyPath + ".json";
         SetKeyboardField(window, "_automationKeys", new AutomationKeyStore(keyPath));
-        app.UpdateSettings.AutomationApi = new AutomationSettings();
+        app.UpdateSettings.AutomationApi = new AutomationSettings { ScreenshotsPerSecond = 5 };
         void Verify(bool passed, string message)
         { if (!passed) throw new InvalidOperationException(message); }
         void WaitUntil(Func<bool> ready)
@@ -46,7 +46,7 @@ internal static partial class Program
         {
             Verify(window.FindName("ApiEnabled") is null, "API controls remain in ordinary settings.");
             OpenDeveloper();
-            foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US" })
+            foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "ja-JP", "en-US" })
             {
                 DisplayLanguage(language);
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(120));
@@ -57,6 +57,9 @@ internal static partial class Program
                 SaveWindowRender(developer, System.IO.Path.Combine(output, "automation-settings-" + language + ".png"));
             }
             var portBox = (System.Windows.Controls.TextBox)developer!.FindName("ApiPort");
+            var screenshotRateBox = (System.Windows.Controls.TextBox)developer.FindName("ApiScreenshotRate");
+            Verify(new AutomationSettings().ScreenshotsPerSecond == 30 && screenshotRateBox.Text == "5",
+                "Screenshot default is not 30 or opening settings overwrote a saved custom limit.");
             var enabled = (System.Windows.Controls.CheckBox)developer.FindName("ApiEnabled");
             portBox.Text = "80";
             KeyboardCall(developer, "OnAutomationApply", developer, new System.Windows.RoutedEventArgs());
@@ -64,8 +67,18 @@ internal static partial class Program
             var probe = new TcpListener(IPAddress.Loopback, 0);
             probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
             portBox.Text = port.ToString(); enabled.IsChecked = true;
+            foreach (var invalidRate in new[] { "0", "31", "x" })
+            {
+                screenshotRateBox.Text = invalidRate;
+                KeyboardCall(developer, "OnAutomationApply", developer, new System.Windows.RoutedEventArgs());
+                Verify(((System.Windows.Controls.TextBlock)developer.FindName("ApiStatus")).Text == DisplayL("AutomationInvalidScreenshotRate") &&
+                    !window.AutomationRunning, "Invalid screenshot rate started the listener.");
+            }
+            screenshotRateBox.Text = "30";
             KeyboardCall(developer, "OnAutomationApply", developer, new System.Windows.RoutedEventArgs());
             WaitUntil(() => window.AutomationRunning && app.UpdateSettings.AutomationApi.Enabled);
+            Verify(app.UpdateSettings.AutomationApi.ScreenshotsPerSecond == 30, "Applying the screenshot rate left the old limit active.");
+            SaveWindowRender(developer, System.IO.Path.Combine(output, "automation-settings-30.png"));
             var key = new AutomationKeyStore(keyPath).LoadOrCreate();
             using var http = new HttpClient { BaseAddress = new Uri(window.AutomationAddress) };
             Verify(http.GetAsync("/api/docs").GetAwaiter().GetResult().IsSuccessStatusCode, "UI enable did not serve docs.");
@@ -73,6 +86,8 @@ internal static partial class Program
             developer.Close(); OpenDeveloper();
             Verify(window.AutomationRunning && ((System.Windows.Controls.CheckBox)developer!.FindName("ApiEnabled")).IsChecked == true,
                 "Closing/reopening developer tools lost the running server or configuration.");
+            Verify(((System.Windows.Controls.TextBox)developer.FindName("ApiScreenshotRate")).Text == "30",
+                "Reopening developer tools lost the screenshot rate.");
             KeyboardCall(developer, "OnAutomationRegenerate", developer, new System.Windows.RoutedEventArgs());
             WaitUntil(() => window.AutomationRunning && new AutomationKeyStore(keyPath).LoadOrCreate() != key);
             http.DefaultRequestHeaders.Add("X-API-Key", key);
@@ -96,8 +111,10 @@ internal static partial class Program
                 app.IsUiPreviewMode = false;
                 var configuration = window.AutomationConfiguration;
                 configuration.Enabled = true;
+                configuration.ScreenshotsPerSecond = 17;
                 AwaitMapping(window.ConfigureAutomationAsync(configuration, save: true));
-                Verify(window.AutomationRunning && store.Load().AutomationApi.Enabled && store.Load().AutomationApi.Port == port,
+                Verify(window.AutomationRunning && store.Load().AutomationApi.Enabled && store.Load().AutomationApi.Port == port &&
+                    store.Load().AutomationApi.ScreenshotsPerSecond == 17,
                     "API configuration did not persist.");
                 configuration.Enabled = false;
                 AwaitMapping(window.ConfigureAutomationAsync(configuration, save: true));
@@ -124,7 +141,7 @@ internal static partial class Program
             if (System.IO.File.Exists(keyPath)) System.IO.File.Delete(keyPath);
             if (System.IO.File.Exists(settingsPath)) System.IO.File.Delete(settingsPath);
         }
-        Console.WriteLine("Developer API settings: entry, four languages, validation, enable/auth, reopen, rotate, stop/rebind, persistence and save-failure cleanup passed.");
+        Console.WriteLine("Developer API settings: entry, five languages, screenshot rate validation/apply/reopen/persistence, enable/auth, rotate, stop/rebind and save-failure cleanup passed.");
         return 0;
     }
 
@@ -148,7 +165,7 @@ internal static partial class Program
         await using var host = new AutomationApiHost(service);
         var probe = new TcpListener(IPAddress.Loopback, 0);
         probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
-        var settings = new AutomationSettings { Enabled = true, Port = port, RequestBurst = 500, RequestsPerSecond = 500, ScreenshotsPerSecond = 30 };
+        var settings = new AutomationSettings { Enabled = true, Port = port, RequestBurst = 500, RequestsPerSecond = 500 };
         var key = new string('A', 64);
         await host.StartAsync(settings, key);
         using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
@@ -209,6 +226,14 @@ internal static partial class Program
         var png = await http.GetAsync("/api/v1/devices/a/screenshot");
         var bytes = await png.Content.ReadAsByteArrayAsync();
         Expect(png.Content.Headers.ContentType?.MediaType == "image/png" && bytes.Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }), "Screenshot is not PNG.");
+        var screenshotBurst = await Task.WhenAll(Enumerable.Range(0, 12)
+            .Select(_ => http.GetAsync("/api/v1/devices/a/screenshot")));
+        foreach (var response in screenshotBurst)
+        {
+            using (response)
+                Expect(response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType == "image/png",
+                    "Default screenshot budget rejected a burst above five requests.");
+        }
         backend.Supported = false;
         await Error(await http.GetAsync("/api/v1/devices/a/clipboard"), 422, "CAPABILITY_NOT_SUPPORTED");
         backend.Supported = true;

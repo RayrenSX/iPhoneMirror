@@ -46,8 +46,21 @@
                             <TextBlock Text="{DynamicResource AutomationHelp}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,0"/>
                             <CheckBox x:Name="ApiEnabled" Content="{DynamicResource AutomationEnable}" Margin="0,10,0,8"/>
                             <TextBlock Text="127.0.0.1"/>
-                            <TextBlock Text="{DynamicResource AutomationPort}" Margin="0,8,0,4"/>
-                            <TextBox x:Name="ApiPort" MaxLength="5" AutomationProperties.Name="{DynamicResource AutomationPort}"/>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="16"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{DynamicResource AutomationPort}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                                <TextBox x:Name="ApiPort" Grid.Row="1" MaxLength="5" AutomationProperties.Name="{DynamicResource AutomationPort}"/>
+                                <TextBlock Grid.Column="2" Text="{DynamicResource AutomationScreenshotRate}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                                <TextBox x:Name="ApiScreenshotRate" Grid.Row="1" Grid.Column="2" MaxLength="2" AutomationProperties.Name="{DynamicResource AutomationScreenshotRate}"/>
+                            </Grid>
                             <TextBlock x:Name="ApiStatus" Margin="0,8,0,4" TextWrapping="Wrap"/>
                             <TextBlock x:Name="ApiAddress" TextWrapping="Wrap"/>
                             <TextBlock Text="API Key: ••••••••••••" Margin="0,8,0,4"/>

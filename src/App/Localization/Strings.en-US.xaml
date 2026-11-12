@@ -1531,6 +1531,8 @@ Pair, select and save.</system:String>
     <sys:String x:Key="AutomationTitle">Developer / Automation API</sys:String>
     <sys:String x:Key="AutomationEnable">Enable local API</sys:String>
     <sys:String x:Key="AutomationPort">Port</sys:String>
+    <sys:String x:Key="AutomationScreenshotRate">Screenshot limit (1–30/s)</sys:String>
+    <sys:String x:Key="AutomationInvalidScreenshotRate">Enter a screenshot limit from 1 to 30 per second.</sys:String>
     <sys:String x:Key="AutomationApply">Apply</sys:String>
     <sys:String x:Key="AutomationRegenerate">Regenerate key</sys:String>
     <sys:String x:Key="AutomationCopyKey">Copy key</sys:String>

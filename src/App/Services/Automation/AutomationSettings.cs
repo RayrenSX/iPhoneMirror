@@ -10,7 +10,7 @@ internal sealed class AutomationSettings
     public int Port { get; set; } = 17890;
     public int RequestsPerSecond { get; set; } = 60;
     public int RequestBurst { get; set; } = 120;
-    public int ScreenshotsPerSecond { get; set; } = 5;
+    public int ScreenshotsPerSecond { get; set; } = 30;
     public string[] Permissions { get; set; } = ["device.read", "device.control", "screen.capture",
         "keyboard.input", "clipboard.read", "clipboard.write"];
     internal AutomationSettings Clone() => new()
