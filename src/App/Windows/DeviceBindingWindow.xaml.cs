@@ -47,20 +47,24 @@ public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindo
     private readonly CancellationTokenSource _lifetime = new();
     private Task _refreshTask = Task.CompletedTask;
     private Task _receiverTask = Task.CompletedTask;
+    private Task _bluetoothTask = Task.CompletedTask;
+    private Task<IReadOnlyList<BluetoothClientInfo>>? _bluetoothDiscoveryTask;
     private bool _airPlayStarting, _airPlayReady, _airPlayFailed;
     private bool _working, _closed, _closeRequested;
     private string? _targetIdentity;
     private bool _targetPending;
     private System.Windows.Threading.DispatcherOperation? _pendingDeviceUpdate;
     private readonly HashSet<DeviceViewModel> _observedDevices = [];
-    internal Func<Task<IReadOnlyList<BluetoothClientInfo>>> ReadBluetoothClientsAsync { get; set; }
+    internal Func<CancellationToken, Task<IReadOnlyList<BluetoothClientInfo>>> ReadBluetoothClientsAsync { get; set; }
+    internal TimeSpan BluetoothDiscoveryTimeout { get; set; } = TimeSpan.FromSeconds(10);
     internal Func<CancellationToken, Task> ScanDevicesAsync { get; set; }
     internal Func<CancellationToken, Task<bool>> StartAirPlayReceiverAsync { get; set; }
+    internal Func<string, CancellationToken, Task<bool>> StartBluetoothPeripheralAsync { get; set; }
     internal Func<string, string, bool> ConfirmOperation { get; set; }
     internal Func<string, string?> RequestProfileName { get; set; }
     private readonly HashSet<string> _removedWiredIdentities = new(StringComparer.OrdinalIgnoreCase);
     private string _activityText = "";
-    internal Task CleanupTask => Task.WhenAll(_refreshTask, _receiverTask);
+    internal Task CleanupTask => Task.WhenAll(_refreshTask, _receiverTask, _bluetoothTask);
     public bool CanRetryAirPlay => _airPlayFailed && !_airPlayStarting;
     public string AirPlayReceiverText => _airPlayStarting ? L("SetupToolsReceiverStarting") :
         _airPlayReady ? L("DeviceBindingAirPlayReceiving") : _airPlayFailed ? L("SetupAirPlayFailed") : "";
@@ -116,6 +120,8 @@ public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindo
         _manager = manager ?? DeviceBindingManager.Shared;
         ReadBluetoothClientsAsync = _viewModel.GetReverseBluetoothClientsAsync;
         StartAirPlayReceiverAsync = EnsureAirPlayReceiverAsync;
+        StartBluetoothPeripheralAsync = (target, token) =>
+            _viewModel.StartBluetoothPeripheralForConfigurationAsync(target, this, token);
         ScanDevicesAsync = async token =>
         {
             await _viewModel.SetupScanAsync(false, token);
@@ -233,9 +239,15 @@ public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindo
         else AppPromptWindow.Inform(L("DeviceBindingTitle"), result.Error ?? L("DeviceBindingCreateFailed"), this);
     }
 
-    private async void ConnectBluetoothClick(object sender, RoutedEventArgs e)
+    private void ConnectBluetoothClick(object sender, RoutedEventArgs e)
     {
-        if (_previewOnly || IsWorking || Profile is null) return;
+        if (IsWorking || _closed) return;
+        _bluetoothTask = ConnectBluetoothAsync();
+    }
+
+    private async Task ConnectBluetoothAsync()
+    {
+        if (_previewOnly || _closed || IsWorking || Profile is null) return;
         var profileId = Profile.Id;
         var profileName = Profile.DisplayName;
         var target = Profile.WiredIdentity?.Udid ?? Profile.AirPlayIdentity?.StableId;
@@ -243,11 +255,11 @@ public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindo
         IsWorking = true; ActivityText = L("SetupToolsBluetoothStarting");
         try
         {
-            if (!await _viewModel.StartBluetoothPeripheralForConfigurationAsync(target))
+            if (!await StartBluetoothPeripheralAsync(target, _lifetime.Token))
                 throw new InvalidOperationException(L("DeviceBindingBluetoothStartFailed"));
             _lifetime.Token.ThrowIfCancellationRequested();
             var clientId = BluetoothConnectionWindow.Show(this, profileName,
-                ReadBluetoothClientsAsync, _viewModel.UnbindBluetoothControlBinding);
+                ReadBluetoothClientsForWindowAsync, _viewModel.UnbindBluetoothControlBinding);
             _lifetime.Token.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(clientId))
             {
@@ -378,7 +390,7 @@ public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindo
     private async Task RefreshBluetoothClientsAsync()
     {
         if (_previewOnly) return;
-        var clients = await ReadBluetoothClientsAsync();
+        var clients = await ReadBluetoothClientsForWindowAsync();
         if (_closed || IsWorking || _lifetime.IsCancellationRequested) return;
         for (var i = BluetoothClients.Count - 1; i >= 0; i--)
             if (!clients.Any(c => string.Equals(c.Id, BluetoothClients[i].Id, StringComparison.OrdinalIgnoreCase))) BluetoothClients.RemoveAt(i);
@@ -390,6 +402,30 @@ public partial class DeviceBindingWindow : IPhoneMirror.UI.Controls.RoundedWindo
         }
         SynchronizeSelectedDevices();
         NotifyAll();
+    }
+
+    private async Task<IReadOnlyList<BluetoothClientInfo>> ReadBluetoothClientsForWindowAsync()
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        cancellation.CancelAfter(BluetoothDiscoveryTimeout);
+        cancellation.Token.ThrowIfCancellationRequested();
+        // Reuse an in-flight native query even if a driver ignores cancellation.
+        // Closing the window can finish cleanup without starting more queries
+        // or allowing a late result to update the UI.
+        if (_bluetoothDiscoveryTask is null || _bluetoothDiscoveryTask.IsCompleted)
+        {
+            _bluetoothDiscoveryTask = ReadBluetoothClientsAsync(cancellation.Token);
+            _ = _bluetoothDiscoveryTask.ContinueWith(task =>
+                DiagnosticLogger.Exception("device-binding", "bluetooth_discovery_failed",
+                    task.Exception!.GetBaseException()), CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+        try { return await _bluetoothDiscoveryTask.WaitAsync(cancellation.Token); }
+        catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
+        {
+            throw new TimeoutException(L("UiBluetoothRefreshFailed"));
+        }
     }
 
     private void CreateProfilesForConnectedUsbDevices()

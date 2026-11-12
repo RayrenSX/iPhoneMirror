@@ -26,7 +26,7 @@ internal static partial class Program
         var receiverStarts = 0;
         var binder = new DeviceBindingWindow(owner, devices, vm, manager: manager)
         {
-            ReadBluetoothClientsAsync = () => Task.FromResult<IReadOnlyList<BluetoothClientInfo>>([]),
+            ReadBluetoothClientsAsync = _ => Task.FromResult<IReadOnlyList<BluetoothClientInfo>>([]),
             ScanDevicesAsync = _ => Task.CompletedTask,
             StartAirPlayReceiverAsync = _ => { receiverStarts++; return receiverReady.Task; }
         };
@@ -115,10 +115,12 @@ internal static partial class Program
                 "Delete changed its target or immediately recreated a connected USB profile.");
             // A result that finishes after close must never repopulate the closed window.
             var pending = new TaskCompletionSource<IReadOnlyList<BluetoothClientInfo>>();
-            binder.ReadBluetoothClientsAsync = () => pending.Task;
+            binder.ReadBluetoothClientsAsync = _ => pending.Task;
             var refresh = (Task)Call("RefreshBluetoothClientsAsync")!;
             binder.Close(); pending.SetResult([new("late", "Late client", "", DateTimeOffset.UtcNow)]);
-            ToolsComplete(refresh); ToolsComplete(binder.CleanupTask);
+            try { ToolsComplete(refresh); }
+            catch (OperationCanceledException) { }
+            ToolsComplete(binder.CleanupTask);
             check(binder.BluetoothClients.Count == 0, "A late refresh changed a closed binder.");
             var surface = new System.Windows.Controls.Border { Width = 120, Height = 80, Opacity = .55 };
             var animationWindow = new Window { Width = 180, Height = 140, Content = surface, ShowInTaskbar = false };
@@ -141,7 +143,7 @@ internal static partial class Program
             Console.WriteLine("PASS modal target stability, live AirPlay chooser, late target discovery, user selection, stale-device rejection, delete suppression and close cleanup.");
             var failedReceiver = new DeviceBindingWindow(owner, [], vm, manager: manager)
             {
-                ReadBluetoothClientsAsync = () => Task.FromResult<IReadOnlyList<BluetoothClientInfo>>([]),
+                ReadBluetoothClientsAsync = _ => Task.FromResult<IReadOnlyList<BluetoothClientInfo>>([]),
                 ScanDevicesAsync = _ => Task.CompletedTask,
                 StartAirPlayReceiverAsync = _ => Task.FromResult(false)
             };

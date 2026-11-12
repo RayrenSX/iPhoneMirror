@@ -289,20 +289,21 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             }
             await BeginTargetRouteAsync(targetDeviceUdid, targetDeviceName,
                 clearPreviousBinding: !IsAdvertising && !preserveExistingBinding,
-                preferredClientId).ConfigureAwait(false);
+                preferredClientId, cancellationToken).ConfigureAwait(false);
             startupProgress?.Invoke(BluetoothHidStartupStage.CheckingBluetooth);
+            cancellationToken.ThrowIfCancellationRequested();
             if (IsAdvertising && Volatile.Read(ref _advertisingStopRequested) == 0)
             {
-                await RefreshTargetClientAsync().ConfigureAwait(false);
+                await RefreshTargetClientAsync(cancellationToken).ConfigureAwait(false);
                 return true;
             }
             if (IsAdvertising)
             {
                 StopAndClearProviderState();
                 await BeginTargetRouteAsync(targetDeviceUdid, targetDeviceName,
-                    preferredClientId: preferredClientId).ConfigureAwait(false);
+                    preferredClientId: preferredClientId, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
-            var adapter = await BluetoothAdapter.GetDefaultAsync();
+            var adapter = await BluetoothAdapter.GetDefaultAsync().AsTask(cancellationToken);
             if (adapter is null || !adapter.IsLowEnergySupported)
             {
                 SetStatus(LocalizationService.Get("BluetoothHidPeripheralUnavailable"),
@@ -320,7 +321,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
             if (_provider is null)
             {
-                var result = await GattServiceProvider.CreateAsync(HidServiceUuid);
+                var result = await GattServiceProvider.CreateAsync(HidServiceUuid).AsTask(cancellationToken);
                 if (result.Error != BluetoothError.Success || result.ServiceProvider is null)
                 {
                     SetStatus(LocalizationService.Get("BluetoothHidServiceCreateFailed"),
@@ -330,9 +331,10 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
                 _provider = result.ServiceProvider;
                 _provider.AdvertisementStatusChanged += OnAdvertisementStatusChanged;
-                await CreateCharacteristicsAsync(_provider.Service);
+                await CreateCharacteristicsAsync(_provider.Service, cancellationToken);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var advertising = new GattServiceProviderAdvertisingParameters
             {
                 IsConnectable = true,
@@ -349,6 +351,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             _provider.StartAdvertising(advertising);
             var completed = await Task.WhenAny(_advertisingStarted.Task,
                 Task.Delay(TimeSpan.FromSeconds(5), cancellationToken));
+            cancellationToken.ThrowIfCancellationRequested();
             Interlocked.Exchange(ref _advertisingStartupInProgress, 0);
             if (completed != _advertisingStarted.Task || !IsAdvertising)
             {
@@ -359,8 +362,14 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
             }
             SetStatus(LocalizationService.Format("BluetoothHidAdvertisingFormat", _provider.AdvertisementStatus),
                 null);
-            await RefreshTargetClientAsync().ConfigureAwait(false);
+            await RefreshTargetClientAsync(cancellationToken).ConfigureAwait(false);
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Interlocked.Exchange(ref _advertisingStartupInProgress, 0);
+            StopAndClearProviderState();
+            throw;
         }
         catch (Exception error)
         {
@@ -1211,10 +1220,10 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     }
 
     internal async Task<IReadOnlyList<BluetoothClientInfo>>
-        GetSubscribedClientInfosAsync()
+        GetSubscribedClientInfosAsync(CancellationToken cancellationToken = default)
     {
         string[] clientIds;
-        await _targetClientGate.WaitAsync().ConfigureAwait(false);
+        await _targetClientGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             clientIds = EnumerateSubscribedClients()
@@ -1233,11 +1242,11 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         {
             var connected = await DeviceInformation.FindAllAsync(
                 BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(
-                    BluetoothConnectionStatus.Connected));
+                    BluetoothConnectionStatus.Connected)).AsTask(cancellationToken);
             var hidConnected = new List<string>();
             foreach (var device in connected)
             {
-                if (await IsHidDeviceAsync(device.Id).ConfigureAwait(false))
+                if (await IsHidDeviceAsync(device.Id, cancellationToken).ConfigureAwait(false))
                     hidConnected.Add(device.Id);
             }
             clientIds = clientIds.Concat(hidConnected)
@@ -1245,6 +1254,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception error)
         {
             DiagnosticLogger.Exception("bluetooth", "connected_device_enumeration_failed", error);
@@ -1253,14 +1263,15 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         var clients = new List<BluetoothClientInfo>(clientIds.Length);
         foreach (var id in clientIds)
         {
-            var name = await GetClientNameAsync(id).ConfigureAwait(false);
+            var name = await GetClientNameAsync(id, cancellationToken).ConfigureAwait(false);
             var address = string.Empty;
             try
             {
-                using var device = await BluetoothLEDevice.FromIdAsync(id);
+                using var device = await BluetoothLEDevice.FromIdAsync(id).AsTask(cancellationToken);
                 if (device is not null)
                     address = device.BluetoothAddress.ToString("X12");
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch { }
             clients.Add(new BluetoothClientInfo(id, name, address,
                 _clientConnectedAt.TryGetValue(id, out var connectedAt)
@@ -1269,16 +1280,18 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         return clients;
     }
 
-    private static async Task<bool> IsHidDeviceAsync(string deviceId)
+    private static async Task<bool> IsHidDeviceAsync(string deviceId, CancellationToken cancellationToken)
     {
         try
         {
-            using var device = await BluetoothLEDevice.FromIdAsync(deviceId);
+            using var device = await BluetoothLEDevice.FromIdAsync(deviceId).AsTask(cancellationToken);
             if (device is null) return false;
             var result = await device.GetGattServicesForUuidAsync(HidServiceUuid,
-                BluetoothCacheMode.Uncached);
-            return result.Status == GattCommunicationStatus.Success && result.Services.Count > 0;
+                BluetoothCacheMode.Uncached).AsTask(cancellationToken);
+            try { return result.Status == GattCommunicationStatus.Success && result.Services.Count > 0; }
+            finally { foreach (var service in result.Services) service.Dispose(); }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch { return false; }
     }
 
@@ -1509,55 +1522,55 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
-    private async Task CreateCharacteristicsAsync(GattLocalService service)
+    private async Task CreateCharacteristicsAsync(GattLocalService service, CancellationToken cancellationToken)
     {
         _protocolModeCharacteristic = await CreateCharacteristicAsync(service,
             GattCharacteristicUuids.ProtocolMode,
             GattCharacteristicProperties.Read | GattCharacteristicProperties.Write,
-            DefaultProtocolMode);
+            DefaultProtocolMode, cancellationToken);
         _protocolModeCharacteristic.WriteRequested += OnProtocolModeWriteRequested;
         _protocolModeCharacteristic.ReadRequested += (sender, args) =>
             RespondToReadAsync(args, () => GetProtocolModeValue(args));
-        _wheelResolutionCharacteristic = await CreateFeatureCharacteristicAsync(service);
+        _wheelResolutionCharacteristic = await CreateFeatureCharacteristicAsync(service, cancellationToken);
 
         var hidInfo = await CreateCharacteristicAsync(service,
             GattCharacteristicUuids.HidInformation,
-            GattCharacteristicProperties.Read, HidInformation);
+            GattCharacteristicProperties.Read, HidInformation, cancellationToken);
         hidInfo.ReadRequested += (_, args) => RespondToReadAsync(args, () => HidInformation);
         _ = hidInfo;
         var descriptor = UsesAbsoluteMouse ? CreateAbsoluteMouseReportMap() : ReportMap;
         if (UsesAbsoluteMouse) descriptor = AddRelativeMouseReport(descriptor);
         var reportMap = await CreateCharacteristicAsync(service,
             GattCharacteristicUuids.ReportMap,
-            GattCharacteristicProperties.Read, descriptor);
+            GattCharacteristicProperties.Read, descriptor, cancellationToken);
         reportMap.ReadRequested += (_, args) => RespondToReadAsync(args, () => descriptor);
         _ = reportMap;
         var controlPoint = await CreateCharacteristicAsync(service,
             GattCharacteristicUuids.HidControlPoint,
-            GattCharacteristicProperties.WriteWithoutResponse, [0x00]);
+            GattCharacteristicProperties.WriteWithoutResponse, [0x00], cancellationToken);
         controlPoint.WriteRequested += OnControlPointWriteRequested;
 
-        _keyboardReport = await CreateReportCharacteristicAsync(service, 0x01);
-        _mouseReport = await CreateReportCharacteristicAsync(service, 0x02);
+        _keyboardReport = await CreateReportCharacteristicAsync(service, 0x01, cancellationToken);
+        _mouseReport = await CreateReportCharacteristicAsync(service, 0x02, cancellationToken);
         if (UsesAbsoluteMouse)
         {
-            _relativeMouseReport = await CreateReportCharacteristicAsync(service, RelativeMouseReportId);
+            _relativeMouseReport = await CreateReportCharacteristicAsync(service, RelativeMouseReportId, cancellationToken);
             _relativeMouseReport.ReadRequested += (_, args) => RespondToReadAsync(args,
                 () => GetLastReport(RelativeMouseReportId, [0, 0, 0, 0, 0, 0]));
             _relativeMouseReport.SubscribedClientsChanged += OnSubscribedClientsChanged;
         }
-        _consumerReport = await CreateReportCharacteristicAsync(service, 0x04);
-        _navigationReport = await CreateReportCharacteristicAsync(service, 0x05);
+        _consumerReport = await CreateReportCharacteristicAsync(service, 0x04, cancellationToken);
+        _navigationReport = await CreateReportCharacteristicAsync(service, 0x05, cancellationToken);
         _bootKeyboardInput = await CreateCharacteristicAsync(service,
             BootKeyboardInputUuid,
             GattCharacteristicProperties.Read | GattCharacteristicProperties.Notify,
-            [0, 0, 0, 0, 0, 0, 0, 0]);
+            [0, 0, 0, 0, 0, 0, 0, 0], cancellationToken);
         if (!UsesAbsoluteMouse)
         {
             _bootMouseInput = await CreateCharacteristicAsync(service,
                 BootMouseInputUuid,
                 GattCharacteristicProperties.Read | GattCharacteristicProperties.Notify,
-                [0, 0, 0]);
+                [0, 0, 0], cancellationToken);
             _bootMouseInput.ReadRequested += (_, args) => RespondToReadAsync(args,
                 () => ToBootMouseReport(GetLastReport(2, [0, 0, 0, 0, 0, 0])));
             _bootMouseInput.SubscribedClientsChanged += OnSubscribedClientsChanged;
@@ -1581,7 +1594,7 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
     private static async Task<GattLocalCharacteristic> CreateCharacteristicAsync(
         GattLocalService service, Guid uuid, GattCharacteristicProperties properties,
-        byte[] value)
+        byte[] value, CancellationToken cancellationToken)
     {
         var parameters = new GattLocalCharacteristicParameters
         {
@@ -1593,26 +1606,26 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
                 properties.HasFlag(GattCharacteristicProperties.WriteWithoutResponse)
                 ? GattProtectionLevel.EncryptionRequired : GattProtectionLevel.Plain,
         };
-        var result = await service.CreateCharacteristicAsync(uuid, parameters);
+        var result = await service.CreateCharacteristicAsync(uuid, parameters).AsTask(cancellationToken);
         if (result.Error != BluetoothError.Success || result.Characteristic is null)
             throw new InvalidOperationException(LocalizationService.Format("BluetoothHidCharacteristicFailedFormat", uuid, result.Error));
         return result.Characteristic;
     }
 
     private static async Task<GattLocalCharacteristic> CreateReportCharacteristicAsync(
-        GattLocalService service, byte reportId)
+        GattLocalService service, byte reportId, CancellationToken cancellationToken)
     {
         var characteristic = await CreateCharacteristicAsync(service, ReportUuid,
             GattCharacteristicProperties.Read | GattCharacteristicProperties.Notify,
             reportId == 1 ? [0, 0, 0, 0, 0, 0, 0, 0] :
-                reportId is 4 or 5 ? [0, 0] : [0, 0, 0, 0, 0, 0]);
+                reportId is 4 or 5 ? [0, 0] : [0, 0, 0, 0, 0, 0], cancellationToken);
         var descriptor = new GattLocalDescriptorParameters
         {
             StaticValue = CryptographicBuffer.CreateFromByteArray([reportId, 0x01]),
             ReadProtectionLevel = GattProtectionLevel.EncryptionRequired,
             WriteProtectionLevel = GattProtectionLevel.EncryptionRequired,
         };
-        var result = await characteristic.CreateDescriptorAsync(ReportReferenceUuid, descriptor);
+        var result = await characteristic.CreateDescriptorAsync(ReportReferenceUuid, descriptor).AsTask(cancellationToken);
         if (result.Error != BluetoothError.Success)
             throw new InvalidOperationException(LocalizationService.Format("BluetoothHidReportDescriptorFailedFormat", result.Error));
         return characteristic;
@@ -2254,12 +2267,12 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         return null;
     }
 
-    private async Task RefreshTargetClientAsync()
+    private async Task RefreshTargetClientAsync(CancellationToken cancellationToken = default)
     {
         string? targetName;
         int generation;
         string[] clientIds;
-        await _targetClientGate.WaitAsync().ConfigureAwait(false);
+        await _targetClientGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             generation = Volatile.Read(ref _routeGeneration);
@@ -2276,9 +2289,9 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
 
         var clients = new List<(string Id, string Name)>(clientIds.Length);
         foreach (var clientId in clientIds)
-            clients.Add((clientId, await GetClientNameAsync(clientId).ConfigureAwait(false)));
+            clients.Add((clientId, await GetClientNameAsync(clientId, cancellationToken).ConfigureAwait(false)));
 
-        await _targetClientGate.WaitAsync().ConfigureAwait(false);
+        await _targetClientGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (generation != Volatile.Read(ref _routeGeneration)) return;
@@ -2294,9 +2307,9 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
     private async Task BeginTargetRouteAsync(string targetDeviceUdid,
         string? targetDeviceName = null,
         bool clearPreviousBinding = false,
-        string? preferredClientId = null)
+        string? preferredClientId = null, CancellationToken cancellationToken = default)
     {
-        await _targetClientGate.WaitAsync().ConfigureAwait(false);
+        await _targetClientGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             AdvanceRouteGeneration();
@@ -2317,19 +2330,21 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         }
     }
 
-    private static async Task<string> GetClientNameAsync(string clientId)
+    private static async Task<string> GetClientNameAsync(string clientId, CancellationToken cancellationToken = default)
     {
         try
         {
-            using var device = await BluetoothLEDevice.FromIdAsync(clientId);
+            using var device = await BluetoothLEDevice.FromIdAsync(clientId).AsTask(cancellationToken);
             if (!string.IsNullOrWhiteSpace(device?.Name)) return device.Name;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch { }
         try
         {
-            var information = await DeviceInformation.CreateFromIdAsync(clientId);
+            var information = await DeviceInformation.CreateFromIdAsync(clientId).AsTask(cancellationToken);
             return information?.Name ?? string.Empty;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch { return string.Empty; }
     }
 
@@ -2530,19 +2545,19 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         }, "wheel_resolution_write");
 
     private async Task<GattLocalCharacteristic> CreateFeatureCharacteristicAsync(
-        GattLocalService service)
+        GattLocalService service, CancellationToken cancellationToken)
     {
         var characteristic = await CreateCharacteristicAsync(service, ReportUuid,
             GattCharacteristicProperties.Read | GattCharacteristicProperties.Write |
                 GattCharacteristicProperties.WriteWithoutResponse,
-            [1]);
+            [1], cancellationToken);
         var descriptor = new GattLocalDescriptorParameters
         {
             StaticValue = CryptographicBuffer.CreateFromByteArray([3, 0x02]),
             ReadProtectionLevel = GattProtectionLevel.EncryptionRequired,
             WriteProtectionLevel = GattProtectionLevel.EncryptionRequired,
         };
-        var result = await characteristic.CreateDescriptorAsync(ReportReferenceUuid, descriptor);
+        var result = await characteristic.CreateDescriptorAsync(ReportReferenceUuid, descriptor).AsTask(cancellationToken);
         if (result.Error != BluetoothError.Success)
             throw new InvalidOperationException(LocalizationService.Format("BluetoothHidWheelDescriptorFailedFormat", result.Error));
         characteristic.ReadRequested += (_, args) => RespondToReadAsync(args,

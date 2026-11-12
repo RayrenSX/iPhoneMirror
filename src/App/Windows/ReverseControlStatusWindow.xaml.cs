@@ -321,6 +321,7 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         Closed += (_, _) =>
         {
             _closed = true;
+            _service.ResolvePrompt(new(ControlPromptAction.Cancel));
             DiagnosticLogger.ReverseControl("status_window", "wired_control_window_closed",
                 ("window_id", _viewModel.WindowId), ("handle", _nativeHandle));
             _viewModel.CountdownElapsed -= OnCountdownElapsed;
@@ -335,6 +336,13 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
             .FirstOrDefault(window => window.IsVisible && ReferenceEquals(window._service, service));
         if (active is not null)
         {
+            if (!ReferenceEquals(active.Owner, owner))
+            {
+                active.Owner = owner;
+                active._viewModel.CancelRequested = null;
+                active._viewModel.RetryRequested = null;
+                active._countdownElapsed = null;
+            }
             if (cancel is not null) active._viewModel.CancelRequested = cancel;
             if (retry is not null) active._viewModel.RetryRequested = retry;
             if (countdownElapsed is not null) active._countdownElapsed = countdownElapsed;
@@ -367,6 +375,13 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
             }
             window.Close();
         }
+    }
+    internal static void CloseForOwner(Window owner, ControlStatusService service)
+    {
+        foreach (var window in Application.Current.Windows.OfType<ReverseControlStatusWindow>()
+            .Where(window => ReferenceEquals(window.Owner, owner) && ReferenceEquals(window._service, service))
+            .ToArray())
+            window.Close();
     }
     private void OnCloseClick(object sender, RoutedEventArgs e)
     {

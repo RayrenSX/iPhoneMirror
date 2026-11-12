@@ -1277,6 +1277,14 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 return;
             void ShowStatus()
             {
+                if (_bluetoothConfigurationOwner is { } configurationOwner)
+                {
+                    if (configurationOwner.IsVisible && ControlStatus.Current is
+                        { Prompt: { IsBlocking: true } } or { Stage: ControlStage.Failed })
+                        ReverseControlStatusWindow.Show(configurationOwner, ControlStatus,
+                            () => _bluetoothConfigurationCancellation?.Cancel());
+                    return;
+                }
                 if (SetupActive) return;
                 if (Application.Current?.MainWindow is { } owner)
                     ReverseControlStatusWindow.Show(owner, ControlStatus,
@@ -1726,8 +1734,12 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     internal async Task EnableBluetoothControlAsync(string? targetDeviceUdid = null,
         bool preserveExistingBinding = false, bool fromReverseControl = false,
-        bool configurationOnly = false)
+        bool configurationOnly = false, CancellationToken cancellationToken = default)
     {
+        using var startupCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, _shutdownCancellation.Token);
+        var startupToken = startupCancellation.Token;
+        startupToken.ThrowIfCancellationRequested();
         var controlDeviceUdid = targetDeviceUdid ?? SelectedDevice?.Udid;
         var statusDeviceName = Devices.FirstOrDefault(device =>
             DeviceViewModel.UdidEquals(device.Udid, controlDeviceUdid))?.Name ?? "iPhone";
@@ -1756,13 +1768,14 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         var useAbsoluteMouse = BluetoothWindowMouseEnabled;
         var reportMapVersion = useAbsoluteMouse ? BluetoothHidProtocol.AbsoluteMouseReportMapVersion
             : BluetoothHidProtocol.ReportMapVersion;
-        if (!await AcknowledgeBluetoothHidReportMapChangeAsync(reportMapVersion) ||
+        if (!await ConfirmBluetoothHidReportMapChangeAsync(reportMapVersion, startupToken) ||
             useAbsoluteMouse != BluetoothWindowMouseEnabled)
         {
             ControlStatus.Cancelled(ControlStatusMode.Bluetooth, statusDeviceName,
                 LocalizationService.Get("ControlBluetoothCancelled"), LocalizationService.Get("ControlPrerequisiteCancelled"));
             return;
         }
+        startupToken.ThrowIfCancellationRequested();
         _bluetoothControlDeviceUdid = controlDeviceUdid;
         _reverseControlSetupActive = fromReverseControl && configurationOnly;
         _bluetoothControlNoticePending = !fromReverseControl && _bluetoothNoticePolicy.ShouldShowForDevice(
@@ -1802,7 +1815,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 DeviceViewModel.UdidEquals(device.Udid, controlDeviceUdid))?.Name;
             var started = await _bluetoothControl.StartAsync(controlDeviceUdid,
                 targetDeviceName, preserveExistingBinding, savedBinding,
-                _shutdownCancellation.Token,
+                startupToken,
                 startupStage => ControlStatus.Report(ControlStatusMode.Bluetooth,
                     startupStage == BluetoothHidStartupStage.CheckingBluetooth
                         ? ControlStage.CheckingBluetooth
@@ -1812,6 +1825,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                         ? LocalizationService.Get("ControlCheckingBluetoothSupport")
                         : LocalizationService.Get("ControlSwitchingBluetoothMode")),
                 useAbsoluteMouse: useAbsoluteMouse);
+            startupToken.ThrowIfCancellationRequested();
             if (!started || _bluetoothControl.HasTransportFailure)
             {
                 var failureDetails = _bluetoothControl.Error ?? _bluetoothControl.Status;
@@ -1857,6 +1871,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         catch (OperationCanceledException)
         {
             await CleanUpFailedBluetoothStartAsync();
+            ControlStatus.Cancelled(ControlStatusMode.Bluetooth, statusDeviceName,
+                LocalizationService.Get("ControlBluetoothCancelled"));
         }
         catch (Exception error)
         {
@@ -1921,20 +1937,46 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     internal bool IsBluetoothReverseControlEnabled => _bluetoothControlEnabled;
     internal bool IsBluetoothPeripheralAdvertising => _bluetoothControl.IsAdvertising;
     internal string BluetoothPeripheralStatus => _bluetoothControl.Error ?? _bluetoothControl.Status;
-    internal async Task<bool> StartBluetoothPeripheralForConfigurationAsync(string udid)
+    private Window? _bluetoothConfigurationOwner;
+    private CancellationTokenSource? _bluetoothConfigurationCancellation;
+
+    internal async Task<bool> StartBluetoothPeripheralForConfigurationAsync(string udid,
+        Window owner, CancellationToken cancellationToken)
     {
-        await EnableBluetoothControlAsync(udid, fromReverseControl: true,
-            configurationOnly: true);
-        // Do not re-read IsAdvertising here. The WinRT AdvertisementStatus
-        // property can lag the Started event that made EnableBluetooth...()
-        // succeed, which used to report a false startup failure to the
-        // device-binding dialog on otherwise healthy adapters.
-        return _bluetoothControlStartSucceeded && !_bluetoothControl.HasTransportFailure;
+        if (_bluetoothConfigurationOwner is not null || !CanStartReverseBluetoothPeripheral) return false;
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _bluetoothConfigurationOwner = owner;
+        _bluetoothConfigurationCancellation = operationCancellation;
+        try
+        {
+            await EnableBluetoothControlAsync(udid, fromReverseControl: true,
+                configurationOnly: true, cancellationToken: operationCancellation.Token);
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            if (ControlStatus.Current?.Stage == ControlStage.Cancelled)
+                throw new OperationCanceledException();
+            // The WinRT AdvertisementStatus property can lag the Started
+            // event that made EnableBluetoothControlAsync succeed.
+            return _bluetoothControlStartSucceeded && !_bluetoothControl.HasTransportFailure;
+        }
+        catch (OperationCanceledException)
+        {
+            ControlStatus.Cancelled(ControlStatusMode.Bluetooth,
+                ControlStatus.Current?.DeviceName ?? "iPhone",
+                LocalizationService.Get("ControlBluetoothCancelled"));
+            throw;
+        }
+        finally
+        {
+            if (ControlStatus.Current?.Stage != ControlStage.Failed || operationCancellation.IsCancellationRequested)
+                ReverseControlStatusWindow.CloseForOwner(owner, ControlStatus);
+            _bluetoothConfigurationOwner = null;
+            _bluetoothConfigurationCancellation = null;
+        }
     }
     internal Task StopBluetoothPeripheralConfigurationAsync() =>
-        DisableBluetoothControlAsync();
-    internal async Task<IReadOnlyList<BluetoothClientInfo>> GetReverseBluetoothClientsAsync() =>
-        (await _bluetoothControl.GetSubscribedClientInfosAsync()).Select(MarkBluetoothClientBinding).ToArray();
+        _reverseControlSetupActive ? DisableBluetoothControlAsync() : Task.CompletedTask;
+    internal async Task<IReadOnlyList<BluetoothClientInfo>> GetReverseBluetoothClientsAsync(CancellationToken cancellationToken = default) =>
+        (await _bluetoothControl.GetSubscribedClientInfosAsync(cancellationToken)).Select(MarkBluetoothClientBinding).ToArray();
     internal async Task<bool> BindReverseBluetoothClientAsync(string udid, string clientId)
     {
         // The reverse-control window is configuration-only. Persist the
@@ -1955,7 +1997,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         return true;
     }
 
-    private async Task<bool> AcknowledgeBluetoothHidReportMapChangeAsync(int reportMapVersion)
+    private Task<bool> AcknowledgeBluetoothHidReportMapChangeAsync(int reportMapVersion) =>
+        ConfirmBluetoothHidReportMapChangeAsync(reportMapVersion, _shutdownCancellation.Token);
+
+    private async Task<bool> ConfirmBluetoothHidReportMapChangeAsync(int reportMapVersion,
+        CancellationToken cancellationToken)
     {
         if (Application.Current is not App app ||
             app.UpdateSettings.BluetoothHidReportMapAcknowledgedVersion == reportMapVersion)
@@ -1967,7 +2013,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             LocalizationService.Get("BluetoothControlReportMapChangedConfirm"),
             LocalizationService.Get("Cancel"),
             TechnicalDetails: LocalizationService.Get("BluetoothControlReportMapChangedDetail")),
-            _shutdownCancellation.Token);
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (result.Action == ControlPromptAction.Primary)
         {
             app.UpdateSettings.BluetoothHidReportMapAcknowledgedVersion = reportMapVersion;
@@ -3233,6 +3280,12 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                         _ => StartUsbControlAsync(target),
                     };
                 };
+                if (ReferenceEquals(status, ControlStatus) && _bluetoothConfigurationOwner is { IsVisible: true } configurationOwner)
+                {
+                    ReverseControlStatusWindow.Show(configurationOwner, status,
+                        cancel: () => _bluetoothConfigurationCancellation?.Cancel());
+                    return;
+                }
                 if (SetupActive || Application.Current?.MainWindow is not { } owner) return;
                 ReverseControlStatusWindow.Show(
                     owner,

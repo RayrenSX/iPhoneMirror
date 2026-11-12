@@ -153,6 +153,8 @@ internal sealed class ControlStatusService
     internal Task<ControlPromptResult> RequestPromptAsync(
         ControlPrompt prompt, CancellationToken cancellationToken = default)
     {
+        if (cancellationToken.IsCancellationRequested)
+            return Task.FromResult(new ControlPromptResult(ControlPromptAction.Cancel));
         ControlStatusSnapshot snapshot;
         TaskCompletionSource<ControlPromptResult> completion;
         lock (_gate)
@@ -164,9 +166,8 @@ internal sealed class ControlStatusService
             if (current is null)
             {
                 _promptCompletion = null;
-                completion.TrySetException(new InvalidOperationException(
+                return Task.FromException<ControlPromptResult>(new InvalidOperationException(
                     "A reverse-control status must be started before showing a prompt."));
-                return completion.Task;
             }
             snapshot = current with { Prompt = prompt, IsTerminal = false, CanCancel = prompt.IsBlocking };
             _current = snapshot;
@@ -177,17 +178,30 @@ internal sealed class ControlStatusService
             "prompt_requested", ("type", prompt.Type), ("title", prompt.Title));
         StatusChanged?.Invoke(this, snapshot);
         if (cancellationToken.CanBeCanceled)
-            cancellationToken.Register(() => ResolvePrompt(new(ControlPromptAction.Cancel)));
+        {
+            var registration = cancellationToken.Register(() =>
+                ResolvePendingPrompt(new(ControlPromptAction.Cancel), completion));
+            // Return the completion itself so ResolvePrompt preserves its
+            // synchronous completion contract. An old token can only resolve
+            // this request, even before the registration cleanup gets to run.
+            _ = completion.Task.ContinueWith(_ => registration.Dispose(),
+                CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
         return completion.Task;
     }
 
-    internal bool ResolvePrompt(ControlPromptResult result)
+    internal bool ResolvePrompt(ControlPromptResult result) => ResolvePendingPrompt(result);
+
+    private bool ResolvePendingPrompt(ControlPromptResult result,
+        TaskCompletionSource<ControlPromptResult>? expected = null)
     {
         TaskCompletionSource<ControlPromptResult>? completion;
         ControlStatusSnapshot? snapshot;
         lock (_gate)
         {
             completion = _promptCompletion;
+            if (expected is not null && !ReferenceEquals(completion, expected)) return false;
             _promptCompletion = null;
             if (completion is null) return false;
             var current = _current;

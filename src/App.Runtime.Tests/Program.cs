@@ -77,6 +77,10 @@ internal static partial class Program
                 return RunAutomationSettingsTests(automationOutput);
             if (args is ["--setup-tools", var toolsOutput])
                 return RunSetupToolsTests(toolsOutput);
+            if (args is ["--bluetooth-setup-cancellation", var bluetoothSetupOutput])
+                return RunBluetoothSetupCancellationTests(bluetoothSetupOutput);
+            if (args is ["--bluetooth-configuration-lifetime", var bluetoothLifetimeOutput])
+                return RunBluetoothConfigurationLifetimeTests(bluetoothLifetimeOutput);
             if (args is ["--driver-ui", var toolsDriverAssembly, var toolsDriverOutput])
                 return RenderDriverTools(toolsDriverAssembly, toolsDriverOutput);
             if (args is ["--first-run-setup", var setupOutput])
