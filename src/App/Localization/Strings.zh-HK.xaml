@@ -177,7 +177,7 @@
     <system:String x:Key="DeviceActionConfirmShutdown">確定關閉「{0}」嗎？這將中斷該裝置的螢幕鏡像與控制連線，須手動開機。</system:String>
     <system:String x:Key="DeviceActionSentFormat">已向「{0}」傳送「{1}」指令。</system:String>
     <system:String x:Key="DeviceActionFailedFormat">無法確認「{0}」的操作結果：{1}</system:String>
-    <system:String x:Key="DeviceActionInfoFormat">裝置名稱：{0}&#10;型號：{1}&#10;系統：{2}&#10;連線：{3}&#10;裝置識別碼：{4}</system:String>
+    <system:String x:Key="DeviceActionInfoFormat" xml:space="preserve">裝置名稱：{0}&#10;型號：{1}&#10;系統：{2}&#10;連線：{3}&#10;裝置識別碼：{4}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">{0} 螢幕鏡像錯誤</system:String>
     <system:String x:Key="DeviceSessionClosedWarningTitleFormat">{0} 螢幕鏡像已停止</system:String>
     <system:String x:Key="DeviceSessionClosedWarningBody">偵測到您已在控制中心點擊停止螢幕鏡像，下次使用此裝置進行有線螢幕鏡像前需重新啟動 iPhone/iPad</system:String>

@@ -177,7 +177,7 @@
     <system:String x:Key="DeviceActionConfirmShutdown">确定将“{0}”关机吗？这会中断该设备的投屏和控制连接，需要手动开机。</system:String>
     <system:String x:Key="DeviceActionSentFormat">已向“{0}”发送“{1}”指令。</system:String>
     <system:String x:Key="DeviceActionFailedFormat">未能确认“{0}”的操作结果：{1}</system:String>
-    <system:String x:Key="DeviceActionInfoFormat">设备名称：{0}&#10;型号：{1}&#10;系统：{2}&#10;连接：{3}&#10;设备标识：{4}</system:String>
+    <system:String x:Key="DeviceActionInfoFormat" xml:space="preserve">设备名称：{0}&#10;型号：{1}&#10;系统：{2}&#10;连接：{3}&#10;设备标识：{4}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">{0} 投屏错误</system:String>
     <system:String x:Key="DeviceSessionClosedWarningTitleFormat">{0} 投屏已停止</system:String>
     <system:String x:Key="DeviceSessionClosedWarningBody">检测到您已经在控制中心点击了停止镜像，下一次该设备有线镜像需重启 iPhone/iPad</system:String>

@@ -177,7 +177,7 @@
     <system:String x:Key="DeviceActionConfirmShutdown">「{0}」の電源を切りますか？ミラーリングと操作の接続が切断されます。電源は手動で入れる必要があります。</system:String>
     <system:String x:Key="DeviceActionSentFormat">「{0}」に「{1}」を送信しました。</system:String>
     <system:String x:Key="DeviceActionFailedFormat">「{0}」の結果を確認できませんでした: {1}</system:String>
-    <system:String x:Key="DeviceActionInfoFormat">デバイス名: {0}&#10;モデル: {1}&#10;システム: {2}&#10;接続: {3}&#10;デバイスID: {4}</system:String>
+    <system:String x:Key="DeviceActionInfoFormat" xml:space="preserve">デバイス名: {0}&#10;モデル: {1}&#10;システム: {2}&#10;接続: {3}&#10;デバイスID: {4}</system:String>
     <system:String x:Key="DeviceCaptureErrorTitleFormat">ミラーリングエラー — {0}</system:String>
     <system:String x:Key="DeviceSessionClosedWarningTitleFormat">ミラーリングを停止しました — {0}</system:String>
     <system:String x:Key="DeviceSessionClosedWarningBody">コントロールセンターからミラーリングを停止しました。このデバイスで有線ミラーリングをもう一度使うには、先にiPhoneまたはiPadを再起動してください。</system:String>
