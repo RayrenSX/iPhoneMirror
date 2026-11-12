@@ -5,14 +5,28 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [Unreleased]
 
+No unreleased changes recorded yet.
+
+## [1.8.5-pre5] - 2026-11-12
+
 ### Added
 
+- Customize the top preview toolbar with a focused editor, a component library, direct drag ordering, hide/restore actions, icon-only display, cancel and persistent save.
+- Add USB device context actions for copying device information, restarting and shutting down the clicked device, with confirmation for power actions; remove the old simultaneous-mirroring and sleep entries.
+- Expose the Automation API screenshot budget in Developer tools, configurable from 1 to 30 requests per second. New configurations default to 30; existing saved limits are preserved.
 - Add a persistent RAOP TCP port setting for the original AirPlay receiver, with validation, occupied-port feedback and receiver restart on Apply. The default remains 5001; UxPlay keeps its own ports.
 - Add configurable shortcuts for independent-window settings in separate cards at the bottom of shortcut settings. Choose opacity (10–100%) or topmost, bind a keyboard chord or mouse button, and select press-to-toggle or hold behavior. New bindings default to toggle; older bindings keep hold behavior. (#77)
 - Add experimental, off-by-default absolute Bluetooth mouse input in the main and independent previews, with seamless cursor movement between Windows and the mirrored image.
 
 ### Fixed
 
+- Make Bluetooth device setup cancellable, bound discovery waits and close owned prompts and pending setup when the owner closes. This addresses the setup lifetime part of #86, not every reported upgrade/configuration problem.
+- Display the configured mouse-release shortcut only after Bluetooth control connects, and hide it during preparation, failure and cancellation. (#87)
+- Start updater shell helpers from an initialized STA thread.
+- Keep toolbar editing aligned when maximizing, restoring, stretching or changing DPI; preserve the video aspect ratio in the editing snapshot instead of stretching it across the preview.
+- Use a short top slide and fade when the original toolbar is hidden; reuse scene snapshots, opacity and render transforms during focus transitions and drag reordering.
+- Dock point-picking actions outside the mirrored picture and remove redundant focus visuals from affected settings controls.
+- Apply the hide-description preference to the newly added settings guidance as well, and remove the obsolete connectivity footer.
 - Allow complete mode to shrink below 800 DIP (down to 480 DIP where space permits), while preserving the currently displayed picture width and keeping the header and preview bars in one row.
 - Fix the automatic reverse-control dropdown reverting selections when WPF subscribes to localized labels. Apply a changed preference to existing streams once, retain manual stop behavior, and show persistence failures in the settings group.
 - Fix Bluetooth absolute-mode first-click and post-scroll positioning, rapid click ordering, failed-press retries, and scrolling via bounded BLE drag gestures. Release safely on queue overflow, preview geometry changes, leave and pause; keep edge scrolling on its requested surface. Complete saved-client startup when HID subscription overlaps binding discovery.
@@ -26,6 +40,20 @@ All notable changes to iPhoneMirror are documented here. The project follows
 - Align user/developer documentation with current DDI packaging, multi-device sessions,
   wireless profiles and Automation API management. Add complete archive/release/issue
   indexes and an offline documentation checker; repair repository links and examples.
+
+### Changed
+
+- Keep application, projection and reverse-control settings as three direct categories; place application mode below theme and synchronize the three hide controls with the effective mode while retaining complete-mode preferences.
+- Keep preview tools and status indicators in one row, refine narrow-window behavior and bound the lightweight preview width.
+- Run automatic reverse-control connections without routine progress windows, while retaining error, required-action and manual-connection dialogs.
+- Improve selector identity, apply-state feedback and transactional settings rollback, including mouse direction, Bluetooth parameters and automatic control preferences.
+- Add a Japanese README, update third-party attribution and remove a personal download mirror from the shipped configuration.
+
+### Notes
+
+- This is a Windows x64 preview release. Detailed changes, upgrade notes and validation boundaries are in [the pre5 release notes](docs/releases/v1.8.5-pre5.md).
+- Experimental absolute Bluetooth mouse input remains disabled by default. The screenshot request budget does not guarantee 30 distinct frames per second.
+- The reported BGMI 4K/microphone issue, iOS-specific AirPlay discovery failures, complete game-control mapping and macOS support are not claimed as resolved by this release.
 
 ## [1.8.5-pre4] - 2026-10-29
 
