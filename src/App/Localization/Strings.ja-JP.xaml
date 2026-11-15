@@ -1947,4 +1947,23 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubPanelOpenFolder">フォルダーを開く</sys:String>
     <sys:String x:Key="DeviceHubPanelSaveFile">名前を付けて保存…</sys:String>
     <sys:String x:Key="DeviceHubPanelInstallFailed">インストールできませんでした。有効な署名がある対応 IPA を使用し、端末のロックを解除してください。</sys:String>
+    <sys:String x:Key="DeviceHubPanelClearSearch">検索をクリア（Esc）</sys:String>
+    <sys:String x:Key="DeviceHubPanelResetFilters">検索と絞り込みをリセット</sys:String>
+    <sys:String x:Key="DeviceHubPanelSearchProcesses">プロセス名または PID を検索</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoProcesses">一致するプロセスがありません</sys:String>
+    <sys:String x:Key="DeviceHubPanelSearchEmptyHint">検索語句や上の絞り込み条件を変更してください。</sys:String>
+    <sys:String x:Key="DeviceHubPanelFilteredProcessCount">{1} 件中 {0} 件のプロセス</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoProfiles">プロファイルがありません</sys:String>
+    <sys:String x:Key="DeviceHubPanelProfilesEmptyHint">パソコンから開発用または構成プロファイルをインストールできます。</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallProfile">プロファイルをインストール…</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallApp">アプリ（IPA）をインストール…</sys:String>
+    <sys:String x:Key="DeviceHubPanelFilesEmptyHint">更新するか、上の階層で別のフォルダーを開いてください。</sys:String>
+    <sys:String x:Key="DeviceHubPanelLoadMore">さらに読み込む</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoLogMatches">一致するログがありません</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsIdle">ログを開始していません</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsWaiting">デバイスのログを待機中</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogFilterEmptyHint">検索をクリアすると取得済みのログをすべて表示します。</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsWaitingHint">新しいログがここに表示されます。停止後も検索と保存ができます。</sys:String>
+    <sys:String x:Key="DeviceHubPanelProfileReadFailed">プロファイルを読み取れませんでした</sys:String>
+    <sys:String x:Key="DeviceHubPanelRefreshHint">接続を確認し、上の更新ボタンで再試行してください。</sys:String>
 </ResourceDictionary>

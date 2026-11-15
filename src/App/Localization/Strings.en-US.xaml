@@ -1947,4 +1947,23 @@ Pair, select and save.</system:String>
     <sys:String x:Key="DeviceHubPanelOpenFolder">Open folder</sys:String>
     <sys:String x:Key="DeviceHubPanelSaveFile">Save as…</sys:String>
     <sys:String x:Key="DeviceHubPanelInstallFailed">Installation failed. Use a validly signed IPA for this device and unlock the phone.</sys:String>
+    <sys:String x:Key="DeviceHubPanelClearSearch">Clear search (Esc)</sys:String>
+    <sys:String x:Key="DeviceHubPanelResetFilters">Reset search and filters</sys:String>
+    <sys:String x:Key="DeviceHubPanelSearchProcesses">Search process name or PID</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoProcesses">No matching processes</sys:String>
+    <sys:String x:Key="DeviceHubPanelSearchEmptyHint">Try another search or change the filter above.</sys:String>
+    <sys:String x:Key="DeviceHubPanelFilteredProcessCount">{0} of {1} running processes</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoProfiles">No profiles installed</sys:String>
+    <sys:String x:Key="DeviceHubPanelProfilesEmptyHint">Install a provisioning or configuration profile from your computer.</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallProfile">Install profile…</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallApp">Install app (IPA)…</sys:String>
+    <sys:String x:Key="DeviceHubPanelFilesEmptyHint">Refresh to check again, or browse another folder.</sys:String>
+    <sys:String x:Key="DeviceHubPanelLoadMore">Load more</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoLogMatches">No matching log entries</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsIdle">Logs have not started</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsWaiting">Waiting for device logs</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogFilterEmptyHint">Clear the search to show all captured entries.</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsWaitingHint">New entries will appear here. Stop keeps the captured entries available.</sys:String>
+    <sys:String x:Key="DeviceHubPanelProfileReadFailed">Profiles could not be read</sys:String>
+    <sys:String x:Key="DeviceHubPanelRefreshHint">Check the device connection, then refresh using the button above.</sys:String>
 </ResourceDictionary>

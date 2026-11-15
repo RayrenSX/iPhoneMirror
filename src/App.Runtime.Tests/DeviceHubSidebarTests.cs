@@ -41,6 +41,7 @@ internal static partial class Program
         string? pauseAction = null;
         string? launchedBundle = null;
         bool ready = true;
+        bool emptyProfiles = false, profileReadError = false, pagedFiles = false, failProcessRead = false, failFileRead = false;
         async Task<JsonElement> Request(DeviceViewModel device, string action, object? args, CancellationToken ct)
         {
             if (action != "get_app_icon") Console.WriteLine("Request: " + device.Udid + " / " + action);
@@ -56,6 +57,20 @@ internal static partial class Program
             }
             ct.ThrowIfCancellationRequested();
             var arguments = JsonSerializer.SerializeToElement(args);
+            if (action == "list_processes" && failProcessRead)
+            { failProcessRead = false; throw new InvalidOperationException("Fixture process read failed."); }
+            if (action == "list_dir")
+            {
+                if (failFileRead) { failFileRead = false; throw new InvalidOperationException("Fixture folder read failed."); }
+                var path = arguments.GetProperty("path").GetString();
+                if (path == "DCIM") return JsonSerializer.SerializeToElement(new { entries = Array.Empty<object>(), nextOffset = (int?)null, total = 0 });
+                if (pagedFiles)
+                {
+                    var offset = arguments.GetProperty("offset").GetInt32();
+                    return JsonSerializer.SerializeToElement(new { entries = (offset == 0 ? new[] { "first.jpg", "second.jpg" } : new[] { "third.jpg" })
+                        .Select(name => new { name, path = name, type = "file", size = 120 }), nextOffset = offset == 0 ? (int?)2 : null, total = 3 });
+                }
+            }
             if (action == "launch") launchedBundle = arguments.GetProperty("bundleId").GetString();
             if (action == "set_setting")
             {
@@ -75,7 +90,8 @@ internal static partial class Program
                     battery = new { available = true, values = new { BatteryCurrentCapacity = 86, BatteryIsCharging = true } },
                     disk = new { available = true, values = new { TotalDiskCapacity = 256L * 1024 * 1024 * 1024, TotalDataAvailable = 92L * 1024 * 1024 * 1024 } }
                 }),
-                "list_profiles" => JsonSerializer.SerializeToElement(new { profiles = new[] { new { id = "fixture-profile", name = "iPhoneMirror Development", kind = "provisioning", organization = "Development Team", expires = "2027-11-15" } }, errors = new { } }),
+                "list_profiles" => JsonSerializer.SerializeToElement(new { profiles = emptyProfiles ? Array.Empty<object>() : new object[] { new { id = "fixture-profile", name = "iPhoneMirror Development", kind = "provisioning", organization = "Development Team", expires = "2027-11-15" } },
+                    errors = profileReadError ? new Dictionary<string, string> { ["configuration"] = "Fixture unavailable." } : new Dictionary<string, string>() }),
                 "list_dir" => JsonSerializer.SerializeToElement(new { entries = new[] {
                     new { name = "DCIM", path = "DCIM", type = "directory", size = 0 },
                     new { name = "IMG_1024.JPG", path = "IMG_1024.JPG", type = "file", size = 4821320 },
@@ -189,7 +205,20 @@ internal static partial class Program
             KeyboardCall(vm, "NotifyCaptureSessionChanged"); Finish();
             Find<TextBox>("AppSearch").Text = "WeChat"; window.UpdateLayout();
             Verify(list.Items.Count == 1, "App search must match names and bundle IDs.");
+            Find<TextBox>("AppSearch").Text = "no-such-app"; Finish();
+            Verify(Find<StackPanel>("AppsEmpty").IsVisible && Find<Button>("ResetAppFilters").IsVisible && Find<Button>("AppSearchClear").IsVisible,
+                "An empty search must explain the result and offer a direct way to reset it.");
+            SaveWindowRender(window, Path.Combine(output, "search-empty.png"));
+            Find<Button>("ResetAppFilters").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
+            Verify(list.Items.Count == populated && Find<TextBox>("AppSearch").Text.Length == 0 && !Find<Button>("AppSearchClear").IsVisible,
+                "Resetting filters must restore the complete list without another device read.");
+            Find<TextBox>("AppSearch").Text = "WeChat"; Finish();
             list.SelectedIndex = 0;
+            var appContainer = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(0);
+            var rowMore = FindVisualDescendants<Button>(appContainer).Single(button => button.Name == "RowMore");
+            rowMore.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
+            Verify(list.ContextMenu!.IsOpen && ReferenceEquals(list.ContextMenu.PlacementTarget, rowMore),
+                "A row's visible more button must open the same operations on that exact application.");
             var appMenu = Menu(list);
             Verify(MenuAction(appMenu, "app-launch").IsEnabled && MenuAction(appMenu, "app-remove").IsEnabled,
                 "The selected application must expose launch and uninstall through its context menu.");
@@ -236,23 +265,73 @@ internal static partial class Program
 
             var appFilter = Find<ComboBox>("AppFilter");
             appFilter.SelectedIndex = 5; Finish();
+            Verify(Find<TextBox>("AppSearch").IsEnabled, "Process search must remain available.");
+            Find<TextBox>("AppSearch").Text = "251"; Finish();
+            Verify(list.Items.Count == 1, "Process search must match a PID.");
+            Find<TextBox>("AppSearch").Text = "no-process"; Finish();
+            Verify(list.Items.Count == 0 && Find<StackPanel>("AppsEmpty").IsVisible, "Process searches must show a useful empty result.");
+            Find<Button>("AppSearchClear").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
             list.SelectedIndex = 0;
             var processMenu = Menu(list);
             Verify(list.Items.Count == 1 && !processMenu.Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-launch") &&
                 MenuAction(processMenu, "app-remove").IsEnabled, "Processes must expose terminate, with no application launch action.");
             ClickMenu(processMenu, "copy"); Verify(copied == "251", "Process menus must copy the PID.");
             appFilter.SelectedIndex = 0; Finish();
+            Find<TextBox>("AppSearch").Text = "WeChat";
+            failProcessRead = true; appFilter.SelectedIndex = 5; Finish();
+            Verify(list.Items.Count == 0 && !Menu(list).Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-remove"),
+                "A failed process read must never expose cached applications as terminable processes.");
+            appFilter.SelectedIndex = 0; Finish();
+
+            window.Height = 680; Finish();
+            list.SelectedIndex = 7; list.ScrollIntoView(list.SelectedItem); Finish();
+            var selectedId = list.SelectedItem!.GetType().GetProperty("Id")!.GetValue(list.SelectedItem);
+            var listScroll = FindVisualDescendants<ScrollViewer>(list).First();
+            var listOffset = listScroll.VerticalOffset;
+            _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+            Verify(Equals(list.SelectedItem!.GetType().GetProperty("Id")!.GetValue(list.SelectedItem), selectedId) &&
+                Math.Abs(listScroll.VerticalOffset - listOffset) < 1, "Refreshing must preserve app selection and scroll position.");
+            window.Height = 900; Finish();
 
             Select(2); var profiles = Find<ListBox>("ProfilesList"); profiles.SelectedIndex = 0;
             var profileMenu = Menu(profiles); ClickMenu(profileMenu, "copy");
             Verify(copied == "fixture-profile" && MenuAction(profileMenu, "profile-remove").IsEnabled && MenuAction(profileMenu, "profile-install").IsEnabled,
                 "Profile menus must provide copy, remove and install actions.");
+            emptyProfiles = true; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+            Verify(Find<StackPanel>("ProfilesEmpty").IsVisible &&
+                FindVisualDescendants<Button>(Find<StackPanel>("ProfilesEmpty")).Single().IsEnabled,
+                "An empty profile list must explain the state and provide an install entry.");
+            SaveWindowRender(window, Path.Combine(output, "profiles-empty.png"));
+            profileReadError = true; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+            Verify(Find<TextBlock>("ProfilesEmptyTitle").Text == LocalizationService.Get("DeviceHubPanelProfileReadFailed") && !Find<Button>("ProfileEmptyInstall").IsVisible,
+                "An unreadable profile list must be distinguished from a successful, empty list.");
+            profileReadError = false;
+            emptyProfiles = false; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
             Select(3); var files = Find<ListBox>("FilesList"); files.SelectedIndex = 0;
             var fileMenu = Menu(files); ClickMenu(fileMenu, "copy");
             Verify(copied == "DCIM" && MenuAction(fileMenu, "file-download").IsEnabled, "File menus must copy the selected path and offer open/save.");
             ClickMenu(fileMenu, "file-download");
             Verify(Find<TextBox>("FilePath").Text == "/DCIM", "Opening a folder from the context menu must browse the selected directory.");
-            Find<TextBox>("FilePath").Text = "/"; ClickAction("file-browse");
+            Verify(Find<StackPanel>("FilesEmpty").IsVisible && Find<Button>("FileParent").IsEnabled,
+                "An empty subfolder must show guidance and allow returning to its parent.");
+            SaveWindowRender(window, Path.Combine(output, "files-empty.png"));
+            Find<TextBox>("FilePath").Text = "/unfinished-address"; ClickAction("file-parent");
+            Verify(Find<TextBox>("FilePath").Text == "/" && files.SelectedItem?.GetType().GetProperty("Id")!.GetValue(files.SelectedItem)?.ToString() == "DCIM" &&
+                !Find<Button>("FileParent").IsEnabled, "Parent navigation must use the open folder and reselect the child, regardless of unfinished address edits.");
+            failFileRead = true; Find<TextBox>("FilePath").Text = "/unreadable"; ClickAction("file-browse");
+            Verify(Find<TextBox>("FilePath").Text == "/" && files.Items.Count == 3,
+                "An unsuccessful folder navigation must preserve the last open address and files.");
+            pagedFiles = true; Find<ComboBox>("FileRoot").SelectedIndex = 1; Finish(); files.SelectedIndex = 0;
+            Verify(files.Items.Count == 2 && Find<Button>("FileNext").IsVisible, "Paged folders must offer load more.");
+            ClickAction("file-next");
+            Verify(files.Items.Count == 3 && files.SelectedItem?.GetType().GetProperty("Id")!.GetValue(files.SelectedItem)?.ToString() == "first.jpg" &&
+                !Find<Button>("FileNext").IsVisible, "Load more must append files while retaining the first page and selection.");
+            files.SelectedIndex = 2; Find<TextBox>("FilePath").Text = "/unfinished-address";
+            _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+            Verify(files.Items.Count == 3 && Find<TextBox>("FilePath").Text == "/" &&
+                files.SelectedItem?.GetType().GetProperty("Id")!.GetValue(files.SelectedItem)?.ToString() == "third.jpg",
+                "Refresh must retain loaded pages and the selected file, without submitting an unfinished address.");
+            pagedFiles = false; Find<ComboBox>("FileRoot").SelectedIndex = 0; Finish();
 
             Select(5); ClickAction("settings-read");
             var settings = (System.Collections.IDictionary)KeyboardField(panel, "_settings");
@@ -273,11 +352,24 @@ internal static partial class Program
             Verify(calls.Count(c => c.Action == "set_location") == locationCalls, "Invalid coordinates must not reach the device.");
 
             Select(4);
+            Verify(Find<StackPanel>("LogsEmpty").IsVisible && Find<Button>("LogStart").IsVisible && !Find<Button>("LogStop").IsVisible,
+                "An idle console must show a start hint and only the available toggle action.");
+            SaveWindowRender(window, Path.Combine(output, "logs-idle.png"));
             Find<Button>("LogStart").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
+            Verify(!Find<Button>("LogStart").IsVisible && Find<Button>("LogStop").IsVisible,
+                "Starting logs must replace start with stop.");
             KeyboardCall(panel, "OnLogTick", null, EventArgs.Empty); Finish();
             Verify(Find<TextBox>("LogText").Text.Contains("SpringBoard"), "Console must render real log messages.");
             Find<TextBox>("LogSearch").Text = "runningboardd";
             Verify(!Find<TextBox>("LogText").Text.Contains("SpringBoard"), "Console filter must filter messages.");
+            Find<TextBox>("LogSearch").Text = "no-log-match"; Finish();
+            Verify(Find<StackPanel>("LogsEmpty").IsVisible && !Find<Button>("LogSave").IsEnabled,
+                "A log filter without results must show a clear-search hint and prevent saving an empty result.");
+            Find<Button>("LogSearchClear").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
+            ClickAction("log-stop");
+            Verify(Find<TextBox>("LogText").Text.Contains("SpringBoard") && Find<Button>("LogStart").IsVisible && Find<Button>("LogSave").IsEnabled,
+                "Stopping the console must retain captured logs for searching and saving.");
+            ClickAction("log-start");
             Select(1); AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
             Console.WriteLine("Console passed.");
             Verify(calls.Any(c => c.Action == "syslog_stop" && c.Device == second.Udid), "Leaving the console must stop the original device's log stream.");
@@ -339,6 +431,14 @@ internal static partial class Program
                         }
                     }
                     Verify(panel.ActualWidth >= 400, "The inspector must retain a usable width.");
+                    var connection = Find<TextBlock>("ConnectionText");
+                    var connectionWidth = new FormattedText(connection.Text, System.Globalization.CultureInfo.CurrentUICulture, connection.FlowDirection,
+                        new Typeface(connection.FontFamily, connection.FontStyle, connection.FontWeight, connection.FontStretch), connection.FontSize,
+                        connection.Foreground, VisualTreeHelper.GetDpi(connection).PixelsPerDip).WidthIncludingTrailingWhitespace;
+                    var connectionEnd = connection.TranslatePoint(new Point(connection.ActualWidth, 0), panel).X;
+                    var connectionParent = (FrameworkElement)connection.Parent;
+                    Verify(connection.ActualWidth + 1 >= connectionWidth && connectionEnd <= panel.ActualWidth - 15,
+                        $"The connection status must remain fully readable in {culture}: text={connectionWidth:0.0}, actual={connection.ActualWidth:0.0}, desired={connection.DesiredSize}, offset={VisualTreeHelper.GetOffset(connection)}, end={connectionEnd:0.0}, panel={panel.ActualWidth:0.0}, parent={connectionParent.GetType().Name}/{connectionParent.ActualWidth:0.0}/{connectionParent.DesiredSize}/{connectionParent.TranslatePoint(new Point(), panel)}.");
                     var preview = (Border)window.FindName("PreviewPanel");
                     var origin = panel.TranslatePoint(new Point(), window); var end = preview.TranslatePoint(new Point(preview.ActualWidth, 0), window);
                     Verify(origin.X >= end.X - 1, "Inspector must not overlap the projection.");
@@ -362,7 +462,7 @@ internal static partial class Program
             panel.Dispose(); LocalizationService.SetLanguage(language); ThemeService.Apply(theme);
             CloseWorkspaceTestWindow(window); app.Shutdown();
         }
-        Console.WriteLine("Integrated device manager passed: projection recovery, context-menu targeting/copy/open, stale-menu cancellation, six-page refresh backgrounds, console cleanup, five languages, two themes and compact/lightweight layout.");
+        Console.WriteLine("Integrated device manager passed: row menus, search/reset and process search, retained list position, empty states, folder navigation and appended pagination, log toggle/filter/retention, projection recovery, stale-response protection, six-page refresh backgrounds, five languages, two themes and compact/lightweight layout.");
         return 0;
     }
 

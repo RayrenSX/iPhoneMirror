@@ -1947,4 +1947,23 @@
     <sys:String x:Key="DeviceHubPanelOpenFolder">打开文件夹</sys:String>
     <sys:String x:Key="DeviceHubPanelSaveFile">另存为…</sys:String>
     <sys:String x:Key="DeviceHubPanelInstallFailed">安装失败。请使用签名有效、支持当前设备的 IPA，并确认手机已解锁。</sys:String>
+    <sys:String x:Key="DeviceHubPanelClearSearch">清除搜索（Esc）</sys:String>
+    <sys:String x:Key="DeviceHubPanelResetFilters">重置搜索和筛选</sys:String>
+    <sys:String x:Key="DeviceHubPanelSearchProcesses">搜索进程名称或 PID</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoProcesses">没有匹配的进程</sys:String>
+    <sys:String x:Key="DeviceHubPanelSearchEmptyHint">试试其他关键词，或调整上方的筛选条件。</sys:String>
+    <sys:String x:Key="DeviceHubPanelFilteredProcessCount">{0} 个进程 / 共 {1} 个</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoProfiles">尚未安装描述文件</sys:String>
+    <sys:String x:Key="DeviceHubPanelProfilesEmptyHint">可从电脑安装开发预置或设备配置文件。</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallProfile">安装描述文件…</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallApp">安装应用（IPA）…</sys:String>
+    <sys:String x:Key="DeviceHubPanelFilesEmptyHint">可刷新重试，或返回上级查看其他文件夹。</sys:String>
+    <sys:String x:Key="DeviceHubPanelLoadMore">加载更多</sys:String>
+    <sys:String x:Key="DeviceHubPanelNoLogMatches">没有匹配的日志</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsIdle">尚未开始读取日志</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsWaiting">正在等待手机日志</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogFilterEmptyHint">清除搜索即可显示已读取的全部日志。</sys:String>
+    <sys:String x:Key="DeviceHubPanelLogsWaitingHint">新日志会自动显示在这里，停止后仍可筛选和保存。</sys:String>
+    <sys:String x:Key="DeviceHubPanelProfileReadFailed">暂时无法读取描述文件</sys:String>
+    <sys:String x:Key="DeviceHubPanelRefreshHint">请检查设备连接后，点击上方的刷新按钮重试。</sys:String>
 </ResourceDictionary>

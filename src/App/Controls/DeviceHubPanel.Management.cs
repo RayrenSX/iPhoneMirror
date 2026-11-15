@@ -15,6 +15,8 @@ namespace IPhoneMirror.App.Controls;
 internal sealed partial class DeviceHubPanel
 {
     private HubRow[] _allApps = [];
+    private HubRow[] _allProcesses = [];
+    private bool _showingProcesses;
     private readonly Dictionary<string, ImageSource> _iconCache = new(StringComparer.Ordinal);
     private readonly HashSet<string> _missingIcons = [];
     private bool _iconsQueued;
@@ -24,7 +26,7 @@ internal sealed partial class DeviceHubPanel
         if (Option(AppFilter) == "processes")
         {
             var result = await op.Call("list_processes");
-            AppsList.ItemsSource = result.GetProperty("processes").EnumerateArray().Select(p =>
+            _allProcesses = result.GetProperty("processes").EnumerateArray().Select(p =>
             {
                 var id = Text(p, "processIdentifier");
                 var executable = p.TryGetProperty("executableURL", out var url) ? FindString(url, "relative", "path", "_0") : "";
@@ -32,8 +34,7 @@ internal sealed partial class DeviceHubPanel
                 if (name.Length == 0) name = executable.Split('/').LastOrDefault() ?? "";
                 return new HubRow(id, name.Length > 0 ? name : "PID " + id, "PID " + id + (executable.Length > 0 ? " · " + executable : ""), "≡", p.Clone());
             }).OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
-            AppCount.Text = F("PanelProcessCount", AppsList.Items.Count);
-            AppsEmpty.Visibility = AppsList.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ApplyAppFilter(preservePosition: true);
             StatusText.Text = "";
             return;
         }
@@ -48,37 +49,65 @@ internal sealed partial class DeviceHubPanel
             if (_iconCache.TryGetValue(IconKey(op.Device!, row), out var icon)) row.Icon = icon;
             return row;
         }).OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
-        ApplyAppFilter();
+        ApplyAppFilter(preservePosition: true);
         StatusText.Text = "";
     }
 
-    private void ApplyAppFilter()
+    private void ApplyAppFilter(bool preservePosition = false)
     {
-        if (!_initialized || Option(AppFilter) == "processes") return;
+        if (!_initialized) return;
         var search = AppSearch.Text.Trim();
         var filter = Option(AppFilter);
-        var selected = (AppsList.SelectedItem as HubRow)?.Id;
-        var rows = _allApps.Where(app =>
-            (search.Length == 0 || app.Title.Contains(search, StringComparison.CurrentCultureIgnoreCase) || app.Id.Contains(search, StringComparison.OrdinalIgnoreCase)) &&
+        var processes = filter == "processes";
+        var source = processes ? _allProcesses : _allApps;
+        var rows = source.Where(app =>
+            (search.Length == 0 || app.Title.Contains(search, StringComparison.CurrentCultureIgnoreCase) || app.Id.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                (processes && app.Detail.Contains(search, StringComparison.OrdinalIgnoreCase))) &&
             (filter switch
             {
                 "user" => !Flag(app.Data, "isFirstParty"), "system" => Flag(app.Data, "isFirstParty"),
                 "developer" => Flag(app.Data, "isDeveloper"), "clips" => Flag(app.Data, "isAppClip"), _ => true
             })).ToArray();
-        AppsList.ItemsSource = rows;
-        AppsList.SelectedItem = rows.FirstOrDefault(r => r.Id == selected);
-        AppCount.Text = F("PanelAppCount", rows.Length, _allApps.Length);
+        ReplaceRows(AppsList, rows, preservePosition: preservePosition);
+        AppCount.Text = processes ? F("PanelFilteredProcessCount", rows.Length, source.Length) : F("PanelAppCount", rows.Length, source.Length);
         AppsEmpty.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        AppsEmptyTitle.SetResourceReference(TextBlock.TextProperty, processes ? "DeviceHubPanelNoProcesses" : "DeviceHubPanelNoResults");
+        AppsEmptyHint.SetResourceReference(TextBlock.TextProperty, "DeviceHubPanelSearchEmptyHint");
+        ResetAppFilters.Visibility = search.Length > 0 || filter is not ("all" or "processes") ? Visibility.Visible : Visibility.Collapsed;
         UpdateCommands();
         if (!_busy) QueueIcons();
+    }
+
+    private void ReplaceRows(ListBox list, HubRow[] rows, string? preferredId = null, bool preservePosition = true)
+    {
+        var selectedId = preferredId ?? (preservePosition ? (list.SelectedItem as HubRow)?.Id : null);
+        var scroll = FindScrollViewer(list);
+        var offset = preservePosition ? scroll?.VerticalOffset ?? 0 : 0;
+        var generation = _generation;
+        list.ItemsSource = rows;
+        list.SelectedItem = rows.FirstOrDefault(row => row.Id == selectedId);
+        // Item containers are regenerated asynchronously. Restore only this result,
+        // never the list from a later search, page or device.
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_disposed || generation != _generation || !ReferenceEquals(list.ItemsSource, rows)) return;
+            FindScrollViewer(list)?.ScrollToVerticalOffset(offset);
+            if (!preservePosition && list.SelectedItem is { } selected) list.ScrollIntoView(selected);
+        }, DispatcherPriority.Loaded);
+    }
+    private static ScrollViewer? FindScrollViewer(DependencyObject parent)
+    {
+        if (parent is ScrollViewer scroll) return scroll;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            if (FindScrollViewer(VisualTreeHelper.GetChild(parent, i)) is { } found) return found;
+        return null;
     }
 
     private void OnAppSearchChanged(object sender, TextChangedEventArgs e)
     {
         if (!_initialized) return;
         AppSearchHint.Visibility = AppSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (Option(AppFilter) == "processes")
-        { if (_initialized) StatusText.Text = L("PanelProcessSearchHint"); return; }
+        AppSearchClear.Visibility = AppSearch.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         ApplyAppFilter();
     }
     private async void OnAppFilterChanged(object sender, SelectionChangedEventArgs e)
@@ -86,19 +115,42 @@ internal sealed partial class DeviceHubPanel
         if (!_initialized) return;
         var processes = Option(AppFilter) == "processes";
         IncludeHidden.Visibility = processes ? Visibility.Collapsed : Visibility.Visible;
-        AppSearch.IsEnabled = !processes;
+        var searchKey = processes ? "DeviceHubPanelSearchProcesses" : "DeviceHubPanelSearchApps";
+        AppSearchHint.SetResourceReference(TextBlock.TextProperty, searchKey);
+        AppSearch.SetResourceReference(ToolTipProperty, searchKey);
+        AppSearch.SetResourceReference(System.Windows.Automation.AutomationProperties.NameProperty, searchKey);
+        var changedKind = _showingProcesses != processes;
+        _showingProcesses = processes;
         _icons?.Cancel();
         RenewContext();
+        StatusText.Text = "";
+        // Never present an application row as a process while its new list loads.
+        if (changedKind)
+        {
+            if (processes) _allProcesses = [];
+            AppSearch.Clear(); AppsList.ItemsSource = null; AppCount.Text = ""; AppsEmpty.Visibility = Visibility.Collapsed;
+        }
         UpdateConnection();
         if ((processes || Option(AppFilter) == "clips") && _active && _ready) await RefreshAsync();
         else if (_allApps.Length == 0 && _active && _ready) await RefreshAsync();
         else ApplyAppFilter();
     }
+    private void OnClearSearchClick(object sender, RoutedEventArgs e)
+    {
+        var search = sender is Button { Tag: "logs" } ? LogSearch : AppSearch;
+        search.Clear(); search.Focus(); e.Handled = true;
+    }
+    private void OnResetAppFiltersClick(object sender, RoutedEventArgs e)
+    {
+        AppSearch.Clear();
+        if (Option(AppFilter) != "processes") AppFilter.SelectedIndex = 0;
+        AppSearch.Focus();
+    }
     private async void OnIncludeHiddenChanged(object sender, RoutedEventArgs e)
     { if (_initialized && _active && _ready) await RefreshAsync(); }
     private async void OnAppDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (Option(AppFilter) == "processes" || e.OriginalSource is not DependencyObject origin ||
+        if (Option(AppFilter) == "processes" || e.OriginalSource is not DependencyObject origin || IsRowActionSource(origin) ||
             ItemsControl.ContainerFromElement(AppsList, origin) is not ListBoxItem) return;
         e.Handled = true;
         await InvokeActionAsync("app-launch");
@@ -181,12 +233,17 @@ internal sealed partial class DeviceHubPanel
     private async Task LoadProfilesAsync(Operation op)
     {
         var result = await op.Call("list_profiles");
-        ProfilesList.ItemsSource = result.GetProperty("profiles").EnumerateArray().Select(p =>
+        var rows = result.GetProperty("profiles").EnumerateArray().Select(p =>
             new HubRow(Text(p, "id"), Text(p, "name"), string.Join(" · ", new[] {
                 Text(p, "kind") == "provisioning" ? L("PanelProvisioning") : L("PanelConfiguration"), Text(p, "organization"), Text(p, "expires"), Text(p, "id")
             }.Where(s => s.Length > 0)), "▤", p.Clone())).ToArray();
-        StatusText.Text = result.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Object && errors.EnumerateObject().Any()
-            ? L("PanelPartialProfiles") : F("PanelProfileCount", ProfilesList.Items.Count);
+        ReplaceRows(ProfilesList, rows);
+        ProfilesEmpty.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var partial = result.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Object && errors.EnumerateObject().Any();
+        ProfilesEmptyTitle.SetResourceReference(TextBlock.TextProperty, "DeviceHub" + (partial ? "PanelProfileReadFailed" : "PanelNoProfiles"));
+        ProfilesEmptyHint.SetResourceReference(TextBlock.TextProperty, "DeviceHub" + (partial ? "PanelRefreshHint" : "PanelProfilesEmptyHint"));
+        ProfileEmptyInstall.Visibility = partial ? Visibility.Collapsed : Visibility.Visible;
+        StatusText.Text = partial ? L("PanelPartialProfiles") : F("PanelProfileCount", ProfilesList.Items.Count);
     }
     private async Task RemoveProfileAsync(Operation op, HubRow? row)
     {
@@ -266,12 +323,13 @@ internal sealed partial class DeviceHubPanel
         if (count == 0) panel.Children.Add(Label("PanelUnavailable"));
     }
 
-    private int _fileOffset;
     private int? _fileNext;
+    private string _listedFilePath = "";
     private async void OnFileRootChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_initialized) return;
-        RenewContext(); FilePath.Text = "/"; _fileOffset = 0; _fileNext = null; FilesList.ItemsSource = null;
+        RenewContext(); FilePath.Text = "/"; _listedFilePath = ""; _fileNext = null; FilesList.ItemsSource = null;
+        FilesEmpty.Visibility = Visibility.Collapsed;
         UpdateConnection();
         if (_active && _ready) await RefreshAsync();
     }
@@ -279,27 +337,48 @@ internal sealed partial class DeviceHubPanel
     { if (e.Key == Key.Enter) { e.Handled = true; await RunAsync(op => ExecuteActionAsync(op, "file-browse")); } }
     private async void OnFileDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (e.OriginalSource is not DependencyObject origin || ItemsControl.ContainerFromElement(FilesList, origin) is not ListBoxItem) return;
+        if (e.OriginalSource is not DependencyObject origin || IsRowActionSource(origin) || ItemsControl.ContainerFromElement(FilesList, origin) is not ListBoxItem) return;
         e.Handled = true; await InvokeActionAsync("file-download");
     }
-    private async Task BrowseAsync(Operation op)
+    private async Task BrowseAsync(Operation op, bool append = false, string? targetPath = null)
     {
-        var root = Option(FileRoot); var path = FilePath.Text.Trim('/');
-        var result = await op.Call("list_dir", new { root, path, offset = _fileOffset, limit = 200, refresh = root == "crashes" && _fileOffset == 0 });
-        FilesList.ItemsSource = result.GetProperty("entries").EnumerateArray()
+        var root = Option(FileRoot); var path = (targetPath ?? FilePath.Text).Trim().Trim('/');
+        var sameFolder = path == _listedFilePath;
+        var offset = append && sameFolder && _fileNext is int next ? next : 0;
+        var retainCount = !append && sameFolder ? FilesList.Items.Count : 0;
+        var entries = new List<JsonElement>();
+        JsonElement result;
+        int? following;
+        do
+        {
+            result = await op.Call("list_dir", new { root, path, offset, limit = 200, refresh = root == "crashes" && offset == 0 });
+            entries.AddRange(result.GetProperty("entries").EnumerateArray().Select(entry => entry.Clone()));
+            following = result.GetProperty("nextOffset").ValueKind == JsonValueKind.Number ? result.GetProperty("nextOffset").GetInt32() : null;
+            if (following.HasValue && following.Value <= offset) throw new IOException("Folder listing made no progress.");
+            if (append || entries.Count >= retainCount || !following.HasValue) break;
+            offset = following.Value;
+        } while (true);
+        var rows = entries
             .OrderBy(e => Text(e, "type") != "directory").ThenBy(e => Text(e, "name"), StringComparer.CurrentCultureIgnoreCase)
             .Select(p => new HubRow(Text(p, "path"), Text(p, "name"), Text(p, "type") == "directory" ? L("PanelFolder") :
                 (p.TryGetProperty("size", out var size) && size.TryGetInt64(out var bytes) ? FormatBytes(bytes) : "—"),
                 Text(p, "type") == "directory" ? "▸" : "≡", p.Clone())).ToArray();
-        _fileNext = result.GetProperty("nextOffset").ValueKind == JsonValueKind.Number ? result.GetProperty("nextOffset").GetInt32() : null;
+        if (append && offset > 0)
+            rows = FilesList.Items.Cast<HubRow>().Concat(rows).DistinctBy(row => row.Id).ToArray();
+        var child = !sameFolder && _listedFilePath.StartsWith(path.Length == 0 ? "" : path + "/", StringComparison.Ordinal)
+            ? _listedFilePath : null;
+        ReplaceRows(FilesList, rows, preferredId: child, preservePosition: sameFolder);
+        _fileNext = following;
+        _listedFilePath = path;
         FilePath.Text = path.Length == 0 ? "/" : "/" + path;
-        StatusText.Text = FilesList.Items.Count == 0 ? L("PanelEmptyFolder") : F("PanelFileCount", _fileOffset + 1, _fileOffset + FilesList.Items.Count, Text(result, "total"));
+        FilesEmpty.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        StatusText.Text = rows.Length == 0 ? "" : F("PanelFileCount", 1, rows.Length, Text(result, "total"));
     }
     private async Task OpenFileAsync(Operation op, HubRow? row)
     {
         if (row is null || !_ready) return;
         if (Text(row.Data, "type") == "directory")
-        { FilePath.Text = row.Id; _fileOffset = 0; await BrowseAsync(op); return; }
+        { await BrowseAsync(op, targetPath: row.Id); return; }
         if (Text(row.Data, "type") != "file") { StatusText.Text = L("PanelUnsupportedFile"); return; }
         var root = Option(FileRoot);
         var dialog = new SaveFileDialog { FileName = Path.GetFileName(row.Title), OverwritePrompt = true };
@@ -396,6 +475,7 @@ internal sealed partial class DeviceHubPanel
         var result = await op.Call("syslog_start");
         _logDevice = op.Device; _logStream = Text(result, "streamId");
         _logCursor = 0; _logLines.Clear(); LogText.Clear(); _logTimer.Start();
+        UpdateLogEmptyState();
         StatusText.Text = L("PanelLogRunning");
     }
     private async void OnLogTick(object? sender, EventArgs e)
@@ -425,16 +505,27 @@ internal sealed partial class DeviceHubPanel
     {
         if (!_initialized) return;
         LogSearchHint.Visibility = LogSearch.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        LogSearchClear.Visibility = LogSearch.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         RenderLogs();
     }
     private void RenderLogs()
     {
         var filter = LogSearch.Text.Trim();
         LogText.Text = string.Join(Environment.NewLine, _logLines.Where(line => filter.Length == 0 || line.Contains(filter, StringComparison.OrdinalIgnoreCase)));
+        UpdateCommands();
         if (LogFollow.IsChecked == true) LogText.ScrollToEnd();
+    }
+    private void UpdateLogEmptyState()
+    {
+        if (!_initialized) return;
+        LogsEmpty.Visibility = LogText.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var filtered = _logLines.Count > 0 && LogSearch.Text.Trim().Length > 0;
+        LogsEmptyTitle.SetResourceReference(TextBlock.TextProperty, "DeviceHub" + (filtered ? "PanelNoLogMatches" : _logStream is null ? "PanelLogsIdle" : "PanelLogsWaiting"));
+        LogsEmptyHint.SetResourceReference(TextBlock.TextProperty, "DeviceHub" + (filtered ? "PanelLogFilterEmptyHint" : _logStream is null ? "PanelLogHint" : "PanelLogsWaitingHint"));
     }
     private async Task SaveLogsAsync(Operation op)
     {
+        if (LogText.Text.Length == 0) { StatusText.Text = L("PanelNoLogMatches"); return; }
         var dialog = new SaveFileDialog { FileName = "iphone-syslog.txt", Filter = "Text|*.txt", OverwritePrompt = true };
         if (dialog.ShowDialog(Owner) != true) { StatusText.Text = ""; return; }
         op.Check(); await File.WriteAllTextAsync(dialog.FileName, LogText.Text, op.Token);

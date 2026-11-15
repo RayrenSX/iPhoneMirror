@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 
 namespace IPhoneMirror.App.Controls;
 
@@ -16,9 +17,38 @@ internal sealed partial class DeviceHubPanel
             // The menu must exist before the first ContextMenuOpening event.
             list.ContextMenu = NewMenu();
             list.PreviewMouseRightButtonDown += (_, e) => SelectContextRow(list, e.OriginalSource as DependencyObject);
-            list.ContextMenuOpening += (_, _) => PopulateListMenu(list);
+            list.ContextMenuOpening += (_, _) =>
+            {
+                var menu = PopulateListMenu(list);
+                menu.PlacementTarget = list;
+                menu.Placement = PlacementMode.MousePoint;
+            };
         }
         AppsList.SetResourceReference(ToolTipProperty, "DeviceHubPanelAppHint");
+    }
+
+    private void OnRowMoreClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button) return;
+        e.Handled = true;
+        foreach (var list in new[] { AppsList, ProfilesList, FilesList })
+        {
+            if (ItemsControl.ContainerFromElement(list, button) is not ListBoxItem item) continue;
+            CloseMenus();
+            list.SelectedItem = list.ItemContainerGenerator.ItemFromContainer(item);
+            var menu = PopulateListMenu(list);
+            menu.PlacementTarget = button; menu.Placement = PlacementMode.Bottom;
+            menu.IsOpen = true;
+            break;
+        }
+    }
+
+    private static bool IsRowActionSource(DependencyObject source)
+    {
+        for (var current = source; current is not null && current is not ListBoxItem;
+            current = current is Visual ? VisualTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current))
+            if (current is ButtonBase) return true;
+        return false;
     }
 
     private ContextMenu NewMenu()
@@ -67,8 +97,16 @@ internal sealed partial class DeviceHubPanel
             AddMenuAction(menu, key, "copy", row is not null, () =>
             {
                 if (!Valid() || row is null) return Task.CompletedTask;
-                try { CopyText(row.Id); StatusText.Text = L("PanelCopied"); }
-                catch { StatusText.Text = L("PanelCopyFailed"); }
+                try
+                {
+                    CopyText(row.Id); StatusText.Text = L("PanelCopied");
+                    StatusText.SetResourceReference(TextBlock.ForegroundProperty, "MutedTextBrush");
+                }
+                catch
+                {
+                    StatusText.Text = L("PanelCopyFailed");
+                    StatusText.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+                }
                 return Task.CompletedTask;
             });
         }
@@ -83,7 +121,7 @@ internal sealed partial class DeviceHubPanel
                 Action(process ? "Terminate" : "PanelUninstall", "app-remove", true);
                 AddMenuSeparator(menu);
             }
-            if (!process) Action("Install", "app-install", true);
+            if (!process) Action("PanelInstallApp", "app-install", true);
         }
         else if (list == ProfilesList)
         {
@@ -93,7 +131,7 @@ internal sealed partial class DeviceHubPanel
                 Action("Remove", "profile-remove", true);
                 AddMenuSeparator(menu);
             }
-            Action("Install", "profile-install", true);
+            Action("PanelInstallProfile", "profile-install", true);
         }
         else if (list == FilesList)
         {
@@ -104,7 +142,7 @@ internal sealed partial class DeviceHubPanel
                 Copy("PanelCopyPath");
                 AddMenuSeparator(menu);
             }
-            Action("ExportCrashes", "file-export", Option(FileRoot) == "crashes");
+            if (Option(FileRoot) == "crashes") Action("ExportCrashes", "file-export", true);
         }
         Action("Refresh", "refresh", true);
         return menu;
@@ -126,12 +164,12 @@ internal sealed partial class DeviceHubPanel
                 await InvokeActionAsync(action);
             });
         }
-        if (_page == 1 && Option(AppFilter) != "processes") Action("Install", "app-install", available);
-        if (_page == 2) Action("Install", "profile-install", available);
-        if (_page == 3) Action("ExportCrashes", "file-export", available);
-        if (_page == 4) Action("SaveLog", "log-save", available && _logLines.Count > 0);
+        if (_page == 1 && Option(AppFilter) != "processes") Action("PanelInstallApp", "app-install", available);
+        if (_page == 2) Action("PanelInstallProfile", "profile-install", available);
+        if (_page == 3 && Option(FileRoot) == "crashes") Action("ExportCrashes", "file-export", available);
+        if (_page == 4) Action("SaveLog", "log-save", available && LogText.Text.Length > 0);
         if (menu.Items.Count > 0) AddMenuSeparator(menu);
-        Action("Prepare", "prepare", !_busy && !_ready && _device is { IsMediaCast: false } && (_device.Ready || _device.IsWireless));
+        if (!_ready && _device is { IsMediaCast: false }) Action("Prepare", "prepare", !_busy && (_device.Ready || _device.IsWireless));
         Action("Replay", "replay", !_busy);
         HeaderMore.ContextMenu = menu;
         menu.PlacementTarget = HeaderMore;
@@ -162,13 +200,31 @@ internal sealed partial class DeviceHubPanel
 
     private async void OnPanelKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F5)
+        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && _page is 1 or 4 && Pages.IsEnabled)
+        {
+            var search = _page == 1 ? AppSearch : LogSearch;
+            search.Focus(); search.SelectAll(); e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && (AppSearch.IsKeyboardFocusWithin || LogSearch.IsKeyboardFocusWithin))
+        {
+            var search = AppSearch.IsKeyboardFocusWithin ? AppSearch : LogSearch;
+            if (search.Text.Length > 0) { search.Clear(); e.Handled = true; }
+        }
+        else if (_page == 3 && e.Key == Key.Escape && FilePath.IsKeyboardFocusWithin)
+        { FilePath.Text = _listedFilePath.Length == 0 ? "/" : "/" + _listedFilePath; FilesList.Focus(); e.Handled = true; }
+        else if (_page == 3 && e.Key == Key.L && Keyboard.Modifiers == ModifierKeys.Control && Pages.IsEnabled)
+        { FilePath.Focus(); FilePath.SelectAll(); e.Handled = true; }
+        else if (_page == 3 && _ready && !_busy && _listedFilePath.Length > 0 &&
+            ((e.Key == Key.Back && FilesList.IsKeyboardFocusWithin) || (e.SystemKey == Key.Up && Keyboard.Modifiers == ModifierKeys.Alt)))
+        { e.Handled = true; await InvokeActionAsync("file-parent"); }
+        else if (e.Key == Key.F5)
         {
             e.Handled = true;
             if (_ready) await InvokeActionAsync("refresh");
         }
         else if (e.Key == Key.Enter && _ready && !_busy)
         {
+            if (e.OriginalSource is DependencyObject source && IsRowActionSource(source)) return;
             if (_page == 1 && AppsList.IsKeyboardFocusWithin && Option(AppFilter) != "processes")
             { e.Handled = true; await InvokeActionAsync("app-launch"); }
             else if (_page == 3 && FilesList.IsKeyboardFocusWithin)

@@ -134,11 +134,14 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     {
         _loadedPages.Clear();
         _allApps = [];
+        _allProcesses = [];
         AppsList.ItemsSource = ProfilesList.ItemsSource = FilesList.ItemsSource = null;
         AppSearch.Clear(); AppCount.Text = "";
+        AppsEmpty.Visibility = ProfilesEmpty.Visibility = FilesEmpty.Visibility = Visibility.Collapsed;
         InfoRows.Children.Clear(); DiagnosticRows.Children.Clear();
-        FilePath.Text = "/"; _fileOffset = 0; _fileNext = null;
+        FilePath.Text = "/"; _listedFilePath = ""; _fileNext = null;
         _logLines.Clear(); LogText.Clear();
+        LogSearch.Clear(); UpdateLogEmptyState();
         StatusText.Text = "";
         ResetSettingValues();
     }
@@ -163,6 +166,14 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         RecoveryHint.Visibility = _hasConnected && !_ready ? Visibility.Visible : Visibility.Collapsed;
         BusyProgress.Visibility = _busy && !_quietOperation ? Visibility.Visible : Visibility.Collapsed;
         UpdateCommands();
+    }
+
+    private void OnConnectionTextSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // Localized status text can grow after the header's first layout pass.
+        // Reflow the name/status allocation once its final text width is known.
+        if (e.WidthChanged && ConnectionText.Parent is FrameworkElement header)
+        { header.InvalidateMeasure(); header.InvalidateArrange(); }
     }
 
     private static string L(string key) => LocalizationService.Get("DeviceHub" + key);
@@ -210,7 +221,11 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         var operation = new Operation(this, _device, _generation, _context.Token);
         _busy = true;
         _quietOperation = quiet;
-        if (!quiet) StatusText.Text = L("Working");
+        if (!quiet)
+        {
+            StatusText.SetResourceReference(TextBlock.ForegroundProperty, "MutedTextBrush");
+            StatusText.Text = L("Working");
+        }
         UpdateConnection();
         return _operation = ExecuteAsync();
 
@@ -233,6 +248,8 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
                 {
                     if (quiet) _ = StopLogsAsync(waitForOperation: true);
                     StatusText.Text = FriendlyError(error);
+                    StatusText.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+                    if (_page == 3) FilePath.Text = _listedFilePath.Length == 0 ? "/" : "/" + _listedFilePath;
                     _viewModel.AddDiagnosticLog("Device management: " + error);
                 }
             }
@@ -291,7 +308,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
             case 0: await LoadInfoAsync(op); break;
             case 1: await LoadAppsAsync(op); break;
             case 2: await LoadProfilesAsync(op); break;
-            case 3: await BrowseAsync(op); break;
+            case 3: await BrowseAsync(op, targetPath: _listedFilePath); break;
             case 4: StatusText.Text = L("PanelLogHint"); break;
             case 5: await ControlActionAsync(op, "settings-read"); break;
         }
@@ -326,10 +343,11 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
             case "profile-install": await InstallAsync(op, true); break;
             case "profile-remove": await RemoveProfileAsync(op, row); break;
             case "file-parent":
-                var path = FilePath.Text.Trim('/'); FilePath.Text = path.Contains('/') ? path[..path.LastIndexOf('/')] : "/";
-                _fileOffset = 0; await BrowseAsync(op); break;
-            case "file-browse": _fileOffset = 0; await BrowseAsync(op); break;
-            case "file-next": if (_fileNext is int next) { _fileOffset = next; await BrowseAsync(op); } break;
+                if (_listedFilePath.Length == 0) { StatusText.Text = ""; break; }
+                var parent = _listedFilePath.Contains('/') ? _listedFilePath[.._listedFilePath.LastIndexOf('/')] : "";
+                await BrowseAsync(op, targetPath: parent); break;
+            case "file-browse": await BrowseAsync(op); break;
+            case "file-next": if (_fileNext.HasValue) await BrowseAsync(op, append: true, targetPath: _listedFilePath); break;
             case "file-download": await OpenFileAsync(op, row); break;
             case "file-export": await ExportCrashesAsync(op); break;
             case "log-start": await StartLogsAsync(op); break;
@@ -367,9 +385,13 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         HeaderMore.IsEnabled = !_busy || _quietOperation;
         FileNext.IsEnabled = _ready && !_busy && _fileNext.HasValue;
         FileNext.Visibility = _fileNext.HasValue ? Visibility.Visible : Visibility.Collapsed;
+        FileParent.IsEnabled = _ready && !_busy && _listedFilePath.Length > 0;
         LogStart.IsEnabled = !_busy && _logStream is null;
         LogStop.IsEnabled = (!_busy || _quietOperation) && _logStream is not null;
-        LogSave.IsEnabled = (!_busy || _quietOperation) && _logLines.Count > 0;
+        LogStart.Visibility = _logStream is null ? Visibility.Visible : Visibility.Collapsed;
+        LogStop.Visibility = _logStream is null ? Visibility.Collapsed : Visibility.Visible;
+        LogSave.IsEnabled = (!_busy || _quietOperation) && LogText.Text.Length > 0;
+        UpdateLogEmptyState();
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -377,7 +399,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => OnLanguageChanged(sender, e)); return; }
         if (_disposed) return;
         CloseMenus();
-        UpdateConnection(); ApplyAppFilter();
+        UpdateConnection(); ApplyAppFilter(preservePosition: true);
         StatusText.Text = "";
         foreach (var page in new[] { 0, 2, 3 }) _loadedPages.Remove(page);
         if (_active && _ready && !_busy && _page is 0 or 2 or 3) _ = RefreshAsync();
