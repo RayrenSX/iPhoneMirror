@@ -162,13 +162,16 @@ class MediaStreamHealth:
         self.check()
 
 
-async def _drain_media(transport, health: MediaStreamHealth):
+async def _drain_media(transport, health: MediaStreamHealth, sink=None):
     try:
         while True:
-            if not await transport.recv():
+            packet = await transport.recv()
+            if not packet:
                 raise EOFError('Media authentication receiver returned no data.')
             health.last_packet_at = time.monotonic()
             health.packet_available.set()
+            if sink is not None:
+                sink(packet)
     except asyncio.CancelledError:
         raise
     except Exception as error:
@@ -233,6 +236,7 @@ async def touch_session(rsd):
     import uuid
 
     display = DisplayService(rsd)
+    media_hub = getattr(rsd, '_iphone_mirror_media_hub', None)
     hid = transport = drain = answer = None
 
     async def close(service):
@@ -251,13 +255,18 @@ async def touch_session(rsd):
         try:
             answer = await asyncio.wait_for(display.start_video_stream(
                 receiver_ip=receiver_ip, receiver_port=transport.port,
-                sender_ip=rsd.service.address[0], display_id=1), 10)
+                sender_ip=rsd.service.address[0], display_id=1,
+                allow_rtcp_fb=True, ltrp_enabled=False, fec_enabled=False), 10)
         except TimeoutError as error:
             raise RuntimeError('Timed out starting the media stream that gates HID auth.') from error
         await asyncio.sleep(.3)
 
         health = MediaStreamHealth()
-        drain = health.reader_task = asyncio.create_task(_drain_media(transport, health))
+        if media_hub is not None:
+            media_hub.owner.display, media_hub.owner.transport, media_hub.owner.stream_answer = display, transport, answer
+            await media_hub.bind()
+        drain = health.reader_task = asyncio.create_task(_drain_media(transport, health,
+            media_hub.feed if media_hub is not None else None))
         await health.wait_started()
         hid = UniversalHIDServiceService(rsd)
         try:
@@ -269,6 +278,9 @@ async def touch_session(rsd):
         yield hid
     finally:
         async with _cleanup_cancellation_scope() as finish:
+            if media_hub is not None:
+                await finish(media_hub.suspend())
+                media_hub.owner.display = media_hub.owner.transport = media_hub.owner.stream_answer = None
             await finish(close(hid))
             if drain is not None:
                 drain.cancel()
@@ -573,7 +585,7 @@ def _interface_with_subclass(configuration, subclass: int):
     return None
 
 PROTOCOL_VERSION = 2
-CAPABILITIES = ['iphoneMirror.usb_touch.v2', 'iphoneMirror.usb_keyboard.v1', 'iphoneMirror.clipboard.rpc.v1']
+CAPABILITIES = ['iphoneMirror.usb_touch.v2', 'iphoneMirror.usb_keyboard.v1', 'iphoneMirror.clipboard.rpc.v1', 'iphoneMirror.hub.rpc.v1']
 MAX_SLOTS = 5
 MAX_FRAME_SIZE = 4 * 1024 * 1024
 MESSAGE_SCHEMA = 'iphoneMirror.touch.v2'
@@ -2494,6 +2506,8 @@ class TouchSession:
         self.display: Optional[DisplayService] = None
         self.dial_plane = None
         self.stream_answer = None
+        from device_hub import DeviceHub
+        self.device_hub = DeviceHub(self)
         self.drain_task = None
         self.transport = None
         self._media_health: Optional[MediaStreamHealth] = None
@@ -4059,6 +4073,7 @@ class TouchSession:
                     await self._recovery_event('rsd_reconnect_failed', error)
                 raise
             self._wireless_connect_phase = ('hid', asyncio.get_running_loop().time())
+            self.rsd._iphone_mirror_media_hub = self.device_hub
             await self._prepare_pasteboard_resources()
             if self._recovering:
                 await self._recovery_event('hid_reinit_started')
@@ -4323,10 +4338,14 @@ class TouchSession:
                     receiver_port=self.transport.port,
                     sender_ip=sender_ip,
                     display_id=1,
+                    allow_rtcp_fb=True,
+                    ltrp_enabled=False,
+                    fec_enabled=False,
                 ),
                 timeout=10.0,
             )
             self._media_health = MediaStreamHealth()
+            await self.device_hub.bind()
             self.drain_task = asyncio.create_task(self._drain())
             self._media_health.reader_task = self.drain_task
             await self._media_health.wait_started()
@@ -4441,7 +4460,7 @@ class TouchSession:
         self._check_media_auth()
 
     async def _drain(self) -> None:
-        await _drain_media(self.transport, self._media_health)
+        await _drain_media(self.transport, self._media_health, self.device_hub.feed)
 
     def _check_media_auth(self) -> None:
         if self.auth_mode == 'mediastream' and self._media_health is not None:
@@ -4555,6 +4574,9 @@ class TouchSession:
                             await self.ipc.emit({'event': 'status', 'code': 'stale_input_dropped',
                                 'message': f'frame_generation={frame_generation} active_generation={self._generation}'})
                             last_stale_generation = frame_generation
+                        continue
+                    if frame.get('kind') in ('hub_request', 'cancel_hub'):
+                        self.device_hub.dispatch(frame, self._generation)
                         continue
                     for attempt in range(2):
                         attempted_hid = self.hid
@@ -5752,6 +5774,7 @@ class TouchSession:
                 release_hid_state(), timeout=HID_CLEANUP_TIMEOUT_SECONDS)
 
     async def _cleanup(self, *, preserve_capture_mux: bool = False) -> None:
+        await self.device_hub.suspend()
         async def close_pasteboard():
             try:
                 async with asyncio.timeout(HID_CLEANUP_TIMEOUT_SECONDS):
@@ -5854,6 +5877,7 @@ async def main_async(rate_hz: int, udid: Optional[str], transport: str,
         # connect() normally owns tunnel teardown, but failures during
         # capture-mux setup or lockdown discovery happen before that scope is
         # entered. Always release those early resources as well.
+        await session.device_hub.close()
         await session._cleanup()
         if session._mux_checkpoint is not None:
             # Capture after every tunnel/client finally block: those can still
@@ -5970,6 +5994,9 @@ def main() -> int:
             stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser()
     parser.add_argument('--rate-hz', type=int, default=120)
+    parser.add_argument('--replay-media', type=Path)
+    parser.add_argument('--media-pipe')
+    parser.add_argument('--replay-speed', type=float, default=1.0)
     parser.add_argument('--udid', default=None)
     parser.add_argument('--ddi-dir', type=Path, default=None,
                         help='仅在未挂载镜像时使用此本地 Personalized DDI 目录')
@@ -5990,6 +6017,12 @@ def main() -> int:
                         help='只读检查指定设备的现有信任、开发者模式及无线控制设置')
     parser.set_defaults(transport='usb')
     args = parser.parse_args()
+    if args.replay_media:
+        if not args.media_pipe or args.udid:
+            parser.error('--replay-media requires --media-pipe and no device')
+        from coredevice_media import replay
+        print(json.dumps(asyncio.run(replay(args.replay_media, args.media_pipe, args.replay_speed))))
+        return 0
     if args.device_action:
         if not args.udid or args.transport != 'usb' or any((
                 args.observe_orientation, args.check_setup, args.check_runtime, args.enable_wifi_sync)):

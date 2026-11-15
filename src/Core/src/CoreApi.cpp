@@ -1549,6 +1549,65 @@ static std::shared_ptr<MultiSessionContext> find_multi_session(iPhoneMirror::Ses
     return found == multi_sessions.end() ? nullptr : found->second;
 }
 
+std::int32_t IM_CALL im_external_session_create(const wchar_t* device_id,
+    const iPhoneMirror::CaptureOptions* options, iPhoneMirror::SessionHandle* handle) {
+    if (!device_id || !*device_id || !options || !handle ||
+        options->struct_size != sizeof(*options) || !valid_capture_option_extensions(*options) ||
+        !valid_video_preferences(options->requested_width, options->requested_height, options->target_fps) ||
+        !std::isfinite(options->audio_volume) || options->audio_volume < 0 || options->audio_volume > 1)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid external media options");
+    *handle = 0;
+    std::shared_lock initialization_lock(initialization_mutex);
+    std::string identity = normalized_wired_device_identity(device_id);
+    {
+        std::scoped_lock lock(state_mutex);
+        if (!initialized) return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
+        if (identity.empty() || !wired_session_reservations.emplace(identity).second)
+            return fail(iPhoneMirror::Result::SessionAlreadyExists, L"Device capture already exists or is stopping");
+    }
+    try {
+        auto context = std::make_shared<MultiSessionContext>();
+        context->preferences = preferences_from_options(*options);
+        context->wired_device_identity = identity;
+        auto source = std::make_unique<iPhoneMirror::capture::WirelessCaptureSession>(device_id, context->preferences);
+        source->start();
+        context->capture = std::move(source);
+        std::scoped_lock lock(state_mutex);
+        const auto id = next_session_handle++;
+        multi_sessions.emplace(id, std::move(context));
+        *handle = id;
+        last_error.clear();
+        return 0;
+    } catch (const std::exception& error) {
+        std::scoped_lock lock(state_mutex);
+        wired_session_reservations.erase(identity);
+        return fail(iPhoneMirror::Result::InternalError, widen(error.what()));
+    }
+}
+
+std::int32_t IM_CALL im_external_session_push(iPhoneMirror::SessionHandle handle,
+    std::uint32_t kind, std::uint32_t width, std::uint32_t height,
+    const std::uint8_t* data, std::uint32_t length) {
+    const auto context = find_multi_session(handle);
+    if (!context || !data || length > 64U * 1024U * 1024U)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid external media frame");
+    std::shared_lock lock(context->lifecycle_mutex);
+    auto* source = dynamic_cast<iPhoneMirror::capture::WirelessCaptureSession*>(context->capture.get());
+    if (context->stopped || !source || !source->publish_external(kind, width, height, {data, length}))
+        return fail(iPhoneMirror::Result::InvalidArgument, L"External media rejected");
+    return 0;
+}
+
+std::int32_t IM_CALL im_external_session_state(iPhoneMirror::SessionHandle handle, std::int32_t active) {
+    const auto context = find_multi_session(handle);
+    if (!context) return -1;
+    std::shared_lock lock(context->lifecycle_mutex);
+    auto* source = dynamic_cast<iPhoneMirror::capture::WirelessCaptureSession*>(context->capture.get());
+    if (context->stopped || !source) return -1;
+    source->external_state(active != 0);
+    return 0;
+}
+
 std::int32_t IM_CALL im_session_stop(iPhoneMirror::SessionHandle handle) {
     auto context = find_multi_session(handle);
     if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");

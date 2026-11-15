@@ -282,7 +282,7 @@ internal sealed record MediaCastRequest(ulong CommandId, MediaCastCommand Comman
     MediaCastFlags Flags, string Url, double Duration, double StartPosition,
     double Volume);
 
-internal sealed class NativeCore : IDisposable
+internal sealed partial class NativeCore : IDisposable
 {
     private const string Library = "iPhoneMirror.Core";
     private bool _initialized;

@@ -252,6 +252,14 @@ struct MediaCastRequest {
 } // namespace iPhoneMirror
 
 IM_API std::int32_t IM_CALL im_initialize();
+// Additive API 18 extension. kind: 1=tightly packed I420, 2=48 kHz S16 PCM.
+IM_API std::int32_t IM_CALL im_external_session_create(const wchar_t* device_id,
+    const iPhoneMirror::CaptureOptions* options, iPhoneMirror::SessionHandle* handle);
+IM_API std::int32_t IM_CALL im_external_session_push(iPhoneMirror::SessionHandle handle,
+    std::uint32_t kind, std::uint32_t width, std::uint32_t height,
+    const std::uint8_t* data, std::uint32_t length);
+IM_API std::int32_t IM_CALL im_external_session_state(iPhoneMirror::SessionHandle handle,
+    std::int32_t active);
 IM_API void IM_CALL im_shutdown();
 IM_API std::uint32_t IM_CALL im_api_version();
 // Persists a single sanitized application/UI diagnostic in the shared log.

@@ -1198,7 +1198,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     }
 
     public bool CanChangeUsbProjectionMode => SelectedDevice is not null &&
-        !IsWirelessSelected && !IsMediaCastSelected && !IsSettingsInteractionBlocked;
+        !IsWirelessSelected && !IsMediaCastSelected && !IsSettingsInteractionBlocked &&
+        CurrentDeviceSession?.ExternalCapture is null;
 
     private DecoderPreference CurrentDecoderPreference =>
         CurrentDeviceSession?.DecoderPreference ?? DecoderPreference.Auto;
@@ -7871,7 +7872,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private async Task RestartUsbSessionAsync(DeviceViewModel device,
         DeviceCaptureState state, string reason)
     {
-        if (_disposed || device.IsWireless || IsBusy || !state.HasSession) return;
+        if (_disposed || device.IsWireless || IsBusy || !state.HasSession || state.ExternalCapture is not null) return;
         IsBusy = true;
         var startSettings = CaptureSessionStartSettings(state);
         var gateHeld = false;

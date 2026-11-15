@@ -130,6 +130,13 @@ Errors use `{ "error": { "code": "...", "message": "..." }, "requestId": "..." }
 
 Future event/frame WebSockets will reuse device identity, ownership, authentication and frame services. No WebSocket stream or script execution endpoint is exposed in v1.
 
+The dev branch adds `/devices/{id}/apps`, `/apps/launch`, and
+`/coredevice/start`, `/coredevice/stop`, `/coredevice/status`. App launch requires
+the existing exclusive control lease. Native capture changes require releasing
+the lease first and never replace an active capture implicitly. The same
+credential and permissions apply. See [Device Hub](../DEV_DEVICE_HUB.zh-CN.md)
+and the [Python SDK / stdio MCP](../../sdk/python/README.md).
+
 ## Validation and publishing
 
 Run `App.Runtime.Tests --automation-api`, Python `automation_clipboard_test.py`, the existing keyboard/router/mapping/clipboard/touch suites and localization verification. Real USB/wireless/BLE and multi-device coordinate effects still need device testing; simulation is not proof of an iPhone action.

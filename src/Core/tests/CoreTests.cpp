@@ -1725,6 +1725,35 @@ void test_wireless_decoder_status() {
         "wireless session reports the external receiver decoder instead of detecting forever");
 }
 
+void test_external_media_source() {
+    using iPhoneMirror::capture::WirelessCaptureSession;
+    iPhoneMirror::capture::CapturePreferences preferences;
+    preferences.play_audio = false;
+    WirelessCaptureSession first(L"coredevice-test-a", preferences);
+    WirelessCaptureSession second(L"coredevice-test-b", preferences);
+    first.start(); second.start();
+    std::vector<std::uint8_t> pixels(4 * 8 * 3 / 2, 96);
+    std::fill(pixels.begin() + 32, pixels.begin() + 40, std::uint8_t{112});
+    std::fill(pixels.begin() + 40, pixels.end(), std::uint8_t{144});
+    check(first.publish_external(1, 4, 8, pixels), "CoreDevice accepts complete I420");
+    check(first.latest_frame() && !second.latest_frame(), "CoreDevice sessions isolate frames");
+    check(first.snapshot().width == 4 && first.snapshot().height == 8,
+        "CoreDevice publishes decoded dimensions");
+    check(!first.publish_external(1, 8192, 8192, pixels) &&
+        !first.publish_external(1, 3, 8, pixels) && !first.publish_external(9, 4, 8, pixels),
+        "CoreDevice rejects mismatched and unknown frames");
+    check(first.snapshot().video_frames == 1, "rejected CoreDevice frames do not advance counters");
+    check(first.publish_external(1, 8, 4, pixels) && first.snapshot().width == 8,
+        "CoreDevice rotation follows a complete decoded frame");
+    std::vector<std::uint8_t> odd_pixels(3 * 5 + 2 * 2 * 3, 128);
+    check(first.publish_external(1, 3, 5, odd_pixels) && first.snapshot().width == 3 && first.latest_frame(),
+        "CoreDevice preserves odd native panel dimensions with ceil-sized chroma planes");
+    first.external_state(false);
+    check(first.latest_frame() != nullptr, "CoreDevice recovery retains the last complete frame");
+    first.stop();
+    check(!first.publish_external(1, 4, 8, pixels), "stopped CoreDevice source rejects late media");
+}
+
 void test_capture_media_safety_helpers() {
     using iPhoneMirror::capture::detail::ProtectedVideoDetector;
     using iPhoneMirror::capture::detail::FastStreamReconnectGate;
@@ -2952,6 +2981,7 @@ int main(int argc, char** argv) {
         test_media_foundation_decoder();
         test_decoder_switch_transaction();
         test_wireless_decoder_status();
+        test_external_media_source();
         test_capture_media_safety_helpers();
         test_image_adjustment_api_validation();
         test_wireless_i420_conversion();

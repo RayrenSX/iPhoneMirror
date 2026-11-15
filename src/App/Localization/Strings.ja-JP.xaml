@@ -1733,4 +1733,19 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="ToolbarAdded">追加済み</sys:String>
     <sys:String x:Key="ToolbarScrollEarlier">左へスクロール</sys:String>
     <sys:String x:Key="ToolbarScrollLater">右へスクロール</sys:String>
+    <sys:String x:Key="DeviceHubTitle">デバイスラボ · dev</sys:String>
+    <sys:String x:Key="DeviceHubDescription">CoreDevice ネイティブミラーリング、App 起動、オフラインメディア再生。選択した USB デバイスの接続を準備してください。入力ソースを変更する前に現在のミラーリングを停止してください。</sys:String>
+    <sys:String x:Key="DeviceHubAudio">音声を再生</sys:String>
+    <sys:String x:Key="DeviceHubRecord">再生用のパケットを記録</sys:String>
+    <sys:String x:Key="DeviceHubPrepare">接続を準備</sys:String>
+    <sys:String x:Key="DeviceHubStart">ネイティブ投影を開始</sys:String>
+    <sys:String x:Key="DeviceHubStop">投影を停止</sys:String>
+    <sys:String x:Key="DeviceHubStatus">メディアの状態</sys:String>
+    <sys:String x:Key="DeviceHubApps">App 一覧を取得</sys:String>
+    <sys:String x:Key="DeviceHubLaunch">選択した App を起動</sys:String>
+    <sys:String x:Key="DeviceHubReplay">記録ファイルを再生</sys:String>
+    <sys:String x:Key="DeviceHubChooseApp">一覧から App を選択してください。</sys:String>
+    <sys:String x:Key="DeviceHubChooseDevice">USB デバイスを選択してください。</sys:String>
+    <sys:String x:Key="DeviceHubWorking">処理中…</sys:String>
+    <sys:String x:Key="DeviceHubCancelled">キャンセルしました。</sys:String>
 </ResourceDictionary>

@@ -39,6 +39,9 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
 
     internal bool IsReady => _bridge.IsReady;
     internal bool SupportsAutomationClipboard => _bridge.SupportsAutomationClipboard;
+    internal bool SupportsDeviceHub => _bridge.SupportsDeviceHub;
+    internal Task<System.Text.Json.JsonElement> DeviceHubAsync(string action, object? arguments,
+        Func<bool> current, CancellationToken cancellation) => _bridge.DeviceHubAsync(action, arguments, current, cancellation);
     internal Func<IDisposable>? InputAdmission { set => _bridge.InputAdmission = value; }
     internal bool InputWritePending => _bridge.InputWritePending;
     internal Task<string?> AutomationClipboardAsync(string kind, string? text, Func<bool> current,

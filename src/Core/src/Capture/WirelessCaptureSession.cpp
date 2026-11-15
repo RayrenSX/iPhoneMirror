@@ -12,8 +12,49 @@ WirelessCaptureSession::WirelessCaptureSession(
 
 WirelessCaptureSession::~WirelessCaptureSession() { stop(); }
 
+WirelessCaptureSession::WirelessCaptureSession(std::wstring device_id,
+    CapturePreferences preferences)
+    : device_id_(std::move(device_id)), preferences_(preferences), external_(true) {}
+
+bool WirelessCaptureSession::publish_external(std::uint32_t kind,
+    std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> payload) {
+    if (!external_ || !stream_) return false;
+    wireless::MessageHeader header{};
+    header.payload_size = static_cast<std::uint32_t>(payload.size());
+    if (kind == 1) {
+        const auto chroma_size = ((width + 1ULL) / 2) * ((height + 1ULL) / 2);
+        if (width < 2 || height < 2 || width > 8192 || height > 8192 ||
+            payload.size() != width * static_cast<std::uint64_t>(height) + 2 * chroma_size) return false;
+        header.width = width; header.height = height;
+        header.stride[0] = width; header.stride[1] = header.stride[2] = (width + 1) / 2;
+        header.plane_size[0] = width * height;
+        header.plane_size[1] = header.plane_size[2] = static_cast<std::uint32_t>(chroma_size);
+        stream_->publish_video(header, payload);
+        external_state(true);
+    } else if (kind == 2) {
+        header.sample_rate = width;
+        if (height < 1 || height > 2 || width != 48000 || payload.empty() ||
+            payload.size() > 192000 || payload.size() % (height * 2)) return false;
+        header.channels = static_cast<std::uint16_t>(height); header.bits_per_sample = 16;
+        stream_->publish_audio(header, payload);
+    } else return false;
+    return true;
+}
+
+void WirelessCaptureSession::external_state(bool active) {
+    external_active_.store(active);
+    if (external_ && stream_) stream_->set_mirror_state(active ?
+        wireless::MirrorSenderState::Active : wireless::MirrorSenderState::Reconnecting);
+}
+
 void WirelessCaptureSession::start() {
     if (stream_) throw std::runtime_error("wireless capture is already running");
+    if (external_) {
+        stream_ = std::make_shared<WirelessClientStream>(device_id_, L"CoreDevice");
+        stream_->set_identity(L"CoreDevice", true);
+        stream_->attach(preferences_);
+        return;
+    }
     if (!receiver_) throw std::runtime_error("wireless receiver is unavailable");
     stream_ = receiver_->attach(device_id_, preferences_);
 }
@@ -25,8 +66,11 @@ void WirelessCaptureSession::stop() noexcept {
 }
 
 Snapshot WirelessCaptureSession::snapshot() const {
-    return stream_ ? stream_->snapshot() : Snapshot{.state = State::Stopped,
+    auto result = stream_ ? stream_->snapshot() : Snapshot{.state = State::Stopped,
         .message = L"Wireless mirroring stopped"};
+    if (external_) result.message = !external_active_.load() ? L"CoreDevice reconnecting" :
+        result.state == State::Streaming ? L"CoreDevice media streaming" : L"CoreDevice: waiting for a complete decoded frame";
+    return result;
 }
 
 std::int64_t WirelessCaptureSession::latest_frame_timestamp() const {

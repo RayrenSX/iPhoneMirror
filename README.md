@@ -4,6 +4,9 @@
 
 <h1 align="center">iPhoneMirror</h1>
 
+> **dev 实验分支**：已接入 rPlayHub 方向的 CoreDevice 原生投屏、Python SDK / MCP、编码流重放、媒体恢复及 App 管理。
+> 入口和构建验证见 [设备实验室](docs/DEV_DEVICE_HUB.zh-CN.md)。新媒体链路仍需 iPhone 实机验收。
+
 <p align="center">
   Windows 上通过 USB 或 AirPlay 进行低延迟 iPhone 屏幕与系统声音采集。<br>
   Low-latency USB and AirPlay iPhone mirroring for Windows.

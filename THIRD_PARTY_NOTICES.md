@@ -217,3 +217,15 @@ engine is redistributed under the Inno Setup License:
 https://jrsoftware.org/files/is/license.txt
 
 All third-party components are provided without warranty.
+
+## rPlayHub CoreDevice decoder reference (dev)
+
+The optional CoreDevice decoder uses the RVRA patch from
+https://github.com/rPlayAI/rPlayHub at revision
+`fe6a7a9f1cff431acfda142cd3564fc8e0e849a3`, under GPL-3.0-or-later.
+The unchanged patch and upstream license are in `third_party/rplayhub`.
+Additional modifications and build scripts are provided in this repository.
+The helper statically links the pinned FFmpeg 8.1.2 build configured with GPL and
+version3 enabled. Binary packages include `tools/CoreDevice/LICENSE.rplayhub`
+and `tools/CoreDevice/LICENSE.FFmpeg`; corresponding sources and build recipe are
+available with this branch. See `docs/DEV_DEVICE_HUB.zh-CN.md`.

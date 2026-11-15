@@ -5336,6 +5336,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             case "about":
                 OnAboutClick(this, new RoutedEventArgs());
                 break;
+            case "device-hub":
+                new DeviceHubWindow(_viewModel) { Owner = this }.Show();
+                break;
             case "advanced-settings":
                 new AdvancedSettingsWindow(1920, 1080, previewOnly: true)
                     { Owner = this }.Show();

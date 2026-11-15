@@ -373,6 +373,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
         IsReady = false;
         GateOpen = false;
         Interlocked.Increment(ref _readyGeneration);
+        CancelDeviceHub();
         // Closing stdin ends the bridge's input loop and lets its teardown run:
         // releasing all touch points, closing the CoreDevice tunnel, and
         // releasing the claimed usbmux interface. Killing the process instead
@@ -464,9 +465,12 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
             using var doc = JsonDocument.Parse(line);
             var root = doc.RootElement;
             var evt = root.GetProperty("event").GetString();
-            if (evt is not ("clipboard_text" or "clipboard_result")) _lastDiagnostic = line;
+            if (evt is not ("clipboard_text" or "clipboard_result" or "hub_result")) _lastDiagnostic = line;
             switch (evt)
             {
+                case "hub_result":
+                    CompleteDeviceHub(root);
+                    break;
                 case "clipboard_result":
                     CompleteAutomationClipboard(root);
                     break;
@@ -536,6 +540,9 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                         caps.ValueKind == JsonValueKind.Array && caps.EnumerateArray().Any(c =>
                             c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.clipboard.rpc.v1");
                     Udid = readyUdid;
+                    SupportsDeviceHub = root.TryGetProperty("capabilities", out var hubCaps) &&
+                        hubCaps.ValueKind == JsonValueKind.Array && hubCaps.EnumerateArray().Any(c =>
+                            c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.hub.rpc.v1");
                     RateHz = root.TryGetProperty("rateHz", out var r) ? r.GetInt32() : 0;
                     GateOpen = root.TryGetProperty("gateOpen", out var g) && g.GetBoolean();
                     AuthMode = root.TryGetProperty("authMode", out var am)

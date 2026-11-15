@@ -75,6 +75,9 @@ function New-UsbBridgeBuildSource {
     Copy-Item -LiteralPath $pasteboardText -Destination $stageSource
     Copy-Item -LiteralPath $pasteboardRecovery -Destination $stageSource
     Copy-Item -LiteralPath $screenOrientation -Destination $stageSource
+    foreach ($module in @('coredevice_media.py', 'device_hub.py')) {
+        Copy-Item -LiteralPath (Join-Path $SourceRoot $module) -Destination $stageSource
+    }
     # Copy source only: stale bytecode from either checkout must not ship.
     Get-ChildItem -LiteralPath $package -Recurse -File -Filter '*.py' | ForEach-Object {
         $relative = $_.FullName.Substring([IO.Path]::GetFullPath($SourceRoot).TrimEnd('\').Length + 1)

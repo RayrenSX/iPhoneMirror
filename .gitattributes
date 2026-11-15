@@ -20,3 +20,7 @@
 
 src/Core/tests/fixtures/quicktime_video_hack/* -text
 src/Core/tests/fixtures/quicktime_video_hack/LICENSE text eol=lf
+
+tests/fixtures/coredevice/*.hevc -text
+# Preserve the pinned upstream patch, including whitespace in context lines.
+third_party/rplayhub/ffmpeg-rvra.patch -text -whitespace

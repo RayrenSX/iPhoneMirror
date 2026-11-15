@@ -41,6 +41,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
         Topmost = false;
         WorkspaceItems =
         [
+            Surface("device-hub", SymbolRegular.Phone20, "DeviceHubTitle", "DeviceHubDescription"),
             Surface("workspace-mirroring", SymbolRegular.ProjectionScreen20, "DeveloperMirroring", "DeveloperMirroringDescription"),
             Surface("workspace-devices", SymbolRegular.Phone20, "DeveloperDevices", "DeveloperDevicesDescription"),
             Surface("workspace-settings", SymbolRegular.Settings20, "DeveloperSettings", "DeveloperSettingsDescription"),
@@ -113,6 +114,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
             {
                 Title = LocalizationService.Get(workspace[index].Key switch
                 {
+                    "device-hub" => "DeviceHubTitle",
                     "workspace-mirroring" => "DeveloperMirroring",
                     "workspace-devices" => "DeveloperDevices",
                     "workspace-settings" => "DeveloperSettings",
@@ -123,6 +125,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
                 }),
                 Description = LocalizationService.Get(workspace[index].Key switch
                 {
+                    "device-hub" => "DeviceHubDescription",
                     "workspace-mirroring" => "DeveloperMirroringDescription",
                     "workspace-devices" => "DeveloperDevicesDescription",
                     "workspace-settings" => "DeveloperSettingsDescription",

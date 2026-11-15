@@ -24,6 +24,7 @@ internal sealed record AutomationTarget(AutomationDevice Device, string SourceId
 {
     internal Func<bool>? HardwareBusy { get; init; }
     internal Func<bool>? SessionCurrent { get; init; }
+    internal Func<string, object?, Func<bool>, CancellationToken, Task<System.Text.Json.JsonElement>>? DeviceHub { get; init; }
 }
 
 // Adapts the application's existing managers. It must never discover/connect a

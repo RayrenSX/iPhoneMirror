@@ -12,6 +12,10 @@ class WirelessCaptureSession final : public ICaptureSession {
 public:
     WirelessCaptureSession(std::shared_ptr<WirelessReceiverHub> receiver,
         std::wstring device_id, CapturePreferences preferences);
+    WirelessCaptureSession(std::wstring device_id, CapturePreferences preferences);
+    bool publish_external(std::uint32_t kind, std::uint32_t width,
+        std::uint32_t height, std::span<const std::uint8_t> payload);
+    void external_state(bool active);
     ~WirelessCaptureSession() override;
     WirelessCaptureSession(const WirelessCaptureSession&) = delete;
     WirelessCaptureSession& operator=(const WirelessCaptureSession&) = delete;
@@ -37,6 +41,8 @@ private:
     std::shared_ptr<WirelessClientStream> stream_;
     std::wstring device_id_;
     CapturePreferences preferences_;
+    bool external_{};
+    std::atomic_bool external_active_{true};
 };
 
 } // namespace iPhoneMirror::capture

@@ -1733,4 +1733,19 @@ Pair, select and save.</system:String>
     <sys:String x:Key="ToolbarAdded">Added</sys:String>
     <sys:String x:Key="ToolbarScrollEarlier">Scroll left</sys:String>
     <sys:String x:Key="ToolbarScrollLater">Scroll right</sys:String>
+    <sys:String x:Key="DeviceHubTitle">Device Hub · dev</sys:String>
+    <sys:String x:Key="DeviceHubDescription">CoreDevice native mirroring, application launch and offline media replay. Prepare the selected USB device first. Stop its current capture before changing the source.</sys:String>
+    <sys:String x:Key="DeviceHubAudio">Play audio</sys:String>
+    <sys:String x:Key="DeviceHubRecord">Record packets for replay</sys:String>
+    <sys:String x:Key="DeviceHubPrepare">Prepare connection</sys:String>
+    <sys:String x:Key="DeviceHubStart">Start CoreDevice</sys:String>
+    <sys:String x:Key="DeviceHubStop">Stop capture</sys:String>
+    <sys:String x:Key="DeviceHubStatus">Media status</sys:String>
+    <sys:String x:Key="DeviceHubApps">List apps</sys:String>
+    <sys:String x:Key="DeviceHubLaunch">Launch selected app</sys:String>
+    <sys:String x:Key="DeviceHubReplay">Replay recording</sys:String>
+    <sys:String x:Key="DeviceHubChooseApp">Select an app from the list.</sys:String>
+    <sys:String x:Key="DeviceHubChooseDevice">Select a USB device.</sys:String>
+    <sys:String x:Key="DeviceHubWorking">Working…</sys:String>
+    <sys:String x:Key="DeviceHubCancelled">Cancelled.</sys:String>
 </ResourceDictionary>

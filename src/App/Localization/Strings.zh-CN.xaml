@@ -1733,4 +1733,19 @@
     <sys:String x:Key="ToolbarAdded">已添加</sys:String>
     <sys:String x:Key="ToolbarScrollEarlier">向左滚动</sys:String>
     <sys:String x:Key="ToolbarScrollLater">向右滚动</sys:String>
+    <sys:String x:Key="DeviceHubTitle">设备实验室 · dev</sys:String>
+    <sys:String x:Key="DeviceHubDescription">CoreDevice 原生投屏、App 启动与离线媒体重放。先准备所选 USB 设备的连接；更换来源前请停止该设备当前的投屏。</sys:String>
+    <sys:String x:Key="DeviceHubAudio">播放音频</sys:String>
+    <sys:String x:Key="DeviceHubRecord">录制数据包供重放</sys:String>
+    <sys:String x:Key="DeviceHubPrepare">准备连接</sys:String>
+    <sys:String x:Key="DeviceHubStart">开始原生投屏</sys:String>
+    <sys:String x:Key="DeviceHubStop">停止投屏</sys:String>
+    <sys:String x:Key="DeviceHubStatus">媒体状态</sys:String>
+    <sys:String x:Key="DeviceHubApps">获取 App 列表</sys:String>
+    <sys:String x:Key="DeviceHubLaunch">启动所选 App</sys:String>
+    <sys:String x:Key="DeviceHubReplay">重放录制文件</sys:String>
+    <sys:String x:Key="DeviceHubChooseApp">请先在列表中选择 App。</sys:String>
+    <sys:String x:Key="DeviceHubChooseDevice">请选择 USB 设备。</sys:String>
+    <sys:String x:Key="DeviceHubWorking">处理中…</sys:String>
+    <sys:String x:Key="DeviceHubCancelled">已取消。</sys:String>
 </ResourceDictionary>

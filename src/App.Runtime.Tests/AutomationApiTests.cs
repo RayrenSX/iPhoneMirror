@@ -155,6 +155,8 @@ internal static partial class Program
     {
         _ = AutomationOpenApi.Document();
         await TestAutomationTransportAdmissionAsync();
+        await TestDeviceHubApiAsync();
+        await TestDeviceHubCorrelationAsync();
         await TestAutomationClipboardCorrelationAsync();
         await TestAutomationLeaseRecoveryAsync();
         await TestAutomationScreenshotSharingAsync();
@@ -238,7 +240,9 @@ internal static partial class Program
         await Error(await http.GetAsync("/api/v1/devices/a/clipboard"), 422, "CAPABILITY_NOT_SUPPORTED");
         backend.Supported = true;
         var spec = await Json(await http.GetAsync("/api/v1/openapi.json"));
-        Expect(spec.GetProperty("openapi").GetString() == "3.1.0" && spec.GetProperty("paths").EnumerateObject().Count() == 15, "Incomplete OpenAPI document.");
+        Expect(spec.GetProperty("openapi").GetString() == "3.1.0" && spec.GetProperty("paths").EnumerateObject().Count() == 20 &&
+            spec.GetProperty("paths").TryGetProperty("/api/v1/devices/{id}/apps/launch", out _) &&
+            spec.GetProperty("paths").TryGetProperty("/api/v1/devices/{id}/coredevice/start", out _), "Incomplete OpenAPI document.");
         Expect((await http.GetStringAsync("/api/docs")).Contains("capture"), "Local docs missing.");
         using (var crossOrigin = new HttpRequestMessage(HttpMethod.Get, "/api/v1/devices"))
         { crossOrigin.Headers.Add("Origin", "https://example.org"); await Error(await http.SendAsync(crossOrigin), 403, "FORBIDDEN"); }
@@ -485,6 +489,7 @@ internal static partial class Program
         internal bool Online = true, Supported = true, HumanBusy, FailUp;
         internal int Geometry = 1, Generation = 1;
         internal Func<string, CancellationToken, Task<VideoFrame?>>? CaptureFrame;
+        internal Func<string, object?, Func<bool>, CancellationToken, Task<JsonElement>>? Hub;
         internal Func<Task>? BeforeReserve;
         internal string ClipboardText = "initial";
         internal readonly ConcurrentQueue<string> Events = new();
@@ -525,7 +530,7 @@ internal static partial class Program
                     if (kind == "paste_text") Events.Enqueue("paste");
                     return Task.FromResult<string?>(ClipboardText);
                 }, token => CaptureFrame?.Invoke(id, token) ?? Task.FromResult<VideoFrame?>(new VideoFrame(2, 2, 8, 1, new byte[16])))
-                { SessionCurrent = SessionCurrent });
+                { SessionCurrent = SessionCurrent, DeviceHub = Hub });
         }
         public Task<bool> IsHumanInputBusyAsync(string identity, CancellationToken cancellation) => Task.FromResult(HumanBusy);
         public async Task ReserveAsync(string identity, Action reserve, CancellationToken cancellation)

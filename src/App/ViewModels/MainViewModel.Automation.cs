@@ -121,6 +121,8 @@ internal sealed partial class MainViewModel : IAutomationBackend
                     var frame = _core.GetDeviceOutputFrame(native, 0, 0, owned: true);
                     return ReferenceEquals(_sessions.Get(device.Udid)?.Handle, native) ? frame : null;
                 }, token)) { SessionCurrent = () => keyboard?.IsCurrent() == true,
+                    DeviceHub = bridge?.SupportsDeviceHub == true ?
+                        (action, args, guard, ct) => bridge.DeviceHubAsync(action, args, guard, ct) : null,
                     HardwareBusy = () => bridge?.InputWritePending == true ||
                     (keyboard is not null && DeviceInput.KeyboardGate(keyboard).CurrentCount == 0) ||
                     (bridge is null && _bluetoothControl.HasPendingInput) };

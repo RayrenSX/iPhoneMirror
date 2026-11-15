@@ -1,0 +1,320 @@
+--- a/libavcodec/hevc/hevcdec.h	2026-06-16 19:17:51
++++ b/libavcodec/hevc/hevcdec.h	2026-08-26 11:02:48
+@@ -381,6 +381,10 @@
+     // for secondary-layer frames, this is the DPB index of the base-layer frame
+     // from the same AU, if it exists, otherwise -1
+     int base_layer_frame;
++
++    // RVRA: the active size this frame's content currently occupies (top-left).
++    // 0 means the full SPS size. Rewritten when the frame is resampled in the DPB.
++    int rvra_w, rvra_h;
+ 
+     /**
+      * A combination of HEVC_FRAME_FLAG_*
+@@ -528,6 +532,17 @@
+     int last_eos;  ///< last packet contains an EOS/EOB NAL
+     int recovery_poc;
+ 
++    /* RVRA (Apple's proprietary in-sequence resolution adaptation, seen on iOS screen
++     * mirroring): the encoder codes a smaller picture into the top-left of the same
++     * SPS-sized frame and appends [w:u16be][h:u16be][00...] to the last slice NAL.
++     * Correct decode requires resampling the active region of every reference when the
++     * active size changes, which standard HEVC has no mechanism for. Enabled by the
++     * RPLAY_RVRA=1 environment variable; single-threaded decode only. */
++    int rvra_enable;
++    int rvra_pending_w, rvra_pending_h;   ///< active size parsed from the current packet
++    int rvra_kernel;                      ///< resampling kernel (RVRA_KERNEL_*)
++    int rvra_antialias;                   ///< stretch the kernel by the downscale ratio
++
+     // NoRaslOutputFlag associated with the last IRAP frame
+     int no_rasl_output_flag;
+ 
+--- a/libavcodec/hevc/hevcdec.c	2026-06-16 19:17:51
++++ b/libavcodec/hevc/hevcdec.c	2026-08-26 11:02:59
+@@ -3205,8 +3205,173 @@
+     }
+ 
+     return nal_idx;
++}
++
++/* RVRA (Apple's proprietary in-sequence resolution adaptation, seen on iOS screen
++ * mirroring): the encoder codes a smaller picture into the top-left of the same SPS-sized
++ * frame and appends [w:u16be][h:u16be][00...][session tag] to the last slice NAL. The
++ * hardware decoder ("AppleAVD::RVRAScaler") resamples the active region of every reference
++ * when that size changes, before prediction; standard HEVC has no such mechanism, so
++ * without this an RVRA stream decodes conformantly and wrong -- a garbled mosaic from the
++ * first downshift onward, with no errors reported.
++ *
++ * Resample one plane's active rect from sw x sh to dw x dh, both anchored at the top-left.
++ * Separable bilinear with center-aligned sampling, through a temporary buffer so up- and
++ * downscales need no aliasing analysis. The filter choice is a first approximation of
++ * Apple's scaler; refine against the VideoToolbox ground truth (rplay-hub
++ * scripts/compare-decodes.py), whose skip blocks expose the true scaler output verbatim. */
++enum {
++    RVRA_KERNEL_BILINEAR = 0,
++    RVRA_KERNEL_BICUBIC,     /* Catmull-Rom */
++    RVRA_KERNEL_LANCZOS3,
++    RVRA_KERNEL_BOX,         /* area-average when antialias-scaled */
++};
++
++static double rvra_kernel(int type, double x)
++{
++    x = fabs(x);
++    switch (type) {
++    case RVRA_KERNEL_BILINEAR:
++        return x < 1 ? 1 - x : 0;
++    case RVRA_KERNEL_BICUBIC:
++        if (x < 1) return 1.5 * x * x * x - 2.5 * x * x + 1;
++        if (x < 2) return -0.5 * x * x * x + 2.5 * x * x - 4 * x + 2;
++        return 0;
++    case RVRA_KERNEL_LANCZOS3: {
++        double px;
++        if (x < 1e-9) return 1;
++        if (x >= 3)   return 0;
++        px = M_PI * x;
++        return 3 * sin(px) * sin(px / 3) / (px * px);
++    }
++    case RVRA_KERNEL_BOX:
++        return x <= 0.5 ? 1 : 0;
++    }
++    return 0;
++}
++
++static const double rvra_kernel_radius[] = { 1, 2, 3, 0.5 };
++
++/* One separable pass: resample `ssize` source samples to `dsize`, reading with stride
++ * rstride and writing with stride wstride (so the same code does rows and columns).
++ * Center-aligned sampling; when antialiasing, the kernel is stretched by the downscale
++ * ratio, which is what turns the box kernel into a true area average. */
++static void rvra_resample_1d(const uint8_t *src, ptrdiff_t sstride, ptrdiff_t rstride,
++                             uint8_t *dst, ptrdiff_t dstride, ptrdiff_t wstride,
++                             int ssize, int dsize, int lines,
++                             int kernel, int antialias)
++{
++    double ratio = (double)ssize / dsize;
++    double ks = antialias && ratio > 1 ? ratio : 1;
++    double radius = rvra_kernel_radius[kernel] * ks;
++
++    for (int d = 0; d < dsize; d++) {
++        double center = (d + 0.5) * ratio - 0.5;
++        int lo = (int)ceil(center - radius - 1e-9);
++        int hi = (int)floor(center + radius + 1e-9);
++        double w[64], wsum = 0;
++        int taps = hi - lo + 1;
++        if (taps > 64) { lo = (int)center - 31; hi = lo + 63; taps = 64; }
++        for (int t = 0; t < taps; t++) {
++            w[t] = rvra_kernel(kernel, (lo + t - center) / ks);
++            wsum += w[t];
++        }
++        if (wsum <= 0)
++            continue;
++        for (int line = 0; line < lines; line++) {
++            const uint8_t *s = src + line * sstride;
++            double acc = 0;
++            for (int t = 0; t < taps; t++)
++                acc += w[t] * s[av_clip(lo + t, 0, ssize - 1) * rstride];
++            dst[line * dstride + d * wstride] =
++                av_clip_uint8((int)lrint(acc / wsum));
++        }
++    }
++}
++
++static void rvra_scale_plane(uint8_t *data, ptrdiff_t stride,
++                             int sw, int sh, int dw, int dh,
++                             int kernel, int antialias)
++{
++    /* Horizontal into an intermediate (dw x sh), then vertical into (dw x dh). */
++    uint8_t *mid = av_malloc((size_t)dw * sh);
++    uint8_t *tmp = av_malloc((size_t)dw * dh);
++    if (!mid || !tmp) {
++        av_free(mid);
++        av_free(tmp);
++        return;
++    }
++    rvra_resample_1d(data, stride, 1, mid, dw, 1, sw, dw, sh, kernel, antialias);
++    rvra_resample_1d(mid, 1, dw, tmp, 1, dw, sh, dh, dw, kernel, antialias);
++    for (int y = 0; y < dh; y++)
++        memcpy(data + y * stride, tmp + (size_t)y * dw, dw);
++    av_free(mid);
++    av_free(tmp);
++}
++
++/* Neutral-fill a plane outside its top-left dw x dh active rect. Apple's decoder shows
++ * uniform 128 (luma and chroma) outside the active rect of a downshifted frame -- measured
++ * off the VideoToolbox ground truth, 128 +/- residual everywhere in both bands -- which is
++ * what fresh gray-initialized scaler buffers would produce. Skip blocks outside the rect
++ * copy from the reference, so the reference must hold that same gray or stale full-size
++ * content leaks into every downshifted picture. */
++static void rvra_fill_outside(uint8_t *data, ptrdiff_t stride,
++                              int plane_w, int plane_h, int dw, int dh)
++{
++    if (dw < plane_w)
++        for (int y = 0; y < dh; y++)
++            memset(data + y * stride + dw, 128, plane_w - dw);
++    for (int y = dh; y < plane_h; y++)
++        memset(data + y * stride, 128, plane_w);
+ }
+ 
++/* Bring every reference in the DPB to the incoming frame's active size. Each frame
++ * remembers the size its content occupies (rvra_w/h), so chained downshifts resample from
++ * where the content actually is, not from where the SPS says it could be.
++ *
++ * The scaling is in place, which also rewrites pictures already handed to the caller if it
++ * still holds them: acceptable for the low-delay, single-threaded decode this targets
++ * (each output is consumed before the next packet is fed), and copy-on-scale is the fix if
++ * that ever changes. */
++static void rvra_resample_refs(HEVCContext *s, HEVCLayerContext *l)
++{
++    const HEVCSPS *sps = l->sps;
++    const int dw = s->rvra_pending_w, dh = s->rvra_pending_h;
++
++    for (int i = 0; i < FF_ARRAY_ELEMS(l->DPB); i++) {
++        HEVCFrame *ref = &l->DPB[i];
++        int sw, sh;
++        if (ref == l->cur_frame || !ref->f || !ref->f->data[0])
++            continue;
++        if (!(ref->flags & (HEVC_FRAME_FLAG_SHORT_REF | HEVC_FRAME_FLAG_LONG_REF)))
++            continue;
++        sw = ref->rvra_w ? ref->rvra_w : sps->width;
++        sh = ref->rvra_h ? ref->rvra_h : sps->height;
++        if (sw == dw && sh == dh)
++            continue;
++        av_log(s->avctx, AV_LOG_DEBUG, "RVRA: ref poc %d %dx%d -> %dx%d\n",
++               ref->poc, sw, sh, dw, dh);
++        rvra_scale_plane(ref->f->data[0], ref->f->linesize[0], sw, sh, dw, dh,
++                         s->rvra_kernel, s->rvra_antialias);
++        rvra_scale_plane(ref->f->data[1], ref->f->linesize[1],
++                         (sw + 1) >> 1, (sh + 1) >> 1, (dw + 1) >> 1, (dh + 1) >> 1,
++                         s->rvra_kernel, s->rvra_antialias);
++        rvra_scale_plane(ref->f->data[2], ref->f->linesize[2],
++                         (sw + 1) >> 1, (sh + 1) >> 1, (dw + 1) >> 1, (dh + 1) >> 1,
++                         s->rvra_kernel, s->rvra_antialias);
++        rvra_fill_outside(ref->f->data[0], ref->f->linesize[0],
++                          sps->width, sps->height, dw, dh);
++        rvra_fill_outside(ref->f->data[1], ref->f->linesize[1],
++                          (sps->width + 1) >> 1, (sps->height + 1) >> 1,
++                          (dw + 1) >> 1, (dh + 1) >> 1);
++        rvra_fill_outside(ref->f->data[2], ref->f->linesize[2],
++                          (sps->width + 1) >> 1, (sps->height + 1) >> 1,
++                          (dw + 1) >> 1, (dh + 1) >> 1);
++        ref->rvra_w = dw;
++        ref->rvra_h = dh;
++    }
++}
++
+ static int hevc_frame_start(HEVCContext *s, HEVCLayerContext *l,
+                             unsigned nal_idx)
+ {
+@@ -3340,6 +3505,17 @@
+     if (ret < 0) {
+         av_log(s->avctx, AV_LOG_ERROR, "Error constructing the frame RPS.\n");
+         goto fail;
++    }
++
++    /* RVRA: with the reference lists built and no CTU decoded yet, this is the moment the
++     * hardware decoder's RVRAScaler runs -- bring every reference to this frame's active
++     * size before prediction reads from them. 8-bit 4:2:0 only (all this stream uses). */
++    if (s->rvra_enable && l == &s->layers[0] &&
++        (sps->pix_fmt == AV_PIX_FMT_YUV420P || sps->pix_fmt == AV_PIX_FMT_YUVJ420P)) {
++        if (s->rvra_pending_w)
++            rvra_resample_refs(s, l);
++        l->cur_frame->rvra_w = s->rvra_pending_w ? s->rvra_pending_w : sps->width;
++        l->cur_frame->rvra_h = s->rvra_pending_h ? s->rvra_pending_h : sps->height;
+     }
+ 
+     if (IS_IRAP(s))
+@@ -3859,6 +4035,32 @@
+ 
+     s->pkt_dts = avpkt->dts;
+ 
++    /* RVRA: the active size rides as a trailer on the last slice NAL of the access unit --
++     * past rbsp_slice_trailing_bits, invisible to the parser -- so it is read straight off
++     * the packet tail. The tier list plus a zero byte over a 32-byte window is what keeps
++     * entropy-coded data from matching by accident (same match rule the capture tooling
++     * uses); an unmatched packet keeps the previous size, which is what one slice per
++     * picture and a trailer on every slice make correct. */
++    if (s->rvra_enable && avpkt->size > 30) {
++        static const uint16_t tiers[][2] = { {1184, 2576}, {1088, 1920}, {720, 1280} };
++        const uint8_t *p = avpkt->data;
++        int n = avpkt->size;
++        int lo = n > 32 ? n - 32 : 1;
++        int found = 0;
++        for (int i = n - 5; i >= lo && !found; i--) {
++            for (int t = 0; t < FF_ARRAY_ELEMS(tiers); t++) {
++                if (p[i]     == (tiers[t][0] >> 8) && p[i + 1] == (tiers[t][0] & 0xff) &&
++                    p[i + 2] == (tiers[t][1] >> 8) && p[i + 3] == (tiers[t][1] & 0xff) &&
++                    p[i + 4] == 0) {
++                    s->rvra_pending_w = tiers[t][0];
++                    s->rvra_pending_h = tiers[t][1];
++                    found = 1;
++                    break;
++                }
++            }
++        }
++    }
++
+     sd = av_packet_get_side_data(avpkt, AV_PKT_DATA_NEW_EXTRADATA, &sd_size);
+     if (sd && sd_size > 0) {
+         ret = hevc_decode_extradata(s, sd, sd_size, 0);
+@@ -3917,6 +4119,9 @@
+     dst->flags      = src->flags;
+ 
+     dst->base_layer_frame = src->base_layer_frame;
++
++    dst->rvra_w = src->rvra_w;
++    dst->rvra_h = src->rvra_h;
+ 
+     av_refstruct_replace(&dst->hwaccel_picture_private,
+                           src->hwaccel_picture_private);
+@@ -4167,6 +4372,35 @@
+     s->sei.picture_timing.picture_struct = 0;
+     s->eos = 1;
+ 
++    /* RVRA is opt-in (default enabled unless RPLAY_RVRA=0) and single-threaded: the resample
++     * mutates DPB frames in place, which frame threading would race with (and adds latency the
++     * target use, live mirroring, cannot spend anyway). */
++    {
++        const char *e = getenv("RPLAY_RVRA");
++#if defined(_WIN32)
++        char win_env[32] = {0};
++        if (!e) {
++            __declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char *, char *, unsigned long);
++            if (GetEnvironmentVariableA("RPLAY_RVRA", win_env, sizeof(win_env)) > 0)
++                e = win_env;
++        }
++#endif
++        s->rvra_enable = (e != NULL) ? (e[0] != '0') : 1;
++        if (s->rvra_enable && avctx->thread_count != 1) {
++            av_log(avctx, AV_LOG_WARNING,
++                   "RVRA requires -threads 1; disabling RVRA reference resampling\n");
++            s->rvra_enable = 0;
++        }
++        if (s->rvra_enable) {
++            /* RPLAY_RVRA_FILTER selects the kernel while it is being fitted to Apple's:
++             * bilinear (default) | bicubic | lanczos | area, with an "_aa" suffix to
++             * stretch the kernel by the downscale ratio (antialiasing). */
++            const char *f = getenv("RPLAY_RVRA_FILTER");
++#if defined(_WIN32)
++            char win_f[32] = {0};
++            if (!f) {
++                __declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char *, char *, unsigned long);
++                if (GetEnvironmentVariableA("RPLAY_RVRA_FILTER", win_f, sizeof(win_f)) > 0)
++                    f = win_f;
++            }
++#endif
++            s->rvra_kernel = RVRA_KERNEL_BILINEAR;
++            s->rvra_antialias = 0;
++            if (f) {
++                if (!strncmp(f, "bicubic", 7)) s->rvra_kernel = RVRA_KERNEL_BICUBIC;
++                else if (!strncmp(f, "lanczos", 7)) s->rvra_kernel = RVRA_KERNEL_LANCZOS3;
++                else if (!strncmp(f, "area", 4)) { s->rvra_kernel = RVRA_KERNEL_BOX; s->rvra_antialias = 1; }
++                if (strstr(f, "_aa")) s->rvra_antialias = 1;
++            }
++            av_log(avctx, AV_LOG_INFO, "RVRA reference resampling enabled (kernel %d aa %d)\n",
++                   s->rvra_kernel, s->rvra_antialias);
++        }
++    }
++
+     atomic_init(&s->wpp_err, 0);
+ 
+     if (!avctx->internal->is_copy) {

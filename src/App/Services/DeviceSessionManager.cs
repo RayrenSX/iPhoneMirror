@@ -154,7 +154,10 @@ internal sealed class DeviceSessionManager
         await Task.Yield();
         try
         {
-            await Task.Run(() => _stopSession(handle));
+            var external = state.ExternalCapture;
+            state.ExternalCapture = null;
+            try { if (external is not null) await external.DisposeAsync(); }
+            finally { await Task.Run(() => _stopSession(handle)); }
         }
         finally
         {

@@ -1,0 +1,82 @@
+import asyncio
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+import unittest
+from unittest.mock import AsyncMock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+from device_hub import DeviceHub
+
+
+class HubTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.owner = SimpleNamespace(_generation=7, _recovering=False, rsd=object(), transport=None,
+            stream_answer=None, ipc=SimpleNamespace(emit=AsyncMock()))
+        self.hub = DeviceHub(self.owner)
+
+    def service(self):
+        service = SimpleNamespace(list_apps=AsyncMock(return_value=[{'bundleIdentifier': 'com.apple.Preferences',
+            'name': 'Settings', 'container': '/private/secret'}, {'name': 'No identifier'}]),
+            launch_application=AsyncMock())
+        manager = SimpleNamespace(__aenter__=AsyncMock(return_value=service), __aexit__=AsyncMock())
+        class Context:
+            async def __aenter__(self): return await manager.__aenter__()
+            async def __aexit__(self, *args): return await manager.__aexit__(*args)
+        return service, manager, Context
+
+    async def test_apps_normalize_and_launch_never_kills_existing(self):
+        service, manager, context = self.service()
+        with patch('device_hub.AppServiceService', side_effect=lambda _: context()) as constructor:
+            result = await self.hub.request('apps', {})
+            self.assertEqual(result['apps'], [{'bundleId': 'com.apple.Preferences', 'name': 'Settings', 'version': ''}])
+            await self.hub.request('launch', {'bundleId': 'com.apple.Preferences'})
+            service.launch_application.assert_awaited_once_with('com.apple.Preferences', kill_existing=False)
+            self.assertEqual(constructor.call_count, 2)  # a fresh channel per request
+            self.assertEqual(manager.__aexit__.await_count, 2)
+            for bundle in ('', 'com.apple/x', 'com.apple;kill', 42, 'a' * 513):
+                with self.assertRaises(ValueError): await self.hub.request('launch', {'bundleId': bundle})
+            self.assertEqual(service.launch_application.await_count, 1)
+
+    async def test_correlated_result_and_obsolete_generation(self):
+        frame = {'kind': 'hub_request', 'requestId': 'a' * 32, 'action': 'apps'}
+        self.hub.request = AsyncMock(return_value={'apps': []})
+        self.hub.dispatch(frame, 6)
+        await asyncio.gather(*list(self.hub.tasks.values()))
+        self.hub.request.assert_not_awaited()
+        result = self.owner.ipc.emit.call_args.args[0]
+        self.assertEqual((result['success'], result['code']), (False, 'SESSION_CHANGED'))
+        self.hub.dispatch(frame, 7)
+        await asyncio.gather(*list(self.hub.tasks.values()))
+        result = self.owner.ipc.emit.call_args.args[0]
+        self.assertTrue(result['success'])
+        self.assertEqual(result['result'], {'apps': []})
+
+    async def test_cancel_closes_inflight_operation_before_ack(self):
+        started, closed = asyncio.Event(), asyncio.Event()
+        async def request(*args):
+            try:
+                started.set()
+                await asyncio.Future()
+            finally: closed.set()
+        self.hub.request = request
+        frame = {'kind': 'hub_request', 'requestId': 'b' * 32, 'action': 'launch'}
+        self.hub.dispatch(frame, 7)
+        await started.wait()
+        task = next(iter(self.hub.tasks.values()))
+        self.hub.dispatch({**frame, 'kind': 'cancel_hub'}, 7)
+        await asyncio.gather(task, return_exceptions=True)
+        self.assertTrue(closed.is_set())
+        result = self.owner.ipc.emit.call_args.args[0]
+        self.assertEqual((result['success'], result['code']), (False, 'CANCELLED'))
+        self.assertEqual(self.hub.tasks, {})
+
+    async def test_media_failure_does_not_break_auth_drain(self):
+        def fail(_): raise OSError('recording disk full')
+        pipeline = SimpleNamespace(feed=fail, error=None)
+        self.hub.pipeline = pipeline
+        self.hub.feed(b'packet')
+        self.assertEqual(pipeline.error, 'media_OSError')
+
+
+if __name__ == '__main__': unittest.main()

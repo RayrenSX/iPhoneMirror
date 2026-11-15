@@ -40,6 +40,14 @@ def check_usb_backends():
 
 def check_runtime_functionality(build_touchscreen_report, contact, release, build_touchscreen_frame):
     checks = []
+    from coredevice_media import Feedback, HevcReceiver, RtpPacket
+    from device_hub import DeviceHub
+    receiver = HevcReceiver()
+    if receiver.push(RtpPacket(1, 0, 123, True, 96, b'\x02\x01delta')) is not None or not receiver.wait_key:
+        raise RuntimeError('CoreDevice keyframe admission failed')
+    if len(Feedback(789, 123).rctl(1)) != 32 or DeviceHub is None:
+        raise RuntimeError('CoreDevice feedback/bridge import failed')
+    checks.append('coredevice_media_rpc')
     if sys.platform == 'win32' and getattr(sys, 'frozen', False):
         checks.extend(check_usb_backends())
     payload = {'text': 'clipboard 中文 😀', 'id': XpcUInt64Type(42),

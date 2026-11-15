@@ -50,6 +50,16 @@ public partial class MainWindow
                 if (!result.Success) throw new AutomationException("DEVICE_NOT_READY", result.Message);
                 return new { opened = _secondaryMirrors.IsOpen(device), mainWindowVisible = IsVisible };
             }
+            if (action == "coredevice")
+            {
+                await _viewModel.StartCoreDeviceCaptureAsync(device, enableControl, record: false, cancellation);
+                return new { started = true, source = "coredevice" };
+            }
+            if (action == "coredevice-stop")
+            {
+                await _viewModel.StopCoreDeviceCaptureAsync(device);
+                return new { running = false };
+            }
             var started = await _viewModel.StartBackgroundSessionAsync(device, cancellation);
             if (!started.Success) throw new AutomationException("DEVICE_NOT_READY", started.Message);
             var backend = (IAutomationBackend)_viewModel;

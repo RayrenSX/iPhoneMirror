@@ -20,6 +20,7 @@ internal sealed class DeviceCaptureState
 {
     internal required string Udid { get; init; }
     internal NativeSessionHandle? Handle { get; set; }
+    internal IAsyncDisposable? ExternalCapture { get; set; }
     internal bool IsStarting { get; set; }
     internal bool IsStopping { get; set; }
     internal bool AutoControlAttempted { get; set; }

@@ -17,6 +17,9 @@ internal static class AutomationOpenApi
         schemas["Input"] = options.GetJsonSchemaAsNode(typeof(AutomationInput));
         schemas["Error"] = JsonNode.Parse("""{"type":"object","required":["error","requestId"],"properties":{"error":{"type":"object","required":["code","message"],"properties":{"code":{"type":"string"},"message":{"type":"string"}}},"requestId":{"type":"string"}}}""");
         schemas["Acquire"] = JsonNode.Parse("""{"type":"object","additionalProperties":false,"properties":{"durationSeconds":{"type":"integer","minimum":5,"maximum":300,"default":30}}}""");
+        schemas["AppLaunch"] = JsonNode.Parse("""{"type":"object","additionalProperties":false,"required":["bundleId"],"properties":{"bundleId":{"type":"string","maxLength":512}}}""");
+        schemas["CoreDeviceStart"] = JsonNode.Parse("""{"type":"object","additionalProperties":false,"properties":{"audio":{"type":"boolean","default":true}}}""");
+        schemas["HubResult"] = JsonNode.Parse("""{"type":"object","description":"CoreDevice media counters/status or normalized apps (bundleId, name, version)."}""");
         schemas["Lease"] = JsonNode.Parse("""{"type":"object","required":["sessionToken","expiresAt"],"properties":{"sessionToken":{"type":"string"},"expiresAt":{"type":"string","format":"date-time"}}}""");
         schemas["Text"] = JsonNode.Parse("""{"type":"object","additionalProperties":false,"required":["text"],"properties":{"text":{"type":"string","description":"Maximum 64 KiB UTF-8."}}}""");
         schemas["Dispatched"] = JsonNode.Parse("""{"type":"object","required":["status"],"properties":{"status":{"const":"dispatched"},"touchId":{"type":"string"}}}""");
@@ -53,6 +56,11 @@ internal static class AutomationOpenApi
         Add("/api/v1/devices", "get", "List observed device sources", "device.read", null, "Devices");
         Add("/api/v1/devices/{id}", "get", "Get a device", "device.read", null, "Device");
         Add("/api/v1/devices/{id}/status", "get", "Inspect capabilities, geometry and control lease", "device.read", null, "Status");
+        Add("/api/v1/devices/{id}/apps", "get", "List installed apps through the prepared CoreDevice bridge", "device.read", null, "HubResult");
+        Add("/api/v1/devices/{id}/apps/launch", "post", "Launch an app once without killing its existing process", "device.control", "AppLaunch", "HubResult", 200, true);
+        Add("/api/v1/devices/{id}/coredevice/status", "get", "Inspect decoded frames, packet loss, queue drops and recovery", "device.read", null, "HubResult");
+        Add("/api/v1/devices/{id}/coredevice/start", "post", "Explicitly prepare CoreDevice native capture; release control and stop other capture first", "device.control, screen.capture", "CoreDeviceStart", "HubResult");
+        Add("/api/v1/devices/{id}/coredevice/stop", "post", "Stop CoreDevice capture; release control first", "device.control, screen.capture", null, "HubResult");
         Add("/api/v1/devices/{id}/control/acquire", "post", "Acquire or renew exclusive control", "device.control", "Acquire", "Lease");
         Add("/api/v1/devices/{id}/control/release", "post", "Cancel input and release control", "device.control", null, null, 204, true);
         foreach (var action in InputActions)

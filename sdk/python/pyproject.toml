@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iphonemirror-sdk"
+version = "0.1.0.dev1"
+description = "Python client and MCP adapter for iPhoneMirror's local Automation API"
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.20,<2"]
+
+[project.scripts]
+iphonemirror-mcp = "iphonemirror.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

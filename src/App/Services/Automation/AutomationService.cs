@@ -3,7 +3,7 @@ using System.Text;
 
 namespace IPhoneMirror.App.Services.Automation;
 
-internal sealed class AutomationService(IAutomationBackend backend, AutomationOwnership ownership,
+internal sealed partial class AutomationService(IAutomationBackend backend, AutomationOwnership ownership,
     DeviceInputService input) : IAsyncDisposable
 {
     private readonly KeyboardMappingExecutor _gestures = new();
