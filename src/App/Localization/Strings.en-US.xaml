@@ -1734,7 +1734,7 @@ Pair, select and save.</system:String>
     <sys:String x:Key="ToolbarScrollEarlier">Scroll left</sys:String>
     <sys:String x:Key="ToolbarScrollLater">Scroll right</sys:String>
     <sys:String x:Key="DeviceHubTitle">Device Hub · dev</sys:String>
-    <sys:String x:Key="DeviceHubDescription">CoreDevice mirroring and device management. Prepare a paired USB or wireless device; stop its active capture before changing sources.</sys:String>
+    <sys:String x:Key="DeviceHubDescription">Manage apps, profiles, files, logs and settings on the selected device.</sys:String>
     <sys:String x:Key="DeviceHubAudio">Play audio</sys:String>
     <sys:String x:Key="DeviceHubRecord">Record packets for replay</sys:String>
     <sys:String x:Key="DeviceHubPrepare">Prepare connection</sys:String>
@@ -1859,9 +1859,9 @@ Pair, select and save.</system:String>
     <sys:String x:Key="DeviceHubPanelLogRunning">Reading live messages…</sys:String>
     <sys:String x:Key="DeviceHubPanelLogDropped">[{0} messages skipped]</sys:String>
     <sys:String x:Key="DeviceHubPanelReplay">Recording replay</sys:String>
-    <sys:String x:Key="DeviceHubPanelAppCount">{0} of {1} apps · Double-click to launch</sys:String>
+    <sys:String x:Key="DeviceHubPanelAppCount">{0} apps / {1} total</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessCount">{0} running processes</sys:String>
-    <sys:String x:Key="DeviceHubPanelAppHint">Double-click an app to open it on the iPhone.</sys:String>
+    <sys:String x:Key="DeviceHubPanelAppHint">Double-click to open; right-click for more actions.</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessSearchHint">Switch back to an app category to search apps.</sys:String>
     <sys:String x:Key="DeviceHubPanelLaunched">Opened {0}</sys:String>
     <sys:String x:Key="DeviceHubPanelProvisioning">Provisioning</sys:String>
@@ -1933,4 +1933,18 @@ Pair, select and save.</system:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraLarge">Accessibility 3</sys:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraExtraLarge">Accessibility 4</sys:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraExtraExtraLarge">Accessibility 5</sys:String>
+    <sys:String x:Key="DeviceHubPanelReconnecting">Connection interrupted</sys:String>
+    <sys:String x:Key="DeviceHubPanelRecoveryHint">Your list is retained. Device actions are paused until the connection recovers, then the page refreshes automatically. No device switching is needed.</sys:String>
+    <sys:String x:Key="DeviceHubPanelMore">More actions</sys:String>
+    <sys:String x:Key="DeviceHubPanelRecoveryShort">Will refresh when reconnected; no need to switch devices.</sys:String>
+    <sys:String x:Key="DeviceHubPanelOpenApp">Open</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyBundleId">Copy Bundle ID</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyPid">Copy process ID</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyIdentifier">Copy identifier</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyPath">Copy path</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopied">Copied</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyFailed">Could not copy. Try again.</sys:String>
+    <sys:String x:Key="DeviceHubPanelOpenFolder">Open folder</sys:String>
+    <sys:String x:Key="DeviceHubPanelSaveFile">Save as…</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallFailed">Installation failed. Use a validly signed IPA for this device and unlock the phone.</sys:String>
 </ResourceDictionary>

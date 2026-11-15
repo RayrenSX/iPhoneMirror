@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services.Automation;
@@ -22,12 +23,14 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     private readonly MainViewModel _viewModel;
     private readonly Func<DeviceViewModel, string, object?, CancellationToken, Task<JsonElement>> _request;
     private readonly Func<DeviceViewModel, bool> _isReady;
+    private readonly DispatcherTimer _connectionWatch = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private CancellationTokenSource _context = new();
     private CancellationTokenSource? _icons;
     private Task _operation = Task.CompletedTask;
     private Task _iconOperation = Task.CompletedTask;
     private DeviceViewModel? _device;
     private bool _active, _ready, _busy, _quietOperation, _initialized, _disposed;
+    private bool _hasConnected, _refreshPending, _refreshQueued;
     private long _generation;
     private int _page = 1;
     private readonly HashSet<int> _loadedPages = [];
@@ -41,8 +44,10 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         _request = request ?? viewModel.DeviceHubUiAsync;
         _isReady = isReady ?? viewModel.IsDeviceHubReady;
         InitializeComponent();
+        InitializeMenus();
         CreateControlGroups();
         _logTimer.Tick += OnLogTick;
+        _connectionWatch.Tick += OnConnectionWatchTick;
         AppsList.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, _) => QueueIcons()));
         LocalizationService.LanguageChanged += OnLanguageChanged;
         _initialized = true;
@@ -55,22 +60,52 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     {
         if (_disposed) return;
         var ready = IsReady(device);
-        var changed = !ReferenceEquals(_device, device) || _active != active;
+        var targetChanged = !ReferenceEquals(_device, device);
+        var changed = targetChanged || _active != active;
         if (changed || (_ready && !ready))
         {
             if (_device is not null) _device.PropertyChanged -= OnDevicePropertyChanged;
             RenewContext();
             _ = StopLogsAsync(waitForOperation: true);
             if (_ready && !ready) _loadedPages.Clear();
-            if (!ReferenceEquals(_device, device)) ClearDeviceContent();
+            if (targetChanged)
+            {
+                ClearDeviceContent();
+                _hasConnected = false;
+                _refreshPending = false;
+            }
             _device = device;
             if (_device is not null) _device.PropertyChanged += OnDevicePropertyChanged;
         }
         var becameReady = !_ready && ready;
         _active = active;
         _ready = ready;
+        _hasConnected |= ready;
+        if (active && device is not null) _connectionWatch.Start();
+        else _connectionWatch.Stop();
+        if (active && ready && (changed || becameReady)) _refreshPending = true;
         UpdateConnection();
-        if (active && ready && (changed || becameReady) && !_busy) _ = RefreshAsync();
+        SchedulePendingRefresh();
+    }
+
+    private void OnConnectionWatchTick(object? sender, EventArgs e)
+    {
+        // Read existing in-process bridge state only. No discovery, connection,
+        // capture start, or device action is initiated by this observer.
+        if (_active && IsReady(_device) != _ready) SetDevice(_device, true);
+    }
+
+    private void SchedulePendingRefresh()
+    {
+        if (_disposed || !_active || !_ready || _busy || !_refreshPending || _refreshQueued) return;
+        _refreshQueued = true;
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            _refreshQueued = false;
+            if (_disposed || !_active || !_ready || _busy || !_refreshPending) return;
+            _refreshPending = false;
+            _ = RefreshAsync();
+        });
     }
 
     private void OnDevicePropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -79,11 +114,13 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         if (ReferenceEquals(sender, _device)) SetDevice(_device, _active);
     }
 
-    private bool IsReady(DeviceViewModel? device) => device is { IsMediaCast: false } &&
-        (device.Ready || device.IsWireless) && _isReady(device);
+    // QuickTime activation temporarily removes the phone from normal usbmux
+    // discovery. Its prepared management bridge is the authoritative connection.
+    private bool IsReady(DeviceViewModel? device) => device is { IsMediaCast: false } && _isReady(device);
 
     private void RenewContext()
     {
+        CloseMenus();
         _context.Cancel();
         _context.Dispose();
         _context = new();
@@ -111,7 +148,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         if (!_initialized) return;
         DeviceNameText.Text = _device?.DisplayName ?? L("PanelNoDevice");
         DeviceDetailText.Text = _device is null ? L("PanelFollowsSelection") : $"{_device.ModelDisplay} · {_device.OsDisplay}";
-        ConnectionText.Text = _ready ? L("PanelConnected") : "";
+        ConnectionText.Text = _ready ? L("PanelConnected") : _hasConnected ? L("PanelReconnecting") : "";
         var usable = _device is { IsMediaCast: false } && (_device.Ready || _device.IsWireless);
         PromptTitle.Text = _device is null ? L("PanelNoDevice") :
             _device.IsMediaCast ? L("PanelPairedDevice") : !usable ? L("PanelOffline") : L("PanelConnectTitle");
@@ -119,9 +156,11 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
             _device.IsMediaCast ? L("PanelPairedHint") : !usable ? L("PanelReconnectHint") : L("PanelConnectHint");
         PrepareButton.Visibility = usable ? Visibility.Visible : Visibility.Collapsed;
         PrepareButton.IsEnabled = !_busy;
-        Pages.Visibility = _ready ? Visibility.Visible : Visibility.Collapsed;
-        ConnectionPrompt.Visibility = _ready ? Visibility.Collapsed : Visibility.Visible;
-        Pages.IsEnabled = !_busy || _quietOperation;
+        var showContent = _ready || _hasConnected;
+        Pages.Visibility = showContent ? Visibility.Visible : Visibility.Collapsed;
+        ConnectionPrompt.Visibility = showContent ? Visibility.Collapsed : Visibility.Visible;
+        Pages.IsEnabled = _ready && (!_busy || _quietOperation);
+        RecoveryHint.Visibility = _hasConnected && !_ready ? Visibility.Visible : Visibility.Collapsed;
         BusyProgress.Visibility = _busy && !_quietOperation ? Visibility.Visible : Visibility.Collapsed;
         UpdateCommands();
     }
@@ -165,6 +204,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
             RenewContext();
         }
         _icons?.Cancel();
+        if (!quiet) CloseMenus();
         var previous = _operation;
         var icons = _iconOperation;
         var operation = new Operation(this, _device, _generation, _context.Token);
@@ -202,10 +242,8 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
                 {
                     _busy = false;
                     _quietOperation = false;
-                    _ready = IsReady(_device);
-                    UpdateConnection();
-                    if (_ready && !_loadedPages.Contains(_page) && _refreshAfterPrepare)
-                    { _refreshAfterPrepare = false; _ = Dispatcher.BeginInvoke(() => _ = RefreshAsync()); }
+                    SetDevice(_device, _active);
+                    SchedulePendingRefresh();
                     if (_page == 1 && Option(AppFilter) != "processes") QueueIcons();
                 }
             }
@@ -219,11 +257,11 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         AutomationException { Code: "CAPTURE_ALREADY_ACTIVE" } => L("PanelStopCaptureFirst"),
         AutomationException { Code: "CAPABILITY_NOT_SUPPORTED" or "DEVICE_HUB_UNAVAILABLE" } => L("PanelUnsupported"),
         AutomationException { Code: "DECODER_MISSING" } => L("PanelDecoderMissing"),
+        AutomationException { Code: "APP_INSTALL_FAILED" } => L("PanelInstallFailed"),
         AutomationException { Code: "CANCELLED" } => L("Cancelled"),
         _ => L("PanelOperationFailed")
     };
 
-    private bool _refreshAfterPrepare;
     private void OnCloseClick(object sender, RoutedEventArgs e) => CloseRequested?.Invoke(this, EventArgs.Empty);
     private void OnTabChecked(object sender, RoutedEventArgs e)
     {
@@ -255,7 +293,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
             case 2: await LoadProfilesAsync(op); break;
             case 3: await BrowseAsync(op); break;
             case 4: StatusText.Text = L("PanelLogHint"); break;
-            case 5: StatusText.Text = L("PanelControlsHint"); break;
+            case 5: await ControlActionAsync(op, "settings-read"); break;
         }
         _loadedPages.Add(_page);
     });
@@ -263,30 +301,36 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     private async void OnActionClick(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string action }) return;
-        if (action == "refresh") { await RefreshAsync(); return; }
-        await RunAsync(op => ExecuteActionAsync(op, action), requiresDevice: action != "replay");
+        await InvokeActionAsync(action);
     }
 
-    private async Task ExecuteActionAsync(Operation op, string action)
+    private Task InvokeActionAsync(string action)
+    {
+        if (action == "refresh") return _ready ? RefreshAsync() : Task.CompletedTask;
+        var row = (_page switch { 1 => AppsList, 2 => ProfilesList, 3 => FilesList, _ => null })?.SelectedItem as HubRow;
+        return RunAsync(op => ExecuteActionAsync(op, action, row), requiresDevice: action != "replay");
+    }
+
+    private async Task ExecuteActionAsync(Operation op, string action, HubRow? row = null)
     {
         switch (action)
         {
             case "prepare":
                 await _viewModel.StartAutomationControlAsync(op.Device!.Udid, op.Device.IsWireless, op.Token);
-                op.Check(); _refreshAfterPrepare = true; break;
+                op.Check(); _refreshPending = true; break;
             case "capabilities": RenderDetails(DiagnosticRows, await op.Call("capabilities")); break;
             case "tunnel": RenderDetails(DiagnosticRows, await op.Call("tunnel_info")); break;
             case "app-install": await InstallAsync(op, false); break;
-            case "app-launch": await LaunchSelectedAsync(op); break;
-            case "app-remove": await RemoveAppAsync(op); break;
+            case "app-launch": await LaunchSelectedAsync(op, row); break;
+            case "app-remove": await RemoveAppAsync(op, row); break;
             case "profile-install": await InstallAsync(op, true); break;
-            case "profile-remove": await RemoveProfileAsync(op); break;
+            case "profile-remove": await RemoveProfileAsync(op, row); break;
             case "file-parent":
                 var path = FilePath.Text.Trim('/'); FilePath.Text = path.Contains('/') ? path[..path.LastIndexOf('/')] : "/";
                 _fileOffset = 0; await BrowseAsync(op); break;
             case "file-browse": _fileOffset = 0; await BrowseAsync(op); break;
             case "file-next": if (_fileNext is int next) { _fileOffset = next; await BrowseAsync(op); } break;
-            case "file-download": await OpenFileAsync(op); break;
+            case "file-download": await OpenFileAsync(op, row); break;
             case "file-export": await ExportCrashesAsync(op); break;
             case "log-start": await StartLogsAsync(op); break;
             case "log-stop": await StopLogsAsync(); op.Check(); StatusText.Text = L("PanelLogStopped"); break;
@@ -319,14 +363,10 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     private void UpdateCommands()
     {
         if (!_initialized) return;
-        var process = Option(AppFilter) == "processes";
-        AppLaunch.IsEnabled = !_busy && !process && AppsList.SelectedItem is HubRow;
-        AppInstall.IsEnabled = !_busy && !process;
-        AppRemove.IsEnabled = !_busy && AppsList.SelectedItem is HubRow;
-        AppRemove.SetResourceReference(ContentControl.ContentProperty, process ? "DeviceHubTerminate" : "DeviceHubPanelUninstall");
-        ProfileRemove.IsEnabled = !_busy && ProfilesList.SelectedItem is HubRow;
-        FileDownload.IsEnabled = !_busy && FilesList.SelectedItem is HubRow;
-        FileNext.IsEnabled = !_busy && _fileNext.HasValue;
+        HeaderRefresh.IsEnabled = _ready && (!_busy || _quietOperation);
+        HeaderMore.IsEnabled = !_busy || _quietOperation;
+        FileNext.IsEnabled = _ready && !_busy && _fileNext.HasValue;
+        FileNext.Visibility = _fileNext.HasValue ? Visibility.Visible : Visibility.Collapsed;
         LogStart.IsEnabled = !_busy && _logStream is null;
         LogStop.IsEnabled = (!_busy || _quietOperation) && _logStream is not null;
         LogSave.IsEnabled = (!_busy || _quietOperation) && _logLines.Count > 0;
@@ -336,6 +376,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     {
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => OnLanguageChanged(sender, e)); return; }
         if (_disposed) return;
+        CloseMenus();
         UpdateConnection(); ApplyAppFilter();
         StatusText.Text = "";
         foreach (var page in new[] { 0, 2, 3 }) _loadedPages.Remove(page);
@@ -365,9 +406,12 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        CloseMenus();
         LocalizationService.LanguageChanged -= OnLanguageChanged;
         if (_device is not null) _device.PropertyChanged -= OnDevicePropertyChanged;
         _context.Cancel(); _icons?.Cancel();
+        _connectionWatch.Stop();
+        _connectionWatch.Tick -= OnConnectionWatchTick;
         _ = StopLogsAsync(waitForOperation: true);
         _logTimer.Tick -= OnLogTick;
         _context.Dispose();

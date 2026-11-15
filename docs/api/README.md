@@ -130,12 +130,7 @@ Errors use `{ "error": { "code": "...", "message": "..." }, "requestId": "..." }
 
 Future event/frame WebSockets will reuse device identity, ownership, authentication and frame services. No WebSocket stream or script execution endpoint is exposed in v1.
 
-The dev branch adds `/devices/{id}/apps`, `/apps/launch`, and
-`/coredevice/start`, `/coredevice/stop`, `/coredevice/status`. App launch requires
-the existing exclusive control lease. Native capture changes require releasing
-the lease first and never replace an active capture implicitly. The same
-credential and permissions apply. See [Device Hub](../DEV_DEVICE_HUB.zh-CN.md)
-and the [Python SDK / stdio MCP](../../sdk/python/README.md).
+The dev branch adds `/devices/{id}/apps`, `/apps/launch`, and the shared device-management actions. App launch and other mutations require the existing exclusive control lease. Live CoreDevice capture and encoded-stream recording endpoints were removed after device testing; they are also absent from OpenAPI, SDK and MCP. See [Device Hub](../DEV_DEVICE_HUB.zh-CN.md) and the [Python SDK / stdio MCP](../../sdk/python/README.md).
 
 ## Validation and publishing
 

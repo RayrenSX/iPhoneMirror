@@ -154,21 +154,6 @@ internal sealed partial class AutomationApiHost(AutomationService service,
                 var body = await ReadAsync<AppLaunchRequest>(c);
                 return Results.Json(await service.DeviceHubAsync(id, principal, Session(c), "launch", body.BundleId, c.RequestAborted));
             });
-            app.MapGet("/api/v1/devices/{id}/coredevice/status", async (string id, HttpContext c) =>
-            { Permission("device.read"); return Results.Json(await service.DeviceHubAsync(id, principal, null, "media_status", null, c.RequestAborted)); });
-            app.MapPost("/api/v1/devices/{id}/coredevice/start", async (string id, HttpContext c) =>
-            {
-                Permission("device.control", "screen.capture");
-                var body = await ReadAsync<CoreDeviceRequest>(c);
-                if (management is null) throw new AutomationException("UNSUPPORTED_RUNTIME", "Application management is unavailable.", 501);
-                return Results.Json(await management("coredevice", id, body.Audio, c.RequestAborted));
-            });
-            app.MapPost("/api/v1/devices/{id}/coredevice/stop", async (string id, HttpContext c) =>
-            {
-                Permission("device.control", "screen.capture");
-                if (management is null) throw new AutomationException("UNSUPPORTED_RUNTIME", "Application management is unavailable.", 501);
-                return Results.Json(await management("coredevice-stop", id, false, c.RequestAborted));
-            });
             app.MapGet("/api/v1/devices/{id}", async (string id, HttpContext c) =>
             { Permission("device.read"); return Results.Json((await service.TargetAsync(id, c.RequestAborted)).Device); });
             app.MapGet("/api/v1/devices/{id}/status", async (string id, HttpContext c) =>
@@ -269,7 +254,6 @@ internal sealed partial class AutomationApiHost(AutomationService service,
     }
     private sealed record AcquireRequest(int DurationSeconds = 30);
     private sealed record AppLaunchRequest(string? BundleId);
-    private sealed record CoreDeviceRequest(bool Audio = true);
     private sealed record PrepareRequest(bool EnableControl = true);
     private sealed record TextRequest(string? Text);
     private sealed class TokenBucket(int rate, int burst)

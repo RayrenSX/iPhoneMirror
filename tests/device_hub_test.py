@@ -72,12 +72,15 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result['success'], result['code']), (False, 'CANCELLED'))
         self.assertEqual(self.hub.tasks, {})
 
-    async def test_media_failure_does_not_break_auth_drain(self):
-        def fail(_): raise OSError('recording disk full')
-        pipeline = SimpleNamespace(feed=fail, error=None)
-        self.hub.pipeline = pipeline
-        self.hub.feed(b'packet')
-        self.assertEqual(pipeline.error, 'media_OSError')
+    async def test_removed_media_actions_never_reach_device(self):
+        self.hub.management.request = AsyncMock()
+        for action in ('media_start', 'media_stop', 'media_status', 'record_start', 'record_stop'):
+            frame = {'kind': 'hub_request', 'requestId': 'd' * 32, 'action': action}
+            self.hub.dispatch(frame, 7)
+            await asyncio.gather(*list(self.hub.tasks.values()))
+            result = self.owner.ipc.emit.call_args.args[0]
+            self.assertEqual((result['success'], result['code']), (False, 'INVALID_REQUEST'))
+        self.hub.management.request.assert_not_awaited()
 
     async def test_rebind_cancels_old_operation_before_rsd_replacement(self):
         started, cleaned = asyncio.Event(), asyncio.Event()

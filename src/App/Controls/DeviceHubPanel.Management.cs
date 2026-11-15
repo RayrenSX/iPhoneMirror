@@ -49,7 +49,7 @@ internal sealed partial class DeviceHubPanel
             return row;
         }).OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
         ApplyAppFilter();
-        StatusText.Text = L("PanelAppHint");
+        StatusText.Text = "";
     }
 
     private void ApplyAppFilter()
@@ -101,17 +101,17 @@ internal sealed partial class DeviceHubPanel
         if (Option(AppFilter) == "processes" || e.OriginalSource is not DependencyObject origin ||
             ItemsControl.ContainerFromElement(AppsList, origin) is not ListBoxItem) return;
         e.Handled = true;
-        await RunAsync(LaunchSelectedAsync);
+        await InvokeActionAsync("app-launch");
     }
-    private async Task LaunchSelectedAsync(Operation op)
+    private async Task LaunchSelectedAsync(Operation op, HubRow? app)
     {
-        if (AppsList.SelectedItem is not HubRow app || Option(AppFilter) == "processes") return;
+        if (app is null || !_ready || Option(AppFilter) == "processes") return;
         await op.Call("launch", new { bundleId = app.Id });
         StatusText.Text = F("PanelLaunched", app.Title);
     }
-    private async Task RemoveAppAsync(Operation op)
+    private async Task RemoveAppAsync(Operation op, HubRow? app)
     {
-        if (AppsList.SelectedItem is not HubRow app) return;
+        if (app is null || !_ready) return;
         var process = Option(AppFilter) == "processes";
         if (!Confirm((process ? L("Terminate") : L("UninstallWarning")) + "\n\n" + app.Title + "\n" + app.Id))
         { StatusText.Text = ""; return; }
@@ -188,9 +188,9 @@ internal sealed partial class DeviceHubPanel
         StatusText.Text = result.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Object && errors.EnumerateObject().Any()
             ? L("PanelPartialProfiles") : F("PanelProfileCount", ProfilesList.Items.Count);
     }
-    private async Task RemoveProfileAsync(Operation op)
+    private async Task RemoveProfileAsync(Operation op, HubRow? row)
     {
-        if (ProfilesList.SelectedItem is not HubRow row) return;
+        if (row is null || !_ready) return;
         if (!Confirm(L("Remove") + "\n\n" + row.Title + "\n" + row.Id)) { StatusText.Text = ""; return; }
         op.Check();
         await op.Call("remove_profile", new { kind = Text(row.Data, "kind"), id = row.Id });
@@ -280,7 +280,7 @@ internal sealed partial class DeviceHubPanel
     private async void OnFileDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is not DependencyObject origin || ItemsControl.ContainerFromElement(FilesList, origin) is not ListBoxItem) return;
-        e.Handled = true; await RunAsync(OpenFileAsync);
+        e.Handled = true; await InvokeActionAsync("file-download");
     }
     private async Task BrowseAsync(Operation op)
     {
@@ -295,9 +295,9 @@ internal sealed partial class DeviceHubPanel
         FilePath.Text = path.Length == 0 ? "/" : "/" + path;
         StatusText.Text = FilesList.Items.Count == 0 ? L("PanelEmptyFolder") : F("PanelFileCount", _fileOffset + 1, _fileOffset + FilesList.Items.Count, Text(result, "total"));
     }
-    private async Task OpenFileAsync(Operation op)
+    private async Task OpenFileAsync(Operation op, HubRow? row)
     {
-        if (FilesList.SelectedItem is not HubRow row) return;
+        if (row is null || !_ready) return;
         if (Text(row.Data, "type") == "directory")
         { FilePath.Text = row.Id; _fileOffset = 0; await BrowseAsync(op); return; }
         if (Text(row.Data, "type") != "file") { StatusText.Text = L("PanelUnsupportedFile"); return; }

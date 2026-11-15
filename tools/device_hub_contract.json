@@ -1,36 +1,135 @@
 {
   "version": 1,
   "actions": {
-    "capabilities": {"readOnly": true, "public": true, "timeout": 35},
-    "device_info": {"readOnly": true, "public": true, "timeout": 35},
-    "tunnel_info": {"readOnly": true, "public": true, "timeout": 35},
-    "apps": {"readOnly": true, "public": true, "timeout": 35},
-    "get_app_icon": {"readOnly": true, "public": true, "timeout": 35},
-    "launch": {"readOnly": false, "public": true, "timeout": 35},
-    "list_processes": {"readOnly": true, "public": true, "timeout": 35},
-    "terminate_app": {"readOnly": false, "public": true, "timeout": 35},
-    "install_app": {"readOnly": false, "public": false, "timeout": 300},
-    "uninstall_app": {"readOnly": false, "public": true, "timeout": 120},
-    "list_profiles": {"readOnly": true, "public": true, "timeout": 35},
-    "install_profile": {"readOnly": false, "public": false, "timeout": 120},
-    "remove_profile": {"readOnly": false, "public": true, "timeout": 35},
-    "list_dir": {"readOnly": true, "public": true, "timeout": 35},
-    "read_file": {"readOnly": true, "public": true, "timeout": 35},
-    "syslog_start": {"readOnly": true, "public": true, "timeout": 35},
-    "syslog_poll": {"readOnly": true, "public": true, "timeout": 35},
-    "syslog_stop": {"readOnly": true, "public": true, "timeout": 35},
-    "settings_probe": {"readOnly": true, "public": true, "timeout": 35},
-    "get_settings": {"readOnly": true, "public": true, "timeout": 35},
-    "get_setting": {"readOnly": true, "public": true, "timeout": 35},
-    "set_setting": {"readOnly": false, "public": true, "timeout": 35},
-    "set_location": {"readOnly": false, "public": true, "timeout": 35},
-    "clear_location": {"readOnly": false, "public": true, "timeout": 35},
-    "device_action": {"readOnly": false, "public": true, "timeout": 35},
-    "press_button": {"readOnly": false, "public": true, "timeout": 35},
-    "media_start": {"readOnly": false, "public": false, "timeout": 35},
-    "media_stop": {"readOnly": false, "public": false, "timeout": 35},
-    "media_status": {"readOnly": true, "public": true, "timeout": 35},
-    "record_start": {"readOnly": false, "public": true, "timeout": 35},
-    "record_stop": {"readOnly": false, "public": true, "timeout": 35}
+    "capabilities": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "device_info": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "tunnel_info": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "apps": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "get_app_icon": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "launch": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    },
+    "list_processes": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "terminate_app": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    },
+    "install_app": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 300
+    },
+    "uninstall_app": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 120
+    },
+    "list_profiles": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "install_profile": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 120
+    },
+    "remove_profile": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    },
+    "list_dir": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "read_file": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "syslog_start": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "syslog_poll": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "syslog_stop": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "settings_probe": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "get_settings": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "get_setting": {
+      "readOnly": true,
+      "public": true,
+      "timeout": 35
+    },
+    "set_setting": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    },
+    "set_location": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    },
+    "clear_location": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    },
+    "device_action": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    },
+    "press_button": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    }
   }
 }

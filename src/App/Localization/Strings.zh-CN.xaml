@@ -1734,7 +1734,7 @@
     <sys:String x:Key="ToolbarScrollEarlier">向左滚动</sys:String>
     <sys:String x:Key="ToolbarScrollLater">向右滚动</sys:String>
     <sys:String x:Key="DeviceHubTitle">设备实验室 · dev</sys:String>
-    <sys:String x:Key="DeviceHubDescription">CoreDevice 原生投屏和设备管理。选择已配对的 USB 或无线设备并准备连接；更换来源前请停止该设备当前的投屏。</sys:String>
+    <sys:String x:Key="DeviceHubDescription">管理当前设备的应用、描述文件、文件、日志和手机设置。</sys:String>
     <sys:String x:Key="DeviceHubAudio">播放音频</sys:String>
     <sys:String x:Key="DeviceHubRecord">录制数据包供重放</sys:String>
     <sys:String x:Key="DeviceHubPrepare">准备连接</sys:String>
@@ -1859,9 +1859,9 @@
     <sys:String x:Key="DeviceHubPanelLogRunning">正在读取实时日志…</sys:String>
     <sys:String x:Key="DeviceHubPanelLogDropped">[已跳过 {0} 条日志]</sys:String>
     <sys:String x:Key="DeviceHubPanelReplay">录制重放</sys:String>
-    <sys:String x:Key="DeviceHubPanelAppCount">{0} 个应用 / 共 {1} 个 · 双击启动</sys:String>
+    <sys:String x:Key="DeviceHubPanelAppCount">{0} 个应用 / 共 {1} 个</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessCount">{0} 个运行中的进程</sys:String>
-    <sys:String x:Key="DeviceHubPanelAppHint">双击应用即可在手机上打开。</sys:String>
+    <sys:String x:Key="DeviceHubPanelAppHint">双击打开，右键显示更多操作。</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessSearchHint">在应用类型中切换回应用列表以搜索。</sys:String>
     <sys:String x:Key="DeviceHubPanelLaunched">已启动 {0}</sys:String>
     <sys:String x:Key="DeviceHubPanelProvisioning">开发预置</sys:String>
@@ -1933,4 +1933,18 @@
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraLarge">辅助 3</sys:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraExtraLarge">辅助 4</sys:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraExtraExtraLarge">辅助 5</sys:String>
+    <sys:String x:Key="DeviceHubPanelReconnecting">连接暂时中断</sys:String>
+    <sys:String x:Key="DeviceHubPanelRecoveryHint">连接暂时中断，已保留列表。通道恢复后会自动刷新，期间暂停设备操作；无需切换设备。</sys:String>
+    <sys:String x:Key="DeviceHubPanelMore">更多操作</sys:String>
+    <sys:String x:Key="DeviceHubPanelRecoveryShort">连接恢复后自动刷新，无需切换设备。</sys:String>
+    <sys:String x:Key="DeviceHubPanelOpenApp">打开</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyBundleId">复制 Bundle ID</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyPid">复制进程 ID</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyIdentifier">复制标识符</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyPath">复制路径</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopied">已复制</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyFailed">复制失败，请重试。</sys:String>
+    <sys:String x:Key="DeviceHubPanelOpenFolder">打开文件夹</sys:String>
+    <sys:String x:Key="DeviceHubPanelSaveFile">另存为…</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallFailed">安装失败。请使用签名有效、支持当前设备的 IPA，并确认手机已解锁。</sys:String>
 </ResourceDictionary>

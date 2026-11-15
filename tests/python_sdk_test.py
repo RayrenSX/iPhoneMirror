@@ -143,9 +143,9 @@ class SdkTests(unittest.TestCase):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    self.assertEqual(len(tools.tools), 41)
+                    self.assertEqual(len(tools.tools), 36)
                     self.assertTrue({'install_app', 'uninstall_app', 'set_phone_setting', 'set_simulated_location',
-                        'export_crash_reports', 'poll_syslog', 'terminate_process', 'start_recording'} <= {t.name for t in tools.tools})
+                        'export_crash_reports', 'poll_syslog', 'terminate_process', 'device_info'} <= {t.name for t in tools.tools})
                     annotations = {t.name: t.annotations for t in tools.tools}
                     self.assertTrue(annotations['uninstall_app'].destructiveHint)
                     self.assertTrue(annotations['get_phone_settings'].readOnlyHint)

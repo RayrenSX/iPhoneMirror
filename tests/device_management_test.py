@@ -205,10 +205,10 @@ class ManagementTests(unittest.IsolatedAsyncioTestCase):
     async def test_contract_covers_all_dispatchers(self):
         media = {"media_start", "media_stop", "media_status", "record_start", "record_stop"}
         for action in ACTIONS:
-            self.assertTrue(action in media or callable(getattr(self.management, "_" + action, None)), action)
+            self.assertTrue(callable(getattr(self.management, "_" + action, None)), action)
         self.assertFalse(ACTIONS["install_app"]["public"])
         self.assertFalse(ACTIONS["install_profile"]["public"])
-        self.assertFalse(ACTIONS["media_start"]["public"])
+        self.assertTrue(media.isdisjoint(ACTIONS), "Unusable live-media actions must be removed from the contract")
 
     async def test_process_numeric_identifiers_stay_numeric(self):
         service = SimpleNamespace(service_name="app-service", list_processes=AsyncMock(return_value=[

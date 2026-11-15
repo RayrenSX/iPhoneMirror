@@ -37,11 +37,18 @@ internal static partial class Program
             ["textSize"] = JsonSerializer.SerializeToElement(new { textSize = new { size = new { large = new { } } } })
         };
         TaskCompletionSource<JsonElement>? delayed = null;
+        TaskCompletionSource<bool>? pauseNext = null;
+        string? pauseAction = null;
+        string? launchedBundle = null;
         bool ready = true;
         async Task<JsonElement> Request(DeviceViewModel device, string action, object? args, CancellationToken ct)
         {
             if (action != "get_app_icon") Console.WriteLine("Request: " + device.Udid + " / " + action);
             calls.Add((device.Udid, action));
+            if (action == pauseAction && pauseNext is not null)
+            {
+                var pending = pauseNext; pauseNext = null; await pending.Task;
+            }
             if (action == "apps" && delayed is not null)
             {
                 // Deliberately ignore cancellation, as a late external response might.
@@ -49,6 +56,7 @@ internal static partial class Program
             }
             ct.ThrowIfCancellationRequested();
             var arguments = JsonSerializer.SerializeToElement(args);
+            if (action == "launch") launchedBundle = arguments.GetProperty("bundleId").GetString();
             if (action == "set_setting")
             {
                 var key = arguments.GetProperty("key").GetString()!;
@@ -61,7 +69,6 @@ internal static partial class Program
                 "list_processes" => JsonSerializer.SerializeToElement(new { processes = new[] { new { processIdentifier = 251, executableURL = new { relative = "/Applications/WeChat.app/WeChat" } } } }),
                 "get_settings" => JsonSerializer.SerializeToElement(new { settings = settingValues.ToDictionary(pair => pair.Key, pair => new { available = true, value = pair.Value }) }),
                 "get_setting" => JsonSerializer.SerializeToElement(new { value = settingValues[arguments.GetProperty("key").GetString()!] }),
-                "media_status" => JsonSerializer.SerializeToElement(new { running = true, decodedFrames = 1284, audioFrames = 2218, packetGaps = 0, droppedFrames = 0, queueDrops = 0, waitingForKeyframe = false, recording = false }),
                 "device_info" => JsonSerializer.SerializeToElement(new
                 {
                     device = new { available = true, values = new { DeviceName = device.DisplayName, ProductType = "iPhone17,3", ProductVersion = "18.6", BuildVersion = "22G86", SerialNumber = "TEST-SERIAL", UniqueDeviceID = device.Udid } },
@@ -81,6 +88,8 @@ internal static partial class Program
             };
         }
         var panel = new DeviceHubPanel(vm, Request, _ => ready);
+        string? copied = null;
+        panel.CopyText = value => copied = value;
         Console.WriteLine("Device manager constructed.");
         SetKeyboardField(window, "_deviceHubPanel", panel);
         ((ContentControl)window.FindName("DeviceHubPanelHost")).Content = panel;
@@ -92,6 +101,7 @@ internal static partial class Program
         guidance.Add(first.Udid); guidance.Add(second.Udid);
         void Finish()
         {
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
             WaitReviewTask((Task)KeyboardField(panel, "_operation"));
             FinishWorkspaceReveal(window); AdvanceDispatcher(TimeSpan.FromMilliseconds(60)); window.UpdateLayout();
         }
@@ -106,6 +116,12 @@ internal static partial class Program
             FindVisualDescendants<Button>(panel).Single(button => button.Tag?.ToString() == action)
                 .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
         }
+        ContextMenu Menu(ListBox list) => (ContextMenu)KeyboardCall(panel, "PopulateListMenu", list)!;
+        MenuItem MenuAction(ContextMenu menu, string action) => menu.Items.OfType<MenuItem>().Single(item => item.Tag?.ToString() == action);
+        void ClickMenu(ContextMenu menu, string action)
+        {
+            MenuAction(menu, action).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); Finish();
+        }
         try
         {
             KeyboardCall(window, "SetDeviceHubPanelVisible", true); Finish();
@@ -119,13 +135,83 @@ internal static partial class Program
             Verify(calls.Any(c => c == (first.Udid, "apps")), "Panel must follow the main selection and load apps.");
             Verify(!calls.Any(c => c.Action == "media_start"), "Opening management must not change the capture source.");
             var list = Find<ListBox>("AppsList");
+            // Starting QuickTime can temporarily downgrade normal usbmux discovery
+            // even while the prepared CoreDevice management bridge remains ready.
+            var populated = list.Items.Count;
+            first.UpdateFrom(DeviceViewModel.FromNative(new NativeDeviceInfo
+            { Udid = first.Udid, Name = first.Name, ProductType = first.ProductType, OsVersion = first.OsVersion, ConnectionType = "USB", State = ConnectionState.Paired }));
+            SetKeyboardField(vm, "_isCapturing", true);
+            KeyboardCall(vm, "NotifyCaptureSessionChanged"); Finish();
+            Verify(Find<Grid>("Pages").IsVisible && list.Items.Count == populated,
+                "Starting projection must not hide a ready management bridge when discovery briefly reports Paired.");
+            var readsBeforeRecovery = calls.Count(c => c.Device == first.Udid && c.Action == "apps");
+            Find<TextBox>("AppSearch").Text = "WeChat"; list.SelectedIndex = 0;
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                ready = false;
+                KeyboardCall(vm, "NotifyUsbControlStateChanged"); Finish();
+                Verify(Find<Grid>("Pages").IsVisible && !Find<Grid>("Pages").IsEnabled && list.Items.Count == 1,
+                    "A capture transport reconnect must keep the selected device's filtered list visible and disable actions.");
+                Verify(Find<TextBlock>("RecoveryHint").IsVisible && !Find<StackPanel>("ConnectionPrompt").IsVisible,
+                    "A previously connected device must show recovery guidance instead of the first-connection prompt.");
+                var requestsWhileOffline = calls.Count;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(550));
+                Verify(calls.Count == requestsWhileOffline, "Recovery observation must never start a connection or request on an offline device.");
+                ready = true;
+                // No view-model notification: the bridge may restore readiness on
+                // its worker after the last capture/control property notification.
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(600)); Finish();
+                Verify(Find<Grid>("Pages").IsVisible && Find<Grid>("Pages").IsEnabled && list.Items.Count == 1,
+                    "A recovered bridge must restore the current page without switching devices, including while native discovery remains Paired.");
+                Verify(list.SelectedItem is not null, "Recovery refresh must preserve the selected app.");
+                Verify(!Find<TextBlock>("RecoveryHint").IsVisible && ReferenceEquals(vm.SelectedDevice, first),
+                    "Recovery must clear its hint while retaining the original main selection.");
+                Verify(calls.Count(c => c.Device == first.Udid && c.Action == "apps") == readsBeforeRecovery + cycle + 1,
+                    "Each recovered connection must perform one current-page refresh, not a retry loop.");
+            }
+            var blockedRefresh = delayed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var interruptedRefresh = (Task)KeyboardCall(panel, "RefreshAsync")!;
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
+            ready = false; KeyboardCall(vm, "NotifyUsbControlStateChanged");
+            ready = true; KeyboardCall(vm, "NotifyUsbControlStateChanged");
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
+            blockedRefresh.SetResult(HubFixtureApps("pre-recovery-response"));
+            WaitReviewTask(interruptedRefresh); Finish();
+            Verify(Find<Grid>("Pages").IsEnabled && !((bool)KeyboardField(panel, "_busy")) && list.Items.Count == 1,
+                "Recovery during an in-flight refresh must complete the pending refresh and release the busy state.");
+            Verify(list.Items.Cast<object>().All(row => ((JsonElement)row.GetType().GetProperty("Data")!.GetValue(row)!).GetProperty("source").GetString() == first.Udid),
+                "A response from the pre-recovery management context must not replace the recovered app list.");
+            Console.WriteLine("PASS projection startup / discovery downgrade, three reconnects, retained app selection/filter and in-flight refresh recovery.");
+            Find<TextBox>("AppSearch").Clear();
+            first.UpdateFrom(DeviceViewModel.FromNative(new NativeDeviceInfo
+            { Udid = first.Udid, Name = first.Name, ProductType = first.ProductType, OsVersion = first.OsVersion, ConnectionType = "USB", State = ConnectionState.Ready }));
+            SetKeyboardField(vm, "_isCapturing", false);
+            KeyboardCall(vm, "NotifyCaptureSessionChanged"); Finish();
             Find<TextBox>("AppSearch").Text = "WeChat"; window.UpdateLayout();
             Verify(list.Items.Count == 1, "App search must match names and bundle IDs.");
             list.SelectedIndex = 0;
-            Find<Button>("AppLaunch").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
+            var appMenu = Menu(list);
+            Verify(MenuAction(appMenu, "app-launch").IsEnabled && MenuAction(appMenu, "app-remove").IsEnabled,
+                "The selected application must expose launch and uninstall through its context menu.");
+            ClickMenu(appMenu, "copy");
+            Verify(copied == "com.tencent.xin", "Copy Bundle ID must copy the pointed application's identifier.");
+            ClickMenu(appMenu, "app-launch");
             Console.WriteLine("App launch passed.");
             Verify(calls.Last(c => c.Action == "launch").Device == first.Udid, "Launch must target the selected main device.");
+            Verify(launchedBundle == "com.tencent.xin", "The context menu must launch its captured application.");
+            var staleLaunch = MenuAction(Menu(list), "app-launch");
             Find<TextBox>("AppSearch").Clear();
+            var pointed = list.Items[1];
+            list.ScrollIntoView(pointed); window.UpdateLayout();
+            var pointedContainer = (ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(pointed);
+            KeyboardCall(panel, "SelectContextRow", list, pointedContainer);
+            Verify(ReferenceEquals(list.SelectedItem, pointed), "Right-clicking another row must select that row immediately.");
+            KeyboardCall(panel, "SelectContextRow", list, null);
+            var blankMenu = Menu(list);
+            Verify(list.SelectedItem is null && !blankMenu.Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-remove") &&
+                MenuAction(blankMenu, "app-install").IsEnabled, "Blank-space menus must offer page actions without exposing a previous app's uninstall.");
+            Verify(panel.FindName("AppLaunch") is null && panel.FindName("AppRemove") is null,
+                "Application actions must not retain the old footer button row.");
             KeyboardCall(window, "SetSettingsPanelVisible", true); Finish();
             Verify(!((bool)KeyboardField(window, "_isDeviceHubPanelVisible")) && ((Border)window.FindName("ControlPanelContent")).IsVisible && !panel.IsVisible,
                 "Settings and device management must share exactly one right card.");
@@ -137,6 +223,8 @@ internal static partial class Program
             var oldOperation = (Task)KeyboardCall(panel, "RefreshAsync")!;
             AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
             vm.SelectedDevice = second;
+            var launchCount = calls.Count(c => c.Action == "launch");
+            staleLaunch.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             slow.SetResult(HubFixtureApps("stale-device"));
             WaitReviewTask(oldOperation); Finish();
             Console.WriteLine("Stale-response protection passed.");
@@ -144,23 +232,42 @@ internal static partial class Program
             Verify(list.Items.Cast<object>().All(row => ((JsonElement)row.GetType().GetProperty("Data")!.GetValue(row)!).GetProperty("source").GetString() == second.Udid),
                 "A stale response must not appear on another device.");
             Verify(calls.Last(c => c.Action == "apps").Device == second.Udid, "The new device must get its own refresh after cancellation.");
+            Verify(calls.Count(c => c.Action == "launch") == launchCount, "A menu from a previous device must never execute on the new device.");
 
             var appFilter = Find<ComboBox>("AppFilter");
             appFilter.SelectedIndex = 5; Finish();
-            Verify(list.Items.Count == 1 && !Find<Button>("AppLaunch").IsEnabled, "Processes must be reachable in Apps with a separate terminate command.");
+            list.SelectedIndex = 0;
+            var processMenu = Menu(list);
+            Verify(list.Items.Count == 1 && !processMenu.Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-launch") &&
+                MenuAction(processMenu, "app-remove").IsEnabled, "Processes must expose terminate, with no application launch action.");
+            ClickMenu(processMenu, "copy"); Verify(copied == "251", "Process menus must copy the PID.");
             appFilter.SelectedIndex = 0; Finish();
+
+            Select(2); var profiles = Find<ListBox>("ProfilesList"); profiles.SelectedIndex = 0;
+            var profileMenu = Menu(profiles); ClickMenu(profileMenu, "copy");
+            Verify(copied == "fixture-profile" && MenuAction(profileMenu, "profile-remove").IsEnabled && MenuAction(profileMenu, "profile-install").IsEnabled,
+                "Profile menus must provide copy, remove and install actions.");
+            Select(3); var files = Find<ListBox>("FilesList"); files.SelectedIndex = 0;
+            var fileMenu = Menu(files); ClickMenu(fileMenu, "copy");
+            Verify(copied == "DCIM" && MenuAction(fileMenu, "file-download").IsEnabled, "File menus must copy the selected path and offer open/save.");
+            ClickMenu(fileMenu, "file-download");
+            Verify(Find<TextBox>("FilePath").Text == "/DCIM", "Opening a folder from the context menu must browse the selected directory.");
+            Find<TextBox>("FilePath").Text = "/"; ClickAction("file-browse");
 
             Select(5); ClickAction("settings-read");
             var settings = (System.Collections.IDictionary)KeyboardField(panel, "_settings");
             var borderEditor = settings["showBorders"]!;
             var borderCheck = (CheckBox)borderEditor.GetType().GetProperty("Input")!.GetValue(borderEditor)!;
             Verify(borderCheck.IsChecked == true, "Phone settings must display the actual nested CoreDevice value.");
+            var unavailableEditor = settings["liquidGlass"]!;
+            Verify(((Grid)unavailableEditor.GetType().GetProperty("Row")!.GetValue(unavailableEditor)!).Visibility == Visibility.Collapsed,
+                "Unsupported settings must be removed from the page instead of leaving unusable switches.");
+            Verify(!FindVisualDescendants<Button>(panel).Any(button => button.Tag?.ToString() is "media-start" or "media-stop" or "media-status" or "record:h265" or "record:imrtp"),
+                "The unusable native-media and encoded-recording buttons must be removed.");
+
             borderCheck.IsChecked = false; ClickAction("setting:showBorders");
             Verify(settingValues["showBorders"].GetProperty("enabled").GetBoolean() == false && borderCheck.IsChecked == false,
                 "A setting change must be applied and re-read on the same target.");
-            ClickAction("media-status");
-            Verify(FindVisualDescendants<TextBox>((StackPanel)KeyboardField(panel, "_mediaDetails")).Any(text => text.Text == "1284"),
-                "Media status must show counters as readable fields.");
             ((TextBox)KeyboardField(panel, "_latitude")).Text = "91";
             var locationCalls = calls.Count(c => c.Action == "set_location"); ClickAction("location-set");
             Verify(calls.Count(c => c.Action == "set_location") == locationCalls, "Invalid coordinates must not reach the device.");
@@ -184,7 +291,8 @@ internal static partial class Program
             KeyboardCall(window, "SetDeviceHubPanelVisible", true); Finish();
 
             ready = false; panel.SetDevice(second, true); Finish();
-            Verify(Find<Button>("PrepareButton").IsVisible && !Find<Grid>("Pages").IsVisible, "An unprepared connection needs one explicit prepare action.");
+            Verify(Find<TextBlock>("RecoveryHint").IsVisible && Find<Grid>("Pages").IsVisible && !Find<Grid>("Pages").IsEnabled,
+                "An established connection must preserve content while it recovers.");
             SaveWindowRender(window, Path.Combine(output, "connection-guidance.png"));
             ready = true; panel.SetDevice(second, true); Finish();
             foreach (var culture in new[] { "zh-CN", "en-US", "zh-TW", "zh-HK", "ja-JP" })
@@ -196,6 +304,40 @@ internal static partial class Program
                 for (var page = 0; page < 6; page++)
                 {
                     Select(page);
+                    if (culture == "zh-CN")
+                    {
+                        var brightBefore = HubBrightPixelFraction(Find<Grid>("Pages"));
+                        var gate = pauseNext = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                        pauseAction = page switch { 0 => "device_info", 1 => "apps", 2 => "list_profiles", 3 => "list_dir", 4 => "syslog_start", _ => "get_settings" };
+                        if (page < 4) _ = KeyboardCall(panel, "RefreshAsync");
+                        else
+                        {
+                            var action = page == 4 ? "log-start" : "settings-read";
+                            FindVisualDescendants<Button>(panel).Single(button => button.Tag?.ToString() == action)
+                                .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                        }
+                        AdvanceDispatcher(TimeSpan.FromMilliseconds(50)); window.UpdateLayout();
+                        Verify((bool)KeyboardField(panel, "_busy") && !Find<Grid>("Pages").IsEnabled && Find<ProgressBar>("BusyProgress").IsVisible,
+                            "Every page must block duplicate device actions and show progress during a pending request.");
+                        if (dark) Verify(HubBrightPixelFraction(Find<Grid>("Pages")) <= brightBefore + .03,
+                            $"Refreshing page {page} must retain its dark background, without a white disabled-control flash.");
+                        SaveWindowRender(window, Path.Combine(output, $"busy-{(dark ? "dark" : "light")}-{page}.png"));
+                        gate.SetResult(true); Finish(); pauseAction = null;
+                        Verify(Find<Grid>("Pages").IsEnabled && !Find<ProgressBar>("BusyProgress").IsVisible,
+                            "A finished request must restore page interaction and remove the progress indicator.");
+                        if (page == 1)
+                        {
+                            list.SelectedIndex = 0;
+                            var popup = Menu(list); popup.PlacementTarget = list; popup.IsOpen = true;
+                            AdvanceDispatcher(TimeSpan.FromMilliseconds(60)); popup.ApplyTemplate(); popup.UpdateLayout();
+                            Verify(popup.IsVisible && MenuAction(popup, "app-launch").IsVisible &&
+                                !string.IsNullOrWhiteSpace(MenuAction(popup, "copy").Header?.ToString()),
+                                "The first opened app context menu must render localized, actionable items.");
+                            if (dark) Verify(HubBrightPixelFraction(popup) < .1, "Dark context menus must use the app theme without a white system background.");
+                            _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+                            Verify(!popup.IsOpen, "Refreshing must close the previously opened menu.");
+                        }
+                    }
                     Verify(panel.ActualWidth >= 400, "The inspector must retain a usable width.");
                     var preview = (Border)window.FindName("PreviewPanel");
                     var origin = panel.TranslatePoint(new Point(), window); var end = preview.TranslatePoint(new Point(preview.ActualWidth, 0), window);
@@ -220,8 +362,21 @@ internal static partial class Program
             panel.Dispose(); LocalizationService.SetLanguage(language); ThemeService.Apply(theme);
             CloseWorkspaceTestWindow(window); app.Shutdown();
         }
-        Console.WriteLine("Integrated device manager passed: navigation, device targeting, stale-response cancellation, app search/launch, console cleanup, five languages, two themes, six pages and compact/lightweight layout.");
+        Console.WriteLine("Integrated device manager passed: projection recovery, context-menu targeting/copy/open, stale-menu cancellation, six-page refresh backgrounds, console cleanup, five languages, two themes and compact/lightweight layout.");
         return 0;
+    }
+
+    private static double HubBrightPixelFraction(FrameworkElement element)
+    {
+        var width = Math.Max(1, (int)Math.Ceiling(element.ActualWidth));
+        var height = Math.Max(1, (int)Math.Ceiling(element.ActualHeight));
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(element);
+        var pixels = new byte[width * height * 4]; bitmap.CopyPixels(pixels, width * 4, 0);
+        var bright = 0;
+        for (var i = 0; i < pixels.Length; i += 4)
+            if (pixels[i] > 232 && pixels[i + 1] > 232 && pixels[i + 2] > 232 && pixels[i + 3] > 240) bright++;
+        return (double)bright / (width * height);
     }
 
     private static JsonElement HubFixtureApps(string source) => JsonSerializer.SerializeToElement(new

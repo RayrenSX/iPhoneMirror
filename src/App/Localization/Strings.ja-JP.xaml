@@ -1734,7 +1734,7 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="ToolbarScrollEarlier">左へスクロール</sys:String>
     <sys:String x:Key="ToolbarScrollLater">右へスクロール</sys:String>
     <sys:String x:Key="DeviceHubTitle">デバイスラボ · dev</sys:String>
-    <sys:String x:Key="DeviceHubDescription">CoreDevice の映像と端末管理。ペアリング済みの USB またはワイヤレス端末を準備し、映像ソースの変更前に停止してください。</sys:String>
+    <sys:String x:Key="DeviceHubDescription">選択した端末のアプリ、プロファイル、ファイル、ログ、設定を管理します。</sys:String>
     <sys:String x:Key="DeviceHubAudio">音声を再生</sys:String>
     <sys:String x:Key="DeviceHubRecord">再生用のパケットを記録</sys:String>
     <sys:String x:Key="DeviceHubPrepare">接続を準備</sys:String>
@@ -1758,7 +1758,7 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubRefresh">更新</sys:String>
     <sys:String x:Key="DeviceHubTerminate">プロセスを終了</sys:String>
     <sys:String x:Key="DeviceHubProcesses">プロセス</sys:String>
-    <sys:String x:Key="DeviceHubProfiles">プロファイル</sys:String>
+    <sys:String x:Key="DeviceHubProfiles">構成</sys:String>
     <sys:String x:Key="DeviceHubRemove">削除</sys:String>
     <sys:String x:Key="DeviceHubBrowse">参照</sys:String>
     <sys:String x:Key="DeviceHubParent">親フォルダー</sys:String>
@@ -1859,9 +1859,9 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubPanelLogRunning">ログを取得中…</sys:String>
     <sys:String x:Key="DeviceHubPanelLogDropped">[{0} 件のログを省略]</sys:String>
     <sys:String x:Key="DeviceHubPanelReplay">録画の再生</sys:String>
-    <sys:String x:Key="DeviceHubPanelAppCount">{1} 個中 {0} 個 · ダブルクリックで起動</sys:String>
+    <sys:String x:Key="DeviceHubPanelAppCount">{0} 件 / 全 {1} 件</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessCount">実行中のプロセス {0} 個</sys:String>
-    <sys:String x:Key="DeviceHubPanelAppHint">アプリをダブルクリックすると iPhone で開きます。</sys:String>
+    <sys:String x:Key="DeviceHubPanelAppHint">ダブルクリックで開き、右クリックで操作を表示します。</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessSearchHint">アプリの種類に切り替えると検索できます。</sys:String>
     <sys:String x:Key="DeviceHubPanelLaunched">{0} を起動しました</sys:String>
     <sys:String x:Key="DeviceHubPanelProvisioning">プロビジョニング</sys:String>
@@ -1933,4 +1933,18 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraLarge">補助 3</sys:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraExtraLarge">補助 4</sys:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraExtraExtraLarge">補助 5</sys:String>
+    <sys:String x:Key="DeviceHubPanelReconnecting">接続が中断しました</sys:String>
+    <sys:String x:Key="DeviceHubPanelRecoveryHint">一覧を保持しています。接続が復旧すると自動で更新します。復旧までデバイス操作は一時停止します。デバイスの切り替えは不要です。</sys:String>
+    <sys:String x:Key="DeviceHubPanelMore">その他の操作</sys:String>
+    <sys:String x:Key="DeviceHubPanelRecoveryShort">再接続後に自動更新します。デバイスの切り替えは不要です。</sys:String>
+    <sys:String x:Key="DeviceHubPanelOpenApp">開く</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyBundleId">Bundle ID をコピー</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyPid">プロセス ID をコピー</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyIdentifier">識別子をコピー</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyPath">パスをコピー</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopied">コピーしました</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyFailed">コピーできませんでした。もう一度お試しください。</sys:String>
+    <sys:String x:Key="DeviceHubPanelOpenFolder">フォルダーを開く</sys:String>
+    <sys:String x:Key="DeviceHubPanelSaveFile">名前を付けて保存…</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallFailed">インストールできませんでした。有効な署名がある対応 IPA を使用し、端末のロックを解除してください。</sys:String>
 </ResourceDictionary>

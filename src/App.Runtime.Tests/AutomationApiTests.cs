@@ -240,9 +240,9 @@ internal static partial class Program
         await Error(await http.GetAsync("/api/v1/devices/a/clipboard"), 422, "CAPABILITY_NOT_SUPPORTED");
         backend.Supported = true;
         var spec = await Json(await http.GetAsync("/api/v1/openapi.json"));
-        Expect(spec.GetProperty("openapi").GetString() == "3.1.0" && spec.GetProperty("paths").EnumerateObject().Count() == 24 &&
+        Expect(spec.GetProperty("openapi").GetString() == "3.1.0" && spec.GetProperty("paths").EnumerateObject().Count() == 21 &&
             spec.GetProperty("paths").TryGetProperty("/api/v1/devices/{id}/apps/launch", out _) &&
-            spec.GetProperty("paths").TryGetProperty("/api/v1/devices/{id}/coredevice/start", out _), "Incomplete OpenAPI document.");
+            !spec.GetProperty("paths").TryGetProperty("/api/v1/devices/{id}/coredevice/start", out _), "Incomplete OpenAPI document.");
         Expect((await http.GetStringAsync("/api/docs")).Contains("capture"), "Local docs missing.");
         using (var crossOrigin = new HttpRequestMessage(HttpMethod.Get, "/api/v1/devices"))
         { crossOrigin.Headers.Add("Origin", "https://example.org"); await Error(await http.SendAsync(crossOrigin), 403, "FORBIDDEN"); }

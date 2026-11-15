@@ -48,8 +48,8 @@ def check_runtime_functionality(build_touchscreen_report, contact, release, buil
         raise RuntimeError('CoreDevice keyframe admission failed')
     if len(Feedback(789, 123).rctl(1)) != 32 or DeviceHub is None:
         raise RuntimeError('CoreDevice feedback/bridge import failed')
-    checks.append('coredevice_media_rpc')
-    if len(ACTIONS) != 31 or setting_input('appearance', 'dark') != {'style': 'dark'}:
+    checks.append('replay_codec_and_hid_feedback')
+    if len(ACTIONS) != 26 or setting_input('appearance', 'dark') != {'style': 'dark'}:
         raise RuntimeError('Device Hub contract/settings payload mismatch')
     checks.append('device_management_contract')
     if sys.platform == 'win32' and getattr(sys, 'frozen', False):

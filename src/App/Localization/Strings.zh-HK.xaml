@@ -1734,7 +1734,7 @@
     <sys:String x:Key="ToolbarScrollEarlier">向左捲動</sys:String>
     <sys:String x:Key="ToolbarScrollLater">向右捲動</sys:String>
     <sys:String x:Key="DeviceHubTitle">裝置實驗室 · dev</sys:String>
-    <sys:String x:Key="DeviceHubDescription">CoreDevice 原生投屏和設備管理。選擇已配對的 USB 或無線設備并準備連接；更換來源前請停止該設備當前的投屏。</sys:String>
+    <sys:String x:Key="DeviceHubDescription">管理目前裝置的應用程式、描述檔、檔案、日誌和手機設定。</sys:String>
     <sys:String x:Key="DeviceHubAudio">播放音訊</sys:String>
     <sys:String x:Key="DeviceHubRecord">錄製封包供重播</sys:String>
     <sys:String x:Key="DeviceHubPrepare">準備連線</sys:String>
@@ -1859,9 +1859,9 @@
     <sys:String x:Key="DeviceHubPanelLogRunning">正在讀取即時日誌…</sys:String>
     <sys:String x:Key="DeviceHubPanelLogDropped">[已略過 {0} 則日誌]</sys:String>
     <sys:String x:Key="DeviceHubPanelReplay">錄製重播</sys:String>
-    <sys:String x:Key="DeviceHubPanelAppCount">{0} 個應用程式 / 共 {1} 個 · 按兩下啟動</sys:String>
+    <sys:String x:Key="DeviceHubPanelAppCount">{0} 個應用程式 / 共 {1} 個</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessCount">{0} 個執行中的程序</sys:String>
-    <sys:String x:Key="DeviceHubPanelAppHint">按兩下應用程式即可在手機上開啟。</sys:String>
+    <sys:String x:Key="DeviceHubPanelAppHint">按兩下開啟，按右鍵顯示更多操作。</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessSearchHint">切換回應用程式類別以搜尋。</sys:String>
     <sys:String x:Key="DeviceHubPanelLaunched">已啟動 {0}</sys:String>
     <sys:String x:Key="DeviceHubPanelProvisioning">開發佈建</sys:String>
@@ -1933,4 +1933,18 @@
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraLarge">輔助 3</sys:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraExtraLarge">輔助 4</sys:String>
     <sys:String x:Key="DeviceHubPanelValue_accessibilityExtraExtraExtraLarge">輔助 5</sys:String>
+    <sys:String x:Key="DeviceHubPanelReconnecting">連線暫時中斷</sys:String>
+    <sys:String x:Key="DeviceHubPanelRecoveryHint">連線暫時中斷，已保留清單。通道恢復後會自動重新整理，期間暫停裝置操作；無須切換裝置。</sys:String>
+    <sys:String x:Key="DeviceHubPanelMore">更多操作</sys:String>
+    <sys:String x:Key="DeviceHubPanelRecoveryShort">連線恢復後自動重新整理，無需切換裝置。</sys:String>
+    <sys:String x:Key="DeviceHubPanelOpenApp">開啟</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyBundleId">複製 Bundle ID</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyPid">複製程序 ID</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyIdentifier">複製識別碼</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyPath">複製路徑</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopied">已複製</sys:String>
+    <sys:String x:Key="DeviceHubPanelCopyFailed">複製失敗，請重試。</sys:String>
+    <sys:String x:Key="DeviceHubPanelOpenFolder">開啟資料夾</sys:String>
+    <sys:String x:Key="DeviceHubPanelSaveFile">另存為…</sys:String>
+    <sys:String x:Key="DeviceHubPanelInstallFailed">安裝失敗。請使用簽署有效、支援目前裝置的 IPA，並確認手機已解鎖。</sys:String>
 </ResourceDictionary>

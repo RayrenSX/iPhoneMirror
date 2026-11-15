@@ -2,8 +2,13 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    AutomationProperties.AutomationId="DeviceHubPanel">
+    AutomationProperties.AutomationId="DeviceHubPanel" PreviewKeyDown="OnPanelKeyDown">
     <UserControl.Resources>
+        <Style x:Key="HubMenuSeparator" TargetType="Separator">
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Separator">
+                <Border Height="1" Margin="6,4" Background="{DynamicResource BorderBrush}"/>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
         <Style x:Key="HubAction" TargetType="Button" BasedOn="{StaticResource CompactButton}">
             <Setter Property="Margin" Value="0,0,6,6"/>
             <Setter Property="Padding" Value="10,7"/>
@@ -24,6 +29,20 @@
             <Setter Property="Margin" Value="0,0,0,2"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="ItemRoot" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
+                            <Setter TargetName="ItemRoot" Property="Background" Value="{DynamicResource ControlHoverBrush}"/>
+                        </MultiTrigger>
+                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemRoot" Property="Background" Value="{DynamicResource ComboItemSelectedBrush}"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.65"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
         </Style>
         <Style x:Key="HubList" TargetType="ListBox">
             <Setter Property="Background" Value="Transparent"/>
@@ -34,6 +53,20 @@
             <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
             <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
             <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBox">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer Focusable="False" Padding="{TemplateBinding Padding}"
+                                CanContentScroll="{TemplateBinding ScrollViewer.CanContentScroll}"
+                                HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}">
+                                <ItemsPresenter/>
+                            </ScrollViewer>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <DataTemplate x:Key="HubRow">
             <Grid Margin="0,4">
@@ -58,16 +91,25 @@
                 <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid>
-                <TextBlock Text="{DynamicResource DeviceHubPanelTitle}" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                <Button HorizontalAlignment="Right" Style="{DynamicResource IconButton}" Width="32" Height="32" MinHeight="32" ToolTip="{DynamicResource Close}" Click="OnCloseClick" AutomationProperties.AutomationId="CloseDeviceHubButton">
-                    <ui:SymbolIcon Symbol="Dismiss20" FontSize="16"/>
-                </Button>
+                <TextBlock Text="{DynamicResource DeviceHubPanelTitle}" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,106,0"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="HeaderRefresh" Style="{DynamicResource IconButton}" Width="32" Height="32" MinHeight="32" ToolTip="{DynamicResource DeviceHubRefresh}" Tag="refresh" Click="OnActionClick" AutomationProperties.AutomationId="DeviceHubRefreshButton">
+                        <ui:SymbolIcon Symbol="ArrowClockwise20" FontSize="16"/>
+                    </Button>
+                    <Button x:Name="HeaderMore" Style="{DynamicResource IconButton}" Width="32" Height="32" MinHeight="32" ToolTip="{DynamicResource DeviceHubPanelMore}" Click="OnMoreClick" AutomationProperties.AutomationId="DeviceHubMoreButton">
+                        <ui:SymbolIcon Symbol="MoreHorizontal20" FontSize="16"/>
+                    </Button>
+                    <Button Style="{DynamicResource IconButton}" Width="32" Height="32" MinHeight="32" ToolTip="{DynamicResource Close}" Click="OnCloseClick" AutomationProperties.AutomationId="CloseDeviceHubButton">
+                        <ui:SymbolIcon Symbol="Dismiss20" FontSize="16"/>
+                    </Button>
+                </StackPanel>
             </Grid>
             <Grid Grid.Row="1" Margin="0,12,0,12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel>
                     <TextBlock x:Name="DeviceNameText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                     <TextBlock x:Name="DeviceDetailText" Style="{StaticResource HubCaption}" FontSize="11" Margin="0,4,8,0"/>
+                    <TextBlock x:Name="RecoveryHint" Text="{DynamicResource DeviceHubPanelRecoveryShort}" Style="{StaticResource HubCaption}" FontSize="11" Visibility="Collapsed" Margin="0,7,8,0" AutomationProperties.LiveSetting="Polite"/>
                 </StackPanel>
                 <TextBlock x:Name="ConnectionText" Grid.Column="1" Style="{StaticResource HubCaption}" VerticalAlignment="Top" FontSize="11" Margin="6,2,0,0"/>
             </Grid>
@@ -83,7 +125,6 @@
                 <Grid x:Name="Pages" Visibility="Collapsed">
                     <ScrollViewer x:Name="InfoPage" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
                         <StackPanel>
-                            <WrapPanel><Button Content="{DynamicResource DeviceHubRefresh}" Tag="refresh" Click="OnActionClick" Style="{StaticResource HubAction}"/></WrapPanel>
                             <StackPanel x:Name="InfoRows"/>
                             <TextBlock Style="{StaticResource HubHeading}" Text="{DynamicResource DeviceHubPanelDiagnostics}"/>
                             <WrapPanel>
@@ -115,24 +156,10 @@
                             <ListBox x:Name="AppsList" Style="{StaticResource HubList}" ItemTemplate="{StaticResource HubRow}" SelectionChanged="OnListSelectionChanged" MouseDoubleClick="OnAppDoubleClick" AutomationProperties.AutomationId="DeviceHubAppList"/>
                             <TextBlock x:Name="AppsEmpty" Style="{StaticResource HubCaption}" Text="{DynamicResource DeviceHubPanelNoResults}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" Visibility="Collapsed"/>
                         </Grid>
-                        <StackPanel Grid.Row="3" Margin="0,10,0,0">
-                            <WrapPanel>
-                                <Button x:Name="AppInstall" Content="{DynamicResource DeviceHubPanelInstall}" Tag="app-install" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                                <Button x:Name="AppLaunch" Content="{DynamicResource DeviceHubPanelLaunch}" Tag="app-launch" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                                <Button x:Name="AppRemove" Content="{DynamicResource DeviceHubPanelUninstall}" Tag="app-remove" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                                <Button Content="{DynamicResource DeviceHubRefresh}" Tag="refresh" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                            </WrapPanel>
-                            <TextBlock x:Name="AppCount" Style="{StaticResource HubCaption}" FontSize="11"/>
-                        </StackPanel>
+                        <TextBlock x:Name="AppCount" Grid.Row="3" Style="{StaticResource HubCaption}" FontSize="11" Margin="0,8,0,0"/>
                     </Grid>
                     <Grid x:Name="ProfilesPage" Visibility="Collapsed">
-                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <ListBox x:Name="ProfilesList" Style="{StaticResource HubList}" ItemTemplate="{StaticResource HubRow}" SelectionChanged="OnListSelectionChanged"/>
-                        <WrapPanel Grid.Row="1" Margin="0,10,0,0">
-                            <Button Content="{DynamicResource DeviceHubPanelInstall}" Tag="profile-install" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                            <Button x:Name="ProfileRemove" Content="{DynamicResource DeviceHubRemove}" Tag="profile-remove" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                            <Button Content="{DynamicResource DeviceHubRefresh}" Tag="refresh" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                        </WrapPanel>
                     </Grid>
                     <Grid x:Name="FilesPage" Visibility="Collapsed">
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -148,26 +175,22 @@
                         </Grid>
                         <ListBox x:Name="FilesList" Grid.Row="2" Style="{StaticResource HubList}" ItemTemplate="{StaticResource HubRow}" SelectionChanged="OnListSelectionChanged" MouseDoubleClick="OnFileDoubleClick"/>
                         <WrapPanel Grid.Row="3" Margin="0,10,0,0">
-                            <Button x:Name="FileDownload" Content="{DynamicResource DeviceHubPanelDownload}" Tag="file-download" Click="OnActionClick" Style="{StaticResource HubAction}"/>
                             <Button x:Name="FileNext" Content="{DynamicResource DeviceHubNext}" Tag="file-next" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                            <Button Content="{DynamicResource DeviceHubExportCrashes}" Tag="file-export" Click="OnActionClick" Style="{StaticResource HubAction}"/>
                         </WrapPanel>
                     </Grid>
                     <Grid x:Name="LogsPage" Visibility="Collapsed">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                        <Grid Margin="0,0,0,8">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <WrapPanel>
+                            <Button x:Name="LogStart" Content="{DynamicResource DeviceHubStartLog}" Tag="log-start" Click="OnActionClick" Style="{StaticResource HubAction}"/>
+                            <Button x:Name="LogStop" Content="{DynamicResource DeviceHubStopLog}" Tag="log-stop" Click="OnActionClick" Style="{StaticResource HubAction}"/>
+                            <Button x:Name="LogSave" Content="{DynamicResource DeviceHubSaveLog}" Tag="log-save" Click="OnActionClick" Style="{StaticResource HubAction}"/>
+                            <CheckBox x:Name="LogFollow" Content="{DynamicResource DeviceHubPanelFollowLogs}" IsChecked="True" VerticalAlignment="Center" Margin="0,0,0,6"/>
+                        </WrapPanel>
+                        <Grid Grid.Row="1" Margin="0,0,0,8">
                             <TextBox x:Name="LogSearch" TextChanged="OnLogSearchChanged" ToolTip="{DynamicResource DeviceHubPanelFilterLogs}" AutomationProperties.Name="{DynamicResource DeviceHubPanelFilterLogs}"/>
                             <TextBlock x:Name="LogSearchHint" Text="{DynamicResource DeviceHubPanelFilterLogs}" Style="{StaticResource HubCaption}" Margin="12,0" VerticalAlignment="Center" IsHitTestVisible="False" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                         </Grid>
-                        <TextBox x:Name="LogText" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" FontFamily="Cascadia Mono, Consolas" FontSize="11" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="{DynamicResource DeviceHubLogs}"/>
-                        <StackPanel Grid.Row="2" Margin="0,10,0,0">
-                            <WrapPanel>
-                                <Button x:Name="LogStart" Content="{DynamicResource DeviceHubStartLog}" Tag="log-start" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                                <Button x:Name="LogStop" Content="{DynamicResource DeviceHubStopLog}" Tag="log-stop" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                                <Button x:Name="LogSave" Content="{DynamicResource DeviceHubSaveLog}" Tag="log-save" Click="OnActionClick" Style="{StaticResource HubAction}"/>
-                            </WrapPanel>
-                            <CheckBox x:Name="LogFollow" Content="{DynamicResource DeviceHubPanelFollowLogs}" IsChecked="True"/>
-                        </StackPanel>
+                        <TextBox x:Name="LogText" Grid.Row="2" IsReadOnly="True" AcceptsReturn="True" Background="{DynamicResource ControlFillBrush}" Foreground="{DynamicResource TextBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="{DynamicResource DeviceHubLogs}"/>
                     </Grid>
                     <ScrollViewer x:Name="ControlsPage" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
                         <StackPanel x:Name="ControlGroups"/>
@@ -183,7 +206,9 @@
             </Grid>
             <StackPanel Grid.Row="4" Margin="0,10,0,0">
                 <ProgressBar x:Name="BusyProgress" Height="2" IsIndeterminate="True" Visibility="Collapsed" Margin="0,0,0,7"/>
-                <TextBlock x:Name="StatusText" Style="{StaticResource HubCaption}" FontSize="11" MaxHeight="48" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.LiveSetting="Polite"/>
+                <TextBlock x:Name="StatusText" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.LiveSetting="Polite">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
             </StackPanel>
         </Grid>
     </Border>

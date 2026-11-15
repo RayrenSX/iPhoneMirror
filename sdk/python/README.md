@@ -21,8 +21,8 @@ from iphonemirror import Client
 client = Client(timeout=420)  # first-time device preparation can mount/download DDI
 print(client.devices())
 phone = client.device('EXPLICIT_OPAQUE_ID_FROM_DEVICES')
-phone.start_coredevice(audio=True)  # stop this device's previous capture first
-print(phone.media_status())
+phone.prepare()
+phone.open_window()
 print(phone.apps())
 with phone:                       # acquire; release in finally, including on errors
     image = phone.screenshot()
@@ -30,7 +30,6 @@ with phone:                       # acquire; release in finally, including on er
         output.write(image.png)
     phone.tap_fraction(.5, .5)     # fractions of current screenshot; 1 maps to last pixel
     phone.launch_app('com.apple.Preferences')
-phone.stop_coredevice()
 ```
 
 Input uses the API's exclusive lease and geometry version. Renewals preserve the
@@ -43,7 +42,7 @@ the local host.
 Run `iphonemirror-mcp` or `python -m iphonemirror.mcp_server` as a **stdio** server
 in your MCP client, passing those environment variables. Tools include explicit
 device selection, acquire/release, PNG screenshot with geometry, tap/swipe,
-keyboard/text, apps/launch, CoreDevice start/stop and media status. MCP keeps the
+keyboard/text, apps/launch and device management. MCP keeps the
 same leases and validation as SDK calls. Release control before stopping or
 changing capture. Use `Client(timeout=420)` for manual first-time preparation;
 prepare the device in the desktop UI before starting automated MCP sessions.
@@ -52,12 +51,12 @@ Neither SDK nor MCP starts a network listener or connects directly to the phone.
 Offline replay is available in the desktop Device Hub and the packaged bridge
 CLI documented in `docs/DEV_DEVICE_HUB.zh-CN.md`.
 
-The expanded Device Hub adds 41 MCP tools and matching SDK methods:
+The expanded Device Hub provides 36 MCP tools and matching SDK methods:
 device_info, capabilities, tunnel_info, list_apps (with include flags), app_icon,
 processes, terminate, install_app, uninstall_app, profiles, install_profile,
 remove_profile, settings, get_setting, set_setting, set_location, clear_location,
 press_button, device_action, list_dir, read_file, download, export_crashes,
-start_logs, poll_logs, stop_logs, start_recording and stop_recording.
+start_logs, poll_logs and stop_logs.
 Use prepare(enable_control=True) and open_window() for explicit setup.
 
 Mutations require an explicitly acquired lease, for example:
@@ -86,3 +85,5 @@ subscription; dropped messages are reported.
 
 See the [feature matrix](../../docs/RPLAYHUB_FEATURE_MATRIX.zh-CN.md) for scope and
 real-device validation boundaries.
+
+Live CoreDevice mirroring and encoded-stream recording were removed after device testing failed to establish a usable video stream. Their API routes, SDK methods and MCP tools are no longer exposed. Existing USB/AirPlay capture and recording remain available.

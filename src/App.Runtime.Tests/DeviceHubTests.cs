@@ -45,61 +45,6 @@ internal static partial class Program
         return 0;
     }
 
-    private static int RunDeviceHubUiTest(string output)
-    {
-        System.IO.Directory.CreateDirectory(output);
-        var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        typeof(App).GetProperty("IsUiPreviewMode", KeyboardTestMembers)!.SetValue(app, true);
-        app.InitializeComponent();
-        var owner = CreateWorkspaceTestWindow(app, includeNativePreview: false);
-        try
-        {
-            var vm = (MainViewModel)KeyboardField(owner, "_viewModel");
-            var hub = new DeviceHubWindow(vm) { Owner = owner };
-            hub.Show(); AdvanceDispatcher(TimeSpan.FromMilliseconds(350));
-            foreach (var culture in new[] { "zh-CN", "en-US", "zh-TW", "zh-HK", "ja-JP" })
-            {
-                IPhoneMirror.App.Localization.LocalizationService.SetLanguage(culture);
-                hub.Width = 560; hub.Height = 580; hub.UpdateLayout();
-                AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
-                Verify(!string.IsNullOrWhiteSpace(hub.Title) && !hub.Title.Contains("DeviceHubTitle"), "Device Hub localization is missing.");
-                SaveWindowRender(hub, System.IO.Path.Combine(output, culture + ".png"));
-                var pending = new Queue<DependencyObject>(); pending.Enqueue(hub);
-                System.Windows.Controls.TabControl? tabs = null;
-                while (pending.TryDequeue(out var node))
-                {
-                    if (node is System.Windows.Controls.TabControl candidate && candidate.Items.Count == 8) { tabs = candidate; break; }
-                    for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(node); i++)
-                        pending.Enqueue(System.Windows.Media.VisualTreeHelper.GetChild(node, i));
-                }
-                Verify(tabs is not null, "Device Hub management pages are missing.");
-                if (culture == "zh-CN")
-                    for (var i = 0; i < tabs!.Items.Count; i++)
-                    {
-                        tabs.SelectedIndex = i; hub.UpdateLayout(); AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
-                        SaveWindowRender(hub, System.IO.Path.Combine(output, "zh-CN-page-" + i + ".png"));
-                    }
-                if (culture == "zh-CN")
-                {
-                    var status = (System.Windows.Controls.TextBlock)KeyboardField(hub, "_status");
-                    status.Text = string.Join(Environment.NewLine, Enumerable.Repeat("Device operation completed · diagnostic detail", 30));
-                    foreach (var i in new[] { 0, 5, 7 })
-                    {
-                        tabs!.SelectedIndex = i; hub.UpdateLayout(); AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
-                        Verify(((System.Windows.Controls.TabItem)tabs.Items[i]).Content is System.Windows.Controls.ScrollViewer,
-                            "Long status output can conceal Device Hub actions at the minimum window size.");
-                        SaveWindowRender(hub, System.IO.Path.Combine(output, "zh-CN-status-page-" + i + ".png"));
-                    }
-                    status.Text = "";
-                }
-                tabs!.SelectedIndex = 0;
-            }
-            hub.Close();
-        }
-        finally { CloseWorkspaceTestWindow(owner); app.Shutdown(); }
-        Console.WriteLine("Device Hub UI rendered at minimum width in five languages.");
-        return 0;
-    }
     private static async Task TestDeviceHubApiAsync()
     {
         var ownership = new AutomationOwnership();
@@ -132,10 +77,10 @@ internal static partial class Program
         Verify((await http.GetAsync("/api/v1/devices/a/apps")).StatusCode == HttpStatusCode.Unauthorized, "Hub bypassed API authentication.");
         http.DefaultRequestHeaders.Add("X-API-Key", new string('A', 64));
         Verify((await http.GetAsync("/api/v1/devices/a/apps")).IsSuccessStatusCode, "App enumeration failed.");
-        Verify((await http.GetAsync("/api/v1/devices/a/coredevice/status")).IsSuccessStatusCode, "Media status failed.");
+        Verify((await http.GetAsync("/api/v1/devices/a/coredevice/status")).StatusCode == HttpStatusCode.NotFound, "Removed native-media endpoints must not be advertised or accepted.");
         var catalog = await (await http.GetAsync("/api/v1/hub/actions")).Content.ReadFromJsonAsync<JsonElement>();
         var actions = catalog.GetProperty("actions");
-        Verify(actions.EnumerateObject().Count() == 27 && !actions.TryGetProperty("install_app", out _) &&
+        Verify(actions.EnumerateObject().Count() == 24 && !actions.TryGetProperty("install_app", out _) &&
             actions.GetProperty("get_settings").GetProperty("readOnly").GetBoolean(), "Public action catalog exposes private host paths or wrong policy.");
         foreach (var action in DeviceHubContract.Actions.Where(p => p.Value.Public && p.Key != "launch"))
         {
@@ -191,10 +136,6 @@ internal static partial class Program
             "Old control generation launched an app.");
         await http.PostAsync("/api/v1/devices/a/control/release", null);
         http.DefaultRequestHeaders.Remove("X-Control-Session");
-        Verify((await http.PostAsJsonAsync("/api/v1/devices/a/coredevice/start", new { audio = false })).IsSuccessStatusCode && management == "coredevice:False",
-            "Native capture did not use explicit application management.");
-        Verify((await http.PostAsync("/api/v1/devices/a/coredevice/stop", null)).IsSuccessStatusCode && management == "coredevice-stop:False",
-            "Native stop did not reach application management.");
         await host.StopAsync();
         await host.StartAsync(new AutomationSettings { Enabled = true, Port = port, Permissions = ["device.read"] }, new string('A', 64));
         Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/get_settings", new { })).IsSuccessStatusCode,
@@ -222,7 +163,7 @@ internal static partial class Program
         Verify(!pending.IsCompleted, "An obsolete bridge generation completed a Hub request.");
         Reply(generation);
         Verify((await pending).GetProperty("apps").GetArrayLength() == 0, "Hub lost correlated response data.");
-        var disconnected = bridge.DeviceHubAsync("media_status", null, () => true, default);
+        var disconnected = bridge.DeviceHubAsync("device_info", null, () => true, default);
         KeyboardCall(bridge, "CancelDeviceHub");
         try { await disconnected; throw new InvalidOperationException("Hub request survived disconnect."); }
         catch (AutomationException error) when (error.Code == "SESSION_CHANGED") { }

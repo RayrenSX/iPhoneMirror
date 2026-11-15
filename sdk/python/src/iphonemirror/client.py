@@ -239,16 +239,6 @@ class Device:
         with self._lock:
             return self.client.request("POST", self.path + "/apps/launch", {"bundleId": bundle_id}, session=self._owned())
 
-    def start_coredevice(self, audio=True):
-        """Explicit preparation; may mount DDI. Does not silently stop another capture."""
-        return self.client.request("POST", self.path + "/coredevice/start", {"audio": bool(audio)}, timeout=max(420, self.client.timeout))
-
-    def media_status(self):
-        return self.client.request("GET", self.path + "/coredevice/status")
-
-    def stop_coredevice(self):
-        return self.client.request("POST", self.path + "/coredevice/stop")
-
     def prepare(self, enable_control=True):
         return self.client.request("POST", self.path + "/prepare", {"enableControl": bool(enable_control)},
                                    timeout=max(420, self.client.timeout))
@@ -322,8 +312,6 @@ class Device:
     def poll_logs(self, stream_id, cursor=0, limit=200):
         return self.hub("syslog_poll", streamId=stream_id, cursor=cursor, limit=limit)
     def stop_logs(self, stream_id): return self.hub("syslog_stop", streamId=stream_id)
-    def start_recording(self, format="h265"): return self.hub("record_start", format=format)
-    def stop_recording(self): return self.hub("record_stop")
 
     def install_app(self, path):
         source = Path(path)

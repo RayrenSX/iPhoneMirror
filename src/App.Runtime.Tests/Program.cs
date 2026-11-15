@@ -139,7 +139,7 @@ internal static partial class Program
             if (args is ["--device-hub-sidebar", var deviceHubSidebarOutput])
                 return RunDeviceHubSidebarTests(deviceHubSidebarOutput);
             if (args is ["--device-hub-ui", var hubOutput])
-                return RunDeviceHubUiTest(hubOutput);
+                return RunDeviceHubSidebarTests(hubOutput);
             if (args is ["--automation-settings", var automationOutput])
                 return RunAutomationSettingsTests(automationOutput);
             if (args is ["--setup-tools", var toolsOutput])

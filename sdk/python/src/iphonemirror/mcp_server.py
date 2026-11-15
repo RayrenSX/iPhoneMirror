@@ -76,21 +76,6 @@ def create_server(client=None):
         """Launch a specific app without killing its existing process; requires control."""
         return selected(device_id).launch_app(bundle_id)
 
-    @server.tool()
-    def start_coredevice_mirror(device_id: str, audio: bool = True) -> dict:
-        """Explicitly start experimental CoreDevice mirroring; may prepare DDI. Never replaces an active capture."""
-        return selected(device_id).start_coredevice(audio)
-
-    @server.tool()
-    def stop_coredevice_mirror(device_id: str) -> dict:
-        """Stop this device's CoreDevice capture. Release its control lease first."""
-        return selected(device_id).stop_coredevice()
-
-    @server.tool()
-    def media_status(device_id: str) -> dict:
-        """Inspect decoded frame count, RTP gaps, drops and keyframe recovery."""
-        return selected(device_id).media_status()
-
     @server.tool(annotations={"readOnlyHint": True})
     def device_info(device_id: str) -> dict:
         """Read hardware, battery and disk details; unavailable domains are explicit."""
@@ -217,16 +202,6 @@ def create_server(client=None):
     def press_phone_button(device_id: str, button: str) -> dict:
         """Press home, app_switcher, lock, volume_up or volume_down once; requires control."""
         return selected(device_id).press_button(button)
-
-    @server.tool()
-    def start_recording(device_id: str, format: str = "h265") -> dict:
-        """Record the active CoreDevice stream as keyframe-gated h265 or packet replay imrtp."""
-        return selected(device_id).start_recording(format)
-
-    @server.tool()
-    def stop_recording(device_id: str) -> dict:
-        """Stop recording and return its local server path and size."""
-        return selected(device_id).stop_recording()
 
     @server.tool(annotations={"readOnlyHint": True})
     def tunnel_info(device_id: str) -> dict:
