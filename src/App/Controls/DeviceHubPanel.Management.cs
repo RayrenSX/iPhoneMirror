@@ -450,7 +450,8 @@ internal sealed partial class DeviceHubPanel
         async Task StopAsync()
         {
             // Context cancellation releases a pending poll before stopping its stream.
-            await pending;
+            try { await pending; }
+            catch (Exception) { /* Context changes intentionally cancel a pending poll. */ }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             try { await _request(device, "syslog_stop", new { streamId = stream }, timeout.Token); }
             catch (Exception) { /* The bridge also expires idle streams after 60 seconds. */ }
