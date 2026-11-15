@@ -65,10 +65,12 @@ internal sealed partial class DeviceHubWindow
         var tabs = new TabControl();
         void Tab(string key, UIElement content)
         {
-            var item = new TabItem { Content = content };
+            var item = new TabItem { Content = key is "Applications" or "Media" or "Device" ?
+                new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } : content };
             item.SetResourceReference(HeaderedContentControl.HeaderProperty, "DeviceHub" + key); tabs.Items.Add(item);
         }
         var apps = Body(); var appButtons = new WrapPanel(); apps.Children.Add(appButtons);
+        _apps.MaxHeight = 400;
         var include = new CheckBox { Margin = new(0, 6, 8, 6) }; include.SetResourceReference(ContentProperty, "DeviceHubIncludeAll"); apps.Children.Add(include);
         var filter = new ComboBox { ItemsSource = new[] { Option("all", "AllApps"), Option("user", "UserApps"), Option("system", "SystemApps"),
             Option("developer", "DeveloperApps"), Option("clips", "ClipApps") }, SelectedIndex = 0, Margin = new(0, 0, 0, 8) };

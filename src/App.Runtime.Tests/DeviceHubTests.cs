@@ -79,6 +79,19 @@ internal static partial class Program
                         tabs.SelectedIndex = i; hub.UpdateLayout(); AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
                         SaveWindowRender(hub, System.IO.Path.Combine(output, "zh-CN-page-" + i + ".png"));
                     }
+                if (culture == "zh-CN")
+                {
+                    var status = (System.Windows.Controls.TextBlock)KeyboardField(hub, "_status");
+                    status.Text = string.Join(Environment.NewLine, Enumerable.Repeat("Device operation completed · diagnostic detail", 30));
+                    foreach (var i in new[] { 0, 5, 7 })
+                    {
+                        tabs!.SelectedIndex = i; hub.UpdateLayout(); AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+                        Verify(((System.Windows.Controls.TabItem)tabs.Items[i]).Content is System.Windows.Controls.ScrollViewer,
+                            "Long status output can conceal Device Hub actions at the minimum window size.");
+                        SaveWindowRender(hub, System.IO.Path.Combine(output, "zh-CN-status-page-" + i + ".png"));
+                    }
+                    status.Text = "";
+                }
                 tabs!.SelectedIndex = 0;
             }
             hub.Close();
