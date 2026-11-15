@@ -114,3 +114,5 @@ POST /api/v1/devices/{id}/apps/install 与 /profiles/install 接受 application/
 
 新增协议测试：python -m unittest discover -s tests -p device_management_test.py。
 实机验收边界仍按上文与功能对照表执行。
+
+中途开始 RTP 录制时，文件先保存一包由已协商 VPS/SPS/PPS 构造的参数引导 AP，随后保存原始数据报和时序；这样手机下一关键帧省略参数时仍可离线解码。磁盘写入或 flush 错误只停止录制，不停止投屏。

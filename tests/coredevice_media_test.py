@@ -249,6 +249,40 @@ class AsyncMediaTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(result['bytes'], 0)
             self.assertFalse(pipeline.status()['recording'])
 
+    async def test_midstream_packet_recording_bootstraps_codec_parameters(self):
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'b' * 32)
+        first = next(units('portrait'))
+        sequence = 1
+        for data in datagrams(first, sequence, 0):
+            pipeline.feed(data); sequence += 1
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {'LOCALAPPDATA': directory}):
+                path = pipeline.start_recording('imrtp')['path']
+            # A phone may send the next IRAP without repeating parameter sets.
+            picture = [nal for nal in first if (nal[0] >> 1) & 63 not in (32, 33, 34)]
+            for data in datagrams(picture, sequence, 24000):
+                pipeline.feed(data); sequence += 1
+            pipeline.stop_recording()
+            receiver, complete = HevcReceiver(), []
+            for _, _, data in read_recording(Path(path)):
+                unit = receiver.push(parse_rtp(data))
+                if unit: complete.append(unit)
+            self.assertEqual(len(complete), 1)
+            self.assertTrue(complete[0].key)
+
+    async def test_recording_disk_failure_does_not_stop_video(self):
+        class FailedDisk:
+            def write(self, data): raise OSError("disk full")
+            def close(self): raise OSError("flush failed")
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'c' * 32)
+        pipeline.encoded_recording = {"file": FailedDisk(), "bytes": 0, "started": False}
+        for data in datagrams(next(units('portrait')), 1, 0):
+            pipeline.feed(data)
+        self.assertFalse(pipeline.queues[0].empty())
+        self.assertIsNone(pipeline.error)
+        self.assertEqual(pipeline.recording_error, "OSError")
+        self.assertIsNone(pipeline.encoded_recording)
+
     async def test_actual_pipeline_replays_packets_and_drains_decoder(self):
         from coredevice_media import replay
         decoder = ROOT / 'dist/CoreDevice/iPhoneMirror.MediaDecoder.exe'

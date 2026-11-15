@@ -289,8 +289,8 @@ class PacketRecording:
 
     def close(self):
         if self.file:
-            self.file.close()
-            self.file = None
+            file, self.file = self.file, None
+            file.close()
 
 
 def read_recording(path: Path):
@@ -422,7 +422,8 @@ class MediaPipeline:
                 self.recording.write(channel, data)
             except OSError as error:
                 self.recording_error = type(error).__name__
-                self.recording.close()
+                with contextlib.suppress(OSError):
+                    self.recording.close()
         feedback = self.feedback[channel]
         if len(data) >= 2 and 192 <= data[1] <= 223:
             if feedback:
@@ -585,20 +586,38 @@ class MediaPipeline:
         path = root / (time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8] + "." + format)
         if format == "imrtp":
             self.recording = PacketRecording(path)
+            # A recording begun mid-session needs the already negotiated codec
+            # parameters even when the phone omits them from its next IRAP.
+            # Seed one valid RTP AP, then preserve subsequent datagrams verbatim.
+            parameters = self.receiver.parameters
+            if len(parameters) == 3 and self.receiver.ssrc is not None and all(0 < len(v) <= 65535 for v in parameters.values()):
+                payload = b"\x60\x01" + b"".join(struct.pack("!H", len(parameters[k])) + parameters[k] for k in (32, 33, 34))
+                if len(payload) + 12 <= 65535:
+                    seed = struct.pack("!BBHII", 128, 224, self.receiver.sequence or 0,
+                                       self.receiver.timestamp or 0, self.receiver.ssrc) + payload
+                    self.recording.write(0, seed)
         else:
             self.encoded_recording = {"file": path.open("xb"), "bytes": 0, "started": False}
-            # Start at a new IRAP including the cached VPS/SPS/PPS.
-            self.receiver.resync()
+        # Start at a new IRAP including the cached VPS/SPS/PPS.
+        self.receiver.resync()
+        self.last_pli = 0
         self.recording_path, self.recording_error = str(path), None
         return {"recording": True, "format": format, "path": str(path)}
 
     def stop_recording(self):
         size = self.encoded_recording["bytes"] if self.encoded_recording else (self.recording.size if self.recording else 0)
         if self.encoded_recording:
-            self.encoded_recording["file"].close()
+            file = self.encoded_recording["file"]
             self.encoded_recording = None
+            try:
+                file.close()
+            except OSError as error:
+                self.recording_error = type(error).__name__
         if self.recording:
-            self.recording.close()
+            try:
+                self.recording.close()
+            except OSError as error:
+                self.recording_error = type(error).__name__
         return {"recording": False, "path": self.recording_path, "bytes": size, "error": self.recording_error}
 
     def status(self):
@@ -636,11 +655,7 @@ class MediaPipeline:
         await asyncio.gather(*(p.wait() for p in self.processes), return_exceptions=True)
         if self.pipe:
             self.pipe.close()
-        if self.recording:
-            self.recording.close()
-        if self.encoded_recording:
-            self.encoded_recording["file"].close()
-            self.encoded_recording = None
+        self.stop_recording()
 
 
 async def replay(path: Path, pipe: str, speed=1.0):
