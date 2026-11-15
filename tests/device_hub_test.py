@@ -27,9 +27,10 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_apps_normalize_and_launch_never_kills_existing(self):
         service, manager, context = self.service()
-        with patch('device_hub.AppServiceService', side_effect=lambda _: context()) as constructor:
+        with patch('device_management.AppServiceService', side_effect=lambda _: context()) as constructor:
             result = await self.hub.request('apps', {})
-            self.assertEqual(result['apps'], [{'bundleId': 'com.apple.Preferences', 'name': 'Settings', 'version': ''}])
+            self.assertEqual(result['apps'], [{'bundleId': 'com.apple.Preferences', 'name': 'Settings', 'version': '',
+                'isFirstParty': False, 'isDeveloper': False, 'isAppClip': False}])
             await self.hub.request('launch', {'bundleId': 'com.apple.Preferences'})
             service.launch_application.assert_awaited_once_with('com.apple.Preferences', kill_existing=False)
             self.assertEqual(constructor.call_count, 2)  # a fresh channel per request
@@ -77,6 +78,23 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.hub.pipeline = pipeline
         self.hub.feed(b'packet')
         self.assertEqual(pipeline.error, 'media_OSError')
+
+    async def test_rebind_cancels_old_operation_before_rsd_replacement(self):
+        started, cleaned = asyncio.Event(), asyncio.Event()
+        async def request(*args):
+            try:
+                started.set()
+                await asyncio.Future()
+            finally:
+                cleaned.set()
+        self.hub.request = request
+        frame = {'kind': 'hub_request', 'requestId': 'c' * 32, 'action': 'install_app'}
+        self.hub.dispatch(frame, 7)
+        await started.wait()
+        await self.hub.suspend()
+        self.assertTrue(cleaned.is_set())
+        self.assertEqual(self.hub.tasks, {})
+        self.assertEqual(self.owner.ipc.emit.call_args.args[0]['code'], 'CANCELLED')
 
 
 if __name__ == '__main__': unittest.main()

@@ -14,7 +14,7 @@ using IPhoneMirror.App.Services.Automation;
 
 namespace IPhoneMirror.App.Automation;
 
-internal sealed class AutomationApiHost(AutomationService service,
+internal sealed partial class AutomationApiHost(AutomationService service,
     Func<string, string?, bool, CancellationToken, Task<object>>? management = null) : IAsyncDisposable
 {
     private WebApplication? _app;
@@ -122,6 +122,7 @@ internal sealed class AutomationApiHost(AutomationService service,
                 if (required.Any(scope => !scopes.Contains(scope)))
                     throw new AutomationException("FORBIDDEN", "The credential does not have the required permission.", 403);
             }
+            MapDeviceHub(app, principal, Permission);
             app.MapGet("/api/docs", () => Results.Content(AutomationOpenApi.Docs, "text/html; charset=utf-8"));
             app.MapGet("/api/v1/openapi.json", () => Results.Json(AutomationOpenApi.Document()));
             app.MapGet("/api/v1/app/status", async (HttpContext c) =>

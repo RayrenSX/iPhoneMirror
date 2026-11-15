@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 from pathlib import Path
 import re
@@ -10,6 +11,7 @@ import time
 import uuid
 
 from coredevice_media import Feedback, MediaPipeline, parse_rtp
+from device_management import ACTIONS, DeviceManagement, HubError
 from pymobiledevice3.remote.core_device.app_service import AppServiceService
 from pymobiledevice3.remote.core_device.display_service import DisplayService
 from pymobiledevice3.remote.core_device.screen_stream import open_media_receiver
@@ -25,6 +27,7 @@ class DeviceHub:
         self.feedback_task = None
         self.audio_service = self.audio_transport = self.audio_task = None
         self.audio_requested = False
+        self.management = DeviceManagement(owner)
 
     async def bind(self):
         """Rebind after the existing bridge repairs its tunnel; keep the output pipe."""
@@ -36,6 +39,10 @@ class DeviceHub:
             self.feedback_task = asyncio.create_task(self._gate_feedback())
         if self.pipeline:
             self.pipeline.receiver = type(self.pipeline.receiver)()
+            self.pipeline.first_timestamps = [None, None]
+            for channel, error in enumerate(self.pipeline.decoder_errors):
+                if error and not error.startswith('audio_'):
+                    self.pipeline._decoder_failed(channel, error)
             self.pipeline.last_video = time.monotonic()
             self.pipeline.configure_feedback(0, self.owner.transport, answer, self.owner.rsd.service.address[0])
             if self.audio_requested:
@@ -87,21 +94,31 @@ class DeviceHub:
     async def _respond(self, frame, generation):
         response = {'event': 'hub_result', 'requestId': frame['requestId'], 'generation': generation, 'success': False}
         try:
-            async with asyncio.timeout(35):
+            action = frame.get('action')
+            if not isinstance(action, str) or action not in ACTIONS:
+                raise ValueError('Unknown operation')
+            async with asyncio.timeout(ACTIONS[action]['timeout']):
                 async with self.lock:
                     if generation != self.owner._generation or self.owner._recovering:
                         raise RuntimeError('SESSION_CHANGED')
-                    response['result'] = await self.request(frame.get('action'), frame.get('arguments') or {})
+                    args = frame.get('arguments')
+                    response['result'] = await self.request(action, {} if args is None else args)
+                    if len(json.dumps(response['result'], ensure_ascii=False).encode('utf-8')) > 3 * 1024 * 1024:
+                        response.pop('result', None)
+                        raise HubError('RESULT_TOO_LARGE')
                     if generation != self.owner._generation or self.owner._recovering:
                         raise RuntimeError('SESSION_CHANGED')
                     response['success'] = True
         except asyncio.CancelledError:
             response['code'] = 'CANCELLED'
             raise
+        except HubError as error:
+            response['code'] = error.code
         except (ValueError, FileNotFoundError) as error:
             response['code'] = 'INVALID_REQUEST' if isinstance(error, ValueError) else 'DECODER_MISSING'
         except Exception as error:
             response['code'] = str(error) if str(error) in ('SESSION_CHANGED', 'MEDIA_UNAVAILABLE', 'MEDIA_ALREADY_RUNNING') else 'DEVICE_HUB_UNAVAILABLE'
+            response['errorType'] = type(error).__name__
         finally:
             self.tasks.pop(frame['requestId'], None)
             with contextlib.suppress(Exception):
@@ -110,29 +127,16 @@ class DeviceHub:
     async def request(self, action, args):
         if not isinstance(args, dict):
             raise ValueError('Invalid arguments')
-        if action == 'apps':
-            async with AppServiceService(self.owner.rsd) as service:
-                apps = await service.list_apps(include_app_clips=False, include_hidden_apps=False, include_internal_apps=False)
-            if isinstance(apps, dict):
-                apps = apps.get('apps', apps.get('applications', []))
-            if not isinstance(apps, list):
-                raise RuntimeError('DEVICE_HUB_UNAVAILABLE')
-            result = []
-            for app in apps[:5000]:
-                if not isinstance(app, dict):
-                    continue
-                bundle = app.get('bundleIdentifier')
-                if isinstance(bundle, str):
-                    result.append({'bundleId': bundle[:512], 'name': str(app.get('name', bundle))[:512],
-                                   'version': str(app.get('version', ''))[:128]})
-            return {'apps': sorted(result, key=lambda a: (a['name'].casefold(), a['bundleId']))}
-        if action == 'launch':
-            bundle = args.get('bundleId')
-            if not isinstance(bundle, str) or not re.fullmatch(r'[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+', bundle) or len(bundle) > 512:
-                raise ValueError('Invalid bundle id')
-            async with AppServiceService(self.owner.rsd) as service:
-                await service.launch_application(bundle, kill_existing=False)
-            return {'status': 'launched', 'bundleId': bundle}
+        if not isinstance(action, str) or action not in ACTIONS:
+            raise ValueError('Unknown operation')
+        if action == 'record_start':
+            if not self.pipeline:
+                raise RuntimeError('MEDIA_UNAVAILABLE')
+            return self.pipeline.start_recording(args.get('format', 'h265'))
+        if action == 'record_stop':
+            if not self.pipeline:
+                raise RuntimeError('MEDIA_UNAVAILABLE')
+            return self.pipeline.stop_recording()
         if action == 'media_status':
             return self.pipeline.status() if self.pipeline else {'running': False}
         if action == 'media_stop':
@@ -164,7 +168,7 @@ class DeviceHub:
                 await pipeline.close()
                 await self.suspend()
                 raise
-        raise ValueError('Unknown Device Hub action')
+        return await self.management.request(action, args)
 
     async def _start_audio(self):
         if self.audio_service:
@@ -178,6 +182,8 @@ class DeviceHub:
         answer = await self.audio_service.start_audio_stream(ip, self.audio_transport.port,
             self.owner.rsd.service.address[0], client_session_id=csid)
         self.pipeline.configure_feedback(1, self.audio_transport, answer, self.owner.rsd.service.address[0])
+        if (self.pipeline.decoder_errors[1] or '').startswith('audio_'):
+            self.pipeline.decoder_errors[1] = None
         self.audio_task = asyncio.create_task(self._receive_audio())
 
     async def _receive_audio(self):
@@ -191,9 +197,19 @@ class DeviceHub:
             raise
         except Exception as error:
             if self.pipeline:
-                self.pipeline.error = 'audio_' + type(error).__name__
+                self.pipeline.decoder_errors[1] = 'audio_' + type(error).__name__
+                if self.owner._media_health:
+                    self.owner._media_health.error = error
 
     async def suspend(self):
+        # Retire old operations before the owner replaces RSD. A multi-stage
+        # operation must never continue its next stage on the newly bound phone.
+        current = asyncio.current_task()
+        pending = [task for task in self.tasks.values() if task is not current]
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        await self.management.close()
         if self.pipeline:
             self.pipeline.receiver.resync()
             self.pipeline.feedback = [None, None]

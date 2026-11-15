@@ -1,13 +1,14 @@
 # dev：rPlayHub 特色功能集成
 
-该分支增加 CoreDevice 原生投屏、Python SDK / MCP、编码流重放、媒体反馈和恢复、App 枚举与启动。
+该分支增加 CoreDevice 原生投屏、Python SDK / MCP、编码流重放、媒体恢复，以及完整设备管理入口。
+上游功能逐项映射、测试证据和规划项见 [功能对照表](RPLAYHUB_FEATURE_MATRIX.zh-CN.md)。
 入口为 **开发者工具 → 设备实验室 · dev**；主窗口右下角版本号连续点击五次打开开发者工具。
 
 ## 功能与使用
 
 | 功能 | 已接入的行为 | 使用方式 |
 |---|---|---|
-| CoreDevice 原生投屏 | DisplayService HEVC 视频和 AAC-ELD 系统音频；复用现有用户态隧道、配对、DDI；I420 / PCM 进入现有原生预览、截图与录制输出 | 选择物理 USB 设备，准备连接，停止该设备原有投屏后点击「开始原生投屏」 |
+| CoreDevice 原生投屏 | DisplayService HEVC 视频和 AAC-ELD 系统音频；复用现有用户态隧道、配对、DDI；I420 / PCM 进入现有原生预览、截图与录制输出 | 选择已配对的 USB 或无线设备，准备连接，停止该设备原有投屏后在媒体页点击「开始原生投屏」 |
 | Python SDK | 设备选择、租约、截图、点击/滑动、按键/文字、App 列表/启动、CoreDevice 启停和状态 | `python -m pip install -e ./sdk/python`，详见 [SDK 说明](../sdk/python/README.md) |
 | MCP | 官方 Python MCP SDK、stdio 工具调用、截图图片内容及几何信息 | `python -m pip install -e './sdk/python[mcp]'`，运行 `iphonemirror-mcp` |
 | 编码流重放 | 记录原始 RTP/RTCP 与时序，离线经过相同组帧、解码、媒体管线，独立预览窗口 | 开始前勾选「录制数据包供重放」；随后「重放录制文件」选择 `.imrtp` |
@@ -76,7 +77,7 @@ src/App.Runtime.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/IPhoneMirr
 | `GET /coredevice/status` | `device.read` | 帧数、丢包、丢帧、错误和关键帧等待状态 |
 
 App 启动与输入共用独占租约、取消和代次检查。请求结果不确定时不自动重试。
-录制文件路径和解码器路径不能由公共 HTTP API 指定；录制只能由本机实验室显式开启。
+录制文件路径和解码器路径不能由公共 HTTP API 指定；录制由实验室或持有租约的 SDK/MCP 调用显式开启。
 解码画面只通过当前 Windows 用户可连接的随机命名管道交付。
 
 ## 当前验证边界
@@ -88,3 +89,28 @@ RVRA 仅识别已观察到的 14 字节尾标；未知变体的画质不作保�
 原生色彩当前按现有 I420/NV12 SDR 管线处理，不声称 HDR 端到端保真。
 
 参考源码和许可证见 [third_party/rplayhub](../third_party/rplayhub/README.md)。
+
+## 完整设备管理（2026-11-15 补齐）
+
+设备实验室提供应用、进程、描述文件、文件与报告、实时日志、媒体、手机设置、设备八页。
+USB 和已配对无线连接都复用当前设备桥；准备连接后在媒体页开始 CoreDevice 投屏。
+应用支持安装/卸载、图标、用户/系统/开发/轻 App 过滤；进程支持结束；
+描述文件支持 Provisioning 与配置描述文件安装/移除；配置安装保留手机确认。
+文件支持 media/crashes 分页浏览、分块下载和崩溃报告导出。
+手机设置支持外观/辅助功能和模拟定位/恢复，设备页有系统按钮与电源操作。
+媒体页可以独立开始/停止 HEVC 或 RTP 录制；解码器失败会重启并等待新的完整关键帧。
+
+GET /api/v1/hub/actions 返回 27 项公开动作及只读/超时政策。
+POST /api/v1/devices/{id}/hub/{action} 接受 JSON 参数：读取需要 device.read，
+修改需要 device.control 和当前 X-Control-Session，录制另需 screen.capture。
+具体动作与参数见共享清单及 SDK 同名方法。
+
+POST /api/v1/devices/{id}/apps/install 与 /profiles/install 接受 application/octet-stream，
+必须指定 Content-Length 和 X-File-Name（只使用扩展名）。IPA 最大 512 MiB，描述文件最大 8 MiB。
+上传和安装全程需要有效租约；长操作须续租，SDK 自动续同一个 token。
+临时文件在成功、异常和取消后清理；公开 API 不接受服务器本机文件路径。
+手机文件路径相对于 media/crashes，禁止目录穿越和符号链接。
+所有修改不自动重试；断线重绑前取消旧操作。
+
+新增协议测试：python -m unittest discover -s tests -p device_management_test.py。
+实机验收边界仍按上文与功能对照表执行。

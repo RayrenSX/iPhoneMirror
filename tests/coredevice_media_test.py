@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import io
+import os
 import json
 from pathlib import Path
 import re
@@ -204,6 +205,50 @@ class MediaTests(unittest.TestCase):
 
 
 class AsyncMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_decoder_failure_restarts_and_recovers_at_complete_keyframe(self):
+        if not (ROOT / 'dist/CoreDevice/iPhoneMirror.MediaDecoder.exe').exists():
+            self.skipTest('Build decoder first')
+        class Sink(io.BytesIO):
+            def close(self): pass
+        sink = Sink()
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'f' * 32)
+        with patch('coredevice_media.open', return_value=sink, create=True):
+            await pipeline.start()
+        try:
+            pipeline.processes[0].kill()
+            for _ in range(200):
+                if pipeline.decoder_restarts[0] == 1: break
+                await asyncio.sleep(.01)
+            self.assertEqual(pipeline.decoder_restarts[0], 1)
+            self.assertIsNone(pipeline.decoder_errors[0])
+            sequence = 1
+            for index, nals in enumerate(units('portrait')):
+                for data in datagrams(nals, sequence, index * 2400):
+                    pipeline.feed(data)
+                    sequence += 1
+                await asyncio.sleep(.02)
+            await pipeline.finish()
+            self.assertEqual(pipeline.frames, 9)
+            self.assertIn(FRAME.pack(b'IMCD', 3, 0, 0, 0, 0), sink.getvalue())
+        finally:
+            await pipeline.close()
+
+    async def test_encoded_recording_starts_with_irap_and_audio_failure_does_not_block_video(self):
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'e' * 32)
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {'LOCALAPPDATA': directory}):
+                result = pipeline.start_recording('h265')
+            pipeline.decoder_errors[1] = 'audio_EOFError'
+            first = next(units('portrait'))
+            for packet in datagrams(first, 1, 0):
+                pipeline.feed(packet)
+            self.assertFalse(pipeline.queues[0].empty())
+            result = pipeline.stop_recording()
+            data = Path(result['path']).read_bytes()
+            self.assertTrue(data.startswith(b'\x00\x00\x00\x01\x40'))
+            self.assertGreater(result['bytes'], 0)
+            self.assertFalse(pipeline.status()['recording'])
+
     async def test_actual_pipeline_replays_packets_and_drains_decoder(self):
         from coredevice_media import replay
         decoder = ROOT / 'dist/CoreDevice/iPhoneMirror.MediaDecoder.exe'

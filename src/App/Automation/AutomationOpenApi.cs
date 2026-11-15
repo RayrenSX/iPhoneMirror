@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
+using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Services.Automation;
 
 namespace IPhoneMirror.App.Automation;
@@ -61,6 +62,26 @@ internal static class AutomationOpenApi
         Add("/api/v1/devices/{id}/coredevice/status", "get", "Inspect decoded frames, packet loss, queue drops and recovery", "device.read", null, "HubResult");
         Add("/api/v1/devices/{id}/coredevice/start", "post", "Explicitly prepare CoreDevice native capture; release control and stop other capture first", "device.control, screen.capture", "CoreDeviceStart", "HubResult");
         Add("/api/v1/devices/{id}/coredevice/stop", "post", "Stop CoreDevice capture; release control first", "device.control, screen.capture", null, "HubResult");
+        schemas["HubArguments"] = JsonNode.Parse("""{"type":"object","description":"Arguments for an allowlisted action from GET /api/v1/hub/actions. Paths are relative to the selected device media/crash service. Host paths are never accepted here."}""");
+        Add("/api/v1/hub/actions", "get", "List published Device Hub actions and readOnly/timeout policy", "device.read", null, "HubResult");
+        Add("/api/v1/devices/{id}/hub/{action}", "post", "Invoke a Device Hub action; mutations require a current control lease, recordings also require screen.capture",
+            "device.read for reads; device.control for mutations", "HubArguments", "HubResult");
+        ((JsonArray)paths["/api/v1/devices/{id}/hub/{action}"]!["post"]!["parameters"]!).Add(new JsonObject {
+            ["name"] = "action", ["in"] = "path", ["required"] = true,
+            ["schema"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(DeviceHubContract.Actions.Where(p => p.Value.Public)
+                .Select(p => (JsonNode?)JsonValue.Create(p.Key)).ToArray()) } });
+        foreach (var kind in new[] { "apps", "profiles" })
+        {
+            var path = $"/api/v1/devices/{{id}}/{kind}/install";
+            Add(path, "post", kind == "apps" ? "Upload and install an IPA (512 MiB maximum)" :
+                "Upload and install a mobileprovision/mobileconfig (8 MiB maximum; may prompt on the phone)",
+                "device.control", null, "HubResult", 200, true);
+            var operation = paths[path]!["post"]!;
+            operation["requestBody"] = JsonNode.Parse("""{"required":true,"content":{"application/octet-stream":{"schema":{"type":"string","format":"binary"}}}}""");
+            ((JsonArray)operation["parameters"]!).Add(new JsonObject { ["name"] = "X-File-Name", ["in"] = "header", ["required"] = true,
+                ["description"] = "Original package filename; only its extension is used. Supply Content-Length and renew the control lease during a long upload/install.",
+                ["schema"] = new JsonObject { ["type"] = "string" } });
+        }
         Add("/api/v1/devices/{id}/control/acquire", "post", "Acquire or renew exclusive control", "device.control", "Acquire", "Lease");
         Add("/api/v1/devices/{id}/control/release", "post", "Cancel input and release control", "device.control", null, null, 204, true);
         foreach (var action in InputActions)

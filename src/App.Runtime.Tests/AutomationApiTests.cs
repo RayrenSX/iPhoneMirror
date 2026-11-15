@@ -240,7 +240,7 @@ internal static partial class Program
         await Error(await http.GetAsync("/api/v1/devices/a/clipboard"), 422, "CAPABILITY_NOT_SUPPORTED");
         backend.Supported = true;
         var spec = await Json(await http.GetAsync("/api/v1/openapi.json"));
-        Expect(spec.GetProperty("openapi").GetString() == "3.1.0" && spec.GetProperty("paths").EnumerateObject().Count() == 20 &&
+        Expect(spec.GetProperty("openapi").GetString() == "3.1.0" && spec.GetProperty("paths").EnumerateObject().Count() == 24 &&
             spec.GetProperty("paths").TryGetProperty("/api/v1/devices/{id}/apps/launch", out _) &&
             spec.GetProperty("paths").TryGetProperty("/api/v1/devices/{id}/coredevice/start", out _), "Incomplete OpenAPI document.");
         Expect((await http.GetStringAsync("/api/docs")).Contains("capture"), "Local docs missing.");

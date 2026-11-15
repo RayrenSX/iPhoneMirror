@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,12 +27,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self): self.handle_request()
     def do_POST(self): self.handle_request()
     def handle_request(self):
-        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'null')
+        raw = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        body = raw if self.headers.get('Content-Type') == 'application/octet-stream' else json.loads(raw or b'null')
         type(self).requests.append((self.command, self.path, body, self.headers.get('X-Control-Session')))
         if self.headers.get('X-API-Key') != KEY:
             return self.reply({'error': {'code': 'UNAUTHORIZED', 'message': 'Invalid key'}}, 401)
         if self.path == '/api/v1/devices':
             return self.reply({'devices': [{'id': 'phone-a'}]})
+        if self.path == '/api/v1/hub/actions':
+            actions = json.loads((ROOT / 'tools/device_hub_contract.json').read_text())['actions']
+            return self.reply({'actions': {k: v for k, v in actions.items() if v['public']}})
+        if '/hub/' in self.path:
+            action = self.path.rsplit('/', 1)[-1]
+            if action == 'read_file':
+                return self.reply({'size': 6, 'offset': body.get('offset', 0), 'modified': 1, 'eof': True, 'data': 'YWJjMTIz'})
+            return self.reply({'action': action, 'arguments': body})
+        if self.path.endswith('/install'):
+            if self.headers.get('X-Control-Session') != TOKEN:
+                return self.reply({'error': {'code': 'CONTROL_LOCKED', 'message': 'Acquire first'}}, 409)
+            return self.reply({'bytes': len(raw), 'name': self.headers.get('X-File-Name')})
         if self.path.endswith('/status') and '/coredevice/' not in self.path:
             return self.reply({'geometry': self.geometry, 'control': {'available': True}})
         if self.path.endswith('/control/acquire'):
@@ -129,10 +143,19 @@ class SdkTests(unittest.TestCase):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    self.assertTrue({'list_devices', 'launch_app', 'start_coredevice_mirror', 'media_status'} <= {t.name for t in tools.tools})
+                    self.assertEqual(len(tools.tools), 41)
+                    self.assertTrue({'install_app', 'uninstall_app', 'set_phone_setting', 'set_simulated_location',
+                        'export_crash_reports', 'poll_syslog', 'terminate_process', 'start_recording'} <= {t.name for t in tools.tools})
+                    annotations = {t.name: t.annotations for t in tools.tools}
+                    self.assertTrue(annotations['uninstall_app'].destructiveHint)
+                    self.assertTrue(annotations['get_phone_settings'].readOnlyHint)
                     result = await session.call_tool('list_devices', {})
                     self.assertFalse(result.isError)
                     result = await session.call_tool('acquire_control', {'device_id': 'phone-a'})
+                    self.assertFalse(result.isError)
+                    result = await session.call_tool('set_phone_setting', {'device_id': 'phone-a', 'key': 'appearance', 'value': 'dark'})
+                    self.assertFalse(result.isError)
+                    result = await session.call_tool('device_power', {'device_id': 'phone-a', 'action': 'sleep'})
                     self.assertFalse(result.isError)
                     result = await session.call_tool('tap', {'device_id': 'phone-a', 'x': .5, 'y': .5})
                     self.assertFalse(result.isError)
@@ -141,6 +164,28 @@ class SdkTests(unittest.TestCase):
                     self.assertEqual([c.type for c in shot.content], ['image', 'text'])
                     await session.call_tool('release_control', {'device_id': 'phone-a'})
         asyncio.run(run())
+
+    def test_management_mutations_uploads_and_downloads(self):
+        device = self.client.device('phone-a')
+        self.assertEqual(device.device_info()['action'], 'device_info')
+        with self.assertRaises(MirrorError): device.set_setting('appearance', 'dark')
+        self.assertFalse(any(path.endswith('/hub/set_setting') for _, path, _, _ in Handler.requests))
+        with device:
+            device.set_setting('appearance', 'dark')
+            device.set_location(31.2, 121.5)
+            device.device_action('sleep')
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'test.ipa'
+                path.write_bytes(b'x' * 200000)
+                result = device.install_app(path)
+                self.assertEqual(result, {'bytes': 200000, 'name': 'package.ipa'})
+                target = Path(directory) / 'download'
+                result = device.download('DCIM/file', target)
+                self.assertEqual(target.read_bytes(), b'abc123')
+                with self.assertRaises(FileExistsError): device.download('DCIM/file', target)
+                self.assertEqual(target.read_bytes(), b'abc123')
+        self.assertEqual(sum(path.endswith('/hub/set_setting') for _, path, _, _ in Handler.requests), 1)
+        with self.assertRaises(ValueError): device.hub('install_app', path='C:/secret.ipa')
 
 
 if __name__ == '__main__': unittest.main()

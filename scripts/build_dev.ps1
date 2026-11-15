@@ -36,7 +36,7 @@ try {
     if (-not $SkipTests) {
         ctest --test-dir build/native -C Release -R '^CoreProtocolTests$' --output-on-failure
         if ($LASTEXITCODE) { throw 'Native tests failed' }
-        foreach ($pattern in @('coredevice_media_test.py', 'device_hub_test.py', 'python_sdk_test.py', 'usb*_test.py')) {
+        foreach ($pattern in @('coredevice_media_test.py', 'device_hub_test.py', 'device_management_test.py', 'python_sdk_test.py', 'usb*_test.py')) {
             & $sdkPython -m unittest discover -s tests -p $pattern
             if ($LASTEXITCODE) { throw "Python tests failed: $pattern" }
         }

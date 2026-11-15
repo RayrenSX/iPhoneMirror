@@ -38,6 +38,8 @@ try {
         @((Get-Item -LiteralPath (Join-Path $source 'screen_orientation.py'))) +
         @((Get-Item -LiteralPath (Join-Path $source 'coredevice_media.py'))) +
         @((Get-Item -LiteralPath (Join-Path $source 'device_hub.py'))) +
+        @((Get-Item -LiteralPath (Join-Path $source 'device_management.py'))) +
+        @((Get-Item -LiteralPath (Join-Path $source 'device_hub_contract.json'))) +
         @(Get-ChildItem -LiteralPath (Join-Path $source 'iostouch') -Recurse -File -Filter '*.py')
     foreach ($file in $files) {
         $relative = $file.FullName.Substring($source.Length + 1)

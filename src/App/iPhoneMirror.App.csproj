@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <EmbeddedResource Include="..\..\tools\device_hub_contract.json" LogicalName="IPhoneMirror.App.DeviceHub.contract.json" />
     <Content Include="..\..\dist\CoreDevice\**\*" Condition="Exists('..\..\dist\CoreDevice')">
       <Link>tools\CoreDevice\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

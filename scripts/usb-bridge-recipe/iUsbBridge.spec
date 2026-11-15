@@ -55,6 +55,7 @@ hiddenimports += [
 hiddenimports = existing_modules(hiddenimports)
 
 datas = []
+datas += [(str(Path(SPECPATH) / 'src' / 'device_hub_contract.json'), '.')]
 datas += collect_data_files('pymobiledevice3')
 datas += collect_data_files('qh3')
 datas += collect_data_files('developer_disk_image')

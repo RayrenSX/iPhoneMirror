@@ -343,6 +343,14 @@ class MediaPipeline:
         self.finishing = False
         self.first_timestamps = [None, None]
         self.last_video = time.monotonic()
+        self.encoded_recording = None
+        self.recording_path = str(recording) if recording else None
+        self.recording_error = None
+        self.decoder_errors = [None, None]
+        self.decoder_tasks = [[], []]
+        self.decoder_restarts = [0, 0]
+        self.restart_tasks = [None, None]
+        self.restart_at = [0, 0]
 
     async def start(self, audio=False):
         executable = decoder_path()
@@ -354,9 +362,11 @@ class MediaPipeline:
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL, creationflags=0x08000000 if os.name == "nt" else 0)
                 self.processes.append(proc)
-                output = asyncio.create_task(self._output(proc))
+                output = asyncio.create_task(self._output(proc, channel))
                 self.output_tasks.append(output)
-                self.tasks.extend([asyncio.create_task(self._input(channel, proc)), output])
+                tasks = [asyncio.create_task(self._input(channel, proc)), output]
+                self.decoder_tasks[channel] = tasks
+                self.tasks.extend(tasks)
             self.feedback_task = asyncio.create_task(self._feedback())
             self.tasks.append(self.feedback_task)
         except BaseException:
@@ -405,10 +415,14 @@ class MediaPipeline:
             self.error = "feedback_" + type(error).__name__
 
     def feed(self, data: bytes, channel=0):
-        if self.closing or self.error:
+        if self.closing or self.error and not self.error.startswith('feedback_'):
             return
         if self.recording:
-            self.recording.write(channel, data)
+            try:
+                self.recording.write(channel, data)
+            except OSError as error:
+                self.recording_error = type(error).__name__
+                self.recording.close()
         feedback = self.feedback[channel]
         if len(data) >= 2 and 192 <= data[1] <= 223:
             if feedback:
@@ -422,10 +436,26 @@ class MediaPipeline:
             if packet.ssrc != feedback.remote:
                 return
             feedback.note(packet, time.monotonic())
+        if self.decoder_errors[channel]:
+            return
         if channel == 0:
             unit = self.receiver.push(packet)
             if unit is None:
                 return
+            if self.encoded_recording:
+                record = self.encoded_recording
+                try:
+                    if not record["started"] and unit.key:
+                        record["started"] = True
+                    if record["started"]:
+                        if record["bytes"] + len(unit.data) > 1024**3:
+                            self.stop_recording()
+                        else:
+                            record["file"].write(unit.data)
+                            record["bytes"] += len(unit.data)
+                except OSError as error:
+                    self.recording_error = type(error).__name__
+                    self.stop_recording()
         else:
             if packet.payload_type != 101 or len(self.processes) < 2:
                 return
@@ -447,21 +477,22 @@ class MediaPipeline:
         try:
             while True:
                 unit = await self.queues[channel].get()
-                if self.first_timestamps[channel] is None:
-                    self.first_timestamps[channel] = unit.timestamp
-                ticks = (unit.timestamp - self.first_timestamps[channel]) & 0xffffffff
-                pts = ticks * 10000000 // (48000 if channel else 24000)
-                proc.stdin.write(PACKET.pack(b"IMPK", len(unit.data), pts, unit.width, unit.height, self.width, self.height))
-                proc.stdin.write(unit.data)
-                await proc.stdin.drain()
-                if not channel and self.feedback[0]:
-                    # A receipt is sent only for a complete AU admitted to the decoder.
-                    await self._send(0, self.feedback[0].complete(unit.timestamp))
-                self.queues[channel].task_done()
+                try:
+                    if self.first_timestamps[channel] is None:
+                        self.first_timestamps[channel] = unit.timestamp
+                    ticks = (unit.timestamp - self.first_timestamps[channel]) & 0xffffffff
+                    pts = ticks * 10000000 // (48000 if channel else 24000)
+                    proc.stdin.write(PACKET.pack(b"IMPK", len(unit.data), pts, unit.width, unit.height, self.width, self.height))
+                    proc.stdin.write(unit.data)
+                    await proc.stdin.drain()
+                    if not channel and self.feedback[0]:
+                        await self._send(0, self.feedback[0].complete(unit.timestamp))
+                finally:
+                    self.queues[channel].task_done()
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            self.error = "decoder_input_" + type(error).__name__
+            self._decoder_failed(channel, "decoder_input_" + type(error).__name__)
 
     def _write(self, data):
         with self.pipe_lock:
@@ -471,7 +502,7 @@ class MediaPipeline:
         if self.pipe and not self.closing:
             await asyncio.to_thread(self._write, FRAME.pack(b'IMCD', 3, 0, 0, 0, 0))
 
-    async def _output(self, proc):
+    async def _output(self, proc, channel=0):
         try:
             while True:
                 header = await proc.stdout.readexactly(FRAME.size)
@@ -488,17 +519,96 @@ class MediaPipeline:
             raise
         except asyncio.IncompleteReadError as error:
             if not self.closing and not (self.finishing and not error.partial):
-                self.error = "decoder_output_truncated"
+                self._decoder_failed(channel, "decoder_output_truncated")
         except Exception as error:
             if not self.closing:
-                self.error = "decoder_output_" + type(error).__name__
+                self._decoder_failed(channel, "decoder_output_" + type(error).__name__)
+
+    def _decoder_failed(self, channel, error):
+        self.decoder_errors[channel] = error
+        if not self.closing and not self.finishing and not self.restart_tasks[channel]:
+            self.restart_tasks[channel] = asyncio.create_task(self._restart_decoder(channel))
+            self.tasks.append(self.restart_tasks[channel])
+
+    async def _restart_decoder(self, channel):
+        try:
+            # Bound restarts during permanently broken input, but allow later recovery.
+            await asyncio.sleep(max(.1, self.restart_at[channel] + 2 - time.monotonic()))
+            if self.closing or self.finishing:
+                return
+            self.restart_at[channel] = time.monotonic()
+            previous = self.decoder_tasks[channel]
+            for task in previous:
+                task.cancel()
+            await asyncio.gather(*previous, return_exceptions=True)
+            self.tasks[:] = [task for task in self.tasks if task not in previous and not task.done()]
+            self.output_tasks[:] = [task for task in self.output_tasks if task not in previous]
+            proc = self.processes[channel]
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+            await proc.wait()
+            queue = self.queues[channel]
+            while not queue.empty():
+                queue.get_nowait()
+                queue.task_done()
+            if not channel:
+                self.receiver.resync()
+                await self.mark_reconnecting()
+            self.first_timestamps[channel] = None
+            proc = await asyncio.create_subprocess_exec(str(decoder_path()), *(["--audio"] if channel else []),
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                creationflags=0x08000000 if os.name == "nt" else 0)
+            self.processes[channel] = proc
+            output = asyncio.create_task(self._output(proc, channel))
+            self.output_tasks.append(output)
+            self.decoder_tasks[channel] = [asyncio.create_task(self._input(channel, proc)), output]
+            self.tasks.extend(self.decoder_tasks[channel])
+            self.decoder_errors[channel] = None
+            self.decoder_restarts[channel] += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self.decoder_errors[channel] = "restart_" + type(error).__name__
+            # The health monitor will repair the transport if video stays unavailable.
+        finally:
+            self.restart_tasks[channel] = None
+
+    def start_recording(self, format="h265"):
+        if format not in ("h265", "imrtp"):
+            raise ValueError("Choose h265 or imrtp")
+        if self.encoded_recording or self.recording and self.recording.file:
+            raise ValueError("A recording is already running")
+        root = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "iPhoneMirror" / "MediaCaptures"
+        root.mkdir(parents=True, exist_ok=True)
+        import uuid
+        path = root / (time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8] + "." + format)
+        if format == "imrtp":
+            self.recording = PacketRecording(path)
+        else:
+            self.encoded_recording = {"file": path.open("xb"), "bytes": 0, "started": False}
+            # Start at a new IRAP including the cached VPS/SPS/PPS.
+            self.receiver.resync()
+        self.recording_path, self.recording_error = str(path), None
+        return {"recording": True, "format": format, "path": str(path)}
+
+    def stop_recording(self):
+        size = self.encoded_recording["bytes"] if self.encoded_recording else (self.recording.size if self.recording else 0)
+        if self.encoded_recording:
+            self.encoded_recording["file"].close()
+            self.encoded_recording = None
+        if self.recording:
+            self.recording.close()
+        return {"recording": False, "path": self.recording_path, "bytes": size, "error": self.recording_error}
 
     def status(self):
-        return {"running": not self.closing and bool(self.processes) and self.error is None,
+        return {"running": not self.closing and bool(self.processes) and self.error is None and self.decoder_errors[0] is None,
                 "decodedFrames": self.frames, "audioFrames": self.audio_frames,
                 "packetGaps": self.receiver.gaps, "droppedFrames": self.receiver.dropped,
                 "queueDrops": self.queue_drops, "waitingForKeyframe": self.receiver.wait_key,
-                "error": self.error, "recording": bool(self.recording and self.recording.file)}
+                "error": self.error, "decoderErrors": self.decoder_errors, "decoderRestarts": self.decoder_restarts,
+                "recording": bool(self.encoded_recording or self.recording and self.recording.file),
+                "recordingPath": self.recording_path, "recordingError": self.recording_error}
 
     async def finish(self):
         self.finishing = True
@@ -528,6 +638,9 @@ class MediaPipeline:
             self.pipe.close()
         if self.recording:
             self.recording.close()
+        if self.encoded_recording:
+            self.encoded_recording["file"].close()
+            self.encoded_recording = None
 
 
 async def replay(path: Path, pipe: str, speed=1.0):

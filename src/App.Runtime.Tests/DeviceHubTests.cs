@@ -64,6 +64,22 @@ internal static partial class Program
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
                 Verify(!string.IsNullOrWhiteSpace(hub.Title) && !hub.Title.Contains("DeviceHubTitle"), "Device Hub localization is missing.");
                 SaveWindowRender(hub, System.IO.Path.Combine(output, culture + ".png"));
+                var pending = new Queue<DependencyObject>(); pending.Enqueue(hub);
+                System.Windows.Controls.TabControl? tabs = null;
+                while (pending.TryDequeue(out var node))
+                {
+                    if (node is System.Windows.Controls.TabControl candidate && candidate.Items.Count == 8) { tabs = candidate; break; }
+                    for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(node); i++)
+                        pending.Enqueue(System.Windows.Media.VisualTreeHelper.GetChild(node, i));
+                }
+                Verify(tabs is not null, "Device Hub management pages are missing.");
+                if (culture == "zh-CN")
+                    for (var i = 0; i < tabs!.Items.Count; i++)
+                    {
+                        tabs.SelectedIndex = i; hub.UpdateLayout(); AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+                        SaveWindowRender(hub, System.IO.Path.Combine(output, "zh-CN-page-" + i + ".png"));
+                    }
+                tabs!.SelectedIndex = 0;
             }
             hub.Close();
         }
@@ -76,11 +92,20 @@ internal static partial class Program
         var ownership = new AutomationOwnership();
         var backend = new AutomationTestBackend(ownership);
         var launches = 0;
+        var hubCalls = new Dictionary<string, int>();
+        string? uploadPath = null;
         backend.Hub = (action, args, guard, ct) =>
         {
             ct.ThrowIfCancellationRequested();
             if (!guard()) throw new OperationCanceledException();
             if (action == "launch") launches++;
+            hubCalls[action] = hubCalls.GetValueOrDefault(action) + 1;
+            if (action is "install_app" or "install_profile")
+            {
+                uploadPath = JsonSerializer.SerializeToElement(args).GetProperty("path").GetString();
+                Verify(System.IO.File.Exists(uploadPath) && System.IO.File.ReadAllText(uploadPath!) == "test-package",
+                    "Upload was not staged completely before installation.");
+            }
             return Task.FromResult(JsonSerializer.SerializeToElement(new { action, running = true, apps = new[] { new { bundleId = "com.apple.Preferences", name = "Settings" } } }));
         };
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
@@ -95,6 +120,24 @@ internal static partial class Program
         http.DefaultRequestHeaders.Add("X-API-Key", new string('A', 64));
         Verify((await http.GetAsync("/api/v1/devices/a/apps")).IsSuccessStatusCode, "App enumeration failed.");
         Verify((await http.GetAsync("/api/v1/devices/a/coredevice/status")).IsSuccessStatusCode, "Media status failed.");
+        var catalog = await (await http.GetAsync("/api/v1/hub/actions")).Content.ReadFromJsonAsync<JsonElement>();
+        var actions = catalog.GetProperty("actions");
+        Verify(actions.EnumerateObject().Count() == 27 && !actions.TryGetProperty("install_app", out _) &&
+            actions.GetProperty("get_settings").GetProperty("readOnly").GetBoolean(), "Public action catalog exposes private host paths or wrong policy.");
+        foreach (var action in DeviceHubContract.Actions.Where(p => p.Value.Public && p.Key != "launch"))
+        {
+            var before = hubCalls.GetValueOrDefault(action.Key);
+            object args = action.Key is "get_app_icon" or "uninstall_app" ? new { bundleId = "com.apple.Preferences" } : new { };
+            var response = await http.PostAsJsonAsync("/api/v1/devices/a/hub/" + action.Key, args);
+            Verify(action.Value.ReadOnly ? response.IsSuccessStatusCode : response.StatusCode == HttpStatusCode.Conflict,
+                "Device Hub action bypassed its read/control admission: " + action.Key);
+            Verify(hubCalls.GetValueOrDefault(action.Key) - before == (action.Value.ReadOnly ? 1 : 0),
+                "An unleased mutation reached the bridge: " + action.Key);
+        }
+        Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/install_app", new { path = "C:/private.ipa" })).StatusCode == HttpStatusCode.UnprocessableEntity,
+            "Generic Hub API accepted a server-side install path.");
+        Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/erase", new { })).StatusCode == HttpStatusCode.UnprocessableEntity,
+            "An unknown device action was admitted.");
         var launch = new { bundleId = "com.apple.Preferences" };
         Verify((await http.PostAsJsonAsync("/api/v1/devices/a/apps/launch", launch)).StatusCode == HttpStatusCode.Conflict && launches == 0,
             "App launch bypassed exclusive control.");
@@ -105,6 +148,31 @@ internal static partial class Program
             "Leased launch was not dispatched once.");
         Verify((await http.PostAsJsonAsync("/api/v1/devices/a/apps/launch", new { bundleId = "bad/id" })).StatusCode == HttpStatusCode.UnprocessableEntity,
             "An invalid app identity reached the bridge.");
+        foreach (var action in DeviceHubContract.Actions.Where(p => p.Value.Public && !p.Value.ReadOnly && p.Key != "launch"))
+        {
+            object args = action.Key == "uninstall_app" ? new { bundleId = "com.apple.Preferences" } : new { };
+            Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/" + action.Key, args)).IsSuccessStatusCode &&
+                hubCalls.GetValueOrDefault(action.Key) == 1, "A leased mutation was not dispatched exactly once: " + action.Key);
+        }
+        foreach (var (kind, fileName) in new[] { ("apps", "../../test.ipa"), ("profiles", "test.mobileprovision"), ("profiles", "test.mobileconfig") })
+        {
+            using var upload = new HttpRequestMessage(HttpMethod.Post, "/api/v1/devices/a/" + kind + "/install")
+            { Content = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes("test-package")) };
+            upload.Content.Headers.ContentType = new("application/octet-stream");
+            upload.Headers.Add("X-File-Name", fileName);
+            Verify((await http.SendAsync(upload)).IsSuccessStatusCode, "Package upload/install failed.");
+            Verify(uploadPath is not null && !System.IO.File.Exists(uploadPath) &&
+                System.IO.Path.GetDirectoryName(uploadPath)!.EndsWith("HubUploads"), "Upload path escaped staging or was not removed after completion.");
+        }
+        using (var invalid = new HttpRequestMessage(HttpMethod.Post, "/api/v1/devices/a/apps/install")
+        { Content = new ByteArrayContent([1, 2, 3]) })
+        {
+            invalid.Content.Headers.ContentType = new("application/octet-stream");
+            invalid.Headers.Add("X-File-Name", "test.exe");
+            var before = hubCalls.GetValueOrDefault("install_app");
+            Verify((await http.SendAsync(invalid)).StatusCode == HttpStatusCode.UnprocessableEntity &&
+                hubCalls.GetValueOrDefault("install_app") == before, "An invalid upload reached the bridge.");
+        }
         backend.Generation++;
         Verify((await http.PostAsJsonAsync("/api/v1/devices/a/apps/launch", launch)).StatusCode == HttpStatusCode.Conflict && launches == 1,
             "Old control generation launched an app.");
@@ -114,6 +182,12 @@ internal static partial class Program
             "Native capture did not use explicit application management.");
         Verify((await http.PostAsync("/api/v1/devices/a/coredevice/stop", null)).IsSuccessStatusCode && management == "coredevice-stop:False",
             "Native stop did not reach application management.");
+        await host.StopAsync();
+        await host.StartAsync(new AutomationSettings { Enabled = true, Port = port, Permissions = ["device.read"] }, new string('A', 64));
+        Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/get_settings", new { })).IsSuccessStatusCode,
+            "Read-only credentials could not inspect phone settings.");
+        Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/set_setting", new { key = "voiceOver", value = true })).StatusCode == HttpStatusCode.Forbidden,
+            "Read-only credentials changed a phone setting.");
     }
 
     private static async Task TestDeviceHubCorrelationAsync()

@@ -10,7 +10,7 @@ using IPhoneMirror.App.ViewModels;
 
 namespace IPhoneMirror.App.Windows;
 
-internal sealed class DeviceHubWindow : IPhoneMirror.UI.Controls.RoundedWindow
+internal sealed partial class DeviceHubWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     private readonly MainViewModel _viewModel;
     private readonly CancellationTokenSource _stop = new();
@@ -21,13 +21,14 @@ internal sealed class DeviceHubWindow : IPhoneMirror.UI.Controls.RoundedWindow
     private readonly CheckBox _record = new() { Margin = new(0, 10, 0, 10) };
     private readonly List<Button> _buttons = [];
     private bool _busy;
-    private sealed record AppItem(string BundleId, string Name) { public string Label => $"{Name}  ·  {BundleId}"; }
+    private sealed record AppItem(string BundleId, string Name, bool FirstParty = false, bool Developer = false, bool Clip = false)
+    { public string Label => $"{Name}  ·  {BundleId}"; }
 
     internal DeviceHubWindow(MainViewModel viewModel)
     {
         _viewModel = viewModel;
         SetResourceReference(TitleProperty, "DeviceHubTitle");
-        Width = 760; Height = 650; MinWidth = 560; MinHeight = 480;
+        Width = 900; Height = 800; MinWidth = 560; MinHeight = 580;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ShowInTaskbar = false;
         var surface = new Border(); surface.SetResourceReference(StyleProperty, "RoundedWindowContent");
@@ -48,36 +49,26 @@ internal sealed class DeviceHubWindow : IPhoneMirror.UI.Controls.RoundedWindow
         var intro = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new(0, 0, 0, 16) };
         intro.SetResourceReference(TextBlock.TextProperty, "DeviceHubDescription"); top.Children.Add(intro);
         _devices.ItemsSource = new ListCollectionView(viewModel.Devices)
-        { Filter = item => item is DeviceViewModel { IsWireless: false, IsMediaCast: false } };
+        { Filter = item => item is DeviceViewModel { IsMediaCast: false } };
         _devices.SelectedItem = viewModel.SelectedDevice;
         if (_devices.SelectedIndex < 0 && _devices.Items.Count == 1) _devices.SelectedIndex = 0;
-        _devices.SelectionChanged += (_, _) => _apps.ItemsSource = null;
+        _devices.SelectionChanged += async (_, _) => { _apps.ItemsSource = null; await StopLogsAsync(); ClearManagementLists(); };
         top.Children.Add(_devices);
-        var options = new WrapPanel(); options.Children.Add(_audio); options.Children.Add(_record); top.Children.Add(options);
+        var options = new WrapPanel(); options.Children.Add(_audio); options.Children.Add(_record);
         _audio.SetResourceReference(ContentProperty, "DeviceHubAudio");
         _record.SetResourceReference(ContentProperty, "DeviceHubRecord");
-        var actions = new WrapPanel(); top.Children.Add(actions);
-        Add(actions, "DeviceHubPrepare", async () => { await viewModel.StartAutomationControlAsync(Device().Udid, false, _stop.Token); });
+        var prepare = new WrapPanel { Margin = new(0, 10, 0, 0) }; top.Children.Add(prepare);
+        Add(prepare, "DeviceHubPrepare", async () => { await viewModel.StartAutomationControlAsync(Device().Udid, Device().IsWireless, _stop.Token); });
+        var actions = new WrapPanel();
         Add(actions, "DeviceHubStart", async () => Show(await viewModel.StartCoreDeviceCaptureAsync(Device(), _audio.IsChecked == true, _record.IsChecked == true, _stop.Token)));
         Add(actions, "DeviceHubStop", () => viewModel.StopCoreDeviceCaptureAsync(Device()));
         Add(actions, "DeviceHubStatus", async () => Show(await viewModel.DeviceHubUiAsync(Device(), "media_status", null, _stop.Token)));
-        Add(actions, "DeviceHubApps", async () =>
-        {
-            var result = await viewModel.DeviceHubUiAsync(Device(), "apps", null, _stop.Token);
-            _apps.ItemsSource = result.GetProperty("apps").EnumerateArray().Select(a =>
-                new AppItem(a.GetProperty("bundleId").GetString()!, a.GetProperty("name").GetString()!)).ToArray();
-        });
-        Add(actions, "DeviceHubLaunch", async () =>
-        {
-            if (_apps.SelectedItem is not AppItem app) throw new InvalidOperationException(LocalizationService.Get("DeviceHubChooseApp"));
-            Show(await viewModel.DeviceHubUiAsync(Device(), "launch", new { bundleId = app.BundleId }, _stop.Token));
-        });
         Add(actions, "DeviceHubReplay", ReplayAsync);
         var bottom = new ScrollViewer { MaxHeight = 160, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _status };
-        DockPanel.SetDock(bottom, Dock.Bottom); panel.Children.Add(bottom); panel.Children.Add(_apps);
+        DockPanel.SetDock(bottom, Dock.Bottom); panel.Children.Add(bottom); panel.Children.Add(CreateManagementTabs(options, actions));
         Content = surface;
         ThemeService.Attach(this);
-        Closed += (_, _) => _stop.Cancel();
+        Closed += async (_, _) => { _stop.Cancel(); await StopLogsAsync(); };
     }
 
     private DeviceViewModel Device() => _devices.SelectedItem as DeviceViewModel ??

@@ -67,9 +67,9 @@ def create_server(client=None):
         return selected(device_id).text(text)
 
     @server.tool()
-    def list_apps(device_id: str) -> dict:
+    def list_apps(device_id: str, include_hidden: bool = False, include_internal: bool = False, include_clips: bool = False) -> dict:
         """List installed apps via an already ready CoreDevice bridge."""
-        return selected(device_id).apps()
+        return selected(device_id).list_apps(include_hidden, include_internal, include_clips)
 
     @server.tool()
     def launch_app(device_id: str, bundle_id: str) -> dict:
@@ -90,6 +90,148 @@ def create_server(client=None):
     def media_status(device_id: str) -> dict:
         """Inspect decoded frame count, RTP gaps, drops and keyframe recovery."""
         return selected(device_id).media_status()
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def device_info(device_id: str) -> dict:
+        """Read hardware, battery and disk details; unavailable domains are explicit."""
+        return selected(device_id).device_info()
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def hub_capabilities(device_id: str) -> dict:
+        """Inspect supported actions, advertised services, settings and file limits."""
+        return selected(device_id).capabilities()
+
+    @server.tool()
+    def prepare_device(device_id: str, enable_control: bool = True) -> dict:
+        """Explicitly prepare capture/control, including DDI when required."""
+        return selected(device_id).prepare(enable_control)
+
+    @server.tool()
+    def open_device_window(device_id: str) -> dict:
+        """Open this device's existing projection window."""
+        return selected(device_id).open_window()
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def app_icon(device_id: str, bundle_id: str) -> list:
+        """Read an installed app's PNG icon."""
+        import base64
+        icon = selected(device_id).app_icon(bundle_id)
+        return [Image(data=base64.b64decode(icon["data"], validate=True), format="png").to_image_content()]
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def list_processes(device_id: str) -> dict:
+        """List running process tokens and identifiers."""
+        return selected(device_id).processes()
+
+    @server.tool(annotations={"destructiveHint": True, "idempotentHint": False})
+    def terminate_process(device_id: str, pid: int, signal: int = 15) -> dict:
+        """Send SIGTERM (15) or SIGKILL (9) once; requires control."""
+        return selected(device_id).terminate(pid, signal)
+
+    @server.tool(annotations={"destructiveHint": True, "idempotentHint": False})
+    def install_app(device_id: str, path: str) -> dict:
+        """Upload an explicit local IPA (up to 512 MiB) and install it; requires control."""
+        return selected(device_id).install_app(path)
+
+    @server.tool(annotations={"destructiveHint": True, "idempotentHint": False})
+    def uninstall_app(device_id: str, bundle_id: str) -> dict:
+        """Remove an installed app and its data; requires control."""
+        return selected(device_id).uninstall_app(bundle_id)
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def list_profiles(device_id: str, kind: str = "all") -> dict:
+        """List provisioning/configuration profiles without exposing private payloads."""
+        return selected(device_id).profiles(kind)
+
+    @server.tool(annotations={"destructiveHint": True, "idempotentHint": False})
+    def install_profile(device_id: str, path: str) -> dict:
+        """Upload a local mobileprovision/mobileconfig; configuration installation may prompt on the phone."""
+        return selected(device_id).install_profile(path)
+
+    @server.tool(annotations={"destructiveHint": True, "idempotentHint": False})
+    def remove_profile(device_id: str, kind: str, identifier: str) -> dict:
+        """Remove a specified provisioning/configuration profile; requires control."""
+        return selected(device_id).remove_profile(kind, identifier)
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def list_device_files(device_id: str, path: str = "", root: str = "media", offset: int = 0, limit: int = 200) -> dict:
+        """Page through the media or crashes file service. Paths are relative; links cannot be traversed."""
+        return selected(device_id).list_dir(path, root, offset, limit)
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def read_device_file(device_id: str, path: str, root: str = "media", offset: int = 0, length: int = 196608) -> dict:
+        """Read one bounded base64 chunk without writing a host file."""
+        return selected(device_id).read_file(path, root, offset, length)
+
+    @server.tool()
+    def download_device_file(device_id: str, path: str, destination: str, root: str = "media") -> dict:
+        """Export a device file to an explicit local destination; never replaces existing files."""
+        return selected(device_id).download(path, destination, root)
+
+    @server.tool()
+    def export_crash_reports(device_id: str, destination: str) -> dict:
+        """Export crash, spin and log reports into a new local directory (5000 files / 1 GiB maximum)."""
+        return selected(device_id).export_crashes(destination)
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def start_syslog(device_id: str) -> dict:
+        """Start a bounded log subscription; poll within 60 seconds and stop when finished."""
+        return selected(device_id).start_logs()
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def poll_syslog(device_id: str, stream_id: str, cursor: int = 0, limit: int = 200) -> dict:
+        """Read logs since a cursor; dropped messages and disconnects are reported."""
+        return selected(device_id).poll_logs(stream_id, cursor, limit)
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def stop_syslog(device_id: str, stream_id: str) -> dict:
+        """Close this log subscription."""
+        return selected(device_id).stop_logs(stream_id)
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def get_phone_settings(device_id: str) -> dict:
+        """Read appearance/accessibility settings; unsupported actions are explicit."""
+        return selected(device_id).settings()
+
+    @server.tool()
+    def set_phone_setting(device_id: str, key: str, value: bool | float | str) -> dict:
+        """Apply an allowlisted phone setting once; inspect capabilities for keys and text sizes."""
+        return selected(device_id).set_setting(key, value)
+
+    @server.tool()
+    def set_simulated_location(device_id: str, latitude: float, longitude: float) -> dict:
+        """Set simulated device location; requires control. Clear it after use."""
+        return selected(device_id).set_location(latitude, longitude)
+
+    @server.tool()
+    def clear_simulated_location(device_id: str) -> dict:
+        """Restore the phone's actual location; requires control."""
+        return selected(device_id).clear_location()
+
+    @server.tool(annotations={"destructiveHint": True, "idempotentHint": False})
+    def device_power(device_id: str, action: str) -> dict:
+        """Request restart, shutdown or sleep once; requires control."""
+        return selected(device_id).device_action(action)
+
+    @server.tool(annotations={"idempotentHint": False})
+    def press_phone_button(device_id: str, button: str) -> dict:
+        """Press home, app_switcher, lock, volume_up or volume_down once; requires control."""
+        return selected(device_id).press_button(button)
+
+    @server.tool()
+    def start_recording(device_id: str, format: str = "h265") -> dict:
+        """Record the active CoreDevice stream as keyframe-gated h265 or packet replay imrtp."""
+        return selected(device_id).start_recording(format)
+
+    @server.tool()
+    def stop_recording(device_id: str) -> dict:
+        """Stop recording and return its local server path and size."""
+        return selected(device_id).stop_recording()
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def tunnel_info(device_id: str) -> dict:
+        """Inspect the selected bridge's existing tunnel without discovering another device."""
+        return selected(device_id).tunnel_info()
 
     def close():
         for device in list(devices.values()):

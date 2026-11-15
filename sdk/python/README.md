@@ -51,3 +51,38 @@ prepare the device in the desktop UI before starting automated MCP sessions.
 Neither SDK nor MCP starts a network listener or connects directly to the phone.
 Offline replay is available in the desktop Device Hub and the packaged bridge
 CLI documented in `docs/DEV_DEVICE_HUB.zh-CN.md`.
+
+The expanded Device Hub adds 41 MCP tools and matching SDK methods:
+device_info, capabilities, tunnel_info, list_apps (with include flags), app_icon,
+processes, terminate, install_app, uninstall_app, profiles, install_profile,
+remove_profile, settings, get_setting, set_setting, set_location, clear_location,
+press_button, device_action, list_dir, read_file, download, export_crashes,
+start_logs, poll_logs, stop_logs, start_recording and stop_recording.
+Use prepare(enable_control=True) and open_window() for explicit setup.
+
+Mutations require an explicitly acquired lease, for example:
+
+    with phone:
+        phone.set_setting('appearance', 'dark')
+        phone.set_location(31.2, 121.5)
+        phone.clear_location()
+        phone.press_button('home')
+        phone.install_app('MySignedApp.ipa')
+        phone.install_profile('Development.mobileprovision')
+
+The SDK streams uploads and renews the same lease token during long management
+operations. Installation, removal and power operations are sent once, never retried.
+Local SDK/MCP file paths choose client-side files; public HTTP actions never accept
+an arbitrary server-side path. The shared action catalog is available through
+client.actions(); phone.hub(operation, **arguments) invokes public actions.
+
+phone.list_dir(path='', root='media') pages through files. phone.read_file reads
+one bounded base64 chunk. phone.download('DCIM/file.mov', 'new-file.mov') downloads
+to a new local file, detecting source changes. phone.export_crashes('new-directory')
+exports up to 5000 files / 1 GiB. Existing destinations are not silently replaced.
+phone.start_logs() returns streamId; pass it to phone.poll_logs(stream_id, cursor)
+and finish with phone.stop_logs(stream_id). Poll within 60 seconds to retain the
+subscription; dropped messages are reported.
+
+See the [feature matrix](../../docs/RPLAYHUB_FEATURE_MATRIX.zh-CN.md) for scope and
+real-device validation boundaries.

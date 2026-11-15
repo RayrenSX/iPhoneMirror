@@ -20,7 +20,8 @@ internal sealed partial class MainViewModel
     {
         var bridge = GetReadyUsbControlBridge(device.Udid) ??
             throw new AutomationException("CONTROL_NOT_AVAILABLE", "Prepare the device's USB control connection first.", 503);
-        if (action != "launch") return await bridge.DeviceHubAsync(action, arguments, () => true, cancellation);
+        if (DeviceHubContract.Require(action).ReadOnly)
+            return await bridge.DeviceHubAsync(action, arguments, () => true, cancellation);
         var physical = AutomationPhysicalId(device.Udid);
         var guard = AutomationHumanGuard(device.Udid);
         using var owner = AutomationOwnership.EnterInput(physical);
@@ -30,14 +31,14 @@ internal sealed partial class MainViewModel
     internal async Task<JsonElement> StartCoreDeviceCaptureAsync(DeviceViewModel device, bool audio,
         bool record, CancellationToken cancellation = default)
     {
-        if (device.IsWireless || device.IsMediaCast)
-            throw new AutomationException("CAPABILITY_NOT_SUPPORTED", "Select the physical USB device for CoreDevice capture.", 422);
+        if (device.IsMediaCast)
+            throw new AutomationException("CAPABILITY_NOT_SUPPORTED", "Select a paired iPhone device for CoreDevice capture.", 422);
         if (!File.Exists(Path.Combine(AppContext.BaseDirectory, "tools", "CoreDevice", "iPhoneMirror.MediaDecoder.exe")))
             throw new AutomationException("DECODER_MISSING", "Build and install the dev CoreDevice decoder first.", 503);
         if (_sessions.Get(device.Udid)?.HasSession == true)
             throw new AutomationException("CAPTURE_ALREADY_ACTIVE", "Stop this device's current capture before selecting CoreDevice.");
         if (GetReadyUsbControlBridge(device.Udid) is null)
-            await StartAutomationControlAsync(device.Udid, wireless: false, cancellation);
+            await StartAutomationControlAsync(device.Udid, wireless: device.IsWireless, cancellation);
         var bridge = GetReadyUsbControlBridge(device.Udid) ??
             throw new AutomationException("CONTROL_NOT_AVAILABLE", "Finish device trust, binding, Developer Mode and DDI preparation.", 503);
         await _coreGate.WaitAsync(cancellation);

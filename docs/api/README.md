@@ -139,6 +139,14 @@ and the [Python SDK / stdio MCP](../../sdk/python/README.md).
 
 ## Validation and publishing
 
+The expanded Device Hub publishes GET /api/v1/hub/actions and
+POST /api/v1/devices/{id}/hub/{action}. Reads require device.read; mutations require
+device.control and the current lease; recording also requires screen.capture.
+Upload IPA/profile bytes to /api/v1/devices/{id}/apps/install or /profiles/install
+using application/octet-stream, Content-Length and X-File-Name.
+Host paths are never accepted by public actions. Renew the lease during long installs;
+the SDK handles streaming and renewal. See the [feature matrix](../RPLAYHUB_FEATURE_MATRIX.zh-CN.md).
+
 Run `App.Runtime.Tests --automation-api`, Python `automation_clipboard_test.py`, the existing keyboard/router/mapping/clipboard/touch suites and localization verification. Real USB/wireless/BLE and multi-device coordinate effects still need device testing; simulation is not proof of an iPhone action.
 
 Kestrel is supplied by `Microsoft.AspNetCore.App`. Both self-contained publish variants must ship its runtime, with no IIS/Hosting Bundle installation. The installer needs no API firewall rule. Local docs/OpenAPI are in the app assembly. Rebuild the repository bridge recipe so the packaged executable advertises the new clipboard capability; keep its runtime manifest/payload together. Packaging checks include ASP.NET assemblies for the multi-file variant.

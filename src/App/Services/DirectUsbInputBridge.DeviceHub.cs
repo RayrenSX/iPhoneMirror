@@ -17,9 +17,14 @@ public sealed partial class DirectUsbInputBridge
             !root.TryGetProperty("generation", out var gen) || gen.GetInt64() != pending.Generation) return;
         if (root.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.True)
             pending.Result.TrySetResult(root.GetProperty("result").Clone());
-        else pending.Result.TrySetException(new AutomationException(
-            root.TryGetProperty("code", out var code) ? code.GetString() ?? "DEVICE_HUB_UNAVAILABLE" : "DEVICE_HUB_UNAVAILABLE",
-            "The device operation failed or was cancelled; check Developer tools. App launches are never retried.", 503));
+        else
+        {
+            var code = root.TryGetProperty("code", out var value) ? value.GetString() ?? "DEVICE_HUB_UNAVAILABLE" : "DEVICE_HUB_UNAVAILABLE";
+            var type = root.TryGetProperty("errorType", out var errorType) ? errorType.GetString() : null;
+            pending.Result.TrySetException(new AutomationException(code,
+                $"Device operation failed ({code}{(type is null ? "" : ": " + type)}). Operations are never automatically retried.",
+                code == "INVALID_REQUEST" ? 422 : code is "CANCELLED" or "SESSION_CHANGED" ? 409 : 503));
+        }
     }
 
     private void CancelDeviceHub()
@@ -33,8 +38,7 @@ public sealed partial class DirectUsbInputBridge
     {
         if (!SupportsDeviceHub || !IsReady)
             throw new AutomationException("CAPABILITY_NOT_SUPPORTED", "Enable the dev device bridge first.", 422);
-        if (action is not ("apps" or "launch" or "media_start" or "media_stop" or "media_status"))
-            throw new ArgumentException(nameof(action));
+        var policy = DeviceHubContract.Require(action);
         if (!await _hubGate.WaitAsync(0, cancellation))
             throw new AutomationException("CONTROL_LOCKED", "Another Device Hub operation is in progress.");
         var id = Guid.NewGuid().ToString("N");
@@ -44,7 +48,7 @@ public sealed partial class DirectUsbInputBridge
         _hubRequests[id] = (wire, completion);
         try
         {
-            using var admission = action == "launch" ? InputAdmission?.Invoke() : null;
+            using var admission = !policy.ReadOnly ? InputAdmission?.Invoke() : null;
             await _sendLock.WaitAsync(cancellation);
             try
             {
@@ -56,7 +60,7 @@ public sealed partial class DirectUsbInputBridge
                 }), cancellation);
             }
             finally { _sendLock.Release(); }
-            var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(40), cancellation);
+            var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(policy.Timeout + 5), cancellation);
             if (generation != InputGeneration || !current()) throw new OperationCanceledException();
             return result;
         }
