@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -136,6 +136,8 @@ internal static partial class Program
                 return RunAutomationApiTests();
             if (args is ["--coredevice-replay", var mediaRecording])
                 return RunCoreDeviceReplayTest(mediaRecording);
+            if (args is ["--device-hub-sidebar", var deviceHubSidebarOutput])
+                return RunDeviceHubSidebarTests(deviceHubSidebarOutput);
             if (args is ["--device-hub-ui", var hubOutput])
                 return RunDeviceHubUiTest(hubOutput);
             if (args is ["--automation-settings", var automationOutput])

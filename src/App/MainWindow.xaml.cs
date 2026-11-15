@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -1777,6 +1777,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _deviceHubPanel?.Dispose();
         DisposeKeyboardInputSubscriptions();
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         DisposeKeyboardMapping();
@@ -2408,6 +2409,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_isSettingsPanelVisible == visible) return;
         _isSettingsPanelVisible = visible;
+        if (visible) _isDeviceHubPanelVisible = false;
+        SynchronizeRightPanelContent();
         ApplyWorkspacePanelState(animate: IsLoaded && !_isFullScreen);
         _viewModel.AddDiagnosticLog(AppLog.Event("workspace_settings_panel_changed",
             ("visible", visible)));
@@ -2419,7 +2422,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             WindowState != WindowState.Minimized;
         var showMirroring = _leftWorkspacePanel == LeftWorkspacePanel.Mirroring;
         var showDevices = _leftWorkspacePanel == LeftWorkspacePanel.Devices;
-        var showSettings = _isSettingsPanelVisible;
+        var showSettings = IsRightWorkspacePanelVisible;
         var showLeftPanel = showMirroring || showDevices;
         var previewStartWidth = Math.Min(PreviewPanel.ActualWidth, PreviewPanel.MaxWidth);
         // A partially revealed panel is not an established viewport. Pinning its
@@ -2463,7 +2466,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             MirroringPanelToggle.IsActive = showMirroring;
             DevicePanelToggle.IsActive = showDevices;
-            SettingsPanelToggle.IsActive = showSettings;
+            SettingsPanelToggle.IsActive = _isSettingsPanelVisible;
+            DeviceHubPanelToggle.IsActive = _isDeviceHubPanelVisible;
         }
         finally { _isSynchronizingWorkspacePanelControls = false; }
 
@@ -2480,7 +2484,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // A newly opening card must be measured at its final content width
             // before the reveal starts, never at the old window's leftover space.
             if (showLeftPanel && !leftWasOpen) LeftPanelHost.ContentWidth = WorkspaceDeviceWidth;
-            if (showSettings && !rightWasOpen) ControlPanel.ContentWidth = WorkspaceSettingsWidth;
+            if (showSettings && !rightWasOpen) ControlPanel.ContentWidth = WorkspaceRightWidth;
         }
         if (!animate)
         {
@@ -2489,7 +2493,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, WorkspaceDeviceWidth);
             SetWorkspacePageImmediate(DevicePanel, showDevices);
             SetWorkspacePageImmediate(MirroringPanel, showMirroring);
-            SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, WorkspaceSettingsWidth);
+            SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, WorkspaceRightWidth);
             ReleaseLightweightCenterWidth();
             if (_viewModel.IsLightweightApplicationMode && IsVisible)
                 QueueInitialLightweightWorkspaceFit();
@@ -2532,7 +2536,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _workspaceLeftSurfaceStartWidth = currentLeftWidth;
         _workspaceLeftSurfaceTargetWidth = showLeftPanel ? WorkspaceDeviceWidth : 0;
         _workspaceRightSurfaceStartWidth = currentRightWidth;
-        _workspaceRightSurfaceTargetWidth = showSettings ? WorkspaceSettingsWidth : 0;
+        _workspaceRightSurfaceTargetWidth = showSettings ? WorkspaceRightWidth : 0;
         _workspaceLeftGapStartWidth = currentLeftGap;
         _workspaceLeftGapTargetWidth = showLeftPanel ? 18 : 0;
         _workspaceRightGapStartWidth = currentRightGap;
@@ -2708,12 +2712,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _workspaceWindowFitOnResume = false;
         CancelLightweightWindowWidthAnimation(preserveLayout: true);
         var showLeftPanel = _leftWorkspacePanel != LeftWorkspacePanel.None;
-        var showSettings = _isSettingsPanelVisible;
+        var showSettings = IsRightWorkspacePanelVisible;
         var hasPanels = showLeftPanel || showSettings;
         DeviceColumn.Width = GridLength.Auto;
         ControlColumn.Width = GridLength.Auto;
         SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, WorkspaceDeviceWidth);
-        SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, WorkspaceSettingsWidth);
+        SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, WorkspaceRightWidth);
         LeftGapColumn.Width = new GridLength(showLeftPanel ? 18 : 0);
         RightGapColumn.Width = new GridLength(showSettings ? 18 : 0);
         SetLightweightCenterColumnFill();
@@ -2724,7 +2728,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var currentWindowWidth = Math.Max(1, bounds.Right - bounds.Left) / scale;
         var chromeWidth = GetLightweightFixedChromeWidth(currentWindowWidth);
         var sideWidth = (showLeftPanel ? WorkspaceDeviceWidth + 18 : 0) +
-            (showSettings ? WorkspaceSettingsWidth + 18 : 0);
+            (showSettings ? WorkspaceRightWidth + 18 : 0);
         var maximumWindowWidth = GetLightweightMaximumWindowWidth();
         var maximumPreviewWidth = Math.Max(1, maximumWindowWidth - chromeWidth -
             sideWidth);
@@ -5337,7 +5341,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 OnAboutClick(this, new RoutedEventArgs());
                 break;
             case "device-hub":
-                new DeviceHubWindow(_viewModel) { Owner = this }.Show();
+                SetDeviceHubPanelVisible(true);
                 break;
             case "advanced-settings":
                 new AdvancedSettingsWindow(1920, 1080, previewOnly: true)
@@ -5962,6 +5966,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 });
             return;
         }
+        RefreshDeviceHubContext(e.PropertyName);
         OnMappingContextChanged(e.PropertyName);
         if (e.PropertyName == nameof(MainViewModel.HideInterfaceDescriptions)) UpdatePreviewStatusPresentation();
         // A mode switch also notifies both effective checkbox values. Its
@@ -6422,10 +6427,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool CanUseNormalPortraitPreviewFrame()
     {
         var showLeftPanel = _leftWorkspacePanel != LeftWorkspacePanel.None;
-        var showSettings = _isSettingsPanelVisible;
+        var showSettings = IsRightWorkspacePanelVisible;
         if (!showLeftPanel && !showSettings) return false;
         var targetSideWidth = (showLeftPanel ? WorkspaceDeviceWidth + 18 : 0) +
-            (showSettings ? WorkspaceSettingsWidth + 18 : 0);
+            (showSettings ? WorkspaceRightWidth + 18 : 0);
         var chromeWidth = GetLightweightFixedChromeWidth(
             GetLightweightCurrentWindowWidth());
         return GetLightweightMaximumWindowWidth() >= chromeWidth +
@@ -6936,7 +6941,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: WorkspaceDeviceWidth);
             SetWorkspacePageImmediate(DevicePanel, visible: false);
             SetWorkspacePageImmediate(MirroringPanel, visible: false);
-            SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: WorkspaceSettingsWidth);
+            SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: WorkspaceRightWidth);
             HeaderPanel.Visibility = Visibility.Collapsed;
             EnvironmentPanel.Visibility = Visibility.Collapsed;
             StatsPanel.Visibility = Visibility.Collapsed;

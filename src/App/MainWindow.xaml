@@ -889,6 +889,16 @@
                         <controls:ThemedSymbolIcon Style="{StaticResource NavigationSymbolIcon}" Symbol="ProjectionScreen24" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
+                <ui:NavigationViewItem x:Name="DeviceHubPanelToggle"
+                                       Style="{StaticResource ShellNavigationItem}"
+                                       Content="{DynamicResource DeviceHubPanelTitle}"
+                                       Click="OnNavigateDeviceHubClick"
+                                       ToolTip="{DynamicResource DeviceHubPanelNavHint}"
+                                       AutomationProperties.AutomationId="DeviceHubNavButton">
+                    <ui:NavigationViewItem.Icon>
+                        <controls:ThemedSymbolIcon Style="{StaticResource NavigationSymbolIcon}" Symbol="Apps24" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
                 <ui:NavigationViewItem x:Name="SettingsPanelToggle"
                                        Style="{StaticResource ShellNavigationItem}"
                                        Content="{DynamicResource NavSettings}"
@@ -2777,6 +2787,7 @@
 
                     </Grid>
                 </Border>
+                <ContentControl x:Name="DeviceHubPanelHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
             </controls:WorkspaceRevealPanel>
         </Grid>
 

@@ -224,7 +224,7 @@ public partial class MainWindow
             // Native HWND focus is authoritative. WPF logical focus can stay
             // on the settings button (or null) after clicking the D3D surface.
             if (_keyboardFocusedWindow() == MainPreviewHost.WindowHandle && MainPreviewHost.WindowHandle != 0) return true;
-            if (_isSettingsPanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or
+            if (IsRightWorkspacePanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or
                     ComboBox or ButtonBase or Slider || Keyboard.FocusedElement is null) return false;
             return true;
         }

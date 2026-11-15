@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 
 namespace IPhoneMirror.App;
@@ -89,7 +89,7 @@ public partial class MainWindow
         if (!preserveSurfaceWidths && _workspaceTransition?.IsRunning != true)
         {
             if (LeftPanelHost.Visibility == Visibility.Visible) LeftPanelHost.Width = WorkspaceDeviceWidth;
-            if (ControlPanel.Visibility == Visibility.Visible) ControlPanel.Width = WorkspaceSettingsWidth;
+            if (ControlPanel.Visibility == Visibility.Visible) ControlPanel.Width = WorkspaceRightWidth;
         }
         UpdateStatisticsLayout();
         // Keep the original single-row toolbar. AdaptiveToolbar compacts labels
@@ -141,7 +141,7 @@ public partial class MainWindow
     private double GetLightweightFixedWorkspaceWidth(double currentWidth) =>
         GetLightweightFixedChromeWidth(currentWidth) +
         (_leftWorkspacePanel != LeftWorkspacePanel.None ? WorkspaceDeviceWidth + 18 : 0) +
-        (_isSettingsPanelVisible ? WorkspaceSettingsWidth + 18 : 0);
+        (IsRightWorkspacePanelVisible ? WorkspaceRightWidth + 18 : 0);
 
     private bool CanConstrainCompletePreview => IsLoaded && IsVisible &&
         !_viewModel.IsLightweightApplicationMode && !_lightweightModeApplied && !_isFullScreen && !_isWindowMaximized &&
@@ -257,11 +257,11 @@ public partial class MainWindow
         // allocation changes; no card is reparented across the preview.
         var showLeft = _leftWorkspacePanel != LeftWorkspacePanel.None ||
             (LeftPanelHost.Visibility == Visibility.Visible && GetLightweightElementWidth(LeftPanelHost) > 0);
-        var showSettings = _isSettingsPanelVisible ||
+        var showSettings = IsRightWorkspacePanelVisible ||
             (ControlPanel.Visibility == Visibility.Visible && GetLightweightElementWidth(ControlPanel) > 0);
         var animating = _preparingWorkspaceReveal || _workspaceSurfaceAnimationActive || _workspaceTransition?.IsRunning == true;
         var leftRequest = showLeft ? (animating ? Math.Max(0, LeftPanelHost.Width) : WorkspaceDeviceWidth) : 0;
-        var rightRequest = showSettings ? (animating ? Math.Max(0, ControlPanel.Width) : WorkspaceSettingsWidth) : 0;
+        var rightRequest = showSettings ? (animating ? Math.Max(0, ControlPanel.Width) : WorkspaceRightWidth) : 0;
         var gaps = animating
             ? GetLightweightColumnWidth(LeftGapColumn) + GetLightweightColumnWidth(RightGapColumn)
             : (showLeft ? 18 : 0) + (showSettings ? 18 : 0);
@@ -341,7 +341,7 @@ public partial class MainWindow
             // Keep content measure stable during the reveal. At rest it wraps
             // within the allocated sidebar instead of clipping its controls.
             LeftPanelHost.ContentWidth = showLeft ? left : WorkspaceDeviceWidth;
-            ControlPanel.ContentWidth = showSettings ? right : WorkspaceSettingsWidth;
+            ControlPanel.ContentWidth = showSettings ? right : WorkspaceRightWidth;
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using IPhoneMirror.UI.Animations;
@@ -54,7 +54,7 @@ public partial class MainWindow
         MirroringPanel.Opacity = _mirroringPageStartOpacity;
         DevicePanel.IsHitTestVisible = showDevices;
         MirroringPanel.IsHitTestVisible = showMirroring;
-        ControlPanel.IsHitTestVisible = _isSettingsPanelVisible;
+        ControlPanel.IsHitTestVisible = IsRightWorkspacePanelVisible;
     }
 
     private void StartWorkspaceTransition()
@@ -70,7 +70,7 @@ public partial class MainWindow
         _workspaceLeftSurfaceStartWidth = GetLightweightElementWidth(LeftPanelHost);
         _workspaceRightSurfaceStartWidth = GetLightweightElementWidth(ControlPanel);
         _workspaceLeftSurfaceTargetWidth = showLeft ? WorkspaceDeviceWidth : 0;
-        _workspaceRightSurfaceTargetWidth = showSettings ? WorkspaceSettingsWidth : 0;
+        _workspaceRightSurfaceTargetWidth = showSettings ? WorkspaceRightWidth : 0;
         _workspaceLeftGapStartWidth = GetLightweightColumnWidth(LeftGapColumn);
         _workspaceRightGapStartWidth = GetLightweightColumnWidth(RightGapColumn);
         _workspaceLeftGapTargetWidth = showLeft ? 18 : 0;

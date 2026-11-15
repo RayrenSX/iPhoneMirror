@@ -9,6 +9,9 @@ namespace IPhoneMirror.App.ViewModels;
 
 internal sealed partial class MainViewModel
 {
+    internal bool IsDeviceHubReady(DeviceViewModel device) =>
+        !device.IsMediaCast && GetReadyUsbControlBridge(device.Udid) is { SupportsDeviceHub: true };
+
     internal Task StopCoreDeviceCaptureAsync(DeviceViewModel device)
     {
         if (_sessions.Get(device.Udid)?.ExternalCapture is not CoreDeviceCaptureFeed)
