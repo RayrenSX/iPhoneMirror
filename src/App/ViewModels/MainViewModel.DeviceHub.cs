@@ -1,6 +1,4 @@
 using System.Text.Json;
-using System.IO;
-using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Services.Automation;
@@ -25,25 +23,4 @@ internal sealed partial class MainViewModel
         return await bridge.DeviceHubAsync(action, arguments, guard, cancellation);
     }
 
-    internal async Task<(string Id, ulong Handle)> StartMediaReplayAsync(string path, double speed = 1,
-        CancellationToken cancellation = default)
-    {
-        await _coreGate.WaitAsync(cancellation);
-        DeviceCaptureState? state = null;
-        try
-        {
-            if (_disposed) throw new ObjectDisposedException(nameof(MainViewModel));
-            var id = "replay-" + Guid.NewGuid().ToString("N");
-            var result = await _sessions.CreateAsync(() => _core.CreateExternalSession(id, true, 1), cancellation);
-            if (!result.Success || result.Handle is null) throw new InvalidOperationException(result.Message);
-            state = new DeviceCaptureState { Udid = id };
-            _sessions.Set(state); _sessions.SetHandle(state, result.Handle);
-            var feed = new CoreDeviceCaptureFeed(_core, result.Handle, null);
-            state.ExternalCapture = feed;
-            feed.StartReplay(path, speed);
-            return (id, result.Handle.RawHandle);
-        }
-        catch { if (state is not null) await _sessions.StopAndDestroyAsync(state); throw; }
-        finally { _coreGate.Release(); }
-    }
 }

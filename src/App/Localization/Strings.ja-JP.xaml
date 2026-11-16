@@ -1743,7 +1743,6 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubStatus">メディアの状態</sys:String>
     <sys:String x:Key="DeviceHubApps">App 一覧を取得</sys:String>
     <sys:String x:Key="DeviceHubLaunch">選択した App を起動</sys:String>
-    <sys:String x:Key="DeviceHubReplay">記録ファイルを再生</sys:String>
     <sys:String x:Key="DeviceHubChooseApp">一覧から App を選択してください。</sys:String>
     <sys:String x:Key="DeviceHubChooseDevice">ペアリング済みの端末を選択してください。</sys:String>
     <sys:String x:Key="DeviceHubWorking">処理中…</sys:String>
@@ -1858,7 +1857,6 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubPanelLogStopped">ログを停止しました。取得済みの内容は保存できます。</sys:String>
     <sys:String x:Key="DeviceHubPanelLogRunning">ログを取得中…</sys:String>
     <sys:String x:Key="DeviceHubPanelLogDropped">[{0} 件のログを省略]</sys:String>
-    <sys:String x:Key="DeviceHubPanelReplay">録画の再生</sys:String>
     <sys:String x:Key="DeviceHubPanelAppCount">{0} 件 / 全 {1} 件</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessCount">実行中のプロセス {0} 個</sys:String>
     <sys:String x:Key="DeviceHubPanelAppHint">ダブルクリックで開き、右クリックで操作を表示します。</sys:String>

@@ -64,6 +64,7 @@
             <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
             <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
             <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
+            <Setter Property="VirtualizingPanel.IsVirtualizingWhenGrouping" Value="True"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBox">
@@ -97,6 +98,11 @@
                     <ui:SymbolIcon Symbol="MoreHorizontal20" FontSize="16"/>
                 </Button>
             </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="HubGroupHeader">
+            <Border Margin="4,10,4,2" Padding="0,0,0,4" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                <TextBlock Text="{Binding Name}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}"/>
+            </Border>
         </DataTemplate>
     </UserControl.Resources>
     <Border Style="{StaticResource WorkspaceCardBorder}" Padding="16" ClipToBounds="True">
@@ -171,7 +177,11 @@
                             <CheckBox x:Name="IncludeHidden" Grid.Column="1" Margin="10,0,0,0" Content="{DynamicResource DeviceHubPanelHiddenApps}" ToolTip="{DynamicResource DeviceHubIncludeAll}" VerticalAlignment="Center" Checked="OnIncludeHiddenChanged" Unchecked="OnIncludeHiddenChanged"/>
                         </Grid>
                         <Grid Grid.Row="2">
-                            <ListBox x:Name="AppsList" Style="{StaticResource HubList}" ItemTemplate="{StaticResource HubRow}" SelectionChanged="OnListSelectionChanged" MouseDoubleClick="OnAppDoubleClick" AutomationProperties.AutomationId="DeviceHubAppList"/>
+                            <ListBox x:Name="AppsList" Style="{StaticResource HubList}" VirtualizingPanel.ScrollUnit="Pixel" ItemTemplate="{StaticResource HubRow}" SelectionChanged="OnListSelectionChanged" MouseDoubleClick="OnAppDoubleClick" AutomationProperties.AutomationId="DeviceHubAppList">
+                                <ListBox.GroupStyle>
+                                    <GroupStyle HeaderTemplate="{StaticResource HubGroupHeader}"/>
+                                </ListBox.GroupStyle>
+                            </ListBox>
                             <StackPanel x:Name="AppsEmpty" Style="{StaticResource HubEmpty}">
                                 <TextBlock x:Name="AppsEmptyTitle" Text="{DynamicResource DeviceHubPanelNoResults}" Style="{StaticResource HubEmptyTitle}"/>
                                 <TextBlock x:Name="AppsEmptyHint" Style="{StaticResource HubCaption}" TextAlignment="Center"/>

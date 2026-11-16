@@ -1,8 +1,12 @@
+using System.Collections;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -20,6 +24,9 @@ internal sealed partial class DeviceHubPanel
     private readonly Dictionary<string, ImageSource> _iconCache = new(StringComparer.Ordinal);
     private readonly HashSet<string> _missingIcons = [];
     private bool _iconsQueued;
+    private bool _iconRefreshPending;
+    private static readonly string[] PinyinBoundaries = ["阿", "八", "擦", "大", "额", "发", "嘎", "哈", "几", "卡", "拉", "妈", "拿", "哦", "趴", "七", "然", "撒", "塌", "挖", "西", "丫", "杂"];
+    private static readonly CompareInfo PinyinComparison = CultureInfo.GetCultureInfo("zh-CN").CompareInfo;
 
     private async Task LoadAppsAsync(Operation op)
     {
@@ -33,22 +40,23 @@ internal sealed partial class DeviceHubPanel
                 var name = Text(p, "name");
                 if (name.Length == 0) name = executable.Split('/').LastOrDefault() ?? "";
                 return new HubRow(id, name.Length > 0 ? name : "PID " + id, "PID " + id + (executable.Length > 0 ? " · " + executable : ""), "≡", p.Clone());
-            }).OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
+            }).OrderBy(r => r.GroupOrder).ThenBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
             ApplyAppFilter(preservePosition: true);
             StatusText.Text = "";
             return;
         }
         var hidden = IncludeHidden.IsChecked == true;
+        _missingIcons.Clear();
         var apps = await op.Call("apps", new { includeHidden = hidden, includeInternal = hidden, includeClips = hidden || Option(AppFilter) == "clips" });
         _allApps = apps.GetProperty("apps").EnumerateArray().Select(a =>
         {
             var id = Text(a, "bundleId"); var name = Text(a, "name");
             var row = new HubRow(id, name.Length > 0 ? name : id,
                 string.Join(" · ", new[] { id, Text(a, "version") }.Where(s => s.Length > 0)),
-                name.Length > 0 ? name[..1].ToUpper(CultureInfo.CurrentCulture) : "A", a.Clone());
+                InitialOf(name.Length > 0 ? name : id), a.Clone());
             if (_iconCache.TryGetValue(IconKey(op.Device!, row), out var icon)) row.Icon = icon;
             return row;
-        }).OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
+        }).OrderBy(r => r.GroupOrder).ThenBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
         ApplyAppFilter(preservePosition: true);
         StatusText.Text = "";
     }
@@ -80,20 +88,55 @@ internal sealed partial class DeviceHubPanel
 
     private void ReplaceRows(ListBox list, HubRow[] rows, string? preferredId = null, bool preservePosition = true)
     {
+        if (list == AppsList && list.Items.Count == rows.Length)
+        {
+            var current = list.Items.Cast<HubRow>().ToArray();
+            if (current.Zip(rows).All(pair => pair.First.Id == pair.Second.Id && pair.First.Initial == pair.Second.Initial))
+            {
+                // A refresh usually returns the same order. Keep its realized
+                // groups and scroll geometry while replacing current metadata.
+                for (var i = 0; i < rows.Length; i++) current[i].UpdateFrom(rows[i]);
+                if (!preservePosition) FindScrollViewer(list)?.ScrollToTop();
+                return;
+            }
+        }
         var selectedId = preferredId ?? (preservePosition ? (list.SelectedItem as HubRow)?.Id : null);
         var scroll = FindScrollViewer(list);
         var offset = preservePosition ? scroll?.VerticalOffset ?? 0 : 0;
+        var anchor = preservePosition && list == AppsList ? list.Items.Cast<HubRow>().Select(row =>
+            (Row: row, Item: list.ItemContainerGenerator.ContainerFromItem(row) as ListBoxItem))
+            .Where(pair => pair.Item is not null && pair.Item.IsVisible)
+            .Select(pair => (pair.Row.Id, Top: pair.Item!.TranslatePoint(new Point(), list).Y))
+            .Where(pair => pair.Top >= -60 && pair.Top < list.ActualHeight).OrderBy(pair => pair.Top).FirstOrDefault() : default;
         var generation = _generation;
-        list.ItemsSource = rows;
+        IEnumerable source = list == AppsList ? CreateGroupedRows(rows) : rows;
+        list.ItemsSource = source;
         list.SelectedItem = rows.FirstOrDefault(row => row.Id == selectedId);
         // Item containers are regenerated asynchronously. Restore only this result,
         // never the list from a later search, page or device.
         Dispatcher.BeginInvoke(() =>
         {
-            if (_disposed || generation != _generation || !ReferenceEquals(list.ItemsSource, rows)) return;
-            FindScrollViewer(list)?.ScrollToVerticalOffset(offset);
+            if (_disposed || generation != _generation || !ReferenceEquals(list.ItemsSource, source)) return;
+            list.UpdateLayout();
+            var viewer = FindScrollViewer(list);
+            viewer?.ScrollToVerticalOffset(offset);
+            if (preservePosition && anchor.Id is not null && rows.FirstOrDefault(row => row.Id == anchor.Id) is { } anchorRow)
+            {
+                list.ScrollIntoView(anchorRow); list.UpdateLayout();
+                if (viewer is not null && list.ItemContainerGenerator.ContainerFromItem(anchorRow) is ListBoxItem item)
+                {
+                    var currentTop = item.TranslatePoint(new Point(), list).Y;
+                    viewer.ScrollToVerticalOffset(Math.Max(0, viewer.VerticalOffset + currentTop - anchor.Top));
+                }
+            }
             if (!preservePosition && list.SelectedItem is { } selected) list.ScrollIntoView(selected);
-        }, DispatcherPriority.Loaded);
+        }, DispatcherPriority.ContextIdle);
+    }
+    private static ICollectionView CreateGroupedRows(HubRow[] rows)
+    {
+        var view = new ListCollectionView((IList)rows);
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(HubRow.Initial)));
+        return view;
     }
     private static ScrollViewer? FindScrollViewer(DependencyObject parent)
     {
@@ -187,7 +230,9 @@ internal sealed partial class DeviceHubPanel
     private static string IconKey(DeviceViewModel device, HubRow app) => device.Udid + ":" + app.Id + ":" + Text(app.Data, "version");
     private void QueueIcons()
     {
-        if (_disposed || !_active || !_ready || _busy || _iconsQueued || _page != 1 || Option(AppFilter) == "processes" || !_iconOperation.IsCompleted || _device is null) return;
+        if (_disposed || !_active || !_ready || _busy || _iconsQueued || _page != 1 || Option(AppFilter) == "processes" || _device is null) return;
+        if (!_iconOperation.IsCompleted) { _iconRefreshPending = true; return; }
+        _iconRefreshPending = false;
         var device = _device; var generation = _generation;
         _icons?.Dispose(); _icons = CancellationTokenSource.CreateLinkedTokenSource(_context.Token);
         var token = _icons.Token;
@@ -202,32 +247,127 @@ internal sealed partial class DeviceHubPanel
                 item.TranslatePoint(new Point(), AppsList).Y is var y && y >= -60 && y < AppsList.ActualHeight).Take(16).ToArray();
             if (visible.Length == 0) visible = AppsList.Items.Cast<HubRow>().Take(10).ToArray();
             _iconOperation = FetchIconsAsync(visible);
+            _ = ResumeIconsAsync(_iconOperation);
         }, DispatcherPriority.Background);
+
+        async Task ResumeIconsAsync(Task pending)
+        {
+            await pending;
+            if (_iconRefreshPending && !_disposed)
+                _ = Dispatcher.BeginInvoke(QueueIcons, DispatcherPriority.Background);
+        }
 
         async Task FetchIconsAsync(HubRow[] rows)
         {
-            foreach (var row in rows)
+            using var concurrency = new SemaphoreSlim(4, 4);
+            using var remote = new SemaphoreSlim(1, 1);
+            await Task.WhenAll(rows.Select(async row =>
             {
-                if (token.IsCancellationRequested || _busy || generation != _generation) break;
-                var key = IconKey(device, row);
-                if (row.Icon is not null || _missingIcons.Contains(key)) continue;
+                var entered = false;
                 try
                 {
-                    var response = await _request(device, "get_app_icon", new { bundleId = row.Id }, token);
-                    token.ThrowIfCancellationRequested();
-                    if (generation != _generation) break;
-                    var encoded = Text(response, "data");
-                    if (encoded.Length > 6 * 1024 * 1024) throw new InvalidDataException("Oversized app icon.");
-                    using var stream = new MemoryStream(Convert.FromBase64String(encoded));
-                    var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                    bitmap.DecodePixelWidth = 64; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
-                    if (_iconCache.Count >= 256) _iconCache.Remove(_iconCache.Keys.First());
-                    _iconCache[key] = bitmap; row.Icon = bitmap;
+                    await concurrency.WaitAsync(token); entered = true;
+                    await FetchIconAsync(row);
                 }
-                catch (OperationCanceledException) { break; }
+                catch (OperationCanceledException) { }
+                finally { if (entered) concurrency.Release(); }
+            }));
+
+            async Task FetchIconAsync(HubRow row)
+            {
+                if (token.IsCancellationRequested || _busy || generation != _generation) return;
+                var key = IconKey(device, row);
+                if (row.Icon is not null || _missingIcons.Contains(key)) return;
+                try
+                {
+                    var bitmap = await TryLoadCachedIconAsync(key, token);
+                    if (bitmap is null)
+                    {
+                        // The management bridge admits one request at a time.
+                        // Disk reads may overlap; phone requests keep that contract.
+                        await remote.WaitAsync(token);
+                        try
+                        {
+                            var response = await _request(device, "get_app_icon", new { bundleId = row.Id }, token);
+                            token.ThrowIfCancellationRequested();
+                            var encoded = Text(response, "data");
+                            if (encoded.Length > 3 * 1024 * 1024) throw new InvalidDataException("Oversized app icon.");
+                            bitmap = await Task.Run(() => DecodeIcon(Convert.FromBase64String(encoded)), token);
+                        }
+                        finally { remote.Release(); }
+                        await SaveCachedIconAsync(key, bitmap, token);
+                    }
+                    token.ThrowIfCancellationRequested();
+                    if (generation != _generation) return;
+                    if (_iconCache.Count >= 256) _iconCache.Remove(_iconCache.Keys.First());
+                    _iconCache[key] = bitmap;
+                    await Dispatcher.InvokeAsync(() => { if (generation == _generation) row.Icon = bitmap; });
+                }
+                catch (OperationCanceledException) { }
                 catch { if (!token.IsCancellationRequested) _missingIcons.Add(key); }
             }
         }
+    }
+
+    private async Task<ImageSource?> TryLoadCachedIconAsync(string key, CancellationToken token)
+    {
+        var path = IconCachePath(key);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(path, token);
+            if (bytes.Length == 0 || bytes.Length > 512 * 1024) return null;
+            return await Task.Run(() => DecodeIcon(bytes), token);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    private async Task SaveCachedIconAsync(string key, ImageSource bitmap, CancellationToken token)
+    {
+        string? temporary = null;
+        try
+        {
+            Directory.CreateDirectory(_iconCacheDirectory);
+            var bytes = await Task.Run(() =>
+            {
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create((BitmapSource)bitmap));
+                using var stream = new MemoryStream(); encoder.Save(stream); return stream.ToArray();
+            }, token);
+            var path = IconCachePath(key); temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            await File.WriteAllBytesAsync(temporary, bytes, token);
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { /* A read-only cache must never delay the app list. */ }
+        finally { if (temporary is not null) try { File.Delete(temporary); } catch { } }
+    }
+
+    private string IconCachePath(string key) => Path.Combine(_iconCacheDirectory,
+        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key))) + ".png");
+
+    private static ImageSource DecodeIcon(byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes);
+        var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
+        bitmap.DecodePixelWidth = 64; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze(); return bitmap;
+    }
+
+    private static string InitialOf(string value)
+    {
+        var first = value.Normalize(System.Text.NormalizationForm.FormKD).Trim().FirstOrDefault();
+        if (first == '\0') return "#";
+        if (char.IsLetter(first) && first <= 0x7F) return char.ToUpperInvariant(first).ToString();
+        if (char.IsDigit(first)) return "#";
+        if (first is < '\u3400' or > '\u9FFF') return "#";
+        var initials = "ABCDEFGHJKLMNOPQRSTWXYZ";
+        var index = 0;
+        for (var i = 1; i < PinyinBoundaries.Length; i++)
+        {
+            if (PinyinComparison.Compare(first.ToString(), PinyinBoundaries[i], CompareOptions.IgnoreCase) < 0) break;
+            index = i;
+        }
+        return initials[index].ToString();
     }
 
     private async Task LoadProfilesAsync(Operation op)

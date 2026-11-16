@@ -168,9 +168,12 @@ internal sealed partial class DeviceHubPanel
         if (_page == 2) Action("PanelInstallProfile", "profile-install", available);
         if (_page == 3 && Option(FileRoot) == "crashes") Action("ExportCrashes", "file-export", available);
         if (_page == 4) Action("SaveLog", "log-save", available && LogText.Text.Length > 0);
-        if (menu.Items.Count > 0) AddMenuSeparator(menu);
-        if (!_ready && _device is { IsMediaCast: false }) Action("Prepare", "prepare", !_busy && (_device.Ready || _device.IsWireless));
-        Action("Replay", "replay", !_busy);
+        if (!_ready && _device is { IsMediaCast: false })
+        {
+            if (menu.Items.Count > 0) AddMenuSeparator(menu);
+            Action("Prepare", "prepare", !_busy && (_device.Ready || _device.IsWireless));
+        }
+        if (menu.Items.Count == 0) return;
         HeaderMore.ContextMenu = menu;
         menu.PlacementTarget = HeaderMore;
         menu.Placement = PlacementMode.Bottom;

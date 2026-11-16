@@ -48,8 +48,6 @@ changing capture. Use `Client(timeout=420)` for manual first-time preparation;
 prepare the device in the desktop UI before starting automated MCP sessions.
 
 Neither SDK nor MCP starts a network listener or connects directly to the phone.
-Offline replay is available in the desktop Device Hub and the packaged bridge
-CLI documented in `docs/DEV_DEVICE_HUB.zh-CN.md`.
 
 The expanded Device Hub provides 36 MCP tools and matching SDK methods:
 device_info, capabilities, tunnel_info, list_apps (with include flags), app_icon,

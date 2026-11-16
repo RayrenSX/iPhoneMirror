@@ -1743,7 +1743,6 @@ Pair, select and save.</system:String>
     <sys:String x:Key="DeviceHubStatus">Media status</sys:String>
     <sys:String x:Key="DeviceHubApps">List apps</sys:String>
     <sys:String x:Key="DeviceHubLaunch">Launch selected app</sys:String>
-    <sys:String x:Key="DeviceHubReplay">Replay recording</sys:String>
     <sys:String x:Key="DeviceHubChooseApp">Select an app from the list.</sys:String>
     <sys:String x:Key="DeviceHubChooseDevice">Select a paired device.</sys:String>
     <sys:String x:Key="DeviceHubWorking">Working…</sys:String>
@@ -1858,7 +1857,6 @@ Pair, select and save.</system:String>
     <sys:String x:Key="DeviceHubPanelLogStopped">Log stopped. You can still save the messages.</sys:String>
     <sys:String x:Key="DeviceHubPanelLogRunning">Reading live messages…</sys:String>
     <sys:String x:Key="DeviceHubPanelLogDropped">[{0} messages skipped]</sys:String>
-    <sys:String x:Key="DeviceHubPanelReplay">Recording replay</sys:String>
     <sys:String x:Key="DeviceHubPanelAppCount">{0} apps / {1} total</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessCount">{0} running processes</sys:String>
     <sys:String x:Key="DeviceHubPanelAppHint">Double-click to open; right-click for more actions.</sys:String>

@@ -1743,7 +1743,6 @@
     <sys:String x:Key="DeviceHubStatus">媒体状态</sys:String>
     <sys:String x:Key="DeviceHubApps">获取 App 列表</sys:String>
     <sys:String x:Key="DeviceHubLaunch">启动所选 App</sys:String>
-    <sys:String x:Key="DeviceHubReplay">重放录制文件</sys:String>
     <sys:String x:Key="DeviceHubChooseApp">请先在列表中选择 App。</sys:String>
     <sys:String x:Key="DeviceHubChooseDevice">请选择已配对的设备。</sys:String>
     <sys:String x:Key="DeviceHubWorking">处理中…</sys:String>
@@ -1858,7 +1857,6 @@
     <sys:String x:Key="DeviceHubPanelLogStopped">日志已停止，已读取的内容仍可保存。</sys:String>
     <sys:String x:Key="DeviceHubPanelLogRunning">正在读取实时日志…</sys:String>
     <sys:String x:Key="DeviceHubPanelLogDropped">[已跳过 {0} 条日志]</sys:String>
-    <sys:String x:Key="DeviceHubPanelReplay">录制重放</sys:String>
     <sys:String x:Key="DeviceHubPanelAppCount">{0} 个应用 / 共 {1} 个</sys:String>
     <sys:String x:Key="DeviceHubPanelProcessCount">{0} 个运行中的进程</sys:String>
     <sys:String x:Key="DeviceHubPanelAppHint">双击打开，右键显示更多操作。</sys:String>

@@ -23,6 +23,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     private readonly MainViewModel _viewModel;
     private readonly Func<DeviceViewModel, string, object?, CancellationToken, Task<JsonElement>> _request;
     private readonly Func<DeviceViewModel, bool> _isReady;
+    private readonly string _iconCacheDirectory;
     private readonly DispatcherTimer _connectionWatch = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private CancellationTokenSource _context = new();
     private CancellationTokenSource? _icons;
@@ -38,11 +39,14 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
 
     internal DeviceHubPanel(MainViewModel viewModel,
         Func<DeviceViewModel, string, object?, CancellationToken, Task<JsonElement>>? request = null,
-        Func<DeviceViewModel, bool>? isReady = null)
+        Func<DeviceViewModel, bool>? isReady = null,
+        string? iconCacheDirectory = null)
     {
         _viewModel = viewModel;
         _request = request ?? viewModel.DeviceHubUiAsync;
         _isReady = isReady ?? viewModel.IsDeviceHubReady;
+        _iconCacheDirectory = iconCacheDirectory ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "iPhoneMirror", "AppIcons");
         InitializeComponent();
         InitializeMenus();
         CreateControlGroups();
@@ -83,9 +87,10 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         _hasConnected |= ready;
         if (active && device is not null) _connectionWatch.Start();
         else _connectionWatch.Stop();
-        if (active && ready && (changed || becameReady)) _refreshPending = true;
+        if (active && ready && (targetChanged || becameReady || (changed && !_loadedPages.Contains(_page)))) _refreshPending = true;
         UpdateConnection();
         SchedulePendingRefresh();
+        if (active && ready && !_refreshPending && _page == 1) QueueIcons();
     }
 
     private void OnConnectionWatchTick(object? sender, EventArgs e)
@@ -325,7 +330,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     {
         if (action == "refresh") return _ready ? RefreshAsync() : Task.CompletedTask;
         var row = (_page switch { 1 => AppsList, 2 => ProfilesList, 3 => FilesList, _ => null })?.SelectedItem as HubRow;
-        return RunAsync(op => ExecuteActionAsync(op, action, row), requiresDevice: action != "replay");
+        return RunAsync(op => ExecuteActionAsync(op, action, row));
     }
 
     private async Task ExecuteActionAsync(Operation op, string action, HubRow? row = null)
@@ -353,28 +358,8 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
             case "log-start": await StartLogsAsync(op); break;
             case "log-stop": await StopLogsAsync(); op.Check(); StatusText.Text = L("PanelLogStopped"); break;
             case "log-save": await SaveLogsAsync(op); break;
-            case "replay": await ReplayAsync(op); break;
             default: await ControlActionAsync(op, action); break;
         }
-    }
-
-    private async Task ReplayAsync(Operation op)
-    {
-        var dialog = new OpenFileDialog { Filter = "iPhoneMirror RTP (*.imrtp)|*.imrtp", CheckFileExists = true };
-        if (dialog.ShowDialog(Owner) != true) { StatusText.Text = ""; return; }
-        op.Check();
-        var session = await _viewModel.StartMediaReplayAsync(dialog.FileName, cancellation: op.Token);
-        try
-        {
-            op.Check();
-            if (!NativePreviewWindow.TryCreateAndShowForSession(session.Handle, 720, 1280,
-                "iPhoneMirror · " + L("PanelReplay"), 0, 2, () => _viewModel.IsDeviceAudioEnabled(session.Id),
-                () => 1, value => _viewModel.SetDeviceAudioEnabled(session.Id, value), () => { }, _ => { }, () => { }, out var preview))
-                throw new InvalidOperationException("The replay preview could not open.");
-            preview!.Closed += async (_, _) => await _viewModel.StopDeviceSessionAsync(session.Id, session.Handle);
-        }
-        catch { await _viewModel.StopDeviceSessionAsync(session.Id, session.Handle); throw; }
-        StatusText.Text = Path.GetFileName(dialog.FileName);
     }
 
     private void OnListSelectionChanged(object sender, SelectionChangedEventArgs e) { if (_initialized) UpdateCommands(); }
@@ -383,6 +368,9 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         if (!_initialized) return;
         HeaderRefresh.IsEnabled = _ready && (!_busy || _quietOperation);
         HeaderMore.IsEnabled = !_busy || _quietOperation;
+        HeaderMore.Visibility = _page == 1 && Option(AppFilter) != "processes" || _page == 2 ||
+            _page == 3 && Option(FileRoot) == "crashes" || _page == 4 && LogText.Text.Length > 0 ||
+            !_ready && _device is { IsMediaCast: false } ? Visibility.Visible : Visibility.Collapsed;
         FileNext.IsEnabled = _ready && !_busy && _fileNext.HasValue;
         FileNext.Visibility = _fileNext.HasValue ? Visibility.Visible : Visibility.Collapsed;
         FileParent.IsEnabled = _ready && !_busy && _listedFilePath.Length > 0;
@@ -415,14 +403,26 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     private sealed class HubRow(string id, string title, string detail, string glyph, JsonElement data) : INotifyPropertyChanged
     {
         public string Id { get; } = id;
-        public string Title { get; } = title;
-        public string Detail { get; } = detail;
-        public string Glyph { get; } = glyph;
-        public JsonElement Data { get; } = data;
+        public string Title { get; private set; } = title;
+        public string Detail { get; private set; } = detail;
+        public string Glyph { get; private set; } = glyph;
+        public JsonElement Data { get; private set; } = data;
+        public string Initial { get; } = InitialOf(title);
+        public int GroupOrder => InitialOrder(Initial);
         private ImageSource? _icon;
         public ImageSource? Icon { get => _icon; set { _icon = value; PropertyChanged?.Invoke(this, new(nameof(Icon))); } }
         public event PropertyChangedEventHandler? PropertyChanged;
+        internal void UpdateFrom(HubRow row)
+        {
+            Data = row.Data;
+            if (Title != row.Title) { Title = row.Title; PropertyChanged?.Invoke(this, new(nameof(Title))); }
+            if (Detail != row.Detail) { Detail = row.Detail; PropertyChanged?.Invoke(this, new(nameof(Detail))); }
+            if (Glyph != row.Glyph) { Glyph = row.Glyph; PropertyChanged?.Invoke(this, new(nameof(Glyph))); }
+            if (!ReferenceEquals(Icon, row.Icon)) Icon = row.Icon;
+        }
     }
+
+    private static int InitialOrder(string initial) => initial == "#" ? 99 : initial[0] - 'A';
 
     public void Dispose()
     {

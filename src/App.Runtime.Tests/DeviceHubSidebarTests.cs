@@ -42,9 +42,20 @@ internal static partial class Program
         string? launchedBundle = null;
         bool ready = true;
         bool emptyProfiles = false, profileReadError = false, pagedFiles = false, failProcessRead = false, failFileRead = false;
+        var iconCalls = 0;
+        var activeIconCalls = 0;
+        var maximumIconCalls = 0;
+        var manyApps = false;
+        var fixtureVersion = "1.0";
         async Task<JsonElement> Request(DeviceViewModel device, string action, object? args, CancellationToken ct)
         {
-            if (action != "get_app_icon") Console.WriteLine("Request: " + device.Udid + " / " + action);
+            if (action == "get_app_icon")
+            {
+                iconCalls++; activeIconCalls++; maximumIconCalls = Math.Max(maximumIconCalls, activeIconCalls);
+                try { await Task.Delay(5, ct); }
+                finally { activeIconCalls--; }
+            }
+            else Console.WriteLine("Request: " + device.Udid + " / " + action);
             calls.Add((device.Udid, action));
             if (action == pauseAction && pauseNext is not null)
             {
@@ -79,7 +90,7 @@ internal static partial class Program
             }
             return action switch
             {
-                "apps" => HubFixtureApps(device.Udid),
+                "apps" => manyApps ? HubFixtureLargeApps(device.Udid) : HubFixtureApps(device.Udid, fixtureVersion),
                 "get_app_icon" => JsonSerializer.SerializeToElement(new { data = HubFixtureIcon(arguments.GetProperty("bundleId").GetString()!) }),
                 "list_processes" => JsonSerializer.SerializeToElement(new { processes = new[] { new { processIdentifier = 251, executableURL = new { relative = "/Applications/WeChat.app/WeChat" } } } }),
                 "get_settings" => JsonSerializer.SerializeToElement(new { settings = settingValues.ToDictionary(pair => pair.Key, pair => new { available = true, value = pair.Value }) }),
@@ -103,7 +114,8 @@ internal static partial class Program
                 _ => JsonSerializer.SerializeToElement(new { success = true })
             };
         }
-        var panel = new DeviceHubPanel(vm, Request, _ => ready);
+        var iconCache = Path.Combine(output, "icon-cache-" + Guid.NewGuid().ToString("N"));
+        var panel = new DeviceHubPanel(vm, Request, _ => ready, iconCache);
         string? copied = null;
         panel.CopyText = value => copied = value;
         Console.WriteLine("Device manager constructed.");
@@ -149,6 +161,67 @@ internal static partial class Program
             Console.WriteLine("Finishing first refresh: " + ((Task)KeyboardField(panel, "_operation")).Status); Finish();
             Console.WriteLine("First device loaded.");
             Verify(calls.Any(c => c == (first.Udid, "apps")), "Panel must follow the main selection and load apps.");
+            Verify(((ListBox)panel.FindName("AppsList")!).GroupStyle.Count == 1 &&
+                ((ListBox)panel.FindName("AppsList")!).Items.Cast<object>().Select(row => row.GetType().GetProperty("Initial")!.GetValue(row)!.ToString()).Distinct().Count() >= 2,
+                "Applications must be displayed in first-letter groups.");
+            var expectedInitials = new Dictionary<string, string> { ["阿福"] = "A", ["哔哩哔哩"] = "B", ["菜鸟"] = "C", ["抖音"] = "D",
+                ["番茄小说"] = "F", ["个人所得税"] = "G", ["国家反诈中心"] = "G", ["海马云电脑"] = "H", ["微信"] = "W", ["12306"] = "#", ["éReader"] = "E" };
+            foreach (var row in Find<ListBox>("AppsList").Items.Cast<object>())
+            {
+                var title = row.GetType().GetProperty("Title")!.GetValue(row)!.ToString()!;
+                if (expectedInitials.TryGetValue(title, out var initial))
+                    Verify(row.GetType().GetProperty("Initial")!.GetValue(row)!.ToString() == initial, $"Incorrect initial for {title}.");
+            }
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(120));
+            WaitReviewTask((Task)KeyboardField(panel, "_iconOperation"));
+            var firstIconCalls = iconCalls;
+            Verify(firstIconCalls > 0 && Directory.GetFiles(iconCache, "*.png").Length > 0,
+                "Visible app icons must be fetched and written to the persistent cache.");
+            SaveWindowRender(window, Path.Combine(output, "alphabetical-initial.png"));
+            Find<Button>("HeaderMore").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            var headerMenu = Find<Button>("HeaderMore").ContextMenu!;
+            Verify(headerMenu.Items.OfType<MenuItem>().All(item => item.Tag?.ToString() != "replay") &&
+                headerMenu.Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-install") &&
+                headerMenu.Items[headerMenu.Items.Count - 1] is MenuItem,
+                "The app header menu must offer installation without replay or an empty trailing separator.");
+            headerMenu.IsOpen = false;
+            ((System.Collections.IDictionary)KeyboardField(panel, "_iconCache")).Clear();
+            _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(120));
+            WaitReviewTask((Task)KeyboardField(panel, "_iconOperation"));
+            Verify(iconCalls == firstIconCalls, "A refresh must use the disk icon cache instead of refetching visible icons.");
+            Verify(maximumIconCalls == 1, "Icon loading must respect the phone bridge's single-request admission contract.");
+            using (var restarted = new DeviceHubPanel(vm, Request, _ => ready, iconCache))
+            {
+                ((ContentControl)window.FindName("DeviceHubPanelHost")).Content = restarted;
+                restarted.SetDevice(first, true);
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+                WaitReviewTask((Task)KeyboardField(restarted, "_operation"));
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(150));
+                WaitReviewTask((Task)KeyboardField(restarted, "_iconOperation"));
+                Verify(iconCalls == firstIconCalls, "A new panel with an empty memory cache must reuse icons from the previous session's disk cache.");
+            }
+            ((ContentControl)window.FindName("DeviceHubPanelHost")).Content = panel; Finish();
+            var reopenReads = calls.Count(call => call.Action == "apps");
+            KeyboardCall(window, "SetDeviceHubPanelVisible", false); Finish();
+            KeyboardCall(window, "SetDeviceHubPanelVisible", true); Finish();
+            Verify(calls.Count(call => call.Action == "apps") == reopenReads, "Reopening the same connected device must immediately reuse its loaded app list.");
+            Console.WriteLine($"PASS icon cache: {firstIconCalls} cold requests; zero requests after refresh and recreated panel; max phone concurrency {maximumIconCalls}.");
+            var firstRow = Find<ListBox>("AppsList").Items[0];
+            var firstId = firstRow.GetType().GetProperty("Id")!.GetValue(firstRow)!.ToString();
+            var damagedCache = (string)KeyboardCall(panel, "IconCachePath", first.Udid + ":" + firstId + ":1.0")!;
+            File.WriteAllText(damagedCache, "damaged fixture icon");
+            ((System.Collections.IDictionary)KeyboardField(panel, "_iconCache")).Clear();
+            _ = KeyboardCall(panel, "RefreshAsync"); Finish(); AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            WaitReviewTask((Task)KeyboardField(panel, "_iconOperation"));
+            Verify(iconCalls == firstIconCalls + 1 && File.ReadAllBytes(damagedCache).Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }),
+                "A damaged cached image must trigger one fetch and be replaced by a valid thumbnail.");
+            var beforeVersionChange = iconCalls;
+            fixtureVersion = "2.0"; _ = KeyboardCall(panel, "RefreshAsync"); Finish(); AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            WaitReviewTask((Task)KeyboardField(panel, "_iconOperation"));
+            Verify(iconCalls > beforeVersionChange, "A changed app version must fetch an updated icon.");
+            fixtureVersion = "1.0"; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+            Console.WriteLine("PASS cache corruption recovery and per-version invalidation.");
             Verify(!calls.Any(c => c.Action == "media_start"), "Opening management must not change the capture source.");
             var list = Find<ListBox>("AppsList");
             // Starting QuickTime can temporarily downgrade normal usbmux discovery
@@ -258,6 +331,8 @@ internal static partial class Program
             WaitReviewTask(oldOperation); Finish();
             Console.WriteLine("Stale-response protection passed.");
             Verify(Find<TextBlock>("DeviceNameText").Text == second.DisplayName, "Device name must follow selection.");
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100)); WaitReviewTask((Task)KeyboardField(panel, "_iconOperation"));
+            Verify(iconCalls > firstIconCalls, "A second device must use its own icon cache namespace.");
             Verify(list.Items.Cast<object>().All(row => ((JsonElement)row.GetType().GetProperty("Data")!.GetValue(row)!).GetProperty("source").GetString() == second.Udid),
                 "A stale response must not appear on another device.");
             Verify(calls.Last(c => c.Action == "apps").Device == second.Udid, "The new device must get its own refresh after cancellation.");
@@ -288,10 +363,20 @@ internal static partial class Program
             var selectedId = list.SelectedItem!.GetType().GetProperty("Id")!.GetValue(list.SelectedItem);
             var listScroll = FindVisualDescendants<ScrollViewer>(list).First();
             var listOffset = listScroll.VerticalOffset;
+            var selectedTop = ((ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(list.SelectedItem)).TranslatePoint(new Point(), list).Y;
             _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+            var refreshedTop = ((ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(list.SelectedItem)).TranslatePoint(new Point(), list).Y;
             Verify(Equals(list.SelectedItem!.GetType().GetProperty("Id")!.GetValue(list.SelectedItem), selectedId) &&
-                Math.Abs(listScroll.VerticalOffset - listOffset) < 1, "Refreshing must preserve app selection and scroll position.");
+                Math.Abs(refreshedTop - selectedTop) < 1, $"Refreshing must preserve app selection and its visible position (row top {selectedTop} → {refreshedTop}; estimated offset {listOffset} → {listScroll.VerticalOffset}).");
             window.Height = 900; Finish();
+            manyApps = true; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
+            Verify(list.Items.Count == 624, "The performance fixture must contain 624 applications.");
+            list.ScrollIntoView(list.Items[0]); Finish();
+            var realized = FindVisualDescendants<ListBoxItem>(list).Count();
+            Verify(realized < 60, $"Grouping must retain virtualization; only visible and nearby rows may be realized ({realized}/624).");
+            SaveWindowRender(window, Path.Combine(output, "alphabetical-large.png"));
+            Console.WriteLine($"PASS grouped virtualization: {realized} realized rows for 624 applications.");
+            manyApps = false; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
 
             Select(2); var profiles = Find<ListBox>("ProfilesList"); profiles.SelectedIndex = 0;
             var profileMenu = Menu(profiles); ClickMenu(profileMenu, "copy");
@@ -334,6 +419,7 @@ internal static partial class Program
             pagedFiles = false; Find<ComboBox>("FileRoot").SelectedIndex = 0; Finish();
 
             Select(5); ClickAction("settings-read");
+            Verify(!Find<Button>("HeaderMore").IsVisible, "Pages without additional actions must hide the empty header menu after replay removal.");
             var settings = (System.Collections.IDictionary)KeyboardField(panel, "_settings");
             var borderEditor = settings["showBorders"]!;
             var borderCheck = (CheckBox)borderEditor.GetType().GetProperty("Input")!.GetValue(borderEditor)!;
@@ -462,7 +548,7 @@ internal static partial class Program
             panel.Dispose(); LocalizationService.SetLanguage(language); ThemeService.Apply(theme);
             CloseWorkspaceTestWindow(window); app.Shutdown();
         }
-        Console.WriteLine("Integrated device manager passed: row menus, search/reset and process search, retained list position, empty states, folder navigation and appended pagination, log toggle/filter/retention, projection recovery, stale-response protection, six-page refresh backgrounds, five languages, two themes and compact/lightweight layout.");
+        Console.WriteLine("Integrated device manager passed: alphabetical/pinyin groups, 624-app virtualization, persistent icon cache/restart/version/corruption/isolation, replay removal, row menus, search/reset, retained list position, file navigation/pagination, log controls, projection recovery, stale-response protection, six pages, five languages, two themes and compact/lightweight layout.");
         return 0;
     }
 
@@ -479,12 +565,22 @@ internal static partial class Program
         return (double)bright / (width * height);
     }
 
-    private static JsonElement HubFixtureApps(string source) => JsonSerializer.SerializeToElement(new
+    private static JsonElement HubFixtureApps(string source, string version = "1.0") => JsonSerializer.SerializeToElement(new
     {
         apps = new[] { ("WeChat", "com.tencent.xin"), ("Safari", "com.apple.mobilesafari"), ("YouTube", "com.google.ios.youtube"), ("App Store", "com.apple.AppStore"),
             ("Music", "com.apple.Music"), ("Booking.com", "com.booking.BookingApp"), ("Skype", "com.skype.skype"), ("Calculator", "com.apple.calculator"),
-            ("NewsBreak", "com.particlenews.newsbreak"), ("Files", "com.apple.DocumentsApp"), ("Maps", "com.apple.Maps"), ("Camera", "com.apple.camera") }
-            .Select(a => new { bundleId = a.Item2, name = a.Item1, version = "1.0", isFirstParty = a.Item2.StartsWith("com.apple"), isDeveloper = false, isAppClip = false, source })
+            ("NewsBreak", "com.particlenews.newsbreak"), ("Files", "com.apple.DocumentsApp"), ("Maps", "com.apple.Maps"), ("Camera", "com.apple.camera"),
+            ("阿福", "com.fixture.afu"), ("哔哩哔哩", "com.fixture.bili"), ("菜鸟", "com.fixture.cainiao"), ("抖音", "com.fixture.douyin"),
+            ("番茄小说", "com.fixture.fanqie"), ("个人所得税", "com.fixture.tax"), ("国家反诈中心", "com.fixture.antifraud"), ("海马云电脑", "com.fixture.haima"),
+            ("微信", "com.fixture.weixin"), ("12306", "com.fixture.train"), ("éReader", "com.fixture.ereader") }
+            .Select(a => new { bundleId = a.Item2, name = a.Item1, version, isFirstParty = a.Item2.StartsWith("com.apple"), isDeveloper = false, isAppClip = false, source })
+    });
+
+    private static JsonElement HubFixtureLargeApps(string source) => JsonSerializer.SerializeToElement(new
+    {
+        apps = Enumerable.Range(0, 624).Select(index => new { bundleId = "com.fixture.large" + index,
+            name = ((char)('A' + index / 24)) + " App " + (index % 24).ToString("00"), version = "1.0", isFirstParty = false,
+            isDeveloper = false, isAppClip = false, source })
     });
 
     private static string HubFixtureIcon(string id)
