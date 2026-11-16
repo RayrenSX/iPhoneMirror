@@ -104,10 +104,13 @@ internal static partial class Program
             if (orientation == Orientation.Vertical) bar.Height = 220; else bar.Width = 220;
             host.Content = bar; AdvanceDispatcher(TimeSpan.FromMilliseconds(50)); host.UpdateLayout();
             var thumb = (Thumb)bar.Template.FindName("ScrollThumb", bar);
+            thumb.ApplyTemplate();
+            var grip = (FrameworkElement)thumb.Template.FindName("Grip", thumb);
             var track = (FrameworkElement)bar.Template.FindName("TrackSurface", bar);
             var lengthProperty = orientation == Orientation.Vertical ? FrameworkElement.HeightProperty : FrameworkElement.WidthProperty;
             var thicknessProperty = orientation == Orientation.Vertical ? FrameworkElement.WidthProperty : FrameworkElement.HeightProperty;
             var originalLength = (double)thumb.GetValue(lengthProperty);
+            var originalThickness = orientation == Orientation.Vertical ? thumb.ActualWidth : thumb.ActualHeight;
             foreach (var animations in new[] { true, false })
             foreach (var hover in new[] { true, false })
             {
@@ -116,12 +119,19 @@ internal static partial class Program
                 // Changing the preference during a transition must clear its clocks immediately.
                 ScrollBarMotion.SetAnimationsEnabled(bar, false);
                 if (animations)
-                    InteractionAssert(!thumb.HasAnimatedProperties && !track.HasAnimatedProperties,
+                    InteractionAssert(!thumb.HasAnimatedProperties && !track.HasAnimatedProperties && !grip.HasAnimatedProperties,
                         "Changing reduced motion left a running animation clock.");
                 ScrollBarMotion.ApplyState(bar, hover, false);
-                InteractionAssert((double)thumb.GetValue(thicknessProperty) == (hover ? 4 : 2) &&
-                    Math.Abs(track.Opacity - (hover ? 0.62 : 0)) < 0.001 && !thumb.HasAnimatedProperties && !track.HasAnimatedProperties,
-                    $"Reduced motion must apply the final hover state immediately: {orientation}, hover={hover}/{bar.IsMouseOver}, enabled={ScrollBarMotion.GetIsEnabled(bar)}, loaded={bar.IsLoaded}, thickness={thumb.GetValue(thicknessProperty)}, track={track.Opacity}, animated={thumb.HasAnimatedProperties}/{track.HasAnimatedProperties}.");
+                host.UpdateLayout();
+                InteractionAssert((double)grip.GetValue(thicknessProperty) == (hover ? 4 : 2) &&
+                    Math.Abs(track.Opacity - (hover ? 0.62 : 0)) < 0.001 && !thumb.HasAnimatedProperties && !track.HasAnimatedProperties && !grip.HasAnimatedProperties,
+                    $"Reduced motion must apply the final hover state immediately: {orientation}, hover={hover}/{bar.IsMouseOver}, enabled={ScrollBarMotion.GetIsEnabled(bar)}, loaded={bar.IsLoaded}, thickness={grip.GetValue(thicknessProperty)}, track={track.Opacity}, animated={thumb.HasAnimatedProperties}/{track.HasAnimatedProperties}/{grip.HasAnimatedProperties}.");
+                InteractionAssert(originalThickness >= 10 &&
+                    Math.Abs((orientation == Orientation.Vertical ? thumb.ActualWidth : thumb.ActualHeight) - originalThickness) < 0.01,
+                    "Hover or reduced motion changed the wide scrollbar pointer target.");
+                var pointerFindings = new HashSet<string>();
+                AuditScrollBarPointerTargets(bar, $"{orientation}/{hover}/{animations}", pointerFindings);
+                InteractionAssert(pointerFindings.Count == 0, string.Join(Environment.NewLine, pointerFindings));
                 InteractionAssert(double.IsNaN(originalLength) ? double.IsNaN((double)thumb.GetValue(lengthProperty)) :
                     (double)thumb.GetValue(lengthProperty) == originalLength, "Hover compressed the scrollbar's draggable length.");
             }

@@ -178,6 +178,10 @@ internal static partial class Program
             Verify(firstIconCalls > 0 && Directory.GetFiles(iconCache, "*.png").Length > 0,
                 "Visible app icons must be fetched and written to the persistent cache.");
             SaveWindowRender(window, Path.Combine(output, "alphabetical-initial.png"));
+            var pointerFindings = new HashSet<string>();
+            foreach (var bar in FindVisualDescendants<System.Windows.Controls.Primitives.ScrollBar>(panel).Where(bar => bar.IsVisible))
+                AuditScrollBarPointerTargets(bar, "DeviceHub/app-list", pointerFindings);
+            Verify(pointerFindings.Count == 0, string.Join(Environment.NewLine, pointerFindings));
             Find<Button>("HeaderMore").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             var headerMenu = Find<Button>("HeaderMore").ContextMenu!;
             Verify(headerMenu.Items.OfType<MenuItem>().All(item => item.Tag?.ToString() != "replay") &&
@@ -376,6 +380,18 @@ internal static partial class Program
             Verify(realized < 60, $"Grouping must retain virtualization; only visible and nearby rows may be realized ({realized}/624).");
             SaveWindowRender(window, Path.Combine(output, "alphabetical-large.png"));
             Console.WriteLine($"PASS grouped virtualization: {realized} realized rows for 624 applications.");
+            var appBar = FindVisualDescendants<System.Windows.Controls.Primitives.ScrollBar>(list).Single(bar => bar.IsVisible);
+            var appTrack = (System.Windows.Controls.Primitives.Track)appBar.Template.FindName("PART_Track", appBar);
+            pointerFindings.Clear(); AuditScrollBarPointerTargets(appBar, "DeviceHub/624-apps", pointerFindings);
+            Verify(pointerFindings.Count == 0, string.Join(Environment.NewLine, pointerFindings));
+            appTrack.Thumb.RaiseEvent(new System.Windows.Controls.Primitives.DragDeltaEventArgs(0, 40)
+                { RoutedEvent = System.Windows.Controls.Primitives.Thumb.DragDeltaEvent });
+            Finish();
+            Verify(listScroll.VerticalOffset > 0, "Dragging the grouped app scrollbar must move the list.");
+            listScroll.ScrollToHome(); Finish();
+            System.Windows.Controls.Primitives.ScrollBar.PageDownCommand.Execute(null, appBar); Finish();
+            Verify(listScroll.VerticalOffset > 0, "Clicking the grouped app scrollbar track must page down.");
+            Console.WriteLine("PASS grouped app scrollbar: full-width thumb/track hit targets, dragging and page down.");
             manyApps = false; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
 
             Select(2); var profiles = Find<ListBox>("ProfilesList"); profiles.SelectedIndex = 0;
@@ -482,6 +498,10 @@ internal static partial class Program
                 for (var page = 0; page < 6; page++)
                 {
                     Select(page);
+                    pointerFindings.Clear();
+                    foreach (var bar in FindVisualDescendants<System.Windows.Controls.Primitives.ScrollBar>(panel).Where(bar => bar.IsVisible))
+                        AuditScrollBarPointerTargets(bar, $"DeviceHub/{culture}/{dark}/{page}", pointerFindings);
+                    Verify(pointerFindings.Count == 0, string.Join(Environment.NewLine, pointerFindings));
                     if (culture == "zh-CN")
                     {
                         var brightBefore = HubBrightPixelFraction(Find<Grid>("Pages"));

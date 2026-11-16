@@ -2074,10 +2074,10 @@ internal static partial class Program
             throw new InvalidOperationException(
                 "Release notes did not create a vertical scrollbar.");
         scrollBar.ApplyTemplate();
-        if (scrollBar.Width != 6 ||
+        if (scrollBar.Width != 10 ||
             scrollBar.MinWidth != 0 || Math.Abs(scrollBar.RenderTransform.Value.OffsetX) > .01 ||
             scrollBar.Template.FindName("ScrollThumb", scrollBar) is not WpfThumb thumb ||
-            thumb.Width != 2)
+            thumb.ActualWidth < 10)
             throw new InvalidOperationException(
                 "Release notes did not use the shared modern scrollbar template.");
     }

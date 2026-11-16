@@ -120,7 +120,9 @@ internal static partial class Program
                         Popup? popup = null;
                         if (window.Content is ComboBox combo)
                         {
-                            combo.IsDropDownOpen = true; AdvanceDispatcher(TimeSpan.FromMilliseconds(40));
+                            // Wait for the popup's opening animation and native
+                            // window placement before testing root input points.
+                            combo.IsDropDownOpen = true; AdvanceDispatcher(TimeSpan.FromMilliseconds(240));
                             popup = (Popup)(combo.Template.FindName("PART_Popup", combo) ?? combo.Template.FindName("Popup", combo));
                             root = popup.Child;
                         }
@@ -132,6 +134,7 @@ internal static partial class Program
                         else if (checkedBars == 0) findings.Add(id + ": overflowing content produced no visible scrollbar.");
                         foreach (var bar in Visuals(root).OfType<ScrollBar>().Where(b => b.IsVisible).ToArray())
                         {
+                            AuditScrollBarPointerTargets(bar, id, findings);
                             var viewer = Ancestors(bar).OfType<ScrollViewer>().First();
                             var vertical = bar.Orientation == Orientation.Vertical;
                             var before = vertical ? viewer.VerticalOffset : viewer.HorizontalOffset;
@@ -146,6 +149,7 @@ internal static partial class Program
                             AdvanceDispatcher(TimeSpan.FromMilliseconds(10)); window.UpdateLayout();
                             if ((vertical ? viewer.VerticalOffset : viewer.HorizontalOffset) <= 0)
                                 findings.Add(id + ": thumb drag did not move content: " + bar.Orientation);
+                            AuditScrollBarPointerTargets(bar, id + "/after-drag", findings);
                         }
                         foreach (var viewer in Visuals(root).OfType<ScrollViewer>().ToArray())
                         {
@@ -187,5 +191,40 @@ internal static partial class Program
             stack.Children.Add(new Button { Content = new TextBlock { Text = $"{i + 1}: {LocalizationService.Get("Close")} — 日本語 / 繁體中文",
                 TextWrapping = TextWrapping.Wrap }, HorizontalContentAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 0, 4) });
         return stack;
+    }
+
+    private static void AuditScrollBarPointerTargets(ScrollBar bar, string name, HashSet<string> findings)
+    {
+        bar.ApplyTemplate();
+        if (bar.Template.FindName("PART_Track", bar) is not Track track ||
+            PresentationSource.FromVisual(bar)?.RootVisual is not UIElement root)
+        {
+            findings.Add(name + ": scrollbar has no connected input surface.");
+            return;
+        }
+        var vertical = bar.Orientation == Orientation.Vertical;
+        var thickness = vertical ? bar.ActualWidth : bar.ActualHeight;
+        if (thickness < 9.5)
+            findings.Add($"{name}/{bar.Orientation}: scrollbar pointer target is only {thickness:0.0} DIP wide.");
+        foreach (var target in new FrameworkElement[] { track.Thumb, track.DecreaseRepeatButton, track.IncreaseRepeatButton })
+        {
+            // Track can allocate less than Thumb.MinHeight for a long list;
+            // WPF clips the rendered thumb to that slot. Test the visible part.
+            var visible = new Rect(target.RenderSize);
+            if (VisualTreeHelper.GetClip(target) is { } clip) visible.Intersect(clip.Bounds);
+            if (visible.IsEmpty) continue;
+            var bounds = target.TransformToAncestor(bar).TransformBounds(visible);
+            if ((vertical ? bounds.Height : bounds.Width) < 2) continue;
+            foreach (var across in new[] { 1d, thickness / 2, thickness - 1 })
+            {
+                var point = vertical ? new Point(across, bounds.Top + bounds.Height / 2) : new Point(bounds.Left + bounds.Width / 2, across);
+                var hit = root.InputHitTest(bar.TranslatePoint(point, root)) as DependencyObject;
+                var ownsHit = false;
+                for (var current = hit; current is not null; current = VisualTreeHelper.GetParent(current))
+                    if (ReferenceEquals(current, target)) { ownsHit = true; break; }
+                if (!ownsHit)
+                    findings.Add($"{name}/{bar.Orientation}/{target.GetType().Name}: cannot click across gutter at {across:0.0} DIP (hit {hit?.GetType().Name ?? "nothing"}).");
+            }
+        }
     }
 }
