@@ -15,5 +15,5 @@ function Get-AdditionalThirdPartyNoticeFiles([string]$Workspace) {
             Join-Path $group.Target $relative
         }
     }
-    'Wireless/licenses/NOTICE-AIRPLAY-CONTROL-BUILD.json'
+    Join-Path (Join-Path 'Wireless' 'licenses') 'NOTICE-AIRPLAY-CONTROL-BUILD.json'
 }

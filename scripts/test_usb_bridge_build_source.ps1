@@ -2,6 +2,12 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'UsbBridgeBuildSource.ps1')
 . (Join-Path $PSScriptRoot 'UsbTouchBridgeRuntime.ps1')
+. (Join-Path $PSScriptRoot 'ThirdPartyNoticeFiles.ps1')
+$noticeFiles = @(Get-AdditionalThirdPartyNoticeFiles $projectRoot)
+if ($noticeFiles.Count -eq 0 -or @($noticeFiles | Where-Object { $_.Contains('/') }).Count -ne 0 -or
+    @($noticeFiles | Select-Object -Unique).Count -ne $noticeFiles.Count) {
+    throw 'Additional third-party notice paths must be unique native Windows paths.'
+}
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('iphoneMirror-build-test-' + [Guid]::NewGuid().ToString('N'))
 $recipe = Join-Path $testRoot 'recipe'
 $workRoot = Join-Path $testRoot 'stages'
