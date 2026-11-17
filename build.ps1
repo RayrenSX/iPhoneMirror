@@ -803,6 +803,8 @@ try {
             'Wireless\licenses\BUILD.json',
             'Wireless\licenses\SHA256SUMS.txt'
         )
+        . (Join-Path $Root 'scripts\ThirdPartyNoticeFiles.ps1')
+        $requiredArtifacts += @(Get-AdditionalThirdPartyNoticeFiles $Root)
         if ($UseUxPlayRuntime) {
             $requiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
                 Join-Path 'Wireless\UxPlay' $_

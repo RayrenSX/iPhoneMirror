@@ -162,6 +162,8 @@ $RequiredArtifacts = @(
     'Wireless\licenses\BUILD.json',
     'Wireless\licenses\SHA256SUMS.txt'
 )
+. (Join-Path $PSScriptRoot 'ThirdPartyNoticeFiles.ps1')
+$RequiredArtifacts += @(Get-AdditionalThirdPartyNoticeFiles $Root)
 if ($UseUxPlayRuntime) {
     $RequiredArtifacts += @($UxPlayRuntimeFiles | ForEach-Object {
         Join-Path 'Wireless\UxPlay' $_

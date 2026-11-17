@@ -25,6 +25,13 @@ foreach ($relativePath in $requiredFiles) {
         throw "Application bundle is incomplete: $relativePath"
     }
 }
+. (Join-Path $PSScriptRoot 'ThirdPartyNoticeFiles.ps1')
+$noticeWorkspace = Split-Path -Parent $PSScriptRoot
+foreach ($notice in @(Get-AdditionalThirdPartyNoticeFiles $noticeWorkspace)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $bundleDirectory $notice) -PathType Leaf)) {
+        throw "Application bundle is missing a third-party notice/source: $notice"
+    }
+}
 
 $appPath = Join-Path $bundleDirectory 'iPhoneMirror.exe'
 $driverPath = Join-Path $bundleDirectory 'iPhoneMirror.Driver.exe'
