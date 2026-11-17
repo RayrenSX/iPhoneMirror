@@ -14,6 +14,7 @@ $requiredFiles = @(
     'iPhoneMirror.exe', 'iPhoneMirror.Driver.exe', 'iPhoneMirror.Core.dll',
     'iPhoneMirror.UsbConfigurationSwitch.exe',
     'Wireless/iPhoneMirror.WirelessHost.exe',
+    'Wireless/iPhoneMirror.AirPlayControl.dll',
     'Wireless/licenses/BUILD.json',
     'tools/iUsbBridge.exe', 'tools/iUsbBridge.runtime.json',
     'THIRD_PARTY_NOTICES.md',

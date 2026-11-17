@@ -282,7 +282,8 @@ $ExpectedWirelessManifestPaths = @(
     'bin/x64/avutil-56.dll',
     'bin/x64/dnssd.dll',
     'bin/x64/swresample-3.dll',
-    'bin/x64/swscale-5.dll'
+    'bin/x64/swscale-5.dll',
+    'bin/x64/iPhoneMirror.AirPlayControl.dll'
 )
 $PrepareMediaOutputRuntime = Join-Path $Root 'scripts\prepare_ffmpeg.ps1'
 $PrepareVcRuntime = Join-Path $Root 'scripts\prepare_vc_runtime.ps1'
@@ -786,6 +787,7 @@ try {
             'Wireless\vcruntime140.dll',
             'Wireless\vcruntime140_1.dll',
             'Wireless\airplay2dll.dll',
+            'Wireless\iPhoneMirror.AirPlayControl.dll',
             'Wireless\avcodec-58.dll',
             'Wireless\avutil-56.dll',
             'Wireless\dnssd.dll',

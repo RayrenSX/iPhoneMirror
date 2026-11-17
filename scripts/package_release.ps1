@@ -147,6 +147,7 @@ $RequiredArtifacts = @(
     'Wireless\vcruntime140.dll',
     'Wireless\vcruntime140_1.dll',
     'Wireless\airplay2dll.dll',
+    'Wireless\iPhoneMirror.AirPlayControl.dll',
     'Wireless\avcodec-58.dll',
     'Wireless\avutil-56.dll',
     'Wireless\dnssd.dll',
@@ -416,7 +417,7 @@ function Assert-PublishedOutput {
     if (@($entries).Count -eq 0) { throw 'Published wireless hash manifest is empty.' }
     $expectedWirelessBinaries = @(
         'airplay2dll.dll', 'avcodec-58.dll', 'avutil-56.dll',
-        'dnssd.dll', 'swresample-3.dll', 'swscale-5.dll'
+        'dnssd.dll', 'swresample-3.dll', 'swscale-5.dll', 'iPhoneMirror.AirPlayControl.dll'
     )
     $manifestNames = @($entries | ForEach-Object { $_.Name } | Select-Object -Unique)
     $missingHashes = @($expectedWirelessBinaries | Where-Object { $_ -notin $manifestNames })
