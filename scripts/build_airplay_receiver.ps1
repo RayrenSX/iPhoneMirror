@@ -76,6 +76,12 @@ $SourceRoot = (Resolve-Path -LiteralPath $BuildSourceRoot).Path
     -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-AirPlayUpstream125Patch.ps1') `
     -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AirPlayHevcPatch.ps1') `
+    -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AirPlayRequestPolicyPatch.ps1') `
+    -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AirPlayControlPatch.ps1') `
+    -SourceRoot $SourceRoot
 
 $CompatibilityMarkers = @(
     @{ Path = 'AirPlayServerLib\lib\http_parser.c';
@@ -194,6 +200,7 @@ foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIG
         'IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC',
         'IPHONE_MIRROR_RUNTIME_DEVICE_ID',
         'IPHONE_MIRROR_BOUND_MEDIA_SOCKETS',
+        'IPHONE_MIRROR_VIDEO_DIAG 32',
         'IPHONE_MIRROR_PRESERVE_IPV6_MEDIA',
         'Mirror TCP read timed out after %d ms',
         'iphonemirror://pause',

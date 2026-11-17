@@ -139,9 +139,12 @@ public partial class FirstRunSetupWindow
         if (!preserveRows || _assessmentItems is null)
         {
             Body.Children.Clear(); _actions.Clear(); _checkRows.Clear();
-            var tools = new System.Windows.Controls.Primitives.UniformGrid { Columns = 2, Margin = new(0, 0, -12, 16) };
-            tools.Children.Add(CreateToolCard(true, () => OpenToolFromSummaryAsync(true)));
-            tools.Children.Add(CreateToolCard(false, () => OpenToolFromSummaryAsync(false)));
+            var tools = new System.Windows.Controls.Primitives.UniformGrid { Columns = 2, Margin = new(-6, 0, -6, 16) };
+            var driverTool = CreateToolCard(true, () => OpenToolFromSummaryAsync(true));
+            var bindingTool = CreateToolCard(false, () => OpenToolFromSummaryAsync(false));
+            driverTool.Margin = bindingTool.Margin = new(6, 0, 6, 0);
+            tools.Children.Add(driverTool);
+            tools.Children.Add(bindingTool);
             Body.Children.Add(tools);
             _assessmentItems = new StackPanel { Margin = new(0, 0, 12, 0) };
             // Reserve the same card and action area throughout the scan, so rows do not move with the heading.

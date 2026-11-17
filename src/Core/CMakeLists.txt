@@ -122,6 +122,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         tests/SdrBgraConverterTests.cpp
         tests/PreviewOpacitySmoke.cpp
         tests/PreviewStaticFrameSmoke.cpp
+        tests/PreviewOwnershipSmoke.cpp
         tests/WasapiUnderrunSmoke.cpp
         src/Renderer/D3D11PreviewRenderer.cpp
         src/Protocol/Plist.cpp

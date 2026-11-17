@@ -25,6 +25,12 @@ foreach ($name in @('SHA256SUMS.txt','BUILD.json','NOTICE-FFMPEG-BUILD.txt')) {
 }
 Copy-Item -LiteralPath (Join-Path $root 'third_party\airplay-server\patches\airplay-upstream-125.patch') `
     -Destination (Join-Path $vendor 'patches')
+foreach ($name in @('airplay-hevc.patch', 'airplay-hevc-config.h',
+        'Apply-AirPlayRequestPolicyPatch.ps1', 'airplay-request-policy.h', 'airplay-play-request.h',
+        'Apply-AirPlayControlPatch.ps1', 'airplay-control.h', 'airplay-control-httpd.h', 'airplay-control-media.h',
+        'airplay-scrub-request.h')) {
+    Copy-Item (Join-Path $root "third_party/airplay-server/patches/$name") (Join-Path $vendor 'patches')
+}
 Copy-Item -Path (Join-Path $root 'third_party\airplay-server\bin\x64\*.dll') `
     -Destination (Join-Path $vendor 'bin\x64')
 $integrityPath = Join-Path $appDirectory 'RuntimeBinaryIntegrity.cs'
@@ -83,6 +89,14 @@ if ((Get-FileHash -LiteralPath (Join-Path $vendor 'bin\x64\airplay2dll.dll')).Ha
 if ((Get-FileHash -LiteralPath (Join-Path $vendor 'NOTICE-FFMPEG-BUILD.txt')).Hash -ne
     (Get-FileHash -LiteralPath (Join-Path $record.RuntimeDirectory 'NOTICE-FFMPEG-BUILD.txt')).Hash) {
     throw 'Build dependency notices were not installed.'
+}
+foreach ($patch in $installed.AdditionalPatches.PSObject.Properties) {
+    if ((Get-FileHash -LiteralPath (Join-Path $vendor ('patches/' + $patch.Name))).Hash -ine $patch.Value) {
+        throw "Installed patch provenance disagrees with $($patch.Name)"
+    }
+}
+if (-not $installed.AdditionalPatches.'airplay-scrub-request.h') {
+    throw 'Scrub parser provenance was not installed.'
 }
 if ($DnsSdBinary) {
     $dnsHash = (Get-FileHash -LiteralPath $installArguments.DnsSdBinary).Hash.ToLowerInvariant()

@@ -12,7 +12,13 @@ namespace iPhoneMirror::media::detail {
 // SSE2 is part of the Windows x64 baseline. Keep SDR conversion in byte
 // units and convert four pixels at a time, without per-pixel function calls.
 // HDR and wide-gamut sources continue through convert_yuv_to_sdr.
-class SdrBgraConverter {
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4324) // intentional 16-byte SIMD object alignment
+#endif
+// The SSE vectors require 16-byte alignment. State it on the type itself so
+// MSVC does not warn at every stack construction that the object is padded.
+class alignas(16) SdrBgraConverter {
 public:
     static bool supports(const DecodedFrame& frame) noexcept {
         return !frame.color.is_hdr() &&
@@ -114,5 +120,8 @@ private:
     bool p010_;
     __m128 y_offset_, c_offset_, y_scale_, red_cr_, green_cb_, green_cr_, blue_cb_;
 };
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 } // namespace iPhoneMirror::media::detail

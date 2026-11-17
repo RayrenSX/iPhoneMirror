@@ -17,8 +17,28 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="ExplorerWebDavTests.cs" />
+    <Compile Include="ExplorerWebDavLocksTests.cs" />
+    <Compile Include="ExplorerFileStoreTests.cs" />
+    <Compile Include="..\App\Services\Automation\AutomationException.cs" Link="Automation\AutomationException.cs" />
+    <Compile Include="..\App\Services\ExplorerMapping\IExplorerFileStore.cs" Link="ExplorerMapping\IExplorerFileStore.cs" />
+    <Compile Include="..\App\Services\ExplorerMapping\ExplorerWebDavServer.cs" Link="ExplorerMapping\ExplorerWebDavServer.cs" />
+    <Compile Include="..\App\Services\ExplorerMapping\ExplorerWebDavLocks.cs" Link="ExplorerMapping\ExplorerWebDavLocks.cs" />
+    <Compile Include="..\App\Services\ExplorerMapping\DeviceHubExplorerFileStore.cs" Link="ExplorerMapping\DeviceHubExplorerFileStore.cs" />
+    <Compile Include="AppProxyPolicyTests.cs" />
+    <Compile Include="MediaHttpProxyBridgeTests.cs" />
+    <Compile Include="..\App\Services\AppProxySettings.cs" Link="AppProxySettings.cs" />
+    <Compile Include="..\App\Services\AppProxyPolicy.cs" Link="AppProxyPolicy.cs" />
+    <Compile Include="..\App\Services\MediaHttpProxyBridge.cs" Link="MediaHttpProxyBridge.cs" />
     <Compile Include="UpdaterHandoffTests.cs" />
     <Compile Include="..\App\Services\AppleDisplayCatalog.cs" Link="AppleDisplayCatalog.cs" />
+    <Compile Include="..\App\Services\DeviceAppearance.cs" Link="DeviceAppearance.cs" />
+    <Compile Include="..\App\Services\DeviceAppearanceCache.cs" Link="DeviceAppearanceCache.cs" />
+    <Compile Include="..\App\Models\DeviceViewModel.cs" Link="DeviceViewModel.cs" />
+    <Compile Include="..\App\Models\DeviceControlPreferences.cs" Link="DeviceControlPreferences.cs" />
+    <Compile Include="..\App\Services\DeviceFrameCatalog.cs" Link="DeviceFrameCatalog.cs" />
+    <EmbeddedResource Include="..\..\config\apple-device-frames.json" LogicalName="IPhoneMirror.App.DeviceFrames.catalog.json" />
+    <EmbeddedResource Include="..\App\Assets\DeviceFrames\*.png" LogicalName="IPhoneMirror.App.DeviceFrames.%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\config\apple-display-catalog.json"
                       LogicalName="IPhoneMirror.App.Devices.AppleDisplayCatalog.json" />
     <Compile Include="..\App\Services\CaptureMuxEndpointLease.cs" Link="CaptureMuxEndpointLease.cs" />
@@ -27,6 +47,9 @@
     <Compile Include="ComponentDownloadNetworkTests.cs" />
     <EmbeddedResource Include="..\..\config\uxplay-component.json" LogicalName="IPhoneMirror.App.Components.UxPlay.json" />
     <Compile Include="IssueFixMediaTests.cs" />
+    <Compile Include="FcupHlsPlaybackTests.cs" />
+    <Compile Include="MediaCastStartupBudgetTests.cs" />
+    <Compile Include="WirelessRuntimeAvailabilityTests.cs" />
     <Compile Include="MediaOutputCoordinatorTests.cs" />
     <Compile Include="ReviewFixRegressionTests.cs" />
     <Compile Include="..\App\Services\MediaOutputCoordinator.cs" Link="MediaOutputCoordinator.cs" />
@@ -68,6 +91,7 @@
     <Compile Include="..\App\Services\MediaCastEventGate.cs" Link="MediaCastEventGate.cs" />
     <Compile Include="..\App\Services\MediaCastPlaybackControls.cs" Link="MediaCastPlaybackControls.cs" />
     <Compile Include="..\App\Services\HlsMediaPlaybackBridge.cs" Link="HlsMediaPlaybackBridge.cs" />
+    <Compile Include="..\App\Services\MediaCastStartupBudget.cs" Link="MediaCastStartupBudget.cs" />
     <Compile Include="..\App\Services\MediaCastAudioDecoder.cs" Link="MediaCastAudioDecoder.cs" />
     <Compile Include="..\App\Services\MediaRecoveryBackoff.cs" Link="MediaRecoveryBackoff.cs" />
     <Compile Include="..\App\Services\BluetoothControlNoticePolicy.cs" Link="BluetoothControlNoticePolicy.cs" />

@@ -41,7 +41,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
         Topmost = false;
         WorkspaceItems =
         [
-            Surface("device-hub", SymbolRegular.Phone20, "DeviceHubTitle", "DeviceHubDescription"),
+            Surface("device-hub", SymbolRegular.Phone20, "DeveloperDeviceToolsTab", "DeveloperDeviceToolsDescription"),
             Surface("workspace-mirroring", SymbolRegular.ProjectionScreen20, "DeveloperMirroring", "DeveloperMirroringDescription"),
             Surface("workspace-devices", SymbolRegular.Phone20, "DeveloperDevices", "DeveloperDevicesDescription"),
             Surface("workspace-settings", SymbolRegular.Settings20, "DeveloperSettings", "DeveloperSettingsDescription"),
@@ -81,6 +81,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
         ];
         DataContext = this;
         InitializeComponent();
+        InitializeDeviceTools();
         InitializeAutomationSettings();
         ThemeService.Attach(this);
         LocalizationService.LanguageChanged += OnLanguageChanged;
@@ -114,7 +115,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
             {
                 Title = LocalizationService.Get(workspace[index].Key switch
                 {
-                    "device-hub" => "DeviceHubTitle",
+                    "device-hub" => "DeveloperDeviceToolsTab",
                     "workspace-mirroring" => "DeveloperMirroring",
                     "workspace-devices" => "DeveloperDevices",
                     "workspace-settings" => "DeveloperSettings",
@@ -125,7 +126,7 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
                 }),
                 Description = LocalizationService.Get(workspace[index].Key switch
                 {
-                    "device-hub" => "DeviceHubDescription",
+                    "device-hub" => "DeveloperDeviceToolsDescription",
                     "workspace-mirroring" => "DeveloperMirroringDescription",
                     "workspace-devices" => "DeveloperDevicesDescription",
                     "workspace-settings" => "DeveloperSettingsDescription",
@@ -234,7 +235,8 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
         if (sender is not FrameworkElement { Tag: string key }) return;
         try
         {
-            _owner.OpenDeveloperSurface(key);
+            if (key == "device-hub") ShowDeviceTools();
+            else _owner.OpenDeveloperSurface(key);
             StatusText = LocalizationService.Get("DeveloperSurfaceOpened");
             RefreshDiagnostics();
         }

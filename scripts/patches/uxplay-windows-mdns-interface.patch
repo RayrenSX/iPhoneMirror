@@ -103,7 +103,7 @@
 +                    const int candidate_gateway =
 +                        adapter->FirstGatewayAddress != NULL;
 +                    const ULONG metric = adapter->Ipv4Metric;
-+                    int better = !best ||
++                    int better = !best || (
 +                        candidate_requested != best_requested
 +                        ? candidate_requested > best_requested
 +                        : non_virtual != best_non_virtual
@@ -115,7 +115,7 @@
 +                                    : metric != best_metric
 +                                        ? metric < best_metric
 +                                        : index < (best->IfIndex != 0
-+                                            ? best->IfIndex : best->Ipv6IfIndex);
++                                            ? best->IfIndex : best->Ipv6IfIndex));
 +                    if (better) {
 +                        best = adapter;
 +                        best_unicast = unicast;

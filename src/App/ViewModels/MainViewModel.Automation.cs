@@ -75,10 +75,15 @@ internal sealed partial class MainViewModel : IAutomationBackend
             var width = sameCapture ? status?.Width ?? 0 : 0;
             var height = sameCapture ? status?.Height ?? 0 : 0;
             ObserveAutomationGeometry(device.Udid, width, height);
-            var portrait = AppliedBluetoothPortraitMouseDirection;
-            var landscape = AppliedBluetoothLandscapeMouseDirection;
-            var reverseX = AppliedBluetoothMouseReverseHorizontal;
-            var reverseY = AppliedBluetoothMouseReverseVertical;
+            bool CaptureActive() => !_disposed && native is { IsClosed: false, IsInvalid: false } &&
+                ReferenceEquals(_sessions.Get(device.Udid)?.Handle, native);
+            bool CaptureCurrent() => CaptureActive() &&
+                _automationGeometry.TryGetValue(device.Udid, out var dimensions) && dimensions == (width, height);
+            var preferences = ControlPreferencesFor(device.Udid);
+            var portrait = (BluetoothMouseDirection)preferences.PortraitDirection;
+            var landscape = (BluetoothMouseDirection)preferences.LandscapeDirection;
+            var reverseX = preferences.ReverseHorizontal;
+            var reverseY = preferences.ReverseVertical;
             var generation = control?.Router.Generation ?? keyboard?.Generation ?? 0;
             var geometry = new AutomationGeometry(width, height,
                 $"{native?.RawHandle ?? 0:x}:{width}:{height}:{(int)portrait}:{(int)landscape}:{reverseX}:{reverseY}");
@@ -87,8 +92,7 @@ internal sealed partial class MainViewModel : IAutomationBackend
             bool Current() => !_disposed && keyboard?.IsCurrent() == true &&
                 (native is null || (ReferenceEquals(_sessions.Get(device.Udid)?.Handle, native) &&
                     _automationGeometry.TryGetValue(device.Udid, out var size) && size == (width, height))) &&
-                portrait == AppliedBluetoothPortraitMouseDirection && landscape == AppliedBluetoothLandscapeMouseDirection &&
-                reverseX == AppliedBluetoothMouseReverseHorizontal && reverseY == AppliedBluetoothMouseReverseVertical &&
+                preferences.HasSameDirection(ControlPreferencesFor(device.Udid)) &&
                 (control is null || control.Router.Generation == generation) &&
                 binding?.Matches(_identityResolver.ResolveControlBinding(device,
                     bridge is not null ? (control?.WiredEnabled == true ? ReverseControlMode.Usb : ReverseControlMode.Wireless) : ReverseControlMode.Bluetooth)) == true;
@@ -117,10 +121,12 @@ internal sealed partial class MainViewModel : IAutomationBackend
                 token => Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    if (native is null || !ReferenceEquals(_sessions.Get(device.Udid)?.Handle, native)) return null;
+                    if (!CaptureCurrent()) return null;
                     var frame = _core.GetDeviceOutputFrame(native, 0, 0, owned: true);
-                    return ReferenceEquals(_sessions.Get(device.Udid)?.Handle, native) ? frame : null;
-                }, token)) { SessionCurrent = () => keyboard?.IsCurrent() == true,
+                    token.ThrowIfCancellationRequested();
+                    return CaptureCurrent() && frame?.Width == width && frame.Height == height ? frame : null;
+                }, token)) { CaptureCurrent = CaptureCurrent, CaptureActive = CaptureActive,
+                    SessionCurrent = () => keyboard?.IsCurrent() == true,
                     DeviceHub = bridge?.SupportsDeviceHub == true ?
                         (action, args, guard, ct) => bridge.DeviceHubAsync(action, args, guard, ct) : null,
                     HardwareBusy = () => bridge?.InputWritePending == true ||

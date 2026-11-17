@@ -27,6 +27,13 @@ internal sealed class MediaCastEventGate
         ++_generation;
     }
 
+    internal bool TryUnbind(long generation, object source)
+    {
+        if (!IsCurrent(generation, source)) return false;
+        _boundSource = null;
+        return true;
+    }
+
     internal bool IsCurrent(long generation, object? source) =>
         source is not null && generation == _generation &&
         ReferenceEquals(source, _boundSource);

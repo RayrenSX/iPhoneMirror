@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using IPhoneMirror.UI.Controls;
@@ -307,16 +308,99 @@ internal sealed class ControlStageItem(ControlStage stage, ControlStatusService 
 public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     private static ReverseControlStatusWindow? _active;
+    private static readonly ConditionalWeakTable<ControlStatusService, NativeOwnerRoute> NativeOwners = new();
     private readonly ControlStatusService _service;
     private readonly ReverseControlStatusViewModel _viewModel;
     private Action? _countdownElapsed;
     private nint _nativeHandle;
     private bool _closed;
+    private string _closeReason = "window";
+    private Window? _closingOwner;
+    private NativeOwnerRoute? _nativeOwner;
+    private NativeOwnerRoute? _closingNativeOwner;
+
+    // A native preview has no WPF Window to use as Owner. Keep its source
+    // identity, rather than just the recyclable HWND, across VM status updates.
+    private sealed class NativeOwnerRoute
+    {
+        private readonly WeakReference<ControlStatusService> _service;
+        private readonly WeakReference<HwndSource> _source;
+        private readonly WeakReference<Window> _fallbackOwner;
+        private bool _invalid;
+        internal nint Handle { get; }
+        internal bool IsValid => !_invalid && _source.TryGetTarget(out var source) &&
+            !source.IsDisposed && source.Handle == Handle &&
+            ReferenceEquals(HwndSource.FromHwnd(Handle), source);
+        internal bool UsesFallback(Window owner) =>
+            _fallbackOwner.TryGetTarget(out var fallback) && ReferenceEquals(fallback, owner);
+
+        internal NativeOwnerRoute(ControlStatusService service, HwndSource source, Window fallbackOwner)
+        {
+            _service = new(service);
+            _source = new(source);
+            _fallbackOwner = new(fallbackOwner);
+            Handle = source.Handle;
+            source.Disposed += OnDisposed;
+        }
+
+        internal void Invalidate()
+        {
+            _invalid = true;
+            if (_source.TryGetTarget(out var source)) source.Disposed -= OnDisposed;
+        }
+
+        private void OnDisposed(object? sender, EventArgs e)
+        {
+            // Disposed fires before the HWND is destroyed. Invalidate first so
+            // closing status cannot activate a preview that is being removed.
+            Invalidate();
+            if (_service.TryGetTarget(out var service) &&
+                NativeOwners.TryGetValue(service, out var current) && ReferenceEquals(current, this))
+                NativeOwners.Remove(service);
+            foreach (var window in Application.Current?.Windows.OfType<ReverseControlStatusWindow>()
+                .Where(window => ReferenceEquals(window._nativeOwner, this) && !window._closed).ToArray() ?? [])
+                window.CloseWithReason("native_owner");
+        }
+    }
+
+    internal static void SetOwnerRoute(Window fallbackOwner, ControlStatusService service, nint nativeOwner = 0)
+    {
+        if (NativeOwners.TryGetValue(service, out var previous))
+        {
+            if (nativeOwner == previous.Handle && previous.IsValid && previous.UsesFallback(fallbackOwner)) return;
+            previous.Invalidate();
+            NativeOwners.Remove(service);
+        }
+        if (nativeOwner != 0 && HwndSource.FromHwnd(nativeOwner) is { IsDisposed: false } source)
+            NativeOwners.Add(service, new(service, source, fallbackOwner));
+    }
+
+    private static NativeOwnerRoute? ResolveNativeOwner(Window fallbackOwner, ControlStatusService service)
+    {
+        if (!NativeOwners.TryGetValue(service, out var route)) return null;
+        if (route.IsValid && route.UsesFallback(fallbackOwner)) return route;
+        // Another explicit managed owner (for example Bluetooth setup) replaces
+        // this route. Automatic VM Show(main, service) keeps the native owner.
+        route.Invalidate();
+        NativeOwners.Remove(service);
+        return null;
+    }
+
+    private void SetPresentationOwner(Window owner, NativeOwnerRoute? nativeOwner)
+    {
+        _nativeOwner = nativeOwner;
+        if (nativeOwner is null) Owner = owner;
+        else
+        {
+            Owner = null;
+            new WindowInteropHelper(this).Owner = nativeOwner.Handle;
+        }
+    }
 
     private ReverseControlStatusWindow(Window owner, ControlStatusService service, Action? cancel,
-        Action? retry, Action? countdownElapsed)
+        Action? retry, Action? countdownElapsed, NativeOwnerRoute? nativeOwner)
     {
-        Owner = owner;
+        SetPresentationOwner(owner, nativeOwner);
         _service = service;
         _countdownElapsed = countdownElapsed;
         _viewModel = new(service) { CancelRequested = cancel, RetryRequested = retry };
@@ -333,6 +417,10 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
             _service.ResolvePrompt(new(ControlPromptAction.Cancel));
             DiagnosticLogger.ReverseControl("status_window", "wired_control_window_closed",
                 ("window_id", _viewModel.WindowId), ("handle", _nativeHandle));
+            ObserveOwner("closed");
+            if (!Dispatcher.HasShutdownStarted)
+                _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle,
+                    new Action(() => ObserveOwner("settled")));
             _viewModel.CountdownElapsed -= OnCountdownElapsed;
             _viewModel.Dispose();
             if (ReferenceEquals(_active, this)) _active = null;
@@ -342,13 +430,15 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         Action? retry = null, Action? countdownElapsed = null)
     {
         if (!service.ShouldShowWindow) return;
+        var nativeOwner = ResolveNativeOwner(owner, service);
         var active = Application.Current.Windows.OfType<ReverseControlStatusWindow>()
             .FirstOrDefault(window => window.IsVisible && ReferenceEquals(window._service, service));
         if (active is not null)
         {
-            if (!ReferenceEquals(active.Owner, owner))
+            if (!ReferenceEquals(active._nativeOwner, nativeOwner) ||
+                (nativeOwner is null && !ReferenceEquals(active.Owner, owner)))
             {
-                active.Owner = owner;
+                active.SetPresentationOwner(owner, nativeOwner);
                 active._viewModel.CancelRequested = null;
                 active._viewModel.RetryRequested = null;
                 active._countdownElapsed = null;
@@ -360,7 +450,7 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
             active.Activate();
             return;
         }
-        _active = new(owner, service, cancel, retry, countdownElapsed);
+        _active = new(owner, service, cancel, retry, countdownElapsed, nativeOwner);
         _active.Show();
         _active.Activate();
         DiagnosticLogger.ReverseControl("status_window", "wired_control_status_window_shown",
@@ -371,7 +461,7 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         var service = new ControlStatusService();
         service.Report(ControlStatusMode.Usb, ControlStage.Connecting, "iPhone",
             LocalizationService.Get("ControlPreparing"), canCancel: false);
-        new ReverseControlStatusWindow(owner, service, null, null, null).Show();
+        new ReverseControlStatusWindow(owner, service, null, null, null, null).Show();
     }
     internal static void CloseActive()
     {
@@ -380,10 +470,10 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
             if (!window.Dispatcher.CheckAccess())
             {
                 _ = window.Dispatcher.BeginInvoke(
-                    DispatcherPriority.Send, new Action(() => { if (!window._closed) window.Close(); }));
+                    DispatcherPriority.Send, new Action(() => { if (!window._closed) window.CloseWithReason("active"); }));
                 return;
             }
-            window.Close();
+            window.CloseWithReason("active");
         }
     }
     internal static void CloseForOwner(Window owner, ControlStatusService service)
@@ -391,13 +481,13 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         foreach (var window in Application.Current.Windows.OfType<ReverseControlStatusWindow>()
             .Where(window => ReferenceEquals(window.Owner, owner) && ReferenceEquals(window._service, service))
             .ToArray())
-            window.Close();
+            window.CloseWithReason("owner");
     }
     private void OnCloseClick(object sender, RoutedEventArgs e)
     {
         if (_viewModel.HasPrompt) _viewModel.ResolvePrompt(ControlPromptAction.Cancel);
         var beginControl = _viewModel.CanBeginControlAfterClose;
-        Close();
+        CloseWithReason("button");
         // Bluetooth control is intentionally gated until the status window is
         // gone. A manual close at the ready stage is an explicit equivalent of
         // waiting for the countdown to finish.
@@ -408,8 +498,71 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         DiagnosticLogger.ReverseControl("status_window", "control_cancel_invoked");
         _viewModel.ResolvePrompt(ControlPromptAction.Cancel);
         _viewModel.CancelRequested?.Invoke();
+        CloseWithReason("cancel");
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel) return;
+        _closingOwner = Owner;
+        _closingNativeOwner = _nativeOwner;
+        ObserveOwner("closing");
+        if (_closingNativeOwner is { } nativeOwner)
+        {
+            if (!IsActive || GetForegroundWindow() != _nativeHandle ||
+                !nativeOwner.IsValid || !IsWindowVisible(nativeOwner.Handle) ||
+                IsIconic(nativeOwner.Handle) || Dispatcher.HasShutdownStarted) return;
+            var activated = SetForegroundWindow(nativeOwner.Handle);
+            if (activated) _ = SetFocus(nativeOwner.Handle);
+            DiagnosticLogger.ReverseControl("status_window", "control_status_owner_activated",
+                ("window_id", _viewModel.WindowId), ("close_reason", _closeReason),
+                ("owner_type", "native_preview"), ("activated", activated));
+            return;
+        }
+        // Give a foreground status window back to its visible workspace before
+        // destroying the HWND. Background countdowns must not steal focus, and
+        // closing a status window must never restore a hidden/minimized owner.
+        if (!IsActive || _closingOwner is not { IsVisible: true } owner ||
+            owner.WindowState == WindowState.Minimized || Dispatcher.HasShutdownStarted) return;
+        try
+        {
+            var activated = owner.Activate();
+            DiagnosticLogger.ReverseControl("status_window", "control_status_owner_activated",
+                ("window_id", _viewModel.WindowId), ("close_reason", _closeReason),
+                ("activated", activated));
+        }
+        catch (InvalidOperationException error)
+        {
+            DiagnosticLogger.ReverseControlWarning("status_window", "control_status_owner_activation_failed",
+                ("window_id", _viewModel.WindowId), ("close_reason", _closeReason),
+                ("error", AppLog.Error(error)));
+        }
+    }
+
+    private void CloseWithReason(string reason)
+    {
+        _closeReason = reason;
         Close();
     }
+
+    private void ObserveOwner(string phase) =>
+        DiagnosticLogger.ReverseControl("status_window", "control_status_owner_observed",
+            ("window_id", _viewModel.WindowId), ("close_reason", _closeReason), ("phase", phase),
+            ("status_active", IsActive), ("status_foreground", GetForegroundWindow() == _nativeHandle),
+            ("owner_type", _closingNativeOwner is not null ? "native_preview" : _closingOwner?.GetType().Name ?? "none"),
+            ("owner_state", _closingNativeOwner is { } native ? !native.IsValid ? "disposed" :
+                IsIconic(native.Handle) ? "Minimized" : "Normal" : _closingOwner?.WindowState.ToString() ?? "none"),
+            ("owner_visible", _closingNativeOwner is { IsValid: true } visibleNative ?
+                IsWindowVisible(visibleNative.Handle) : _closingOwner?.IsVisible ?? false),
+            ("owner_active", _closingNativeOwner is { IsValid: true } activeNative ?
+                GetForegroundWindow() == activeNative.Handle : _closingOwner?.IsActive ?? false));
+
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool IsIconic(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern nint SetFocus(nint hwnd);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     private void OnPromptCardIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (e.NewValue is not true) return;
@@ -439,7 +592,7 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         {
             DiagnosticLogger.ReverseControl("status_window", "wired_control_window_close_called",
                 ("window_id", _viewModel.WindowId), ("handle", _nativeHandle), ("visible", IsVisible));
-            Close();
+            CloseWithReason("countdown");
             if (_closed) _countdownElapsed?.Invoke();
             else
                 DiagnosticLogger.ReverseControlWarning("status_window", "wired_control_auto_close_failed",

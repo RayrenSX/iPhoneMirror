@@ -1,10 +1,12 @@
 # iPhone / iPad 面板分辨率目录
 
-采集日期：2026-10-17。覆盖当日型号索引中的全部 **171 个 ProductType**，对应 **99 份 Apple 官方产品规格**。只包含 iPhone、iPad。
+采集日期：2026-11-13。覆盖当日型号索引中的全部 **174 个 ProductType**，对应 **101 份 Apple 官方产品规格**。只包含 iPhone、iPad。
 
 这里的尺寸是正常竖屏的物理面板像素，不是逻辑点数，也不是 USB/AirPlay 编码器必然输出的尺寸。收录旧设备的规格不代表新增了这些设备的投屏协议支持。只有实际接收并解码的帧才能证明输出达到了原生像素。
 
 型号标识由 [DeviceKit](https://github.com/devicekit/DeviceKit) 提供，并与 [IPSW.me 型号索引](https://api.ipsw.me/v4/devices) 逐项对照；显示像素逐项来自下表的 Apple 官方规格页。iPad Pro M5 两种尺寸使用不同的官方规格页，修正了上游 13 英寸指向 11 英寸页面的问题。
+
+新增型号若尚未进入 DeviceKit，则由更新脚本明确补录并与 IPSW 索引核对。iPhone Duo 的单项规格采用合上时的外屏，型号识别不表示已支持折叠内外屏自动切换。
 
 统一数据位于 [apple-display-catalog.json](../config/apple-display-catalog.json)，其中保留每份规格页的标题、显示参数原文片段和 SHA256。完整下载的原始规格页保存在更新脚本的本地缓存，不下载固件、图片或整个网站。应用运行时使用随包内置数据，不联网查表。
 
@@ -44,6 +46,7 @@
 | iPad Air (11-inch) (M4) | iPad16,8, iPad16,9 | 1640×2360 | 2360 | [Apple](https://support.apple.com/126471) |
 | iPad Pro (11-inch) (M5) | iPad17,1, iPad17,2 | 1668×2420 | 2420 | [Apple](https://support.apple.com/en-us/125406) |
 | iPad Pro (13-inch) (M5) | iPad17,3, iPad17,4 | 2064×2752 | 2752 | [Apple](https://support.apple.com/en-us/125407) |
+| iPad mini (A20 Pro) | iPad19,1, iPad19,2 | 1512×2316 | 2316 | [Apple](https://support.apple.com/en-us/149482) |
 | iPad 2 | iPad2,1, iPad2,2, iPad2,3, iPad2,4 | 768×1024 | 1024 | [Apple](https://support.apple.com/kb/SP622) |
 | iPad mini | iPad2,5, iPad2,6, iPad2,7 | 768×1024 | 1024 | [Apple](https://support.apple.com/kb/SP661) |
 | iPad (3rd generation) | iPad3,1, iPad3,2, iPad3,3 | 1536×2048 | 2048 | [Apple](https://support.apple.com/kb/SP647) |
@@ -105,6 +108,7 @@
 | iPhone 17e | iPhone18,5 | 1170×2532 | 2532 | [Apple](https://support.apple.com/126470) |
 | iPhone 18 Pro | iPhone19,2 | 1206×2622 | 2622 | [Apple](https://support.apple.com/en-us/148590) |
 | iPhone 18 Pro Max | iPhone19,3, iPhone19,7 | 1320×2868 | 2868 | [Apple](https://support.apple.com/en-us/148591) |
+| iPhone Duo | iPhone19,4 | 1398×2034 | 2034 | [Apple](https://support.apple.com/en-us/148588) |
 | iPhone 3GS | iPhone2,1 | 320×480 | 480 | [Apple](https://support.apple.com/kb/SP565) |
 | iPhone 4 | iPhone3,1, iPhone3,2, iPhone3,3 | 640×960 | 960 | [Apple](https://support.apple.com/kb/SP587) |
 | iPhone 4s | iPhone4,1 | 640×960 | 960 | [Apple](https://support.apple.com/kb/SP643) |

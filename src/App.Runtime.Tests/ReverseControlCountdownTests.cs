@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using IPhoneMirror.App.Windows;
 
@@ -39,6 +41,7 @@ internal static class ReverseControlCountdownTests
 
     internal static void Run(Window owner)
     {
+        TestIndependentNativeOwnerRoute(owner);
         foreach (var mode in new[] { "Usb", "Wireless", "Bluetooth" })
             TestQueuedSuccess(owner, mode);
         TestQueuedSuccess(owner, "Usb", workerReports: true);
@@ -46,7 +49,155 @@ internal static class ReverseControlCountdownTests
         TestFailure(owner);
         TestPromptAndRecovery(owner);
         TestManualCloseAndReplacement(owner);
+        TestForegroundCloseReturnsToOwner(owner, "Usb");
+        TestForegroundCloseReturnsToOwner(owner, "Wireless");
+        TestBackgroundCountdownPreservesFocus(owner);
+        TestClosePreservesUnavailableOwner(owner, minimized: false);
+        TestClosePreservesUnavailableOwner(owner, minimized: true);
         Console.WriteLine("Reverse-control countdown runtime tests passed.");
+    }
+
+    private static void TestIndependentNativeOwnerRoute(Window originalOwner)
+    {
+        var app = Application.Current;
+        var previousMain = app.MainWindow;
+        var main = (MainWindow)typeof(Program).GetMethod("CreateWorkspaceTestWindow",
+            BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [app, false, false])!;
+        using var native = new HwndSource(new HwndSourceParameters("Independent control owner fixture")
+        { WindowStyle = 0x10CF0000, Width = 240, Height = 340, PositionX = 800, PositionY = 120 });
+        Window? status = null;
+        try
+        {
+            // This is the real independent-window entry. A missing device exits
+            // after showing status, before any transport or hardware is started.
+            typeof(MainWindow).GetMethod("OnIndependentUsbControlRequested", Instance)!
+                .Invoke(main, ["native-owner-fixture-missing-device", native.Handle]);
+            status = app.Windows.OfType<ReverseControlStatusWindow>().Single();
+            var statusHandle = new WindowInteropHelper(status).Handle;
+            Require(GetWindow(statusHandle, 4) == native.Handle,
+                $"Independent control status must belong to its native preview; expected={native.Handle}, actual={GetWindow(statusHandle, 4)}.");
+            var service = status.DataContext.GetType().GetField("_service", Instance)!.GetValue(status.DataContext)!;
+            Require(ReferenceEquals(status, Show(main, service)), "VM continuation must reuse the independent status window.");
+            Require(GetWindow(statusHandle, 4) == native.Handle,
+                "A later VM Show(main, service) must preserve the independent native owner.");
+            main.WindowState = WindowState.Minimized;
+            Pump(TimeSpan.FromMilliseconds(80));
+            Require(IsWindowVisible(statusHandle) && !IsIconic(statusHandle),
+                "Minimizing main must not minimize an independent preview's control prompt.");
+            main.Hide();
+            Pump(TimeSpan.FromMilliseconds(80));
+            Require(IsWindowVisible(statusHandle), "Hiding main must not hide the independent control prompt.");
+            ActivateForeground(status);
+            var mainStateBeforeClose = main.WindowState;
+            var mainVisibleBeforeClose = main.IsVisible;
+            Console.WriteLine($"Native close before: foreground={GetForegroundWindow()}, status={statusHandle}, " +
+                $"status_active={status.IsActive}, native={native.Handle}, native_visible={IsWindowVisible(native.Handle)}, " +
+                $"native_minimized={IsIconic(native.Handle)}, main_state={mainStateBeforeClose}, main_visible={mainVisibleBeforeClose}.");
+            Call(status, "OnCloseClick", status, new RoutedEventArgs());
+            Pump(TimeSpan.FromMilliseconds(80));
+            Console.WriteLine($"Native close after: foreground={GetForegroundWindow()}, expected_native={native.Handle}, " +
+                $"status_visible={status.IsVisible}, main_state={main.WindowState}, main_visible={main.IsVisible}.");
+            Require(GetForegroundWindow() == native.Handle,
+                $"Closing independent status must return to its native preview; expected={native.Handle}, actual={GetForegroundWindow()}.");
+            Require(main.IsVisible == mainVisibleBeforeClose && main.WindowState == mainStateBeforeClose,
+                "Closing independent status must preserve main's actual hidden/minimized state before close.");
+            status = Show(main, service);
+            Require(GetWindow(new WindowInteropHelper(status).Handle, 4) == native.Handle,
+                "Closing a status window must retain the live native route for later failure/recovery.");
+            ActivateForeground(status);
+            Call(service, "Ready", Enum.Parse(ModeType, "Usb"), "Native countdown fixture", "Connected");
+            Pump(TimeSpan.FromSeconds(5.5));
+            Require(!status.IsVisible && GetForegroundWindow() == native.Handle &&
+                main.IsVisible == mainVisibleBeforeClose && main.WindowState == mainStateBeforeClose,
+                "The real native-owner countdown must close, return focus to its preview and preserve main state.");
+            Console.WriteLine("PASS: actual five-second native-owner countdown returns focus without restoring main.");
+            Call(service, "Begin", Enum.Parse(ModeType, "Usb"), "Native owner fixture");
+            status = Show(main, service);
+            var cover = new Window { Title = "Independent status background fixture", Width = 240, Height = 160,
+                ShowInTaskbar = false, Style = null };
+            try
+            {
+                cover.Show(); ActivateForeground(cover);
+                Require(cover.IsActive && !status.IsActive, "Independent background-close fixture must activate another window.");
+                Call(status, "OnCloseClick", status, new RoutedEventArgs());
+                Pump(TimeSpan.FromMilliseconds(80));
+                Require(cover.IsActive && GetForegroundWindow() == new WindowInteropHelper(cover).Handle,
+                    "Closing background native-owned status must preserve foreground focus.");
+            }
+            finally { cover.Close(); }
+            foreach (var minimize in new[] { false, true })
+            {
+                status = Show(main, service);
+                ShowWindow(native.Handle, minimize ? 6 : 0);
+                Pump(TimeSpan.FromMilliseconds(80));
+                Call(status, "OnCloseClick", status, new RoutedEventArgs());
+                Pump(TimeSpan.FromMilliseconds(80));
+                Require(minimize ? IsIconic(native.Handle) : !IsWindowVisible(native.Handle),
+                    "Closing independent status must preserve its native owner's hidden/minimized state.");
+                ShowWindow(native.Handle, 9);
+            }
+            main.WindowState = WindowState.Normal;
+            main.Show(); main.Activate();
+            typeof(MainWindow).GetMethod("ShowReverseControlStatus", Instance)!
+                .Invoke(main, [Enum.Parse(ModeType, "Usb"), "native-owner-fixture-missing-device", (nint)0]);
+            status = app.Windows.OfType<ReverseControlStatusWindow>().Single();
+            Require(ReferenceEquals(status.Owner, main), "An explicit main-window start must replace the previous native route.");
+            using var replacement = new HwndSource(new HwndSourceParameters("Replacement independent owner fixture")
+            { WindowStyle = 0x10CF0000, Width = 240, Height = 340, PositionX = 1080, PositionY = 120 });
+            typeof(MainWindow).GetMethod("OnIndependentUsbControlRequested", Instance)!
+                .Invoke(main, ["native-owner-fixture-missing-device", replacement.Handle]);
+            status = app.Windows.OfType<ReverseControlStatusWindow>().Single();
+            Require(GetWindow(new WindowInteropHelper(status).Handle, 4) == replacement.Handle,
+                "Another explicit independent start must rebind the native owner.");
+            native.Dispose();
+            Pump(TimeSpan.FromMilliseconds(80));
+            Require(status.IsVisible, "Disposing an old native owner must not close a rerouted status window.");
+            replacement.Dispose();
+            Pump(TimeSpan.FromMilliseconds(80));
+            Require(!status.IsVisible, "Destroying the native owner must close its control status window.");
+            status = Show(main, service);
+            Require(ReferenceEquals(status.Owner, main), "A disposed native owner must release the route before the next Show.");
+            Console.WriteLine("PASS: real independent menu owner, VM reuse, hidden/minimized main, native close focus and owner disposal.");
+        }
+        finally
+        {
+            if (status?.IsVisible == true) status.Close();
+            typeof(Program).GetMethod("CloseWorkspaceTestWindow", BindingFlags.Static | BindingFlags.NonPublic)!
+                .Invoke(null, [main]);
+            app.MainWindow = previousMain;
+            originalOwner.Activate();
+        }
+    }
+
+    [DllImport("user32.dll")] private static extern nint GetWindow(nint hwnd, uint command);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool IsIconic(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int command);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint from, uint to, bool attach);
+
+    private static void ActivateForeground(Window window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        window.Activate(); SetForegroundWindow(handle);
+        if (GetForegroundWindow() != handle)
+        {
+            // Match the native-focus fixtures: the unattended launcher may not
+            // own the system foreground queue. Attach only for this explicit
+            // fixture activation, then detach before exercising production close.
+            var foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+            var currentThread = GetCurrentThreadId();
+            var attached = foregroundThread != 0 && foregroundThread != currentThread &&
+                AttachThreadInput(currentThread, foregroundThread, true);
+            try { window.Activate(); SetForegroundWindow(handle); }
+            finally { if (attached) AttachThreadInput(currentThread, foregroundThread, false); }
+        }
+        Pump(TimeSpan.FromMilliseconds(80));
+        Require(window.IsActive && GetForegroundWindow() == handle,
+            $"Foreground fixture activation failed: expected={handle}, actual={GetForegroundWindow()}.");
     }
 
     private static void TestQueuedSuccess(Window owner, string modeName, bool workerReports = false)
@@ -238,6 +389,86 @@ internal static class ReverseControlCountdownTests
             Console.WriteLine("PASS: Bluetooth manual close, instance replacement and queued updates after disposal.");
         }
         finally { if (replacement.IsVisible) replacement.Close(); }
+    }
+
+    private static void TestForegroundCloseReturnsToOwner(Window owner, string modeName)
+    {
+        var service = Activator.CreateInstance(ServiceType, nonPublic: true)!;
+        Call(service, "Begin", Enum.Parse(ModeType, modeName), "Runtime test iPhone");
+        var window = Show(owner, service);
+        try
+        {
+            Pump(TimeSpan.FromMilliseconds(80));
+            Require(window.IsActive, "The foreground-close fixture must activate its status window.");
+            Call(window, "OnCloseClick", window, new RoutedEventArgs());
+            Pump(TimeSpan.FromMilliseconds(80));
+            Console.WriteLine($"{modeName} foreground close: owner_state={owner.WindowState}, " +
+                $"owner_visible={owner.IsVisible}, owner_active={owner.IsActive}");
+            Require(!window.IsVisible && owner.IsVisible && owner.WindowState != WindowState.Minimized && owner.IsActive,
+                "Closing a foreground control status window must return to the visible owner without minimizing it.");
+        }
+        finally { if (window.IsVisible) window.Close(); }
+    }
+
+    private static void TestBackgroundCountdownPreservesFocus(Window owner)
+    {
+        var service = Activator.CreateInstance(ServiceType, nonPublic: true)!;
+        var mode = Enum.Parse(ModeType, "Wireless");
+        Call(service, "Begin", mode, "Runtime test iPhone");
+        var window = Show(owner, service);
+        var cover = new Window
+        {
+            Title = "Status-close focus fixture", Width = 240, Height = 160,
+            ShowInTaskbar = false, Style = null,
+        };
+        try
+        {
+            Call(service, "Ready", mode, "Runtime test iPhone", "Connected");
+            Pump(TimeSpan.FromMilliseconds(80));
+            cover.Show();
+            cover.Activate();
+            Pump(TimeSpan.FromMilliseconds(80));
+            Require(cover.IsActive && !window.IsActive,
+                "The background-close fixture must put another window in the foreground.");
+            Call(window, "OnCountdownElapsed");
+            Pump(TimeSpan.FromMilliseconds(80));
+            Require(!window.IsVisible && cover.IsActive && owner.WindowState != WindowState.Minimized,
+                "A background status countdown must close without activating or minimizing its owner.");
+            Console.WriteLine("PASS: background countdown preserves the foreground window.");
+        }
+        finally
+        {
+            if (window.IsVisible) window.Close();
+            cover.Close();
+            owner.Activate();
+        }
+    }
+
+    private static void TestClosePreservesUnavailableOwner(Window owner, bool minimized)
+    {
+        var service = Activator.CreateInstance(ServiceType, nonPublic: true)!;
+        Call(service, "Begin", Enum.Parse(ModeType, "Usb"), "Runtime test iPhone");
+        var window = Show(owner, service);
+        try
+        {
+            if (minimized) owner.WindowState = WindowState.Minimized;
+            else owner.Hide();
+            Pump(TimeSpan.FromMilliseconds(80));
+            Call(window, "OnCloseClick", window, new RoutedEventArgs());
+            Pump(TimeSpan.FromMilliseconds(80));
+            Require(!window.IsVisible && (minimized
+                    ? owner.WindowState == WindowState.Minimized
+                    : !owner.IsVisible),
+                "Closing a control status window must preserve an owner's hidden/minimized state.");
+            Console.WriteLine($"PASS: status close preserves owner {(minimized ? "minimized" : "hidden")} state.");
+        }
+        finally
+        {
+            if (window.IsVisible) window.Close();
+            owner.WindowState = WindowState.Normal;
+            owner.Show();
+            owner.Activate();
+        }
     }
 
     private static Window Show(Window owner, object service, Action? completed = null)

@@ -86,6 +86,7 @@ internal static class WirelessReceiverConfiguration
     }
 
     internal const string DefaultReceiverName = "iPhoneMirror AirPlay";
+    internal const string MediaReceiverName = "iPhoneMirror Video";
     internal const string ExecutableName = "iPhoneMirror.WirelessHost.exe";
     internal const string UxPlayExecutableName = "iPhoneMirror.UxPlayHost.exe";
     private static readonly string[] OriginalRequiredRuntimeFiles =
@@ -226,7 +227,7 @@ internal static class WirelessReceiverConfiguration
     }
 
     internal static bool SupportsMediaCast(WirelessReceiverBackend backend) =>
-        NormalizeBackend(backend) == WirelessReceiverBackend.Original;
+        true; // The dedicated video receiver is independent of the mirror backend.
 
     internal static bool RequiresOriginalQualityWarning(WirelessDisplayProfile profile) =>
         profile.Id is "maximum" or "maximum-ipad" or "maximum-ipad-pro" || profile.NativeDisplay is not null;
@@ -300,6 +301,18 @@ internal readonly record struct WirelessRuntimeProbeResult(
 internal sealed class WirelessReceiverService
 {
     private readonly object _probeLock = new();
+    private readonly object _availabilityLock = new();
+    private readonly Dictionary<WirelessReceiverBackend, AvailabilitySnapshot> _availability = new();
+    private readonly Func<string, bool> _verifyAvailability;
+
+    private sealed record AvailabilitySnapshot(string Directory, string Metadata,
+        bool Available, long CheckedAt);
+
+    internal WirelessReceiverService(Func<string, bool>? availabilityVerifier = null)
+    {
+        _verifyAvailability = availabilityVerifier ??
+            (directory => RuntimeBinaryIntegrity.VerifyWirelessDirectory(directory, out _));
+    }
 
     internal string? ExecutablePath => GetExecutablePath(WirelessReceiverBackend.Original);
 
@@ -327,10 +340,53 @@ internal sealed class WirelessReceiverService
         var executable = GetExecutablePath(runtime.Backend);
         if (executable is null) return false;
         var directory = Path.GetDirectoryName(executable);
-        return directory is not null &&
-            runtime.RequiredRuntimeFiles.All(file => File.Exists(Path.Combine(directory, file))) &&
-            (!runtime.RequiresBundleIntegrity ||
-                RuntimeBinaryIntegrity.VerifyWirelessDirectory(directory, out _));
+        if (directory is null) return false;
+        lock (_availabilityLock)
+        {
+            var metadata = GetAvailabilityMetadata(directory, executable, runtime.RequiredRuntimeFiles);
+            if (metadata is null) return false;
+            if (!runtime.RequiresBundleIntegrity) return true;
+            if (_availability.TryGetValue(runtime.Backend, out var cached) &&
+                string.Equals(cached.Directory, directory, StringComparison.OrdinalIgnoreCase) &&
+                cached.Metadata == metadata &&
+                Stopwatch.GetElapsedTime(cached.CheckedAt) <
+                    (cached.Available ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(1)))
+                return cached.Available;
+
+            // This is only the frequently queried status display. A launch
+            // always performs the fresh, full verification in ProbeRuntime.
+            // Recheck file metadata so a replacement during hashing cannot
+            // become a cached success for a different payload.
+            var available = _verifyAvailability(directory);
+            if (metadata != GetAvailabilityMetadata(directory, executable, runtime.RequiredRuntimeFiles))
+                return false;
+            _availability[runtime.Backend] = new(directory, metadata, available,
+                Stopwatch.GetTimestamp());
+            return available;
+        }
+    }
+
+    private static string? GetAvailabilityMetadata(string directory, string executable,
+        IReadOnlyList<string> requiredFiles)
+    {
+        try
+        {
+            var metadata = new System.Text.StringBuilder();
+            foreach (var path in requiredFiles.Select(file => Path.Combine(directory, file)).Prepend(executable))
+            {
+                var file = new FileInfo(path);
+                if (!file.Exists) return null;
+                metadata.Append(file.Length).Append(':').Append(file.LastWriteTimeUtc.Ticks)
+                    .Append(':').Append(file.CreationTimeUtc.Ticks).Append(':')
+                    .Append((int)file.Attributes).Append(';');
+            }
+            return metadata.ToString();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+            ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     internal WirelessRuntimeProbeResult ProbeRuntime() =>

@@ -1,0 +1,176 @@
+{
+  "schema": 1,
+  "sourceRepository": "https://github.com/pixelsign/html5-device-mockups",
+  "gitTreeSha": "fcac3e1232663dfddf28619432c7b343ba4e794c",
+  "firstGenerationIPadProEvidence": {
+    "commit": "7169a948288b197c1037dc56ca1a234df1dc467b",
+    "date": "2017-04-22",
+    "url": "https://github.com/pixelsign/html5-device-mockups/commit/7169a948288b197c1037dc56ca1a234df1dc467b",
+    "explanation": "The iPad Pro artwork was added before the second generation was released in June 2017."
+  },
+  "groups": [
+    {
+      "name": "iPhone 5",
+      "productTypes": [
+        "iPhone5,1",
+        "iPhone5,2"
+      ],
+      "geometrySource": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/src/scss/devices.scss",
+      "credits": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/CREDITS.txt",
+      "finishes": [
+        {
+          "color": "Black",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/1c0f5fc1c1146d6caac3c99ae0876dcfae6d59c8",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPhone5/portrait_black.png",
+          "screen": [
+            63,
+            236,
+            641,
+            1136
+          ]
+        },
+        {
+          "color": "White",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/a201438bf7f78b235f83c35020a952d63636e380",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPhone5/portrait_white.png",
+          "screen": [
+            63,
+            236,
+            641,
+            1136
+          ]
+        }
+      ]
+    },
+    {
+      "name": "iPhone 6",
+      "productTypes": [
+        "iPhone7,2"
+      ],
+      "geometrySource": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/src/scss/devices.scss",
+      "credits": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/CREDITS.txt",
+      "finishes": [
+        {
+          "color": "Space Gray",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/9fed8be77087a54818343de4cfc2a69ee354b5cf",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPhone6/portrait_black.png",
+          "screen": [
+            52,
+            217,
+            751,
+            1334
+          ]
+        },
+        {
+          "color": "Silver",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/29677d783320f2176641546d641cd3b29830b641",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPhone6/portrait_white.png",
+          "screen": [
+            52,
+            217,
+            751,
+            1334
+          ]
+        },
+        {
+          "color": "Gold",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/72968364a570abd37f03e5eac91b775c6342c0e0",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPhone6/portrait_gold.png",
+          "screen": [
+            52,
+            217,
+            751,
+            1334
+          ]
+        }
+      ]
+    },
+    {
+      "name": "iPhone 6 Plus",
+      "productTypes": [
+        "iPhone7,1"
+      ],
+      "geometrySource": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/src/scss/devices.scss",
+      "credits": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/CREDITS.txt",
+      "finishes": [
+        {
+          "color": "Space Gray",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/5065567da33845ba29d488d43e88d26a528d9f29",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPhone6Plus/portrait_black.png",
+          "screen": [
+            81,
+            287,
+            1080,
+            1920
+          ]
+        },
+        {
+          "color": "Silver",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/2c94dc69de5139f2962dab2f21a5a907a9bed936",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPhone6Plus/portrait_white.png",
+          "screen": [
+            81,
+            287,
+            1080,
+            1920
+          ]
+        },
+        {
+          "color": "Gold",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/ae5e2361763f653e8b3444d3a15e4bd68d14cfac",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPhone6Plus/portrait_gold.png",
+          "screen": [
+            81,
+            287,
+            1080,
+            1920
+          ]
+        }
+      ]
+    },
+    {
+      "name": "iPad Pro (12.9-inch)",
+      "productTypes": [
+        "iPad6,7",
+        "iPad6,8"
+      ],
+      "geometrySource": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/src/scss/devices.scss",
+      "credits": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/CREDITS.txt",
+      "finishes": [
+        {
+          "color": "Space Gray",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/fae8f97380c9a220accb94672aed9e35fdc941aa",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPadPro/portrait_black.png",
+          "screen": [
+            123,
+            224,
+            2047,
+            2732
+          ]
+        },
+        {
+          "color": "Silver",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/b8b36cd7db0973ad4f9d29a3fa78f7f243310d96",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPadPro/portrait_white.png",
+          "screen": [
+            123,
+            224,
+            2047,
+            2732
+          ]
+        },
+        {
+          "color": "Gold",
+          "url": "https://api.github.com/repos/pixelsign/html5-device-mockups/git/blobs/0cb7f0c9910cab7601201b5e6a2173dd66e959ee",
+          "source": "https://github.com/pixelsign/html5-device-mockups/blob/fcac3e1232663dfddf28619432c7b343ba4e794c/device-mockups/iPadPro/portrait_gold.png",
+          "screen": [
+            123,
+            225,
+            2047,
+            2731
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "UpstreamCommit": "f47a3ffcfa9458aac40562d73c314de1447df013",
+  "GoVersion": "go version go1.25.4 windows/amd64",
+  "Compiler": "gcc.exe (Rev7, Built by MSYS2 project) 16.2.0",
+  "BinarySha256": "85832a1f7805c20060b56ef48426db13831c7c2391e365dbe952e74cb0a70919",
+  "Sources": [
+    {
+      "Sha256": "2287f7a409d746cdf425c59f200aab7a4b8c37a64af24f727cf77818f7516643",
+      "Path": "cmd/fcup-smoke/main.go"
+    },
+    {
+      "Sha256": "5a51ab90da4a2d9f40dcd44d5a78d450d3db2ea6bfb006162a076c3a669670c9",
+      "Path": "cmd/smoke/main.go"
+    },
+    {
+      "Sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "Path": "COPYING.GPL"
+    },
+    {
+      "Sha256": "e524c1db3c812e1287acccf509843dfe07cad854ed72350ef4e3232f37dd9e4f",
+      "Path": "go.mod"
+    },
+    {
+      "Sha256": "d43f861c4c344cf324b1e930fd8dc73570cd856016b3b99d5820dbcd82ca721f",
+      "Path": "internal/fairplay/fairplay_crypto.go"
+    },
+    {
+      "Sha256": "f805a164e978e9a6e92b61ebcb07963551aca9d632735f349035c0f7bab0f1f6",
+      "Path": "internal/fairplay/fairplay_key_test.go"
+    },
+    {
+      "Sha256": "44da638e7df707f43931655ac31dfcb223a874609af8629afdace9488f20cd83",
+      "Path": "internal/fairplay/fairplay_md5.go"
+    },
+    {
+      "Sha256": "86d2f0a60302aa211a8e6d3993162913e549a8553f6098fa74bcba15a27f4d6c",
+      "Path": "internal/fairplay/fairplay_message.go"
+    },
+    {
+      "Sha256": "a8d02d05286df5528b56f6631fba837528bc3b2e6414c594a51d1251e0f14030",
+      "Path": "internal/fairplay/fairplay_sap.go"
+    },
+    {
+      "Sha256": "afa95cb683e579377e58d5ce3354689578fd50bb658a93edc0a5e6e31e1f4ae4",
+      "Path": "internal/fairplay/fairplay_vectors_test.go"
+    },
+    {
+      "Sha256": "c2044c86e6a3efc32304edc13bfb7fac3e2823f17ddfaa04dd40aa829f99f1c2",
+      "Path": "internal/fairplay/fpsap_tables.go"
+    },
+    {
+      "Sha256": "3bbfa4f5aa811128b7e628fd675ac9353504f0e42d7cfe9d57225227c71b0fca",
+      "Path": "internal/fairplay/fpsap_test.go"
+    },
+    {
+      "Sha256": "ad4d58f64d74d739feaf0dbf81c0f0c3091fa615d215e2e751e964e766976342",
+      "Path": "internal/fairplay/fpsap.go"
+    },
+    {
+      "Sha256": "28ab87dde4310a540411aa5ae1d37b82695845ed7f06c13b445879a13893a6d0",
+      "Path": "internal/fairplay/helpers_test.go"
+    },
+    {
+      "Sha256": "f218daaf70351c46b9fbd03e468fd7f43f984fc55e8306e76c829b9ac6c5af51",
+      "Path": "internal/fairplay/receiver_fairplay_test.go"
+    },
+    {
+      "Sha256": "8ede8b3d78df2a8b9e38ea506cdd9ebe0d005af6d40eed1d67339b2bc3aee93e",
+      "Path": "internal/fairplay/receiver_fairplay.go"
+    },
+    {
+      "Sha256": "3426956e488b30b2f238c6b82647ede8d50d7c438e15e352ac59da4faa2b877f",
+      "Path": "internal/fairplay/session_test.go"
+    },
+    {
+      "Sha256": "1bf34f2b17c476560ce98e3990cfb7cd2117af14e991ee757ffdd6e7cb464ffd",
+      "Path": "internal/fairplay/session.go"
+    },
+    {
+      "Sha256": "9f7095b17c425a5e7d435ea882d7a8220117d0a4d3f8e290720606518bbb66c5",
+      "Path": "internal/fpcontrol/conn_test.go"
+    },
+    {
+      "Sha256": "dbb9c1917404dd69432a0c571854fef6b90a9bd6e93163e6eaebe8e444a4fb87",
+      "Path": "internal/fpcontrol/conn.go"
+    },
+    {
+      "Sha256": "b8568c8a8bd8b4e8102eb5cdcb1703ff4bff6709ca23342f9ba5a51418cc969b",
+      "Path": "internal/fpcontrol/control_test.go"
+    },
+    {
+      "Sha256": "58f3b191637d9d3088ef4884b613b0e5dd374d2c660ca01e332ebd02897d9eb3",
+      "Path": "internal/fpcontrol/control.go"
+    },
+    {
+      "Sha256": "77c9ee8c2f812b44d1484389108d1dd10c17cb3e31f93468a67211f8db2c6b43",
+      "Path": "internal/fpcontrol/testdata/native-gcm.json"
+    },
+    {
+      "Sha256": "d2c4c1dd8aa433564ebe790beb4d2c861c999ea09dd0c933f4de8b4a32de8e62",
+      "Path": "internal/fpcontrol/testdata/wrapped-material.json"
+    },
+    {
+      "Sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+      "Path": "LICENSE"
+    },
+    {
+      "Sha256": "570156750068dc5e0a15e5dfb09059f54b7886f186fd650fc5c35e037884dbf3",
+      "Path": "main.go"
+    },
+    {
+      "Sha256": "574d25f7ed7a8abad1b4ddb7b9586f71b70730757ecb3b1717d761cc411eebfb",
+      "Path": "media/broker_test.go"
+    },
+    {
+      "Sha256": "67fcdf9ab720afa5101d4386c833693611d05ebb9b02b5651534659347fd87da",
+      "Path": "media/broker.go"
+    },
+    {
+      "Sha256": "a740803b59fa0d9083a964cfa832999feca747856a491deffa226cac443ab436",
+      "Path": "media/track_integration_test.go"
+    },
+    {
+      "Sha256": "4137d87e4fb46360c4588d97174b9a3cbd53deced630acedcabc3b2745cfd79c",
+      "Path": "media/track_test.go"
+    },
+    {
+      "Sha256": "15281b55da6cad1c2f9cbc055362aa06408f663ab5f62938bafab04b8d225960",
+      "Path": "media/track.go"
+    },
+    {
+      "Sha256": "617ba4e68a531d64551590a9234993f2652ac1670a6611260d55fd6b2419a5be",
+      "Path": "media/variant_integration_test.go"
+    },
+    {
+      "Sha256": "536047c6ed967896c028fb1d6fce02868b1f565099106b36bda21ff9e5959b9c",
+      "Path": "media/variant_test.go"
+    },
+    {
+      "Sha256": "d76d33068f72934143f799bea3dba578ec6424193f77f2dd20171d58e5f76584",
+      "Path": "media/variant.go"
+    },
+    {
+      "Sha256": "8b816ff36fa1812eb972af7041e6cc40145f0c25db072db55e0c1c68bac8386d",
+      "Path": "receiver/state_test.go"
+    },
+    {
+      "Sha256": "7185317b6bd97be66f391dd189834eefe0cf552a72339479a0c470e8834cdbf5",
+      "Path": "receiver/state.go"
+    },
+    {
+      "Sha256": "bc66bdcf77720512af113b6fcc12bec6ba68c1f87c0113d4eec64b8a2e4daca3",
+      "Path": "SOURCE.md"
+    },
+    {
+      "Sha256": "7389ffcc69e56efc7c8672f3dca11368cd8d75c8ca16750dcb545655cd679ab0",
+      "Path": "THIRD_PARTY_NOTICES.md"
+    },
+    {
+      "Sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "Path": "third_party/doubletake/COPYING.GPL"
+    },
+    {
+      "Sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+      "Path": "third_party/doubletake/LICENSE"
+    },
+    {
+      "Sha256": "db4f82b594ce1ae7d9d19ea8cfb7aceed9d7a3d99fe74873ecb710efd0cf7cf4",
+      "Path": "third_party/licenses/github.com/hashicorp/mdns/LICENSE"
+    },
+    {
+      "Sha256": "f200ff9bad73385db2ed81e23ee2c1fe069eb5776e17fae4ee85ad0a9e1361a5",
+      "Path": "third_party/licenses/github.com/miekg/dns/LICENSE"
+    },
+    {
+      "Sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "Path": "third_party/licenses/golang.org/x/crypto/LICENSE"
+    },
+    {
+      "Sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "Path": "third_party/licenses/golang.org/x/net/LICENSE"
+    },
+    {
+      "Sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "Path": "third_party/licenses/golang.org/x/sys/unix/LICENSE"
+    },
+    {
+      "Sha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20",
+      "Path": "third_party/licenses/google.golang.org/protobuf/LICENSE"
+    },
+    {
+      "Sha256": "20d9b7d9372369484ecadae229d3e3efee8029b259e11c9a1b07d2e0a3c82e39",
+      "Path": "third_party/licenses/howett.net/plist/LICENSE"
+    }
+  ]
+}

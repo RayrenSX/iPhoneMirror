@@ -29,7 +29,7 @@
                         <TextBlock Text="{DynamicResource DeveloperToolsTitle}"
                                    Style="{StaticResource SubWindowTitle}"/>
                     </StackPanel>
-                    <TextBlock Text="{DynamicResource DeveloperToolsSubtitle}"
+                    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DeveloperToolsSubtitle}"
                                Style="{StaticResource SubWindowSubtitle}"/>
                 </StackPanel>
                 <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
@@ -37,13 +37,15 @@
                 </Button>
             </Grid>
 
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled" Margin="0,12,0,0">
+            <TabControl x:Name="DeveloperPages" Grid.Row="1" Margin="0,12,0,0" Style="{StaticResource SubWindowTabControl}" SelectionChanged="OnDeveloperPageChanged">
+                <TabItem Header="{DynamicResource DeveloperGeneralTab}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <Border Style="{StaticResource SettingsSection}" Padding="16">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource AutomationTitle}" Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Text="{DynamicResource AutomationHelp}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,0"/>
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource AutomationHelp}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,0"/>
                             <CheckBox x:Name="ApiEnabled" Content="{DynamicResource AutomationEnable}" Margin="0,10,0,8"/>
                             <TextBlock Text="127.0.0.1"/>
                             <Grid Margin="0,8,0,0">
@@ -79,7 +81,7 @@
                         <StackPanel>
                             <TextBlock Text="{DynamicResource DeveloperToolsWorkspaceSection}"
                                        Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Text="{DynamicResource DeveloperToolsWorkspaceHint}"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DeveloperToolsWorkspaceHint}"
                                        Style="{StaticResource SubWindowSubtitle}"/>
                             <ItemsControl ItemsSource="{Binding WorkspaceItems}" Margin="0,12,0,0">
                                 <ItemsControl.ItemsPanel>
@@ -100,7 +102,7 @@
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Title}" FontSize="{DynamicResource BodyFontSize}"
                                                                FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding Description}" FontSize="{DynamicResource CaptionFontSize}"
+                                                    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding Description}" FontSize="{DynamicResource CaptionFontSize}"
                                                                Foreground="{DynamicResource MutedTextBrush}"
                                                                TextTrimming="CharacterEllipsis"/>
                                                 </StackPanel>
@@ -116,7 +118,7 @@
                         <StackPanel>
                             <TextBlock Text="{DynamicResource DeveloperToolsWindowsSection}"
                                        Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Text="{DynamicResource DeveloperToolsWindowsHint}"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DeveloperToolsWindowsHint}"
                                        Style="{StaticResource SubWindowSubtitle}"/>
                             <ItemsControl ItemsSource="{Binding WindowItems}" Margin="0,12,0,0">
                                 <ItemsControl.ItemsPanel>
@@ -137,7 +139,7 @@
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Title}" FontSize="{DynamicResource BodyFontSize}"
                                                                FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding Description}" FontSize="{DynamicResource CaptionFontSize}"
+                                                    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding Description}" FontSize="{DynamicResource CaptionFontSize}"
                                                                Foreground="{DynamicResource MutedTextBrush}"
                                                                TextTrimming="CharacterEllipsis"/>
                                                 </StackPanel>
@@ -153,7 +155,7 @@
                         <StackPanel>
                             <TextBlock Text="{DynamicResource DeveloperToolsParametersSection}"
                                        Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Text="{DynamicResource DeveloperToolsParametersHint}"
+                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DeveloperToolsParametersHint}"
                                        Style="{StaticResource SubWindowSubtitle}"/>
                             <Grid Margin="0,14,0,0">
                                 <Grid.ColumnDefinitions>
@@ -246,6 +248,12 @@
                     </Border>
                 </StackPanel>
             </ScrollViewer>
+                </TabItem>
+                <TabItem x:Name="DeviceToolsTab" Header="{DynamicResource DeveloperDeviceToolsTab}" AutomationProperties.AutomationId="DeveloperDeviceToolsTab">
+                    <ContentControl x:Name="DeveloperDeviceHubHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                                    Focusable="False" IsTabStop="False" FocusVisualStyle="{x:Null}"/>
+                </TabItem>
+            </TabControl>
 
             <Grid Grid.Row="2" Margin="0,12,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

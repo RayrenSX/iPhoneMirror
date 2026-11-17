@@ -411,12 +411,21 @@
                                     Value="{DynamicResource AccentBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="IconRoot" Property="Opacity" Value="0.4"/>
+                            <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledTextBrush}"/>
+                            <Setter TargetName="IconRoot" Property="Background" Value="Transparent"/>
+                            <Setter TargetName="IconRoot" Property="BorderBrush" Value="Transparent"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledTextBrush}"/>
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style x:Key="TitleBarButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
@@ -460,7 +469,9 @@
                                     Value="{DynamicResource FocusStrokeBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="CloseRoot" Property="Opacity" Value="0.4"/>
+                            <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledTextBrush}"/>
+                            <Setter TargetName="CloseRoot" Property="Background" Value="Transparent"/>
+                            <Setter TargetName="CloseRoot" Property="BorderBrush" Value="Transparent"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

@@ -30,7 +30,17 @@ try {
             -i "testsrc2=size=$($entry[1]):rate=6" -frames:v 1 -c:v libx264 -bf 0 -tune zerolatency `
             -pix_fmt yuv420p -f h264 (Join-Path $stage ($entry[0] + '.h264'))
         if ($LASTEXITCODE) { throw 'H.264 channel fixture generation failed.' }
+        & $videoEncoder -hide_banner -loglevel error -nostdin -f lavfi `
+            -i "testsrc2=size=$($entry[1]):rate=6" -frames:v 1 -c:v libx265 `
+            -x265-params 'log-level=error:bframes=0' -tune zerolatency -pix_fmt yuv420p `
+            -f hevc (Join-Path $stage ($entry[0] + '.hevc'))
+        if ($LASTEXITCODE) { throw 'HEVC channel fixture generation failed.' }
     }
+    & $videoEncoder -hide_banner -loglevel error -nostdin -f lavfi `
+        -i 'testsrc2=size=96x64:rate=6' -frames:v 1 -c:v libx265 `
+        -x265-params 'log-level=error:bframes=0' -tune zerolatency -pix_fmt yuv420p10le `
+        -f hevc (Join-Path $stage 'main10.hevc')
+    if ($LASTEXITCODE) { throw 'HEVC Main10 channel fixture generation failed.' }
     & $cmake -S (Join-Path $PSScriptRoot 'airplay-upstream-tests') -B (Join-Path $stage 'build') `
         -A x64 "-DRECEIVER=$($receiver.Replace('\','/'))"
     if ($LASTEXITCODE) { throw 'Could not configure the receiver library tests.' }
@@ -46,7 +56,8 @@ try {
     & (Join-Path $runtime 'airplay_upstream_smoke.exe') (Join-Path $stage 'aac-eld.frames')
     if ($LASTEXITCODE) { throw 'Receiver library regression failed.' }
     & (Join-Path $runtime 'airplay_channel_smoke.exe') (Join-Path $stage 'landscape.h264') `
-        (Join-Path $stage 'portrait.h264')
+        (Join-Path $stage 'portrait.h264') (Join-Path $stage 'landscape.hevc') `
+        (Join-Path $stage 'portrait.hevc') (Join-Path $stage 'main10.hevc')
     if ($LASTEXITCODE) { throw 'Receiver video-channel regression failed.' }
 }
 finally { $env:Path = $previousPath }

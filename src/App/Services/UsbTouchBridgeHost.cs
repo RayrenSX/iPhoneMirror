@@ -38,6 +38,21 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     }
 
     internal bool IsReady => _bridge.IsReady;
+    internal bool NativeKeyboardVisible { get => _bridge.NativeKeyboardVisible; set => _bridge.NativeKeyboardVisible = value; }
+    internal bool SupportsNativeKeyboardVisibility => _bridge.SupportsNativeKeyboardVisibility;
+    internal async Task<bool> SetNativeKeyboardVisibleAsync(bool visible, Func<bool> current,
+        CancellationToken cancellation = default)
+    {
+        try { return await _bridge.SetNativeKeyboardVisibleAsync(visible, current, cancellation).ConfigureAwait(false); }
+        finally
+        {
+            if (!_bridge.IsReady && State is ReverseControlState.Ready or ReverseControlState.Controlling)
+            {
+                State = ReverseControlState.Error;
+                Raise("error", "native_keyboard_route_unavailable", LocalizationService.Get("ReverseControlBridgeNotReady"));
+            }
+        }
+    }
     internal bool SupportsAutomationClipboard => _bridge.SupportsAutomationClipboard;
     internal bool SupportsDeviceHub => _bridge.SupportsDeviceHub;
     internal Task<System.Text.Json.JsonElement> DeviceHubAsync(string action, object? arguments,

@@ -1,0 +1,1222 @@
+{
+  "schema": 1,
+  "models": {
+    "ipad-7th-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-air-4th-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "green": [
+        "green"
+      ],
+      "rose-gold": [
+        "rose-gold",
+        "rose gold",
+        "4"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ],
+      "sky-blue": [
+        "sky-blue",
+        "sky blue"
+      ]
+    },
+    "ipad-mini-5th-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-pro-11-inch": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-pro-12-9-inch-4th-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-11": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "green": [
+        "green"
+      ],
+      "purple": [
+        "purple"
+      ],
+      "red": [
+        "red",
+        "6"
+      ],
+      "white": [
+        "white",
+        "2"
+      ],
+      "yellow": [
+        "yellow"
+      ]
+    },
+    "iphone-11-pro": {
+      "midnight-green": [
+        "midnight-green",
+        "midnight green"
+      ],
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-11-pro-max": {
+      "midnight-green": [
+        "midnight-green",
+        "midnight green"
+      ],
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-12": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "green": [
+        "green"
+      ],
+      "red": [
+        "red",
+        "6"
+      ],
+      "white": [
+        "white",
+        "2"
+      ]
+    },
+    "iphone-12-mini": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "blue": [
+        "blue",
+        "9"
+      ],
+      "green": [
+        "green",
+        "12"
+      ],
+      "red": [
+        "red",
+        "6",
+        "product red",
+        "(product)red"
+      ],
+      "white": [
+        "white",
+        "2"
+      ]
+    },
+    "iphone-12-pro": {
+      "graphite": [
+        "graphite",
+        "1"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "pacific-blue": [
+        "pacific-blue",
+        "pacific blue"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-12-pro-max": {
+      "graphite": [
+        "graphite",
+        "1"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "pacific-blue": [
+        "pacific-blue",
+        "pacific blue"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-13": {
+      "midnight": [
+        "midnight",
+        "1"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "pink": [
+        "pink"
+      ],
+      "red": [
+        "red",
+        "6"
+      ],
+      "starlight": [
+        "starlight",
+        "2"
+      ]
+    },
+    "iphone-13-mini": {
+      "midnight": [
+        "midnight",
+        "1"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "pink": [
+        "pink"
+      ],
+      "red": [
+        "red",
+        "6"
+      ],
+      "starlight": [
+        "starlight",
+        "2"
+      ]
+    },
+    "iphone-13-pro": {
+      "graphite": [
+        "graphite",
+        "1"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "sierra-blue": [
+        "sierra-blue",
+        "sierra blue"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-13-pro-max": {
+      "graphite": [
+        "graphite",
+        "1"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "sierra-blue": [
+        "sierra-blue",
+        "sierra blue"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-14": {
+      "midnight": [
+        "midnight",
+        "1"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "purple": [
+        "purple"
+      ],
+      "red": [
+        "red",
+        "6"
+      ],
+      "starlight": [
+        "starlight",
+        "2"
+      ]
+    },
+    "iphone-14-plus": {
+      "midnight": [
+        "midnight",
+        "1"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "purple": [
+        "purple"
+      ],
+      "red": [
+        "red",
+        "6"
+      ],
+      "starlight": [
+        "starlight",
+        "2"
+      ]
+    },
+    "iphone-14-pro": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "purple": [
+        "purple"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-14-pro-max": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "purple": [
+        "purple"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-16": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "pink": [
+        "pink"
+      ],
+      "teal": [
+        "teal"
+      ],
+      "ultramarine": [
+        "ultramarine"
+      ],
+      "white": [
+        "white",
+        "2"
+      ]
+    },
+    "iphone-16-plus": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "pink": [
+        "pink"
+      ],
+      "teal": [
+        "teal"
+      ],
+      "ultramarine": [
+        "ultramarine"
+      ],
+      "white": [
+        "white",
+        "2"
+      ]
+    },
+    "iphone-16-pro": {
+      "black-titanium": [
+        "black-titanium",
+        "black titanium",
+        "1"
+      ],
+      "desert-titanium": [
+        "desert-titanium",
+        "desert titanium"
+      ],
+      "natural-titanium": [
+        "natural-titanium",
+        "natural titanium"
+      ],
+      "white-titanium": [
+        "white-titanium",
+        "white titanium",
+        "2"
+      ]
+    },
+    "iphone-16-pro-max": {
+      "black-titanium": [
+        "black-titanium",
+        "black titanium",
+        "1"
+      ],
+      "desert-titanium": [
+        "desert-titanium",
+        "desert titanium"
+      ],
+      "natural-titanium": [
+        "natural-titanium",
+        "natural titanium"
+      ],
+      "white-titanium": [
+        "white-titanium",
+        "white titanium",
+        "2"
+      ]
+    },
+    "iphone-17": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "lavender": [
+        "lavender",
+        "17"
+      ],
+      "mist-blue": [
+        "mist-blue",
+        "mist blue",
+        "9"
+      ],
+      "sage": [
+        "sage",
+        "18"
+      ],
+      "white": [
+        "white",
+        "2"
+      ]
+    },
+    "iphone-17-pro": {
+      "cosmic-orange": [
+        "cosmic-orange",
+        "cosmic orange"
+      ],
+      "deep-blue": [
+        "deep-blue",
+        "deep blue"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-17-pro-max": {
+      "cosmic-orange": [
+        "cosmic-orange",
+        "cosmic orange"
+      ],
+      "deep-blue": [
+        "deep-blue",
+        "deep blue"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-5c": {
+      "blue": [
+        "blue"
+      ],
+      "green": [
+        "green"
+      ],
+      "pink": [
+        "pink"
+      ],
+      "white": [
+        "white",
+        "2"
+      ],
+      "yellow": [
+        "yellow"
+      ]
+    },
+    "iphone-5s": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-6s": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "rose-gold": [
+        "rose-gold",
+        "rose gold",
+        "4"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-6s-plus": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "rose-gold": [
+        "rose-gold",
+        "rose gold",
+        "4"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-7": {
+      "jet-black": [
+        "jet-black",
+        "jet black"
+      ],
+      "matte-black": [
+        "matte-black",
+        "matte black"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "rose-gold": [
+        "rose-gold",
+        "rose gold",
+        "4"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-7-plus": {
+      "jet-black": [
+        "jet-black",
+        "jet black"
+      ],
+      "matte-black": [
+        "matte-black",
+        "matte black"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "rose-gold": [
+        "rose-gold",
+        "rose gold",
+        "4"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-8": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-8-plus": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-se-2nd-generation": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "red": [
+        "red",
+        "6"
+      ],
+      "white": [
+        "white",
+        "2"
+      ]
+    },
+    "iphone-x": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-xr": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "coral": [
+        "coral"
+      ],
+      "red": [
+        "red",
+        "6"
+      ],
+      "white": [
+        "white",
+        "2"
+      ],
+      "yellow": [
+        "yellow"
+      ]
+    },
+    "iphone-xs": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-xs-max": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-air-2": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-air-3rd-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-mini-4": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-se": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "gold": [
+        "gold",
+        "3"
+      ],
+      "rose-gold": [
+        "rose-gold",
+        "rose gold",
+        "4"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-air": {
+      "space-black": [
+        "space-black",
+        "space black",
+        "1"
+      ],
+      "cloud-white": [
+        "cloud-white",
+        "cloud white",
+        "2"
+      ],
+      "light-gold": [
+        "light-gold",
+        "light gold"
+      ],
+      "sky-blue": [
+        "sky-blue",
+        "sky blue"
+      ]
+    },
+    "ipad-air-5th-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "space grey",
+        "1"
+      ]
+    },
+    "ipad-air-11-inch-m2": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "purple": [
+        "purple",
+        "lavender"
+      ],
+      "starlight": [
+        "starlight",
+        "stardust",
+        "2"
+      ]
+    },
+    "ipad-air-13-inch-m2": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "purple": [
+        "purple",
+        "lavender"
+      ],
+      "starlight": [
+        "starlight",
+        "stardust",
+        "2"
+      ]
+    },
+    "ipad-pro-11-inch-3rd-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "space grey",
+        "1"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-pro-12-9-inch-3rd-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "space grey",
+        "1"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-pro-11-inch-m4": {
+      "space-black": [
+        "space-black",
+        "space black",
+        "1"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-pro-13-inch-m4": {
+      "space-black": [
+        "space-black",
+        "space black",
+        "1"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "ipad-mini-a17-pro": {
+      "starlight": [
+        "starlight",
+        "2"
+      ]
+    },
+    "ipad-mini-6th-generation": {
+      "starlight": [
+        "starlight",
+        "2"
+      ]
+    },
+    "iphone-18-pro-max": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "burgundy": [
+        "burgundy",
+        "6"
+      ],
+      "glacier": [
+        "glacier",
+        "9"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-18-pro": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "burgundy": [
+        "burgundy",
+        "6"
+      ],
+      "glacier": [
+        "glacier",
+        "9"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ]
+    },
+    "iphone-15": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "green": [
+        "green"
+      ],
+      "pink": [
+        "pink"
+      ],
+      "yellow": [
+        "yellow"
+      ]
+    },
+    "iphone-15-plus": {
+      "black": [
+        "black",
+        "1"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "green": [
+        "green"
+      ],
+      "pink": [
+        "pink"
+      ],
+      "yellow": [
+        "yellow"
+      ]
+    },
+    "iphone-15-pro": {
+      "black-titanium": [
+        "black-titanium",
+        "black titanium",
+        "1"
+      ],
+      "blue-titanium": [
+        "blue-titanium",
+        "blue titanium"
+      ],
+      "natural-titanium": [
+        "natural-titanium",
+        "natural titanium"
+      ],
+      "white-titanium": [
+        "white-titanium",
+        "white titanium",
+        "2"
+      ]
+    },
+    "iphone-15-pro-max": {
+      "black-titanium": [
+        "black-titanium",
+        "black titanium",
+        "1"
+      ],
+      "blue-titanium": [
+        "blue-titanium",
+        "blue titanium"
+      ],
+      "natural-titanium": [
+        "natural-titanium",
+        "natural titanium"
+      ],
+      "white-titanium": [
+        "white-titanium",
+        "white titanium",
+        "2"
+      ]
+    },
+    "ipad-air-11-inch-m4": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "purple": [
+        "purple"
+      ],
+      "starlight": [
+        "starlight",
+        "2"
+      ]
+    },
+    "ipad-air-13-inch-m4": {
+      "space-gray": [
+        "space-gray",
+        "space gray",
+        "1",
+        "space grey"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "purple": [
+        "purple"
+      ],
+      "starlight": [
+        "starlight",
+        "2"
+      ]
+    },
+    "ipad-a16": {
+      "blue": [
+        "blue"
+      ],
+      "pink": [
+        "pink"
+      ],
+      "silver": [
+        "silver",
+        "2"
+      ],
+      "yellow": [
+        "yellow"
+      ]
+    },
+    "ipad-pro-12-9-inch-2nd-generation": {
+      "space-gray": [
+        "space-gray",
+        "space gray"
+      ],
+      "gold": [
+        "gold"
+      ],
+      "silver": [
+        "silver"
+      ]
+    },
+    "ipad-pro-10-5-inch": {
+      "space-gray": [
+        "space-gray",
+        "space gray"
+      ],
+      "gold": [
+        "gold"
+      ],
+      "silver": [
+        "silver"
+      ]
+    },
+    "ipad-mini-a20-pro": {
+      "midnight": [
+        "midnight"
+      ],
+      "starlight": [
+        "starlight"
+      ]
+    }
+  },
+  "iPhone18IconEvidence": {
+    "reviewedOn": "2026-11-13",
+    "method": "Original Apple icon rim colors matched to the four official product finishes. Actual Lockdown values still require physical-device validation.",
+    "assets": [
+      {
+        "productType": "iPhone19,2",
+        "finish": "black",
+        "token": "1",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,2-1-1-0/online-infobox__3x.png",
+        "sha256": "aee177d444a55c25b691e92835828c4605b95221085f9fd432baae3ad1c21e1a"
+      },
+      {
+        "productType": "iPhone19,2",
+        "finish": "burgundy",
+        "token": "6",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,2-1-6-0/online-infobox__3x.png",
+        "sha256": "d0ccd1e0b51a3d3503b16a3224cd910c3de49a66eb83a238b1ffaa55c8c8cfac"
+      },
+      {
+        "productType": "iPhone19,2",
+        "finish": "glacier",
+        "token": "9",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,2-1-9-0/online-infobox__3x.png",
+        "sha256": "684767d946f6ae76d0e2852acaef0875e9d1ab99575fb801800b3b9ddbc63f44"
+      },
+      {
+        "productType": "iPhone19,2",
+        "finish": "silver",
+        "token": "2",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,2-1-2-0/online-infobox__3x.png",
+        "sha256": "c6001fc1e6051971c3554b8c9814a9641ac59c38934447e7772dcc96be7e05b7"
+      },
+      {
+        "productType": "iPhone19,3",
+        "finish": "black",
+        "token": "1",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,3-1-1-0/online-infobox__3x.png",
+        "sha256": "75a3a8a9b6ab51aa63cca4323f21b4d21812a61b4436de2e4aff8675877a010d"
+      },
+      {
+        "productType": "iPhone19,7",
+        "finish": "black",
+        "token": "1",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,7-1-1-0/online-infobox__3x.png",
+        "sha256": "75a3a8a9b6ab51aa63cca4323f21b4d21812a61b4436de2e4aff8675877a010d"
+      },
+      {
+        "productType": "iPhone19,3",
+        "finish": "burgundy",
+        "token": "6",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,3-1-6-0/online-infobox__3x.png",
+        "sha256": "72911fe690f59a11310d5f6dd1c9c236728b40dc788b43aaf2d4ca161abec541"
+      },
+      {
+        "productType": "iPhone19,7",
+        "finish": "burgundy",
+        "token": "6",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,7-1-6-0/online-infobox__3x.png",
+        "sha256": "72911fe690f59a11310d5f6dd1c9c236728b40dc788b43aaf2d4ca161abec541"
+      },
+      {
+        "productType": "iPhone19,3",
+        "finish": "glacier",
+        "token": "9",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,3-1-9-0/online-infobox__3x.png",
+        "sha256": "a53120dbfc9e7c77b19f963dea343546485bdc64027cf2c6ce526871692f72f8"
+      },
+      {
+        "productType": "iPhone19,7",
+        "finish": "glacier",
+        "token": "9",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,7-1-9-0/online-infobox__3x.png",
+        "sha256": "a53120dbfc9e7c77b19f963dea343546485bdc64027cf2c6ce526871692f72f8"
+      },
+      {
+        "productType": "iPhone19,3",
+        "finish": "silver",
+        "token": "2",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,3-1-2-0/online-infobox__3x.png",
+        "sha256": "7859f099381429ae0d4d3c1f3f477dafb387970c3e2c14f8101072eb79840d19"
+      },
+      {
+        "productType": "iPhone19,7",
+        "finish": "silver",
+        "token": "2",
+        "source": "https://statici.icloud.com/fmipmobile/deviceImages-9.0/iPhone/iPhone19,7-1-2-0/online-infobox__3x.png",
+        "sha256": "7859f099381429ae0d4d3c1f3f477dafb387970c3e2c14f8101072eb79840d19"
+      }
+    ]
+  }
+}

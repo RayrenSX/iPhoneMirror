@@ -16,7 +16,18 @@
 #include "sha512.h"
 #include "aes.h"
 #include "compat.h"
+#include "pairing.h"
+#include "ed25519.h"
+#include "aes_ctr.h"
+#include "http_response.h"
+#include "airplay-play-request.h"
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
+static int contains_bytes(const char *wire, int length, const char *needle) {
+    size_t count = strlen(needle);
+    for (size_t i = 0; i + count <= (size_t)length; ++i)
+        if (!memcmp(wire + i, needle, count)) return 1;
+    return 0;
+}
 static HANDLE state_event, frame_event, geometry_event, disconnected_event;
 static volatile LONG last_state, video_length, video_type;
 static unsigned char video_bytes[1024];
@@ -507,6 +518,86 @@ static void test_ipv6(logger_t *logger) {
     puts("IPv6: binary remote address, data accept/reconnect/decrypt, audio sockets and bounded stop passed.");
 }
 int main(int argc, char **argv) {
+    const char play_text[] = "Content-Location: http://127.0.0.1/video.mp4\r\nStart-Position: 0.25\r\n";
+    plist_t play = iphone_mirror_play_request(play_text, sizeof(play_text) - 1);
+    CHECK(play != NULL);
+    char *play_url = NULL;
+    double play_position = 0;
+    plist_get_string_val(plist_dict_get_item(play, "Content-Location"), &play_url);
+    plist_get_real_val(plist_dict_get_item(play, "Start-Position"), &play_position);
+    CHECK(play_url && !strcmp(play_url, "http://127.0.0.1/video.mp4") && play_position == 0.25);
+    free(play_url);
+    char *play_binary = NULL; uint32_t play_binary_length = 0;
+    plist_to_bin(play, &play_binary, &play_binary_length);
+    plist_t parsed_binary = iphone_mirror_play_request(play_binary, play_binary_length);
+    CHECK(parsed_binary != NULL);
+    plist_free(parsed_binary); free(play_binary); plist_free(play);
+    const char bad_play[] = "Content-Location: http://localhost/video\nStart-Position: nan\n";
+    CHECK(iphone_mirror_play_request(bad_play, sizeof(bad_play)-1) == NULL);
+    /* A persistent HTTP client must finish an empty pair-verify response
+       without waiting for the server to close the connection. */
+    const char *protocols[] = { "HTTP/1.1", "HTTP/1.0" };
+    for (int i = 0; i < 2; ++i) {
+        http_response_t *response = http_response_init(protocols[i], 200, "OK");
+        http_response_add_header(response, "Content-Type", "application/octet-stream");
+        http_response_finish(response, NULL, 0);
+        int length = 0;
+        const char *wire = http_response_get_data(response, &length);
+        CHECK(length > 0 && contains_bytes(wire, length, "\r\nContent-Length: 0\r\n\r\n"));
+        CHECK(!http_response_get_disconnect(response));
+        http_response_destroy(response);
+    }
+    const int bodyless_statuses[] = { 101, 204, 304 };
+    for (int i = 0; i < 3; ++i) {
+        http_response_t *response = http_response_init("HTTP/1.1", bodyless_statuses[i], "Test");
+        http_response_finish(response, NULL, 0);
+        int length = 0;
+        const char *wire = http_response_get_data(response, &length);
+        CHECK(length > 0 && !contains_bytes(wire, length, "Content-Length:"));
+        http_response_destroy(response);
+    }
+    http_response_t *body_response = http_response_init("HTTP/1.1", 200, "OK");
+    http_response_finish(body_response, "abc", 3);
+    int body_length = 0;
+    const char *body_wire = http_response_get_data(body_response, &body_length);
+    CHECK(body_length > 0 && contains_bytes(body_wire, body_length, "\r\nContent-Length: 3\r\n\r\nabc"));
+    CHECK(!contains_bytes(body_wire, body_length, "Content-Length: 0"));
+    http_response_destroy(body_response);
+    /* Cached receivers may start with pair-verify on a new HTTP connection.
+     * Permitting that first step must not allow an unverified second step. */
+    pairing_t *pairing = pairing_init_generate();
+    CHECK(pairing != NULL);
+    pairing_session_t *session = pairing_session_init(pairing);
+    CHECK(session != NULL && pairing_session_check_handshake_status(session) == 0);
+    unsigned char bad_signature[64] = {0};
+    CHECK(pairing_session_finish(session, bad_signature) != 0);
+    unsigned char peer_key[32] = {9}, peer_signing_key[32], peer_private[64], seed[32] = {7};
+    ed25519_create_keypair(peer_signing_key, peer_private, seed);
+    CHECK(pairing_session_handshake(session, peer_key, peer_signing_key) == 0);
+    CHECK(pairing_session_check_handshake_status(session) == 0);
+    CHECK(pairing_session_finish(session, bad_signature) != 0);
+    unsigned char signed_message[64], secret[32], digest[64], key[16], iv[16];
+    unsigned char signature[64], encrypted[64], skipped[64] = {0};
+    memcpy(signed_message, peer_key, 32);
+    CHECK(pairing_session_get_public_key(session, signed_message + 32) == 0);
+    ed25519_sign(signature, signed_message, sizeof(signed_message), peer_signing_key, peer_private);
+    pairing_get_ecdh_secret_key(session, secret);
+    sha512_context hash;
+    sha512_init(&hash); sha512_update(&hash, (const unsigned char *)"Pair-Verify-AES-Key", 19);
+    sha512_update(&hash, secret, 32); sha512_final(&hash, digest); memcpy(key, digest, 16);
+    sha512_init(&hash); sha512_update(&hash, (const unsigned char *)"Pair-Verify-AES-IV", 18);
+    sha512_update(&hash, secret, 32); sha512_final(&hash, digest); memcpy(iv, digest, 16);
+    AES_CTR_CTX cipher; AES_ctr_set_key(&cipher, key, iv, AES_MODE_128);
+    AES_ctr_encrypt(&cipher, skipped, skipped, sizeof(skipped));
+    AES_ctr_encrypt(&cipher, signature, encrypted, sizeof(signature));
+    CHECK(pairing_session_finish(session, encrypted) == 0);
+    CHECK(pairing_session_check_handshake_status(session) != 0);
+    pairing_session_destroy(session);
+    pairing_destroy(pairing);
+    if (argc == 2 && !strcmp(argv[1], "--pairing-only")) {
+        puts("Cached pair-verify accepts a new connection and rejects invalid signatures.");
+        return 0;
+    }
     WSADATA wsa; uint64_t start;
     CHECK((argc == 2 || argc == 3) && WSAStartup(MAKEWORD(2,2),&wsa) == 0);
     state_event=CreateEvent(NULL,FALSE,FALSE,NULL);

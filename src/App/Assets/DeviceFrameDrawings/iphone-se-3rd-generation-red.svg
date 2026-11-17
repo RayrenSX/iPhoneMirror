@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1789" height="3614" viewBox="0 0 69.7 140.8">
+<title>iPhone SE (3rd generation) — red, original vector frame</title>
+<desc>Official body and panel dimensions; visual estimates for sensors, buttons, radii and finish shading. Not physically calibrated.</desc>
+<defs>
+<linearGradient id="metal" x1="0" y1="0" x2="1" y2=".16" gradientUnits="objectBoundingBox"><stop stop-color="#66111f"/><stop offset=".08" stop-color="#dba4ad"/><stop offset=".17" stop-color="#a51c32"/><stop offset=".5" stop-color="#bc5565"/><stop offset=".86" stop-color="#a51c32"/><stop offset=".97" stop-color="#d28e98"/><stop offset="1" stop-color="#63111e"/></linearGradient>
+<linearGradient id="glass" x2=".3" y2="1"><stop stop-color="#111214"/><stop offset=".55" stop-color="#0b0c0e"/><stop offset="1" stop-color="#0b0c0e"/></linearGradient>
+<radialGradient id="lens"><stop stop-color="#172f43"/><stop offset=".42" stop-color="#0b1824"/><stop offset=".65" stop-color="#192b42"/><stop offset=".85" stop-color="#05090d"/><stop offset="1" stop-color="#30343a"/></radialGradient>
+<mask id="opening" maskUnits="userSpaceOnUse" x="0" y="0" width="69.7" height="140.8"><rect width="100%" height="100%" fill="white"/><rect x="5.632208588957057" y="18.43128834355829" width="58.435582822085884" height="103.93742331288342" rx="0" fill="black"/></mask>
+</defs>
+<g mask="url(#opening)">
+<rect x="0.82000" y="24.20000" width="0.98000" height="4.70000" rx="0.25000" fill="url(#metal)" stroke="#5b0f1c" stroke-width="0.08"/>
+<rect x="0.82000" y="36.00000" width="0.98000" height="9.40000" rx="0.25000" fill="url(#metal)" stroke="#5b0f1c" stroke-width="0.08"/>
+<rect x="0.82000" y="48.20000" width="0.98000" height="9.40000" rx="0.25000" fill="url(#metal)" stroke="#5b0f1c" stroke-width="0.08"/>
+<rect x="67.90000" y="36.00000" width="0.98000" height="11.00000" rx="0.25000" fill="url(#metal)" stroke="#5b0f1c" stroke-width="0.08"/>
+<rect x="1.20000" y="1.20000" width="67.30000" height="138.40000" rx="10.30000" fill="url(#metal)" stroke="#450c15" stroke-width="0.16"/>
+<rect x="1.43000" y="1.43000" width="66.84000" height="137.94000" rx="10.07000" fill="none" stroke="#e0b0b7" stroke-width="0.1"/>
+<rect x="1.95000" y="1.95000" width="65.80000" height="136.90000" rx="9.55000" fill="url(#glass)" stroke="#26282b" stroke-width="0.09"/>
+<rect x="5.46221" y="18.26129" width="58.77558" height="104.27742" rx="0.12000" fill="#232629"/>
+<rect x="29.05000" y="9.23129" width="11.60000" height="1.40000" rx="0.65000" fill="#323336"/>
+<rect x="29.35000" y="9.45129" width="11.00000" height="1.00000" rx="0.45000" fill="#111315"/>
+<circle cx="29.75" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="29.75" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="30.15" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="30.15" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="30.55" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="30.55" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="30.95" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="30.95" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="31.35" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="31.35" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="31.75" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="31.75" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="32.15" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="32.15" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="32.55" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="32.55" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="32.95" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="32.95" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="33.35" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="33.35" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="33.75" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="33.75" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="34.15" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="34.15" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="34.55" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="34.55" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="34.95" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="34.95" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="35.35" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="35.35" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="35.75" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="35.75" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="36.15" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="36.15" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="36.55" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="36.55" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="36.95" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="36.95" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="37.35" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="37.35" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="37.75" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="37.75" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="38.15" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="38.15" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="38.55" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="38.55" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="38.95" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="38.95" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="39.35" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="39.35" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="39.75" cy="9.76128834355829" r="0.065" fill="#57595c"/>
+<circle cx="39.75" cy="10.14128834355829" r="0.065" fill="#454749"/>
+<circle cx="21.950000000000003" cy="9.93128834355829" r="1.3" fill="#17191d"/>
+<circle cx="21.950000000000003" cy="9.93128834355829" r="0.93" fill="url(#lens)"/>
+<circle cx="21.700000000000003" cy="9.66128834355829" r="0.2" fill="#263e55"/>
+<rect x="31.95000" y="5.13129" width="5.80000" height="1.45000" rx="0.70000" fill="#141519"/>
+<circle cx="34.85" cy="131.32898159509202" r="5.4" fill="url(#metal)"/>
+<circle cx="34.85" cy="131.32898159509202" r="5.0600000000000005" fill="#0b0c0e" stroke="#25272a" stroke-width="0.09"/>
+<rect x="1.20000" y="14.20000" width="0.75000" height="0.65000" rx="0.00000" fill="#d28e98"/>
+<rect x="67.75000" y="14.20000" width="0.75000" height="0.65000" rx="0.00000" fill="#d28e98"/>
+<rect x="1.20000" y="126.60000" width="0.75000" height="0.65000" rx="0.00000" fill="#d28e98"/>
+<rect x="67.75000" y="126.60000" width="0.75000" height="0.65000" rx="0.00000" fill="#d28e98"/>
+</g>
+</svg>

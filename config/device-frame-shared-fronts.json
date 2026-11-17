@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "groups": [
+    {
+      "productName": "iPad (10th generation)",
+      "productTypes": ["iPad13,18", "iPad13,19"],
+      "sourceProfileId": "ipad-a16",
+      "sourceProductType": "iPad15,7",
+      "finishes": ["blue", "pink", "silver", "yellow"],
+      "bodyMillimeters": {"width": 179.5, "height": 248.6, "depth": 7.0},
+      "displayPixels": {"width": 1640, "height": 2360},
+      "evidence": [
+        "https://support.apple.com/en-us/111840",
+        "https://support.apple.com/en-us/122240",
+        "https://developer.apple.com/download/files/accessories/dimensional-drawings/ipad-10th-generation.pdf"
+      ],
+      "reviewedOn": "2026-11-13",
+      "scope": "Front-view artwork reuse only: same body dimensions, rectangular panel dimensions, landscape front camera, top Touch ID and volume-button layout, and named finishes. This is not a dedicated 10th-generation Apple bezel export or a physical-device color measurement. Housing numeric tokens are not inherited."
+    }
+  ]
+}

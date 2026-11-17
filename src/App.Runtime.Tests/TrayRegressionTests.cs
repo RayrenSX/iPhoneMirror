@@ -17,6 +17,16 @@ internal static partial class Program
         var originalVolume = KeyboardField(vm, "_playbackVolume");
         try
         {
+            // The preceding floating settings test can create an idle preferences
+            // record. This case specifically exercises the first projection;
+            // discard only that synthetic idle record, never a live session.
+            if (KeyboardCall(sessions, "Get", selected.Udid) is { } existingState)
+            {
+                InteractionAssert(!(bool)KeyboardField(existingState, "HasSession") &&
+                    !(bool)KeyboardField(existingState, "IsStarting") && !(bool)KeyboardField(existingState, "IsStopping"),
+                    "The offline tray audio fixture unexpectedly owns an active capture.");
+                KeyboardCall(sessions, "Remove", selected.Udid);
+            }
             InteractionAssert(KeyboardCall(sessions, "Get", selected.Udid) is null &&
                 (bool)KeyboardField(vm, "PlayAudio"), "Expected a fresh selected device with audio enabled.");
             var state = KeyboardCall(vm, "GetOrCreateIndependentDeviceState", selected)!;

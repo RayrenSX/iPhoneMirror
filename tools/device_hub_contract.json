@@ -76,6 +76,46 @@
       "public": true,
       "timeout": 35
     },
+    "upload_file": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 600
+    },
+    "delete_file": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 35
+    },
+    "stat_file": {
+      "readOnly": true,
+      "public": false,
+      "timeout": 35
+    },
+    "write_mapped_file": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 600
+    },
+    "make_directory": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 35
+    },
+    "set_mapped_file_time": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 35
+    },
+    "move_file": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 35
+    },
+    "delete_mapped_file": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 120
+    },
     "syslog_start": {
       "readOnly": true,
       "public": true,
@@ -129,6 +169,11 @@
     "press_button": {
       "readOnly": false,
       "public": true,
+      "timeout": 35
+    },
+    "shared_document_apps": {
+      "readOnly": true,
+      "public": false,
       "timeout": 35
     }
   }

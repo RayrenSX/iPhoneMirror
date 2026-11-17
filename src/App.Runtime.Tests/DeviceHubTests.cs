@@ -80,7 +80,7 @@ internal static partial class Program
         Verify((await http.GetAsync("/api/v1/devices/a/coredevice/status")).StatusCode == HttpStatusCode.NotFound, "Removed native-media endpoints must not be advertised or accepted.");
         var catalog = await (await http.GetAsync("/api/v1/hub/actions")).Content.ReadFromJsonAsync<JsonElement>();
         var actions = catalog.GetProperty("actions");
-        Verify(actions.EnumerateObject().Count() == 24 && !actions.TryGetProperty("install_app", out _) &&
+        Verify(actions.EnumerateObject().Count() == 24 && !actions.TryGetProperty("install_app", out _) && !actions.TryGetProperty("upload_file", out _) && !actions.TryGetProperty("delete_file", out _) &&
             actions.GetProperty("get_settings").GetProperty("readOnly").GetBoolean(), "Public action catalog exposes private host paths or wrong policy.");
         foreach (var action in DeviceHubContract.Actions.Where(p => p.Value.Public && p.Key != "launch"))
         {
@@ -94,6 +94,10 @@ internal static partial class Program
         }
         Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/install_app", new { path = "C:/private.ipa" })).StatusCode == HttpStatusCode.UnprocessableEntity,
             "Generic Hub API accepted a server-side install path.");
+        Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/upload_file", new { sourcePath = "C:/private.txt" })).StatusCode == HttpStatusCode.UnprocessableEntity &&
+            !hubCalls.ContainsKey("upload_file"), "Generic Hub API accepted a host file path for import.");
+        Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/delete_file", new { root = "media", path = "private.txt" })).StatusCode == HttpStatusCode.UnprocessableEntity &&
+            !hubCalls.ContainsKey("delete_file"), "Generic Hub API accepted a private file deletion action.");
         Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/erase", new { })).StatusCode == HttpStatusCode.UnprocessableEntity,
             "An unknown device action was admitted.");
         var launch = new { bundleId = "com.apple.Preferences" };

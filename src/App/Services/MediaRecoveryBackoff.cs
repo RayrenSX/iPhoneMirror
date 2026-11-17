@@ -10,20 +10,38 @@ internal sealed class MediaRecoveryBackoff(
         stablePlaybackWindow ?? TimeSpan.FromSeconds(10);
     private int _attempts;
     private DateTimeOffset? _openedAt;
+    private double _openedPosition;
+    private bool _madeStableProgress;
 
     internal void Reset()
     {
         _attempts = 0;
         _openedAt = null;
+        _madeStableProgress = false;
     }
 
-    internal void MarkOpened() => _openedAt = _clock();
+    internal void MarkOpened(double position = 0)
+    {
+        _openedAt = _clock();
+        _openedPosition = position;
+        _madeStableProgress = false;
+    }
+
+    internal void MarkProgress(double position)
+    {
+        if (_openedAt is { } openedAt && double.IsFinite(position) &&
+            double.IsFinite(_openedPosition) &&
+            _clock() - openedAt >= _stablePlaybackWindow &&
+            position - _openedPosition >= _stablePlaybackWindow.TotalSeconds)
+            _madeStableProgress = true;
+    }
 
     internal bool TryGetNext(out int attempt, out TimeSpan delay)
     {
-        if (_openedAt is { } openedAt && _clock() - openedAt >= _stablePlaybackWindow)
+        if (_madeStableProgress)
             _attempts = 0;
         _openedAt = null;
+        _madeStableProgress = false;
 
         if (_attempts >= maximumAttempts)
         {

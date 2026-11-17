@@ -133,6 +133,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     // MediaElement timestamp. HLS bridge replacement can reset or jump the
     // latter; a wall-clock anchor keeps progress proportional and monotonic.
     private double _mediaTimelineAnchorPosition;
+    private DateTime _mediaHealthSampleUtc;
+    private bool _mediaPrematureEndRetried;
+    private MediaCastPlaybackStatus _mediaTerminalStatus;
+    private int _mediaBridgeEndCheckRevision;
+    private double _mediaLastActualPosition;
+    private DateTime _mediaLastActualAdvanceUtc;
+    private DateTime _mediaPositionRegressionSinceUtc;
+    private double _mediaObservedPosition;
     private DateTime _mediaTimelineAnchorUtc;
     private bool _mediaTimelineRunning;
     private double _lastRejectedMediaPosition;
@@ -342,6 +350,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         _keyboardHookProc = KeyboardHookProcedure;
         InitializeComponent();
+        InitializeWorkspaceBindings();
         // Slider handles direct track clicks at the class-handler level and can
         // mark the mouse event handled before an ordinary XAML handler sees it.
         // Observe handled events so every click/drag has one complete seek
@@ -369,6 +378,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 _bluetoothShortcuts[action] = KeyboardShortcut.FromSettings(
                     app.UpdateSettings, action);
         }
+        InitializeProxySettings();
         _themeControlReady = true;
         _workspaceControlsReady = true;
         _viewModel = new MainViewModel();
@@ -392,6 +402,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _secondaryMirrors.KeyboardFocusChanged += OnIndependentKeyboardFocusChanged;
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _secondaryMirrors.PhoneFrameChanged += RefreshProjectionPhoneFrame;
+        _viewModel.PropertyChanged += (_, _) => RefreshProjectionPhoneFrame();
+        Loaded += (_, _) => RefreshProjectionPhoneFrame();
         _viewModel.Devices.CollectionChanged += OnDevicesCollectionChanged;
         _viewModel.DeviceVideoSizeChanged += OnDeviceVideoSizeChanged;
         _viewModel.DeviceSessionHandleChanged += OnDeviceSessionHandleChanged;
@@ -762,10 +775,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         var position = BluetoothMouseOrientationMapper.MapNormalized(
             mapped.Value.X, mapped.Value.Y, sourceWidth, sourceHeight, e.Rotation,
-            _viewModel.AppliedBluetoothPortraitMouseDirection,
-            _viewModel.AppliedBluetoothLandscapeMouseDirection,
-            _viewModel.AppliedBluetoothMouseReverseHorizontal,
-            _viewModel.AppliedBluetoothMouseReverseVertical);
+            (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(sourceUdid).PortraitDirection,
+            (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(sourceUdid).LandscapeDirection,
+            _viewModel.ControlPreferencesFor(sourceUdid).ReverseHorizontal,
+            _viewModel.ControlPreferencesFor(sourceUdid).ReverseVertical);
         if (e.Kind == Controls.PreviewPointerKind.ButtonDown)
         {
             CancelWheelScroll(state);
@@ -1091,14 +1104,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _lastControlSourceY = mapped.Y;
             var sensitivity = PointerSensitivity(
                 sourceWidth, sourceHeight) *
-                (_viewModel.AppliedBluetoothMouseSensitivity / 100.0);
+                (_viewModel.ControlPreferencesFor(sourceUdid).MouseSensitivity / 100.0);
             var oriented = MapMouseDeltaToDeviceOrientation(dx, dy,
                 sourceWidth, sourceHeight,
                 e.Rotation,
-                _viewModel.AppliedBluetoothPortraitMouseDirection,
-                _viewModel.AppliedBluetoothLandscapeMouseDirection,
-                _viewModel.AppliedBluetoothMouseReverseHorizontal,
-                _viewModel.AppliedBluetoothMouseReverseVertical);
+                (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(sourceUdid).PortraitDirection,
+                (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(sourceUdid).LandscapeDirection,
+                _viewModel.ControlPreferencesFor(sourceUdid).ReverseHorizontal,
+                _viewModel.ControlPreferencesFor(sourceUdid).ReverseVertical);
             dx = oriented.X;
             dy = oriented.Y;
             var scaledX = dx * sensitivity + _controlRemainderX;
@@ -1205,7 +1218,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _lastWheelResolutionMultiplier = multiplier;
         }
         var unitsPerTick = Math.Max(1, 120 / multiplier);
-        var wheelTotal = _controlWheelRemainder + delta * (_viewModel.AppliedBluetoothWheelSensitivity / 100.0);
+        var wheelTotal = _controlWheelRemainder + delta * (_viewModel.ControlPreferencesFor(_activeControlUdid ?? _viewModel.BluetoothControlTargetUdid).WheelSensitivity / 100.0);
         var wheelUnits = (int)Math.Truncate(wheelTotal / unitsPerTick);
         _controlWheelRemainder = wheelTotal - wheelUnits * unitsPerTick;
         return Math.Clamp(-wheelUnits, -127, 127);
@@ -1426,7 +1439,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         await _bluetoothRouteGate.WaitAsync();
         try
         {
-            ShowReverseControlStatus(ControlStatusMode.Bluetooth, udid);
+            ShowReverseControlStatus(ControlStatusMode.Bluetooth, udid, window);
             ResetControlRouteState();
             if (_viewModel.IsBluetoothControlEnabled && _activeControlWindow == window)
             {
@@ -1496,7 +1509,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         try
         {
-            ShowReverseControlStatus(ControlStatusMode.Usb, udid);
+            ShowReverseControlStatus(ControlStatusMode.Usb, udid, window);
             var device = _viewModel.Devices.FirstOrDefault(candidate =>
                 DeviceViewModel.UdidEquals(candidate.Udid, udid));
             if (device is null || device.IsMediaCast) return;
@@ -1527,7 +1540,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         try
         {
-            ShowReverseControlStatus(ControlStatusMode.Wireless, udid);
+            ShowReverseControlStatus(ControlStatusMode.Wireless, udid, window);
             if (_viewModel.IsWirelessControlTarget(udid))
             {
                 await _viewModel.ToggleWirelessControlAsync(udid);
@@ -1808,13 +1821,16 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (message is 0x0231 or 0x0232) // WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE
             _horizontalProjectionResize = null;
-        if (message == 0x0046 && lParam != 0 && CanConstrainCompletePreview && GetWindowRect(hwnd, out var completeBounds))
+        if (message == 0x0046 && lParam != 0 && CanConstrainCompleteWorkspace && GetWindowRect(hwnd, out var completeBounds))
         {
             var position = Marshal.PtrToStructure<WorkspaceWindowPosition>(lParam);
             if ((position.Flags & 0x0001) == 0 && position.Width > 0 && position.Height > 0)
             {
                 var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
-                var minimum = (int)Math.Ceiling(GetCompletePreviewMinimumWindowWidth(completeBounds, position.Height, scale) * scale - .001);
+                var minimumWidth = CanConstrainCompletePreview
+                    ? GetCompletePreviewMinimumWindowWidth(completeBounds, position.Height, scale)
+                    : GetCompleteWorkspaceMinimumWidth();
+                var minimum = (int)Math.Ceiling(minimumWidth * scale - .001);
                 if (position.Width < minimum)
                 {
                     if ((position.Flags & 0x0002) == 0 && position.X + position.Width == completeBounds.Right)
@@ -1824,12 +1840,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 }
             }
         }
-        if (message == 0x0214 && lParam != 0 && CanConstrainCompletePreview && GetWindowRect(hwnd, out var completeCurrent))
+        if (message == 0x0214 && lParam != 0 && CanConstrainCompleteWorkspace && GetWindowRect(hwnd, out var completeCurrent))
         {
             var proposed = Marshal.PtrToStructure<NativeRect>(lParam);
             var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
-            var minimum = (int)Math.Ceiling(GetCompletePreviewMinimumWindowWidth(completeCurrent,
-                proposed.Bottom - proposed.Top, scale) * scale - .001);
+            var minimumWidth = CanConstrainCompletePreview
+                ? GetCompletePreviewMinimumWindowWidth(completeCurrent, proposed.Bottom - proposed.Top, scale)
+                : GetCompleteWorkspaceMinimumWidth();
+            var minimum = (int)Math.Ceiling(minimumWidth * scale - .001);
             if (proposed.Right - proposed.Left < minimum)
             {
                 if ((int)wParam is 1 or 4 or 7) proposed.Left = proposed.Right - minimum;
@@ -2124,14 +2142,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // Relative Raw Input reports physical mouse counts. Do not apply a
             // source-resolution divisor here: it makes the maximum sensitivity
             // feel slow and causes large packets to hit the boot-report clamp.
-            var sensitivity = _viewModel.AppliedBluetoothMouseSensitivity / 100.0;
+            var sensitivity = _viewModel.ControlPreferencesFor(_activeControlUdid ?? _viewModel.BluetoothControlTargetUdid).MouseSensitivity / 100.0;
             var (deviceDx, deviceDy) = MapMouseDeltaToDeviceOrientation(
                 delta.X * sensitivity, delta.Y * sensitivity,
                 sourceWidth, sourceHeight, rotation,
-                _viewModel.AppliedBluetoothPortraitMouseDirection,
-                _viewModel.AppliedBluetoothLandscapeMouseDirection,
-                _viewModel.AppliedBluetoothMouseReverseHorizontal,
-                _viewModel.AppliedBluetoothMouseReverseVertical);
+                (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(_activeControlUdid ?? _viewModel.BluetoothControlTargetUdid).PortraitDirection,
+                (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(_activeControlUdid ?? _viewModel.BluetoothControlTargetUdid).LandscapeDirection,
+                _viewModel.ControlPreferencesFor(_activeControlUdid ?? _viewModel.BluetoothControlTargetUdid).ReverseHorizontal,
+                _viewModel.ControlPreferencesFor(_activeControlUdid ?? _viewModel.BluetoothControlTargetUdid).ReverseVertical);
             AddRawControlDelta(deviceDx, deviceDy);
         }
 
@@ -2849,6 +2867,16 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
 
+        if (_isWindowMaximized)
+        {
+            BeginMaximizedWorkspaceDrag(e);
+            return;
+        }
+        DragWorkspaceWindow();
+    }
+
+    private void DragWorkspaceWindow()
+    {
         // Keep the configured DWM backdrop for the whole move loop. Changing
         // Mica/Acrylic to None here makes Windows repaint the client surface
         // with its default black/white fill before the drag starts, which is
@@ -3091,7 +3119,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     _mediaPlaying = false;
                     UpdateMediaCastStatistics();
                     UpdateMediaCastControls();
-                    if (_mediaOpened) ReportMediaCastPlayback();
+                    ReportMediaCastPlayback();
                     _viewModel.AddDiagnosticLog(AppLog.Event("media_pause_applied",
                         ("id", request.CommandId), ("position", _mediaStartPosition),
                         ("opened", _mediaOpened)));
@@ -3100,6 +3128,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             case MediaCastCommand.Resume:
                 if (_mediaCastActive)
                 {
+                    if (_mediaTerminalStatus != MediaCastPlaybackStatus.Unknown)
+                    {
+                        SetLocalMediaCastPlayback(shouldPlay: true);
+                        break;
+                    }
                     _mediaShouldPlay = true;
                     if (_mediaOpened) MediaCastMediaElement.Play();
                     RestartMediaCastAudioAtCurrentPosition();
@@ -3107,7 +3140,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     SynchronizeMediaCastTimelineClock();
                     UpdateMediaCastStatistics();
                     UpdateMediaCastControls();
-                    if (_mediaOpened) ReportMediaCastPlayback();
+                    ReportMediaCastPlayback();
                     _viewModel.AddDiagnosticLog(AppLog.Event("media_resume_applied",
                         ("id", request.CommandId), ("position", _mediaStartPosition),
                         ("opened", _mediaOpened)));
@@ -3228,11 +3261,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // Every new source owns a new bridge, including HLS -> native media
         // and replacements whose backend fails to start.
         DisposeHlsMediaBridge();
-        _mediaProgramDuration = MediaSourceClassifier.IsLikelyLive(source) &&
-            !MediaCastPlaybackControls.IsReliableDuration(true,
-                request.Duration) ? 0 : NormalizeMediaDuration(request.Duration);
-        _mediaStartPosition = ClampMediaPosition(request.StartPosition,
-            clampToDuration: true, duration: _mediaProgramDuration);
+        DisposeMediaHttpProxyBridge();
+        // The sender's explicit duration is programme metadata, including
+        // short ads. Only WMF's segment-derived duration needs the 30s filter.
+        _mediaProgramDuration = NormalizeMediaDuration(request.Duration);
+        _mediaStartPosition = MediaCastPlaybackControls.ClampPosition(
+            request.StartPosition, _mediaProgramDuration);
+        _mediaObservedPosition = _mediaStartPosition;
+        _mediaPositionRegressionSinceUtc = default;
         _mediaLastTimelineDuration = _mediaProgramDuration;
         _mediaLastTimelinePosition = _mediaStartPosition;
         _mediaBridgeOffset = _mediaStartPosition;
@@ -3248,6 +3284,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _mediaSeekInteractionTarget = _mediaStartPosition;
         _mediaPlaying = false;
         _mediaShouldPlay = true;
+        _mediaTerminalStatus = MediaCastPlaybackStatus.Unknown;
+        _mediaPrematureEndRetried = false;
         _mediaOpened = false;
         _mediaStopped = false;
         _mediaCastActive = true;
@@ -3284,6 +3322,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             }
             _mediaPlaybackSource = _mediaHlsBridge.PlaybackUri;
         }
+        else
+        {
+            _mediaPlaybackSource = ResolveNativeMediaCastSource(source);
+        }
         _mediaRecoveryBackoff.Reset();
         _viewModel.AddDiagnosticLog(AppLog.Event("media_play_begin",
             ("command", request.CommandId),
@@ -3313,7 +3355,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
             Activate();
         }
-        MediaCastMediaElement.Play();
+        if (_mediaHlsBridge is null) MediaCastMediaElement.Play();
         _mediaPlaybackTimer.Start();
         _viewModel.AddDiagnosticLog(AppLog.Event("media_play_submitted",
             ("command", request.CommandId), ("generation", generation),
@@ -3395,6 +3437,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _mediaSource = null;
         _mediaPlaybackSource = null;
         DisposeHlsMediaBridge();
+        DisposeMediaHttpProxyBridge();
         _lastRejectedMediaPosition = 0;
         _mediaProgressSampleUtc = default;
         _mediaRecoveryBackoff.Reset();
@@ -3459,6 +3502,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _mediaSource = null;
         _mediaPlaybackSource = null;
         DisposeHlsMediaBridge();
+        DisposeMediaHttpProxyBridge();
         _lastRejectedMediaPosition = 0;
         _mediaProgressSampleUtc = default;
         _mediaRecoveryBackoff.Reset();
@@ -3582,10 +3626,52 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _viewModel.AddDiagnosticLog(
                 $"media_previous_source_clear_failed error={SanitizeMediaError(error.Message)}");
         }
-        replacement.Source = source;
+        if (_mediaHlsBridge is { } bridge && Equals(source, bridge.PlaybackUri))
+        {
+            // WMF has its own HTTP response deadline. Prepare remote probes
+            // and the bounded startup buffer before giving it a local URL,
+            // so a healthy slow source does not leave an abandoned GET.
+            _ = BindPreparedMediaCastSourceAsync(replacement, source, generation,
+                bridge, _mediaRecoveryCancellation.Token);
+        }
+        else
+            replacement.Source = source;
         _viewModel.AddDiagnosticLog(AppLog.Event("media_backend_replace_complete",
             ("generation", generation), ("source", AppLog.MediaSource(source))));
         return true;
+    }
+
+    private async Task BindPreparedMediaCastSourceAsync(MediaElement mediaElement,
+        Uri source, long generation, HlsMediaPlaybackBridge bridge,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Complete the caller's Loading/timer setup before a cached
+            // preparation result can report failure or bind a source.
+            await Task.Yield();
+            if (cancellationToken.IsCancellationRequested || _shutdownStarted ||
+                !ReferenceEquals(bridge, _mediaHlsBridge) ||
+                !IsCurrentMediaCastEvent(mediaElement, generation)) return;
+            await bridge.WaitUntilReadyAsync(cancellationToken);
+            if (cancellationToken.IsCancellationRequested || _shutdownStarted ||
+                !ReferenceEquals(bridge, _mediaHlsBridge) ||
+                !IsCurrentMediaCastEvent(mediaElement, generation)) return;
+            mediaElement.Source = source;
+            if (_mediaShouldPlay) mediaElement.Play();
+            else mediaElement.Pause();
+            _viewModel.AddDiagnosticLog(AppLog.Event("media_backend_source_ready",
+                ("generation", generation), ("stage", bridge.StartupStage)));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            if (_shutdownStarted || !ReferenceEquals(bridge, _mediaHlsBridge) ||
+                !IsCurrentMediaCastEvent(mediaElement, generation)) return;
+            RecoverOrStopAfterMediaEventFailure("startup", error, mediaElement, generation);
+        }
     }
 
     private void DisposeHlsMediaBridge()
@@ -3602,6 +3688,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private bool IsCurrentMediaCastEvent(MediaElement mediaElement, long generation) =>
         _mediaCastActive && _mediaSource is not null &&
+        _mediaTerminalStatus == MediaCastPlaybackStatus.Unknown &&
         _mediaCastEvents.IsCurrent(generation, mediaElement);
 
     private void OnMediaCastBufferingStarted(object? sender, long generation)
@@ -3612,6 +3699,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         SetMediaCastTimelineRunning(false);
         ShowMediaCastStatus("MediaCastLoadingVideo");
         UpdateMediaCastControls(mediaElement);
+        ReportMediaCastPlayback();
         _viewModel.AddDiagnosticLog(AppLog.Event("media_buffering_started",
             ("generation", generation),
             ("position", ReadMediaCastPosition(mediaElement).ToString("F3"))));
@@ -3626,6 +3714,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (!_mediaWaitingForFirstFrame)
             MediaCastStatusPanel.Visibility = Visibility.Collapsed;
         UpdateMediaCastControls(mediaElement);
+        ReportMediaCastPlayback();
         _viewModel.AddDiagnosticLog(AppLog.Event("media_buffering_ended",
             ("generation", generation),
             ("position", ReadMediaCastPosition(mediaElement).ToString("F3"))));
@@ -3653,7 +3742,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         ++_mediaRecoveryRevision;
         _mediaOpeningTimer.Stop();
         _mediaOpened = true;
-        _mediaRecoveryBackoff.MarkOpened();
+        _mediaRecoveryBackoff.MarkOpened(_mediaStartPosition);
+        _mediaLastActualPosition = _mediaStartPosition;
+        _mediaLastActualAdvanceUtc = DateTime.UtcNow;
+        _mediaPositionRegressionSinceUtc = default;
         var hasFixedDuration = mediaElement.NaturalDuration.HasTimeSpan &&
             mediaElement.NaturalDuration.TimeSpan > TimeSpan.Zero;
         var naturalDuration = hasFixedDuration
@@ -3673,6 +3765,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _mediaIsLive = segmentedSource && !hasReliableDuration;
         _mediaStartPosition = ClampMediaPosition(_mediaStartPosition,
             clampToDuration: true);
+        // Pause before applying the pending position. WMF can reset a new
+        // HTTP source to zero when Pause follows its initial seek.
+        if (!_mediaShouldPlay) mediaElement.Pause();
         if (_mediaStartPosition > 0 && _mediaHlsBridge is null)
         {
             try
@@ -3689,7 +3784,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             }
         }
         if (_mediaShouldPlay) mediaElement.Play();
-        else mediaElement.Pause();
         _mediaPlaying = _mediaShouldPlay;
         // Keep the requested programme position as the loading anchor. WMF's
         // newly-opened HLS element may briefly report zero or a segment-local
@@ -3745,6 +3839,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (!IsCurrentMediaCastEvent(mediaElement, generation)) return;
         AdvanceImplicitMediaProgress(mediaElement);
         var endedPosition = ReadMediaCastPosition(mediaElement);
+        if (!_mediaIsLive)
+            SetMediaCastTimelinePosition(Math.Max(_mediaObservedPosition,
+                Math.Max(_mediaStartPosition, ClampMediaPosition(endedPosition))), running: false);
         // A running FFmpeg bridge is a continuous transport. MediaElement can
         // still emit a spurious EOF while its MPEG-TS input is reconnecting;
         // keep the cast session alive and let the bridge own HLS recovery.
@@ -3770,6 +3867,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             UpdateMediaCastStatistics(mediaElement);
             UpdateMediaCastControls(mediaElement);
             ReportMediaCastPlayback();
+            var checkRevision = ++_mediaBridgeEndCheckRevision;
+            _ = CheckMediaCastBridgeEndAsync(mediaElement, generation,
+                _mediaHlsBridge, endedPosition, checkRevision,
+                _mediaRecoveryCancellation.Token);
             return;
         }
         if (_mediaHlsBridge is not null)
@@ -3794,7 +3895,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 ("position", endedPosition.ToString("F3")),
                 ("source", AppLog.MediaSource(_mediaSource)),
                 ("reason", "hls_bridge_eof")));
-            QueueMediaCastCompletion();
+            QueueMediaCastCompletion(naturalEnd: true);
             return;
         }
         RememberImplicitMediaProgress(endedPosition);
@@ -3827,7 +3928,39 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         UpdateMediaCastStatistics(mediaElement);
         UpdateMediaCastControls(mediaElement);
         ReportMediaCastPlayback();
-        QueueMediaCastCompletion();
+        QueueMediaCastCompletion(naturalEnd: true);
+    }
+
+    private async Task CheckMediaCastBridgeEndAsync(MediaElement mediaElement,
+        long generation, HlsMediaPlaybackBridge bridge, double endedPosition,
+        int revision, CancellationToken cancellationToken)
+    {
+        // WMF can deliver its only EOF callback before FFmpeg publishes its
+        // exit code. Recheck that callback rather than losing completion in
+        // the narrow interval where the bridge still appears to be running.
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            try { await Task.Delay(250, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            { return; }
+            if (!IsCurrentMediaCastEvent(mediaElement, generation) ||
+                revision != _mediaBridgeEndCheckRevision ||
+                !ReferenceEquals(bridge, _mediaHlsBridge) || !_mediaShouldPlay) return;
+            if (ReadMediaCastPosition(mediaElement) > endedPosition + 0.02)
+                return;
+            if (!bridge.IsRunning)
+            {
+                OnMediaCastMediaEnded(mediaElement, generation);
+                return;
+            }
+        }
+        // Playing an ended element did not resume consumption. Its HTTP body
+        // cannot be rebound safely; rebuild from the last observed position.
+        _viewModel.AddDiagnosticLog(AppLog.Event("media_bridge_eof_stalled",
+            ("generation", generation), ("position", _mediaStartPosition)));
+        DisposeHlsMediaBridge();
+        _mediaPlaybackSource = null;
+        QueueLiveMediaRecovery("player ended while the HLS bridge was still running");
     }
 
     private void OnMediaCastMediaFailed(
@@ -3852,6 +3985,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (!IsCurrentMediaCastEvent(mediaElement, generation)) return;
         AdvanceImplicitMediaProgress(mediaElement);
         var failedPosition = ReadMediaCastPosition(mediaElement);
+        if (!_mediaIsLive)
+            SetMediaCastTimelinePosition(Math.Max(_mediaObservedPosition,
+                Math.Max(_mediaStartPosition, ClampMediaPosition(failedPosition))), running: false);
+        _viewModel.AddDiagnosticLog(AppLog.Event("media_backend_failed",
+            ("generation", generation), ("opened", _mediaOpened),
+            ("position", failedPosition.ToString("F3")),
+            ("hresult", e.ErrorException?.HResult.ToString("X8") ?? "unknown"),
+            ("error", AppLog.Error(SanitizeMediaError(e.ErrorException?.Message ?? "unknown")))));
         if (_mediaSpeedFallbackPending && _mediaPlaybackSpeed != 1.0)
         {
             // WMF rejects SpeedRatio changes on some HLS MPEG-TS samples with
@@ -3879,7 +4020,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 ("generation", generation),
                 ("position", failedPosition.ToString("F3")),
                 ("reason", "hls_bridge_eof")));
-            QueueMediaCastCompletion();
+            QueueMediaCastCompletion(naturalEnd: true);
             return;
         }
         RememberImplicitMediaProgress(failedPosition);
@@ -3907,16 +4048,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             QueueLiveMediaRecovery(message);
             return;
         }
-        _mediaShouldPlay = false;
-        _mediaPlaybackTimer.Stop();
-        MediaCastStatusPanel.Visibility = Visibility.Collapsed;
         _viewModel.AddUiLog(LocalizationService.Format("MediaCastPlaybackFailedFormat",
             message));
         UpdateMediaCastStatistics(mediaElement);
-        UpdateMediaCastControls(mediaElement);
-        ReportMediaCastPlayback();
-        QueueMediaCastCompletion();
+        FinishMediaCastItem(completed: false, message);
     }
+
+    private MediaCastPlaybackStatus ReadMediaCastPlaybackStatus() =>
+        MediaCastPlaybackControls.GetPlaybackStatus(_mediaCastActive,
+            _mediaStopped, _mediaShouldPlay,
+            IsMediaCastTimelineLoading() || _mediaSeekLoading ||
+                _mediaPendingHlsSeekPosition.HasValue || _mediaPendingSeekPosition.HasValue,
+            _mediaTerminalStatus);
 
     private void ReportMediaCastPlayback()
     {
@@ -3947,10 +4090,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // replacement the position is intentionally frozen; claiming a
             // non-zero rate here makes the phone add wall-clock time between
             // reports and then snap backwards on the next update.
-            var rate = _mediaTimelineRunning ? 1 : 0;
+            var status = ReadMediaCastPlaybackStatus();
+            var rate = status == MediaCastPlaybackStatus.Playing &&
+                _mediaTimelineRunning ? _mediaPlaybackSpeed : 0;
             _viewModel.ReportMediaCastPlayback(_mediaCommandId, duration,
                 position,
-                rate);
+                rate, status);
             _lastPlaybackReportError = null;
             UpdateMediaCastStatistics();
         }
@@ -4033,10 +4178,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
             if (!_mediaCastActive || !_mediaUsesHlsBridge ||
+                _mediaTerminalStatus != MediaCastPlaybackStatus.Unknown ||
                 generation != _mediaCastEvents.CurrentGeneration ||
                 !Equals(source, _mediaSource) ||
-                !MediaCastPlaybackControls.IsReliableDuration(
-                    segmented: true, duration)) return;
+                // FFmpeg reports the playlist duration, not WMF's short
+                // segment window. Six-second ads are valid finite programmes.
+                NormalizeMediaDuration(duration) <= 0) return;
             if (Math.Abs(_mediaProgramDuration - duration) < 0.05) return;
             _mediaProgramDuration = duration;
             _mediaIsLive = false;
@@ -4055,6 +4202,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void SeekMediaCastToPosition(double target, bool allowCoalesce = true)
     {
         if (!_mediaCastActive) return;
+        // A seek explicitly starts a new playback attempt for a finished item.
+        var restartingItem = _mediaTerminalStatus != MediaCastPlaybackStatus.Unknown;
+        if (restartingItem)
+        {
+            ResetMediaRecoveryCancellation();
+            _mediaRecoveryBackoff.Reset();
+            _mediaPrematureEndRetried = false;
+        }
+        _mediaTerminalStatus = MediaCastPlaybackStatus.Unknown;
         target = ClampMediaPosition(target, clampToDuration: true);
         if (_mediaHlsBridge is not null)
         {
@@ -4076,14 +4232,23 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 return;
             }
         }
+        // A user seek supersedes an already queued delayed reconnect for the
+        // old position, even before the replacement fires MediaOpened.
+        ++_mediaRecoveryRevision;
+        _mediaObservedPosition = target;
+        _mediaPositionRegressionSinceUtc = default;
         _mediaStartPosition = target;
         SetMediaCastTimelinePosition(target, running: false);
         _mediaProgressSampleUtc = DateTime.UtcNow;
         ClearMediaCastPendingHlsSeek();
 
-        if (_mediaHlsBridge is null)
+        if (_mediaHlsBridge is null && !_mediaUsesHlsBridge)
         {
-            if (!_mediaOpened) return;
+            if (!_mediaOpened)
+            {
+                if (restartingItem) RestartNativeMediaCastAtPosition(target);
+                return;
+            }
             _mediaSeekLoading = true;
             try
             {
@@ -4140,8 +4305,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _mediaOpeningTimer.Start();
             if (!ReplaceMediaCastMediaElement(_mediaPlaybackSource, generation,
                     audioEnabled, volume)) return;
-            if (_mediaShouldPlay) MediaCastMediaElement.Play();
-            else MediaCastMediaElement.Pause();
+            if (_mediaHlsBridge is null)
+            {
+                if (_mediaShouldPlay) MediaCastMediaElement.Play();
+                else MediaCastMediaElement.Pause();
+            }
             _mediaPlaybackTimer.Start();
             UpdateMediaCastControls();
             ReportMediaCastPlayback();
@@ -4158,6 +4326,51 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
+    private void RestartNativeMediaCastAtPosition(double target)
+    {
+        var source = _mediaSource;
+        if (source is null) return;
+        var generation = _mediaCastEvents.CurrentGeneration;
+        var audioEnabled = !MediaCastMediaElement.IsMuted;
+        var volume = MediaCastMediaElement.Volume;
+        try
+        {
+            // A terminal WMF element cannot be assumed open again. Set the
+            // target before binding a fresh renderer; MediaOpened applies it
+            // while preserving whether this was a paused seek or a replay.
+            _mediaCastAudioDecoder.Stop();
+            _mediaPlaybackSource = ResolveNativeMediaCastSource(source);
+            _mediaPlaying = false;
+            _mediaBuffering = false;
+            _mediaSeekLoading = target > 0;
+            _mediaWaitingForFirstFrame = _mediaShouldPlay;
+            _mediaOpeningPosition = target;
+            _mediaOpenedAtUtc = DateTime.UtcNow;
+            _mediaProgressSampleUtc = _mediaOpenedAtUtc;
+            ClearMediaCastPendingSeek();
+            ShowMediaCastStatus("MediaCastLoadingVideo");
+            _mediaOpeningTimer.Start();
+            if (!ReplaceMediaCastMediaElement(_mediaPlaybackSource, generation,
+                    audioEnabled, volume)) return;
+            if (_mediaShouldPlay) MediaCastMediaElement.Play();
+            else MediaCastMediaElement.Pause();
+            _mediaPlaybackTimer.Start();
+            UpdateMediaCastControls();
+            ReportMediaCastPlayback();
+            _viewModel.AddDiagnosticLog(AppLog.Event("media_native_seek_restart",
+                ("target", target.ToString("F3")),
+                ("duration", _mediaProgramDuration.ToString("F3"))));
+        }
+        catch (Exception error)
+        {
+            var message = SanitizeMediaError(error.Message);
+            _viewModel.AddDiagnosticLog(AppLog.Event("media_native_seek_restart_failed",
+                ("target", target.ToString("F3")),
+                ("error", AppLog.Error(message))));
+            FinishMediaCastItem(completed: false, message);
+        }
+    }
+
     private void UpdateMediaCastStatistics(MediaElement? mediaElement = null)
     {
         mediaElement ??= MediaCastMediaElement;
@@ -4169,10 +4382,68 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnMediaPlaybackTimerTick(object? sender, EventArgs e)
     {
+        if (_mediaCastActive && _mediaOpened && _mediaUsesHlsBridge &&
+            _mediaTerminalStatus == MediaCastPlaybackStatus.Unknown)
+        {
+            var actual = ReadMediaCastPosition(MediaCastMediaElement);
+            var now = DateTime.UtcNow;
+            if (actual > _mediaLastActualPosition + 0.02 || !_mediaShouldPlay ||
+                _mediaSeekLoading || _mediaWaitingForFirstFrame)
+            {
+                _mediaLastActualPosition = actual;
+                _mediaLastActualAdvanceUtc = now;
+                _mediaPositionRegressionSinceUtc = default;
+            }
+            var canRecover = _mediaShouldPlay && !_mediaSeekLoading &&
+                !_mediaWaitingForFirstFrame && !_mediaPendingHlsSeekPosition.HasValue &&
+                !_mediaPendingSeekPosition.HasValue;
+            var observed = Math.Max(_mediaObservedPosition, _mediaLastActualPosition);
+            if (canRecover && !_mediaIsLive && observed - actual > 2 &&
+                MediaCastPlaybackControls.IsPrematureEnd(_mediaProgramDuration, observed))
+            {
+                if (_mediaPositionRegressionSinceUtc == default)
+                    _mediaPositionRegressionSinceUtc = now;
+                if (now - _mediaPositionRegressionSinceUtc >= TimeSpan.FromSeconds(1))
+                {
+                    RecoverStalledMediaCastPlayback("player timestamp moved backwards", actual, observed);
+                    return;
+                }
+            }
+            else
+                _mediaPositionRegressionSinceUtc = default;
+            if (_mediaShouldPlay) _mediaRecoveryBackoff.MarkProgress(actual);
+            // WMF can stop consuming without delivering another EOF, even
+            // while its producer still runs. Only stationary playback is
+            // re-evaluated; buffered media which advances keeps playing.
+            if (_mediaHlsBridge is not null && canRecover &&
+                now - _mediaLastActualAdvanceUtc >= TimeSpan.FromSeconds(15))
+            {
+                _viewModel.AddDiagnosticLog(AppLog.Event("media_bridge_stalled",
+                    ("position", actual), ("eof", _mediaHlsBridge.ExitedSuccessfully)));
+                if (!_mediaHlsBridge.IsRunning)
+                    OnMediaCastMediaEnded(MediaCastMediaElement,
+                        _mediaCastEvents.CurrentGeneration);
+                else
+                    RecoverStalledMediaCastPlayback("player did not advance while the HLS bridge was running",
+                        actual, observed);
+                return;
+            }
+        }
         if (_mediaSpeedFallbackPending &&
             DateTime.UtcNow - _mediaSpeedChangedUtc > TimeSpan.FromSeconds(5))
             _mediaSpeedFallbackPending = false;
         RetryPendingMediaCastSeek();
+        if (_mediaCastActive && _mediaOpened &&
+            DateTime.UtcNow - _mediaHealthSampleUtc >= TimeSpan.FromSeconds(5))
+        {
+            _mediaHealthSampleUtc = DateTime.UtcNow;
+            _viewModel.AddDiagnosticLog(AppLog.Event("media_playback_health",
+                ("actual", ReadMediaCastPosition(MediaCastMediaElement).ToString("F3")),
+                ("timeline", ReadMediaCastTimelinePosition().ToString("F3")),
+                ("buffering", _mediaBuffering),
+                ("bridge_running", _mediaHlsBridge?.IsRunning),
+                ("bridge_eof", _mediaHlsBridge?.ExitedSuccessfully)));
+        }
         if (_mediaCastActive && _mediaTimelineRunning &&
             !_mediaSeekInteraction && !_mediaSeekLoading)
         {
@@ -4204,19 +4475,50 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         ReportMediaCastPlayback();
     }
 
+    private void RecoverStalledMediaCastPlayback(string reason, double actual, double observed)
+    {
+        _viewModel.AddDiagnosticLog(AppLog.Event("media_progress_recovery",
+            ("reason", reason), ("actual", actual), ("observed", observed)));
+        // A producer can stay alive while WMF loses its time base or stops
+        // consuming bytes. Freeze at observed media progress before marking
+        // the player closed; recovery must not synthesize or skip programme time.
+        SetMediaCastTimelinePosition(observed, running: false);
+        _mediaOpened = false;
+        _mediaBuffering = false;
+        _mediaWaitingForFirstFrame = true;
+        _mediaCastEvents.TryUnbind(_mediaCastEvents.CurrentGeneration,
+            MediaCastMediaElement);
+        DisposeHlsMediaBridge();
+        _mediaPlaybackSource = null;
+        ShowMediaCastStatus("MediaCastLoadingVideo");
+        QueueLiveMediaRecovery(reason);
+    }
+
     private void OnMediaOpeningTimerTick(object? sender, EventArgs e)
     {
         if (!_mediaCastActive || _mediaOpened || _mediaSource is null) {
             _mediaOpeningTimer.Stop();
             return;
         }
-        if (DateTime.UtcNow - _mediaOpenedAtUtc < TimeSpan.FromSeconds(20)) return;
+        var bridge = _mediaHlsBridge;
+        if (bridge is not null)
+        {
+            // Both HLS inputs and WMF share the bridge's progress budget.
+            // A healthy second input may still be probing after the original
+            // fixed 20s window; repeated errors cannot renew this budget.
+            if (!bridge.HasStartupTimedOut) return;
+        }
+        else if (DateTime.UtcNow - _mediaOpenedAtUtc < TimeSpan.FromSeconds(20))
+            return;
         _mediaOpeningTimer.Stop();
         var generation = _mediaCastEvents.CurrentGeneration;
         _viewModel.AddDiagnosticLog(AppLog.Event("media_open_timeout",
             ("generation", generation),
-            ("source", AppLog.MediaSource(_mediaSource))));
-        var message = "media source did not open within 20 seconds";
+            ("source", AppLog.MediaSource(_mediaSource)),
+            ("stage", bridge?.StartupStage ?? "native_open")));
+        var message = bridge is not null
+            ? "media source startup timed out"
+            : "media source did not open within 20 seconds";
         _viewModel.AddUiLog(LocalizationService.Format(
             "MediaCastPlaybackFailedFormat", message));
         if (_mediaIsLive || _mediaUsesHlsBridge)
@@ -4248,6 +4550,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private double ReadMediaCastTimelinePosition()
     {
+        // WPF buffering notifications can lag behind the stalled player.
+        // Read its programme position; retain the anchor during seek/load.
+        if (MediaCastPlaybackControls.UsePlayerTimeline(_mediaUsesHlsBridge,
+                _mediaOpened, _mediaIsLive, _mediaWaitingForFirstFrame,
+                _mediaSeekLoading || _mediaPendingHlsSeekPosition.HasValue ||
+                _mediaPendingSeekPosition.HasValue))
+            return ClampMediaPosition(Math.Max(_mediaObservedPosition,
+                ReadMediaCastPosition(MediaCastMediaElement)));
         var position = _mediaTimelineAnchorPosition;
         if (_mediaTimelineRunning && _mediaTimelineAnchorUtc != default)
         {
@@ -4311,6 +4621,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 }
                 return Math.Max(0, _mediaStartPosition);
             }
+            if (_mediaOpened && !_mediaWaitingForFirstFrame && !_mediaSeekLoading &&
+                !_mediaPendingHlsSeekPosition.HasValue && !_mediaPendingSeekPosition.HasValue)
+                _mediaObservedPosition = Math.Max(_mediaObservedPosition,
+                    ClampMediaPosition(position));
             return position;
         }
         catch (InvalidOperationException)
@@ -4488,8 +4802,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (_updatingMediaCastControls) return;
         mediaElement ??= MediaCastMediaElement;
         var pendingHlsSeek = ReadMediaCastPendingHlsSeekPosition();
-        var timelineLoading = IsMediaCastTimelineLoading(pendingHlsSeek) ||
-            _mediaSeekLoading;
+        var timelineLoading = _mediaTerminalStatus == MediaCastPlaybackStatus.Unknown &&
+            (IsMediaCastTimelineLoading(pendingHlsSeek) || _mediaSeekLoading);
         var actualPosition = _mediaOpened
             ? ReadMediaCastPosition(mediaElement) : Math.Max(0, _mediaStartPosition);
         // The slider and controller always use the programme clock. The
@@ -4504,8 +4818,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var duration = _mediaProgramDuration > 0
             ? _mediaProgramDuration
             : _mediaIsLive ? 0 : naturalDuration;
-        var canSeek = MediaCastPlaybackControls.CanSeek(
-            _mediaOpened, _mediaIsLive, duration);
+        var canSeek = CanSeekMediaCastTimeline(duration);
         // During a HLS replacement the MediaElement is intentionally not
         // seekable yet, but a known programme duration still gives the slider
         // a stable scale and lets it retain the requested target visually.
@@ -4782,6 +5095,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void SetLocalMediaCastPlayback(bool shouldPlay)
     {
         if (!_mediaCastActive) return;
+        if (_mediaTerminalStatus != MediaCastPlaybackStatus.Unknown)
+        {
+            if (!shouldPlay) return;
+            var restartAt = _mediaTerminalStatus is MediaCastPlaybackStatus.Stopped or MediaCastPlaybackStatus.Completed
+                ? 0 : _mediaStartPosition;
+            _mediaShouldPlay = true;
+            _mediaPrematureEndRetried = false;
+            SeekMediaCastToPosition(restartAt, allowCoalesce: false);
+        }
         try
         {
             _mediaShouldPlay = shouldPlay;
@@ -4818,6 +5140,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void StartMediaCastAudioAt(double position)
     {
         if (!_mediaCastActive || !_mediaShouldPlay || _mediaSource is null) return;
+        if (!_viewModel.NeedsMediaCastAudioDecode)
+        {
+            _mediaCastAudioDecoder.Stop();
+            return;
+        }
         _mediaCastAudioDecoder.Start(_mediaSource, position, _mediaPlaybackSpeed,
             message => _viewModel.AddDiagnosticLog(AppLog.Event("media_audio",
                 ("message", AppLog.Error(message)))));
@@ -4825,20 +5152,26 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void SeekMediaCastLocally(double requestedPosition)
     {
-        if (!_mediaCastActive || !_mediaOpened || _mediaIsLive ||
-            _mediaBuffering || _mediaWaitingForFirstFrame ||
-            _mediaPendingHlsSeekPosition.HasValue || _mediaSeekLoading)
+        var duration = ReadMediaCastDuration(MediaCastMediaElement);
+        if (!CanSeekMediaCastTimeline(duration))
         {
             LogMediaSeekDiagnostic("seek_commit_ignored", requestedPosition);
             return;
         }
-        var duration = ReadMediaCastDuration(MediaCastMediaElement);
-        if (!MediaCastPlaybackControls.CanSeek(_mediaOpened, _mediaIsLive, duration))
-            return;
         var target = MediaCastPlaybackControls.ClampPosition(
             requestedPosition, duration);
         LogMediaSeekDiagnostic("seek_commit", target);
         SeekMediaCastToPosition(target, allowCoalesce: false);
+    }
+
+    private bool CanSeekMediaCastTimeline(double duration)
+    {
+        var canReopen = _mediaSource is not null &&
+            _mediaTerminalStatus is MediaCastPlaybackStatus.Completed or MediaCastPlaybackStatus.Failed;
+        return _mediaCastActive && !_mediaBuffering && !_mediaWaitingForFirstFrame &&
+            !_mediaPendingHlsSeekPosition.HasValue && !_mediaSeekLoading &&
+            MediaCastPlaybackControls.CanSeek(_mediaOpened || canReopen,
+                _mediaIsLive, duration);
     }
 
     private bool IsLikelyMediaCastStartupSeek(double target)
@@ -4875,10 +5208,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var pendingHlsSeek = ReadMediaCastPendingHlsSeekPosition();
         var duration = _mediaProgramDuration > 0
             ? _mediaProgramDuration : ReadMediaCastDuration(MediaCastMediaElement);
-        var canInteract = _mediaCastActive && _mediaOpened && !_mediaIsLive &&
-            !_mediaBuffering && !_mediaWaitingForFirstFrame &&
-            !_mediaSeekLoading && !pendingHlsSeek.HasValue &&
-            MediaCastPlaybackControls.CanSeek(_mediaOpened, _mediaIsLive, duration);
+        var canInteract = CanSeekMediaCastTimeline(duration) && !pendingHlsSeek.HasValue;
         if (!MediaCastSeekSlider.IsEnabled || !canInteract)
         {
             LogMediaSeekDiagnostic("seek_pointer_down_ignored");
@@ -5023,6 +5353,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_updatingMediaCastControls || !_mediaCastActive) return;
         var volume = Math.Clamp(e.NewValue / 100, 0, 1);
+        _viewModel.AddDiagnosticLog(AppLog.Event("media_local_volume",
+            ("volume", volume.ToString("F3")),
+            ("position", ReadMediaCastPosition(MediaCastMediaElement).ToString("F3")),
+            ("opened", _mediaOpened), ("buffering", _mediaBuffering)));
         MediaCastMediaElement.Volume = volume;
         _viewModel.UpdateMediaCastAudioControls(
             !MediaCastMediaElement.IsMuted, volume);
@@ -5125,14 +5459,80 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         return index;
     }
 
-    private void QueueMediaCastCompletion()
+    private void QueueMediaCastCompletion(bool naturalEnd = false)
     {
+        if (_mediaTerminalStatus != MediaCastPlaybackStatus.Unknown) return;
+        if (naturalEnd)
+        {
+            if (_mediaUsesHlsBridge && MediaCastPlaybackControls.IsPrematureEnd(
+                    _mediaProgramDuration, _mediaStartPosition))
+            {
+                _viewModel.AddDiagnosticLog(AppLog.Event("media_premature_eof",
+                    ("position", _mediaStartPosition), ("duration", _mediaProgramDuration)));
+                if (!_mediaPrematureEndRetried)
+                {
+                    _mediaPrematureEndRetried = true;
+                    _mediaShouldPlay = true;
+                    DisposeHlsMediaBridge();
+                    _mediaPlaybackSource = null;
+                    QueueLiveMediaRecovery("media ended before the final playback position");
+                }
+                else
+                {
+                    FinishMediaCastItem(completed: false,
+                        "media ended before the final playback position");
+                    _viewModel.AddUiLog(LocalizationService.Format("MediaCastPlaybackFailedFormat", "media ended before the final playback position"));
+                }
+                return;
+            }
+            // Every source, including external HLS and direct MP4, must end
+            // the item without cancelling the sender's queue/session.
+            FinishMediaCastItem(completed: true);
+            _viewModel.AddDiagnosticLog(AppLog.Event("media_item_completed",
+                ("command", _mediaCommandId), ("duration", _mediaProgramDuration)));
+            return;
+        }
         var generation = _mediaCastEvents.CurrentGeneration;
         Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
             if (_mediaCastActive && generation == _mediaCastEvents.CurrentGeneration)
                 _viewModel.RequestMediaCastStop();
         });
+    }
+
+    private void FinishMediaCastItem(bool completed, string? reason = null)
+    {
+        var position = completed && _mediaProgramDuration > 0
+            ? _mediaProgramDuration : _mediaStartPosition;
+        _mediaTerminalStatus = completed
+            ? MediaCastPlaybackStatus.Completed : MediaCastPlaybackStatus.Failed;
+        CancelMediaRecovery();
+        ++_mediaRecoveryRevision;
+        _mediaOpeningTimer.Stop();
+        _mediaPlaybackTimer.Stop();
+        _mediaShouldPlay = false;
+        _mediaPlaying = false;
+        _mediaOpened = false;
+        _mediaBuffering = false;
+        _mediaWaitingForFirstFrame = false;
+        _mediaSeekLoading = false;
+        ClearMediaCastPendingHlsSeek();
+        ClearMediaCastPendingSeek();
+        SetMediaCastTimelinePosition(position, running: false);
+        _mediaCastAudioDecoder.Stop();
+        if (completed)
+            MediaCastStatusPanel.Visibility = Visibility.Collapsed;
+        else
+        {
+            MediaCastStatusText.Text = LocalizationService.Format(
+                "MediaCastPlaybackFailedFormat", reason ?? "playback failed");
+            MediaCastStatusPanel.Visibility = Visibility.Visible;
+            // Stop any remaining network/decoder work while retaining the
+            // sender's session so a new item can still arrive.
+            DisposeHlsMediaBridge();
+            DisposeMediaHttpProxyBridge();
+        }
+        ReportMediaCastPlayback();
     }
 
     private string SanitizeMediaError(string message)
@@ -5146,7 +5546,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void QueueLiveMediaRecovery(string reason)
     {
         if (!_mediaCastActive || (!_mediaIsLive && !_mediaUsesHlsBridge) ||
-            _mediaSource is null) return;
+            _mediaSource is null ||
+            _mediaTerminalStatus != MediaCastPlaybackStatus.Unknown) return;
         var generation = _mediaCastEvents.CurrentGeneration;
         var revision = ++_mediaRecoveryRevision;
         var source = _mediaSource;
@@ -5158,9 +5559,22 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 ("generation", generation), ("revision", revision),
                 ("attempts", attempt), ("source", AppLog.MediaSource(source)),
                 ("reason", AppLog.Error(reason))));
-            QueueMediaCastCompletion();
+            // Exhausting this item's recovery must not cancel the sender's
+            // queue, including when HLS uses an external signed media URL.
+            FinishMediaCastItem(completed: false, reason);
             return;
         }
+        // Recovery freezes the programme clock and is explicitly loading.
+        // This must happen before the delayed replacement begins.
+        SetMediaCastTimelineRunning(false);
+        // Every recovery retires the old forward-only HTTP consumer. Leaving
+        // it bound during the delay lets queued callbacks cancel recovery, or
+        // lets a replacement consume an already-used transport midstream.
+        _mediaCastEvents.TryUnbind(generation, MediaCastMediaElement);
+        _mediaOpened = false;
+        DisposeHlsMediaBridge();
+        _mediaPlaybackSource = null;
+        ReportMediaCastPlayback();
         _viewModel.AddUiLog(AppLog.Event("live media reconnect",
             ("delay_ms", delay.TotalMilliseconds.ToString("F0")),
             ("attempt", attempt), ("reason", AppLog.Error(reason))));
@@ -5188,6 +5602,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             (!_mediaIsLive && !_mediaUsesHlsBridge) ||
             generation != _mediaCastEvents.CurrentGeneration ||
             revision != _mediaRecoveryRevision ||
+            _mediaTerminalStatus != MediaCastPlaybackStatus.Unknown ||
             !Equals(source, _mediaSource)) return;
 
         _viewModel.AddDiagnosticLog(AppLog.Event("media_recovery_begin",
@@ -5214,6 +5629,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                         generation, source, duration));
                 if (_mediaHlsBridge is not null)
                     _mediaPlaybackSource = _mediaHlsBridge.PlaybackUri;
+                else if (_mediaUsesHlsBridge)
+                    throw new InvalidOperationException(
+                        LocalizationService.Get("HlsRestartFailed"));
             }
             _mediaOpened = false;
             // Keep the sender's transport in PLAYING while the next HLS
@@ -5232,8 +5650,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (!ReplaceMediaCastMediaElement(
                     _mediaPlaybackSource ?? source, generation,
                     audioEnabled, volume)) return;
-            if (_mediaShouldPlay) MediaCastMediaElement.Play();
-            else MediaCastMediaElement.Pause();
+            if (_mediaHlsBridge is null)
+            {
+                if (_mediaShouldPlay) MediaCastMediaElement.Play();
+                else MediaCastMediaElement.Pause();
+            }
             _mediaPlaybackTimer.Start();
             UpdateMediaCastControls();
             _viewModel.AddDiagnosticLog(AppLog.Event("media_recovery_submitted",
@@ -5341,7 +5762,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 OnAboutClick(this, new RoutedEventArgs());
                 break;
             case "device-hub":
-                SetDeviceHubPanelVisible(true);
+                OpenDeveloperTools();
+                _developerToolsWindow?.ShowDeviceTools();
                 break;
             case "advanced-settings":
                 new AdvancedSettingsWindow(1920, 1080, previewOnly: true)
@@ -5841,6 +6263,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             Owner = this,
         };
+        _secondaryMirrors.ConfigurePhoneFrameSettings(window);
         _projectionSettingsWindow = window;
         _projectionSettingsUdid = udid;
         _projectionSettingsSessionHandle = sessionHandle;
@@ -5967,6 +6390,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         RefreshDeviceHubContext(e.PropertyName);
+        if (e.PropertyName == nameof(MainViewModel.NeedsMediaCastAudioDecode))
+        {
+            if (!_viewModel.NeedsMediaCastAudioDecode) _mediaCastAudioDecoder.Stop();
+            else if (!_mediaCastAudioDecoder.IsRunning) RestartMediaCastAudioAtCurrentPosition();
+        }
         OnMappingContextChanged(e.PropertyName);
         if (e.PropertyName == nameof(MainViewModel.HideInterfaceDescriptions)) UpdatePreviewStatusPresentation();
         // A mode switch also notifies both effective checkbox values. Its
@@ -6208,7 +6636,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             PreviewPanel.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
             MainPreviewHost.SetDeviceCornerProfile(DeviceCornerProfile.Rectangular,
                 enabled: false);
-            MinWidth = Math.Min(CompleteMinimumWindowWidth, IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(this).Width);
+            UpdateCompleteWorkspaceMinimumWidth();
             if (_lightweightModeApplied && !_isWindowMaximized)
             {
                 SizeToContent = SizeToContent.Manual;
@@ -6612,7 +7040,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.SourceVideoWidth != 0 && _viewModel.SourceVideoHeight != 0;
 
     private bool HasLightweightWorkspacePanels =>
-        _leftWorkspacePanel != LeftWorkspacePanel.None || _isSettingsPanelVisible;
+        _leftWorkspacePanel != LeftWorkspacePanel.None || IsRightWorkspacePanelVisible;
 
     private double GetLightweightFixedChromeWidth(double currentWindowWidth)
     {
@@ -7352,30 +7780,26 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void OnShortcutSettingsClick(object sender, RoutedEventArgs e) =>
         ShowShortcutSettings();
 
-    private async void OnClearBluetoothBindingsClick(object sender, RoutedEventArgs e)
-    {
-        if (!AppPromptWindow.Confirm(
-                LocalizationService.Get("ClearBluetoothBindingsTitle"),
-                LocalizationService.Get("ClearBluetoothBindingsBody")))
-            return;
-        if (!await _viewModel.ClearBluetoothControlBindingsAsync())
-            AppPromptWindow.Inform(
-                LocalizationService.Get("ClearBluetoothBindingsTitle"),
-                LocalizationService.Get("ClearBluetoothBindingsFailed"));
-    }
-
     private void ToggleBluetoothControlFromHotkey()
     {
         BluetoothControlNoticeWindow.TryCloseActive();
         HandleConfiguredShortcut(BluetoothShortcutAction.BluetoothControl);
     }
 
-    private void ShowReverseControlStatus(ControlStatusMode mode, string? targetUdid = null)
+    private void ShowReverseControlStatus(ControlStatusMode mode, string? targetUdid = null, nint sourceWindow = 0)
     {
         var target = targetUdid ?? _viewModel.SelectedDevice?.Udid;
         if (mode == ControlStatusMode.Bluetooth && _viewModel.IsBluetoothControlTarget(target)) return;
         if (mode != ControlStatusMode.Bluetooth && _viewModel.IsDeviceControlEnabled(target)) return;
         var status = _viewModel.GetControlStatus(mode, target);
+        if (sourceWindow == 0)
+        {
+            var independent = _secondaryMirrors.GetWindowHandle(target);
+            if (independent != 0 && _keyboardForegroundWindow() == independent) sourceWindow = independent;
+        }
+        // Register before Begin can synchronously publish a prompt. VM status
+        // updates keep this route; an explicit main-window start clears it.
+        ReverseControlStatusWindow.SetOwnerRoute(this, status, sourceWindow);
         status.QuietAutomaticStartup = false;
         if (status.Current is not { IsTerminal: false } &&
             !_viewModel.IsUsbControlTarget(target))

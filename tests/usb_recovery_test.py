@@ -116,6 +116,20 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('USB reader stopped', await asyncio.wait_for(watcher, 0.3))
         self.assertFalse(reader.done()); reader.cancel()
 
+    async def test_sdk_consumed_tls_error_keeps_the_record_failure_reason(self):
+        import ssl
+        from types import SimpleNamespace
+        s = self.session()
+        task = asyncio.get_running_loop().create_future(); task.set_result(None)
+        reader = asyncio.StreamReader()
+        error = ssl.SSLError('test TLS record failure')
+        error.reason = 'DECRYPTION_FAILED_OR_BAD_RECORD_MAC'
+        reader.set_exception(error)
+        client = SimpleNamespace(_sock_read_task=task, _reader=reader)
+        self.assertIn('SSLError (DECRYPTION_FAILED_OR_BAD_RECORD_MAC)', s._transport_failure_reason(client))
+        client = SimpleNamespace(_sock_read_task=task, _service=SimpleNamespace(reader=reader))
+        self.assertIn('SSLError (DECRYPTION_FAILED_OR_BAD_RECORD_MAC)', s._transport_failure_reason(client))
+
     async def test_known_dead_transport_skips_hid_repair(self):
         s = self.session(); s._session_ready.set()
         s._usb_mux_transport = Mock(failure_reason='USB reader stopped')
@@ -267,6 +281,8 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         s=bridge.TouchSession(Ipc(),120,'test-device')
         s._remote_pairing_provision_attempted=True
         s.hid=Hid(); s.auth_mode='direct'; s.gate_open=True
+        s.keyboard_service_id=512
+        s.hid._bridge_keyboard_attach_attempted = True  # fixture already completed initialization
         s._preflight_developer_environment=AsyncMock()
         return s
 
@@ -528,7 +544,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(bridge,'UniversalHIDServiceService',Hid):
             await s._refresh_direct_hid()
         await s._send_keyboard_report([])
-        self.assertEqual([(512,[])],s.hid.keys)
+        self.assertEqual([(512,[]),(512,[])],s.hid.keys)
 
     async def test_health_and_ready_do_not_repeat_one_shot_hid_inventory(self):
         s=self.session()

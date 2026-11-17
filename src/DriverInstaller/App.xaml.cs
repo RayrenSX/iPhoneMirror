@@ -8,6 +8,8 @@ namespace IPhoneMirror.DriverInstaller;
 
 public partial class App : Application
 {
+    static App() => WpfLayoutCompatibility.Enable();
+
     internal bool IsUiPreviewMode { get; set; }
     private readonly Exception? _elevationBoundaryError =
         DriverOperationClient.InitializeElevationBoundary();

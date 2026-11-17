@@ -4,7 +4,7 @@
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource AboutTitle}"
-        Width="782" Height="622" MinWidth="722" MinHeight="542"
+        Width="962" Height="722" MinWidth="722" MinHeight="542"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         Foreground="{DynamicResource TextBrush}"
         AutomationProperties.AutomationId="AboutWindow"
@@ -16,6 +16,51 @@
                BasedOn="{StaticResource PrimaryButton}">
             <Setter Property="Foreground"
                     Value="{DynamicResource AboutCheckUpdatesTextBrush}"/>
+        </Style>
+        <Style x:Key="AboutInfoCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="16"/>
+        </Style>
+        <Style x:Key="AboutQuickAction" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="FontSize" Value="{DynamicResource SecondaryFontSize}"/>
+        </Style>
+        <Style x:Key="AboutTextLink" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Padding" Value="6,5"/>
+            <Setter Property="Margin" Value="0,2,8,2"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+            <Setter Property="FontSize" Value="{DynamicResource SecondaryFontSize}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="DonationStarButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource DonationActionBorderBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="{DynamicResource DonationActionBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource DonationActionHoverBrush}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource DonationActionBorderBrush}"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource DonationActionPressedBrush}"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
     </chrome:RoundedWindow.Resources>
     <Grid Style="{StaticResource SubWindowPageRoot}"
@@ -42,149 +87,387 @@
         <TabControl x:Name="AboutTabs" Grid.Row="2"
                     SelectionChanged="OnAboutTabChanged"
                     Style="{StaticResource SubWindowTabControl}">
-            <TabItem Header="{DynamicResource AboutTitle}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled"
-                              Padding="0">
-                    <StackPanel Margin="0,14,0,0">
-                            <Grid>
+            <TabItem x:Name="OverviewTab" Header="{DynamicResource AboutOverviewTitle}"
+                     AutomationProperties.AutomationId="AboutOverviewTab">
+                <ScrollViewer x:Name="OverviewScrollViewer" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled" Padding="0">
+                    <StackPanel Margin="0,12,0,0">
+                        <Border Style="{StaticResource AboutInfoCard}" Margin="0,0,0,12">
+                            <Grid SizeChanged="OnOverviewHeaderSizeChanged">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="88"/>
+                                    <ColumnDefinition Width="76"/>
                                     <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <Border Width="68" Height="68" CornerRadius="14"
-                                        HorizontalAlignment="Left"
-                                        Background="{DynamicResource PanelAltBrush}"
-                                        BorderBrush="{DynamicResource BorderBrush}"
-                                        BorderThickness="1">
-                                    <Image Source="pack://application:,,,/Assets/iPhoneMirror.png"
-                                           Width="52" Height="52"/>
+                                <Border Width="60" Height="60" CornerRadius="14"
+                                        HorizontalAlignment="Left" VerticalAlignment="Center"
+                                        Background="{DynamicResource ControlFillBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                    <Image Source="pack://application:,,,/Assets/iPhoneMirror.png" Width="46" Height="46"/>
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="iPhoneMirror"
-                                               Style="{StaticResource SubWindowTitle}"/>
+                                    <TextBlock Text="iPhoneMirror" Style="{StaticResource SubWindowTitle}"/>
                                     <Button x:Name="AboutVersionButton" Content="{Binding VersionText}"
-                                               Click="OnVersionClick" Background="Transparent" BorderThickness="0" Padding="0"
-                                               HorizontalAlignment="Left" MinHeight="24" Cursor="Hand"
-                                               AutomationProperties.AutomationId="AboutVersionButton"
-                                               Foreground="{DynamicResource MutedTextBrush}"
-                                               FontSize="{DynamicResource SecondaryFontSize}" FontWeight="SemiBold"
-                                               Margin="0,4,0,0"/>
-                                    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource AboutDescription}"
-                                               Style="{StaticResource SubWindowSubtitle}"
-                                               Margin="0,6,0,0"/>
+                                            Click="OnVersionClick" Background="Transparent" BorderThickness="0" Padding="0"
+                                            HorizontalAlignment="Left" MinHeight="24" Cursor="Hand"
+                                            AutomationProperties.AutomationId="AboutVersionButton"
+                                            Foreground="{DynamicResource AccentBrush}"
+                                            FontSize="{DynamicResource SecondaryFontSize}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{DynamicResource AboutProjectMeta}"
+                                               Style="{StaticResource SubWindowSubtitle}" Margin="0,2,0,0"/>
+                                    <TextBlock Text="{DynamicResource AboutDescription}"
+                                               Visibility="{DynamicResource InterfaceDescriptionsVisibility}"
+                                               Style="{StaticResource SubWindowSubtitle}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <WrapPanel x:Name="OverviewActions" Grid.Column="2" MaxWidth="520"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center" Margin="12,0,-8,0">
+                                    <Button Click="OnGitHubClick" Style="{StaticResource AboutTextLink}"
+                                            AutomationProperties.Name="GitHub">
+                                        <DockPanel LastChildFill="True">
+                                            <ui:SymbolIcon DockPanel.Dock="Right" Symbol="Open20" FontSize="14"
+                                                           Style="{StaticResource ButtonSymbolIcon}" Margin="5,0,0,0"/>
+                                            <TextBlock Text="GitHub"/>
+                                        </DockPanel>
+                                    </Button>
+                                    <Button Content="{DynamicResource Changelog}" Click="OnChangelogClick"
+                                            Style="{StaticResource AboutTextLink}"/>
+                                    <Button Content="{DynamicResource LicenseInformation}" Click="OnLicenseClick"
+                                            Style="{StaticResource AboutTextLink}"/>
+                                    <Button x:Name="SupportAuthorButton" Click="OnSupportAuthorClick"
+                                            Style="{StaticResource AboutTextLink}"
+                                            AutomationProperties.Name="{DynamicResource SupportAuthor}"
+                                            AutomationProperties.AutomationId="SupportAuthorButton">
+                                        <DockPanel LastChildFill="True">
+                                            <ui:SymbolIcon DockPanel.Dock="Left" Symbol="Heart20" FontSize="16"
+                                                           Style="{StaticResource ButtonSymbolIcon}" Margin="0,0,5,0"/>
+                                            <TextBlock Text="{DynamicResource SupportAuthor}" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                    </Button>
+                                </WrapPanel>
+                            </Grid>
+                        </Border>
+
+                        <Grid SizeChanged="OnOverviewColumnsSizeChanged">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition x:Name="OverviewCardsRowGap" Height="0"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="UpdateSettingsCard" Style="{StaticResource AboutInfoCard}">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="True">
+                                        <ui:SymbolIcon DockPanel.Dock="Left" Symbol="ArrowDownload20" FontSize="19"
+                                                       Foreground="{DynamicResource AccentBrush}" Margin="0,0,8,0"/>
+                                        <TextBlock Text="{DynamicResource UpdateSettingsTitle}"
+                                                   Style="{StaticResource SubWindowSectionTitle}" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding UpdateStatus}" Style="{StaticResource SubWindowSubtitle}"
+                                               Margin="0,8,0,0" AutomationProperties.AutomationId="AboutUpdateStatus"/>
+                                    <Button x:Name="CheckUpdatesButton" Content="{Binding CheckUpdatesButtonText}"
+                                            IsEnabled="{Binding CanCheckForUpdates}"
+                                            Click="OnCheckUpdatesClick" Style="{StaticResource AboutCheckUpdatesButtonStyle}"
+                                            HorizontalAlignment="Left" Margin="0,10,0,12"/>
+                                    <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,0,0,8"/>
+                                    <TextBlock Text="{DynamicResource UpdateSettingsDescription}"
+                                               Visibility="{DynamicResource InterfaceDescriptionsVisibility}"
+                                               Style="{StaticResource SubWindowSubtitle}" Margin="0,0,0,8"/>
+                                    <CheckBox Content="{DynamicResource CheckOnStartup}"
+                                              IsChecked="{Binding CheckOnStartup}" Margin="0,0,0,2"/>
+                                    <CheckBox Content="{DynamicResource AutoDownloadUpdates}"
+                                              IsChecked="{Binding AutoDownload}" Margin="0,0,0,2"/>
+                                    <CheckBox Content="{DynamicResource AllowUpdateMirrorFallback}"
+                                              IsChecked="{Binding AllowMirrorFallback}"
+                                              ToolTip="{DynamicResource AllowUpdateMirrorFallbackDescription}" Margin="0,0,0,2"/>
+                                    <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,8"/>
+                                    <CheckBox Content="{DynamicResource NotifyStableReleases}"
+                                              IsChecked="{Binding NotifyStableReleases}" Margin="0,0,0,2"/>
+                                    <CheckBox Content="{DynamicResource NotifyPrereleaseReleases}"
+                                              IsChecked="{Binding NotifyPrereleaseReleases}"/>
+                                    <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource AboutUpdateSaveHint}"
+                                               Style="{StaticResource SubWindowSubtitle}" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="DiagnosticsCard" Grid.Column="2" Style="{StaticResource AboutInfoCard}">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="True">
+                                        <ui:SymbolIcon DockPanel.Dock="Left" Symbol="DocumentText20" FontSize="19"
+                                                       Foreground="{DynamicResource AccentBrush}" Margin="0,0,8,0"/>
+                                        <TextBlock Text="{DynamicResource DiagnosticsTitle}"
+                                                   Style="{StaticResource SubWindowSectionTitle}" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <TextBlock Text="{DynamicResource DiagnosticsDescription}"
+                                               Visibility="{DynamicResource InterfaceDescriptionsVisibility}"
+                                               Style="{StaticResource SubWindowSubtitle}" Margin="0,8,0,0"/>
+                                    <TextBox Text="{Binding DiagnosticPath, Mode=OneWay}" IsReadOnly="True"
+                                             ToolTip="{DynamicResource DiagnosticsLocation}"
+                                             AutomationProperties.AutomationId="AboutDiagnosticPath"
+                                             FontSize="{DynamicResource SecondaryFontSize}"
+                                             TextWrapping="Wrap" Padding="10,7" Margin="0,10,0,0"/>
+                                    <TextBlock Text="{Binding DiagnosticStatus}" Style="{StaticResource SubWindowSubtitle}"
+                                               Margin="0,6,0,8" AutomationProperties.AutomationId="AboutDiagnosticStatus"/>
+                                    <WrapPanel Margin="-4,0,-4,8">
+                                        <Button Content="{DynamicResource OpenLogs}" Click="OnOpenLogsClick"
+                                                Style="{StaticResource AboutQuickAction}"/>
+                                        <Button Content="{DynamicResource CleanLogs}" Click="OnCleanLogsClick"
+                                                Style="{StaticResource AboutQuickAction}"/>
+                                    </WrapPanel>
+                                    <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,0,0,10"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{DynamicResource LiveLogHeader}"
+                                                   Style="{StaticResource SubWindowSectionTitle}" VerticalAlignment="Center"/>
+                                        <WrapPanel Grid.Column="1" HorizontalAlignment="Right" Margin="8,0,-6,0">
+                                            <Button x:Name="LogPauseButton" Content="{Binding LogPauseActionText}"
+                                                    Click="OnLogPauseClick" ToolTip="{DynamicResource LogPauseHint}"
+                                                    Style="{StaticResource AboutTextLink}" Margin="0"
+                                                    AutomationProperties.AutomationId="AboutLogPauseButton"/>
+                                            <Button x:Name="LogCopyButton" Click="OnCopyLogClick"
+                                                    IsEnabled="{Binding CanCopyLog}"
+                                                    ToolTip="{DynamicResource LogCopyHint}"
+                                                    Style="{StaticResource AboutTextLink}" Margin="0"
+                                                    AutomationProperties.Name="{Binding Text, ElementName=LogCopyLabel}"
+                                                    AutomationProperties.AutomationId="AboutLogCopyButton">
+                                                <TextBlock x:Name="LogCopyLabel" Text="{DynamicResource LogCopy}"/>
+                                            </Button>
+                                            <Button x:Name="LogClearButton" Content="{DynamicResource ClearView}"
+                                                    Click="OnClearLogClick" ToolTip="{DynamicResource LogClearHint}"
+                                                    Style="{StaticResource AboutTextLink}" Margin="0"
+                                                    AutomationProperties.AutomationId="AboutLogClearButton"/>
+                                        </WrapPanel>
+                                    </Grid>
+                                    <Border Background="{DynamicResource PreviewChromeBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                            CornerRadius="10" Margin="0,8,0,0" ClipToBounds="True">
+                                        <TextBox x:Name="LiveLogTextBox" Text="{Binding DisplayedLogText, Mode=OneWay}"
+                                                 ToolTip="{Binding MainViewModel.LogPathDisplay, Mode=OneWay}"
+                                                 IsReadOnly="True" TextAlignment="Left" VerticalContentAlignment="Top"
+                                                 FontFamily="{StaticResource CodeFontFamily}"
+                                                 FontSize="{DynamicResource SecondaryFontSize}"
+                                                 Foreground="{DynamicResource PreviewTextBrush}" Background="Transparent"
+                                                 BorderThickness="0" Height="160" Padding="10" TextWrapping="Wrap"
+                                                 SelectionBrush="{DynamicResource AccentBrush}" SelectionOpacity="0.35"
+                                                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                                 TextChanged="OnLiveLogTextChanged"
+                                                 PreviewMouseDown="OnLiveLogPreviewMouseDown"
+                                                 PreviewMouseWheel="OnLiveLogPreviewMouseWheel"
+                                                 PreviewKeyDown="OnLiveLogPreviewKeyDown"
+                                                 SelectionChanged="OnLiveLogSelectionChanged"/>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem x:Name="DonationTab" Header="{DynamicResource SupportAuthor}"
+                     AutomationProperties.AutomationId="DonationTab">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled" Padding="0">
+                    <StackPanel Margin="0,14,0,0">
+                        <Border Background="{DynamicResource DonationHeaderBrush}" BorderBrush="{DynamicResource BorderSoftBrush}"
+                                BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,14">
+                            <Grid SizeChanged="OnDonationHeaderSizeChanged">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid x:Name="DonationHeaderIntro" Margin="0,0,16,0" VerticalAlignment="Center">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="36"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Symbol="Heart20" FontSize="24"
+                                                   Foreground="{DynamicResource ErrorBrush}"
+                                                   VerticalAlignment="Top" Margin="0,2,10,0"/>
+                                    <StackPanel Grid.Column="1">
+                                        <WrapPanel>
+                                            <TextBlock Text="{DynamicResource DonationTitle}"
+                                                       Style="{StaticResource SubWindowSectionTitle}"
+                                                       VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Border Background="{DynamicResource SuccessSurfaceBrush}"
+                                                    CornerRadius="8" Padding="8,3">
+                                                <TextBlock Text="{DynamicResource DonationFreeBadge}"
+                                                           Foreground="{DynamicResource SuccessBrush}"
+                                                           FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap"/>
+                                            </Border>
+                                        </WrapPanel>
+                                        <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DonationDescription}"
+                                                   Style="{StaticResource SubWindowSubtitle}" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                                <StackPanel x:Name="DonationHeaderActions" Grid.Column="1"
+                                            MinWidth="184" MaxWidth="240" VerticalAlignment="Center"
+                                            HorizontalAlignment="Right">
+                                    <Button x:Name="DonationStarButton" Style="{StaticResource DonationStarButtonStyle}"
+                                            Click="OnGitHubClick" FontSize="{DynamicResource SecondaryFontSize}"
+                                            ToolTip="{DynamicResource DonationStarHint}"
+                                            AutomationProperties.AutomationId="DonationStarButton"
+                                            AutomationProperties.Name="{DynamicResource DonationStarProject}">
+                                        <DockPanel LastChildFill="True">
+                                            <ui:SymbolIcon DockPanel.Dock="Left" Symbol="Star20" FontSize="20"
+                                                           Style="{StaticResource ButtonSymbolIcon}" Margin="0,0,6,0"/>
+                                            <ui:SymbolIcon DockPanel.Dock="Right" Symbol="Open20" FontSize="16"
+                                                           Style="{StaticResource ButtonSymbolIcon}" Margin="8,0,0,0"/>
+                                            <TextBlock Text="{DynamicResource DonationStarProject}" TextWrapping="Wrap"
+                                                       VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Button>
+                                    <Button x:Name="DonationCopyLinkButton" Click="OnCopyProjectLinkClick"
+                                            Margin="0,8,0,0" FontSize="{DynamicResource SecondaryFontSize}"
+                                            AutomationProperties.AutomationId="DonationCopyLinkButton"
+                                            AutomationProperties.Name="{Binding Text, ElementName=DonationCopyLinkLabel}">
+                                        <DockPanel LastChildFill="True">
+                                            <ui:SymbolIcon DockPanel.Dock="Left" Symbol="Copy20" FontSize="20"
+                                                           Style="{StaticResource ButtonSymbolIcon}" Margin="0,0,6,0"/>
+                                            <TextBlock x:Name="DonationCopyLinkLabel"
+                                                       Text="{DynamicResource DonationCopyProjectLink}" TextWrapping="Wrap"
+                                                       VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Button>
                                 </StackPanel>
                             </Grid>
+                        </Border>
 
-                            <Border Height="1" Background="{DynamicResource BorderSoftBrush}"
-                                    Margin="0,20"/>
-                            <TextBlock Text="{DynamicResource UpdateStatusTitle}"
-                                       Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding UpdateStatus}"
-                                       Style="{StaticResource SubWindowSubtitle}"
-                                       Margin="0,6,0,14"/>
-                            <WrapPanel>
-                                <Button Content="{DynamicResource CheckForUpdates}"
-                                        Click="OnCheckUpdatesClick"
-                                        Style="{StaticResource AboutCheckUpdatesButtonStyle}"
-                                        MinWidth="138" Margin="0,0,8,8"/>
-                                <Button Content="GitHub" Click="OnGitHubClick"
-                                        MinWidth="96" Margin="0,0,8,8"/>
-                                <Button Content="{DynamicResource Changelog}"
-                                        Click="OnChangelogClick"
-                                        MinWidth="108" Margin="0,0,8,8"/>
-                                <Button Content="{DynamicResource LicenseInformation}"
-                                        Click="OnLicenseClick"
-                                        MinWidth="118" Margin="0,0,8,8"/>
-                            </WrapPanel>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <TabItem Header="{DynamicResource UpdateSettingsTitle}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled"
-                              Padding="0">
-                    <StackPanel Margin="0,14,0,0">
-                            <TextBlock Text="{DynamicResource UpdateSettingsTitle}"
-                                       Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource UpdateSettingsDescription}"
-                                       Style="{StaticResource SubWindowSubtitle}"
-                                       Margin="0,6,0,18"/>
-                            <CheckBox Content="{DynamicResource CheckOnStartup}"
-                                      IsChecked="{Binding CheckOnStartup}" Margin="0,0,0,14"/>
-                            <CheckBox Content="{DynamicResource AutoDownloadUpdates}"
-                                      IsChecked="{Binding AutoDownload}" Margin="0,0,0,14"/>
-                            <CheckBox Content="{DynamicResource AllowUpdateMirrorFallback}"
-                                      IsChecked="{Binding AllowMirrorFallback}" Margin="0,0,0,14"
-                                      ToolTip="{DynamicResource AllowUpdateMirrorFallbackDescription}"/>
-                            <CheckBox Content="{DynamicResource NotifyStableReleases}"
-                                      IsChecked="{Binding NotifyStableReleases}" Margin="0,0,0,14"/>
-                            <CheckBox Content="{DynamicResource NotifyPrereleaseReleases}"
-                                      IsChecked="{Binding NotifyPrereleaseReleases}"/>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <TabItem Header="{DynamicResource DiagnosticsTitle}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled"
-                              Padding="0">
-                    <StackPanel Margin="0,14,0,0">
-                            <TextBlock Text="{DynamicResource DiagnosticsTitle}"
-                                       Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource DiagnosticsDescription}"
-                                       Style="{StaticResource SubWindowSubtitle}"
-                                       Margin="0,6,0,18"/>
-                            <TextBlock Text="{DynamicResource DiagnosticsLocation}"
-                                       Style="{StaticResource SubWindowSectionTitle}"/>
-                            <TextBox Text="{Binding DiagnosticPath, Mode=OneWay}"
-                                     IsReadOnly="True" Margin="0,9,0,14"
-                                     Padding="10,7" TextWrapping="Wrap"/>
-                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding DiagnosticStatus}"
-                                       Style="{StaticResource SubWindowSubtitle}"
-                                       Margin="0,0,0,14"/>
-                            <WrapPanel>
-                                <Button Content="{DynamicResource OpenLogs}"
-                                        Click="OnOpenLogsClick"
-                                        Style="{StaticResource PrimaryButton}"
-                                        MinWidth="126" Margin="0,0,8,8"/>
-                                <Button Content="{DynamicResource CleanLogs}"
-                                        Click="OnCleanLogsClick"
-                                        MinWidth="126" Margin="0,0,8,8"/>
-                            </WrapPanel>
-                            <Border Height="1" Background="{DynamicResource BorderSoftBrush}"
-                                    Margin="0,12,0,18"/>
+                        <Border Background="{DynamicResource ErrorSurfaceBrush}"
+                                BorderBrush="{DynamicResource ErrorBrush}"
+                                BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="0,0,0,16">
                             <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <TextBlock Text="{DynamicResource LiveLogHeader}"
-                                           Style="{StaticResource SubWindowSectionTitle}"
-                                           VerticalAlignment="Center"/>
-                                <Button Grid.Column="1" Margin="8,0,0,0" Content="{DynamicResource ClearView}"
-                                        Command="{Binding MainViewModel.ClearLogCommand}"
-                                        HorizontalAlignment="Right" Padding="10,5"
-                                        MinHeight="32" FontSize="{DynamicResource SecondaryFontSize}"/>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <ui:SymbolIcon Symbol="Shield20" FontSize="20"
+                                               Foreground="{DynamicResource ErrorBrush}"
+                                               VerticalAlignment="Top" Margin="0,1,10,0"/>
+                                <TextBlock Grid.Column="1" Style="{StaticResource SubWindowSubtitle}"
+                                           Foreground="{DynamicResource ErrorBrush}" Margin="0">
+                                    <Run Text="{DynamicResource DonationAntiResaleTitle}" FontWeight="Bold"/>
+                                    <Run Text="  "/>
+                                    <Run Text="{DynamicResource DonationAntiResaleNotice}"/>
+                                </TextBlock>
                             </Grid>
-                            <TextBlock Text="{Binding MainViewModel.LogPathDisplay, Mode=OneWay}"
-                                       FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource CaptionFontSize}"
-                                       Foreground="{DynamicResource MutedTextBrush}"
-                                       TextWrapping="Wrap" Margin="0,10,0,7"/>
-                            <Border Background="{DynamicResource PreviewChromeBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="10"
-                                    ClipToBounds="True">
-                                <TextBox x:Name="LiveLogTextBox"
-                                         Text="{Binding MainViewModel.LogText, Mode=OneWay}"
-                                         IsReadOnly="True" FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource SecondaryFontSize}"
-                                         Foreground="{DynamicResource PreviewTextBrush}"
-                                         Background="Transparent" BorderThickness="0"
-                                         Height="180" Padding="10" TextWrapping="NoWrap"
-                                         SelectionBrush="{DynamicResource AccentBrush}"
-                                         SelectionOpacity="0.35"
-                                         VerticalScrollBarVisibility="Auto"
-                                         HorizontalScrollBarVisibility="Auto"
-                                         TextChanged="OnLiveLogTextChanged"/>
+                        </Border>
+
+                        <Border x:Name="DonationIntegrityError" Visibility="Collapsed"
+                                Background="{DynamicResource ErrorSurfaceBrush}"
+                                BorderBrush="{DynamicResource ErrorBrush}" BorderThickness="1"
+                                CornerRadius="12" Padding="16" Margin="0,0,0,16"
+                                AutomationProperties.AutomationId="DonationIntegrityError">
+                            <TextBlock Text="{DynamicResource DonationIntegrityFailure}"
+                                       Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"/>
+                        </Border>
+
+                        <TextBlock TextAlignment="Center" Margin="0,0,0,12" TextWrapping="Wrap"
+                                   Visibility="{Binding Visibility, ElementName=DonationPaymentCards}"
+                                   FontSize="{DynamicResource SecondaryFontSize}"
+                                   Foreground="{DynamicResource MutedTextBrush}">
+                            <Run Text="{DynamicResource DonationRecipientLabel}"/>
+                            <Run Text="{Binding DonationRecipientName, Mode=OneWay}"
+                                 Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                        </TextBlock>
+
+                        <Grid x:Name="DonationPaymentCards" Visibility="Collapsed" UseLayoutRounding="True"
+                              SizeChanged="OnDonationCardsSizeChanged">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition x:Name="DonationCardsRowGap" Height="0"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="WeChatDonationCard" Background="{DynamicResource SuccessSurfaceBrush}"
+                                    BorderBrush="{DynamicResource SuccessBrush}" BorderThickness="1"
+                                    CornerRadius="12" Padding="16">
+                                <StackPanel>
+                                    <DockPanel HorizontalAlignment="Center" LastChildFill="True" Margin="0,0,0,8">
+                                        <Border DockPanel.Dock="Left" Width="24" Height="24" CornerRadius="12"
+                                                Background="{DynamicResource DonationWeChatBrush}" Margin="0,0,8,0">
+                                            <TextBlock Text="微" Foreground="White" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock Text="{DynamicResource DonationWeChatTitle}"
+                                                   Style="{StaticResource SubWindowSectionTitle}"
+                                                   Foreground="{DynamicResource SuccessBrush}" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <Border Background="White" CornerRadius="12" Padding="8"
+                                            HorizontalAlignment="Center">
+                                        <Image x:Name="WeChatDonationQrCode" Width="240" Height="270" Stretch="Uniform"
+                                               SnapsToDevicePixels="True"
+                                               RenderOptions.BitmapScalingMode="HighQuality"
+                                               AutomationProperties.AutomationId="WeChatDonationQrCode"
+                                               AutomationProperties.Name="{DynamicResource DonationWeChatQrAccessibleName}"/>
+                                    </Border>
+                                    <TextBlock Text="{DynamicResource DonationWeChatScanHint}"
+                                               Style="{StaticResource SubWindowSubtitle}"
+                                               TextAlignment="Center" Margin="0,5,0,0"/>
+                                </StackPanel>
                             </Border>
+                            <Border x:Name="AlipayDonationCard" Grid.Column="2"
+                                    Background="{DynamicResource InfoSurfaceBrush}"
+                                    BorderBrush="{DynamicResource InfoBrush}" BorderThickness="1"
+                                    CornerRadius="12" Padding="16">
+                                <StackPanel>
+                                    <DockPanel HorizontalAlignment="Center" LastChildFill="True" Margin="0,0,0,8">
+                                        <Border DockPanel.Dock="Left" Width="24" Height="24" CornerRadius="12"
+                                                Background="{DynamicResource DonationAlipayBrush}" Margin="0,0,8,0">
+                                            <TextBlock Text="支" Foreground="White" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock Text="{DynamicResource DonationAlipayTitle}"
+                                                   Style="{StaticResource SubWindowSectionTitle}"
+                                                   Foreground="{DynamicResource InfoBrush}" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <Border Background="White" CornerRadius="12" Padding="8"
+                                            HorizontalAlignment="Center">
+                                        <Image x:Name="AlipayDonationQrCode" Width="240" Height="270" Stretch="Uniform"
+                                               SnapsToDevicePixels="True"
+                                               RenderOptions.BitmapScalingMode="HighQuality"
+                                               AutomationProperties.AutomationId="AlipayDonationQrCode"
+                                               AutomationProperties.Name="{DynamicResource DonationQrAccessibleName}"/>
+                                    </Border>
+                                    <TextBlock Text="{DynamicResource DonationScanHint}"
+                                               Style="{StaticResource SubWindowSubtitle}"
+                                               TextAlignment="Center" Margin="0,5,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Border Background="{DynamicResource PanelAltBrush}"
+                                BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1"
+                                CornerRadius="12" Padding="14" Margin="0,16,0,0">
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource DonationRecipientCheckHint}"
+                                           Style="{StaticResource SubWindowSubtitle}" Margin="0"/>
+                                <TextBlock Text="{DynamicResource DonationVoluntaryHint}"
+                                           Style="{StaticResource SubWindowSubtitle}"/>
+                                <Button Content="{Binding DonationOfficialAddress, Mode=OneWay}"
+                                        Click="OnGitHubClick" HorizontalAlignment="Left"
+                                        Style="{StaticResource GhostButton}" Padding="0,4"
+                                        Foreground="{DynamicResource InfoBrush}"
+                                        FontSize="{DynamicResource SecondaryFontSize}" Margin="0,4,0,0"
+                                        AutomationProperties.AutomationId="DonationOfficialProjectButton"/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

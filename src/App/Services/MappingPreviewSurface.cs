@@ -4,6 +4,9 @@ internal sealed record MappingPreviewSurface(nint Window, nint Owner, string Dev
     uint Width, uint Height, int Rotation, BluetoothMouseDirection Portrait,
     BluetoothMouseDirection Landscape, bool ReverseX, bool ReverseY)
 {
+    internal DeviceFrameProfile? Frame { get; init; }
+    internal int FrameRotation { get; init; }
+
     internal (double X, double Y) ToDevice(double x, double y) =>
         BluetoothMouseOrientationMapper.MapNormalized(x, y, Width, Height, Rotation,
             Portrait, Landscape, ReverseX, ReverseY);

@@ -8,17 +8,33 @@ public partial class WindowStyleSettingsWindow : IPhoneMirror.UI.Controls.Rounde
 {
     private readonly Func<double, bool> _apply;
     private readonly Func<bool, bool> _applyOpaqueOnHover;
+    private readonly Func<bool, bool>? _applyPhoneFrame;
     private bool _ready;
     private double _appliedOpacity;
 
     internal WindowStyleSettingsWindow(double opacity, Func<double, bool> apply,
-        bool opaqueOnHover, Func<bool, bool> applyOpaqueOnHover)
+        bool opaqueOnHover, Func<bool, bool> applyOpaqueOnHover,
+        bool phoneFrame = false, Func<bool, bool>? applyPhoneFrame = null,
+        string? phoneFrameDescription = null, bool phoneFrameAvailable = true)
     {
         _apply = apply;
         _applyOpaqueOnHover = applyOpaqueOnHover;
+        _applyPhoneFrame = applyPhoneFrame;
         InitializeComponent();
+        PhoneFrameCheckBox.IsChecked = phoneFrame;
+        PhoneFrameCheckBox.IsEnabled = phoneFrameAvailable;
+        if (phoneFrameDescription is not null)
+        {
+            SetPhoneFrameDescription(phoneFrameDescription);
+        }
+        PhoneFrameSection.Visibility = applyPhoneFrame is null ? Visibility.Collapsed : Visibility.Visible;
         LocalizationService.RefreshWhenLanguageChanges(this, () =>
-            FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text));
+        {
+            FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text);
+            PhoneFrameHelp.Text = LocalizationService.RefreshText(PhoneFrameHelp.Text);
+            if (PhoneFrameCheckBox.ToolTip is string tooltip)
+                PhoneFrameCheckBox.ToolTip = LocalizationService.RefreshText(tooltip);
+        });
         _appliedOpacity = Math.Clamp(opacity, 0.1, 1.0);
         OpacitySlider.Value = _appliedOpacity * 100;
         OpaqueOnHoverCheckBox.IsChecked = opaqueOnHover;
@@ -39,6 +55,36 @@ public partial class WindowStyleSettingsWindow : IPhoneMirror.UI.Controls.Rounde
         OpacitySlider.Value = _appliedOpacity * 100;
         _ready = true;
         FeedbackText.Text = LocalizationService.Get("IndependentWindowOpacityFailed");
+        FeedbackText.Visibility = Visibility.Visible;
+    }
+
+    internal void SetPhoneFrameEnabled(bool enabled)
+    {
+        var ready = _ready;
+        _ready = false;
+        PhoneFrameCheckBox.IsChecked = enabled;
+        _ready = ready;
+    }
+
+    internal void SetPhoneFrameDescription(string description)
+    {
+        PhoneFrameHelp.Text = description;
+        PhoneFrameCheckBox.ToolTip = description;
+    }
+
+    private void OnPhoneFrameChanged(object sender, RoutedEventArgs e)
+    {
+        if (!_ready || _applyPhoneFrame is null) return;
+        var enabled = PhoneFrameCheckBox.IsChecked == true;
+        if (_applyPhoneFrame(enabled))
+        {
+            FeedbackText.Visibility = Visibility.Collapsed;
+            return;
+        }
+        _ready = false;
+        PhoneFrameCheckBox.IsChecked = !enabled;
+        _ready = true;
+        FeedbackText.Text = LocalizationService.Get("IndependentWindowPhoneFrameFailed");
         FeedbackText.Visibility = Visibility.Visible;
     }
 

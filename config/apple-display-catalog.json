@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "retrievedOn": "2026-10-17",
+  "retrievedOn": "2026-11-13",
   "scope": [
     "iPhone",
     "iPad"
@@ -9,17 +9,17 @@
   "sources": [
     {
       "url": "https://api.github.com/repos/devicekit/DeviceKit/contents/Source/Device.swift.gyb",
-      "gitBlobSha": "63b4348a32a5110fb06ee3be7dc85ede8e0ee7b8",
-      "sha256": "38b85fda0ff4ff6e5d045bb055a69118efbb78131a53cf51b9bde7b141428bcc"
+      "gitBlobSha": "af7f28214406a46491f4ab22dc36999e8dac578d",
+      "sha256": "420b37f510aa7e473ed806e37916ddceb8b361dd0e3fa97806302cdabdaead4b"
     },
     {
       "url": "https://api.ipsw.me/v4/devices",
-      "sha256": "0563704e631fa34bb872be1804a1b9f7c27a56ff127295fd8a124a858206b1c0"
+      "sha256": "dfe3621d8fd68a521c514dd5ec10df36d335c8c62487003dafa6783e704e6d18"
     }
   ],
   "coverage": {
-    "identifierCount": 171,
-    "productCount": 99,
+    "identifierCount": 174,
+    "productCount": 101,
     "missingIdentifiers": []
   },
   "products": [
@@ -400,6 +400,21 @@
       "appleSpecTitle": "iPad Pro 13‑inch (M5) - Tech Specs - Apple Support",
       "appleSpecSha256": "9c6036ef363c9987fbedfe98bb5ec6c1a1a2ed4a5bcdc976918d19f1fa0f72a0",
       "displayQuote": "Polishing cloth in nano-texture display glass option Display Ultra Retina XDR display Tandem OLED 3 2752-by-2064-pixel resolution at 264 ppi ProMotion technology with adaptive refresh rates from 10Hz to 120Hz Wide color (P3) True Tone Fingerprint-r"
+    },
+    {
+      "name": "iPad mini (A20 Pro)",
+      "family": "iPad",
+      "identifiers": [
+        "iPad19,1",
+        "iPad19,2"
+      ],
+      "width": 1512,
+      "height": 2316,
+      "longEdge": 2316,
+      "appleSpecUrl": "https://support.apple.com/en-us/149482",
+      "appleSpecTitle": "iPad mini (A20 Pro) - Tech Specs - Apple Support",
+      "appleSpecSha256": "8de847f3a0767fd33a09a6624b7a04367d31637777202db718384cdcd323636a",
+      "displayQuote": " Adapter Polishing cloth in nano-texture display glass option Display Super Retina XDR display OLED 2316-by-1512 resolution at 326 ppi Wide color (P3) True Tone Fingerprint-resistant oleophobic coating Fully laminated Antireflective coating Na"
     },
     {
       "name": "iPad 2",
@@ -881,8 +896,8 @@
       "height": 1334,
       "longEdge": 1334,
       "appleSpecUrl": "https://support.apple.com/kb/SP820",
-      "appleSpecTitle": "iPhone SE (2nd generation) - Technical Specifications - Apple Support",
-      "appleSpecSha256": "7da063f4e3c958f3a36c6e2d21684cf4a1a88a6eeffa86d013a65c15754d64fb",
+      "appleSpecTitle": "iPhone SE (2nd generation) - Tech Specs - Apple Support",
+      "appleSpecSha256": "0a2774a4f7dede87796b68b8e90a7a251315a28e3756f0587d688d1733061181",
       "displayQuote": "isplay Retina HD display 4.7-inch (diagonal) widescreen LCD Multi‑Touch display with IPS technology 1334-by-750-pixel resolution at 326 ppi 1400:1 contrast ratio (typical) True Tone display Wide color display (P3) Haptic Touch 625 nits max brightn"
     },
     {
@@ -1291,6 +1306,20 @@
       "appleSpecTitle": "iPhone 18 Pro Max - Tech Specs - Apple Support",
       "appleSpecSha256": "0f2a7ba58522ca71ce5462738b5b5acb6987ef5b061b11b9a6b568b52b27ee92",
       "displayQuote": ".78 ounces (249 grams) Display Super Retina XDR display 6.9‑inch (diagonal) all‑screen OLED display 2868‑by‑1320-pixel resolution at 460 ppi Dynamic Island Always-On display ProMotion technology with adaptive refresh rates up to 120Hz HDR display T"
+    },
+    {
+      "name": "iPhone Duo",
+      "family": "iPhone",
+      "identifiers": [
+        "iPhone19,4"
+      ],
+      "width": 1398,
+      "height": 2034,
+      "longEdge": 2034,
+      "appleSpecUrl": "https://support.apple.com/en-us/148588",
+      "appleSpecTitle": "iPhone Duo - Tech Specs - Apple Support",
+      "appleSpecSha256": "6c1abdc51c3c5f8e77a65f5ed94d691c57a249ffafeae9a6de1550f2d08d5cf8",
+      "displayQuote": "Wide‑angle OLEDs Outer display Super Retina XDR display 5.4‑inch (diagonal) all‑screen OLED display 1398‑by‑2034-pixel resolution at 460 ppi Both displays Dynamic Island Always-On display ProMotion technology with adaptive refresh rates up to 120Hz"
     },
     {
       "name": "iPhone 3GS",

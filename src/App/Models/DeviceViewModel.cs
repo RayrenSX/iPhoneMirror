@@ -17,6 +17,8 @@ public sealed class DeviceViewModel : INotifyPropertyChanged
     private string _connectionType;
     private string _status;
     private ConnectionState _state;
+    private DeviceAppearance _appearance = DeviceAppearance.Unknown;
+    internal DeviceAppearance Appearance => _appearance;
 
     private DeviceViewModel(string udid, string name, string productType,
         string osVersion, string connectionType, string status, ConnectionState state)
@@ -79,6 +81,7 @@ public sealed class DeviceViewModel : INotifyPropertyChanged
 
         var changed = false;
         changed |= Set(ref _name, source.Name, nameof(Name), nameof(DisplayName));
+        changed |= Set(ref _appearance, source.Appearance, nameof(Appearance));
         changed |= Set(ref _productType, source.ProductType, nameof(ProductType), nameof(ModelDisplay));
         changed |= Set(ref _osVersion, source.OsVersion, nameof(OsVersion), nameof(OsDisplay));
         changed |= Set(ref _connectionType, source.ConnectionType, nameof(ConnectionType));
@@ -132,16 +135,18 @@ public sealed class DeviceViewModel : INotifyPropertyChanged
         string.Empty,
         ConnectionState.Ready);
 
-    internal static DeviceViewModel FromNative(NativeDeviceInfo info) => new(
+    internal static DeviceViewModel FromNative(NativeDeviceInfo info) => FromNative(info, DeviceAppearanceCache.Shared.Remember(info.Udid, info.ProductType, NativeCore.GetDeviceAppearance(info.Udid)));
+
+    internal static DeviceViewModel FromNative(NativeDeviceInfo info, DeviceAppearance appearance) => new(
         info.Udid ?? string.Empty,
         info.Name ?? "iPhone",
         info.ProductType ?? string.Empty,
         info.OsVersion ?? string.Empty,
         info.ConnectionType ?? "USB",
         info.Status ?? string.Empty,
-        info.State);
+        info.State) { _appearance = appearance };
 
     internal DeviceViewModel AsUsbPresentNoMux() => new(
         Udid, Name, ProductType, OsVersion, ConnectionType, Status,
-        ConnectionState.UsbPresentNoMux);
+        ConnectionState.UsbPresentNoMux) { _appearance = _appearance };
 }

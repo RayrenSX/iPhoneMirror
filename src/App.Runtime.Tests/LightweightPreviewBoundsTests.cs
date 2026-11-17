@@ -18,6 +18,11 @@ internal static partial class Program
         app.InitializeComponent();
         SetApplicationDisplayMode(app, ApplicationDisplayMode.Lightweight);
         var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        // This matrix checks the uncapped portrait reserve, which needs more
+        // width than the narrow secondary monitor under the current pointer.
+        window.Left = SystemParameters.WorkArea.Left + 40;
+        window.Top = SystemParameters.WorkArea.Top + 40;
+        DrainDispatcher(); window.UpdateLayout();
         var vm = (MainViewModel)KeyboardField(window, "_viewModel");
         var panelType = typeof(MainWindow).GetNestedType("LeftWorkspacePanel", BindingFlags.NonPublic)!;
         var preview = (FrameworkElement)window.FindName("PreviewPanel");

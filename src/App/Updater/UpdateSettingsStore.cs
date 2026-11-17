@@ -21,9 +21,15 @@ public enum ApplicationDisplayMode
 
 internal sealed class UpdateSettings
 {
+    public bool PhoneFrameEnabled { get; set; }
+    public Dictionary<string, bool> DeviceFrameEnabled { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> DeviceFrameColors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, DeviceControlPreferences> DeviceControlPreferences { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string SettingsCategory { get; set; } = "projection";
+    public AppProxySettings NetworkProxy { get; set; } = new();
     public List<SettingShortcutBinding> SettingShortcuts { get; set; } = [];
     public ReverseControlMode MirroringAutoControlMode { get; set; } = ReverseControlMode.None;
+    public bool ShowNativeKeyboard { get; set; } = true;
     public Services.Automation.AutomationSettings AutomationApi { get; set; } = new();
     public Dictionary<string, DeviceVideoPreferences> DeviceVideoPreferences { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public KeyboardMappingSettings KeyboardMapping { get; set; } = new();
@@ -113,11 +119,17 @@ internal sealed class UpdateSettings
 
     internal UpdateSettings Clone() => new()
     {
+        DeviceControlPreferences = new(DeviceControlPreferences ?? [], StringComparer.OrdinalIgnoreCase),
         SettingsCategory = SettingsCategory,
+        NetworkProxy = (NetworkProxy ?? new()).Clone(),
         SettingShortcuts = (SettingShortcuts ?? []).Where(binding => binding is not null && binding.IsValid)
             .Select(binding => binding with { }).ToList(),
         MirroringAutoControlMode = MirroringAutoControlMode,
+        ShowNativeKeyboard = ShowNativeKeyboard,
         AutomationApi = (AutomationApi ?? new()).Clone(),
+        PhoneFrameEnabled = PhoneFrameEnabled,
+        DeviceFrameEnabled = new(DeviceFrameEnabled ?? [], StringComparer.OrdinalIgnoreCase),
+        DeviceFrameColors = new(DeviceFrameColors ?? [], StringComparer.OrdinalIgnoreCase),
         DeviceVideoPreferences = new(DeviceVideoPreferences ?? [], StringComparer.OrdinalIgnoreCase),
         KeyboardMapping = KeyboardMapping.Clone(),
         CheckOnStartup = CheckOnStartup,
@@ -238,9 +250,30 @@ internal sealed class UpdateSettingsStore
                 BluetoothHidReportMapVersion = BluetoothHidProtocol.ReportMapVersion,
                 BluetoothHidReportMapAcknowledgedVersion = BluetoothHidProtocol.ReportMapVersion,
             };
+            var settingsJson = File.ReadAllText(_path);
             var settings = JsonSerializer.Deserialize<UpdateSettings>(
-                File.ReadAllText(_path), JsonOptions) ?? new UpdateSettings();
+                settingsJson, JsonOptions) ?? new UpdateSettings();
             var migrationChanged = false;
+            if (!AppProxyPolicy.TryNormalize(settings.NetworkProxy, out var proxySettings))
+            {
+                settings.NetworkProxy = new();
+                migrationChanged = true;
+            }
+            else
+            {
+                migrationChanged = settings.NetworkProxy.Mode != proxySettings.Mode ||
+                    settings.NetworkProxy.Address != proxySettings.Address;
+                settings.NetworkProxy = proxySettings;
+            }
+            using var settingsDocument = JsonDocument.Parse(settingsJson);
+            if (settingsDocument.RootElement.ValueKind == JsonValueKind.Object &&
+                !settingsDocument.RootElement.EnumerateObject().Any(property =>
+                    property.Name.Equals(nameof(UpdateSettings.PhoneFrameEnabled), StringComparison.OrdinalIgnoreCase)))
+            {
+                // Preserve an existing opt-in when moving device preferences to one global switch.
+                settings.PhoneFrameEnabled = settings.DeviceFrameEnabled?.Values.Any(enabled => enabled) == true;
+                migrationChanged = true;
+            }
             if (!Enum.IsDefined(settings.ApplicationDisplayMode))
             {
                 settings.ApplicationDisplayMode = ApplicationDisplayMode.Complete;
@@ -273,6 +306,7 @@ internal sealed class UpdateSettingsStore
                 settings.WirelessReceiverName = normalizedReceiverName;
                 migrationChanged = true;
             }
+            settings.DeviceControlPreferences = new(settings.DeviceControlPreferences ?? [], StringComparer.OrdinalIgnoreCase);
             settings.BluetoothControlDeviceBindings = NormalizeBluetoothBindings(
                 settings.BluetoothControlDeviceBindings);
             if (settings.BluetoothMouseSensitivitySchema < 1)

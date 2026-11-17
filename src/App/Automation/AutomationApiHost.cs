@@ -114,6 +114,9 @@ internal sealed partial class AutomationApiHost(AutomationService service,
                 finally
                 {
                     DiagnosticLogger.Info("AutomationAPI", "request", ("requestId", context.TraceIdentifier),
+                        ("method", context.Request.Method),
+                        ("endpoint", (context.GetEndpoint() as Microsoft.AspNetCore.Routing.RouteEndpoint)?.RoutePattern.RawText),
+                        ("aborted", context.RequestAborted.IsCancellationRequested),
                         ("status", context.Response.StatusCode), ("elapsedMs", watch.ElapsedMilliseconds));
                 }
             });

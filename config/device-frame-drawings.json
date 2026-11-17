@@ -1,0 +1,741 @@
+{
+  "schema": 1,
+  "artworkKind": "self-drawn",
+  "license": "Project source-code license",
+  "precision": "Body dimensions, native panel pixels and PPI come from cited Apple specifications. Corner radii, sensor/button/notch positions, metal highlights and finish RGB values are visual estimates from product photos, not measured manufacturing drawings or physical-device calibration.",
+  "rendering": "Original parameterized SVG artwork; Apple reference photographs are not bundled or raster-traced. Render at native panel density or 2x for legacy panels. Screen openings and hardware cutouts remain separate from live video.",
+  "models": [
+    {
+      "id": "ipad",
+      "name": "iPad",
+      "productTypes": [
+        "iPad1,1"
+      ],
+      "bodyMm": {
+        "width": 189.7,
+        "height": 242.8,
+        "depth": 13.4
+      },
+      "panelPixels": {
+        "width": 768,
+        "height": 1024
+      },
+      "ppi": 132,
+      "style": "ipad-original",
+      "finishes": [
+        "silver"
+      ],
+      "features": {
+        "camera": false,
+        "home": "square",
+        "corner": 10.5
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP580",
+        "specSha256": "ac8a7eb67055f28eed3e6366c327e29679ceadfe2df16d02be2df339eef00d92",
+        "referenceImages": []
+      }
+    },
+    {
+      "id": "ipad-2",
+      "name": "iPad 2",
+      "productTypes": [
+        "iPad2,1",
+        "iPad2,2",
+        "iPad2,3",
+        "iPad2,4"
+      ],
+      "bodyMm": {
+        "width": 185.7,
+        "height": 241.2,
+        "depth": 8.8
+      },
+      "panelPixels": {
+        "width": 768,
+        "height": 1024
+      },
+      "ppi": 132,
+      "style": "ipad-classic",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 10.5,
+        "mute": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP622",
+        "specSha256": "cb31f3230de3db0a7e280df4e3c099b902db07dcda382e72c82bb883ef181da7",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/7WUAS350/images/tech-specs/SP622_01-ipad2-mul.png"
+        ]
+      }
+    },
+    {
+      "id": "ipad-mini",
+      "name": "iPad mini",
+      "productTypes": [
+        "iPad2,5",
+        "iPad2,6",
+        "iPad2,7"
+      ],
+      "bodyMm": {
+        "width": 134.7,
+        "height": 200,
+        "depth": 7.2
+      },
+      "panelPixels": {
+        "width": 768,
+        "height": 1024
+      },
+      "ppi": 163,
+      "style": "ipad-mini",
+      "finishes": [
+        "black",
+        "silver"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 10,
+        "mute": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP661",
+        "specSha256": "1ab38ec414c5ddb0a66acd810a4b54c839e0c4879dbbefcaf77b82a0935636f8",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111978_sp661_ipad_mini_color.jpg",
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111978_sp661_ipad_mini_buttons.jpg"
+        ]
+      }
+    },
+    {
+      "id": "ipad-3rd-generation",
+      "name": "iPad (3rd generation)",
+      "productTypes": [
+        "iPad3,1",
+        "iPad3,2",
+        "iPad3,3"
+      ],
+      "bodyMm": {
+        "width": 185.7,
+        "height": 241.2,
+        "depth": 9.4
+      },
+      "panelPixels": {
+        "width": 1536,
+        "height": 2048
+      },
+      "ppi": 264,
+      "style": "ipad-classic",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 10.5,
+        "mute": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP647",
+        "specSha256": "5bbdd07d1dc77a62c7a25ae4cdb027be68eb2d098944dc3018b00b08928b85e3",
+        "referenceImages": []
+      }
+    },
+    {
+      "id": "ipad-4th-generation",
+      "name": "iPad (4th generation)",
+      "productTypes": [
+        "iPad3,4",
+        "iPad3,5",
+        "iPad3,6"
+      ],
+      "bodyMm": {
+        "width": 185.7,
+        "height": 241.2,
+        "depth": 9.4
+      },
+      "panelPixels": {
+        "width": 1536,
+        "height": 2048
+      },
+      "ppi": 264,
+      "style": "ipad-classic",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 10.5,
+        "mute": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP662",
+        "specSha256": "abd301a4b2499c458e421358f8fc5f5e833419bc3302758c262a0a9be29a3044",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111993_sp662_ipad-4th-gen_color.jpg",
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111993_sp662_ipad-4th-gen_buttons.jpg"
+        ]
+      }
+    },
+    {
+      "id": "ipad-air",
+      "name": "iPad Air",
+      "productTypes": [
+        "iPad4,1",
+        "iPad4,2",
+        "iPad4,3"
+      ],
+      "bodyMm": {
+        "width": 169.5,
+        "height": 240,
+        "depth": 7.5
+      },
+      "panelPixels": {
+        "width": 1536,
+        "height": 2048
+      },
+      "ppi": 264,
+      "style": "ipad-air",
+      "finishes": [
+        "space-gray",
+        "silver"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 10,
+        "mute": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP692",
+        "specSha256": "72f3373b21fd0039092337b4dbfd13fcca16dda523dc08fddf93c8204d591fb7",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/112020_SP692-specs_color-mul.png"
+        ]
+      }
+    },
+    {
+      "id": "ipad-mini-2",
+      "name": "iPad mini 2",
+      "productTypes": [
+        "iPad4,4",
+        "iPad4,5",
+        "iPad4,6"
+      ],
+      "bodyMm": {
+        "width": 134.7,
+        "height": 200,
+        "depth": 7.5
+      },
+      "panelPixels": {
+        "width": 1536,
+        "height": 2048
+      },
+      "ppi": 326,
+      "style": "ipad-mini",
+      "finishes": [
+        "space-gray",
+        "silver"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 10,
+        "mute": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP693",
+        "specSha256": "bbb5c1b6ce31fb12522f7bcc74c405e28679ea7d0830c62047f52d6bfed2f2fb",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/112019_SP693-specs_color-mul.png"
+        ]
+      }
+    },
+    {
+      "id": "ipad-mini-3",
+      "name": "iPad mini 3",
+      "productTypes": [
+        "iPad4,7",
+        "iPad4,8",
+        "iPad4,9"
+      ],
+      "bodyMm": {
+        "width": 134.7,
+        "height": 200,
+        "depth": 7.5
+      },
+      "panelPixels": {
+        "width": 1536,
+        "height": 2048
+      },
+      "ppi": 326,
+      "style": "ipad-mini",
+      "finishes": [
+        "space-gray",
+        "silver",
+        "gold"
+      ],
+      "features": {
+        "camera": true,
+        "home": "touch-id",
+        "corner": 10,
+        "mute": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP709",
+        "specSha256": "1cebe4aa971e5263dbc8d4a9016e668001076f5853d9d813ff663cf5c5d6c974",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/112018_SP709-silver.jpeg",
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/112018_SP709-gold.jpeg",
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/112018_SP709-space_gray.jpeg"
+        ]
+      }
+    },
+    {
+      "id": "ipad-5th-generation",
+      "name": "iPad (5th generation)",
+      "productTypes": [
+        "iPad6,11",
+        "iPad6,12"
+      ],
+      "bodyMm": {
+        "width": 169.5,
+        "height": 240,
+        "depth": 7.5
+      },
+      "panelPixels": {
+        "width": 1536,
+        "height": 2048
+      },
+      "ppi": 264,
+      "style": "ipad-air",
+      "finishes": [
+        "space-gray",
+        "silver",
+        "gold"
+      ],
+      "features": {
+        "camera": true,
+        "home": "touch-id",
+        "corner": 10
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP751",
+        "specSha256": "544d52c3208fe4dc29e00ae976b043414b2708bbfdbde1a25fe95b2cee51870b",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111960_ipad_5th_generation.png"
+        ]
+      }
+    },
+    {
+      "id": "ipad-pro-9-7-inch",
+      "name": "iPad Pro (9.7-inch)",
+      "productTypes": [
+        "iPad6,3",
+        "iPad6,4"
+      ],
+      "bodyMm": {
+        "width": 169.5,
+        "height": 240,
+        "depth": 6.1
+      },
+      "panelPixels": {
+        "width": 1536,
+        "height": 2048
+      },
+      "ppi": 264,
+      "style": "ipad-air",
+      "finishes": [
+        "space-gray",
+        "silver",
+        "gold",
+        "rose-gold"
+      ],
+      "features": {
+        "camera": true,
+        "home": "touch-id",
+        "corner": 10,
+        "smartConnector": true,
+        "ambientSensor": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP739",
+        "specSha256": "66f01941f41ffadda815d6fb8a762b883b0b3b6dff24a158cbe23ca7992a977e",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111965_SP739.png"
+        ]
+      }
+    },
+    {
+      "id": "ipad-6th-generation",
+      "name": "iPad (6th generation)",
+      "productTypes": [
+        "iPad7,5",
+        "iPad7,6"
+      ],
+      "bodyMm": {
+        "width": 169.5,
+        "height": 240,
+        "depth": 7.5
+      },
+      "panelPixels": {
+        "width": 1536,
+        "height": 2048
+      },
+      "ppi": 264,
+      "style": "ipad-air",
+      "finishes": [
+        "space-gray",
+        "silver",
+        "gold"
+      ],
+      "features": {
+        "camera": true,
+        "home": "touch-id",
+        "corner": 10,
+        "warmGold": true
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP774",
+        "specSha256": "99ea94273d626b2cf029c43233a5390bcaee880d0120a1738785f49c19e60b61",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111957_sp774-ipad-6-gen.png"
+        ]
+      }
+    },
+    {
+      "id": "iphone",
+      "name": "iPhone",
+      "productTypes": [
+        "iPhone1,1"
+      ],
+      "bodyMm": {
+        "width": 61,
+        "height": 115,
+        "depth": 11.6
+      },
+      "panelPixels": {
+        "width": 320,
+        "height": 480
+      },
+      "ppi": 163,
+      "style": "iphone-chrome",
+      "finishes": [
+        "silver"
+      ],
+      "features": {
+        "camera": false,
+        "home": "square",
+        "corner": 10.8
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP2",
+        "specSha256": "31cdee5c67224ff5d20554b1af731a14c1f93dbdbe330fa16691b6b94cd5c5b7",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/7WUAS350/images/iphone/iphone-iphone-original-colors.jpg"
+        ],
+        "identificationUrl": "https://support.apple.com/en-us/108044"
+      }
+    },
+    {
+      "id": "iphone-3g",
+      "name": "iPhone 3G",
+      "productTypes": [
+        "iPhone1,2"
+      ],
+      "bodyMm": {
+        "width": 62.1,
+        "height": 115.5,
+        "depth": 12.3
+      },
+      "panelPixels": {
+        "width": 320,
+        "height": 480
+      },
+      "ppi": 163,
+      "style": "iphone-chrome",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": false,
+        "home": "square",
+        "corner": 11.5
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP495",
+        "specSha256": "821575240d006573b924f3527e7bf1cd11373f3fb7e1a471a9540eca976f853d",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/7WUAS350/images/iphone/iphone-iphone3g-colors.jpg"
+        ],
+        "identificationUrl": "https://support.apple.com/en-us/108044"
+      }
+    },
+    {
+      "id": "iphone-3gs",
+      "name": "iPhone 3GS",
+      "productTypes": [
+        "iPhone2,1"
+      ],
+      "bodyMm": {
+        "width": 62.1,
+        "height": 115.5,
+        "depth": 12.3
+      },
+      "panelPixels": {
+        "width": 320,
+        "height": 480
+      },
+      "ppi": 163,
+      "style": "iphone-chrome",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": false,
+        "home": "square",
+        "corner": 11.5
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP565",
+        "specSha256": "7bce872270d76615f007d9feef155426615c7a11ad91061c3d34030dec17edfb",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/7WUAS350/images/iphone/iphone-iphone3gs-colors.jpg"
+        ],
+        "identificationUrl": "https://support.apple.com/en-us/108044"
+      }
+    },
+    {
+      "id": "iphone-4",
+      "name": "iPhone 4",
+      "productTypes": [
+        "iPhone3,1",
+        "iPhone3,2"
+      ],
+      "bodyMm": {
+        "width": 58.6,
+        "height": 115.2,
+        "depth": 9.3
+      },
+      "panelPixels": {
+        "width": 640,
+        "height": 960
+      },
+      "ppi": 326,
+      "style": "iphone-flat",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 8.5,
+        "antenna": "gsm"
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP587",
+        "specSha256": "2b02173e4d6b960f4939f29b8b02ea1a69c7358d9ecacbad27a2a7746ba15e58",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/7WUAS350/images/iphone/iphone-iphone4-colors.jpg"
+        ],
+        "identificationUrl": "https://support.apple.com/en-us/108044"
+      }
+    },
+    {
+      "id": "iphone-4-cdma",
+      "name": "iPhone 4",
+      "productTypes": [
+        "iPhone3,3"
+      ],
+      "bodyMm": {
+        "width": 58.6,
+        "height": 115.2,
+        "depth": 9.3
+      },
+      "panelPixels": {
+        "width": 640,
+        "height": 960
+      },
+      "ppi": 326,
+      "style": "iphone-flat",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 8.5,
+        "antenna": "cdma"
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP587",
+        "specSha256": "2b02173e4d6b960f4939f29b8b02ea1a69c7358d9ecacbad27a2a7746ba15e58",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/7WUAS350/images/iphone/iphone-iphone4-colors.jpg"
+        ],
+        "identificationUrl": "https://support.apple.com/en-us/108044"
+      }
+    },
+    {
+      "id": "iphone-4s",
+      "name": "iPhone 4s",
+      "productTypes": [
+        "iPhone4,1"
+      ],
+      "bodyMm": {
+        "width": 58.6,
+        "height": 115.2,
+        "depth": 9.3
+      },
+      "panelPixels": {
+        "width": 640,
+        "height": 960
+      },
+      "ppi": 326,
+      "style": "iphone-flat",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": true,
+        "home": "square",
+        "corner": 8.5,
+        "antenna": "cdma"
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP643",
+        "specSha256": "3e0028f41678bda298953b510757b51b9ad80e20643a952be3c76f2a4b9ddd0f",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/112004_sp643_iphone4s_color_white.jpg",
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/112004_sp643_iphone4s_color_black.jpg"
+        ]
+      }
+    },
+    {
+      "id": "iphone-se-3rd-generation",
+      "name": "iPhone SE (3rd generation)",
+      "productTypes": [
+        "iPhone14,6"
+      ],
+      "bodyMm": {
+        "width": 67.3,
+        "height": 138.4,
+        "depth": 7.3
+      },
+      "panelPixels": {
+        "width": 750,
+        "height": 1334
+      },
+      "ppi": 326,
+      "style": "iphone-rounded",
+      "finishes": [
+        "midnight",
+        "starlight",
+        "red"
+      ],
+      "features": {
+        "camera": true,
+        "home": "touch-id",
+        "corner": 10.3
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/kb/SP867",
+        "specSha256": "587a05bcef9ebb9be93ae26cd7e9026bf2ba6360c1df7030365d1c136f9ffb57",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111866_sp867-iphone-se-3gen.png",
+          "https://cdsassets.apple.com/live/SZLF0YNV/images/sp/111866_sp867-portimage.png"
+        ]
+      }
+    },
+    {
+      "id": "iphone-16e",
+      "name": "iPhone 16e",
+      "productTypes": [
+        "iPhone17,5"
+      ],
+      "bodyMm": {
+        "width": 71.5,
+        "height": 146.7,
+        "depth": 7.8
+      },
+      "panelPixels": {
+        "width": 1170,
+        "height": 2532
+      },
+      "ppi": 460,
+      "style": "iphone-notch",
+      "finishes": [
+        "black",
+        "white"
+      ],
+      "features": {
+        "camera": true,
+        "home": null,
+        "corner": 10.6,
+        "screenCorner": 8.5,
+        "notchWidth": 26,
+        "notchDepth": 5.3
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/122208",
+        "specSha256": "5120ee3c3b0a51f0666e7be596602159195b41d4bbee70d3578d7614cfc17b10",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/7WUAS350/images/tech-specs/122208-iphone-16e.png",
+          "https://cdsassets.apple.com/live/7WUAS350/images/tech-specs/122208-iphone-16e-portimage1.png",
+          "https://cdsassets.apple.com/live/7WUAS350/images/tech-specs/122208-iphone-16e-portimage2.png"
+        ]
+      }
+    },
+    {
+      "id": "iphone-17e",
+      "name": "iPhone 17e",
+      "productTypes": [
+        "iPhone18,5"
+      ],
+      "bodyMm": {
+        "width": 71.5,
+        "height": 146.7,
+        "depth": 7.8
+      },
+      "panelPixels": {
+        "width": 1170,
+        "height": 2532
+      },
+      "ppi": 460,
+      "style": "iphone-notch",
+      "finishes": [
+        "black",
+        "white",
+        "soft-pink"
+      ],
+      "features": {
+        "camera": true,
+        "home": null,
+        "corner": 10.6,
+        "screenCorner": 8.5,
+        "notchWidth": 26,
+        "notchDepth": 5.3
+      },
+      "evidence": {
+        "specUrl": "https://support.apple.com/126470",
+        "specSha256": "cb44a2885d46bdc47734336f0b4a279bebc30a633560bdf0ecb61b5d50e23186",
+        "referenceImages": [
+          "https://cdsassets.apple.com/live/7WUAS350/images/tech-specs/iphone-17e.png"
+        ]
+      }
+    }
+  ]
+}

@@ -8,6 +8,78 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class ProjectionSettingsWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
+    private Func<(bool Enabled, bool Available, string Description)>? _phoneFrameState;
+    private Func<bool, Task<bool>>? _setPhoneFrame;
+    private bool _phoneFrameBusy;
+    private bool _refreshingFrameColor;
+    private Func<DeviceFrameColorOption[]>? _frameColorOptions;
+    private Func<string>? _selectedFrameColor;
+    private Func<string, bool>? _setFrameColor;
+    private Func<bool>? _frameColorAvailable;
+
+    internal void ConfigurePhoneFrameColors(Func<DeviceFrameColorOption[]> options,
+        Func<string> selected, Func<string, bool> apply, Func<bool>? available = null)
+    {
+        _frameColorOptions = options;
+        _selectedFrameColor = selected;
+        _setFrameColor = apply;
+        _frameColorAvailable = available;
+        RefreshPhoneFrame();
+    }
+
+    private void OnFrameColorChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_refreshingFrameColor || _setFrameColor is null || FrameColorComboBox.SelectedValue is not string color) return;
+        var success = _setFrameColor(color);
+        RefreshPhoneFrame();
+        PhoneFrameFeedback.Visibility = success ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    internal void ConfigurePhoneFrame(Func<(bool Enabled, bool Available, string Description)> state,
+        Func<bool, Task<bool>> apply)
+    {
+        _phoneFrameState = state;
+        _setPhoneFrame = apply;
+        RefreshPhoneFrame();
+        Activated += (_, _) => RefreshPhoneFrame();
+    }
+
+    internal void RefreshPhoneFrame()
+    {
+        if (_phoneFrameState is null) return;
+        var state = _phoneFrameState();
+        PhoneFrameCheckBox.IsChecked = state.Enabled;
+        PhoneFrameCheckBox.IsEnabled = state.Available && !_phoneFrameBusy;
+        PhoneFrameDescription.Text = state.Description;
+        _refreshingFrameColor = true;
+        try
+        {
+            var options = _frameColorOptions?.Invoke() ?? [];
+            if (FrameColorComboBox.ItemsSource is not DeviceFrameColorOption[] previous || !previous.SequenceEqual(options))
+                FrameColorComboBox.ItemsSource = options;
+            FrameColorComboBox.SelectedValue = _selectedFrameColor?.Invoke() ?? "";
+            FrameColorComboBox.IsEnabled = (_frameColorAvailable?.Invoke() ?? state.Available) && _setFrameColor is not null;
+        }
+        finally { _refreshingFrameColor = false; }
+    }
+
+    private async void OnPhoneFrameClick(object sender, RoutedEventArgs e)
+    {
+        if (_setPhoneFrame is null || _phoneFrameBusy) return;
+        var enabled = PhoneFrameCheckBox.IsChecked == true;
+        _phoneFrameBusy = true;
+        PhoneFrameCheckBox.IsEnabled = false;
+        bool success = false;
+        try { success = await _setPhoneFrame(enabled); }
+        catch (Exception error) { DiagnosticLogger.Exception("window", "phone_frame_setting_failed", error); }
+        finally
+        {
+            _phoneFrameBusy = false;
+            RefreshPhoneFrame();
+            PhoneFrameFeedback.Visibility = success ? Visibility.Collapsed : Visibility.Visible;
+        }
+    }
+
     private readonly Func<Task> _refresh;
     private readonly Func<Task> _fullScreen;
     private readonly Func<Task> _separateWindow;

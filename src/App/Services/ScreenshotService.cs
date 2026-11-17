@@ -38,22 +38,28 @@ internal static class ScreenshotService
 
     internal static BitmapSource CreateBitmap(VideoFrame frame)
     {
-        var requiredBytes = checked((int)(frame.Stride * frame.Height));
-        if (frame.Width == 0 || frame.Height == 0 || frame.Stride < frame.Width * 4U ||
-            frame.Pixels.Length < requiredBytes)
-        {
-            throw new InvalidDataException(LocalizationService.Get("ScreenshotInvalidFrame"));
-        }
-
+        ValidateFrame(frame);
+        var required = (ulong)frame.Stride * frame.Height;
         // NativeCore reuses its copy buffer. Own this frame before another
         // preview/screenshot request can overwrite it.
-        var pixels = frame.Pixels.AsSpan(0, requiredBytes).ToArray();
+        var pixels = frame.Pixels.AsSpan(0, (int)required).ToArray();
         var bitmap = BitmapSource.Create(
             checked((int)frame.Width), checked((int)frame.Height),
             96, 96, PixelFormats.Bgra32, null, pixels, checked((int)frame.Stride));
         bitmap.Freeze();
 
         return bitmap;
+    }
+
+    internal static void ValidateFrame(VideoFrame frame)
+    {
+        var required = (ulong)frame.Stride * frame.Height;
+        if (frame.Width == 0 || frame.Height == 0 || frame.Width > int.MaxValue ||
+            frame.Height > int.MaxValue || frame.Stride < (ulong)frame.Width * 4U ||
+            required > int.MaxValue || (ulong)frame.Pixels.Length < required)
+        {
+            throw new InvalidDataException(LocalizationService.Get("ScreenshotInvalidFrame"));
+        }
     }
 
     internal static string CaptureVisualPng(FrameworkElement visual, string destinationPath)

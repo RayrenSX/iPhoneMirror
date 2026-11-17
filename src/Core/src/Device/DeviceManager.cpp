@@ -73,6 +73,27 @@ void enrich_from_lockdown(transport::Socket& socket, DeviceRecord& record) {
     if (!values || values->type != plist::Type::Dictionary) return;
 
     record.lockdown_accessible = true;
+    record.device_color = detail::device_color_token(values->find("DeviceColor"));
+    record.enclosure_color = detail::device_color_token(values->find("DeviceEnclosureColor"));
+    record.housing_color = detail::device_color_token(values->find("DeviceHousingColor"));
+    // Some iOS versions omit these from the unkeyed dictionary. Query each
+    // missing housing field while this metadata tunnel is already open.
+    for (auto [key, destination] : std::array<std::pair<const char*, std::wstring*>, 2>{{
+        {"DeviceEnclosureColor", &record.enclosure_color},
+        {"DeviceHousingColor", &record.housing_color}}}) {
+        if (!destination->empty()) continue;
+        try {
+            const auto color = lockdown_exchange(socket, plist::Value::Dict({
+                {"Label", plist::Value::String("iPhoneMirror")},
+                {"Request", plist::Value::String("GetValue")},
+                {"Key", plist::Value::String(key)},
+            }));
+            if (!color.find("Error")) *destination = detail::device_color_token(color.find("Value"));
+        } catch (...) {
+            // Optional appearance metadata must not revoke successful discovery.
+            break;
+        }
+    }
     if (const auto* value = values->find("DeviceName")) record.name = widen(value->string_or());
     if (const auto* value = values->find("ProductType")) record.product_type = widen(value->string_or());
     if (const auto* value = values->find("ProductVersion")) record.os_version = widen(value->string_or());
@@ -361,6 +382,13 @@ std::vector<DeviceRecord> DeviceManager::refresh(bool refresh_metadata,
                 }
                 // A failed fresh read revokes cached readiness. Keep the
                 // display fields, and retry unreadable devices on later polls.
+                if (item.had_cache) {
+                    if (item.record.device_color.empty()) item.record.device_color = item.cached_snapshot.device_color;
+                    if (item.record.enclosure_color.empty() && item.record.housing_color.empty()) {
+                        item.record.enclosure_color = item.cached_snapshot.enclosure_color;
+                        item.record.housing_color = item.cached_snapshot.housing_color;
+                    }
+                }
                 metadata_cache_.insert_or_assign(item.serial, item.record);
             }
             result.push_back(std::move(item.record));

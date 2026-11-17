@@ -8,9 +8,9 @@ internal sealed partial class AutomationService(IAutomationBackend backend, Auto
 {
     private readonly KeyboardMappingExecutor _gestures = new();
     private readonly CancellationTokenSource _stop = new();
-    private readonly SemaphoreSlim _screenshots = new(2, 2);
-    private readonly object _frameLock = new();
-    private readonly Dictionary<string, Task<byte[]>> _frames = [];
+    private AutomationScreenshotQueue? _screenshots;
+    private AutomationScreenshotQueue Screenshots => LazyInitializer.EnsureInitialized(ref _screenshots,
+        () => new AutomationScreenshotQueue(_stop.Token));
     private Task? _maintenance;
     private readonly object _admissionLock = new();
     private bool _accepting;
@@ -172,42 +172,49 @@ internal sealed partial class AutomationService(IAutomationBackend backend, Auto
         finally { lease.Operation.Release(); }
     }
 
-    internal async Task<byte[]> ScreenshotAsync(string id, CancellationToken cancellation)
+    internal Task<byte[]> ScreenshotAsync(string id, CancellationToken cancellation) =>
+        Screenshots.CaptureAsync(id, async token =>
     {
-        var target = await backend.ResolveAsync(id, cancellation);
+        var started = Stopwatch.GetTimestamp();
+        var target = await backend.ResolveAsync(id, token).ConfigureAwait(false);
         Online(target);
-        if (!target.Device.Capabilities.Screenshot)
-            throw new AutomationException("SCREENSHOT_UNAVAILABLE", "Start capture and wait for a device frame.", 503);
-        Task<byte[]> task;
-        var frameKey = id + ":" + target.Device.Geometry.Version;
-        lock (_frameLock)
-        {
-            if (!_frames.TryGetValue(frameKey, out task!))
-            {
-                _frames[frameKey] = task = CapturePngAsync(target);
-                _ = RetireFrameAsync(frameKey, task);
-            }
-        }
-        return await task.WaitAsync(cancellation);
-    }
-    private async Task RetireFrameAsync(string key, Task<byte[]> task)
-    {
-        try { await task; }
-        catch { /* The request observes the error; still evict abandoned work. */ }
-        finally { lock (_frameLock) if (_frames.GetValueOrDefault(key) == task) _frames.Remove(key); }
-    }
-    private async Task<byte[]> CapturePngAsync(AutomationTarget target)
-    {
-        await Task.Yield();
-        if (!await _screenshots.WaitAsync(0, _stop.Token))
-            throw new AutomationException("RATE_LIMITED", "Screenshot encoders are busy.", 429);
+        // A retained capture can briefly clear its decoded frame while its
+        // existing recovery runs. Wait for that new frame within this one
+        // coalesced job; never start/restart capture or return an old PNG.
+        var frameWait = Stopwatch.GetTimestamp();
         try
         {
-            var frame = await target.Capture(_stop.Token) ?? throw new AutomationException("SCREENSHOT_UNAVAILABLE", "No device frame is available.", 503);
-            return await Task.Run(() => ScreenshotService.EncodePng(frame), _stop.Token);
+            var frame = target.Device.Capabilities.Screenshot ? await target.Capture(token).ConfigureAwait(false) : null;
+            while (frame is null)
+            {
+                if (target.CaptureActive?.Invoke() != true ||
+                    Stopwatch.GetElapsedTime(frameWait) >= TimeSpan.FromMilliseconds(500))
+                    throw new AutomationException("SCREENSHOT_UNAVAILABLE", "Start capture and wait for a device frame.", 503);
+                await Task.Delay(50, token).ConfigureAwait(false);
+                target = await backend.ResolveAsync(id, token).ConfigureAwait(false);
+                Online(target);
+                frame = target.Device.Capabilities.Screenshot ? await target.Capture(token).ConfigureAwait(false) : null;
+            }
+            token.ThrowIfCancellationRequested();
+            var captured = Stopwatch.GetTimestamp();
+            var png = FastPngEncoder.Encode(frame, token);
+            if (target.CaptureCurrent?.Invoke() == false)
+                throw new AutomationException("SCREENSHOT_UNAVAILABLE", "The capture session changed. Request a new screenshot.", 503);
+            var elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            if (elapsed >= 500)
+                DiagnosticLogger.Info("AutomationAPI", "screenshot_slow", ("device", AppLog.Device(target.SourceId)),
+                    ("width", frame.Width), ("height", frame.Height),
+                    ("readMs", (long)Stopwatch.GetElapsedTime(started, captured).TotalMilliseconds),
+                    ("encodeMs", (long)Stopwatch.GetElapsedTime(captured).TotalMilliseconds));
+            return png;
         }
-        finally { _screenshots.Release(); }
-    }
+        catch (Exception error) when (error is System.IO.IOException or InvalidOperationException or TimeoutException or
+            System.Runtime.InteropServices.COMException)
+        {
+            DiagnosticLogger.Warning("AutomationAPI", "screenshot_failed", ("type", error.GetType().Name));
+            throw new AutomationException("SCREENSHOT_UNAVAILABLE", "The current frame could not be captured. Wait for a new frame and retry.", 503);
+        }
+    }, cancellation);
 
     private async Task MaintainAsync()
     {
@@ -278,6 +285,12 @@ internal sealed partial class AutomationService(IAutomationBackend backend, Auto
         Suspend();
         _stop.Cancel();
         await RevokeAllAsync();
+        if (_screenshots is { } screenshots)
+        {
+            try { await screenshots.DrainAsync().WaitAsync(TimeSpan.FromSeconds(3)); }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            { DiagnosticLogger.Warning("AutomationAPI", "screenshot_shutdown", ("type", error.GetType().Name)); }
+        }
         if (_maintenance is not null) await _maintenance;
     }
     private static void Online(AutomationTarget target)

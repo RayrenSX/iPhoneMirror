@@ -209,6 +209,8 @@ constexpr const char* PreviewPixelShaders = R"(
 Texture2D<float> yPlane : register(t0);
 Texture2D<float2> uvPlane : register(t1);
 Texture2D<float4> image : register(t2);
+Texture2D<float4> deviceFrame : register(t3);
+Texture2D<float> deviceScreenMask : register(t4);
 SamplerState linearSampler : register(s0);
 
 cbuffer ShapeConstants : register(b0) {
@@ -217,7 +219,8 @@ cbuffer ShapeConstants : register(b0) {
     float cornerExponent;
     float cornerEnabled;
     float rotationQuarterTurns;
-    float2 shapePadding;
+    float phoneFrame;
+    float shapePadding;
     float yOffset;
     float yScale;
     float chromaOffset;
@@ -236,15 +239,20 @@ cbuffer ShapeConstants : register(b0) {
     float contrast;
     float saturation;
     float gammaValue;
+    float4 frameScreenRect;
+    float frameRotation;
+    float3 framePadding;
 };
 
-float2 rotateUv(float2 uv) {
-    int turns = ((int)round(rotationQuarterTurns) % 4 + 4) % 4;
+float2 rotateBy(float2 uv, float rotation) {
+    int turns = ((int)round(rotation) % 4 + 4) % 4;
     if (turns == 1) return float2(uv.y, 1.0 - uv.x);
     if (turns == 2) return float2(1.0 - uv.x, 1.0 - uv.y);
     if (turns == 3) return float2(1.0 - uv.y, uv.x);
     return uv;
 }
+
+float2 rotateUv(float2 uv) { return rotateBy(uv, rotationQuarterTurns); }
 
 float cornerCoverage(float2 pixel) {
     if (cornerEnabled < 0.5) return 1.0;
@@ -265,6 +273,22 @@ float cornerCoverage(float2 pixel) {
 float4 premultiplyForCorner(float3 rgb, float2 pixel) {
     float alpha = cornerCoverage(pixel);
     return float4(rgb * alpha, alpha);
+}
+
+float2 screenUv(float2 uv) {
+    return phoneFrame > 0.5 ? (uv - frameScreenRect.xy) / frameScreenRect.zw : uv;
+}
+
+float3 inverseSrgb(float3 value);
+
+float4 frameComposite(float3 rgb, float2 uv, float2 pixel) {
+    if (phoneFrame < 0.5) return premultiplyForCorner(rgb, pixel);
+    float2 artworkUv = rotateBy(uv, frameRotation);
+    float4 bezel = deviceFrame.Sample(linearSampler, artworkUv);
+    if (hdrSurface > 0.5 && bezel.a > 0.0)
+        bezel.rgb = inverseSrgb(bezel.rgb / bezel.a) * bezel.a;
+    float mask = deviceScreenMask.Sample(linearSampler, artworkUv);
+    return float4(bezel.rgb + rgb * mask, saturate(bezel.a + mask));
 }
 
 float3 inverseSrgb(float3 value) {
@@ -348,7 +372,8 @@ float3 applyImageAdjustments(float3 rgb) {
 }
 
 float4 nv12Main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
-    uv = rotateUv(uv);
+    float2 outputUv = uv;
+    uv = rotateUv(screenUv(uv));
     float y = max(0.0, yPlane.Sample(linearSampler, uv) - yOffset) * yScale;
     float2 chroma = (uvPlane.Sample(linearSampler, uv) -
         float2(chromaOffset, chromaOffset)) * chromaScale;
@@ -356,12 +381,12 @@ float4 nv12Main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGE
     rgb.r = y + redCr * chroma.y;
     rgb.g = y + greenCb * chroma.x + greenCr * chroma.y;
     rgb.b = y + blueCb * chroma.x;
-    return premultiplyForCorner(
-        applyImageAdjustments(applyColorOutput(rgb)), position.xy);
+    return frameComposite(
+        applyImageAdjustments(applyColorOutput(rgb)), outputUv, position.xy);
 }
 
 float4 copyMain(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
-    return premultiplyForCorner(image.Sample(linearSampler, rotateUv(uv)).rgb, position.xy);
+    return frameComposite(image.Sample(linearSampler, rotateUv(screenUv(uv))).rgb, uv, position.xy);
 }
 
 float4 maskMain(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
@@ -381,7 +406,8 @@ struct D3D11PreviewRenderer::Impl {
         float corner_exponent{2.36F};
         float corner_enabled{};
         float rotation_quarter_turns{};
-        float padding[2]{};
+        float phone_frame{};
+        float padding{};
         float y_offset{};
         float y_scale{1.0F};
         float chroma_offset{0.5F};
@@ -400,6 +426,9 @@ struct D3D11PreviewRenderer::Impl {
         float contrast{1.0F};
         float saturation{1.0F};
         float gamma{1.0F};
+        float frame_screen_rect[4]{};
+        float frame_rotation{};
+        float frame_padding[3]{};
     };
 
     struct ImageAdjustments {
@@ -474,6 +503,14 @@ struct D3D11PreviewRenderer::Impl {
     std::atomic_uint64_t render_size_limit{};
     // Radius/exponent are published as one atomic value so a live device
     // switch cannot render one frame using a mixed profile.
+    std::atomic_bool phone_frame{false};
+    std::mutex device_frame_mutex;
+    std::shared_ptr<const DeviceFrameArtwork> requested_artwork;
+    std::shared_ptr<const DeviceFrameArtwork> uploaded_artwork;
+    ComPtr<ID3D11ShaderResourceView> device_frame_view;
+    ComPtr<ID3D11ShaderResourceView> device_mask_view;
+    int artwork_rotation{};
+    bool artwork_active{};
     std::atomic_uint64_t corner_profile{pack_corner_profile(0.1784F, 2.36F)};
     std::mutex image_adjustments_mutex;
     ImageAdjustments image_adjustments;
@@ -504,8 +541,18 @@ struct D3D11PreviewRenderer::Impl {
 #ifdef IPHONEMIRROR_PREVIEW_TEST_HOOKS
         test_hooks = std::move(hooks);
 #endif
-        initialize();
-        worker = std::jthread([this](std::stop_token token) { run(token); });
+        try {
+            initialize();
+#ifdef IPHONEMIRROR_PREVIEW_TEST_HOOKS
+            if (test_hooks.after_initialize) test_hooks.after_initialize();
+#endif
+            worker = std::jthread([this](std::stop_token token) { run(token); });
+        } catch (...) {
+            // A partially initialized swap chain also owns its HWND. Impl's
+            // destructor is not called when construction throws.
+            release_device_resources();
+            throw;
+        }
     }
 
     ~Impl() {
@@ -513,6 +560,7 @@ struct D3D11PreviewRenderer::Impl {
             worker.request_stop();
             worker.join();
         }
+        release_device_resources();
     }
 
     void initialize() {
@@ -687,13 +735,16 @@ struct D3D11PreviewRenderer::Impl {
     void release_device_resources() noexcept {
         if (context) {
             context->ClearState();
-            if (context) context->Flush();
         }
         if (composition_visual) (void)composition_visual->SetContent(nullptr);
         if (composition_device) (void)composition_device->Commit();
 
         release_shared_gpu_frame();
         target.Reset();
+        device_frame_view.Reset();
+        device_mask_view.Reset();
+        uploaded_artwork.reset();
+        artwork_active = false;
         render_view.Reset();
         render_target.Reset();
         render_texture.Reset();
@@ -712,6 +763,11 @@ struct D3D11PreviewRenderer::Impl {
         composition_target.Reset();
         composition_device.Reset();
         swap_chain.Reset();
+        // D3D11 defers object destruction. Flush only after all back-buffer
+        // views, pipeline bindings and swap-chain references are released;
+        // otherwise the next flip-model chain for this HWND can fail with
+        // E_ACCESSDENIED, leaving an actively decoding session black.
+        if (context) context->Flush();
         factory.Reset();
         context.Reset();
         device.Reset();
@@ -947,9 +1003,25 @@ struct D3D11PreviewRenderer::Impl {
             static_cast<std::uint32_t>(packed_profile >> 32U));
         const auto curve_exponent = std::bit_cast<float>(
             static_cast<std::uint32_t>(packed_profile & 0xFFFFFFFFU));
-        values.corner_radius = static_cast<float>(std::min(width, height)) * normalized_radius;
+        values.phone_frame = enabled && artwork_active ? 1.0F : 0.0F;
+        if (values.phone_frame > 0.5F) {
+            const auto& art = *uploaded_artwork;
+            float x = art.screen_x, y = art.screen_y, w = art.screen_width, h = art.screen_height;
+            for (int i = 0; i < artwork_rotation; ++i) {
+                const float old_x = x, old_w = w;
+                x = 1.0F - y - h; y = old_x; w = h; h = old_w;
+            }
+            values.frame_screen_rect[0] = x; values.frame_screen_rect[1] = y;
+            values.frame_screen_rect[2] = w; values.frame_screen_rect[3] = h;
+            values.frame_rotation = static_cast<float>(artwork_rotation);
+        }
+        ID3D11ShaderResourceView* artwork_views[] = {device_frame_view.Get(), device_mask_view.Get()};
+        context->PSSetShaderResources(3, 2, artwork_views);
+        const auto effective_radius = values.phone_frame > 0.5F && normalized_radius == 0.0F
+            ? 0.1784F : normalized_radius;
+        values.corner_radius = static_cast<float>(std::min(width, height)) * effective_radius;
         values.corner_exponent = curve_exponent;
-        values.corner_enabled = enabled && normalized_radius > 0.0F ? 1.0F : 0.0F;
+        values.corner_enabled = enabled && effective_radius > 0.0F ? 1.0F : 0.0F;
         values.rotation_quarter_turns = static_cast<float>(rotation);
         values.hdr_surface = hdr_surface_active() ? 1.0F : 0.0F;
         {
@@ -1008,7 +1080,7 @@ struct D3D11PreviewRenderer::Impl {
         const auto packed_profile = corner_profile.load(std::memory_order_relaxed);
         const auto normalized_radius = std::bit_cast<float>(
             static_cast<std::uint32_t>(packed_profile >> 32U));
-        return normalized_radius > 0.0F && !IsZoomed(window) &&
+        return (normalized_radius > 0.0F || phone_frame.load(std::memory_order_relaxed)) && !IsZoomed(window) &&
             GetPropW(window, L"iPhoneMirrorFullScreen") == nullptr;
     }
 
@@ -1324,6 +1396,41 @@ struct D3D11PreviewRenderer::Impl {
         return upload_cpu(frame);
     }
 
+    void release_unrequested_device_frame() {
+        { std::scoped_lock lock(device_frame_mutex); if (requested_artwork) return; }
+        if (!uploaded_artwork && !device_frame_view && !device_mask_view) return;
+        ID3D11ShaderResourceView* empty[] = {nullptr, nullptr};
+        context->PSSetShaderResources(3, 2, empty);
+        device_frame_view.Reset();
+        device_mask_view.Reset();
+        uploaded_artwork.reset();
+        artwork_active = false;
+    }
+
+    void prepare_device_frame() {
+        std::shared_ptr<const DeviceFrameArtwork> artwork;
+        { std::scoped_lock lock(device_frame_mutex); artwork = requested_artwork; }
+        if (artwork == uploaded_artwork) return;
+        device_frame_view.Reset(); device_mask_view.Reset();
+        if (artwork) {
+            const auto upload_texture = [&](DXGI_FORMAT format, const std::uint8_t* bytes, UINT stride,
+                ComPtr<ID3D11ShaderResourceView>& view) {
+                D3D11_TEXTURE2D_DESC desc{};
+                desc.Width = artwork->width; desc.Height = artwork->height;
+                desc.MipLevels = 1; desc.ArraySize = 1; desc.Format = format;
+                desc.SampleDesc.Count = 1; desc.Usage = D3D11_USAGE_IMMUTABLE;
+                desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                D3D11_SUBRESOURCE_DATA data{bytes, stride, 0};
+                ComPtr<ID3D11Texture2D> texture;
+                check(device->CreateTexture2D(&desc, &data, &texture), "Create device frame texture");
+                check(device->CreateShaderResourceView(texture.Get(), nullptr, &view), "Create device frame view");
+            };
+            upload_texture(DXGI_FORMAT_B8G8R8A8_UNORM, artwork->premultiplied_bgra.data(), artwork->width * 4, device_frame_view);
+            upload_texture(DXGI_FORMAT_R8_UNORM, artwork->screen_mask.data(), artwork->width, device_mask_view);
+        }
+        uploaded_artwork = std::move(artwork);
+    }
+
     RenderResult render(const media::DecodedFrame& frame) {
         if (target_width == 0 || target_height == 0) return RenderResult::Retry;
         if (!upload(frame)) return RenderResult::Retry;
@@ -1355,10 +1462,17 @@ struct D3D11PreviewRenderer::Impl {
         }
 
         const auto turns = ((rotation_quarter_turns.load(std::memory_order_relaxed) % 4) + 4) % 4;
+        prepare_device_frame();
+        artwork_rotation = (turns + (frame.width > frame.height ? 1 : 0)) % 4;
+        artwork_active = phone_frame.load(std::memory_order_relaxed) && uploaded_artwork &&
+            !IsZoomed(window) && GetPropW(window, L"iPhoneMirrorFullScreen") == nullptr;
         const bool swaps_axes = (turns & 1) != 0;
-        const float source_aspect = swaps_axes
+        float source_aspect = swaps_axes
             ? static_cast<float>(frame.height) / frame.width
             : static_cast<float>(frame.width) / frame.height;
+        if (artwork_active) source_aspect = (artwork_rotation & 1)
+            ? static_cast<float>(uploaded_artwork->height) / uploaded_artwork->width
+            : static_cast<float>(uploaded_artwork->width) / uploaded_artwork->height;
         const float target_aspect = static_cast<float>(target_width) / target_height;
         D3D11_VIEWPORT viewport{};
         if (target_aspect > source_aspect) {
@@ -1445,7 +1559,7 @@ struct D3D11PreviewRenderer::Impl {
         if (!use_limited_pass) {
             context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
             context->ClearRenderTargetView(target.Get(), composition_mode ? transparent : black);
-            if (composition_mode) draw_black_background(rounded);
+            if (composition_mode && !artwork_active) draw_black_background(rounded);
             draw_nv12(viewport, target_width, target_height, rounded, turns);
         } else {
             ensure_render_texture(limited_width, limited_height);
@@ -1464,7 +1578,7 @@ struct D3D11PreviewRenderer::Impl {
             context->OMSetRenderTargets(0, nullptr, nullptr);
             context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
             context->ClearRenderTargetView(target.Get(), composition_mode ? transparent : black);
-            if (composition_mode) draw_black_background(rounded);
+            if (composition_mode && !artwork_active) draw_black_background(rounded);
             context->RSSetViewports(1, &viewport);
             context->PSSetShader(copy_pixel_shader.Get(), nullptr, 0);
             update_shape_constants(target_width, target_height, rounded);
@@ -1548,6 +1662,9 @@ struct D3D11PreviewRenderer::Impl {
                     !device || !context || !swap_chain) {
                     rebuild_device_resources();
                 }
+                // Release disabled artwork even if capture has cleared its last
+                // image or the surface cannot currently present a video frame.
+                release_unrequested_device_frame();
                 // Coalesce interactive WM_SIZE bursts independently of media
                 // FPS. A resize iteration bypasses the media deadline below
                 // and immediately presents the newest retained frame.
@@ -1721,6 +1838,16 @@ void D3D11PreviewRenderer::set_corner_profile(float normalized_radius,
 void D3D11PreviewRenderer::set_opacity(float opacity) noexcept {
     if (!impl_ || !std::isfinite(opacity)) return;
     impl_->opacity.store(std::clamp(opacity, 0.1F, 1.0F), std::memory_order_relaxed);
+}
+
+void D3D11PreviewRenderer::set_device_frame(std::shared_ptr<const DeviceFrameArtwork> artwork) noexcept {
+    { std::scoped_lock lock(impl_->device_frame_mutex); impl_->requested_artwork = std::move(artwork); }
+    request_refresh();
+}
+
+void D3D11PreviewRenderer::set_phone_frame(bool enabled) noexcept {
+    impl_->phone_frame.store(enabled, std::memory_order_relaxed);
+    request_refresh();
 }
 
 void D3D11PreviewRenderer::set_rotation(std::int32_t quarter_turns) noexcept {

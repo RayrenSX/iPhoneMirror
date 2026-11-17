@@ -30,6 +30,7 @@ internal static partial class Program
         var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
         var vm = (MainViewModel)KeyboardField(window, "_viewModel");
         var calls = new List<(string Device, string Action)>();
+        JsonElement lastFileArguments = default;
         var settingValues = new Dictionary<string, JsonElement>
         {
             ["showBorders"] = JsonSerializer.SerializeToElement(new { showBorders = new { enabled = true } }),
@@ -72,6 +73,7 @@ internal static partial class Program
             { failProcessRead = false; throw new InvalidOperationException("Fixture process read failed."); }
             if (action == "list_dir")
             {
+                lastFileArguments = arguments.Clone();
                 if (failFileRead) { failFileRead = false; throw new InvalidOperationException("Fixture folder read failed."); }
                 var path = arguments.GetProperty("path").GetString();
                 if (path == "DCIM") return JsonSerializer.SerializeToElement(new { entries = Array.Empty<object>(), nextOffset = (int?)null, total = 0 });
@@ -103,6 +105,7 @@ internal static partial class Program
                 }),
                 "list_profiles" => JsonSerializer.SerializeToElement(new { profiles = emptyProfiles ? Array.Empty<object>() : new object[] { new { id = "fixture-profile", name = "iPhoneMirror Development", kind = "provisioning", organization = "Development Team", expires = "2027-11-15" } },
                     errors = profileReadError ? new Dictionary<string, string> { ["configuration"] = "Fixture unavailable." } : new Dictionary<string, string>() }),
+                "shared_document_apps" => JsonSerializer.SerializeToElement(new { apps = new[] { new { bundleId = "com.test.documents", name = "Documents app" } } }),
                 "list_dir" => JsonSerializer.SerializeToElement(new { entries = new[] {
                     new { name = "DCIM", path = "DCIM", type = "directory", size = 0 },
                     new { name = "IMG_1024.JPG", path = "IMG_1024.JPG", type = "file", size = 4821320 },
@@ -115,7 +118,7 @@ internal static partial class Program
             };
         }
         var iconCache = Path.Combine(output, "icon-cache-" + Guid.NewGuid().ToString("N"));
-        var panel = new DeviceHubPanel(vm, Request, _ => ready, iconCache);
+        var panel = new DeviceHubPanel(vm, Request, _ => ready, iconCache, (_, _) => Task.CompletedTask, developerMode: true);
         string? copied = null;
         panel.CopyText = value => copied = value;
         Console.WriteLine("Device manager constructed.");
@@ -153,6 +156,14 @@ internal static partial class Program
         try
         {
             KeyboardCall(window, "SetDeviceHubPanelVisible", true); Finish();
+            var host = (ContentControl)window.FindName("DeviceHubPanelHost");
+            Verify(!host.Focusable && !host.IsTabStop && host.FocusVisualStyle is null,
+                "The management content host is an extra keyboard stop that can draw a white frame around the entire panel.");
+            Verify(!panel.Focusable && !panel.IsTabStop,
+                "The management page must leave keyboard focus on its actionable controls.");
+            var closeAction = FindVisualDescendants<Button>(panel).First(button => button.IsVisible && button.IsEnabled);
+            Verify(closeAction.FocusVisualStyle is not null && closeAction.Focus(),
+                "Removing a container focus frame must retain keyboard focus feedback on management actions.");
             Console.WriteLine("No-device navigation passed.");
             Verify(Find<StackPanel>("ConnectionPrompt").IsVisible && calls.Count == 0, "Opening without a device must show guidance and must not start control/capture.");
             Console.WriteLine("Adding first device."); vm.Devices.Add(first);
@@ -195,7 +206,7 @@ internal static partial class Program
             WaitReviewTask((Task)KeyboardField(panel, "_iconOperation"));
             Verify(iconCalls == firstIconCalls, "A refresh must use the disk icon cache instead of refetching visible icons.");
             Verify(maximumIconCalls == 1, "Icon loading must respect the phone bridge's single-request admission contract.");
-            using (var restarted = new DeviceHubPanel(vm, Request, _ => ready, iconCache))
+            using (var restarted = new DeviceHubPanel(vm, Request, _ => ready, iconCache, (_, _) => Task.CompletedTask, developerMode: true))
             {
                 ((ContentControl)window.FindName("DeviceHubPanelHost")).Content = restarted;
                 restarted.SetDevice(first, true);
@@ -409,6 +420,128 @@ internal static partial class Program
             profileReadError = false;
             emptyProfiles = false; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
             Select(3); var files = Find<ListBox>("FilesList"); files.SelectedIndex = 0;
+            var mappingToggle = Find<CheckBox>("ExplorerMappingToggle");
+            var mappingOpen = Find<Button>("ExplorerMappingOpen");
+            Verify(mappingToggle.IsVisible && mappingToggle.IsChecked == false && mappingToggle.IsEnabled && !mappingOpen.IsVisible,
+                "Media Explorer mapping must start off and expose Open only after a drive is mapped.");
+            Verify(mappingToggle.ToolTip?.ToString()?.Contains(LocalizationService.Get("DeviceHubExplorerHelp"), StringComparison.Ordinal) == true,
+                "The Explorer mapping switch must explain its phone scope and automatic disconnect lifetime.");
+            var mappingDriveType = typeof(MainViewModel).Assembly.GetType("IPhoneMirror.App.Services.ExplorerMapping.WindowsExplorerDrive", true)!;
+            // This creates only the inert ownership wrapper. No drive mapping,
+            // WebClient call or Explorer process is started by this UI fixture.
+            var mappingDrive = Activator.CreateInstance(mappingDriveType,
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic, null,
+                ["Z:", @"\\127.0.0.1@1\DavWWWRoot\ui-fixture-" + Guid.NewGuid().ToString("N")], null)!;
+            SetKeyboardField(mappingDrive, "_disposeTask", Task.CompletedTask);
+            var mappingSessionType = typeof(MainViewModel).GetNestedType("ExplorerMappingSession",
+                System.Reflection.BindingFlags.NonPublic)!;
+            using var mappingLifetime = new CancellationTokenSource();
+            var mappingSession = Activator.CreateInstance(mappingSessionType,
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public,
+                null, [second, null, mappingLifetime], null)!;
+            SetKeyboardField(mappingSession, "Drive", mappingDrive);
+            ((TaskCompletionSource)mappingSessionType.GetProperty("Finished",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(mappingSession)!).TrySetResult();
+            try
+            {
+                SetKeyboardField(vm, "_explorerMappingBusy", true);
+                KeyboardCall(vm, "NotifyExplorerMapping");
+                Verify(!mappingToggle.IsEnabled && mappingToggle.IsChecked == false,
+                    "A busy mapping operation must disable duplicate user requests.");
+                SetKeyboardField(vm, "_explorerMappingBusy", false);
+                SetKeyboardField(vm, "_explorerMapping", mappingSession);
+                KeyboardCall(vm, "NotifyExplorerMapping");
+                Verify(mappingToggle.IsChecked == true && mappingOpen.IsVisible &&
+                    Find<TextBlock>("ExplorerMappingFeedback").Text == LocalizationService.Format("DeviceHubExplorerMappedFormat", "Z:"),
+                    "The mapping switch and drive feedback must follow the current device's successful mapping.");
+                window.UpdateLayout();
+                Rect MappingBounds(FrameworkElement element) => element.TransformToAncestor(panel)
+                    .TransformBounds(new Rect(element.RenderSize));
+                var mappingBounds = MappingBounds(Find<StackPanel>("ExplorerMappingRow"));
+                var toolbarBounds = MappingBounds(Find<StackPanel>("FileToolbar"));
+                var switchBounds = MappingBounds(mappingToggle);
+                var titleBounds = MappingBounds(Find<TextBlock>("ExplorerMappingTitle"));
+                var openBounds = MappingBounds(mappingOpen);
+                Verify(mappingBounds.Top >= toolbarBounds.Bottom &&
+                    mappingBounds.Bottom <= MappingBounds(files).Top &&
+                    Math.Abs(mappingBounds.Left - toolbarBounds.Left) < 1 &&
+                    Math.Abs(mappingBounds.Right - toolbarBounds.Right) < 1 &&
+                    titleBounds.Right <= openBounds.Left && openBounds.Right <= switchBounds.Left &&
+                    mappingOpen.ActualWidth <= 32 && mappingToggle.ActualWidth >= 48,
+                    "Mapping must form a compact aligned bar between file tools and files, with a right-side switch and icon action.");
+                ready = false; panel.SetDevice(second, true); Finish();
+                Verify(!Find<Grid>("Pages").IsEnabled && mappingToggle.IsEnabled,
+                    "A lost phone page connection must not disable disconnecting an owned Explorer mapping.");
+                ready = true; panel.SetDevice(second, true); Finish();
+                panel.SetDevice(first, true); Finish();
+                Verify(mappingToggle.IsChecked == false && !mappingOpen.IsVisible,
+                    "A mapping owned by another phone must never appear checked or openable on this phone.");
+                panel.SetDevice(second, true); Finish();
+                Find<ComboBox>("FileRoot").SelectedIndex = 1; Finish();
+                Verify(!Find<StackPanel>("ExplorerMappingRow").IsVisible,
+                    "The media mapping control must not imply that crash reports are mapped.");
+                Find<ComboBox>("FileRoot").SelectedIndex = 0; Finish();
+                SaveWindowRender(window, Path.Combine(output, "files-explorer-mapped.png"));
+            }
+            finally
+            {
+                // Clear the inert wrapper before normal VM shutdown, so the
+                // fixture never invokes Windows disconnection for any drive.
+                SetKeyboardField(vm, "_explorerMapping", null);
+                SetKeyboardField(mappingSession, "Drive", null);
+                SetKeyboardField(vm, "_explorerMappingBusy", false);
+                ready = true; panel.SetDevice(second, true);
+                KeyboardCall(vm, "NotifyExplorerMapping");
+            }
+            SetKeyboardField(vm, "_explorerMappingError", true);
+            SetKeyboardField(vm, "_explorerStatusKey", "DeviceHubExplorerFailedFormat");
+            SetKeyboardField(vm, "_explorerFailure", "53");
+            KeyboardCall(vm, "NotifyExplorerMapping");
+            Verify(Find<TextBlock>("ExplorerMappingFeedback").IsVisible && mappingToggle.IsChecked == false && !mappingOpen.IsVisible,
+                "An Explorer mapping failure must be visible without pretending a drive exists.");
+            SetKeyboardField(vm, "_explorerMappingError", false);
+            SetKeyboardField(vm, "_explorerStatusKey", null);
+            SetKeyboardField(vm, "_explorerFailure", null);
+            KeyboardCall(vm, "NotifyExplorerMapping");
+            Console.WriteLine("PASS Explorer mapping UI: default off, owned drive, busy/error feedback, other-device isolation and disconnect availability with disabled phone pages.");
+            var documentRoot = Find<ComboBox>("FileRoot");
+            var documentChoice = documentRoot.Items.OfType<ComboBoxItem>().Single(item => item.Tag?.ToString() == "documents:com.test.documents");
+            documentRoot.SelectedItem = documentChoice; Finish();
+            Verify(lastFileArguments.GetProperty("root").GetString() == "documents" &&
+                lastFileArguments.GetProperty("bundleId").GetString() == "com.test.documents" &&
+                lastFileArguments.GetProperty("path").GetString() == "" && mappingToggle.IsVisible &&
+                mappingToggle.IsChecked == false && Find<Button>("FileImport").IsVisible,
+                "Selecting shared app documents must reset the path and scope browsing/import/mapping to that app.");
+            foreach (var action in new[] { "read_file", "upload_file", "delete_file" })
+            {
+                var scoped = JsonSerializer.SerializeToElement(KeyboardCall(panel, "DocumentArguments", action, new { root = "media", path = "中文.txt" }));
+                Verify(scoped.GetProperty("root").GetString() == "documents" &&
+                    scoped.GetProperty("bundleId").GetString() == "com.test.documents" &&
+                    scoped.GetProperty("path").GetString() == "中文.txt", "Every file operation must preserve the selected app scope.");
+            }
+            try
+            {
+                SetKeyboardField(mappingSession, "Drive", mappingDrive);
+                SetKeyboardField(mappingSession, "BundleId", "com.test.documents");
+                SetKeyboardField(vm, "_explorerMapping", mappingSession);
+                KeyboardCall(vm, "NotifyExplorerMapping");
+                Verify(mappingToggle.IsChecked == true && mappingOpen.IsVisible, "The selected app must own its matching mapped drive.");
+                SetKeyboardField(mappingSession, "BundleId", "com.test.other");
+                KeyboardCall(vm, "NotifyExplorerMapping");
+                Verify(mappingToggle.IsChecked == false && !mappingOpen.IsVisible, "Another app's mapped drive must never be openable from this app.");
+                SaveWindowRender(window, Path.Combine(output, "files-app-documents.png"));
+            }
+            finally
+            {
+                SetKeyboardField(vm, "_explorerMapping", null);
+                SetKeyboardField(mappingSession, "Drive", null);
+                KeyboardCall(vm, "NotifyExplorerMapping");
+            }
+            documentRoot.SelectedIndex = 0; Finish();
+            Verify(lastFileArguments.GetProperty("root").GetString() == "media" && !lastFileArguments.TryGetProperty("bundleId", out _),
+                "Switching back to media must remove the app bundle scope.");
+            Console.WriteLine("PASS app document scopes: app picker, root reset, all file arguments and per-app mapped drive ownership.");
+            files.SelectedIndex = 0;
             var fileMenu = Menu(files); ClickMenu(fileMenu, "copy");
             Verify(copied == "DCIM" && MenuAction(fileMenu, "file-download").IsEnabled, "File menus must copy the selected path and offer open/save.");
             ClickMenu(fileMenu, "file-download");
@@ -515,13 +648,13 @@ internal static partial class Program
                                 .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                         }
                         AdvanceDispatcher(TimeSpan.FromMilliseconds(50)); window.UpdateLayout();
-                        Verify((bool)KeyboardField(panel, "_busy") && !Find<Grid>("Pages").IsEnabled && Find<ProgressBar>("BusyProgress").IsVisible,
+                        Verify((bool)KeyboardField(panel, "_busy") && !Find<Grid>("Pages").IsEnabled && !FindVisualDescendants<ProgressBar>(panel).Any(),
                             "Every page must block duplicate device actions and show progress during a pending request.");
                         if (dark) Verify(HubBrightPixelFraction(Find<Grid>("Pages")) <= brightBefore + .03,
                             $"Refreshing page {page} must retain its dark background, without a white disabled-control flash.");
                         SaveWindowRender(window, Path.Combine(output, $"busy-{(dark ? "dark" : "light")}-{page}.png"));
                         gate.SetResult(true); Finish(); pauseAction = null;
-                        Verify(Find<Grid>("Pages").IsEnabled && !Find<ProgressBar>("BusyProgress").IsVisible,
+                        Verify(Find<Grid>("Pages").IsEnabled && !((bool)KeyboardField(panel, "_busy")),
                             "A finished request must restore page interaction and remove the progress indicator.");
                         if (page == 1)
                         {
@@ -558,7 +691,9 @@ internal static partial class Program
             }
             SetApplicationDisplayMode(app, ApplicationDisplayMode.Lightweight);
             KeyboardCall(window, "ApplyApplicationDisplayMode"); Finish();
-            Verify(panel.IsVisible && panel.ActualWidth > 400, "Management must also work in lightweight mode.");
+            SaveWindowRender(window, Path.Combine(output, "lightweight.png"));
+            Verify(panel.IsVisible && panel.ActualWidth > 400,
+                $"Management must also work in lightweight mode: visible={panel.IsVisible}, panel={panel.ActualWidth:0.0}, window={window.ActualWidth:0.0}, host={((FrameworkElement)window.FindName("DeviceHubPanelHost")).ActualWidth:0.0}, control={((FrameworkElement)window.FindName("ControlPanel")).ActualWidth:0.0}.");
             vm.Devices.Clear(); vm.SelectedDevice = null; Finish();
             Verify(Find<ListBox>("AppsList").Items.Count == 0, "Deselecting the phone must clear its private data from the inspector.");
         }

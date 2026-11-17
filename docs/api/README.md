@@ -108,7 +108,11 @@ Table bodies use abbreviated notation; transmitted JSON needs quoted keys. Keys 
 
 On a real iPhone, `input/text` may open an iOS **Allow Paste** prompt (the source may be named `dtpasteboardd`). Handle that prompt on the phone and verify the destination field before continuing. A `202` response can arrive while the prompt is still open. Do not send follow-up keys or restore/change the phone clipboard until the paste finishes; changing the clipboard while permission is pending can cancel the insertion. Clipboard tests should keep the original text in memory and restore it only if the clipboard still contains the test value, so they do not overwrite a later user copy or background synchronization.
 
-Screenshots require an already active capture and a decoded frame. Concurrent callers share an in-flight PNG task per source; a bounded encoder pool avoids UI blocking. No WPF window or desktop screenshot is taken. Device clipboard reads do not synthesize Command+C or overwrite the Windows clipboard. Empty text is a valid clipboard value.
+Screenshots require an already active capture and a decoded frame. Concurrent callers for the same source share pending work, including target resolution, GPU readback and PNG encoding. Two encoder slots process a queue of at most 32 sources; a source waits at most two seconds for a slot before returning 429 with `Retry-After`. An individual request can be cancelled without cancelling its peers. When all callers leave, queued work is cancelled; work already executing retains its encoder slot until it finishes. Screenshot operations have a ten-second deadline and return 503 if readback/encoding cannot finish in time. Capture restarts invalidate the old result. No completed-frame cache, WPF window or desktop screenshot is used. Device clipboard reads do not synthesize Command+C or overwrite the Windows clipboard. Empty text is a valid clipboard value.
+
+If an existing capture temporarily has no decoded frame, the same coalesced task waits up to 500 ms for a new frame and refreshes its dimensions. Persistent missing frames or a stopped capture return 503. This does not start or restart capture, and never serves a cached PNG.
+
+The API uses fast lossless PNG compression at the original capture resolution. This reduces encoding work and avoids intermediate full-size bitmap copies; PNG files can be larger than screenshots saved through the UI. The HTTP content type and decoded pixels are unchanged.
 
 ## Limits and errors
 

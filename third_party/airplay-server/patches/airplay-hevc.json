@@ -1,0 +1,32 @@
+[
+  {
+    "Path": "AirPlayServerLib/lib/raop_rtp_mirror.c",
+    "Base": "810a3d65a3f1c01498cf69e756840dff1f74c455f0bef9c7518d00f3ab9a42e3",
+    "Target": "d8e2ae51769d7408c2205289ae2a86f23a4bd7ad5bb988f72e5ecdf4e2d21a0b"
+  },
+  {
+    "Path": "AirPlayServerLib/lib/global.h",
+    "Base": "dd2d0fda81bf2ddfe8a3b0e27e3b920d25443b027d2125f65b8b6c46cb3286e0",
+    "Target": "764f0506a3192e9a27d151337020b0d99512b04227b17fbd256a8af939ce131d"
+  },
+  {
+    "Path": "AirPlayServerLib/lib/raop_handlers.h",
+    "Base": "b625e390173b41dd37082567e07ecdcfc32abfd945f299fd4eab0e6727174c1b",
+    "Target": "a3641222fbde9425820ad9fd1e43d78b67c8e487abf57311416a6e6aa509680a"
+  },
+  {
+    "Path": "airplay2dll/FgAirplayChannel.h",
+    "Base": "f6deba3e5b9cccc2d70e98e9ff95cf1a966a50a12357d3ed78fe1670c9bab67a",
+    "Target": "8bf3d313b6e5444c51671f9ba88a8e08c5ef3ee3e2271604a0e21b4071607050"
+  },
+  {
+    "Path": "airplay2dll/src/FgAirplayServer.cpp",
+    "Base": "6f22c08b3726dc87da1b1a26cdd98c0d74e61375dcaeda2b9b548fe119eb40ca",
+    "Target": "0c9f5cd7a38ed0408d60297d716b134c4e13f67915a41340e9453575112364e3"
+  },
+  {
+    "Path": "airplay2dll/FgAirplayChannel.cpp",
+    "Base": "0757a3292c43050f4a75a14a1bf821ffcad4286754d9dd36b87a08a1e81e7272",
+    "Target": "65665dbf9eb7ceb5e6bb0321e69463dbb4c9aa8fffef043f6b43c263ce716eab"
+  }
+]

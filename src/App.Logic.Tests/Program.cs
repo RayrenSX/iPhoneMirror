@@ -25,6 +25,23 @@ if (int.TryParse(Environment.GetEnvironmentVariable(delayedExitEnvironment),
     return;
 }
 
+if (args is ["--proxy-environment-probe"])
+{
+    Console.WriteLine(JsonSerializer.Serialize(AppProxyPolicyTests.EnvironmentNames.ToDictionary(
+        name => name, Environment.GetEnvironmentVariable, StringComparer.Ordinal)));
+    return;
+}
+if (args is ["--app-proxy-policy"])
+{
+    await AppProxyPolicyTests.RunAsync();
+    return;
+}
+if (args is ["--media-http-proxy"])
+{
+    await MediaHttpProxyBridgeTests.RunAsync();
+    return;
+}
+
 var diagnosticTestRoot = args is ["--component-public-uxplay", var componentPublicOutput]
     ? Path.GetFullPath(Path.Combine(componentPublicOutput, "logs"))
     : Path.Combine(Path.GetTempPath(), $"iPhoneMirror-test-logs-{Guid.NewGuid():N}");
@@ -50,6 +67,54 @@ if (args is ["--updater-package-e2e", var elevatedUpdaterFixture, var elevatedUp
 {
     await UpdaterHandoffTests.RunPackageEndToEndAsync(elevatedUpdaterFixture, elevatedUpdaterInstall,
         elevatedUpdaterIdentity, elevatedInstaller: true);
+    return;
+}
+
+if (args is ["--fcup-hls", var fcupFfmpeg])
+{
+    await FcupHlsPlaybackTests.RunAsync(Path.GetFullPath(fcupFfmpeg));
+    return;
+}
+
+if (args is ["--media-timeline"])
+{
+    Equal(true, MediaCastPlaybackControls.UsePlayerTimeline(true, true, false, false, false), "opened HLS VOD uses actual position even during delayed buffering");
+    Equal(false, MediaCastPlaybackControls.UsePlayerTimeline(true, true, false, false, true), "seek retains requested programme anchor");
+    Equal(false, MediaCastPlaybackControls.UsePlayerTimeline(true, true, false, true, false), "first frame retains opening anchor");
+    Equal(false, MediaCastPlaybackControls.UsePlayerTimeline(true, true, true, false, false), "live stream retains existing timeline policy");
+    Equal(true, MediaCastPlaybackControls.IsPrematureEnd(855.92, 845.675), "frozen tail must not complete item");
+    Equal(false, MediaCastPlaybackControls.IsPrematureEnd(90, 89.5), "normal EOF tolerates frame rounding");
+    Equal(true, MediaCastPlaybackControls.IsPrematureEnd(6, 0), "unrendered short ad must not complete");
+    Equal(true, MediaCastPlaybackControls.IsPrematureEnd(1, 0), "unrendered one-second ad must not complete");
+    Equal(false, MediaCastPlaybackControls.IsPrematureEnd(1, 0.745), "one-second ad tolerates the last 250ms playback sample before WMF resets its position");
+    Equal(true, MediaCastPlaybackControls.IsPrematureEnd(1, 0.4), "a one-second ad truncated before its midpoint must not complete");
+    Equal(false, MediaCastPlaybackControls.IsPrematureEnd(6.6, 6.517), "rendered ad tail tolerates frame rounding");
+    Equal(MediaCastPlaybackStatus.Loading, MediaCastPlaybackControls.GetPlaybackStatus(true, false, true, true), "buffering is loading");
+    Equal(MediaCastPlaybackStatus.Paused, MediaCastPlaybackControls.GetPlaybackStatus(true, false, false, true), "user pause takes precedence over buffering");
+    Equal(MediaCastPlaybackStatus.Playing, MediaCastPlaybackControls.GetPlaybackStatus(true, false, true, false), "ready item is playing");
+    Equal(MediaCastPlaybackStatus.Completed, MediaCastPlaybackControls.GetPlaybackStatus(true, false, true, true, MediaCastPlaybackStatus.Completed), "completed item retains its natural-end reason during late loading callbacks");
+    Equal(MediaCastPlaybackStatus.Stopped, MediaCastPlaybackControls.GetPlaybackStatus(true, true, false, false, MediaCastPlaybackStatus.Completed), "explicit stop must not report a natural-end reason");
+    Equal(MediaCastPlaybackStatus.Failed, MediaCastPlaybackControls.GetPlaybackStatus(true, false, true, false, MediaCastPlaybackStatus.Failed), "failed item cannot revive its playing status");
+    Equal(MediaCastPlaybackStatus.Stopped, MediaCastPlaybackControls.GetPlaybackStatus(false, false, true, true), "inactive cast is stopped");
+    var clock = DateTimeOffset.UtcNow;
+    var recovery = new MediaRecoveryBackoff(() => clock,
+        maximumAttempts: 2, stablePlaybackWindow: TimeSpan.FromSeconds(3));
+    Equal(true, recovery.TryGetNext(out _, out _), "first recovery is available");
+    recovery.MarkOpened(10);
+    clock += TimeSpan.FromSeconds(20);
+    recovery.MarkProgress(10);
+    Equal(true, recovery.TryGetNext(out var frozenAttempt, out _) && frozenAttempt == 2,
+        "opened but frozen playback cannot reset retry budget");
+    recovery.MarkOpened(10);
+    clock += TimeSpan.FromSeconds(20);
+    recovery.MarkProgress(10.01);
+    Equal(false, recovery.TryGetNext(out _, out _), "tiny timestamp noise cannot renew exhausted recovery");
+    recovery.MarkOpened(10);
+    clock += TimeSpan.FromSeconds(4);
+    recovery.MarkProgress(14);
+    Equal(true, recovery.TryGetNext(out var resumedAttempt, out _) && resumedAttempt == 1,
+        "sustained actual progress renews recovery budget");
+    Console.WriteLine("PASS HLS timeline, explicit playback status and premature EOF regression");
     return;
 }
 
@@ -580,7 +645,7 @@ Equal(true,
     keyboardFocusSource.Contains(
         "private bool IsMainKeyboardEditorFocused() =>\n" +
         "        (MainPreviewHost.WindowHandle == 0 || _keyboardFocusedWindow() != MainPreviewHost.WindowHandle) &&\n" +
-        "        (_isSettingsPanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or ComboBox or ButtonBase or Slider);",
+        "        (IsRightWorkspacePanelVisible || Keyboard.FocusedElement is TextBoxBase or PasswordBox or ComboBox or ButtonBase or Slider);",
         StringComparison.Ordinal) &&
     keyboardFocusSource.Contains(
         "(sourceWindow != _windowSource?.Handle || !IsMainKeyboardEditorFocused())",
@@ -1113,9 +1178,9 @@ Equal(true,
     modernControlsText.Contains(
         "BasedOn=\"{StaticResource ModernScrollBarStyle}\"/>",
         StringComparison.Ordinal) &&
-    modernControlsText.Contains("<Setter Property=\"Width\" Value=\"6\"/>",
+    modernControlsText.Contains("<Setter Property=\"Width\" Value=\"10\"/>",
         StringComparison.Ordinal) &&
-    modernControlsText.Contains("<Setter Property=\"Height\" Value=\"6\"/>",
+    modernControlsText.Contains("<Setter Property=\"Height\" Value=\"10\"/>",
         StringComparison.Ordinal) &&
     modernControlsText.Contains("CornerRadius=\"2\"", StringComparison.Ordinal) &&
     modernControlsText.Contains("MinHeight\" Value=\"28\"", StringComparison.Ordinal) &&
@@ -1124,7 +1189,7 @@ Equal(true,
     modernControlsText.Contains("SystemParameters.ClientAreaAnimationKey", StringComparison.Ordinal) &&
     modernControlsText.Contains("PageLeftCommand", StringComparison.Ordinal) &&
     modernControlsText.Contains("PageRightCommand", StringComparison.Ordinal),
-    "shared scrollbars are thin, rounded, animated, and support both orientations");
+    "shared scrollbars retain wide pointer targets, rounded animated visuals, and both orientations");
 Equal(true, modernControlsText.Contains(
         "<Style x:Key=\"TitleBarButton\" TargetType=\"Button\" BasedOn=\"{StaticResource IconButton}\">",
         StringComparison.Ordinal) &&
@@ -1546,7 +1611,7 @@ Equal(true,
         StringComparison.Ordinal),
     "Bluetooth control confines the hidden cursor to the active preview without excluding independent input");
 Equal(true,
-    mainWindowCode.Contains("var sensitivity = _viewModel.AppliedBluetoothMouseSensitivity / 100.0;",
+    mainWindowCode.Contains("var sensitivity = _viewModel.ControlPreferencesFor(_activeControlUdid ?? _viewModel.BluetoothControlTargetUdid).MouseSensitivity / 100.0;",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("e.SurfaceWidth", StringComparison.Ordinal) &&
     mainWindowCode.Contains("physical mouse counts", StringComparison.Ordinal),
@@ -1689,7 +1754,7 @@ Equal(true,
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("SetSettingsPanelVisible(!_isSettingsPanelVisible)",
         StringComparison.Ordinal) &&
-    mainWindowCode.Contains("var showSettings = _isSettingsPanelVisible;",
+    mainWindowCode.Contains("var showSettings = IsRightWorkspacePanelVisible;",
         StringComparison.Ordinal) &&
     !mainWindowCode.Contains("WorkspacePanel.Settings", StringComparison.Ordinal),
     "left workspace pages stay exclusive while settings toggles independently");
@@ -1707,7 +1772,7 @@ Equal(true,
         "SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: WorkspaceDeviceWidth)",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains(
-        "SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: WorkspaceSettingsWidth)",
+        "SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: WorkspaceRightWidth)",
         StringComparison.Ordinal),
     "entering full screen cancels pending workspace panel animations");
 var closeMethodIndex = mainWindowCode.IndexOf(
@@ -2218,8 +2283,10 @@ Equal(true,
     aboutWindowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal) &&
     aboutWindowText.Contains("AllowsTransparency=\"True\"", StringComparison.Ordinal),
     "main keeps its native preview chrome while about uses the shared alpha frame");
-Equal(true, aboutWindowText.Contains("{DynamicResource CheckForUpdates}",
-                StringComparison.Ordinal) &&
+Equal(true, (aboutWindowText.Contains("{DynamicResource CheckForUpdates}",
+                StringComparison.Ordinal) ||
+            aboutWindowText.Contains("Content=\"{Binding CheckUpdatesButtonText}\"",
+                StringComparison.Ordinal)) &&
             aboutWindowText.Contains(
                 "Style=\"{StaticResource AboutCheckUpdatesButtonStyle}\"",
                 StringComparison.Ordinal) &&
@@ -2315,9 +2382,9 @@ var shortcutSettingsCode = File.ReadAllText(Path.Combine(sourceDirectory, "App",
     "ShortcutSettingsWindow.xaml.cs"));
 Equal(true, mainWindowXaml.Contains("OpenShortcutSettingsButton",
         StringComparison.Ordinal) &&
-    mainWindowXaml.Contains("ClearBluetoothBindingsButton",
+    !mainWindowXaml.Contains("ClearBluetoothBindingsButton",
         StringComparison.Ordinal) &&
-    mainWindowCode.Contains("OnClearBluetoothBindingsClick",
+    !mainWindowCode.Contains("OnClearBluetoothBindingsClick",
         StringComparison.Ordinal) &&
     shortcutSettingsText.Contains("PreviewKeyDown=\"OnShortcutPreviewKeyDown\"",
         StringComparison.Ordinal) &&
@@ -4159,11 +4226,21 @@ Equal("iPhone 12 mini", AppleProductNames.Resolve("iPhone13,1"),
     "known ProductType uses the real model name");
 Equal("iPhone99,9", AppleProductNames.Resolve("iPhone99,9"),
     "unknown ProductType remains visible for diagnostics");
+Equal("iPhone 18 Pro", AppleProductNames.Resolve("iPhone19,2"),
+    "iPhone 18 Pro uses the shared model catalog");
+Equal("iPhone 18 Pro Max", AppleProductNames.Resolve("iPhone19,7"),
+    "regional iPhone 18 Pro Max identifiers are recognized");
+Equal("iPhone 18 Pro", AppleProductNames.Resolve(" iphone19,2 "),
+    "model names preserve case-insensitive and whitespace-tolerant lookup");
+foreach (var product in AppleDisplayCatalog.Products)
+foreach (var identifier in product.Identifiers)
+    Equal(product.Name.Replace("Xʀ", "XR", StringComparison.Ordinal), AppleProductNames.Resolve(identifier),
+        $"all phone/tablet model identifiers have a readable name: {identifier}");
 
 // Display outlines are selected from ProductType when available. Legacy
 // Home-button displays remain rectangular, while metadata-less startup can
 // use a conservative decoded-frame aspect fallback.
-Equal("iphone-dynamic-island",
+Equal("iphone-17",
     DeviceCornerProfileResolver.Resolve("iPhone18,3", 1206, 2622).Id,
     "iPhone17 family profile");
 Equal("iphone-x",
@@ -4175,9 +4252,24 @@ Equal("rectangular",
 Equal("rectangular",
     DeviceCornerProfileResolver.Resolve("iPhone14,6", 750, 1334).Id,
     "iPhone SE 3 remains rectangular");
-Equal("iphone-notch",
+Equal("iphone-modern-notch",
     DeviceCornerProfileResolver.Resolve("iPhone17,5", 1170, 2532).Id,
     "iPhone 16e retains notch profile");
+Equal("iphone-modern-notch",
+    DeviceCornerProfileResolver.Resolve("iPhone18,5", 1170, 2532).Id,
+    "iPhone 17e does not inherit Dynamic Island corners");
+Equal("iphone-duo-inner",
+    DeviceCornerProfileResolver.Resolve("iPhone19,4", 2007, 2853).Id,
+    "Duo inner panel uses its own verified outline");
+Equal("iphone-duo-inner",
+    DeviceCornerProfileResolver.Resolve("iPhone19,4", 951, 669).Id,
+    "Duo inner outline survives rotation and scaling");
+Equal("rectangular",
+    DeviceCornerProfileResolver.Resolve("iPhone19,4", 1398, 2034).Id,
+    "Duo asymmetric outer panel avoids an incorrect symmetric crop");
+Equal("rectangular",
+    DeviceCornerProfileResolver.Resolve("iPhone19,4").Id,
+    "Unknown Duo panel geometry does not invent an outline");
 Equal("iphone-12-mini",
     DeviceCornerProfileResolver.Resolve("iPhone13,1", 1080, 2340).Id,
     "iPhone 12 mini has a tighter device-specific curve");
@@ -4210,6 +4302,9 @@ Equal("rectangular",
     "ambiguous geometry does not clip");
 Equal(0, DeviceCornerProfile.Rectangular.GetGdiRadius(1206),
     "rectangular fallback radius");
+
+WirelessRuntimeAvailabilityTests.Run();
+await AppProxyPolicyTests.RunAsync();
 
 Equal("iPhoneMirror AirPlay",
     WirelessReceiverConfiguration.SanitizeReceiverName("  iPhoneMirror AirPlay  "),
@@ -4254,7 +4349,7 @@ foreach (var legacyProfile in WirelessReceiverConfiguration.SupportedProfiles)
         WirelessReceiverConfiguration.ProfileForSavedId(legacyProfile.Id).Id,
         "saved device-specific profiles migrate without losing original quality");
 var tabletOriginal = WirelessReceiverConfiguration.SupportedProfiles.Single(profile => profile.Id == "maximum-ipad");
-Equal(171, AppleDisplayCatalog.Products.SelectMany(product => product.Identifiers).Distinct().Count(),
+Equal(174, AppleDisplayCatalog.Products.SelectMany(product => product.Identifiers).Distinct().Count(),
     "managed catalog includes every downloaded iPhone and iPad identifier");
 foreach (var catalogProduct in AppleDisplayCatalog.Products)
     foreach (var catalogIdentifier in catalogProduct.Identifiers)
@@ -4434,9 +4529,9 @@ Equal(true,
 Equal(true, WirelessReceiverConfiguration.SupportsMediaCast(
         WirelessReceiverBackend.Original),
     "video app casting remains available with the original receiver");
-Equal(false, WirelessReceiverConfiguration.SupportsMediaCast(
+Equal(true, WirelessReceiverConfiguration.SupportsMediaCast(
         WirelessReceiverBackend.UxPlay),
-    "video app casting is disabled for the UxPlay fallback receiver");
+    "dedicated video receiver remains available with the UxPlay mirror backend");
 var uxPlayRuntimeRoot = Path.Combine(Path.GetTempPath(),
     $"iphone-mirror-uxplay-runtime-{Guid.NewGuid():N}");
 try
@@ -4496,7 +4591,7 @@ var hlsBridgeArguments = HlsMediaPlaybackBridge.BuildArguments(
     new Uri("http://127.0.0.1:18081/stream.ts"));
 Equal(true,
     hlsBridgeArguments.Contains("-protocol_whitelist", StringComparer.Ordinal) &&
-    hlsBridgeArguments.Contains("http,https,tcp,tls,crypto",
+    hlsBridgeArguments.Contains("http,https,tcp,tls,crypto,httpproxy",
         StringComparer.Ordinal) &&
     !hlsBridgeArguments.Contains("-reconnect_at_eof", StringComparer.Ordinal) &&
     hlsBridgeArguments.Contains("mpegts", StringComparer.Ordinal) &&
@@ -4515,6 +4610,21 @@ Equal(true,
     hlsSeekArguments.Contains("-output_ts_offset", StringComparer.Ordinal) &&
     hlsSeekArguments.Contains("-123.5", StringComparer.Ordinal),
     "HLS bridge resets timestamps after an input seek");
+var projectedSource = new Uri("http://127.0.0.1:18081/" + new string('a', 48) +
+    "/resource/stream.m3u8?fixture=keep");
+var projectedArguments = HlsMediaPlaybackBridge.BuildArguments(projectedSource,
+    new Uri("http://127.0.0.1:18082/output.ts"), 12.5).ToArray();
+var projectedInputs = projectedArguments.Select((argument, index) => (argument, index))
+    .Where(entry => entry.argument == "-i")
+    .Select(entry => new Uri(projectedArguments[entry.index + 1])).ToArray();
+Equal(true, projectedInputs.Length == 2 &&
+    projectedInputs[0].Query == "?fixture=keep&iphonemirror_track=video" &&
+    projectedInputs[1].Query == "?fixture=keep&iphonemirror_track=audio" &&
+    projectedArguments.Count(argument => argument == "-ss") == 2 &&
+    projectedArguments.Contains("-isync", StringComparer.Ordinal),
+    "FCUP requests separate broker track views while retaining seek and common clock options");
+Equal(false, hlsBridgeArguments.Any(argument => argument.Contains("iphonemirror_track=", StringComparison.Ordinal)),
+    "external HLS URLs do not receive local broker projection parameters");
 var mediaAudioArguments = MediaCastAudioDecoder.BuildArguments(
     new Uri("https://example.test/episode.m3u8"), 123.5, 1.5);
 Equal(true,
@@ -5267,6 +5377,7 @@ Equal(false, mediaRecovery.TryGetNext(out _, out _),
 mediaRecovery.Reset();
 mediaRecovery.MarkOpened();
 recoveryNow += TimeSpan.FromSeconds(11);
+mediaRecovery.MarkProgress(11);
 Equal(true, mediaRecovery.TryGetNext(out var stableAttempt, out var stableDelay) &&
     stableAttempt == 1 && stableDelay == TimeSpan.FromMilliseconds(250),
     "stable playback resets live recovery backoff");
@@ -5274,6 +5385,7 @@ var segmentedRecovery = new MediaRecoveryBackoff(() => recoveryNow,
     maximumAttempts: 2, stablePlaybackWindow: TimeSpan.FromSeconds(3));
 segmentedRecovery.MarkOpened();
 recoveryNow += TimeSpan.FromSeconds(5.8);
+segmentedRecovery.MarkProgress(5.8);
 Equal(true, segmentedRecovery.TryGetNext(out var segmentedAttempt, out _) &&
     segmentedAttempt == 1,
     "HLS segment handoff resets recovery after real playback progress");
@@ -5950,6 +6062,9 @@ Equal(WirelessStallRecoveryAction.None,
         1_010, stallStart.AddHours(2).AddSeconds(7)),
     "stopped wireless sessions never trigger recovery");
 
+ExplorerWebDavLocksTests.Run();
+await ExplorerWebDavTests.RunAsync();
+await ExplorerFileStoreTests.Run();
 Console.WriteLine("App logic tests passed.");
 if (Directory.Exists(diagnosticTestRoot))
     Directory.Delete(diagnosticTestRoot, recursive: true);

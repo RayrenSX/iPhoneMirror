@@ -9,15 +9,20 @@ from datetime import datetime
 import io
 import json
 import math
+import os
 from pathlib import Path
 import re
+import stat
+import struct
 import time
 import uuid
 import zipfile
 
 from pymobiledevice3.remote.core_device.app_service import AppServiceService
 from pymobiledevice3.remote.core_device.core_device_service import CoreDeviceService
-from pymobiledevice3.services.afc import AfcService
+from pymobiledevice3.exceptions import AfcException, AfcFileNotFoundError
+from pymobiledevice3.services.afc import AfcOpcode, AfcService
+from document_file_service import DocumentsFiles, HouseArrestService, VEND_DOCUMENTS
 from pymobiledevice3.services.diagnostics import DiagnosticsService
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
 from pymobiledevice3.services.misagent import MisagentService
@@ -220,6 +225,17 @@ class DeviceManagement:
                 "isAppClip": bool(app.get("isAppClip", app.get("IsAppClip", False)))})
         return {"apps": sorted(result, key=lambda a: (a["name"].casefold(), a["bundleId"])), "source": source}
 
+    async def _shared_document_apps(self, args):
+        async with connected(InstallationProxyService, self.rsd) as service:
+            apps = await service.browse(attributes=["CFBundleIdentifier", "CFBundleDisplayName", "CFBundleName", "UIFileSharingEnabled"])
+        result = []
+        for app in apps[:5000]:
+            if app.get("UIFileSharingEnabled") is not True:
+                continue
+            identifier = bundle_id(app.get("CFBundleIdentifier"))
+            result.append({"bundleId": identifier, "name": str(app.get("CFBundleDisplayName") or app.get("CFBundleName") or identifier)[:512]})
+        return {"apps": sorted(result, key=lambda item: (item["name"].casefold(), item["bundleId"]))}
+
     async def _get_app_icon(self, args):
         bundle = bundle_id(args.get("bundleId"))
         async with connected(SpringBoardServicesService, self.rsd) as service:
@@ -349,6 +365,21 @@ class DeviceManagement:
     @asynccontextmanager
     async def _files(self, args):
         root = args.get("root", "media")
+        if root == "documents":
+            identifier = bundle_id(args.get("bundleId"))
+            service = HouseArrestService(self.rsd, documents_only=True)
+            try:
+                # Vend must finish before AFC's packet reader starts; otherwise
+                # that reader can consume the House Arrest plist response.
+                await service.send_command(identifier, VEND_DOCUMENTS)
+                async with service:
+                    if (await service.stat("/Documents")).get("st_ifmt") != "S_IFDIR":
+                        raise ValueError("Shared Documents is not a directory")
+                    yield DocumentsFiles(service)
+            finally:
+                with suppress(Exception):
+                    await asyncio.wait_for(service.close(), 2)
+            return
         if root not in ("media", "crashes"):
             raise ValueError("Choose media or crashes")
         name = None if root == "media" else "com.apple.crashreportcopymobile.shim.remote"
@@ -418,6 +449,302 @@ class DeviceManagement:
                 raise HubError("FILE_CHANGED")
         return {"path": path, "offset": offset, "size": size, "modified": json_value(stat.get("st_mtime")),
                 "data": base64.b64encode(data).decode(), "eof": offset + len(data) >= size}
+
+    async def _delete_file(self, args):
+        if args.get("root", "media") not in ("media", "documents"):
+            raise ValueError("Only media files can be deleted")
+        path = relative_path(args.get("path", ""))
+        if not path:
+            raise ValueError("Choose a file")
+        expected = args.get("expected")
+        if not isinstance(expected, dict) or type(expected.get("size")) is not int or expected["size"] < 0 or "modified" not in expected:
+            raise ValueError("A file listing snapshot is required")
+        try:
+            async with self._files(args) as service:
+                current = await self._safe_stat(service, path)
+                if current.get("st_ifmt") != "S_IFREG":
+                    raise ValueError("Only regular files can be deleted")
+                if expected["size"] != int(current.get("st_size", -1)) or expected["modified"] != json_value(current.get("st_mtime")):
+                    raise HubError("FILE_DELETE_CHANGED")
+                # A single remove never recursively deletes a directory or retries.
+                await service.rm_single("/" + path)
+            return {"status": "deleted", "path": path}
+        except (OSError, AfcException) as error:
+            raise HubError("FILE_DELETE_FAILED") from error
+
+    async def _upload_file(self, args):
+        if args.get("root", "media") not in ("media", "documents"):
+            raise ValueError("Only the media file service accepts imports")
+        directory = relative_path(args.get("path", ""))
+        source = Path(string(args.get("sourcePath"), 32768))
+        name = relative_path(source.name)
+        if not name or len(name.encode("utf-8")) > 255:
+            raise ValueError("Unsupported file name")
+        temporary = "/" + relative_path("/".join(filter(None,
+            (directory, ".iPhoneMirror-import-" + uuid.uuid4().hex + ".partial"))))
+        try:
+            with source.open("rb") as input_file:
+                before = os.fstat(input_file.fileno())
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError("Choose a regular file")
+                async with self._files(args) as service:
+                    if (await self._safe_stat(service, directory)).get("st_ifmt") != "S_IFDIR":
+                        raise ValueError("Not a directory")
+                    committed = False
+                    try:
+                        handle = await service.fopen(temporary, "w")
+                        written = 0
+                        try:
+                            while data := input_file.read(CHUNK):
+                                if written + len(data) > before.st_size:
+                                    raise HubError("FILE_CHANGED")
+                                await service.fwrite(handle, data)
+                                written += len(data)
+                        finally:
+                            await asyncio.wait_for(service.fclose(handle), 2)
+                        after = os.fstat(input_file.fileno())
+                        if written != before.st_size or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                            raise HubError("FILE_CHANGED")
+                        if int((await service.stat(temporary)).get("st_size", -1)) != written:
+                            raise HubError("FILE_IMPORT_FAILED")
+                        # Choose the final name after writing so existing files are
+                        # preserved, including names added while the transfer ran.
+                        existing = {entry.casefold() for entry in await service.listdir("/" + directory)}
+                        target_name = name
+                        for number in range(1, 100001):
+                            if target_name.casefold() not in existing:
+                                break
+                            suffix = f" ({number})" + source.suffix
+                            budget = 255 - len(suffix.encode("utf-8"))
+                            if budget <= 0:
+                                raise ValueError("Unsupported file name")
+                            target_name = source.stem.encode("utf-8")[:budget].decode("utf-8", "ignore") + suffix
+                        else:
+                            raise HubError("DIRECTORY_TOO_LARGE")
+                        target = relative_path("/".join(filter(None, (directory, target_name))))
+                        await service.rename(temporary, "/" + target)
+                        committed = True
+                    finally:
+                        if not committed:
+                            with suppress(Exception):
+                                await asyncio.wait_for(service.rm_single(temporary, force=True), 2)
+            return {"status": "imported", "path": target, "name": target_name, "size": written}
+        except (OSError, AfcException) as error:
+            raise HubError("FILE_IMPORT_FAILED") from error
+
+    @staticmethod
+    def _mapped_path(args, key="path", allow_root=False):
+        if args.get("root", "media") not in ("media", "documents"):
+            raise ValueError("Explorer mapping only exposes the media file service")
+        path = relative_path(args.get(key, ""))
+        if not allow_root and not path:
+            raise ValueError("The mapped root cannot be changed")
+        if any(len(part.encode("utf-8")) > 255 for part in path.split("/")):
+            raise ValueError("Unsupported file name")
+        return path
+
+    @staticmethod
+    def _mapped_metadata(path, value):
+        kind = {"S_IFDIR": "directory", "S_IFREG": "file"}.get(value.get("st_ifmt"))
+        if kind is None:
+            raise ValueError("Explorer mapping does not expose links or special files")
+        return {"path": path, "name": path.rsplit("/", 1)[-1], "type": kind,
+                "size": int(value.get("st_size", 0)), "modified": json_value(value.get("st_mtime"))}
+
+    @staticmethod
+    def _mapped_expected(current, expected):
+        if not isinstance(expected, dict) or expected.get("type") not in ("file", "directory") or \
+                type(expected.get("size")) is not int or expected["size"] < 0 or "modified" not in expected:
+            raise ValueError("A mapping metadata snapshot is required")
+        if any(current[key] != expected[key] for key in ("type", "size", "modified")):
+            raise HubError("FILE_MAPPING_CONFLICT")
+
+    @staticmethod
+    def _mapped_error(error):
+        if isinstance(error, (AfcFileNotFoundError, FileNotFoundError)) or \
+                isinstance(error, AfcException) and error.status == 8:
+            return HubError("FILE_NOT_FOUND")
+        if isinstance(error, PermissionError) or isinstance(error, AfcException) and error.status == 10:
+            return HubError("FILE_ACCESS_DENIED")
+        if isinstance(error, AfcException) and error.status in (9, 16, 33):
+            return HubError("FILE_MAPPING_CONFLICT")
+        return HubError("FILE_OPERATION_FAILED")
+
+    async def _mapped_stat(self, service, path, optional=False):
+        try:
+            return self._mapped_metadata(path, await self._safe_stat(service, path))
+        except (AfcFileNotFoundError, FileNotFoundError):
+            if optional:
+                return None
+            raise HubError("FILE_NOT_FOUND") from None
+        except AfcException as error:
+            if optional and error.status == 8:
+                return None
+            raise self._mapped_error(error) from error
+
+    async def _mapped_target(self, service, path, expected):
+        current = await self._mapped_stat(service, path, optional=True)
+        if expected is None:
+            if current is not None:
+                raise HubError("FILE_MAPPING_CONFLICT")
+        elif current is None:
+            raise HubError("FILE_MAPPING_CONFLICT")
+        else:
+            self._mapped_expected(current, expected)
+        return current
+
+    async def _mapped_parent(self, service, path):
+        parent = path.rpartition("/")[0]
+        if (await self._mapped_stat(service, parent))["type"] != "directory":
+            raise HubError("FILE_MAPPING_CONFLICT")
+
+    async def _stat_file(self, args):
+        path = self._mapped_path(args, allow_root=True)
+        try:
+            async with self._files(args) as service:
+                return await self._mapped_stat(service, path)
+        except (OSError, AfcException) as error:
+            raise self._mapped_error(error) from error
+
+    async def _write_mapped_file(self, args):
+        path = self._mapped_path(args)
+        expected = args.get("expected")
+        source = Path(string(args.get("sourcePath"), 32768))
+        parent = path.rpartition("/")[0]
+        temporary = "/" + "/".join(filter(None, (parent, ".iPhoneMirror-map-" + uuid.uuid4().hex + ".partial")))
+        try:
+            with source.open("rb") as input_file:
+                before = os.fstat(input_file.fileno())
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError("Choose a regular spool file")
+                async with self._files(args) as service:
+                    await self._mapped_parent(service, path)
+                    existing = await self._mapped_target(service, path, expected)
+                    if existing is not None and existing["type"] != "file":
+                        raise HubError("FILE_MAPPING_CONFLICT")
+                    committed = False
+                    try:
+                        handle = await service.fopen(temporary, "w")
+                        written = 0
+                        try:
+                            while data := input_file.read(CHUNK):
+                                if written + len(data) > before.st_size:
+                                    raise HubError("FILE_CHANGED")
+                                await service.fwrite(handle, data)
+                                written += len(data)
+                        finally:
+                            await asyncio.wait_for(service.fclose(handle), 2)
+                        after = os.fstat(input_file.fileno())
+                        if written != before.st_size or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                            raise HubError("FILE_CHANGED")
+                        if int((await service.stat(temporary)).get("st_size", -1)) != written:
+                            raise HubError("FILE_OPERATION_FAILED")
+                        # Recheck after the transfer: a PUT must never silently
+                        # rename itself or replace a target changed while writing.
+                        await self._mapped_parent(service, path)
+                        await self._mapped_target(service, path, expected)
+                        await service.rename(temporary, "/" + path)
+                        committed = True
+                        return await self._mapped_stat(service, path)
+                    finally:
+                        if not committed:
+                            with suppress(Exception):
+                                await asyncio.wait_for(service.rm_single(temporary, force=True), 2)
+        except (OSError, AfcException) as error:
+            raise self._mapped_error(error) from error
+
+    async def _make_directory(self, args):
+        path = self._mapped_path(args)
+        try:
+            async with self._files(args) as service:
+                await self._mapped_parent(service, path)
+                await self._mapped_target(service, path, None)
+                await service.makedirs("/" + path)
+                return await self._mapped_stat(service, path)
+        except (OSError, AfcException) as error:
+            raise self._mapped_error(error) from error
+
+    async def _set_mapped_file_time(self, args):
+        path = self._mapped_path(args)
+        modified = integer(args.get("modifiedNs"), 0, 2**63 - 1)
+        try:
+            async with self._files(args) as service:
+                current = await self._mapped_stat(service, path)
+                self._mapped_expected(current, args.get("expected"))
+                # AFC SET_FILE_TIME matches libimobiledevice afc_set_file_time:
+                # unsigned little-endian epoch nanoseconds, then UTF-8 path/NUL.
+                # The pinned pymobiledevice3 exposes the opcode but no helper.
+                payload = struct.pack("<Q", modified) + ("/" + path).encode("utf-8") + b"\0"
+                await service._do_operation(AfcOpcode.SET_FILE_TIME, payload)
+                return await self._mapped_stat(service, path)
+        except (OSError, AfcException) as error:
+            raise self._mapped_error(error) from error
+
+    async def _move_file(self, args):
+        path = self._mapped_path(args)
+        destination = self._mapped_path(args, "destination")
+        if path == destination or destination.startswith(path + "/"):
+            raise HubError("FILE_MAPPING_CONFLICT")
+        try:
+            async with self._files(args) as service:
+                current = await self._mapped_stat(service, path)
+                self._mapped_expected(current, args.get("expected"))
+                await self._mapped_parent(service, destination)
+                target = await self._mapped_target(service, destination, args.get("destinationExpected"))
+                if target is not None:
+                    if target["type"] != current["type"]:
+                        raise HubError("FILE_MAPPING_CONFLICT")
+                    if target["type"] == "directory" and any(name not in (".", "..") for name in await service.listdir("/" + destination)):
+                        raise HubError("FILE_MAPPING_CONFLICT")
+                # AFC's single rename preserves the source if replacement fails.
+                # Do not pre-delete the destination or retry a failed rename.
+                self._mapped_expected(await self._mapped_stat(service, path), args.get("expected"))
+                await self._mapped_target(service, destination, args.get("destinationExpected"))
+                await service.rename("/" + path, "/" + destination)
+                return await self._mapped_stat(service, destination)
+        except (OSError, AfcException) as error:
+            raise self._mapped_error(error) from error
+
+    async def _delete_mapped_file(self, args):
+        path = self._mapped_path(args)
+        recursive = args.get("recursive", False)
+        if type(recursive) is not bool:
+            raise ValueError("recursive must be boolean")
+        try:
+            async with self._files(args) as service:
+                current = await self._mapped_stat(service, path)
+                self._mapped_expected(current, args.get("expected"))
+                pending = [(path, current, 0)]
+                plan = []
+                # Preflight the entire bounded tree before the first deletion.
+                # Links and special entries abort without removing any file.
+                while pending:
+                    target, metadata, depth = pending.pop()
+                    if depth > 64 or len(plan) + len(pending) >= 10000:
+                        raise HubError("DIRECTORY_TOO_LARGE")
+                    plan.append((target, metadata))
+                    if metadata["type"] != "directory":
+                        continue
+                    names = [name for name in await service.listdir("/" + target) if name not in (".", "..")]
+                    if names and not recursive:
+                        raise HubError("FILE_MAPPING_CONFLICT")
+                    for name in names:
+                        if "/" in relative_path(name):
+                            raise ValueError("Invalid directory entry")
+                        child = target + "/" + name
+                        pending.append((child, await self._mapped_stat(service, child), depth + 1))
+                        if len(plan) + len(pending) > 10000:
+                            raise HubError("DIRECTORY_TOO_LARGE")
+                for target, metadata in reversed(plan):
+                    fresh = await self._mapped_stat(service, target)
+                    if metadata["type"] == "file":
+                        self._mapped_expected(fresh, metadata)
+                    elif fresh["type"] != "directory" or any(name not in (".", "..") for name in await service.listdir("/" + target)):
+                        raise HubError("FILE_MAPPING_CONFLICT")
+                    await service.rm_single("/" + target)
+                return {"status": "deleted", "path": path}
+        except (OSError, AfcException) as error:
+            raise self._mapped_error(error) from error
 
     async def _syslog_start(self, args):
         if self.log_stream and time.monotonic() - self.log_activity < 60:

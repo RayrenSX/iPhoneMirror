@@ -91,6 +91,12 @@ Automation 生命周期专项、VC Runtime 版本解析和 Apple 支持包验证
 `App.Runtime.Tests`；它并非自动检测所有无桌面环境。本地运行 WPF 测试会创建窗口。
 本地化校验由 Windows workflow 单独执行，不包含在 `build.ps1` 的测试段中。
 
+本地构建还分别在新进程中运行主程序和驱动管理器的 `--grid-layout-entry` 探针，
+验证各自的应用入口在首次 Grid 布局前启用兼容算法。两者不能在同一进程中合并验证，
+因为 WPF 会缓存兼容开关。默认运行时套件同时覆盖 2,784 组 Grid 边界及混合布局；
+也可单独执行 `App.Runtime.Tests --grid-layout-compatibility`。故障证据见
+[启动布局闪退分析](diagnostics/startup-grid-crash-20261116.md)。
+
 `build.ps1` 先编译托管测试，再直接执行测试程序集，并仅为测试子进程清除
 SDK/CI 注入的 CLR/.NET 环境覆盖。`dotnet run` 会注入 `DOTNET_ROOT_X64`，
 触发更新器和驱动的提权环境保护；单独运行涉及提权的测试时，应使用干净环境下的
@@ -111,8 +117,12 @@ dotnet ./src/DriverInstaller.Tests/bin/Release/net10.0-windows10.0.19041.0/iPhon
 
 # 使用构建创建的 Python 环境，避免缺少桥接依赖
 $env:PATH = (Join-Path $PWD 'third_party/libusb/bin/x64') + ';' + $env:PATH
+& ./work/usb-touch-bridge-python/Scripts/python.exe -m pip install -r tests/requirements.txt
 & ./work/usb-touch-bridge-python/Scripts/python.exe -m unittest discover -s tests -p '*test.py'
 ```
+
+完整构建会在运行 Python 测试前安装 [测试依赖](../tests/requirements.txt)，包含手机边框验证使用的
+Pillow、NumPy 和 SciPy；这些依赖不属于 HID 桥接运行时。
 
 静态预览回归使用合成 NV12 帧，不连接手机或启动无线接收器：
 
@@ -122,6 +132,12 @@ $env:PATH = (Join-Path $PWD 'third_party/libusb/bin/x64') + ';' + $env:PATH
 
 # DXGI 可呈现但桌面像素不可读取时，仅验证 Present 和重试；不验证显示
 ./build/native/src/Core/Release/iPhoneMirror.Core.Tests.exe --preview-static-frame-retry-only
+
+# 验证同一 HWND 的公开预览接管、并发停止/销毁、构造失败回滚及核心重启
+./build/native/src/Core/Release/iPhoneMirror.Core.Tests.exe --preview-ownership-only
+
+# 验证旧预览释放后立即创建新翻转模型交换链
+./build/native/src/Core/Release/iPhoneMirror.Core.Tests.exe --preview-handoff-only
 ```
 
 测试为每个预览单独注入呈现繁忙、窗口遮挡和上传失败，始终保持同一帧时间戳。

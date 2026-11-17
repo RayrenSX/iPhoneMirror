@@ -9,6 +9,33 @@ remains under its upstream license.
 The root GNU General Public License v3.0 only applies to original iPhoneMirror
 material and does not replace, narrow or relicense any component listed below.
 
+## Device frame artwork
+
+The optional independent preview frames embed Apple product-bezel PNGs and
+credited model-specific vector renderings. Artwork is not relicensed under
+iPhoneMirror's GPLv3. Exact per-finish source URLs, hashes, geometry and any
+screen-clearing transformations are recorded in `config/apple-device-frames.json`
+and `config/device-frame-supplements.json`. The reviewed iPad 10/A16 front-view
+association and its official specification references are recorded separately
+in `config/device-frame-shared-fronts.json`; it is not a dedicated iPad 10 export.
+
+- Apple Product Bezels: https://developer.apple.com/design/resources/#product-bezels
+- Apple license: `licenses/device-frames/Apple Design Resources License.rtf`
+  in the delivery; source copy under `third_party/device-frames/`.
+- The iPhone 5, iPhone 6, iPhone 6 Plus and first-generation 12.9-inch iPad Pro
+  vector PNGs come from https://github.com/pixelsign/html5-device-mockups.
+- The publisher's MIT license and original graphical-rendering credits are
+  included as `licenses/device-frames/pixelsign-LICENSE.txt` and
+  `pixelsign-CREDITS.txt`. Those credits identify the original graphical authors;
+  the software license does not replace any separately applicable artwork terms.
+- `licenses/device-frames/SOURCE.md` describes the provenance and transformations.
+
+The additional original SVG frames and their generated PNGs are project artwork
+under GPLv3. `config/device-frame-drawings.json` records official dimensional
+references and the limits of estimated visual details; editable sources are in
+`src/App/Assets/DeviceFrameDrawings/`. These are not Apple bezel exports. Apple
+reference photographs are not bundled or raster-traced.
+
 ## ClassIsland toolbar editing reference
 
 The toolbar customization flow was initially adapted from ClassIsland's component
@@ -215,6 +242,17 @@ downloaded from the official JRSoftware GitHub release and verified against the
 SHA-256 recorded in `scripts/inno-runtime-manifest.psd1`. The generated Setup
 engine is redistributed under the Inno Setup License:
 https://jrsoftware.org/files/is/license.txt
+
+## go-atv AirPlay video control library
+
+The independent video receiver dynamically loads `iPhoneMirror.AirPlayControl.dll`,
+using the fairplay and fpcontrol packages from https://github.com/jkiddo/go-atv at
+commit `f47a3ffcfa9458aac40562d73c314de1447df013` (LGPL-3.0-or-later), including
+code derived from https://github.com/omarroth/doubletake. Attribution, license
+texts, complete library sources, local changes and rebuild instructions are in
+`third_party/airplay-control`, shipped under `Wireless/licenses/airplay-control`.
+This library handles video control negotiation and authenticated records; it does
+not implement media decoding. The screen-mirroring receiver uses its existing path.
 
 All third-party components are provided without warranty.
 

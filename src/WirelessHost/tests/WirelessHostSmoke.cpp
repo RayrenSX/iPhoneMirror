@@ -319,10 +319,13 @@ int wmain(int argc, wchar_t** argv) {
     bool invalid_mute_rejected{};
     std::atomic_uint64_t latest_media_command_id{};
     bool protocol_valid = connected;
+    bool mirror_setup_log{};
+    bool mirror_timeout_log{};
+    bool protocol_private_data{};
     int message_count{};
     auto last_type = iPhoneMirror::wireless::MessageType::Ready;
     std::thread pipe_reader([&] {
-        for (int message = 0; protocol_valid && message < 192; ++message) {
+        for (int message = 0; protocol_valid && message < 256; ++message) {
             iPhoneMirror::wireless::MessageHeader header;
             const auto header_read = read_exact(pipe, &header, sizeof(header), 5000);
             if (!header_read && ready.load(std::memory_order_acquire)) break;
@@ -343,6 +346,9 @@ int wmain(int argc, wchar_t** argv) {
                 callback_log = callback_log ||
                     (text.find("airplay level=6 message_bytes=") != std::string::npos &&
                         text.find("message_fp=anon-") != std::string::npos);
+                mirror_setup_log |= text.find("protocol_event=setup_mirror") != std::string::npos;
+                mirror_timeout_log |= text.find("protocol_event=mirror_read_timeout") != std::string::npos;
+                protocol_private_data |= text.find("private-diagnostic-sentinel") != std::string::npos;
                 capability_log = capability_log ||
                     text.find("capability=1280x720@30") != std::string::npos;
                 startup_log = startup_log ||
@@ -885,6 +891,106 @@ int wmain(int argc, wchar_t** argv) {
         http_header(renewal_response, "SID") == event_sid &&
         http_header(renewal_response, "TIMEOUT") == "Second-120" &&
         WSAPoll(&event_poll, 1, 100) == 0;
+    // Natural completion is an item state, not a controller stop. Exercise
+    // the real IPC path and confirm both polling and GENA observe STOPPED.
+    const auto command_before_replay = latest_media_command_id.load(
+        std::memory_order_acquire);
+    const auto completion_play_ok = tcp_request(18090, play_request)
+        .find("200 OK") != std::string::npos;
+    for (int attempt = 0; completion_play_ok && attempt < 40 &&
+        latest_media_command_id.load(std::memory_order_acquire) ==
+            command_before_replay; ++attempt) Sleep(25);
+    const auto playing_event = event_listener_ready
+        ? receive_event(event_listener) : std::string{};
+    iPhoneMirror::wireless::MessageHeader completed_playback;
+    completed_playback.type = iPhoneMirror::wireless::MessageType::PlaybackState;
+    completed_playback.reserved = static_cast<std::uint32_t>(
+        iPhoneMirror::wireless::MediaPlaybackState::Completed);
+    completed_playback.media_command_id = latest_media_command_id.load(
+        std::memory_order_acquire);
+    completed_playback.media_duration = completed_playback.media_position = 300;
+    const auto completion_write = completion_play_ok &&
+        completed_playback.media_command_id != command_before_replay &&
+        write_exact(pipe, &completed_playback, sizeof(completed_playback), 5000);
+    bool dlna_completed_stopped{};
+    for (int attempt = 0; completion_write && attempt < 40; ++attempt) {
+        dlna_completed_stopped = transport_state().find(
+            "<CurrentTransportState>STOPPED</CurrentTransportState>") !=
+                std::string::npos;
+        if (dlna_completed_stopped) break;
+        Sleep(25);
+    }
+    const auto completed_event = event_listener_ready
+        ? receive_event(event_listener) : std::string{};
+    const auto completion_notify_ok = dlna_completed_stopped &&
+        playing_event.find("TransportState val=&quot;PLAYING&quot;") != std::string::npos &&
+        completed_event.find("TransportState val=&quot;STOPPED&quot;") != std::string::npos &&
+        http_header(completed_event, "SID") == event_sid &&
+        http_header(completed_event, "SEQ") == "2";
+    const auto duplicate_completion_ignored = completion_write &&
+        write_exact(pipe, &completed_playback, sizeof(completed_playback), 5000) &&
+        WSAPoll(&event_poll, 1, 100) == 0;
+    const auto new_play_ok = tcp_request(18090, play_request)
+        .find("200 OK") != std::string::npos;
+    for (int attempt = 0; new_play_ok && attempt < 40 &&
+        latest_media_command_id.load(std::memory_order_acquire) ==
+            completed_playback.media_command_id; ++attempt) Sleep(25);
+    if (event_listener_ready) receive_event(event_listener);
+    const auto stale_completion_write = new_play_ok &&
+        latest_media_command_id.load(std::memory_order_acquire) !=
+            completed_playback.media_command_id &&
+        write_exact(pipe, &completed_playback, sizeof(completed_playback), 5000);
+    Sleep(100);
+    const auto stale_completion_ignored = stale_completion_write &&
+        transport_state().find(
+            "<CurrentTransportState>PLAYING</CurrentTransportState>") !=
+                std::string::npos && WSAPoll(&event_poll, 1, 100) == 0;
+    auto failed_playback = completed_playback;
+    failed_playback.media_command_id = latest_media_command_id.load(
+        std::memory_order_acquire);
+    failed_playback.reserved = static_cast<std::uint32_t>(
+        iPhoneMirror::wireless::MediaPlaybackState::Failed);
+    failed_playback.media_position = 99;
+    const auto failure_write = stale_completion_ignored &&
+        write_exact(pipe, &failed_playback, sizeof(failed_playback), 5000);
+    const auto failed_event = event_listener_ready
+        ? receive_event(event_listener) : std::string{};
+    const auto failure_notify_ok = failure_write &&
+        transport_state().find(
+            "<CurrentTransportState>STOPPED</CurrentTransportState>") !=
+                std::string::npos &&
+        failed_event.find("TransportState val=&quot;STOPPED&quot;") != std::string::npos &&
+        http_header(failed_event, "SEQ") == "4";
+    const auto duplicate_failure_ignored = failure_write &&
+        write_exact(pipe, &failed_playback, sizeof(failed_playback), 5000) &&
+        WSAPoll(&event_poll, 1, 100) == 0;
+    // The PC play button restarts a terminal item without a protocol command.
+    // Its same-command Loading/Playing reports must revive the DLNA state.
+    auto replay_playback = failed_playback;
+    replay_playback.reserved = static_cast<std::uint32_t>(
+        iPhoneMirror::wireless::MediaPlaybackState::Loading);
+    const auto local_replay_write = duplicate_failure_ignored &&
+        write_exact(pipe, &replay_playback, sizeof(replay_playback), 5000);
+    const auto replay_event = event_listener_ready
+        ? receive_event(event_listener) : std::string{};
+    const auto local_replay_notify_ok = local_replay_write &&
+        transport_state().find(
+            "<CurrentTransportState>PLAYING</CurrentTransportState>") !=
+                std::string::npos &&
+        replay_event.find("TransportState val=&quot;PLAYING&quot;") != std::string::npos &&
+        http_header(replay_event, "SEQ") == "5";
+    replay_playback.reserved = static_cast<std::uint32_t>(
+        iPhoneMirror::wireless::MediaPlaybackState::Completed);
+    const auto replay_completion_write = local_replay_notify_ok &&
+        write_exact(pipe, &replay_playback, sizeof(replay_playback), 5000);
+    const auto replay_completion_event = event_listener_ready
+        ? receive_event(event_listener) : std::string{};
+    const auto replay_completion_notify_ok = replay_completion_write &&
+        transport_state().find(
+            "<CurrentTransportState>STOPPED</CurrentTransportState>") !=
+                std::string::npos &&
+        replay_completion_event.find("TransportState val=&quot;STOPPED&quot;") != std::string::npos &&
+        http_header(replay_completion_event, "SEQ") == "6";
     const auto unsubscribe_request = std::format(
         "UNSUBSCRIBE /dlna/event/avtransport HTTP/1.1\r\n"
         "Host: 127.0.0.1:18090\r\nSID: {}\r\n"
@@ -932,7 +1038,8 @@ int wmain(int argc, wchar_t** argv) {
     CloseHandle(stop_event);
     CloseHandle(pipe);
     WSACleanup();
-    if (!protocol_valid || !ready || !callback_log || !capability_log || !startup_log ||
+    if (!protocol_valid || !mirror_setup_log || !mirror_timeout_log || protocol_private_data ||
+        !ready || !callback_log || !capability_log || !startup_log ||
         !wait_end_log || !ipc_summary_log || !callback_summary_log || !dlna_http_log ||
         !dlna_soap_log || raw_sensitive_log || !callback_metadata ||
         !callback_connected ||
@@ -957,11 +1064,21 @@ int wmain(int argc, wchar_t** argv) {
         !invalid_seek_rejected || !invalid_seek_not_forwarded ||
         !dlna_discovery || !dlna_ssdp_date || !dlna_ssdp_within_mx ||
         !initial_notify_ok || !renewal_ok || !unsubscribe_ok ||
+        !completion_notify_ok || !duplicate_completion_ignored ||
+        !stale_completion_ignored || !failure_notify_ok || !duplicate_failure_ignored ||
+        !local_replay_notify_ok || !replay_completion_notify_ok ||
         !unreachable_callback_cleaned || !stale_stop_write || !stale_stop_ignored ||
         !controller_stop_write ||
         !dlna_controller_stop || !late_playback_write ||
         !late_playback_ignored || !prompt_slow_client_shutdown) {
         std::cerr << "wireless host IPC smoke failed: connected=" << connected
+            << " completion_notify_ok=" << completion_notify_ok
+            << " duplicate_completion_ignored=" << duplicate_completion_ignored
+            << " stale_completion_ignored=" << stale_completion_ignored
+            << " failure_notify_ok=" << failure_notify_ok
+            << " duplicate_failure_ignored=" << duplicate_failure_ignored
+            << " local_replay_notify_ok=" << local_replay_notify_ok
+            << " replay_completion_notify_ok=" << replay_completion_notify_ok
             << " protocol=" << protocol_valid << " ready=" << ready
             << " callback_log=" << callback_log
             << " capability_log=" << capability_log

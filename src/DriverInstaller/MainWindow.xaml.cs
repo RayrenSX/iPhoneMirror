@@ -1,9 +1,11 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using IPhoneMirror.DriverInstaller.Models;
 using IPhoneMirror.DriverInstaller.Services;
 using IPhoneMirror.DriverInstaller.Windows;
@@ -766,4 +768,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+}
+
+// Give the inner content a finite height while keeping the page scrollable when
+// large text or a small display cannot fit the header, footer and usable body.
+public sealed class DriverPageHeightConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+    {
+        double Height(int index) => index < values.Length && values[index] is double value && double.IsFinite(value)
+            ? Math.Max(0, value) : 0;
+        var advanced = values.Length > 4 && values[4] is true;
+        var chrome = Height(1) + Height(3) + (advanced ? Height(2) + 12 : 0) + 22;
+        return Math.Max(Height(0), chrome + 220);
+    }
+
+    public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
 }

@@ -853,7 +853,8 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
 }
 
 bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
-    std::uint32_t features, std::optional<in_addr> route_address = std::nullopt,
+    std::uint32_t features, std::uint64_t full_features,
+    std::optional<in_addr> route_address = std::nullopt,
     std::uint32_t width = 1280, std::uint32_t height = 720, std::uint32_t fps = 30) {
     const auto raop_port = free_port(SOCK_STREAM, IPPROTO_TCP);
     auto airplay_port = free_port(SOCK_STREAM, IPPROTO_TCP);
@@ -953,7 +954,7 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
     const BinaryPlist info_plist(info_body);
     const auto info_root = info_plist.root();
     const auto info_features = info_root &&
-        plist_integer(info_plist, *info_root, "features") == features;
+        plist_integer(info_plist, *info_root, "features") == full_features;
     const auto info_device = info_root &&
         plist_string(info_plist, *info_root, "deviceID") == device_id &&
         plist_string(info_plist, *info_root, "macAddress") == device_id;
@@ -963,7 +964,7 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
         info_plist.dictionary_value(*info_root, "displays") : std::nullopt;
     const auto display = displays ? info_plist.array_value(*displays, 0) :
         std::nullopt;
-    const auto info_display = display &&
+    const auto info_display = mode == L"media" ? !displays : display &&
         plist_integer(info_plist, *display, "width") == width &&
         plist_integer(info_plist, *display, "height") == height &&
         plist_integer(info_plist, *display, "widthPixels") == width &&
@@ -1037,7 +1038,7 @@ int wmain(int argc, wchar_t** argv) {
             return 77;
         }
         const auto passed = environment_clean &&
-            probe_mode(host, L"mirror", 0x5A7FFEE6U, route_address);
+            probe_mode(host, L"mirror", 0x5A7FFEE6U, 0x4005A7FFEE6ULL, route_address);
         WSACleanup();
         if (!passed) {
             std::cerr << "Wireless receiver media-route smoke failed: "
@@ -1048,15 +1049,16 @@ int wmain(int argc, wchar_t** argv) {
         return 0;
     }
     auto passed = environment_clean &&
-        probe_mode(host, L"mirror", 0x5A7FFEE6U) &&
-        probe_mode(host, L"combined", 0x5A7FFEF7U) &&
-        probe_mode(host, L"combined", 0x5A7FFEF7U, std::nullopt, 2880, 2880, 60) &&
-        probe_mode(host, L"combined", 0x5A7FFEF7U, std::nullopt, 2360, 2360, 60);
+        probe_mode(host, L"mirror", 0x5A7FFEE6U, 0x4005A7FFEE6ULL) &&
+        probe_mode(host, L"media", 0x5A7FFE73U, 0x5A7FFE73ULL) &&
+        probe_mode(host, L"combined", 0x5A7FFEE6U, 0x4005A7FFEE6ULL) &&
+        probe_mode(host, L"combined", 0x5A7FFEE6U, 0x4005A7FFEE6ULL, std::nullopt, 2880, 2880, 60) &&
+        probe_mode(host, L"combined", 0x5A7FFEE6U, 0x4005A7FFEE6ULL, std::nullopt, 2360, 2360, 60);
     std::vector<std::uint32_t> catalog_edges;
     for (const auto& display : iPhoneMirror::devices::AppleDisplays) {
         if (std::find(catalog_edges.begin(), catalog_edges.end(), display.height) != catalog_edges.end()) continue;
         catalog_edges.push_back(display.height);
-        if (passed) passed = probe_mode(host, L"combined", 0x5A7FFEF7U,
+        if (passed) passed = probe_mode(host, L"combined", 0x5A7FFEE6U, 0x4005A7FFEE6ULL,
             std::nullopt, display.height, display.height, 60);
     }
     WSACleanup();

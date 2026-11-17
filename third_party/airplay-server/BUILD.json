@@ -6,42 +6,59 @@
   "IpcVersion": 8,
   "Ffmpeg": {
     "Commit": "63b2b0f47df420007c53888ce0e8383d24b8fb06",
-    "SourceUrl": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/63b2b0f47df420007c53888ce0e8383d24b8fb06",
-    "SourceSha256": "2D6E9244BE21B32756C481F4653D7F17AE08608DD2DB1BA04E826CF0052DF860",
-    "RecipeSha256": "C8C8DC78656CD9DE71DB5DF2D1D3AE6A3401D6E288916B3D696580DD5D6F7464",
+    "SourceUrl": "https://api.github.com/repos/FFmpeg/FFmpeg/tarball/63b2b0f47df420007c53888ce0e8383d24b8fb06",
+    "SourceSha256": "06F221FE8D4D7B2A3416F19641A472C0CCE836DF38110BB2C093B7528A7065FC",
+    "RecipeSha256": "74ADE82B6D165ECD93747FBC3C24D06D8BB6CBB899BC38FD75F63B32BE046A3B",
     "PatchSha256": "B2C6963C26B9E83D30618D2674CB2043F278B2D03002DC8F7929AA06527B9DE8",
-    "Compiler": "gcc.exe (Rev4, Built by MSYS2 project) 16.2.0"
+    "Compiler": "gcc.exe (Rev7, Built by MSYS2 project) 16.2.0"
   },
   "Runtime": [
     {
       "Name": "airplay2dll.dll",
-      "Size": 421888,
-      "Sha256": "d5e1cdd0250f306bf7419dbe971daebd69aede3b517390586df54a60a8057397"
+      "Size": 446976,
+      "Sha256": "0ae995831f11729006e50a20f29a78c4016dd3c25bb9a2f8a6413ca6f1c3a3ba"
     },
     {
       "Name": "avcodec-58.dll",
-      "Size": 1262592,
-      "Sha256": "a3bafedd357b33cb35cf47463c95f7c93c805057c2729db4a8c736918b37a823"
+      "Size": 1983488,
+      "Sha256": "ca12fe868993903fe36507e23030dd226b2c39f6c905610005f1aeeb2693c959"
     },
     {
       "Name": "avutil-56.dll",
-      "Size": 522752,
-      "Sha256": "3f9bd71c581fb65602cd8043595d8789ea5a504dcefc70a85c4484b9788915dc"
+      "Size": 531968,
+      "Sha256": "8da4b9ff2c577e935597f307eccaaca276b24084388385b2b10f535f7ac3fd27"
     },
     {
       "Name": "dnssd.dll",
-      "Size": 433664,
-      "Sha256": "d18d47bf555902dde6faa6817f62dcdbff0535bb1cd62eac0f99fbd324f2d072"
+      "Size": 431616,
+      "Sha256": "d7d54e05da7fda335a938967c50f55c19c5da379b4ac4f7da625892777fdfd69"
+    },
+    {
+      "Name": "iPhoneMirror.AirPlayControl.dll",
+      "Size": 11479565,
+      "Sha256": "85832a1f7805c20060b56ef48426db13831c7c2391e365dbe952e74cb0a70919"
     },
     {
       "Name": "swresample-3.dll",
       "Size": 102400,
-      "Sha256": "97bc36e7db8c12b1fcf72681e94bff39b1ca0a0011756d8ca831e51820594bfc"
+      "Sha256": "85226ae16655e83f00bec043df5c5096dd398d8b36a126baaea7d57417005309"
     },
     {
       "Name": "swscale-5.dll",
-      "Size": 477696,
-      "Sha256": "412f8a0c90ee10a4131faa3a82b2eeed0a165c9ab10babf5cd95edea892b4fbf"
+      "Size": 477184,
+      "Sha256": "7428b72f69bf9b26588b91b771fa17d49b2102f4972e6a97f95308ea32666542"
     }
-  ]
+  ],
+  "AdditionalPatches": {
+    "Apply-AirPlayControlPatch.ps1": "17f9c39ee0cf3c9390d4d8870496b6d81cf0d09ad855050d33bd245c6de76979",
+    "airplay-hevc-config.h": "dcd1e49f0796d53ff6abb4fd048e57b0edb751aad5e59b5ffbfcdda69a123022",
+    "Apply-AirPlayRequestPolicyPatch.ps1": "14165c2ad14fd2792cd5dbd88992e6c997d02926698f5372ebf0dbd0bbf4e5ea",
+    "airplay-play-request.h": "fb4dc351989f19c5c42ea7aa16bac2be3d1f0ca5c61e712e0f434878f3ddd8de",
+    "airplay-hevc.patch": "ecf202b16bd758395611e65a905b2a18156e3cc74e61326dc7f970e07ce1a8fc",
+    "airplay-scrub-request.h": "e1fa90c650cff4f7937ff6b00dc46a8fbeb2f310582aa2677f1ffb67b803aa10",
+    "airplay-request-policy.h": "5f145863dfd22067b6e3ac0f2617bdcdfa028eca87aa3d1893ab7bb1d7ab7402",
+    "airplay-control-httpd.h": "3fb3ac5c367fbc23f2abef6218528017567351e5d855a2df4c91bca3e139fe70",
+    "airplay-control-media.h": "7db1ac48d9c6fed357c5db8a0488bc1d5f25e3687f62757646f4b26b1db01613",
+    "airplay-control.h": "c8acc293ef973191c9c43684cde63e2857c9c55883b9ae09a50ab911e58fd1be"
+  }
 }

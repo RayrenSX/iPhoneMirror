@@ -51,7 +51,7 @@ static void receive_video(AVCodecContext *ctx, FILE *out, int width, int height)
 static void decode_video(AVCodecContext *ctx, const char *path, const char *output,
         int width, int height) {
     int size; uint8_t *input = read_file(path, &size), *cursor = input;
-    AVCodecParserContext *parser = av_parser_init(AV_CODEC_ID_H264);
+    AVCodecParserContext *parser = av_parser_init(ctx->codec_id);
     AVPacket packet; av_init_packet(&packet);
     FILE *out = fopen(output, "wb");
     check(parser && out, "video test setup");
@@ -77,7 +77,7 @@ static void decode_video(AVCodecContext *ctx, const char *path, const char *outp
     fclose(out); av_parser_close(parser); av_free(input);
 }
 int main(int argc, char **argv) {
-    check(argc == 8, "expected landscape, portrait, ALAC extradata, packet and three output paths");
+    check(argc == 12, "expected H.264, HEVC and ALAC fixtures and output paths");
     check(avcodec_version() == AV_VERSION_INT(58,137,100), "receiver avcodec ABI changed");
     AVCodecContext *video = avcodec_alloc_context3(avcodec_find_decoder(AV_CODEC_ID_H264));
     check(video && avcodec_open2(video, NULL, NULL) >= 0, "open H.264 decoder");
@@ -85,6 +85,14 @@ int main(int argc, char **argv) {
     decode_video(video, argv[2], argv[6], 64, 96);
     check(video_frames == 12, "decoded H.264 frame count including orientation change");
     avcodec_free_context(&video);
+    if (argc == 12) {
+        video = avcodec_alloc_context3(avcodec_find_decoder(AV_CODEC_ID_HEVC));
+        check(video && avcodec_open2(video, NULL, NULL) >= 0, "open HEVC decoder");
+        decode_video(video, argv[8], argv[10], 96, 64);
+        decode_video(video, argv[9], argv[11], 64, 96);
+        check(video_frames == 24, "decoded HEVC frame count including orientation change");
+        avcodec_free_context(&video);
+    }
     AVCodecContext *audio = avcodec_alloc_context3(avcodec_find_decoder(AV_CODEC_ID_ALAC));
     check(audio != NULL, "ALAC decoder exists");
     audio->extradata = read_file(argv[3], &audio->extradata_size);

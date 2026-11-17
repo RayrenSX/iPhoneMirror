@@ -1,6 +1,7 @@
 using System.Collections;
 using System.IO;
 using System.Reflection;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
@@ -118,23 +119,32 @@ internal static partial class Program
         var footer = Visuals(window).OfType<Button>().Single(button =>
             BindingOperations.GetBinding(button, Button.ContentProperty)?.Path.Path == "AdvancedButtonText");
         var page = Visuals(window).OfType<ScrollViewer>().First();
-        window.GetType().GetField("_appleSupport", InteractionMembers)!.SetValue(window, Activator.CreateInstance(
-            assembly.GetType("IPhoneMirror.DriverInstaller.Models.AppleSupportStatus")!,
-            [true, true, "Apple Mobile Device Service", true, "oem3.inf", app.FindResource("AppleMuxReady"), true, false, null]));
-        window.GetType().GetField("_libUsb", InteractionMembers)!.SetValue(window, Activator.CreateInstance(
-            assembly.GetType("IPhoneMirror.DriverInstaller.Models.LibUsbStackStatus")!,
-            [true, true, true, "1.2.6.0", string.Format((string)app.FindResource("LibUsbRunning"), "1.2.6.0")]));
-        foreach (var property in new[] { "AppleStatusText", "LibUsbStatusText" })
-            window.GetType().GetMethod("OnPropertyChanged", InteractionMembers, [typeof(string)])!.Invoke(window, [property]);
-        window.GetType().GetProperty("OperationStatus")!.SetValue(window,
-            string.Format((string)app.FindResource("DevicesReady"), 2));
+        var localization = app.Resources.MergedDictionaries.Single(dictionary =>
+            dictionary.Source?.OriginalString.Contains("/Localization/Strings.", StringComparison.Ordinal) == true);
+        var initializeLanguage = assembly.GetType("IPhoneMirror.DriverInstaller.Services.DriverLocalization")!
+            .GetMethod("Initialize", BindingFlags.Static | BindingFlags.NonPublic)!;
         window.MinWidth = 0;
         window.MinHeight = 0;
         var count = 0;
+        foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US", "ja-JP" })
         foreach (var textScale in new[] { 1d, 2d })
-        foreach (var size in new[] { new Size(1180, 760), new Size(980, 640), new Size(800, 480) })
+        foreach (var size in language == "zh-CN"
+            ? new[] { new Size(1180, 760), new Size(980, 640), new Size(800, 480) }
+            : new[] { new Size(980, 640) })
         foreach (var advanced in new[] { false, true })
         {
+            localization.Source = new Uri($"/{assembly.GetName().Name};component/Localization/Strings.{language}.xaml", UriKind.Relative);
+            initializeLanguage.Invoke(null, [new[] { "--language", language }]);
+            window.GetType().GetField("_appleSupport", InteractionMembers)!.SetValue(window, Activator.CreateInstance(
+                assembly.GetType("IPhoneMirror.DriverInstaller.Models.AppleSupportStatus")!,
+                [true, true, "Apple Mobile Device Service", true, "oem3.inf", app.FindResource("AppleMuxReady"), true, false, null]));
+            window.GetType().GetField("_libUsb", InteractionMembers)!.SetValue(window, Activator.CreateInstance(
+                assembly.GetType("IPhoneMirror.DriverInstaller.Models.LibUsbStackStatus")!,
+                [true, true, true, "1.2.6.0", string.Format((string)app.FindResource("LibUsbRunning"), "1.2.6.0")]));
+            foreach (var property in new[] { "AppleStatusText", "LibUsbStatusText", "AdvancedButtonText" })
+                window.GetType().GetMethod("OnPropertyChanged", InteractionMembers, [typeof(string)])!.Invoke(window, [property]);
+            window.GetType().GetProperty("OperationStatus")!.SetValue(window,
+                string.Format((string)app.FindResource("DevicesReady"), 2));
             appearance.Invoke(null, [app, (double?)textScale, (bool?)false]);
             advancedProperty.SetValue(window, advanced);
             window.Width = size.Width;
@@ -143,7 +153,8 @@ internal static partial class Program
             DrainDispatcher();
             AdvanceDispatcher(TimeSpan.FromMilliseconds(550));
             window.UpdateLayout();
-            var label = $"{(advanced ? "advanced" : "simple")}-{size.Width}x{size.Height}-text{textScale}";
+            var label = $"{(language == "zh-CN" ? "" : language + "-")}{(advanced ? "advanced" : "simple")}-{size.Width}x{size.Height}-text{textScale}";
+            if (!advanced) AssertDriverSimpleAlignment(window, app, label, output);
             // Ordinary window sizes must show the footer without page scrolling.
             // This catches a viewport-height minimum plus outer margins, even
             // though the footer remains technically reachable via a scrollbar.
@@ -193,10 +204,91 @@ internal static partial class Program
                 SaveWindowRender(window, Path.Combine(output, label + "-footer-failure.png"));
             InteractionAssert(footerBounds.Top >= 0 && footerBounds.Bottom <= window.ActualHeight,
                 $"Driver footer must remain reachable with large text: {label}, bounds={footerBounds}, page={page.VerticalOffset}/{page.ScrollableHeight}.");
+            AssertDriverHeaderFooterAlignment(window, app, page, footer, label);
             SaveWindowRender(window, Path.Combine(output, label + ".png"));
             count++;
         }
-        Console.WriteLine($"Driver layout regressions passed: {count} renders across simple/advanced layouts, three window sizes and 100%/200% text.");
+        Console.WriteLine($"Driver layout regressions passed: {count} renders across simple/advanced layouts, five languages, three window sizes and 100%/200% text.");
+    }
+
+    private static void AssertDriverSimpleAlignment(Window window, Application app, string label, string output)
+    {
+        Rect Bounds(FrameworkElement element) => element.TransformToAncestor(window)
+            .TransformBounds(new Rect(element.RenderSize));
+        var selector = Visuals(window).OfType<ComboBox>().Single(control => control.IsVisible &&
+            BindingOperations.GetBinding(control, ItemsControl.ItemsSourceProperty)?.Path.Path == "ConnectedDevices");
+        var install = Visuals(window).OfType<Button>().Single(control => control.IsVisible &&
+            Equals(control.Content, app.FindResource("InstallAll")));
+        Border StatusCard(string path)
+        {
+            var text = Visuals(window).OfType<TextBlock>().Single(element => element.IsVisible &&
+                BindingOperations.GetBinding(element, TextBlock.TextProperty)?.Path.Path == path);
+            for (DependencyObject? parent = VisualTreeHelper.GetParent(text); parent is not null;
+                parent = VisualTreeHelper.GetParent(parent))
+                if (parent is Border border) return border;
+            throw new InvalidOperationException("The status text has no visible card.");
+        }
+        var apple = Bounds(StatusCard("AppleStatusText"));
+        var filter = Bounds(StatusCard("LibUsbStatusText"));
+        var device = Bounds(selector);
+        var primary = Bounds(install);
+        var title = Bounds(Visuals(window).OfType<TextBlock>().Single(control => control.IsVisible &&
+            Equals(control.Text, app.FindResource("PrepareTitle"))));
+        var description = Bounds(Visuals(window).OfType<TextBlock>().Single(control => control.IsVisible &&
+            Equals(control.Text, app.FindResource("PrepareDescription"))));
+        var deviceLabel = Bounds(Visuals(window).OfType<TextBlock>().Single(control => control.IsVisible &&
+            Equals(control.Text, app.FindResource("CurrentDevice"))));
+        var detail = Bounds(Visuals(window).OfType<TextBlock>().Single(control => control.IsVisible &&
+            BindingOperations.GetBinding(control, TextBlock.TextProperty)?.Path.Path == "SelectedDevice.DetailText"));
+        var feedback = Bounds(Visuals(window).OfType<TextBlock>().Single(control => control.IsVisible &&
+            BindingOperations.GetBinding(control, TextBlock.TextProperty)?.Path.Path == "OperationStatus"));
+        var left = Math.Min(apple.Left, filter.Left);
+        var right = Math.Max(apple.Right, filter.Right);
+        var maximumEdgeError = new[]
+        {
+            Math.Abs(device.Left - left), Math.Abs(device.Right - right),
+            Math.Abs(primary.Left - left), Math.Abs(primary.Right - right),
+            Math.Abs(apple.Top - filter.Top), Math.Abs(apple.Bottom - filter.Bottom),
+            Math.Abs(deviceLabel.Left - left), Math.Abs(detail.Left - left), Math.Abs(feedback.Left - left),
+            Math.Abs((title.Left + title.Right - left - right) / 2),
+            Math.Abs((description.Left + description.Right - left - right) / 2),
+        }.Max();
+        File.WriteAllText(Path.Combine(output, label + "-alignment.json"),
+            JsonSerializer.Serialize(new { label, apple = apple.ToString(), filter = filter.ToString(),
+                device = device.ToString(), primary = primary.ToString(), title = title.ToString(),
+                description = description.ToString(), deviceLabel = deviceLabel.ToString(),
+                detail = detail.ToString(), feedback = feedback.ToString(), maximumEdgeError },
+                new JsonSerializerOptions { WriteIndented = true }));
+        if (maximumEdgeError > 1)
+            SaveWindowRender(window, Path.Combine(output, label + "-alignment-failure.png"));
+        InteractionAssert(maximumEdgeError <= 1,
+            $"Driver status cards, device selector and primary action must share the same content edges: " +
+            $"{label}, cards={left:F1}..{right:F1}, selector={device.Left:F1}..{device.Right:F1}, " +
+            $"primary={primary.Left:F1}..{primary.Right:F1}, maximum error={maximumEdgeError:F1}px.");
+    }
+
+    private static void AssertDriverHeaderFooterAlignment(Window window, Application app,
+        ScrollViewer page, Button advanced, string label)
+    {
+        Rect Bounds(FrameworkElement element) => element.TransformToAncestor(window)
+            .TransformBounds(new Rect(element.RenderSize));
+        double CenterY(Rect bounds) => (bounds.Top + bounds.Bottom) / 2;
+        var theme = Bounds((FrameworkElement)window.FindName("ThemeComboBox"));
+        var refresh = Bounds(Visuals(window).OfType<Button>().Single(control => control.IsVisible &&
+            Equals(control.ToolTip, app.FindResource("Refresh"))));
+        var content = Bounds((FrameworkElement)page.Content);
+        var notice = Bounds(Visuals(window).OfType<TextBlock>().Single(control => control.IsVisible &&
+            Equals(control.Text, app.FindResource("DriverChangeNotice"))));
+        var brand = Bounds(Visuals(window).OfType<TextBlock>().Single(control => control.IsVisible &&
+            control.Text == "USB · Apple"));
+        var footer = Bounds(advanced);
+        InteractionAssert(Math.Abs(refresh.Right - content.Right) <= 1 &&
+            Math.Abs(CenterY(theme) - CenterY(refresh)) <= 1 && theme.Right < refresh.Left,
+            $"Driver theme and refresh controls must form an aligned header row: {label}, theme={theme}, refresh={refresh}, content={content}.");
+        InteractionAssert(Math.Abs(notice.Left - content.Left) <= 1 &&
+            Math.Abs(brand.Right - content.Right) <= 1 && Math.Abs(CenterY(notice) - CenterY(footer)) <= 1,
+            $"Driver footer notice and advanced action must share a baseline and the page edges: {label}, " +
+            $"notice={notice}, advanced={footer}, brand={brand}, content={content}.");
     }
 
     private static void AssertDriverPopupInput(ComboBox combo, int index)

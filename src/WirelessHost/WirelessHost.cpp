@@ -122,6 +122,8 @@ public:
 using StartServer = void* (__cdecl*)(const char*, unsigned int, unsigned int,
     IAirServerCallback*);
 using StopServer = void (__cdecl*)(void*);
+using PlaybackStateCallback = int (__cdecl*)(void*, unsigned long long*);
+using SetPlaybackStateCallback = void (__cdecl*)(void*, void*, PlaybackStateCallback);
 
 struct DeviceMetadata {
     std::string device_id;
@@ -621,7 +623,6 @@ public:
     }
 
     void videoPlay(char* url, double volume, double start_position) override {
-        iPhoneMirror::wireless::MessageHeader header;
         // Keep URL inspection bounded. A malformed SDK pointer or an
         // unterminated URL must be rejected rather than read without limit.
         std::string_view location = url
@@ -645,46 +646,36 @@ public:
         }
         if (sendMediaPlay(location, volume, start_position, std::nullopt)) return;
 
-        header.type = iPhoneMirror::wireless::MessageType::MediaStop;
-        bool sent{};
-        {
-            std::scoped_lock lock(playback_mutex_);
-            header.media_command_id = media_command_id_ + 1;
-            const PlaybackState next_playback{
-                .command_id = header.media_command_id,
-            };
-            sent = writer_.send(header);
-            if (sent) {
-                media_command_id_ = header.media_command_id;
-                playback_ = next_playback;
-            }
-        }
-        if (!sent) media_send_failures_.fetch_add(1, std::memory_order_relaxed);
-        diagnostic(std::format("media stop command={} reason=invalid_or_unsupported_url "
-            "url_bytes={} sent={}", header.media_command_id, location.size(), sent));
+        sendMediaStop(location.size());
     }
 
     void playDlnaMedia(std::string_view url, double duration, double volume,
-        double start_position, bool muted) {
-        if (!sendMediaPlay(url, volume, start_position, muted, duration))
+        double start_position, bool muted, std::uint64_t generation) {
+        if (!sendMediaPlay(url, volume, start_position, muted, duration, generation))
             diagnostic("dlna media play rejected: URL is not HTTP(S)");
     }
 
-    void mediaPause() noexcept {
-        send_media_control(iPhoneMirror::wireless::MessageType::MediaPause, 0);
+    void stopDlnaMedia(std::uint64_t generation) {
+        sendMediaStop(0, generation);
     }
 
-    void mediaResume() noexcept {
-        send_media_control(iPhoneMirror::wireless::MessageType::MediaResume, 0);
+    void mediaPause(std::uint64_t dlna_generation = 0) noexcept {
+        send_media_control(iPhoneMirror::wireless::MessageType::MediaPause, 0,
+            dlna_generation);
     }
 
-    void mediaSeek(double position) noexcept {
+    void mediaResume(std::uint64_t dlna_generation = 0) noexcept {
+        send_media_control(iPhoneMirror::wireless::MessageType::MediaResume, 0,
+            dlna_generation);
+    }
+
+    void mediaSeek(double position, std::uint64_t dlna_generation = 0) noexcept {
         if (!std::isfinite(position) || position < 0) {
             diagnostic("media seek rejected: position is not finite or is negative");
             return;
         }
         send_media_control(iPhoneMirror::wireless::MessageType::MediaSeek,
-            position);
+            position, dlna_generation);
     }
 
     void videoGetPlayInfo(double* duration, double* position, double* rate) override {
@@ -702,8 +693,16 @@ public:
         if (rate) *rate = playback_.rate;
     }
 
-    void updatePlayback(const iPhoneMirror::wireless::MessageHeader& header) noexcept {
-        if (header.type != iPhoneMirror::wireless::MessageType::PlaybackState) return;
+    int videoGetPlayState(unsigned long long* command) noexcept {
+        std::scoped_lock lock(playback_mutex_);
+        if (command) *command = playback_.item_id;
+        return static_cast<int>(playback_.state);
+    }
+
+    template <typename CommitTransport>
+    std::uint64_t updatePlayback(const iPhoneMirror::wireless::MessageHeader& header,
+        CommitTransport&& commit_transport) noexcept {
+        if (header.type != iPhoneMirror::wireless::MessageType::PlaybackState) return 0;
         std::scoped_lock lock(playback_mutex_);
         if (header.media_command_id != playback_.command_id || playback_.stopped) {
             const auto ignored = ignored_playback_updates_.fetch_add(
@@ -714,15 +713,37 @@ public:
                     header.media_command_id, playback_.command_id, playback_.stopped,
                     ignored);
             }
-            return;
+            return 0;
         }
+        const auto previous_state = playback_.state;
         playback_.duration = std::max(0.0, header.media_duration);
         playback_.position = std::max(0.0, header.media_position);
         playback_.rate = header.media_rate;
+        playback_.state = static_cast<iPhoneMirror::wireless::MediaPlaybackState>(
+            header.reserved);
         playback_.updated_at = std::chrono::steady_clock::now();
+        // The commit only changes in-memory transport state. Publishing its
+        // GENA notification happens after this command lock is released.
+        return playback_.dlna_generation && commit_transport(
+            playback_.dlna_generation, previous_state, playback_.state)
+            ? playback_.dlna_generation : 0;
     }
 
-    bool stopPlaybackFromController(std::uint64_t command_id) noexcept {
+    std::uint64_t updatePlayback(const iPhoneMirror::wireless::MessageHeader& header) noexcept {
+        return updatePlayback(header, [](std::uint64_t,
+            iPhoneMirror::wireless::MediaPlaybackState previous,
+            iPhoneMirror::wireless::MediaPlaybackState current) {
+            const auto terminal = [](auto state) {
+                return state == iPhoneMirror::wireless::MediaPlaybackState::Completed ||
+                    state == iPhoneMirror::wireless::MediaPlaybackState::Failed;
+            };
+            return !terminal(previous) && terminal(current);
+        });
+    }
+
+    template <typename CommitTransport>
+    bool stopPlaybackFromController(std::uint64_t command_id,
+        CommitTransport&& commit_transport) noexcept {
         {
             std::scoped_lock lock(playback_mutex_);
             if (command_id == 0 || command_id != playback_.command_id) {
@@ -740,10 +761,17 @@ public:
             }
             playback_.rate = 0;
             playback_.stopped = true;
+            playback_.state = iPhoneMirror::wireless::MediaPlaybackState::Stopped;
             playback_.updated_at = std::chrono::steady_clock::now();
+            if (playback_.dlna_generation)
+                commit_transport(playback_.dlna_generation);
         }
         diagnosticf("media stop requested by controller command={}", command_id);
         return true;
+    }
+
+    bool stopPlaybackFromController(std::uint64_t command_id) noexcept {
+        return stopPlaybackFromController(command_id, [](std::uint64_t) {});
     }
 
     void setVolume(float volume, const char* remote_name,
@@ -820,6 +848,38 @@ public:
 
     void log(int level, const char* message) override {
         const auto text = safe_text(message);
+        // Classify protocol milestones without copying sender-controlled URLs,
+        // addresses, names or credentials into diagnostics. Keep these after
+        // the generic handshake log budget is exhausted as well.
+        constexpr std::pair<std::string_view, std::string_view> milestones[] = {
+            {"SETUP 1", "setup_keys"},
+            {"SETUP 2 (mirror", "setup_mirror"},
+            {"SETUP 3 (audio", "setup_audio"},
+            {"teardown raop", "teardown_audio"},
+            {"teardown mirror", "teardown_mirror"},
+            {"teardown client", "teardown_client"},
+            {"Mirror TCP read timed out", "mirror_read_timeout"},
+            {"Mirror TCP select failed", "mirror_select_failed"},
+            {"Mirror TCP socket closed", "mirror_peer_closed"},
+            {"Mirror TCP receive failed", "mirror_receive_failed"},
+            {"TCP socket closed", "mirror_peer_closed"},
+            {"Error in recv", "mirror_receive_failed"},
+            {"Invalid mirror payload size", "mirror_invalid_payload"},
+            {"Connection closed for socket", "control_peer_closed"},
+            {"Error receiving data on socket", "control_receive_failed"},
+            {"RAOP not initialized at SETUP", "setup_missing_session"},
+            {"Stopping raop rtp mirror", "mirror_stopping"},
+            {"Exiting exception thread", "transport_exception"},
+            {"mWidthSource =", "mirror_codec_configuration"},
+            {"lengthofSPS =", "mirror_sps"},
+            {"lengthofPPS =", "mirror_pps"}
+        };
+        for (const auto& [prefix, event] : milestones) {
+            if (text.starts_with(prefix)) {
+                diagnostic(std::format("protocol_event={} level={}", event, level));
+                return;
+            }
+        }
         constexpr std::string_view video_diagnostic_prefix = "IPHONE_MIRROR_VIDEO_DIAG ";
         if (text.starts_with(video_diagnostic_prefix)) {
             auto fields = text.substr(video_diagnostic_prefix.size());
@@ -867,16 +927,46 @@ public:
 private:
     struct PlaybackState {
         std::uint64_t command_id{};
+        std::uint64_t item_id{};
+        std::uint64_t dlna_generation{};
         double duration{};
         double position{};
         double rate{};
+        iPhoneMirror::wireless::MediaPlaybackState state{};
         bool stopped{};
         std::chrono::steady_clock::time_point updated_at{std::chrono::steady_clock::now()};
     };
 
+    void sendMediaStop(std::size_t url_bytes,
+        std::uint64_t dlna_generation = 0) {
+        iPhoneMirror::wireless::MessageHeader header;
+        header.type = iPhoneMirror::wireless::MessageType::MediaStop;
+        bool sent{};
+        {
+            std::scoped_lock lock(playback_mutex_);
+            if (dlna_generation && (!playback_.dlna_generation ||
+                dlna_generation < playback_.dlna_generation)) return;
+            header.media_command_id = media_command_id_ + 1;
+            const PlaybackState next_playback{
+                .command_id = header.media_command_id,
+                .item_id = playback_.item_id,
+                .dlna_generation = dlna_generation,
+                .state = iPhoneMirror::wireless::MediaPlaybackState::Stopped,
+            };
+            sent = writer_.send(header);
+            if (sent) {
+                media_command_id_ = header.media_command_id;
+                playback_ = next_playback;
+            }
+        }
+        if (!sent) media_send_failures_.fetch_add(1, std::memory_order_relaxed);
+        diagnostic(std::format("media stop command={} reason=invalid_or_unsupported_url "
+            "url_bytes={} sent={}", header.media_command_id, url_bytes, sent));
+    }
+
     bool sendMediaPlay(std::string_view location, double volume,
         double start_position, std::optional<bool> muted,
-        double duration = 0) {
+        double duration = 0, std::uint64_t dlna_generation = 0) {
         if (!iPhoneMirror::wireless::is_valid_http_url(location)) return false;
 
         iPhoneMirror::wireless::MessageHeader header;
@@ -898,8 +988,10 @@ private:
             header.media_command_id = media_command_id_ + 1;
             const PlaybackState next_playback{
                 .command_id = header.media_command_id,
+                .item_id = header.media_command_id,
+                .dlna_generation = dlna_generation,
                 .position = header.media_position,
-                .rate = 1.0,
+                .state = iPhoneMirror::wireless::MediaPlaybackState::Loading,
                 .updated_at = std::chrono::steady_clock::now(),
             };
             sent = writer_.send(header, std::span(
@@ -941,7 +1033,7 @@ private:
     }
 
     void send_media_control(iPhoneMirror::wireless::MessageType type,
-        double position) noexcept {
+        double position, std::uint64_t dlna_generation = 0) noexcept {
         if (!std::isfinite(position) || position < 0) {
             diagnostic("media control rejected: invalid position");
             return;
@@ -953,8 +1045,16 @@ private:
             std::scoped_lock lock(playback_mutex_);
             header.media_command_id = media_command_id_ + 1;
             auto next_playback = playback_;
+            // A delayed DLNA control cannot take back an item that a new Play
+            // or an AirPlay sender has already replaced.
+            if (dlna_generation && (!next_playback.dlna_generation ||
+                dlna_generation < next_playback.dlna_generation)) return;
+            if (dlna_generation) next_playback.dlna_generation = dlna_generation;
             if (type == iPhoneMirror::wireless::MessageType::MediaSeek) {
                 next_playback.position = position;
+                if (next_playback.state != iPhoneMirror::wireless::MediaPlaybackState::Paused)
+                    next_playback.state = iPhoneMirror::wireless::MediaPlaybackState::Loading;
+                next_playback.rate = 0;
             } else {
                 auto current = next_playback.position;
                 if (next_playback.rate != 0) {
@@ -963,8 +1063,17 @@ private:
                         next_playback.rate;
                 }
                 next_playback.position = current;
-                next_playback.rate = type == iPhoneMirror::wireless::MessageType::MediaPause
-                    ? 0.0 : 1.0;
+                next_playback.rate = 0;
+                // A sender commonly pauses immediately after receiving ended.
+                // Keep that terminal state stable so reverse polling cannot
+                // observe Completed -> Paused -> Completed for the same item.
+                const auto terminal = next_playback.state ==
+                    iPhoneMirror::wireless::MediaPlaybackState::Completed ||
+                    next_playback.state == iPhoneMirror::wireless::MediaPlaybackState::Failed;
+                if (type != iPhoneMirror::wireless::MessageType::MediaPause || !terminal)
+                    next_playback.state = type == iPhoneMirror::wireless::MessageType::MediaPause
+                        ? iPhoneMirror::wireless::MediaPlaybackState::Paused
+                        : iPhoneMirror::wireless::MediaPlaybackState::Loading;
             }
             next_playback.command_id = header.media_command_id;
             next_playback.updated_at = std::chrono::steady_clock::now();
@@ -1048,7 +1157,7 @@ bool set_airplay_environment(std::wstring_view name,
     return SetEnvironmentVariableW(wide_name.c_str(), wide_value.c_str()) != FALSE;
 }
 
-std::wstring stable_airplay_device_id() {
+std::wstring stable_airplay_device_id(bool media_only) {
     wchar_t computer[MAX_COMPUTERNAME_LENGTH + 1]{};
     DWORD length = static_cast<DWORD>(std::size(computer));
     if (!GetComputerNameW(computer, &length)) {
@@ -1061,7 +1170,7 @@ std::wstring stable_airplay_device_id() {
         hash ^= static_cast<std::uint8_t>(computer[index]);
         hash *= 1099511628211ULL;
     }
-    constexpr std::string_view profile = "airplay-compat-v3";
+    const std::string_view profile = media_only ? "airplay-video-v1" : "airplay-compat-v3";
     for (const auto byte : profile) {
         hash ^= static_cast<std::uint8_t>(byte);
         hash *= 1099511628211ULL;
@@ -1216,11 +1325,40 @@ bool receive_playback_updates(HANDLE pipe, AirPlayCallback& callback,
             return false;
         }
         if (header.type == iPhoneMirror::wireless::MessageType::PlaybackState) {
-            callback.updatePlayback(header);
+            if (header.reserved > static_cast<std::uint32_t>(
+                    iPhoneMirror::wireless::MediaPlaybackState::Completed) ||
+                !std::isfinite(header.media_duration) || header.media_duration < 0 ||
+                !std::isfinite(header.media_position) || header.media_position < 0 ||
+                !std::isfinite(header.media_rate)) {
+                if (failure_reason) *failure_reason = ERROR_INVALID_DATA;
+                return false;
+            }
+            const auto changed = callback.updatePlayback(header,
+                [&dlna](std::uint64_t generation, auto, auto state) {
+                    using iPhoneMirror::wireless::MediaPlaybackState;
+                    switch (state) {
+                    case MediaPlaybackState::Playing:
+                    case MediaPlaybackState::Loading:
+                        return dlna.update_transport_playback(generation, "PLAYING");
+                    case MediaPlaybackState::Paused:
+                        return dlna.update_transport_playback(generation, "PAUSED_PLAYBACK");
+                    case MediaPlaybackState::Stopped:
+                    case MediaPlaybackState::Failed:
+                    case MediaPlaybackState::Completed:
+                        return dlna.update_transport_playback(generation, "STOPPED");
+                    default:
+                        return false;
+                    }
+                });
+            if (changed) dlna.notify_transport_changed();
         } else if (header.type ==
             iPhoneMirror::wireless::MessageType::MediaStopRequest) {
-            if (callback.stopPlaybackFromController(header.media_command_id))
-                dlna.set_transport_stopped();
+            bool changed{};
+            callback.stopPlaybackFromController(header.media_command_id,
+                [&dlna, &changed](std::uint64_t generation) {
+                    changed = dlna.update_transport_playback(generation, "STOPPED");
+                });
+            if (changed) dlna.notify_transport_changed();
         } else {
             if (failure_reason) *failure_reason = ERROR_INVALID_DATA;
             return false;
@@ -1287,7 +1425,7 @@ int wmain(int argc, wchar_t** argv) {
         receiver_mode == L"combined" ? L"combined" : L"mirror";
     const auto effective_receiver_name = receiver_name_wide.empty()
         ? std::wstring(L"iPhoneMirror AirPlay") : receiver_name_wide;
-    const auto device_id = stable_airplay_device_id();
+    const auto device_id = stable_airplay_device_id(std::wstring_view(effective_mode) == L"media");
     const auto pairing_seed = stable_airplay_pairing_seed(device_id);
     if (pairing_seed.empty()) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
@@ -1339,6 +1477,8 @@ int wmain(int argc, wchar_t** argv) {
 
     const auto start_server = reinterpret_cast<StartServer>(GetProcAddress(library, StartExport));
     const auto stop_server = reinterpret_cast<StopServer>(GetProcAddress(library, StopExport));
+    const auto set_playback_state_callback = reinterpret_cast<SetPlaybackStateCallback>(
+        GetProcAddress(library, "fgServerSetPlaybackStateCallback"));
     if (!start_server || !stop_server) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
             "wireless_host airplay_exports_missing");
@@ -1368,6 +1508,12 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(pipe);
         return 6;
     }
+    if (set_playback_state_callback) {
+        set_playback_state_callback(server, &callback,
+            +[](void* cls, unsigned long long* command) -> int {
+                return static_cast<AirPlayCallback*>(cls)->videoGetPlayState(command);
+            });
+    }
     wchar_t public_key[65]{};
     const auto public_key_length = GetEnvironmentVariableW(
         L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY", public_key,
@@ -1396,13 +1542,23 @@ int wmain(int argc, wchar_t** argv) {
             stable_dlna_uuid(pairing_seed), static_cast<std::uint16_t>(dlna_port),
             static_cast<std::uint16_t>(dlna_ssdp_port), {
                 .play = [&callback](std::string_view url, double duration,
-                            double position, double volume, bool muted) {
-                    callback.playDlnaMedia(url, duration, volume, position, muted);
+                            double position, double volume, bool muted,
+                            std::uint64_t generation) {
+                    callback.playDlnaMedia(url, duration, volume, position, muted,
+                        generation);
                 },
-                .stop = [&callback] { callback.videoPlay(nullptr, 0, 0); },
-                .pause = [&callback] { callback.mediaPause(); },
-                .resume = [&callback] { callback.mediaResume(); },
-                .seek = [&callback](double position) { callback.mediaSeek(position); },
+                .stop = [&callback](std::uint64_t generation) {
+                    callback.stopDlnaMedia(generation);
+                },
+                .pause = [&callback](std::uint64_t generation) {
+                    callback.mediaPause(generation);
+                },
+                .resume = [&callback](std::uint64_t generation) {
+                    callback.mediaResume(generation);
+                },
+                .seek = [&callback](double position, std::uint64_t generation) {
+                    callback.mediaSeek(position, generation);
+                },
                 .set_volume = [&callback](double volume) {
                     callback.mediaVolume(volume);
                 },

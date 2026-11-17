@@ -284,14 +284,20 @@ internal static partial class Program
         foreach (var tabs in Visuals(window).OfType<TabControl>().ToArray())
         {
             var selected = tabs.SelectedIndex;
+            var viewportWidth = window.Width;
+            var viewportHeight = window.Height;
             for (var i = 0; i < tabs.Items.Count; ++i)
             {
                 tabs.SelectedIndex = i;
+                window.Width = viewportWidth;
+                window.Height = viewportHeight;
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(25));
                 window.UpdateLayout();
                 AssertVisibleButtonsFit(window);
             }
             tabs.SelectedIndex = selected;
+            window.Width = viewportWidth;
+            window.Height = viewportHeight;
             AdvanceDispatcher(TimeSpan.FromMilliseconds(25));
             window.UpdateLayout();
         }

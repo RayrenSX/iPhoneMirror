@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shell;
+using System.Windows.Threading;
 
 namespace IPhoneMirror.UI.Controls;
 
@@ -11,6 +12,27 @@ namespace IPhoneMirror.UI.Controls;
 public class RoundedWindow : Window
 {
     private HwndSource? _source;
+    private DispatcherOperation? _restoreTransparency;
+
+    static RoundedWindow()
+    {
+        // The painted frame owns the surface color. Theme/backdrop refreshes
+        // must never turn the alpha window's outer shadow margin opaque.
+        BackgroundProperty.OverrideMetadata(typeof(RoundedWindow),
+            new FrameworkPropertyMetadata(Brushes.Transparent, null, CoerceBackground));
+        AllowsTransparencyProperty.OverrideMetadata(typeof(RoundedWindow),
+            new FrameworkPropertyMetadata(false, (target, _) => target.CoerceValue(BackgroundProperty)));
+    }
+
+    private static object CoerceBackground(DependencyObject target, object value)
+    {
+        var window = (RoundedWindow)target;
+        if (!window.AllowsTransparency) return value;
+        // Some backdrop APIs also reset HwndTarget.BackgroundColor after
+        // assigning the brush. Repair both layers before the next render.
+        window.QueueTransparencyRestore();
+        return Brushes.Transparent;
+    }
     public static readonly DependencyProperty IsChromeCloseButtonProperty = DependencyProperty.RegisterAttached(
         "IsChromeCloseButton", typeof(bool), typeof(RoundedWindow), new PropertyMetadata(false, OnChromeCloseButtonChanged));
     public static bool GetIsChromeCloseButton(DependencyObject target) => (bool)target.GetValue(IsChromeCloseButtonProperty);
@@ -41,6 +63,10 @@ public class RoundedWindow : Window
         AllowsTransparency = true;
         Background = Brushes.Transparent;
         SetResourceReference(StyleProperty, typeof(RoundedWindow));
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible) RestoreTransparency();
+        };
     }
 
     protected override void OnInitialized(EventArgs e)
@@ -67,12 +93,44 @@ public class RoundedWindow : Window
         SizeForReadingText(this);
         _source.AddHook(WindowProcedure);
         ApplyNativeCorners();
+        RestoreTransparency();
+    }
+
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        RestoreTransparency();
     }
 
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
         ApplyNativeCorners();
+        RestoreTransparency();
+    }
+
+    private void RestoreTransparency()
+    {
+        RestoreCompositionBackground();
+        QueueTransparencyRestore();
+    }
+
+    private void QueueTransparencyRestore()
+    {
+        if (!AllowsTransparency || _source is null ||
+            _restoreTransparency?.Status == DispatcherOperationStatus.Pending) return;
+        _restoreTransparency = Dispatcher.BeginInvoke(DispatcherPriority.Render, () =>
+        {
+            _restoreTransparency = null;
+            RestoreCompositionBackground();
+        });
+    }
+
+    private void RestoreCompositionBackground()
+    {
+        if (AllowsTransparency && _source?.CompositionTarget is { } target &&
+            target.BackgroundColor.A != 0)
+            target.BackgroundColor = Colors.Transparent;
     }
 
     private void ApplyNativeCorners()
@@ -103,6 +161,8 @@ public class RoundedWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _restoreTransparency?.Abort();
+        _restoreTransparency = null;
         _source?.RemoveHook(WindowProcedure);
         _source = null;
         base.OnClosed(e);
@@ -110,6 +170,11 @@ public class RoundedWindow : Window
 
     private nint WindowProcedure(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
+        if (message is 0x031A or 0x031E) // WM_THEMECHANGED / WM_DWMCOMPOSITIONCHANGED
+        {
+            ApplyNativeCorners();
+            RestoreTransparency();
+        }
         if (message == 0x0024) // WM_GETMINMAXINFO: maximize inside this monitor's work area.
         {
             var info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };

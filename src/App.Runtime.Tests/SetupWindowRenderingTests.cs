@@ -98,8 +98,93 @@ internal static partial class Program
         }
         File.WriteAllText(Path.Combine(output, "rendering.json"),
             JsonSerializer.Serialize(samples, new JsonSerializerOptions { WriteIndented = true }));
+        VerifySetupAlignment(output, vm);
         app.Shutdown();
         Console.WriteLine("PASS default-render-mode setup HWND, animation, minimize/restore, maximize and theme transitions.");
         return 0;
+    }
+
+    private static void VerifySetupAlignment(string output, MainViewModel vm)
+    {
+        var originalTheme = ThemeService.Preference;
+        var layouts = new List<object>();
+        try
+        {
+            foreach (var theme in new[] { IPhoneMirror.App.Updater.AppTheme.Dark, IPhoneMirror.App.Updater.AppTheme.Light })
+            foreach (var size in new[] { (Width: 600d, Height: 540d), (Width: 880d, Height: 820d) })
+            foreach (var step in new[] { SetupStep.Welcome, SetupStep.MirrorConnection, SetupStep.Environment })
+            {
+                ThemeService.Apply(theme);
+                var store = new FirstRunSetupStore(Path.Combine(Path.GetFullPath(output), $"alignment-{theme}-{size.Width}-{step}.json"));
+                store.Save(new() { Step = step, Usage = SetupUsage.WiredOnly,
+                    Devices = [new() { Id = "alignment-phone", Name = "iPhone" }] });
+                var window = new FirstRunSetupWindow(vm, store, previewOnly: true)
+                { Width = size.Width, Height = size.Height };
+                try
+                {
+                    window.Show(); ToolsPump(120); window.UpdateLayout();
+                    T Find<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
+                    Rect Bounds(FrameworkElement element) => element.TransformToAncestor(window)
+                        .TransformBounds(new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+                    double Center(FrameworkElement element) { var bounds = Bounds(element); return bounds.Left + bounds.Width / 2; }
+                    void Close(double actual, double expected, string description)
+                    {
+                        if (Math.Abs(actual - expected) > 1)
+                            throw new InvalidOperationException($"Setup {step}/{theme}/{size.Width}: {description}: {actual:F2} vs {expected:F2}.");
+                    }
+                    var page = Find<StackPanel>("Page");
+                    var footer = Find<Grid>("SetupFooter");
+                    var progress = Find<Grid>("StepIndicator");
+                    Close(Center(progress), Center(page), "progress and page center");
+                    Close(Center(footer), Center(page), "footer and page center");
+                    Close(footer.ActualWidth, page.ActualWidth, "footer and content width");
+                    Close(Center(Find<TextBlock>("Heading")), Center(page), "heading center");
+                    var stages = progress.Children.OfType<StackPanel>().ToArray();
+                    if (stages.Length != 3) throw new InvalidOperationException("Setup must show three progress stages.");
+                    Close(Center(stages[1]), Center(page), "middle progress stage");
+                    Close(stages[0].ActualWidth, stages[2].ActualWidth, "equal progress columns");
+                    var previous = Find<Button>("Previous");
+                    var next = Find<Button>("Next");
+                    Close(previous.ActualWidth, next.ActualWidth, "equal navigation widths");
+                    var skip = Find<Button>("Skip");
+                    if (skip.IsVisible) Close(Center(skip), Center(footer), "centered skip action");
+                    var body = Find<StackPanel>("Body");
+                    if (step == SetupStep.Environment)
+                    {
+                        var card = body.Children.OfType<Button>().Single();
+                        Close(Center(card), Center(page), "single tool card center");
+                        Close(card.ActualWidth, body.ActualWidth, "single tool card width");
+                    }
+                    if (step == SetupStep.MirrorConnection)
+                    {
+                        var row = body.Children.OfType<WrapPanel>().Single();
+                        var cards = row.Children.OfType<RadioButton>().ToArray();
+                        if (cards.Length != 2) throw new InvalidOperationException("Connection choices must retain both transport cards.");
+                        var left = Bounds(cards[0]); var right = Bounds(cards[1]);
+                        Close((left.Left + right.Right) / 2, Center(page), "balanced connection-card gutter");
+                        Close(left.Width, right.Width, "equal connection-card width");
+                        if (left.IntersectsWith(right)) throw new InvalidOperationException("Connection choices overlap.");
+                    }
+                    foreach (var action in new[] { previous, next, skip, Find<Button>("CancelOperation") }.Where(button => button.IsVisible))
+                    {
+                        var bounds = Bounds(action);
+                        if (bounds.Left < 0 || bounds.Right > window.ActualWidth || bounds.Top < 0 || bounds.Bottom > window.ActualHeight)
+                            throw new InvalidOperationException("Setup navigation is clipped at the minimum window size.");
+                    }
+                    ToolsCapture(window, Path.Combine(output, $"setup-aligned-{theme}-{size.Width}-{step}.png"));
+                    layouts.Add(new { theme = theme.ToString(), step = step.ToString(), width = window.ActualWidth,
+                        height = window.ActualHeight, contentWidth = page.ActualWidth, center = Center(page) });
+                }
+                finally
+                {
+                    typeof(FirstRunSetupWindow).GetField("_allowClose", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, true);
+                    window.Close();
+                }
+            }
+        }
+        finally { ThemeService.Apply(originalTheme); }
+        File.WriteAllText(Path.Combine(output, "alignment.json"),
+            JsonSerializer.Serialize(layouts, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine("PASS setup alignment: centered progress/content/footer, balanced cards and navigation at minimum/default sizes in both themes.");
     }
 }

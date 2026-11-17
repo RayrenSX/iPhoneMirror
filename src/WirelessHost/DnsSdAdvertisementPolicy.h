@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -11,8 +12,16 @@ namespace iPhoneMirror::wireless {
 
 using DnsSdProperties = std::vector<std::pair<std::wstring, std::wstring>>;
 
-inline constexpr std::wstring_view MirroringFeatures = L"0x5A7FFEE6,0x0";
-inline constexpr std::wstring_view MediaCastFeatures = L"0x5A7FFEF7,0x0";
+inline std::uint16_t airplay_service_port(std::wstring_view mode,
+    std::uint16_t requested, std::uint16_t mirroring) noexcept {
+    return mode != L"media" && mirroring != 0 ? mirroring : requested;
+}
+
+// Bit 42 requests explicit H.264/HEVC codec configuration from recent iPhones.
+inline constexpr std::wstring_view MirroringFeatures = L"0x5A7FFEE6,0x400";
+// Dedicated video receivers must not advertise Screen (bit 7) or the screen
+// multicodec capability (bit 42), otherwise iOS lists them under mirroring.
+inline constexpr std::wstring_view MediaCastFeatures = L"0x5A7FFE73,0x0";
 inline constexpr std::wstring_view LegacyAirPlayModel = L"AppleTV3,2";
 inline constexpr std::wstring_view LegacyAirPlayVersion = L"220.68";
 inline constexpr std::wstring_view AirPlayPairingIdentity =
@@ -39,10 +48,10 @@ inline void set_dns_sd_property(DnsSdProperties& properties,
 // advertised AirPlay identity without depending on a live network adapter.
 inline void apply_dns_sd_advertisement_policy(std::string_view service_type,
     bool media_mode, std::wstring_view device_id, std::wstring_view public_key,
-    DnsSdProperties& properties) {
+    DnsSdProperties& properties, bool video_handoff = true) {
     if (service_type == "_airplay._tcp") {
         set_dns_sd_property(properties, L"features",
-            media_mode ? MediaCastFeatures : MirroringFeatures);
+            media_mode && video_handoff ? MediaCastFeatures : MirroringFeatures);
         set_dns_sd_property(properties, L"deviceid", device_id);
         if (media_mode) {
             set_dns_sd_property(properties, L"model", LegacyAirPlayModel);
@@ -54,7 +63,8 @@ inline void apply_dns_sd_advertisement_policy(std::string_view service_type,
         }
     }
     else if (service_type == "_raop._tcp" && media_mode) {
-        set_dns_sd_property(properties, L"ft", MediaCastFeatures);
+        set_dns_sd_property(properties, L"ft",
+            video_handoff ? MediaCastFeatures : MirroringFeatures);
         set_dns_sd_property(properties, L"am", LegacyAirPlayModel);
         set_dns_sd_property(properties, L"vs", LegacyAirPlayVersion);
         if (is_lower_hex(public_key, 64))

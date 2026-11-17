@@ -457,13 +457,15 @@ class HostDisconnectTests(unittest.IsolatedAsyncioTestCase):
         async def eof():
             await started.wait()
             return None
-        session = SimpleNamespace(connect=connect, _cleanup=AsyncMock(), _mux_checkpoint=None)
+        session = SimpleNamespace(connect=connect, _cleanup=AsyncMock(), _mux_checkpoint=None,
+                                  device_hub=SimpleNamespace(close=AsyncMock()))
         with patch.object(channel, '_read_message', eof), \
              patch.object(bridge, 'BridgeChannel', return_value=channel), \
              patch.object(bridge, 'TouchSession', return_value=session):
             await asyncio.wait_for(bridge.main_async(120, None, 'usb'), 1)
         self.assertTrue(closed.is_set())
         session._cleanup.assert_awaited_once()
+        session.device_hub.close.assert_awaited_once()
 
     async def test_disconnect_watch_preserves_all_frames(self):
         channel = bridge.BridgeChannel()
@@ -509,13 +511,15 @@ class HostDisconnectTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.Event().wait()
         session = SimpleNamespace(
             connect=AsyncMock(side_effect=ddi.BridgePrerequisiteError('developer_image_tss_rejected', 'rejected')),
-            _cleanup=AsyncMock(), _mux_checkpoint=None)
+            _cleanup=AsyncMock(), _mux_checkpoint=None,
+            device_hub=SimpleNamespace(close=AsyncMock()))
         with patch.object(channel, 'wait_for_disconnect', waiting), \
              patch.object(bridge, 'BridgeChannel', return_value=channel), \
              patch.object(bridge, 'TouchSession', return_value=session):
             await asyncio.wait_for(bridge.main_async(120, None, 'usb'), 1)
         self.assertEqual(channel.emit.call_args_list[0].args[0]['code'], 'developer_image_tss_rejected')
         session._cleanup.assert_awaited_once()
+        session.device_hub.close.assert_awaited_once()
 
 
 class CacheValidationTests(unittest.TestCase):

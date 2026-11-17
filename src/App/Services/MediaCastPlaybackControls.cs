@@ -1,4 +1,5 @@
 using System.Globalization;
+using IPhoneMirror.App.Interop;
 
 namespace IPhoneMirror.App.Services;
 
@@ -38,6 +39,30 @@ internal static class MediaCastPlaybackControls
 
     internal static bool CanSeek(bool opened, bool isLive, double duration) =>
         opened && !isLive && double.IsFinite(duration) && duration > 0;
+
+    internal static bool UsePlayerTimeline(bool hls, bool opened, bool live,
+        bool waitingForFirstFrame, bool seeking) =>
+        hls && opened && !live && !waitingForFirstFrame && !seeking;
+
+    internal static bool IsPrematureEnd(double duration, double lastPosition) =>
+        double.IsFinite(duration) && duration > 0 &&
+        double.IsFinite(lastPosition) && lastPosition >= 0 &&
+        // Account for the 250ms progress tick plus a decoded video frame.
+        // WMF can reset Position before dispatching its EOF callback.
+        duration - lastPosition > Math.Min(2, Math.Max(0.35, duration * 0.02));
+
+    internal static MediaCastPlaybackStatus GetPlaybackStatus(bool active,
+        bool stopped, bool shouldPlay, bool loading,
+        MediaCastPlaybackStatus terminalStatus = MediaCastPlaybackStatus.Unknown)
+    {
+        if (!active || stopped) return MediaCastPlaybackStatus.Stopped;
+        if (terminalStatus is MediaCastPlaybackStatus.Stopped or MediaCastPlaybackStatus.Failed or
+            MediaCastPlaybackStatus.Completed)
+            return terminalStatus;
+        // User intent remains paused even if WMF is buffering at that moment.
+        if (!shouldPlay) return MediaCastPlaybackStatus.Paused;
+        return loading ? MediaCastPlaybackStatus.Loading : MediaCastPlaybackStatus.Playing;
+    }
 
     internal static bool IsReliableDuration(bool segmented, double duration) =>
         double.IsFinite(duration) && duration > 0 &&

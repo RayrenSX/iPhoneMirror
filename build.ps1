@@ -622,6 +622,9 @@ try {
 
         $libUsbDirectory = Join-Path $Root 'third_party\libusb\bin\x64'
         $env:PATH = "$libUsbDirectory$([IO.Path]::PathSeparator)$env:PATH"
+        & $UsbControlPython -m pip install --disable-pip-version-check `
+            --requirement (Join-Path $Root 'tests\requirements.txt')
+        if ($LASTEXITCODE -ne 0) { throw "Python test dependency installation failed: $LASTEXITCODE" }
         & $UsbControlPython -m unittest discover -s tests -p '*test.py'
         if ($LASTEXITCODE -ne 0) { throw "USB touch bridge tests failed: $LASTEXITCODE" }
         & (Join-Path $Root 'scripts\test_usb_bridge_build_source.ps1') | Out-Host
@@ -660,6 +663,29 @@ try {
                 -CleanManagedTestEnvironment
             if ($testExitCode -ne 0) { throw "Tests failed: $Project ($testExitCode)" }
             if ($Project -eq 'src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj') {
+                # Each WPF executable must initialize Grid compatibility on its
+                # own. A shared test process would cache the main App's switch
+                # and conceal a missing initializer in the driver manager.
+                dotnet build 'src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj' `
+                    --configuration $Configuration -p:NuGetAudit=false
+                if ($LASTEXITCODE -ne 0) { throw "Driver layout probe build failed: $LASTEXITCODE" }
+                $layoutEntries = @(
+                    @{ Project = 'src/App/iPhoneMirror.App.csproj'; Type = 'IPhoneMirror.App.App' },
+                    @{ Project = 'src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj'; Type = 'IPhoneMirror.DriverInstaller.App' }
+                )
+                foreach ($entry in $layoutEntries) {
+                    $layoutAssembly = dotnet msbuild $entry.Project -nologo `
+                        "-p:Configuration=$Configuration" -getProperty:TargetPath
+                    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($layoutAssembly) -or
+                        -not (Test-Path -LiteralPath $layoutAssembly.Trim() -PathType Leaf)) {
+                        throw "Failed to resolve layout entry assembly: $($entry.Project)"
+                    }
+                    $layoutExitCode = Invoke-NativeToolWithSanitizedEnvironment `
+                        (Get-Command dotnet -ErrorAction Stop).Source `
+                        @($testAssembly.Trim(), '--grid-layout-entry', $layoutAssembly.Trim(), $entry.Type) `
+                        -CleanManagedTestEnvironment
+                    if ($layoutExitCode -ne 0) { throw "WPF startup layout probe failed: $($entry.Type) ($layoutExitCode)" }
+                }
                 $lifecycleExitCode = Invoke-NativeToolWithSanitizedEnvironment `
                     (Get-Command dotnet -ErrorAction Stop).Source @($testAssembly.Trim(), '--automation-lifecycle') `
                     -CleanManagedTestEnvironment

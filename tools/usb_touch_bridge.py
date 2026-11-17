@@ -102,14 +102,14 @@ try:
 except ImportError:  # pragma: no cover - older packaged pymobiledevice3
     POLICY_PROMISE_SECONDARY = {'promiseSecondary': {}}
 from pymobiledevice3.remote.core_device.hid_service import (
-    UniversalHIDServiceService,
+    UniversalHIDServiceService as UpstreamUniversalHIDServiceService,
     IndigoHIDService,
     TOUCHSCREEN_STATE_CONTACT,
     TOUCHSCREEN_STATE_RELEASE,
     DIGITIZER_SURFACE_MAIN_TOUCHSCREEN,
     KEYBOARD_SURFACE_DEFAULT_SERVICE_ID,
 )
-from pymobiledevice3.remote.xpc_message import XpcUInt64Type
+from pymobiledevice3.remote.xpc_message import XpcInt64Type, XpcUInt64Type
 
 try:
     from iostouch.qt.usb import (
@@ -585,7 +585,7 @@ def _interface_with_subclass(configuration, subclass: int):
     return None
 
 PROTOCOL_VERSION = 2
-CAPABILITIES = ['iphoneMirror.usb_touch.v2', 'iphoneMirror.usb_keyboard.v1', 'iphoneMirror.clipboard.rpc.v1', 'iphoneMirror.hub.rpc.v1']
+CAPABILITIES = ['iphoneMirror.usb_touch.v2', 'iphoneMirror.usb_keyboard.v1', 'iphoneMirror.clipboard.rpc.v1', 'iphoneMirror.hub.rpc.v1', 'iphoneMirror.native_keyboard.v1']
 MAX_SLOTS = 5
 MAX_FRAME_SIZE = 4 * 1024 * 1024
 MESSAGE_SCHEMA = 'iphoneMirror.touch.v2'
@@ -2137,22 +2137,133 @@ async def create_lockdown_with_retry(ipc, udid: Optional[str],
 LEGACY_UNIVERSAL_HID_FEATURE = 'com.apple.coredevice.feature.remote.universalhid'
 
 
-class LegacyUniversalHIDServiceService(UniversalHIDServiceService):
-    SERVICE_NAME = LEGACY_UNIVERSAL_HID_SERVICE
+class UniversalHIDServiceService(UpstreamUniversalHIDServiceService):
+    """Keep HID request IDs odd and register a real keyboard usage.
+
+    pymobiledevice3 11.3.1 increments request IDs by one and adopts received
+    IDs as its send counter. An even reply-wanting ID crashes dtuhidd. Keep
+    this compatibility fix local to HID, including its legacy endpoint.
+    """
+    FEATURE_IDENTIFIER = 'com.apple.coredevice.feature.remote.universalhidservice'
+    # UniversalHID KeyboardReport: report ID 1, 232 usage bits, a constant
+    # byte, then eight timestamp/vendor bytes (39 bytes in total). The SDK's
+    # USB boot-keyboard descriptor describes a different report format.
+    KEYBOARD_REPORT_DESCRIPTOR = bytes.fromhex(
+        '85 01 05 07 19 01 29 E7 96 E8 00 75 01 15 01 26 '
+        'E7 00 81 02 A1 02 06 1A FF 0A F1 E0 19 00 29 00 '
+        '75 08 95 01 81 01 C0 06 00 FF 0A 02 01 15 00 26 '
+        'FF 00 75 08 95 08 81 02')
+
+    def __init__(self, rsd):
+        super().__init__(rsd)
+        self._hid_send_lock = asyncio.Lock()
+
+    async def _hid_request(self, payload: dict, *, wanting_reply: bool = False):
+        service = self.service
+
+        async def send():
+            # Replies and requests have independent sequences. Preserve our
+            # next odd ID even though the pinned SDK replaces its counter from
+            # the peer's reply ID; an even reply-wanting ID crashes dtuhidd.
+            async with self._hid_send_lock:
+                request_id = getattr(self, '_next_hid_request_id', None)
+                if request_id is None:
+                    request_id = service.next_message_id[1] | 1
+                self._next_hid_request_id = request_id + 2
+                service.next_message_id[1] = request_id
+                await service.send_request({
+                    'featureIdentifier': self.FEATURE_IDENTIFIER,
+                    'messageType': 'Request', 'payload': payload,
+                }, wanting_reply=wanting_reply)
+                service.next_message_id[1] = self._next_hid_request_id
+
+        if not wanting_reply:
+            # Health PING owns the response reader, but must not delay a key
+            # or touch release until its ACK. Only serialize actual writes.
+            await send()
+            return
+        async with service._request_lock:
+            await send()
+            try:
+                response = await service.receive_response()
+                return response
+            finally:
+                # receive_response() in the pinned SDK adopts the peer's
+                # message ID. Restore our independent odd sequence.
+                service.next_message_id[1] = self._next_hid_request_id
 
     async def list_connected_services(self) -> dict:
-        return await self.service.send_receive_request({
-            'featureIdentifier': LEGACY_UNIVERSAL_HID_FEATURE,
-            'messageType': 'Request',
-            'payload': {'connectedServices': {}},
-        })
+        return await self._hid_request({'connectedServices': {}}, wanting_reply=True)
 
     async def send_report(self, service_id: int, report: bytes) -> None:
-        await self.service.send_request({
-            'featureIdentifier': LEGACY_UNIVERSAL_HID_FEATURE,
-            'messageType': 'Request',
-            'payload': {'send': {'_0': report, '_1': XpcUInt64Type(service_id)}},
-        })
+        await self._hid_request({'send': {'_0': report, '_1': XpcUInt64Type(service_id)}})
+
+    async def create_keyboard_service(self, service_id=None,
+                                      product='iPhoneMirror external keyboard',
+                                      manufacturer='iPhoneMirror', vendor_id=0x05AC,
+                                      product_id=0x0250) -> int:
+        if service_id is None:
+            # dtuhidd's service IDs are device-wide. A replacement connection
+            # must not reuse its predecessor's ID: closing the old owner would
+            # otherwise remove the new keyboard as well.
+            service_id = (1 << 32) | int.from_bytes(os.urandom(4), 'little')
+        usage, page = XpcInt64Type(6), XpcInt64Type(1)
+        vendor, product_number = XpcInt64Type(vendor_id), XpcInt64Type(product_id)
+        identifier = XpcUInt64Type(service_id)
+        pair = {'DeviceUsage': usage, 'DeviceUsagePage': page}
+        properties = {
+            'DeviceUsagePairs': [pair], 'PrimaryUsage': XpcUInt64Type(6),
+            'PrimaryUsagePage': XpcUInt64Type(1), 'Product': product,
+            'ProductID': product_number, 'VendorID': vendor, '_ServiceID': identifier,
+            '_CoreDevice_codablePropertyStorage': {
+                'Manufacturer': {'string': manufacturer}, 'Product': {'string': product},
+                'ProductID': {'int': product_number}, 'VendorID': {'int': vendor},
+                'PrimaryUsage': {'int': usage}, 'PrimaryUsagePage': {'int': page},
+                'DeviceUsagePairs': {'array': [{'dictionary': {
+                    'DeviceUsage': {'int': usage}, 'DeviceUsagePage': {'int': page},
+                }}]},
+                'Transport': {'string': 'USB'},
+                'ReportDescriptor': {'data': self.KEYBOARD_REPORT_DESCRIPTOR},
+                'UniversalControlVirtualService': {'bool': True},
+                '_ServiceID': {'uint': identifier},
+            },
+        }
+        response = await self._hid_request({'createService': {'_0': properties}}, wanting_reply=True)
+        created_id = response.get('serviceID') if isinstance(response, dict) else None
+        if (not isinstance(created_id, int) or isinstance(created_id, bool) or
+                not 0 < created_id < (1 << 64) or created_id == KEYBOARD_SURFACE_CONNECTED):
+            raise ValueError('HID did not confirm the created keyboard service ID')
+        self._created_keyboard_service_id = created_id
+        # Registration ACK precedes backboardd's attach notification. Let it
+        # attach before a first modifier report, which otherwise can latch.
+        await asyncio.sleep(.3)
+        return created_id
+
+    async def remove_keyboard_service(self) -> None:
+        """Remove only the keyboard created by this connection, never surface 512."""
+        created_id = getattr(self, '_created_keyboard_service_id', None)
+        if created_id == KEYBOARD_SURFACE_CONNECTED:
+            self._created_keyboard_service_id = None
+            return
+        if created_id is not None and self._service is not None:
+            async with asyncio.timeout(HID_CLEANUP_TIMEOUT_SECONDS):
+                with contextlib.suppress(Exception):
+                    await self.send_keyboard(created_id, [])
+                await self._hid_request({'removeService': {'_0': XpcUInt64Type(created_id)}})
+            self._created_keyboard_service_id = None
+
+    async def close(self) -> None:
+        try:
+            with contextlib.suppress(Exception):
+                await self.remove_keyboard_service()
+        finally:
+            self._created_keyboard_service_id = None
+            await super().close()
+
+
+class LegacyUniversalHIDServiceService(UniversalHIDServiceService):
+    SERVICE_NAME = LEGACY_UNIVERSAL_HID_SERVICE
+    FEATURE_IDENTIFIER = LEGACY_UNIVERSAL_HID_FEATURE
 
 
 class PasteboardRecoveryHub(DtxServiceProvider):
@@ -2480,7 +2591,8 @@ class TouchSession:
     """USB → CoreDevice 隧道 → RSD → Universal HID 会话。"""
 
     def __init__(self, ipc: BridgeChannel, rate_hz: int, udid: Optional[str] = None,
-                 transport: str = 'usb', ddi_dir: Optional[Path] = None) -> None:
+                 transport: str = 'usb', ddi_dir: Optional[Path] = None,
+                 show_native_keyboard: bool = True) -> None:
         self.ipc = ipc
         self.rate_hz = rate_hz
         self.udid = udid
@@ -2502,6 +2614,7 @@ class TouchSession:
         self._touch_report_sent_at = 0.0
         self._held_keyboard_usages: frozenset[int] = frozenset()
         self.keyboard_service_id: Optional[int] = None
+        self.show_native_keyboard = show_native_keyboard
 
         self.display: Optional[DisplayService] = None
         self.dial_plane = None
@@ -3717,11 +3830,12 @@ class TouchSession:
         if inventory:
             Path(inventory).write_text(json.dumps(surfaces, default=lambda v: v.hex() if isinstance(v, bytes) else str(v), indent=2))
         ids = self._connected_service_ids(surfaces)
+        hid._bridge_has_system_keyboard = KEYBOARD_SURFACE_CONNECTED in ids
         log.info('service=%s surfaces=%s', hid.SERVICE_NAME, sorted(ids))
-        # iOS publishes a keyboard surface on some DDIs (service 512). In
-        # direct-HID mode registering a second virtual service can be rejected
-        # even though the published surface accepts the standard keyboard
-        # report. Prefer the device-owned surface when it is available.
+        # Service 512 accepts input but advertises usage page/code 0/0 on
+        # current DDIs, so iOS does not count it as a hardware keyboard.
+        # Use it without attaching a hardware keyboard when the user wants
+        # iOS's native keyboard. Hidden mode registers a real 1/6 keyboard.
         if KEYBOARD_SURFACE_CONNECTED in ids:
             self.keyboard_service_id = KEYBOARD_SURFACE_CONNECTED
         if DIGITIZER_SURFACE_MAIN_TOUCHSCREEN in ids:
@@ -3970,6 +4084,15 @@ class TouchSession:
         for name in ('_sock_read_task', '_tun_read_task'):
             task = getattr(client, name, None)
             if isinstance(task, asyncio.Future) and task.done():
+                # The SDK consumes OSError/SSLError and returns normally. Keep
+                # the StreamReader's TLS reason so diagnostics can distinguish
+                # record corruption from a peer shutdown without logging data.
+                reader = getattr(client, '_reader', None)
+                if reader is None:
+                    reader = getattr(getattr(client, '_service', None), 'reader', None)
+                if isinstance(reader, asyncio.StreamReader) and (error := reader.exception()) is not None:
+                    detail = getattr(error, 'reason', None)
+                    return f'CoreDevice {name} ended: {type(error).__name__}' + (f' ({detail})' if detail else '')
                 return f'CoreDevice {name} ended'
         return None
 
@@ -4402,6 +4525,9 @@ class TouchSession:
             'gateOpen': self.gate_open, 'authMode': self.auth_mode,
             'transport': self.transport_mode,
             'generation': self._generation,
+            'nativeKeyboardSupported': bool(getattr(self.hid, '_bridge_has_system_keyboard', False)) and (
+                self.show_native_keyboard or self.keyboard_service_id not in (None, KEYBOARD_SURFACE_CONNECTED)),
+            'nativeKeyboardVisible': self.keyboard_service_id == KEYBOARD_SURFACE_CONNECTED,
         })
         self._session_ready.set()
         self._ddi_deadline = None
@@ -4420,10 +4546,16 @@ class TouchSession:
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_RELEASE, 0, 0)
                 await asyncio.wait_for(self.hid.send_report(
                     DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report), HID_OPERATION_TIMEOUT_SECONDS)
+            # Prepare the chosen keyboard route without injecting a user key.
+            # Native-visible mode retains system 512 without a hardware attach.
+            await self._ensure_keyboard_service(self.hid, best_effort=True)
             if self.keyboard_service_id is not None:
                 await asyncio.wait_for(self.hid.send_keyboard(self.keyboard_service_id, []),
                                        HID_OPERATION_TIMEOUT_SECONDS)
             await self._ping_hid()
+            if self.keyboard_service_id not in (None, KEYBOARD_SURFACE_CONNECTED):
+                await self.ipc.emit({'event': 'status', 'code': 'keyboard_service_ready',
+                                     'message': str(self.keyboard_service_id)})
 
     async def _ping_hid(self, hid=None) -> None:
         """Fence HID writes without repeating the one-shot service inventory.
@@ -4577,6 +4709,11 @@ class TouchSession:
                         continue
                     if frame.get('kind') in ('hub_request', 'cancel_hub'):
                         self.device_hub.dispatch(frame, self._generation)
+                        continue
+                    if frame.get('kind') == 'native_keyboard_visibility':
+                        request_generation = self._generation
+                        await self._cancel_keyboard_pastes(keyboard_paste_tasks)
+                        await self._native_keyboard_request(frame, request_generation)
                         continue
                     for attempt in range(2):
                         attempted_hid = self.hid
@@ -4827,9 +4964,33 @@ class TouchSession:
                 # Inventory may succeed just before iOS closes the socket.
                 # Fence the candidate on its own connection before adoption.
                 await self._ping_hid(new_hid)
-                if old_hid is not None:
-                    await self._close_remote_service(old_hid, 'replaced_hid')
+                # Each owner registers a distinct keyboard ID. Prepare and
+                # verify its successor before retiring the old keyboard so
+                # idle renewal never leaves iOS without an attached keyboard.
+                keyboard_created = False
+                if not (idle_only and self.show_native_keyboard and
+                        not getattr(new_hid, '_bridge_has_system_keyboard', False)):
+                    # A visible-mode idle candidate lacking system 512 is
+                    # already unsuitable. Do not even briefly attach a new
+                    # external keyboard while the old visible route works.
+                    keyboard_created = await self._ensure_keyboard_service(new_hid, best_effort=True)
+                if self.keyboard_service_id is not None:
+                    await asyncio.wait_for(new_hid.send_keyboard(self.keyboard_service_id, []),
+                                           HID_OPERATION_TIMEOUT_SECONDS)
                 await self._ping_hid(new_hid)
+                if idle_only and (
+                        (self.show_native_keyboard and self.keyboard_service_id != KEYBOARD_SURFACE_CONNECTED) or
+                        (not self.show_native_keyboard and
+                         self.keyboard_service_id in (None, KEYBOARD_SURFACE_CONNECTED))):
+                    # Healthy rotation must not silently change the user's
+                    # keyboard mode. Discard this optional candidate without
+                    # repairing or closing the still-working owner. Fault
+                    # recovery may fall back and report actual state in ready.
+                    self.keyboard_service_id = old_keyboard_service_id
+                    await self._close_remote_service(new_hid, 'keyboard_mode_mismatch')
+                    await self.ipc.emit({'event': 'status', 'code': 'direct_hid_refresh_deferred',
+                                         'message': 'Keeping the current keyboard route.'})
+                    return False
             except BaseException as error:
                 self.keyboard_service_id = old_keyboard_service_id
                 await self._close_remote_service(new_hid, 'rejected_hid')
@@ -4842,10 +5003,18 @@ class TouchSession:
             self._active_touch_ids.clear()
             self._touch_keepalive_contacts = ()
             self._held_keyboard_usages = frozenset()
-            # _verify_touch_surface selected this session's device-owned
-            # keyboard. Clearing it registers a duplicate and iOS resets HID.
+            # Retain this connection's external keyboard, or its device-owned
+            # input fallback if keyboard registration was unavailable.
             self._owns_hid = True
             self._input_verified = False
+            # Adoption is committed before awaiting old-owner cleanup. A
+            # cancellation here must leave cleanup pointing at the live new
+            # connection, rather than roll back to an already closed one.
+            if old_hid is not None:
+                await self._close_remote_service(old_hid, 'replaced_hid')
+            if keyboard_created:
+                await self.ipc.emit({'event': 'status', 'code': 'keyboard_service_ready',
+                                     'message': str(self.keyboard_service_id)})
             await self.ipc.emit({'event': 'warning', 'code': 'direct_hid_refreshed',
                                  'message': f'Universal HID refreshed; authMode={self.auth_mode}.'})
             return True
@@ -5402,22 +5571,112 @@ class TouchSession:
             # Let the HID encoder timestamp the actual send, like touch input.
             await self._send_keyboard_report(usages)
 
+    async def _ensure_keyboard_service(self, hid, *, best_effort: bool = False) -> bool:
+        """Caller owns _hid_lifecycle_lock; return whether a keyboard was created."""
+        self._check_media_auth()
+        if self.show_native_keyboard and getattr(hid, '_bridge_has_system_keyboard', False):
+            self.keyboard_service_id = KEYBOARD_SURFACE_CONNECTED
+            return False
+        if (self.keyboard_service_id is not None and
+                (self.keyboard_service_id != KEYBOARD_SURFACE_CONNECTED or
+                 getattr(hid, '_bridge_keyboard_attach_attempted', False))):
+            return False
+        hid._bridge_keyboard_attach_attempted = True
+        try:
+            service_id = await asyncio.wait_for(hid.create_keyboard_service(
+                product='iPhoneMirror external keyboard', manufacturer='iPhoneMirror'),
+                HID_OPERATION_TIMEOUT_SECONDS)
+            if (not isinstance(service_id, int) or isinstance(service_id, bool) or
+                    not 0 < service_id < 1 << 64 or service_id == KEYBOARD_SURFACE_CONNECTED):
+                raise ValueError('Universal HID returned an invalid keyboard service ID')
+        except (OSError, EOFError, ConnectionTerminatedError):
+            # A timeout/cancelled RemoteXPC exchange can leave an incomplete
+            # response. Let the owner rebuild HID instead of reusing it.
+            raise
+        except Exception as error:
+            if not best_effort:
+                raise
+            # Unsupported keyboard registration must not disable working touch
+            # control. The caller still fences this connection before ready;
+            # without surface 512, a real key can retry registration later.
+            # With 512 available, use it until the next HID replacement rather
+            # than resending a rejected registration on every keystroke.
+            await self.ipc.emit({'event': 'warning', 'code': 'keyboard_service_unavailable',
+                'message': f'Keyboard initialization failed: {type(error).__name__}: {str(error)[:160]}'})
+            return False
+        self.keyboard_service_id = service_id
+        return True
+
+    async def _native_keyboard_request(self, frame: dict, expected_generation: Optional[int] = None) -> None:
+        request_id = frame.get('requestId')
+        if (frame.get('schema') != MESSAGE_SCHEMA or not isinstance(request_id, str) or
+                not 1 <= len(request_id) <= 64 or not request_id.isascii() or
+                not request_id.isalnum() or type(frame.get('visible')) is not bool):
+            raise ValueError('invalid native keyboard request')
+        if expected_generation is None:
+            expected_generation = self._generation
+        result = {'event': 'native_keyboard_result', 'requestId': request_id,
+                  'generation': expected_generation, 'success': False}
+        try:
+            result['success'] = await self.set_native_keyboard_visible(frame['visible'], expected_generation)
+        except Exception as error:
+            # The host receives an explicit failure, with no unrelated input
+            # or text in the reply. A failed final fence can follow a device
+            # mutation: require the host to retire this route before reuse.
+            result['code'] = type(error).__name__
+            result['uncertain'] = True
+        result['visible'] = self.keyboard_service_id == KEYBOARD_SURFACE_CONNECTED
+        await self.ipc.emit(result)
+
+    async def set_native_keyboard_visible(self, visible: bool, expected_generation: Optional[int] = None) -> bool:
+        if type(visible) is not bool:
+            raise ValueError('native keyboard visibility must be boolean')
+        if expected_generation is None:
+            expected_generation = self._generation
+        async with self._keyboard_lock:
+            async with self._hid_recovery_lock:
+                async with self._hid_lifecycle_lock:
+                    if expected_generation != self._generation:
+                        return False
+                    self._check_media_auth()
+                    hid = self.hid
+                    if hid is None or not getattr(hid, '_bridge_has_system_keyboard', False):
+                        return False
+                    if self.keyboard_service_id is not None:
+                        await asyncio.wait_for(hid.send_keyboard(self.keyboard_service_id, []),
+                                               HID_OPERATION_TIMEOUT_SECONDS)
+                    self._held_keyboard_usages = frozenset()
+                    if visible:
+                        await asyncio.wait_for(hid.remove_keyboard_service(), HID_OPERATION_TIMEOUT_SECONDS)
+                        self.keyboard_service_id = KEYBOARD_SURFACE_CONNECTED
+                        hid._bridge_keyboard_attach_attempted = False
+                        self.show_native_keyboard = True
+                    else:
+                        previous = self.show_native_keyboard
+                        self.show_native_keyboard = False
+                        try:
+                            # A user-requested hide must retry an earlier
+                            # best-effort attach, including after hide/show.
+                            if self.keyboard_service_id == KEYBOARD_SURFACE_CONNECTED:
+                                hid._bridge_keyboard_attach_attempted = False
+                            await self._ensure_keyboard_service(hid)
+                            if self.keyboard_service_id in (None, KEYBOARD_SURFACE_CONNECTED):
+                                raise RuntimeError('Native keyboard hide did not attach a keyboard')
+                        except BaseException:
+                            self.show_native_keyboard = previous
+                            raise
+                    await asyncio.wait_for(hid.send_keyboard(self.keyboard_service_id, []),
+                                           HID_OPERATION_TIMEOUT_SECONDS)
+                    await self._ping_hid()
+                    return True
+
     async def _send_keyboard_report(self, usages: list[int],
                                     timestamp: Optional[int] = None) -> None:
         async with self._hid_lifecycle_lock:
             self._check_media_auth()
             if self.hid is None:
                 raise RuntimeError('Universal HID service is unavailable')
-            if self.keyboard_service_id is None:
-                # Register the virtual keyboard through the same public API used by
-                # The service ID is device-specific; do not assume that a requested
-                # value was accepted until the device confirms it.
-                self.keyboard_service_id = await asyncio.wait_for(
-                    self.hid.create_keyboard_service(
-                        product='iPhoneMirror virtual keyboard', manufacturer='iPhoneMirror'),
-                    HID_OPERATION_TIMEOUT_SECONDS)
-                await self.ipc.emit({'event': 'status', 'code': 'keyboard_service_ready',
-                                     'message': str(self.keyboard_service_id)})
+            keyboard_created = await self._ensure_keyboard_service(self.hid)
             async with self._hid_operation_lock:
                 # Host-side delays can expire while the IPC reader waits on
                 # HID. Preserve the chord at the actual send boundary too:
@@ -5448,6 +5707,9 @@ class TouchSession:
                     timeout=HID_OPERATION_TIMEOUT_SECONDS)
                 self._check_media_auth()
                 self._held_keyboard_usages = frozenset(usages)
+                if keyboard_created:
+                    await self.ipc.emit({'event': 'status', 'code': 'keyboard_service_ready',
+                                         'message': str(self.keyboard_service_id)})
                 if globe and SHORTCUT_TIMING_DIAGNOSTICS:
                     log.info('shortcut_keyboard_sent usages=%s monotonic=%.6f', usages, time.monotonic())
                 if globe:
@@ -5847,9 +6109,9 @@ class TouchSession:
 
 
 async def main_async(rate_hz: int, udid: Optional[str], transport: str,
-                     ddi_dir: Optional[Path] = None) -> None:
+                     ddi_dir: Optional[Path] = None, show_native_keyboard: bool = True) -> None:
     ipc = BridgeChannel()
-    session = TouchSession(ipc, rate_hz, udid, transport, ddi_dir)
+    session = TouchSession(ipc, rate_hz, udid, transport, ddi_dir, show_native_keyboard)
     connection = asyncio.create_task(session.connect())
     disconnected = asyncio.create_task(ipc.wait_for_disconnect())
     try:
@@ -5994,6 +6256,8 @@ def main() -> int:
             stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser()
     parser.add_argument('--rate-hz', type=int, default=120)
+    parser.add_argument('--hide-native-keyboard', action='store_true',
+                        help='连接外部键盘并隐藏手机原生输入法；默认显示')
     parser.add_argument('--replay-media', type=Path)
     parser.add_argument('--media-pipe')
     parser.add_argument('--replay-speed', type=float, default=1.0)
@@ -6071,7 +6335,8 @@ def main() -> int:
             if not args.udid:
                 parser.error('--enable-wifi-sync requires --udid')
             return 0 if asyncio.run(enable_wifi_sync_async(args.udid)) else 1
-        asyncio.run(main_async(args.rate_hz, args.udid, args.transport, args.ddi_dir))
+        asyncio.run(main_async(args.rate_hz, args.udid, args.transport, args.ddi_dir,
+                               not args.hide_native_keyboard))
     except KeyboardInterrupt:
         return 0
     return 0

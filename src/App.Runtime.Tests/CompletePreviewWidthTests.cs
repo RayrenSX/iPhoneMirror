@@ -18,6 +18,11 @@ internal static partial class Program
         app.InitializeComponent();
         SetApplicationDisplayMode(app, ApplicationDisplayMode.Complete);
         var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        // The picture-preservation matrix needs the primary monitor's width;
+        // a narrow secondary work area legitimately caps the window sooner.
+        window.Left = SystemParameters.WorkArea.Left + 40;
+        window.Top = SystemParameters.WorkArea.Top + 40;
+        DrainDispatcher(); window.UpdateLayout();
         var vm = (MainViewModel)KeyboardField(window, "_viewModel");
         var panelType = typeof(MainWindow).GetNestedType("LeftWorkspacePanel", BindingFlags.NonPublic)!;
         var preview = (Border)window.FindName("PreviewPanel");
@@ -53,7 +58,7 @@ internal static partial class Program
                 KeyboardCall(window, "ApplyApplicationDisplayMode"); Layout();
                 var initial = Bounds();
                 var originalPicture = PictureWidth();
-                var expected = Math.Max(480, window.ActualWidth - preview.ActualWidth + originalPicture + 2);
+                var expected = Math.Max(window.MinWidth, window.ActualWidth - preview.ActualWidth + originalPicture + 2);
                 expected = Math.Min(expected, IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(window).Width);
                 var minimumPixels = (int)Math.Ceiling(expected * scale - .001);
                 foreach (var edge in new[] { 1, 2, 4, 5, 7, 8 })
@@ -80,7 +85,12 @@ internal static partial class Program
                 for (var attempt = 0; attempt < 5; attempt++)
                 {
                     ApplyWidth(minimumPixels - 100);
-                    InteractionAssert(PictureWidth() >= originalPicture - 2 &&
+                    // A narrow toolbar/status bar can acquire a horizontal
+                    // scrollbar. Account for its height without allowing the
+                    // window's horizontal resize to squeeze the picture.
+                    var expectedPicture = Math.Min(originalPicture,
+                        (preview.ActualHeight - 2) * sourceWidth / sourceHeight);
+                    InteractionAssert(PictureWidth() >= expectedPicture - 2 &&
                         Math.Abs(window.ActualWidth * scale - minimumPixels) <= 2,
                         $"Repeated shrinking compressed the picture or drifted: {sourceWidth}x{sourceHeight}, left={left}, right={right}, attempt={attempt}, picture={PictureWidth():F2}/{originalPicture:F2}, window={window.ActualWidth * scale:F2}/{minimumPixels}, preview={preview.ActualWidth:F2}x{preview.ActualHeight:F2}, reserve={KeyboardField(window, "_completeResizePreviewWidth")}.");
                 }
@@ -90,18 +100,27 @@ internal static partial class Program
                 ApplyWidth(minimumPixels + 80);
                 var grownPicture = PictureWidth();
                 ApplyWidth(minimumPixels - 80);
-                InteractionAssert(PictureWidth() >= grownPicture - 2 &&
+                var expectedAfterShrink = Math.Min(grownPicture,
+                    (preview.ActualHeight - 2) * sourceWidth / sourceHeight);
+                InteractionAssert(PictureWidth() >= expectedAfterShrink - 2 &&
                     Math.Abs(preview.ActualHeight - originalHeight) < 1,
                     $"Growing/shrinking compressed the displayed picture: {PictureWidth():F2}/{grownPicture:F2}, height={preview.ActualHeight:F2}/{originalHeight:F2}.");
                 var resized = Bounds();
                 var reducedHeight = resized[3] - resized[1] - (int)Math.Round(100 * scale);
                 var expectedPictureAfterHeightChange = Math.Min(preview.ActualWidth - 2,
                     (preview.ActualHeight - 102) * sourceWidth / sourceHeight);
-                InteractionAssert(PerfSetWindowPos(hwnd, 0, 0, 0, (int)Math.Round(800 * scale), reducedHeight, 0x0016),
+                // Change height first so a simultaneous toolbar scrollbar
+                // change cannot alter the expected available picture height.
+                InteractionAssert(PerfSetWindowPos(hwnd, 0, 0, 0, resized[2] - resized[0], reducedHeight, 0x0016),
                     "Could not resize height at the picture boundary.");
                 Layout();
                 InteractionAssert(Math.Abs(PictureWidth() - expectedPictureAfterHeightChange) <= 2,
                     $"Height change did not update the width boundary: {PictureWidth():F2}/{expectedPictureAfterHeightChange:F2}.");
+                ApplyWidth((int)Math.Round(800 * scale));
+                var expectedAfterHeightShrink = Math.Min(expectedPictureAfterHeightChange,
+                    (preview.ActualHeight - 2) * sourceWidth / sourceHeight);
+                InteractionAssert(PictureWidth() >= expectedAfterHeightShrink - 2,
+                    "Shrinking after a height change compressed the picture.");
                 SaveWindowRender(window, Path.Combine(output, $"boundary-{sourceWidth}x{sourceHeight}-left-{left}-right-{right}.png"));
                 Console.WriteLine($"PASS source={sourceWidth}x{sourceHeight}, left={left}, right={right}: six grips, anchored edges, five repeated native shrink attempts, picture width={PictureWidth():F1} DIP.");
             }
@@ -125,7 +144,7 @@ internal static partial class Program
             SetKeyboardField(vm, "_isCapturing", false);
             KeyboardCall(window, "ApplyApplicationDisplayMode");
             ApplyWidth((int)Math.Round(800 * scale));
-            InteractionAssert(Math.Abs(window.ActualWidth - 800) <= 2,
+            InteractionAssert(Math.Abs(window.ActualWidth - Math.Max(800, window.MinWidth)) <= 2,
                 "Stopping video retained the picture width floor.");
             Console.WriteLine("PASS: height changes update the boundary; fullscreen/maximize/mode restore and stopping video release their temporary limits.");
             return 0;

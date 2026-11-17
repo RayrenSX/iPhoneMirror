@@ -18,7 +18,7 @@
         <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
             <StackPanel Margin="0,0,44,0">
                 <TextBlock Text="iPhoneMirror" Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Text="{DynamicResource TrayPanelSubtitle}" Style="{StaticResource SubWindowSubtitle}"/>
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource TrayPanelSubtitle}" Style="{StaticResource SubWindowSubtitle}"/>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnHideClick"
                     ToolTip="{DynamicResource TrayHidePanel}" AutomationProperties.Name="{DynamicResource TrayHidePanel}">

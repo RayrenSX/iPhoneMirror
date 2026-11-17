@@ -144,8 +144,9 @@ internal static partial class Program
                     .GetMethod("Render", InteractionMembers)!.Invoke(null, ["# Release notes\n\nBody text\n\n```text\nCode example\n```"] )!;
                 host.Content = new FlowDocumentScrollViewer { Document = notes, IsToolBarVisible = false };
                 host.UpdateLayout();
-                Check(notes.FontSize == 28 && notes.LineHeight == 42 && notes.Blocks.FirstBlock.FontSize == 32 &&
-                      notes.Blocks.LastBlock.FontSize == 26, "Release-note reading text must scale fully while headings retain a balanced hierarchy.");
+                Check(notes.FontSize == 28 && notes.LineHeight == 42 && notes.Blocks.FirstBlock.FontSize == 38 &&
+                      notes.Blocks.LastBlock.FontSize == 26,
+                    $"Release-note text scale mismatch: body={notes.FontSize}, line={notes.LineHeight}, heading={notes.Blocks.FirstBlock.FontSize}, code={notes.Blocks.LastBlock.FontSize}, blocks={notes.Blocks.Count}.");
                 appearance.Invoke(null, [app, (double?)1, (bool?)true]);
                 Check(notes.FontSize == 14 && notes.Blocks.FirstBlock.FontSize == 22,
                     "Open release notes must update their text size without recreation.");

@@ -648,8 +648,9 @@ WirelessReceiverHub::~WirelessReceiverHub() { stop(); }
 
 void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_path,
     std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate,
-    std::uint32_t raop_port) {
-    if (raop_port == 0 || raop_port > 65535 || raop_port == 7001 || raop_port == 8090)
+    std::uint32_t raop_port, bool media_only) {
+    if (raop_port == 0 || raop_port > 65535 || raop_port == 7001 ||
+        raop_port == 7011 || raop_port == 8090 || (!media_only && raop_port == 5011))
         throw std::invalid_argument("Invalid RAOP port or conflict with AirPlay/DLNA port");
     std::scoped_lock lifecycle_lock(lifecycle_mutex_);
     // A crashed host leaves a signaled process handle and a joinable reader
@@ -698,7 +699,9 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
         quote_argument(receiver_name_) + L" --parent-pid " + std::to_wstring(GetCurrentProcessId()) +
         L" --width " + std::to_wstring(width) + L" --height " + std::to_wstring(height) +
         L" --fps " + std::to_wstring(frame_rate) +
-        L" --mode combined --raop-port " + std::to_wstring(raop_port) + L" --airplay-port 7001";
+        (media_only ? L" --mode media --raop-port " : L" --mode mirror --raop-port ") +
+        std::to_wstring(raop_port) +
+        (media_only ? L" --airplay-port 7011 --dlna-port 8090" : L" --airplay-port 7001");
     STARTUPINFOW startup{.cb = sizeof(startup)};
     PROCESS_INFORMATION process{};
     const auto working_directory = std::filesystem::path(host_path_).parent_path().wstring();
@@ -721,9 +724,9 @@ void WirelessReceiverHub::start(std::wstring receiver_name, std::wstring host_pa
     try {
         logging::write(std::format(
             "wireless_hub host_started pid={} receiver_fp={} capability={}x{}@{} "
-            "mode=combined raop_port={} host_file={}", process.dwProcessId,
+            "mode={} raop_port={} host_file={}", process.dwProcessId,
             anonymous_label(receiver_name_), width, height, frame_rate,
-            raop_port,
+            media_only ? "media" : "mirror", raop_port,
             narrow(std::filesystem::path(host_path_).filename().wstring())));
         worker_ = std::jthread([this](std::stop_token token) { run(token); });
         playback_worker_ = std::jthread(
@@ -814,9 +817,12 @@ MediaCastCommand WirelessReceiverHub::take_media_command() {
 }
 
 bool WirelessReceiverHub::update_media_playback(std::uint64_t command_id,
-    double duration, double position, double rate) noexcept {
+    double duration, double position, double rate,
+    wireless::MediaPlaybackState state) noexcept {
     if (!std::isfinite(duration) || !std::isfinite(position) || !std::isfinite(rate) ||
         command_id == 0 || duration < 0 || position < 0 ||
+        static_cast<std::uint32_t>(state) >
+            static_cast<std::uint32_t>(wireless::MediaPlaybackState::Completed) ||
         stopping_.load(std::memory_order_acquire) ||
         !ready_.load(std::memory_order_acquire)) return false;
     {
@@ -831,6 +837,7 @@ bool WirelessReceiverHub::update_media_playback(std::uint64_t command_id,
         playback_update_.duration = duration;
         playback_update_.position = position;
         playback_update_.rate = rate;
+        playback_update_.state = state;
         playback_update_.pending = true;
     }
     playback_condition_.notify_one();
@@ -897,6 +904,7 @@ void WirelessReceiverHub::run_playback_writer(std::stop_token stop_token) noexce
             header.media_duration = update.duration;
             header.media_position = update.position;
             header.media_rate = update.rate;
+            header.reserved = static_cast<std::uint32_t>(update.state);
         }
         std::scoped_lock write_lock(pipe_write_mutex_);
         if (!pipe_ || !write_all(as_handle(pipe_.get()), &header, sizeof(header))) {

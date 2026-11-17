@@ -37,6 +37,16 @@ internal static partial class Program
                 File.Move(raopArguments + ".tmp", raopArguments, overwrite: true);
                 return 0;
             }
+            if (args is ["--grid-layout-entry", var layoutAssembly, var layoutApplication])
+                return RunGridLayoutEntryProbe(layoutAssembly, layoutApplication);
+            if (args is ["--grid-layout-compatibility"]) return RunGridLayoutCompatibilityTests();
+            if (args is ["--explorer-mapping-lifecycle", var explorerLifecycleOutput]) return RunExplorerMappingLifecycleTests(explorerLifecycleOutput);
+            if (args is ["--rounded-window-recovery", var roundedRecoveryOutput]) return RunRoundedWindowRecoveryTests(roundedRecoveryOutput);
+            if (args is ["--about-usability", var aboutUsabilityOutput]) return RunAboutUsabilityTests(aboutUsabilityOutput);
+            if (args is ["--donation-integrity", var donationIntegrityOutput]) return RunDonationIntegrityTests(donationIntegrityOutput);
+            if (args is ["--phone-frame", var phoneFrameOutput]) return RunPhoneFrameTests(phoneFrameOutput);
+            if (args is ["--device-corner-clipping", var cornerClippingOutput]) return RunDeviceCornerClippingTests(cornerClippingOutput);
+            if (args is ["--independent-corner-profiles", var independentCornersOutput]) return RunIndependentCornerProfileTests(independentCornersOutput);
             if (args is ["--wireless-raop-ports", var portOutput]) return RunWirelessRaopPortTests(portOutput);
             if (args is ["--device-context-menu", var deviceMenuOutput]) return RunDeviceContextMenuTests(deviceMenuOutput);
             if (args is ["--toolbar-customization", var customizeToolbarOutput]) return RunPreviewToolbarCustomizationTests(customizeToolbarOutput);
@@ -49,6 +59,8 @@ internal static partial class Program
             if (args is ["--toolbar-focus-video", var toolbarVideoOutput]) return RunToolbarFocusVideoTests(toolbarVideoOutput);
             if (args is ["--application-mode-visibility", var modeVisibilityOutput]) return RunApplicationModeVisibilityTests(modeVisibilityOutput);
             if (args is ["--complete-window-resize", var completeResizeOutput]) return RunCompleteWindowResizeTests(completeResizeOutput);
+            if (args is ["--window-drag-regions"]) return RunWindowDragRegionTests();
+            if (args is ["--window-drag-input"]) return RunWindowDragRegionTests(nativeInput: true);
             if (args is ["--complete-preview-width-limit", var previewLimitOutput]) return RunCompletePreviewWidthTests(previewLimitOutput);
             if (args is ["--lightweight-preview-bounds", var lightweightBoundsOutput]) return RunLightweightPreviewBoundsTests(lightweightBoundsOutput);
             if (args is ["--workspace-lifecycle-review"]) return RunWorkspaceLifecycleReview();
@@ -89,10 +101,15 @@ internal static partial class Program
             }
             if (args is ["--selector-identities"])
                 return RunSelectorIdentityTests();
+            if (args is ["--wireless-backend-selection", var wirelessSelectionOutput])
+                return RunWirelessBackendSelectionTests(wirelessSelectionOutput);
             if (args is ["--setting-shortcuts", var settingShortcutsOutput])
                 return RunSettingShortcutTests(settingShortcutsOutput);
+            if (args is ["--device-control-settings", var controlSettingsOutput]) return RunDeviceControlPreferencesTests(controlSettingsOutput);
             if (args is ["--settings-categories", var settingsOutput])
                 return RunSettingsCategoryTests(settingsOutput);
+            if (args is ["--proxy-settings", var proxySettingsOutput]) return RunProxySettingsTests(proxySettingsOutput);
+            if (args is ["--proxy-media-playback", var proxyMediaOutput]) return RunProxyMediaPlaybackTests(proxyMediaOutput);
             if (args is ["--mirroring-auto-control", var autoControlOutput])
                 return RunMirroringAutoControlTests(autoControlOutput);
             if (args is ["--repair-streaming"])
@@ -134,10 +151,20 @@ internal static partial class Program
                 return RunControlErrorPresentationTests();
             if (args is ["--automation-api"])
                 return RunAutomationApiTests();
+            if (args is ["--screenshot-benchmark", var screenshotFixture])
+                return RunScreenshotBenchmark(screenshotFixture);
             if (args is ["--coredevice-replay", var mediaRecording])
                 return RunCoreDeviceReplayTest(mediaRecording);
             if (args is ["--device-hub-sidebar", var deviceHubSidebarOutput])
                 return RunDeviceHubSidebarTests(deviceHubSidebarOutput);
+            if (args is ["--device-hub-file-import", var deviceHubFileImportOutput])
+                return RunDeviceHubFileImportTests(deviceHubFileImportOutput);
+            if (args is ["--device-hub-file-delete", var deviceHubFileDeleteOutput])
+                return RunDeviceHubFileDeleteTests(deviceHubFileDeleteOutput);
+            if (args is ["--device-hub-auto-connect", var deviceHubAutoConnectOutput])
+                return RunDeviceHubAutoConnectTests(deviceHubAutoConnectOutput);
+            if (args is ["--device-hub-placement", var deviceHubPlacementOutput])
+                return RunDeviceHubPlacementTests(deviceHubPlacementOutput);
             if (args is ["--device-hub-ui", var hubOutput])
                 return RunDeviceHubSidebarTests(hubOutput);
             if (args is ["--automation-settings", var automationOutput])
@@ -289,6 +316,22 @@ internal static partial class Program
                 finally { mediaApp.Shutdown(); }
                 return 0;
             }
+            if (args is ["--media-lifecycle"])
+                return RunMediaCastLifecycleTests();
+            if (args is ["--media-playback", var mediaPlaybackOutput])
+                return RunMediaCastPlaybackTests(mediaPlaybackOutput);
+            if (args is ["--media-direct-replay", var mediaReplayOutput])
+                return RunMediaCastDirectReplayTests(mediaReplayOutput);
+            if (args is ["--media-direct-failure", var mediaFailureOutput])
+                return RunMediaCastDirectReplayTests(mediaFailureOutput, failureFirst: true);
+            if (args is ["--media-slow-start", var mediaSlowStartOutput])
+                return RunMediaCastSlowStartupTests(mediaSlowStartOutput);
+            if (args is ["--media-load-speed", var mediaLoadSpeedOutput])
+                return RunMediaCastLoadSpeedTests(mediaLoadSpeedOutput);
+            if (args is ["--media-discontinuity", var mediaDiscontinuityOutput])
+                return RunMediaCastDiscontinuityTests(mediaDiscontinuityOutput);
+            if (args is ["--media-discontinuity", var selectedMediaDiscontinuityOutput, var mediaScenario])
+                return RunMediaCastDiscontinuityTests(selectedMediaDiscontinuityOutput, mediaScenario);
             if (args is ["--virtual-camera-regression"])
                 return RunVirtualCameraRegressionTests();
             if (args is ["--virtual-camera-live", var cameraOutput,
@@ -332,8 +375,16 @@ internal static partial class Program
                 return RunAdaptiveToolbarTests(toolbarOutput);
             if (args is ["--mirroring-sidebar", var sidebarOutput])
                 return RunMirroringSidebarTests(sidebarOutput);
+            if (args is ["--wireless-preview-rebind", var wirelessRebindOutput])
+                return RunWirelessPreviewRebindTests(wirelessRebindOutput);
+            if (args is ["--native-keyboard-settings", var nativeKeyboardOutput])
+                return RunNativeKeyboardSettingsTests(nativeKeyboardOutput);
             if (args is ["--tray-startup-theme", var trayThemeOutput])
                 return RunTrayStartupThemeTests(trayThemeOutput);
+            if (args is ["--tray-startup-settings", var traySettingsOutput])
+                return RunTrayStartupSettingsTests(traySettingsOutput);
+            if (args is ["--hidden-startup-bindings", var hiddenBindingsOutput])
+                return RunHiddenStartupBindingTests(hiddenBindingsOutput);
             if (args is ["--theme-content", var themeContentOutput])
                 return RunThemeContentAudit(themeContentOutput);
             if (args is ["--tray-mode", var trayOutput])
@@ -429,6 +480,10 @@ internal static partial class Program
                 return ReverseControlCountdownTests.Run();
             if (args is ["--control-binding", var bindingOutput])
                 return RunControlBindingTests(bindingOutput);
+            if (args is ["--wired-final-retry", var finalRetryOutput])
+                return RunWiredFinalRetryTests(finalRetryOutput);
+            if (args is ["--wired-final-retry-live", var finalRetryUdid, var finalRetryLiveOutput])
+                return RunWiredFinalRetryLive(finalRetryUdid, finalRetryLiveOutput);
             if (args is ["--wired-control-live-countdown"])
                 return WiredControlLiveCountdownTest.Run();
             if (args is ["--live-record", .. var recordingArgs])
@@ -443,6 +498,8 @@ internal static partial class Program
                 return RunUiPreview(themeName, surface);
             if (args.Length != 0)
                 throw new ArgumentException("Unknown runtime test arguments: " + string.Join(" ", args));
+            TestGridStarSizeBoundaries();
+            TestGridMixedDefinitions();
             RunAutomationApiTests();
             RunInteractionRegressionTests();
             TestWheelCancellationState();
@@ -1158,7 +1215,13 @@ internal static partial class Program
               }]
             }]
             """;
-        var release = parseLatest.Invoke(null, [releaseJson, true, false, Type.Missing]) ??
+        // The shared thumb assertion checks its arranged hit area. A two-line
+        // release leaves the scrollbar collapsed with ActualWidth=0, so use
+        // notes that genuinely overflow the update window's viewport.
+        var scrollableReleaseJson = releaseJson.Replace("Runtime XAML construction test",
+            string.Join("\\n\\n", Enumerable.Repeat("Runtime XAML construction test", 80)),
+            StringComparison.Ordinal);
+        var release = parseLatest.Invoke(null, [scrollableReleaseJson, true, false, Type.Missing]) ??
             throw new InvalidOperationException("Release fixture was not parsed.");
 
         var clientType = assembly.GetType(
@@ -1371,7 +1434,11 @@ internal static partial class Program
                     throw new InvalidOperationException(
                         "Developer tools window must be independent and non-topmost.");
                 AssertSelfDrawnWindowCorners(window);
-                AssertCatalogCount(windowType, window, "WorkspaceItems", 7);
+                AssertCatalogKeys(windowType, window, "WorkspaceItems",
+                [
+                    "device-hub", "workspace-mirroring", "workspace-devices", "workspace-settings",
+                    "first-run-setup", "workspace-output", "driver-manager", "about",
+                ]);
                 AssertCatalogKeys(windowType, window, "WindowItems",
                 [
                     "advanced-settings", "text-input", "device-binding",
@@ -2008,19 +2075,6 @@ internal static partial class Program
         }
     }
 
-    private static void AssertCatalogCount(Type windowType, object window,
-        string propertyName, int expected)
-    {
-        var value = windowType.GetProperty(propertyName,
-            BindingFlags.Instance | BindingFlags.Public)?.GetValue(window) as IEnumerable ??
-            throw new InvalidOperationException(
-                $"Developer catalog was not found: {propertyName}");
-        var actual = value.Cast<object>().Count();
-        if (actual != expected)
-            throw new InvalidOperationException(
-                $"Developer catalog {propertyName} expected {expected}, got {actual}.");
-    }
-
     private static void AssertCatalogKeys(Type windowType, object window,
         string propertyName, string[] expected)
     {
@@ -2074,12 +2128,13 @@ internal static partial class Program
             throw new InvalidOperationException(
                 "Release notes did not create a vertical scrollbar.");
         scrollBar.ApplyTemplate();
-        if (scrollBar.Width != 10 ||
+        var thumb = scrollBar.Template.FindName("ScrollThumb", scrollBar) as WpfThumb;
+        if (!scrollBar.IsVisible || scrollBar.Width != 10 ||
             scrollBar.MinWidth != 0 || Math.Abs(scrollBar.RenderTransform.Value.OffsetX) > .01 ||
-            scrollBar.Template.FindName("ScrollThumb", scrollBar) is not WpfThumb thumb ||
+            thumb is null ||
             thumb.ActualWidth < 10)
             throw new InvalidOperationException(
-                "Release notes did not use the shared modern scrollbar template.");
+                $"Release notes did not use the shared modern scrollbar template: width={scrollBar.Width}, min={scrollBar.MinWidth}, offset={scrollBar.RenderTransform.Value.OffsetX}, visible={scrollBar.IsVisible}, thumb={thumb?.ActualWidth}, actual={scrollBar.ActualWidth}.");
     }
 
     private static T? FindVisualDescendant<T>(DependencyObject root, Func<T, bool> match)

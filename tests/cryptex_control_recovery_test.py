@@ -17,6 +17,8 @@ class CryptexControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         session = bridge.TouchSession(Ipc(), 120, 'test-device')
         session._ddi_uses_cryptex = True
         session.hid = Hid()
+        session.keyboard_service_id = 512
+        session.hid._bridge_keyboard_attach_attempted = True
         session.auth_mode = 'mediastream'
         session.gate_open = True
         return session
@@ -57,7 +59,7 @@ class CryptexControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         image.assert_not_awaited()
         gate.assert_not_awaited()
         await session._send_keyboard_report([4])
-        self.assertEqual([(512, [4])], session.hid.keys)
+        self.assertEqual([(512, []), (512, [4])], session.hid.keys)
 
     async def test_media_auth_rotation_defers_held_input_then_refreshes_after_release(self):
         for kind in ('touch', 'keyboard', 'button'):
@@ -92,7 +94,7 @@ class CryptexControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(session._recovering)
         self.assertEqual('mediastream', session.auth_mode)
         self.assertEqual(bridge.MAX_SLOTS, len(session.hid.reports))
-        self.assertEqual([(512, [])], session.hid.keys)
+        self.assertEqual([(512, []), (512, [])], session.hid.keys)
 
     async def test_media_auth_sender_failure_does_not_replay_the_old_press(self):
         session = self.session()

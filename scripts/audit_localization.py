@@ -265,10 +265,14 @@ def audit(require_installer=False):
             for key in re.findall(r'\b(?:(?:LocalizationService|DriverLocalization)\.Get|L)\(\s*"(\w+)"\s*\)', content):
                 if re.search(r'(?<!\{)\{\d+', catalog['en-US'].get(key, '')):
                     errors.append(f'{path.relative_to(ROOT)}: unformatted string template {key}')
-            if re.search(r'string [LF]\(string key', content):
-                for key in re.findall(r'\b[LF]\(\s*"(\w+)"(?!\s*\+)', content):
+            for alias, prefix in re.findall(
+                    r'string\s+([LF])\(string key[^)]*\)\s*=>\s*(?:LocalizationService|DriverLocalization)\.(?:Get|Format)\(\s*(?:"(\w*)"\s*\+\s*)?key\b', content):
+                for suffix in re.findall(rf'\b{alias}\(\s*"(\w+)"(?!\s*\+)', content):
+                    key = prefix + suffix
                     if key not in catalog['en-US']:
                         errors.append(f'{path.relative_to(ROOT)}: undefined alias string key {key}')
+                    elif alias == 'L' and re.search(r'(?<!\{)\{\d+', catalog['en-US'][key]):
+                        errors.append(f'{path.relative_to(ROOT)}: unformatted string template {key}')
             if path.name == 'BluetoothHidMouseService.cs':
                 for call in re.findall(r'\bSetStatus\((.*?)\);', content, re.S):
                     if re.search(r'\$?"[A-Za-z][^"\n]* [A-Za-z][^"\n]*"', call):

@@ -24,6 +24,7 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
     private bool _closed;
     private int _pixelWidth, _pixelHeight;
     private IReadOnlyList<KeyboardMappingEntry> _entries = [];
+    private DeviceFrameHitTest? _frameHitTest;
     internal MappingPreviewSurface Surface { get; private set; }
     internal bool IsPicking => _pick is not null;
 
@@ -31,6 +32,7 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
     {
         IPhoneMirror.SharedUI.Services.WindowWorkAreaController.UseOwnerBounds(this);
         Surface = surface;
+        _frameHitTest = surface.Frame is { } frame ? new DeviceFrameHitTest(frame) : null;
         Title = LocalizationService.Get("MappingPicking");
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -51,7 +53,7 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
             _source?.AddHook(Hook);
             ApplyInputMode();
         };
-        Closed += (_, _) => { _closed = true; _source?.RemoveHook(Hook); _source = null; _pickingToolbar?.Close(); Complete(null); };
+        Closed += (_, _) => { _closed = true; _source?.RemoveHook(Hook); _source = null; _pickingToolbar?.Close(); Complete(null); _frameHitTest = null; };
         Deactivated += (_, _) => { if (IsPicking) Complete(null); };
         KeyDown += (_, e) =>
         {
@@ -107,6 +109,8 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
     internal void Update(MappingPreviewSurface surface, IReadOnlyList<KeyboardMappingEntry> entries)
     {
         var cancel = IsPicking && Surface != surface;
+        if (!ReferenceEquals(Surface.Frame, surface.Frame))
+            _frameHitTest = surface.Frame is { } frame ? new DeviceFrameHitTest(frame) : null;
         Surface = surface;
         _entries = entries;
         if (cancel) Complete(null);
@@ -116,7 +120,7 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
         if (!IsPicking && GetCursorPos(out var cursor))
         {
             ScreenToClient(Surface.Window, ref cursor);
-            _cursor = PreviewCoordinateMapper.Normalize(cursor.X, cursor.Y, _pixelWidth, _pixelHeight, Surface.Width, Surface.Height);
+            _cursor = NormalizePixels(cursor.X, cursor.Y);
         }
         RefreshDrawing();
     }
@@ -145,12 +149,30 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
     private (double X, double Y)? Normalize(Point point)
     {
         if (ActualWidth <= 0 || ActualHeight <= 0) return null;
-        return PreviewCoordinateMapper.Normalize(point.X * _pixelWidth / ActualWidth,
-            point.Y * _pixelHeight / ActualHeight, _pixelWidth, _pixelHeight, Surface.Width, Surface.Height);
+        return NormalizePixels(point.X * _pixelWidth / ActualWidth, point.Y * _pixelHeight / ActualHeight);
+    }
+
+    private (double X, double Y)? NormalizePixels(double x, double y)
+    {
+        if (Surface.Frame is { } frame)
+        {
+            var bounds = PhoneFrameGeometry.ScreenBounds(frame, Surface.FrameRotation, _pixelWidth, _pixelHeight);
+            var input = new Controls.PreviewPointerEventArgs(Controls.PreviewPointerKind.Move,
+                (int)x, (int)y, 0, 0, _pixelWidth, _pixelHeight, Surface.Width, Surface.Height, Surface.Rotation, 0, 0);
+            return _frameHitTest?.Contains(Surface.FrameRotation, input) == true
+                ? ((x - bounds.X) / bounds.Width, (y - bounds.Y) / bounds.Height) : null;
+        }
+        return PreviewCoordinateMapper.Normalize(x, y, _pixelWidth, _pixelHeight, Surface.Width, Surface.Height);
     }
 
     private Point Project(double x, double y)
     {
+        if (Surface.Frame is { } frame)
+        {
+            var bounds = PhoneFrameGeometry.ScreenBounds(frame, Surface.FrameRotation, _pixelWidth, _pixelHeight);
+            return new((bounds.X + x * bounds.Width) * ActualWidth / Math.Max(1, _pixelWidth),
+                (bounds.Y + y * bounds.Height) * ActualHeight / Math.Max(1, _pixelHeight));
+        }
         var point = PreviewCoordinateMapper.Project(x, y, _pixelWidth, _pixelHeight, Surface.Width, Surface.Height);
         return new(point.X * ActualWidth / Math.Max(1, _pixelWidth), point.Y * ActualHeight / Math.Max(1, _pixelHeight));
     }

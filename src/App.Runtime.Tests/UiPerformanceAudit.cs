@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -28,7 +29,16 @@ internal static partial class Program
         var failures = new List<string>();
         var metrics = new Dictionary<string, object>();
         void Verify(bool condition, string message) { if (!condition) failures.Add(message); }
-        var owner = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        var logFixture = Path.Combine(Path.GetFullPath(output), "about-native-log.txt");
+        File.WriteAllText(logFixture, "About live-log thread regression fixture.\n");
+        var previousLogFile = Environment.GetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE");
+        MainWindow owner;
+        try
+        {
+            Environment.SetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE", logFixture);
+            owner = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        }
+        finally { Environment.SetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE", previousLogFile); }
         try
         {
             var original = new ScaleTransform(0.9, 0.9);
@@ -77,21 +87,36 @@ internal static partial class Program
             about.Owner = owner;
             var timer = (DispatcherTimer)typeof(AboutWindow).GetField("_logTimer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(about)!;
             var ticks = 0;
+            var logUpdates = 0;
+            var offThreadLogUpdates = 0;
+            var observable = (INotifyPropertyChanged)viewModel;
+            PropertyChangedEventHandler observeLog = (_, args) =>
+            {
+                if (args.PropertyName != "LogText") return;
+                Interlocked.Increment(ref logUpdates);
+                if (!owner.Dispatcher.CheckAccess()) Interlocked.Increment(ref offThreadLogUpdates);
+            };
             EventHandler countTick = (_, _) => ticks++;
+            observable.PropertyChanged += observeLog;
             timer.Tick += countTick;
             try
             {
                 about.Show();
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(650));
                 metrics["aboutOverviewLogTicks650ms"] = ticks;
-                Verify(!timer.IsEnabled && ticks == 0, "About overview polls invisible diagnostic logs.");
+                metrics["aboutOverviewLogUpdates"] = logUpdates;
+                Verify(timer.IsEnabled && ticks > 0, "The merged About overview does not refresh its visible diagnostic log.");
+                Verify(logUpdates > 0 && offThreadLogUpdates == 0,
+                    "Asynchronous About log reads did not publish their result on the UI thread.");
                 var tabs = (TabControl)about.FindName("AboutTabs");
-                tabs.SelectedIndex = 2;
-                AdvanceDispatcher(TimeSpan.FromMilliseconds(650));
-                Verify(timer.IsEnabled && ticks > 0, "Visible diagnostics no longer refresh.");
                 tabs.SelectedIndex = 1;
-                Verify(!timer.IsEnabled, "Update settings keep diagnostic polling active.");
-                tabs.SelectedIndex = 2;
+                var hiddenTicks = ticks;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(650));
+                Verify(!timer.IsEnabled && ticks == hiddenTicks, "The support page keeps diagnostic polling active.");
+                about.ShowDiagnostics();
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
+                Verify(tabs.SelectedIndex == 0 && timer.IsEnabled,
+                    "The diagnostics shortcut does not open the overview and resume visible log polling.");
                 about.Hide();
                 Verify(!timer.IsEnabled, "Hidden About window keeps polling.");
                 about.Show();
@@ -102,7 +127,7 @@ internal static partial class Program
                 about.WindowState = WindowState.Normal;
                 Verify(timer.IsEnabled, "Restoring diagnostics does not resume polling.");
             }
-            finally { about.Close(); timer.Tick -= countTick; }
+            finally { about.Close(); timer.Tick -= countTick; observable.PropertyChanged -= observeLog; }
             Verify(!timer.IsEnabled, "Closed About window keeps polling.");
 
             var open = typeof(MainWindow).GetMethod("OpenDeveloperSurface", BindingFlags.Instance | BindingFlags.NonPublic)!;

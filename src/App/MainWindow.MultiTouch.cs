@@ -32,10 +32,10 @@ public partial class MainWindow
                 if (mapped is null) return; // Letterbox bars do not start contacts.
                 var sourceWindow = GetControlKeyboardWindow(udid);
                 var guard = CapturePointerSendGuard(sourceWindow);
-                var portrait = _viewModel.AppliedBluetoothPortraitMouseDirection;
-                var landscape = _viewModel.AppliedBluetoothLandscapeMouseDirection;
-                var reverseX = _viewModel.AppliedBluetoothMouseReverseHorizontal;
-                var reverseY = _viewModel.AppliedBluetoothMouseReverseVertical;
+                var portrait = (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(udid).PortraitDirection;
+                var landscape = (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(udid).LandscapeDirection;
+                var reverseX = _viewModel.ControlPreferencesFor(udid).ReverseHorizontal;
+                var reverseY = _viewModel.ControlPreferencesFor(udid).ReverseVertical;
                 var route = _viewModel.CaptureTouchRoute(udid,
                     () => guard() && GetControlKeyboardWindow(udid) == sourceWindow && contact?.Pressed != false,
                     (x, y) => BluetoothMouseOrientationMapper.MapNormalized(x, y, width, height, input.Rotation,

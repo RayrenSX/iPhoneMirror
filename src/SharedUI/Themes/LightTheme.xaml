@@ -50,6 +50,9 @@
     <SolidColorBrush x:Key="PrimaryActionFocusBrush" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="PrimaryActionDisabledBrush" Color="#FFE5E5E8"/>
     <SolidColorBrush x:Key="PrimaryActionDisabledTextBrush" Color="#FF59595D"/>
+    <SolidColorBrush x:Key="SecondaryActionDisabledBrush" Color="#03FFFFFF"/>
+    <SolidColorBrush x:Key="SecondaryActionDisabledBorderBrush" Color="#0A000000"/>
+    <SolidColorBrush x:Key="ButtonDisabledTextBrush" Color="#FF88888F"/>
     <SolidColorBrush x:Key="ControlFillBrush" Color="#BFFFFFFF"/>
     <SolidColorBrush x:Key="ControlHoverBrush" Color="#FFF0F0F2"/>
     <SolidColorBrush x:Key="ControlPressedBrush" Color="#FFE5E5E8"/>

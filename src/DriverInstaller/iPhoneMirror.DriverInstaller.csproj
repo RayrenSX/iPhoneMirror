@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror.Driver</AssemblyName>
     <RootNamespace>IPhoneMirror.DriverInstaller</RootNamespace>
-    <Version>1.8.5-pre5</Version>
+    <Version>1.8.5-pre6</Version>
     <AssemblyVersion>1.8.5.0</AssemblyVersion>
     <FileVersion>1.8.5.0</FileVersion>
     <Authors>RayrenSX</Authors>
@@ -37,6 +37,7 @@
              Link="Networking\SegmentedHttpDownloader.cs" />
     <Compile Include="..\Shared\Security\ElevationPathLock.cs"
              Link="Security\ElevationPathLock.cs" />
+    <Compile Include="..\SharedUI\Services\WpfLayoutCompatibility.cs" Link="Services\WpfLayoutCompatibility.cs" />
     <Compile Include="..\SharedUI\Services\AccessibilityAppearance.cs" Link="Services\AccessibilityAppearance.cs" />
     <Compile Include="..\SharedUI\Services\SupportedUiCultures.cs" Link="Services\SupportedUiCultures.cs" />
     <Compile Include="..\SharedUI\Services\WindowWorkAreaController.cs"

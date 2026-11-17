@@ -208,6 +208,10 @@ class ManagementTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(callable(getattr(self.management, "_" + action, None)), action)
         self.assertFalse(ACTIONS["install_app"]["public"])
         self.assertFalse(ACTIONS["install_profile"]["public"])
+        self.assertFalse(ACTIONS["upload_file"]["public"])
+        self.assertFalse(ACTIONS["upload_file"]["readOnly"])
+        self.assertFalse(ACTIONS["delete_file"]["public"])
+        self.assertFalse(ACTIONS["delete_file"]["readOnly"])
         self.assertTrue(media.isdisjoint(ACTIONS), "Unusable live-media actions must be removed from the contract")
 
     async def test_process_numeric_identifiers_stay_numeric(self):

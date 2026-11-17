@@ -21,6 +21,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         new(StringComparer.OrdinalIgnoreCase);
     private bool _disposing;
     private bool _disposed;
+    private bool _updatingPhoneFrame;
 
     internal event Action<string, nint>? ReverseControlRequested;
     internal event Action<string, nint>? UsbControlRequested;
@@ -46,6 +47,119 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal bool IsOpen(DeviceViewModel? device) => device is not null &&
         _windows.ContainsKey(device.Udid);
     internal bool HasAnyOpen => _windows.Count != 0;
+    internal event Action? PhoneFrameChanged;
+
+    internal string SelectedFrameColor => viewModel.SelectedDevice is { } device ? FrameAppearance(device).SelectedColorId ?? "" : "";
+    internal bool CanSelectFrameColor => viewModel.SelectedDevice is { IsMediaCast: false } device &&
+        DeviceFrameCatalog.Find(device.ProductType) is not null;
+
+    private DeviceAppearance FrameAppearance(DeviceViewModel device)
+    {
+        var colors = (System.Windows.Application.Current as App)?.UpdateSettings.DeviceFrameColors;
+        var selected = colors?.FirstOrDefault(pair => DeviceViewModel.UdidEquals(pair.Key, device.Udid)).Value;
+        return device.Appearance with { SelectedColorId = selected };
+    }
+
+    internal bool SetSelectedFrameColor(string color)
+    {
+        if (viewModel.SelectedDevice is not { } device || System.Windows.Application.Current is not App app) return false;
+        if (color.Length != 0 && !(DeviceFrameCatalog.Find(device.ProductType)?.Colors ?? []).Any(c => c.Id == color)) return false;
+        var previous = app.UpdateSettings.DeviceFrameColors ?? new(StringComparer.OrdinalIgnoreCase);
+        var changed = new Dictionary<string, string>(previous, StringComparer.OrdinalIgnoreCase);
+        if (color.Length == 0) changed.Remove(device.Udid); else changed[device.Udid] = color;
+        var oldAppearance = FrameAppearance(device);
+        var appearance = device.Appearance with { SelectedColorId = color };
+        _windows.TryGetValue(device.Udid, out var window);
+        if (window is not null && !window.UpdateDeviceAppearance(device.ProductType, appearance)) return false;
+        app.UpdateSettings.DeviceFrameColors = changed;
+        if (!app.SaveUpdateSettings())
+        {
+            app.UpdateSettings.DeviceFrameColors = previous;
+            window?.UpdateDeviceAppearance(device.ProductType, oldAppearance);
+            return false;
+        }
+        PhoneFrameChanged?.Invoke();
+        return true;
+    }
+
+    internal (bool Enabled, bool Available, string Description) GetPhoneFrameState()
+    {
+        var device = viewModel.SelectedDevice;
+        var description = LocalizationService.Get("ProjectionPhoneFrameHelp");
+        if (device is not null)
+            description += " " + DeviceFrameCatalog.Describe(DeviceFrameCatalog.Resolve(device.ProductType, FrameAppearance(device)));
+        return (SavedPhoneFrameEnabled, true, description);
+    }
+
+    private static bool SavedPhoneFrameEnabled =>
+        (System.Windows.Application.Current as App)?.UpdateSettings.PhoneFrameEnabled == true;
+
+    private static void ApplySavedPhoneFramePreference(NativePreviewWindow window)
+    {
+        var enabled = SavedPhoneFrameEnabled;
+        if (window.PhoneFrameEnabled != enabled && (!enabled || window.CanShowPhoneFrame))
+            _ = window.SetPhoneFrame(enabled);
+        window.RefreshPhoneFramePreference();
+    }
+
+    internal Task<bool> SetPhoneFrameAsync(bool enabled) => Task.FromResult(SavePhoneFramePreference(enabled));
+
+    private bool SavePhoneFramePreference(bool enabled)
+    {
+        if (_updatingPhoneFrame || System.Windows.Application.Current is not App app) return false;
+        var previous = app.UpdateSettings.PhoneFrameEnabled;
+        var changed = new List<(NativePreviewWindow Window, bool Enabled)>();
+        var saved = false;
+        _updatingPhoneFrame = true;
+        try
+        {
+            foreach (var window in _windows.Values)
+            {
+                if (window.PhoneFrameEnabled == enabled || (enabled && !window.CanShowPhoneFrame)) continue;
+                changed.Add((window, window.PhoneFrameEnabled));
+                if (!window.SetPhoneFrame(enabled)) return false;
+            }
+            app.UpdateSettings.PhoneFrameEnabled = enabled;
+            saved = app.SaveUpdateSettings();
+            return saved;
+        }
+        catch (Exception error)
+        {
+            DiagnosticLogger.Exception("settings", "global_phone_frame_failed", error);
+            return false;
+        }
+        finally
+        {
+            if (!saved)
+            {
+                app.UpdateSettings.PhoneFrameEnabled = previous;
+                foreach (var (window, wasEnabled) in changed.AsEnumerable().Reverse())
+                {
+                    try { _ = window.SetPhoneFrame(wasEnabled); }
+                    catch (Exception error) { DiagnosticLogger.Exception("settings", "phone_frame_rollback_failed", error); }
+                }
+            }
+            _updatingPhoneFrame = false;
+            foreach (var window in _windows.Values) window.RefreshPhoneFramePreference();
+            PhoneFrameChanged?.Invoke();
+        }
+    }
+
+    internal void ConfigurePhoneFrameSettings(ProjectionSettingsWindow settings)
+    {
+        settings.ConfigurePhoneFrame(GetPhoneFrameState, SetPhoneFrameAsync);
+        settings.ConfigurePhoneFrameColors(() => DeviceFrameCatalog.ColorOptions(viewModel.SelectedDevice?.ProductType),
+            () => SelectedFrameColor, SetSelectedFrameColor, () => CanSelectFrameColor);
+        void Refresh() => settings.RefreshPhoneFrame();
+        void OnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => Refresh();
+        PhoneFrameChanged += Refresh;
+        viewModel.PropertyChanged += OnPropertyChanged;
+        settings.Closed += (_, _) =>
+        {
+            PhoneFrameChanged -= Refresh;
+            viewModel.PropertyChanged -= OnPropertyChanged;
+        };
+    }
 
     internal void SetBluetoothWindowMouseEnabled(bool enabled)
     {
@@ -114,6 +228,10 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         return width != 0 && height != 0;
     }
 
+    internal (DeviceFrameProfile? Frame, int Rotation) GetDeviceFrame(string udid) =>
+        _windows.TryGetValue(udid, out var window)
+            ? (window.ActiveDeviceFrame, window.DeviceFrameRotation) : (null, 0);
+
     internal bool IsFullScreen(string udid) =>
         _windows.TryGetValue(udid, out var window) && window.IsFullScreen;
 
@@ -133,6 +251,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             var currentHandle = viewModel.GetDeviceSessionHandle(device.Udid);
             if (currentHandle != 0 && existing.SessionHandle == currentHandle)
             {
+                _ = existing.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
+                ApplySavedPhoneFramePreference(existing);
                 existing.Activate();
                 viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_reused",
                     ("device", AppLog.Device(device.Udid)),
@@ -140,6 +260,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                 return Task.FromResult((true, string.Empty));
             }
             _windows.Remove(device.Udid);
+            PhoneFrameChanged?.Invoke();
             existing.Dispose();
         }
         // A joining request may stop waiting, but does not own another
@@ -226,6 +347,11 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                     device.Udid, started.Handle, preserveIfSelected: true);
             return (false, LocalizationService.Get("PreviewRendererAttachFailed"));
         }
+        _ = window.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
+        window.PhoneFramePreferenceRequested = SavePhoneFramePreference;
+        window.PhoneFramePreference = () => SavedPhoneFrameEnabled;
+        ApplySavedPhoneFramePreference(window);
+        window.PhoneFrameChanged += () => { if (!_updatingPhoneFrame) PhoneFrameChanged?.Invoke(); };
         window.BluetoothWindowMouseEnabled = viewModel.BluetoothWindowMouseEnabled;
         _windows[device.Udid] = window;
         window.ActivationChanged += active =>
@@ -243,6 +369,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             if (!_windows.TryGetValue(device.Udid, out var tracked) ||
                 !ReferenceEquals(tracked, window)) return;
             _windows.Remove(device.Udid);
+            PhoneFrameChanged?.Invoke();
             PreviewClosed?.Invoke(device.Udid);
             var closingHandle = window.SessionHandle;
             viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_closed",
@@ -291,11 +418,13 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         if (handle != 0 && _sessionRecoveries.Contains(udid) &&
             window.RebindSession(handle))
         {
+            ApplySavedPhoneFramePreference(window);
             return;
         }
         if (window.SessionHandle == handle) return;
 
         _windows.Remove(udid);
+        PhoneFrameChanged?.Invoke();
         PreviewClosed?.Invoke(udid);
         viewModel.AddDiagnosticLog(AppLog.Event("independent_preview_handle_invalidated",
             ("device", AppLog.Device(udid)),
@@ -330,6 +459,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             !_windows.TryGetValue(udid, out var window)) return;
 
         _windows.Remove(udid);
+        PhoneFrameChanged?.Invoke();
         PreviewClosed?.Invoke(udid);
         viewModel.AddDiagnosticLog(AppLog.Event(
             "independent_preview_recovery_failed",
@@ -368,6 +498,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        foreach (var window in _windows.Values) window.RefreshPhoneFrameDescription();
+        PhoneFrameChanged?.Invoke();
         foreach (var (udid, presentation) in _protectionStates.ToArray())
             try
             {
@@ -403,11 +535,15 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal void UpdateDevice(DeviceViewModel? device, uint width, uint height)
     {
         if (device is null) return;
+        if (_windows.TryGetValue(device.Udid, out var appearanceWindow))
+        {
+            _ = appearanceWindow.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
+            ApplySavedPhoneFramePreference(appearanceWindow);
+        }
         UpdateDevice(device.Udid, width, height);
-        // Do not re-apply the model default here. The detached window owns
-        // the user's per-window corner override (including "remove corners");
-        // applying the profile on every size/status notification would undo
-        // that menu choice as soon as the window is focused or resized.
+        // The detached window refreshes its base model/panel profile with
+        // these notifications and keeps its per-window "remove corners"
+        // choice independent of that profile.
     }
 
     internal void HideForShutdown()

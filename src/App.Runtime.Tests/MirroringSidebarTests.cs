@@ -102,7 +102,7 @@ internal static partial class Program
                         owner.UpdateLayout(); DrainDispatcher();
                         InteractionAssert(topFrame.IsVisible && page.IsVisible,
                             "The original toolbar and the Mirroring sidebar cannot be shown together.");
-                        SaveWindowRender(owner, Path.Combine(output, $"mirroring-actions-{theme}.png"));
+                        SaveWindowRender(owner, Path.Combine(output, $"mirroring-actions-{culture}-{theme}.png"));
                         topFrame.ClearValue(UIElement.VisibilityProperty);
                         topActions.ClearValue(UIElement.VisibilityProperty);
                     }

@@ -10,12 +10,15 @@ namespace IPhoneMirror.App;
 
 public partial class App : Application
 {
+    static App() => WpfLayoutCompatibility.Enable();
+
     internal bool IsSystemSessionEnding { get; private set; }
     internal bool IsUiPreviewMode { get; set; }
     internal CompactLaunchOptions LaunchOptions { get; private set; } = new(false, null);
     internal bool AutomationBackground { get; set; }
     private readonly UpdateSettingsStore _settingsStore = new();
-    private readonly GitHubReleaseClient _releaseClient = new();
+    private GitHubReleaseClient? _releaseClient;
+    private GitHubReleaseClient ReleaseClient => _releaseClient ??= new();
     private AboutWindow? _aboutWindow;
     private UpdateWindow? _updateWindow;
     private SingleInstanceCoordinator? _singleInstanceCoordinator;
@@ -67,6 +70,7 @@ public partial class App : Application
             AutomationBackground = LaunchOptions.AutomationBackground;
             AppIdentity.Initialize();
             UpdateSettings = _settingsStore.Load();
+            AppProxyPolicy.Apply(UpdateSettings.NetworkProxy);
             RefreshInterfaceDescriptionVisibility();
             ThemeService.Apply(UpdateSettings.Theme);
             EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
@@ -198,10 +202,10 @@ public partial class App : Application
         if (manual && !settings.NotifyStableReleases &&
             !settings.NotifyPrereleaseReleases)
             settings.NotifyStableReleases = true;
-        var release = await _releaseClient.GetLatestAsync(settings, cancellationToken);
+        var release = await ReleaseClient.GetLatestAsync(settings, cancellationToken);
         if (release is null || release.Version <= VersionManager.Current)
             return null;
-        return await _releaseClient.EnrichReleaseNotesAsync(release, cancellationToken);
+        return await ReleaseClient.EnrichReleaseNotesAsync(release, cancellationToken);
     }
 
     internal void ShowAboutWindow(Window owner, MainViewModel mainViewModel,
@@ -237,7 +241,7 @@ public partial class App : Application
             _updateWindow.Activate();
             return;
         }
-        var window = new UpdateWindow(release, _releaseClient, autoDownload,
+        var window = new UpdateWindow(release, ReleaseClient, autoDownload,
             UpdateSettings.AllowMirrorFallback)
         {
             Owner = owner,
@@ -256,7 +260,7 @@ public partial class App : Application
             $"v{previewVersion}", LocalizationService.Get("DeveloperPreviewUpdateTitle"),
             LocalizationService.Get("DeveloperPreviewUpdateBody"),
             DateTimeOffset.Now, previewVersion, true, null, null, null);
-        var window = new UpdateWindow(release, _releaseClient, autoDownload: false,
+        var window = new UpdateWindow(release, ReleaseClient, autoDownload: false,
             allowMirrorFallback: false, readOnlyPreview: true)
         {
             Owner = owner,
@@ -302,7 +306,7 @@ public partial class App : Application
 
         _ = SaveUpdateSettings();
         ThemeService.Shutdown();
-        try { _releaseClient.Dispose(); }
+        try { _releaseClient?.Dispose(); }
         catch (Exception error)
         {
             DiagnosticLogger.Exception("updater", "client_dispose_failed", error);

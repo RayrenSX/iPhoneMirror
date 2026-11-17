@@ -11,18 +11,20 @@ internal static class RuntimeBinaryIntegrity
     private static readonly IReadOnlyDictionary<string, string> WirelessHashes =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
+            ["iPhoneMirror.AirPlayControl.dll"] =
+                "85832a1f7805c20060b56ef48426db13831c7c2391e365dbe952e74cb0a70919",
             ["airplay2dll.dll"] =
-                "d5e1cdd0250f306bf7419dbe971daebd69aede3b517390586df54a60a8057397",
+                "0ae995831f11729006e50a20f29a78c4016dd3c25bb9a2f8a6413ca6f1c3a3ba",
             ["avcodec-58.dll"] =
-                "a3bafedd357b33cb35cf47463c95f7c93c805057c2729db4a8c736918b37a823",
+                "ca12fe868993903fe36507e23030dd226b2c39f6c905610005f1aeeb2693c959",
             ["avutil-56.dll"] =
-                "3f9bd71c581fb65602cd8043595d8789ea5a504dcefc70a85c4484b9788915dc",
+                "8da4b9ff2c577e935597f307eccaaca276b24084388385b2b10f535f7ac3fd27",
             ["dnssd.dll"] =
-                "d18d47bf555902dde6faa6817f62dcdbff0535bb1cd62eac0f99fbd324f2d072",
+                "d7d54e05da7fda335a938967c50f55c19c5da379b4ac4f7da625892777fdfd69",
             ["swresample-3.dll"] =
-                "97bc36e7db8c12b1fcf72681e94bff39b1ca0a0011756d8ca831e51820594bfc",
+                "85226ae16655e83f00bec043df5c5096dd398d8b36a126baaea7d57417005309",
             ["swscale-5.dll"] =
-                "412f8a0c90ee10a4131faa3a82b2eeed0a165c9ab10babf5cd95edea892b4fbf",
+                "7428b72f69bf9b26588b91b771fa17d49b2102f4972e6a97f95308ea32666542",
         };
 
     private const string FfmpegHash =

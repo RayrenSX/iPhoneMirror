@@ -22,6 +22,10 @@ internal static partial class Program
         var owner = CreateWorkspaceTestWindow(app, includeNativePreview: false);
         AboutWindow? about = null;
         ShortcutSettingsWindow? shortcuts = null;
+        DeveloperToolsWindow? developer = null;
+        ProjectionSettingsWindow? projection = null;
+        WindowStyleSettingsWindow? windowStyle = null;
+        ComponentDownloadWindow? component = null;
         try
         {
             var vm = (MainViewModel)KeyboardField(owner, "_viewModel");
@@ -29,10 +33,23 @@ internal static partial class Program
             about = new AboutWindow(app, vm) { Owner = owner };
             shortcuts = new ShortcutSettingsWindow(new Dictionary<BluetoothShortcutAction, KeyboardShortcut>(), _ => null)
                 { Owner = owner };
-            about.Show(); shortcuts.Show();
+            developer = new DeveloperToolsWindow(owner) { Owner = owner };
+            projection = new ProjectionSettingsWindow(vm,
+                () => Task.CompletedTask, () => Task.CompletedTask,
+                () => Task.CompletedTask, () => Task.CompletedTask, () => { }, previewOnly: true)
+                { Owner = owner };
+            windowStyle = new WindowStyleSettingsWindow(1, _ => true, false, _ => true,
+                applyPhoneFrame: _ => true) { Owner = owner };
+            component = new ComponentDownloadWindow(previewOnly: true) { Owner = owner };
+            about.Show(); shortcuts.Show(); developer.Show();
+            projection.Show(); windowStyle.Show(); component.Show();
+            var proxyFeedback = (TextBlock)owner.FindName("NetworkProxyFeedback");
+            proxyFeedback.Text = "Description visibility test error";
+            proxyFeedback.Visibility = Visibility.Visible;
             var mainDescriptionKeys = new[] { "AppSubtitleConnectivity",
                 "ProjectionSettingsDescription", "UsbProjectionPerDeviceHint", "WirelessResolutionHelp", "WirelessRaopPortHelp", "MediaCastDescription", "RenderLimitHelp",
-                "VideoPipelinePreferenceHelp", "MirroringAutoControlDescription", "MappingDescription", "SettingsScopeMouseDirection", "BluetoothMouseDirectionHelp", "KeepUnlocked" };
+                "VideoPipelinePreferenceHelp", "MirroringAutoControlDescription", "MappingDescription", "SettingsScopeMouseDirection", "BluetoothMouseDirectionHelp", "KeepUnlocked",
+                "NetworkProxyAddressHelp", "NetworkProxyRestartHelp", "DeviceControlSettingsScope" };
             IEnumerable<TextBlock> DescriptionTexts(DependencyObject root)
             {
                 var seen = new HashSet<DependencyObject>();
@@ -60,7 +77,7 @@ internal static partial class Program
                             $"{key}: description visibility does not follow the preference.");
                 }
             }
-            var names = new[] { "DeviceUnlockDescription", "ResolutionDescription", "FrameRateDescription", "LatencyDescription", "AudioDescription" };
+            var names = new[] { "DeviceUnlockDescription", "ResolutionDescription", "FrameRateDescription", "LatencyDescription", "AudioDescription", "ProjectionPhoneFrameDescription" };
             void AssertDescriptions(bool hidden)
             {
                 DrainDispatcher(); owner.UpdateLayout();
@@ -72,11 +89,28 @@ internal static partial class Program
                     if (hidden) InteractionAssert(text.DesiredSize.Height == 0, $"{name}: hidden description still reserves height.");
                 }
                 AssertResourceDescriptions(owner, mainDescriptionKeys, hidden);
-                AssertResourceDescriptions(about!, new[] { "AboutSubtitle", "AboutDescription", "UpdateSettingsDescription", "DiagnosticsDescription" }, hidden);
+                AssertResourceDescriptions(about!, new[] { "AboutSubtitle", "AboutDescription", "UpdateSettingsDescription", "DiagnosticsDescription", "AboutUpdateSaveHint", "DonationDescription" }, hidden);
                 AssertResourceDescriptions(shortcuts!, new[] { "ShortcutSettingsDescription", "SettingShortcutsDescription", "ShortcutSettingsCaptureHint" }, hidden);
+                AssertResourceDescriptions(developer!, new[] { "DeveloperToolsSubtitle", "AutomationHelp", "DeveloperToolsWorkspaceHint", "DeveloperToolsWindowsHint", "DeveloperToolsParametersHint" }, hidden);
+                developer!.UpdateLayout();
+                var developerDescriptions = DescriptionTexts(developer).Where(text =>
+                    System.Windows.Data.BindingOperations.GetBinding(text, TextBlock.TextProperty)?.Path?.Path ==
+                        nameof(DeveloperSurfaceItem.Description)).ToArray();
+                InteractionAssert(developerDescriptions.Length == developer.WorkspaceItems.Count + developer.WindowItems.Count,
+                    "Developer workspace/window description templates were not instantiated by the fixture.");
+                InteractionAssert(developerDescriptions.All(text => text.Visibility ==
+                    (hidden ? Visibility.Collapsed : Visibility.Visible)),
+                    "Developer workspace/window item descriptions did not follow the preference.");
+                AssertResourceDescriptions(windowStyle!, new[] { "IndependentWindowPhoneFrameHelp" }, hidden);
+                AssertResourceDescriptions(component!, new[] { "UxPlayDownloadDescription" }, hidden);
+                InteractionAssert(((TextBlock)projection!.FindName("PhoneFrameDescription")).Visibility ==
+                    (hidden ? Visibility.Collapsed : Visibility.Visible),
+                    "Projection settings phone-frame description did not follow the preference.");
                 InteractionAssert(((FrameworkElement)owner.FindName("DetectionStatus")).Visibility == (hidden ? Visibility.Collapsed : Visibility.Visible),
                     "The driver header did not follow the description preference.");
-                foreach (var key in new[] { "ApplicationModeLabel", "ThemeTitle", "LanguageToolTip", "MirroringAutoControlTitle" })
+                InteractionAssert(proxyFeedback.Visibility == Visibility.Visible,
+                    "Hiding descriptions must not hide a settings error.");
+                foreach (var key in new[] { "ApplicationModeLabel", "ThemeTitle", "LanguageToolTip", "MirroringAutoControlTitle", "NetworkProxyModeLabel", "NetworkProxyAddressLabel" })
                     foreach (var text in Visuals(owner).OfType<TextBlock>().Where(text => text.Text == (string)app.FindResource(key)))
                         InteractionAssert(text.Visibility == Visibility.Visible, $"A required field label was hidden: {key}.");
             }
@@ -154,6 +188,11 @@ internal static partial class Program
             Console.WriteLine("PASS: main/settings/child-window descriptions and driver header toggle live; labels retained; resize, legacy/clone/persistence, both themes, full screen and save-failure rollback/retry.");
             return 0;
         }
-        finally { app.IsUiPreviewMode = true; shortcuts?.Close(); about?.Close(); CloseWorkspaceTestWindow(owner); app.Shutdown(); }
+        finally
+        {
+            app.IsUiPreviewMode = true;
+            component?.Close(); windowStyle?.Close(); projection?.Close(); developer?.Close();
+            shortcuts?.Close(); about?.Close(); CloseWorkspaceTestWindow(owner); app.Shutdown();
+        }
     }
 }

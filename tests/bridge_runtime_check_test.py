@@ -46,6 +46,7 @@ class BridgeRuntimeCheckTests(unittest.TestCase):
 
     def test_native_serialization_crypto_and_resources(self):
         self.assertEqual([
+            'replay_codec_and_hid_feedback', 'device_management_contract',
             'xpc_roundtrip', 'five_slot_hid_reports', 'simultaneous_contacts_independent_release',
             'quic_initial_encryption',
             'aes_gcm_roundtrip', 'lzfse_roundtrip', 'ca_store', 'ddi_async_http_transport',
@@ -57,6 +58,21 @@ class BridgeRuntimeCheckTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'HID report'):
             check_runtime_functionality(lambda *args, **kwargs: b'',
                                         TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE, build_touchscreen_frame)
+
+    def test_mapped_file_actions_cannot_be_missing_public_or_marked_read_only(self):
+        from device_management import ACTIONS
+        for action in ('stat_file', 'write_mapped_file', 'make_directory', 'move_file', 'delete_mapped_file', 'set_mapped_file_time'):
+            for mutation in ('missing', 'public', 'readOnly'):
+                with self.subTest(action=action, mutation=mutation), patch.dict(ACTIONS, clear=False):
+                    if mutation == 'missing':
+                        del ACTIONS[action]
+                    else:
+                        ACTIONS[action] = {**ACTIONS[action], mutation:
+                                           True if mutation == 'public' else action != 'stat_file'}
+                    with self.assertRaisesRegex(RuntimeError, 'Device Hub contract'):
+                        check_runtime_functionality(build_touchscreen_report,
+                                                    TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE,
+                                                    build_touchscreen_frame)
 
     def test_single_contact_encoder_cannot_pass_multi_contact_check(self):
         def old_frame(contacts, timestamp):

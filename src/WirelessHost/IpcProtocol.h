@@ -43,6 +43,17 @@ enum class MirrorSenderState : std::uint32_t {
     Reconnecting = 2,
 };
 
+// PlaybackState carries this in reserved; values match the public Core enum.
+enum class MediaPlaybackState : std::uint32_t {
+    Unknown = 0,
+    Playing = 1,
+    Paused = 2,
+    Loading = 3,
+    Stopped = 4,
+    Failed = 5,
+    Completed = 6,
+};
+
 // MediaVolume uses the header's reserved word as an explicit routing tag. A
 // mirrored AirPlay stream must carry a device id and never enter the logical
 // URL-cast command queue; URL-cast controls must not be applied to a mirror.

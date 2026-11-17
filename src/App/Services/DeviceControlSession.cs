@@ -27,6 +27,9 @@ internal sealed class DeviceControlSession(string deviceUdid)
     internal readonly SingleFlightOperation WiredOperation = new();
     internal readonly SingleFlightOperation WirelessOperation = new();
     internal readonly SingleFlightOperation StopOperation = new();
+    internal readonly UsbControlRecoveryBudget WiredRecovery = new();
+    internal bool WiredRecoveryInProgress;
+    internal bool WiredFinalRetryInProgress;
     internal readonly ReverseControlInputRouter Router = new();
     internal readonly ControlStatusService ControlStatus = new();
     internal bool Enabled => WiredEnabled || WirelessEnabled;

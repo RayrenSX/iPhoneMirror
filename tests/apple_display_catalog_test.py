@@ -14,7 +14,7 @@ class AppleDisplayCatalogTests(unittest.TestCase):
     def test_downloaded_index_coverage_and_generated_outputs(self):
         catalog = json.loads(updater.CATALOG.read_text(encoding='utf-8'))
         identifiers = updater.validate(catalog)
-        self.assertEqual(171, len(identifiers))
+        self.assertEqual(174, len(identifiers))
         self.assertEqual({'iPhone', 'iPad'}, set(catalog['scope']))
         self.assertEqual(updater.generated_header(catalog), updater.HEADER.read_text(encoding='utf-8'))
         self.assertEqual(updater.generated_documentation(catalog), updater.DOCUMENTATION.read_text(encoding='utf-8'))
@@ -37,6 +37,11 @@ class AppleDisplayCatalogTests(unittest.TestCase):
         source = b'<title>iPhone - Apple Support</title><p>No display specification is available.</p>'
         with self.assertRaisesRegex(ValueError, 'no display resolution'):
             updater.parse_spec(('test', 'iPhone', ['iPhone99,1'], 'https://support.apple.com/test'), source)
+
+    def test_foldable_closed_panel_is_not_replaced_by_first_inner_resolution(self):
+        source = b'<title>iPhone Duo - Apple Support</title><p>Inner display 1878-by-2670-pixel resolution at 430 ppi</p><p>Outer display 1398-by-2034-pixel resolution at 460 ppi</p><p>Both displays</p>'
+        result = updater.parse_spec(('iPhoneDuo', 'iPhone Duo', ['iPhone19,4'], 'https://support.apple.com/test'), source)
+        self.assertEqual((1398, 2034), (result['width'], result['height']))
 
 
 if __name__ == '__main__':

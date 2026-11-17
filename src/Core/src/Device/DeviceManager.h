@@ -1,6 +1,7 @@
 #pragma once
 
 #include "iPhoneMirror/CoreApi.h"
+#include "Protocol/Plist.h"
 
 #include <cstdint>
 #include <mutex>
@@ -20,6 +21,9 @@ struct DeviceRecord {
     std::wstring udid;
     std::wstring name;
     std::wstring product_type;
+    std::wstring device_color;
+    std::wstring enclosure_color;
+    std::wstring housing_color;
     std::wstring os_version;
     std::wstring connection_type;
     std::wstring status;
@@ -27,10 +31,27 @@ struct DeviceRecord {
 
 namespace detail {
 
+// Lockdown returns these as either strings (names/hex/numeric codes) or integers.
+// Keep raw tokens: color codes are not portable between product generations.
+inline std::wstring device_color_token(const plist::Value* value) {
+    if (!value) return {};
+    std::string token;
+    if (value->type == plist::Type::String) token = value->string;
+    else if (value->type == plist::Type::Integer && value->integer >= 0)
+        token = std::to_string(value->integer);
+    if (token.size() > 31) return {};
+    for (unsigned char c : token) if (c < 0x20 || c > 0x7e) return {};
+    return std::wstring(token.begin(), token.end());
+}
+
+
 inline void preserve_cached_device_display_metadata(
     DeviceRecord& target, const DeviceRecord& cached) {
     target.name = cached.name;
     target.product_type = cached.product_type;
+    target.device_color = cached.device_color;
+    target.enclosure_color = cached.enclosure_color;
+    target.housing_color = cached.housing_color;
     target.os_version = cached.os_version;
 }
 

@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        xmlns:local="clr-namespace:IPhoneMirror.DriverInstaller"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource AppTitle}"
@@ -17,25 +18,42 @@
                             CornerRadius="20" GlassFrameThickness="0"/>
     </shell:WindowChrome.WindowChrome>
     <Window.Resources>
+        <local:DriverPageHeightConverter x:Key="DriverPageHeight"/>
         <Style x:Key="DeviceItem" TargetType="ListBoxItem" BasedOn="{StaticResource SelectableListItem}">
             <Setter Property="Padding" Value="14,12"/>
         </Style>
     </Window.Resources>
 
     <Grid>
-    <ScrollViewer Style="{StaticResource PageScrollViewerStyle}" Padding="24,18,24,20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
-    <Grid MinHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" animations:PageTransition.IsEnabled="True">
+    <ScrollViewer x:Name="DriverPageScroll" Style="{StaticResource PageScrollViewerStyle}" Padding="24,18,24,20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+    <Grid animations:PageTransition.IsEnabled="True">
+        <Grid.Height>
+            <MultiBinding Converter="{StaticResource DriverPageHeight}">
+                <Binding Path="ViewportHeight" ElementName="DriverPageScroll"/>
+                <Binding Path="ActualHeight" ElementName="DriverHeader"/>
+                <Binding Path="ActualHeight" ElementName="DriverEnvironmentSection"/>
+                <Binding Path="ActualHeight" ElementName="DriverFooter"/>
+                <Binding Path="IsAdvancedMode"/>
+            </MultiBinding>
+        </Grid.Height>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="16"/>
+            <RowDefinition>
+                <RowDefinition.Style>
+                    <Style TargetType="RowDefinition">
+                        <Setter Property="Height" Value="0"/>
+                        <Style.Triggers><DataTrigger Binding="{Binding IsAdvancedMode}" Value="True"><Setter Property="Height" Value="12"/></DataTrigger></Style.Triggers>
+                    </Style>
+                </RowDefinition.Style>
+            </RowDefinition>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="16"/>
+            <RowDefinition Height="12"/>
             <RowDefinition Height="*" MinHeight="220"/>
-            <RowDefinition Height="14"/>
+            <RowDefinition Height="10"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid>
+        <Grid x:Name="DriverHeader">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -55,27 +73,27 @@
                                Foreground="{DynamicResource MutedBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,3,0,0"/>
                 </StackPanel>
             </Grid>
-            <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource DialogActions}" Margin="-4,4,-4,-4"
+            <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,8,0,0"
                         shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                <ComboBox Margin="{StaticResource DialogActionMargin}" x:Name="ThemeComboBox"
+                <ComboBox Margin="0,0,8,0" x:Name="ThemeComboBox"
                           ItemsSource="{Binding ThemeChoices}" DisplayMemberPath="Label"
                           SelectedValuePath="Value" SelectedValue="{Binding SelectedTheme}"
-                          Width="154" ToolTip="{DynamicResource Appearance}"
+                          MinWidth="154" MaxWidth="260" ToolTip="{DynamicResource Appearance}"
                           PreviewMouseLeftButtonDown="OnThemePreviewMouseLeftButtonDown"/>
-                <Button Margin="{StaticResource DialogActionMargin}" Content="{DynamicResource ForceDriverCleanup}"
+                <Button Margin="0,0,8,0" Content="{DynamicResource ForceDriverCleanup}"
                         Click="OnForceDriverCleanupClick"
                         IsEnabled="{Binding CanInteract}"
                         Visibility="{Binding AdvancedVisibility}"
                         Style="{StaticResource DangerButton}"
                         MinWidth="146" MinHeight="32" Padding="10,5"
                         FontSize="{DynamicResource FontSize11}"/>
-                <Button Margin="{StaticResource DialogActionMargin}" Style="{StaticResource IconButton}"
+                <Button Margin="0,0,8,0" Style="{StaticResource IconButton}"
                         Click="OnOpenLogsClick" IsEnabled="{Binding CanInteract}"
                         ToolTip="{DynamicResource OpenLogs}"
                         Visibility="{Binding AdvancedVisibility}">
                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Open20" FontSize="16"/>
                 </Button>
-                <Button Margin="{StaticResource DialogActionMargin}" Style="{StaticResource IconButton}"
+                <Button Style="{StaticResource IconButton}"
                         Click="OnRefreshClick" IsEnabled="{Binding CanInteract}"
                         ToolTip="{DynamicResource Refresh}">
                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="ArrowClockwise20" FontSize="16"/>
@@ -84,7 +102,7 @@
 
         </Grid>
 
-        <Border Grid.Row="2" Style="{StaticResource Section}" Padding="14">
+        <Border x:Name="DriverEnvironmentSection" Grid.Row="2" Style="{StaticResource Section}" Padding="14">
             <Border.Visibility>
                 <Binding Path="AdvancedVisibility"/>
             </Border.Visibility>
@@ -113,23 +131,24 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="2" Grid.RowSpan="3" Style="{StaticResource Section}" CornerRadius="22" Padding="24,16" Visibility="{Binding SimpleVisibility}" animations:SurfaceMotion.Enabled="True">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Center">
-                <StackPanel MaxWidth="720" HorizontalAlignment="Center">
+        <Border Grid.Row="4" Style="{StaticResource Section}" CornerRadius="22" Padding="24,12" Visibility="{Binding SimpleVisibility}" animations:SurfaceMotion.Enabled="True">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                <StackPanel MaxWidth="660" HorizontalAlignment="Stretch">
                     <Border Width="44" Height="44" CornerRadius="14" Background="{DynamicResource ControlFillBrush}" HorizontalAlignment="Center" Margin="0,0,0,8" animations:SurfaceMotion.Enabled="True">
                         <ui:SymbolIcon Symbol="UsbPlug20" FontSize="26" Foreground="{DynamicResource AccentBrush}"/>
                     </Border>
                     <TextBlock Text="{DynamicResource PrepareTitle}" TextWrapping="Wrap" FontSize="{DynamicResource FontSize28}" FontWeight="SemiBold" TextAlignment="Center"/>
-                    <TextBlock Text="{DynamicResource PrepareDescription}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="24,8,24,12" LineHeight="{DynamicResource BodyLineHeight}"/>
-                    <UniformGrid Columns="2" Margin="0,0,-12,12" animations:SurfaceMotion.Enabled="True" animations:SurfaceMotion.Delay="50">
-                        <Border Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1" CornerRadius="14" Padding="12" Margin="0,0,12,0">
+                    <TextBlock Text="{DynamicResource PrepareDescription}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,12" LineHeight="{DynamicResource BodyLineHeight}"/>
+                    <Grid Margin="0,0,0,10" animations:SurfaceMotion.Enabled="True" animations:SurfaceMotion.Delay="50">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1" CornerRadius="14" Padding="12">
                             <StackPanel><TextBlock Text="{DynamicResource AppleUsbEnvironment}" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Text="{Binding AppleStatusText}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}" TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="{DynamicResource BodyLineHeight}"/></StackPanel>
                         </Border>
-                        <Border Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1" CornerRadius="14" Padding="12" Margin="0,0,12,0">
+                        <Border Grid.Column="2" Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1" CornerRadius="14" Padding="12">
                             <StackPanel><TextBlock Text="{DynamicResource CaptureFilterDriver}" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Text="{Binding LibUsbStatusText}" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}" TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="{DynamicResource BodyLineHeight}"/></StackPanel>
                         </Border>
-                    </UniformGrid>
-                    <StackPanel MaxWidth="460" animations:SurfaceMotion.Enabled="True" animations:SurfaceMotion.Delay="100">
+                    </Grid>
+                    <StackPanel animations:SurfaceMotion.Enabled="True" animations:SurfaceMotion.Delay="100">
                         <TextBlock Text="{DynamicResource CurrentDevice}" FontSize="{DynamicResource SecondaryFontSize}" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,8"/>
                         <ComboBox ItemsSource="{Binding ConnectedDevices}" SelectedItem="{Binding SelectedDevice, Mode=TwoWay}" DisplayMemberPath="SelectionText"
                                   MinWidth="320" MinHeight="44" IsEnabled="{Binding CanInteract}" AutomationProperties.Name="{DynamicResource CurrentDevice}"
@@ -138,7 +157,7 @@
                         <Button Content="{DynamicResource InstallAll}" Style="{StaticResource PrimaryButton}" Click="OnQuickInstallClick" IsEnabled="{Binding CanQuickInstall}" MinHeight="40" FontSize="{DynamicResource ButtonFontSize}"/>
                         <Border Margin="0,10,0,0">
                             <StackPanel><ProgressBar Height="3" IsIndeterminate="True" Visibility="{Binding BusyVisibility}" Margin="0,0,0,10"/>
-                            <TextBlock Text="{Binding OperationStatus}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" TextAlignment="Center" LineHeight="{DynamicResource BodyLineHeight}" AutomationProperties.LiveSetting="Polite"/></StackPanel>
+                            <TextBlock Text="{Binding OperationStatus}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" LineHeight="{DynamicResource BodyLineHeight}" AutomationProperties.LiveSetting="Polite"/></StackPanel>
                         </Border>
                     </StackPanel>
                 </StackPanel>
@@ -266,16 +285,15 @@
             </Border>
         </Grid>
 
-        <Grid Grid.Row="6">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <TextBlock Text="{DynamicResource DriverChangeNotice}" TextWrapping="Wrap"
+        <Grid x:Name="DriverFooter" Grid.Row="6">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="{DynamicResource DriverChangeNotice}" TextWrapping="Wrap" VerticalAlignment="Center"
                        Foreground="{DynamicResource MutedBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="12,0,0,0">
-                <Button Content="{Binding AdvancedButtonText}" Click="OnAdvancedClick"
-                        MinHeight="28" Padding="12,4" FontSize="{DynamicResource FontSize11}"/>
-                <TextBlock Text="USB · Apple" VerticalAlignment="Center"
-                           Foreground="{DynamicResource MutedBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="12,0,0,0"/>
-            </StackPanel>
+            <Button Grid.Column="1" Content="{Binding AdvancedButtonText}" Click="OnAdvancedClick"
+                    VerticalAlignment="Center" Margin="12,0,0,0"
+                    MinHeight="28" Padding="12,4" FontSize="{DynamicResource FontSize11}"/>
+            <TextBlock Grid.Column="2" Text="USB · Apple" VerticalAlignment="Center"
+                       Foreground="{DynamicResource MutedBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="12,0,0,0"/>
         </Grid>
     </Grid>
     </ScrollViewer>

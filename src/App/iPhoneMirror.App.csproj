@@ -23,7 +23,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.8.5-pre5</Version>
+    <Version>1.8.5-pre6</Version>
     <AssemblyVersion>1.8.5.0</AssemblyVersion>
     <FileVersion>1.8.5.0</FileVersion>
     <Authors>RayrenSX</Authors>
@@ -49,6 +49,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\DeviceFrames\*.png" LogicalName="IPhoneMirror.App.DeviceFrames.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\config\apple-device-frames.json" LogicalName="IPhoneMirror.App.DeviceFrames.catalog.json" />
     <EmbeddedResource Include="..\..\config\apple-display-catalog.json"
                       LogicalName="IPhoneMirror.App.Devices.AppleDisplayCatalog.json" />
     <EmbeddedResource Include="..\..\config\uxplay-component.json"
@@ -102,6 +104,7 @@
              Link="Networking\SegmentedHttpDownloader.cs" />
     <Compile Include="..\Shared\Security\ElevationPathLock.cs"
              Link="Security\ElevationPathLock.cs" />
+    <Compile Include="..\SharedUI\Services\WpfLayoutCompatibility.cs" Link="Services\WpfLayoutCompatibility.cs" />
     <Compile Include="..\SharedUI\Services\AccessibilityAppearance.cs" Link="Services\AccessibilityAppearance.cs" />
     <Compile Include="..\SharedUI\Services\SupportedUiCultures.cs" Link="Services\SupportedUiCultures.cs" />
     <Compile Include="..\SharedUI\Services\WindowWorkAreaController.cs"
@@ -159,6 +162,8 @@
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
     <Resource Include="Assets\iPhoneMirror.png" />
+    <EmbeddedResource Include="Assets\Donation\wechat.png" LogicalName="IPhoneMirror.App.Donation.wechat.png" />
+    <EmbeddedResource Include="Assets\Donation\alipay.png" LogicalName="IPhoneMirror.App.Donation.alipay.png" />
     <Content Include="native\iPhoneMirror.Core.dll" Condition="Exists('native\iPhoneMirror.Core.dll')">
       <Link>iPhoneMirror.Core.dll</Link>
       <TargetPath>iPhoneMirror.Core.dll</TargetPath>
@@ -240,7 +245,7 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Content Include="..\..\third_party\airplay-server\bin\x64\airplay2dll.dll;..\..\third_party\airplay-server\bin\x64\avcodec-58.dll;..\..\third_party\airplay-server\bin\x64\avutil-56.dll;..\..\third_party\airplay-server\bin\x64\swresample-3.dll;..\..\third_party\airplay-server\bin\x64\swscale-5.dll">
+    <Content Include="..\..\third_party\airplay-server\bin\x64\iPhoneMirror.AirPlayControl.dll;..\..\third_party\airplay-server\bin\x64\airplay2dll.dll;..\..\third_party\airplay-server\bin\x64\avcodec-58.dll;..\..\third_party\airplay-server\bin\x64\avutil-56.dll;..\..\third_party\airplay-server\bin\x64\swresample-3.dll;..\..\third_party\airplay-server\bin\x64\swscale-5.dll">
       <Link>Wireless\%(Filename)%(Extension)</Link>
       <TargetPath>Wireless\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -254,6 +259,13 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
+    <Content Include="..\..\third_party\airplay-control\**\*" Exclude="..\..\third_party\airplay-control\**\*.dll;..\..\third_party\airplay-control\**\*.exe">
+      <Link>Wireless\licenses\airplay-control\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <TargetPath>Wireless\licenses\airplay-control\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
     <Content Include="..\..\third_party\libusb\COPYING">
       <Link>licenses\libusb-COPYING.txt</Link>
       <TargetPath>licenses\libusb-COPYING.txt</TargetPath>
@@ -263,6 +275,13 @@
     </Content>
     <Content Include="..\..\LICENSE">
       <Link>LICENSE</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="..\..\third_party\device-frames\*">
+      <Link>licenses\device-frames\%(Filename)%(Extension)</Link>
+      <TargetPath>licenses\device-frames\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>

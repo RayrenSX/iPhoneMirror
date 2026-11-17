@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -700,14 +700,14 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         internal set => Set(ref _applicationSettingsStatus, value);
     }
 
-    public bool HasPendingBluetoothSensitivitySettings => Application.Current is App app &&
-        (Math.Abs(_bluetoothMouseSensitivity - app.UpdateSettings.BluetoothMouseSensitivity) > 0.001 ||
-         Math.Abs(_bluetoothWheelSensitivity - app.UpdateSettings.BluetoothWheelSensitivity) > 0.001);
-    public bool HasPendingMouseDirectionSettings => Application.Current is App app &&
-        ((int)_bluetoothPortraitMouseDirection != app.UpdateSettings.BluetoothPortraitMouseDirection ||
-         (int)_bluetoothLandscapeMouseDirection != app.UpdateSettings.BluetoothLandscapeMouseDirection ||
-         _bluetoothMouseReverseHorizontal != app.UpdateSettings.BluetoothMouseReverseHorizontal ||
-         _bluetoothMouseReverseVertical != app.UpdateSettings.BluetoothMouseReverseVertical);
+    public bool HasPendingBluetoothSensitivitySettings => SelectedDevice is { IsMediaCast: false } && Application.Current is App &&
+        (Math.Abs(_bluetoothMouseSensitivity - ControlPreferencesFor(SelectedDevice?.Udid).MouseSensitivity) > 0.001 ||
+         Math.Abs(_bluetoothWheelSensitivity - ControlPreferencesFor(SelectedDevice?.Udid).WheelSensitivity) > 0.001);
+    public bool HasPendingMouseDirectionSettings => SelectedDevice is { IsMediaCast: false } && Application.Current is App &&
+        ((int)_bluetoothPortraitMouseDirection != ControlPreferencesFor(SelectedDevice?.Udid).PortraitDirection ||
+         (int)_bluetoothLandscapeMouseDirection != ControlPreferencesFor(SelectedDevice?.Udid).LandscapeDirection ||
+         _bluetoothMouseReverseHorizontal != ControlPreferencesFor(SelectedDevice?.Udid).ReverseHorizontal ||
+         _bluetoothMouseReverseVertical != ControlPreferencesFor(SelectedDevice?.Udid).ReverseVertical);
     public bool HasPendingBluetoothMouseSettings =>
         HasPendingBluetoothSensitivitySettings || HasPendingMouseDirectionSettings;
 
@@ -754,25 +754,17 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     {
         if (Application.Current is not App app) return;
         var snapshot = app.UpdateSettings.Clone();
-        if (sensitivity)
+        var preferences = ControlPreferencesFor(SelectedDevice?.Udid);
+        if (sensitivity) preferences = preferences with
+            { MouseSensitivity = _bluetoothMouseSensitivity, WheelSensitivity = _bluetoothWheelSensitivity };
+        if (direction) preferences = preferences with
         {
-            app.UpdateSettings.BluetoothMouseSensitivity = _bluetoothMouseSensitivity;
-            app.UpdateSettings.BluetoothMouseSensitivitySchema = 2;
-            app.UpdateSettings.BluetoothWheelSensitivity = _bluetoothWheelSensitivity;
-            app.UpdateSettings.BluetoothMouseSettingsSchema = 1;
-        }
-        if (direction)
-        {
-            app.UpdateSettings.BluetoothPortraitMouseDirection =
-                (int)_bluetoothPortraitMouseDirection;
-            app.UpdateSettings.BluetoothLandscapeMouseDirection =
-                (int)_bluetoothLandscapeMouseDirection;
-            app.UpdateSettings.BluetoothMouseReverseHorizontal =
-                _bluetoothMouseReverseHorizontal;
-            app.UpdateSettings.BluetoothMouseReverseVertical =
-                _bluetoothMouseReverseVertical;
-            app.UpdateSettings.BluetoothMouseDirectionSchema = 1;
-        }
+            PortraitDirection = (int)_bluetoothPortraitMouseDirection,
+            LandscapeDirection = (int)_bluetoothLandscapeMouseDirection,
+            ReverseHorizontal = _bluetoothMouseReverseHorizontal, ReverseVertical = _bluetoothMouseReverseVertical,
+        };
+        if (SelectedDevice?.Udid is not { } target) return;
+        app.UpdateSettings.DeviceControlPreferences[target] = preferences;
         if (!app.SaveUpdateSettings())
         {
             app.RestoreUpdateSettings(snapshot);
@@ -783,6 +775,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             NotifyMouseSettingsPending();
             return;
         }
+        _appliedDeviceControlPreferences[target] = preferences;
         ClearMouseSettingsStatus();
         if (sensitivity)
         {
@@ -877,7 +870,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         ? LocalizationService.Format("WirelessRaopPortUnavailableFormat", port) : string.Empty;
     public Visibility WirelessRaopPortValidationVisibility => string.IsNullOrEmpty(WirelessRaopPortValidation)
         ? Visibility.Collapsed : Visibility.Visible;
-    public string MediaCastReceiverName => _wireless.AppliedReceiverName;
+    public string MediaCastReceiverName => WirelessReceiverConfiguration.MediaReceiverName;
     public string MediaCastStatus { get => LocalizationService.RefreshText(_mediaCastStatus); private set => Set(ref _mediaCastStatus, value); }
     public WirelessReceiverBackendOption SelectedWirelessReceiverBackend
     {
@@ -1293,6 +1286,10 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             ? "UpdateVirtualCamera" : "InstallVirtualCamera");
     public bool IsMediaOutputRunning =>
         _mediaOutput.IsRunning || _virtualCamera.IsRunning;
+    private bool _mediaCastAudioStarting;
+    internal bool NeedsMediaCastAudioDecode => _mediaCastAudioStarting ||
+        (_mediaOutput.IsRunning &&
+         DeviceViewModel.UdidEquals(_mediaOutputUdid, DeviceViewModel.MediaCastUdid));
     public bool IsMediaOutputTransitioning => _isMediaOutputTransitioning;
     public bool IsRecordingMediaOutput => _mediaOutput.IsRecording;
     public bool IsStreamingMediaOutput => _mediaOutput.IsStreaming;
@@ -1371,6 +1368,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     public MainViewModel()
     {
+        var controlSettings = (Application.Current as App)?.UpdateSettings ?? new UpdateSettings();
+        _defaultControlPreferences = DeviceControlPreferences.FromLegacy(controlSettings).Normalize();
+        foreach (var (udid, preferences) in controlSettings.DeviceControlPreferences)
+            if (preferences is not null)
+                _appliedDeviceControlPreferences[udid] = preferences.Normalize();
         ControlStatus.StatusChanged += (_, snapshot) =>
         {
             // Automatic wired recovery must not activate a Cancel dialog over
@@ -1464,6 +1466,18 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _virtualCamera.StatusChanged += OnMediaOutputStatusChanged;
         _sessions.SessionHandleChanged += (udid, handle) =>
         {
+            // Receiver restarts retain the selected device card. Its setter
+            // intentionally ignores the same object, so handle replacement
+            // must select the current session before publishing UI changes.
+            // Resolve from the manager rather than trusting a delayed event's
+            // handle; an unselected device must never take over the preview.
+            if (!_disposed && DeviceViewModel.UdidEquals(SelectedDevice?.Udid, udid))
+            {
+                var currentSession = CurrentDeviceSession;
+                NativeCore.SelectPreviewSession(IsSessionPresentable(currentSession)
+                    ? currentSession!.Handle : null);
+                NotifyCaptureSessionChanged();
+            }
             // A new USB capture configuration cannot inherit mux sequence
             // numbers from an earlier native session, even for the same phone.
             if (FindControl(udid) is { } control) control.WiredMuxResume = new();
@@ -2562,7 +2576,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         DiagnosticLogger.ReverseControl("wireless", "start_begin",
             ("device", AppLog.Device(device.Udid)), ("apple_device", AppLog.Device(boundUdid)));
         NotifyUsbControlStateChanged();
-        var bridge = new UsbTouchBridgeHost();
+        var bridge = new UsbTouchBridgeHost { NativeKeyboardVisible = ShowNativeKeyboard };
         control.WirelessBridge = bridge;
         AttachWirelessBridgeEvents(control, bridge, device);
         var lockdownGateHeld = false;
@@ -2584,6 +2598,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (!bridge.IsReady || control.WirelessStartupTerminated ||
                 !DeviceViewModel.UdidEquals(_identityResolver.Resolve(device).AppleUdid, boundUdid))
                 throw new InvalidOperationException(LocalizationService.Get("ControlWirelessStartupDisconnected"));
+            CheckNativeKeyboardCapability(bridge);
             control.WirelessEnabled = control.WirelessConnected = true;
             control.WirelessTarget = device.Udid;
             control.Router.Begin(boundUdid, ReverseControlMode.Wireless);
@@ -2675,6 +2690,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                         _ = DisableWirelessControlAsync(control);
                         return;
                     }
+                    CheckNativeKeyboardCapability(bridge);
                     control.WirelessConnected = true;
                     control.Failed = false;
                     control.Router.Begin(bridge.Udid!, ReverseControlMode.Wireless);
@@ -2754,7 +2770,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 NotifyUsbControlStateChanged();
                 return;
             }
-            var bridge = new UsbTouchBridgeHost();
+            var bridge = new UsbTouchBridgeHost { NativeKeyboardVisible = ShowNativeKeyboard };
             control.WirelessBridge = bridge;
             AttachWirelessBridgeEvents(control, bridge, device);
             var lockdownGateHeld = false;
@@ -2770,6 +2786,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 if (!bridge.IsReady || !ReferenceEquals(control.WirelessBridge, bridge) ||
                     control.Stopping || !control.WirelessEnabled)
                     throw new InvalidOperationException(LocalizationService.Get("ControlWirelessRecoveryDisconnected"));
+                CheckNativeKeyboardCapability(bridge);
                 control.WirelessConnected = true;
                 control.Router.Begin(appleUdid, ReverseControlMode.Wireless);
                 control.Status = bridge.AuthMode == "direct"
@@ -2880,7 +2897,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         NotifyUsbControlStateChanged();
         var bridge = new UsbTouchBridgeHost(
             _sessions.TryGet(device.Udid, out var muxCapture) && muxCapture.HasSession && !device.IsWireless
-                ? control.WiredMuxResume : null);
+                ? control.WiredMuxResume : null) { NativeKeyboardVisible = ShowNativeKeyboard };
         control.WiredBridge = bridge;
         AttachUsbBridgeEvents(control, bridge, device, cancellationToken);
         var lockdownGateHeld = false;
@@ -2900,9 +2917,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (!bridge.IsReady || !ReferenceEquals(control.WiredBridge, bridge) ||
                 !DeviceViewModel.UdidEquals(GetUsbControlBinding(device.Udid), boundUsbUdid))
                 throw new InvalidOperationException(LocalizationService.Get("ReverseControlUsbBindingChanged"));
+            CheckNativeKeyboardCapability(bridge);
             control.WiredEnabled = true;
             control.Failed = false;
             control.WiredConnected = true;
+            control.WiredRecovery.Ready(System.Diagnostics.Stopwatch.GetTimestamp());
             control.ControlStatus.Report(ControlStatusMode.Usb, ControlStage.Connecting, device.Name, LocalizationService.Get("ControlConnectingChannel"));
             control.Router.Begin(boundUsbUdid, ReverseControlMode.Usb);
             control.ControlStatus.Report(ControlStatusMode.Usb, ControlStage.InitializingServices, device.Name, LocalizationService.Get("ControlInitializingInput"));
@@ -2976,7 +2995,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private async Task<bool> ConfirmReverseControlPrerequisitesAsync(DeviceControlSession control, bool wireless, CancellationToken cancellationToken)
     {
-        if (AutomationControlStartup.Contains(control.DeviceUdid) ||
+        if (control.WiredFinalRetryInProgress || AutomationControlStartup.Contains(control.DeviceUdid) ||
             _mirroringControlStartup.Contains(control.DeviceUdid)) return true;
         var acknowledged = wireless
             ? _wirelessControlPrerequisiteAcknowledged
@@ -3049,6 +3068,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 // actual ready event validates the replacement sender.
                 if (bridgeEvent.EventName == "status" && bridgeEvent.Code == "recovery_triggered")
                 {
+                    control.WiredRecovery.Disconnected(System.Diagnostics.Stopwatch.GetTimestamp());
                     control.WiredConnected = false;
                     control.Router.Stop();
                     control.ControlStatus.Report(ControlStatusMode.Usb, ControlStage.Recovering,
@@ -3067,7 +3087,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                         _ = DisableUsbControlAsync(control);
                         return;
                     }
+                    CheckNativeKeyboardCapability(bridge);
                     control.WiredConnected = true;
+                    control.WiredRecovery.Ready(System.Diagnostics.Stopwatch.GetTimestamp());
                     control.Failed = false;
                     control.Router.Begin(bridge.Udid!, ReverseControlMode.Usb);
                     control.ControlStatus.Ready(ControlStatusMode.Usb, device.Name);
@@ -3078,26 +3100,12 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     NotifyUsbControlStateChanged();
                     return;
                 }
-                // Exhaustion is terminal. Restarting a live capture-mux
-                // owner only loses its sequence state and repeats VERSION
-                // timeouts; let the user see the failure instead.
+                // After the bridge's own attempts, try the same full startup as
+                // manual Retry once. Retain this capture's mux checkpoint.
                 if (bridgeEvent.EventName == "error" && bridgeEvent.Code == "direct_hid_recovery_exhausted")
                 {
-                    control.WiredEnabled = control.WiredConnected = false;
-                    control.Failed = true;
-                    control.Router.Stop();
-                    var recoveryMessage = LocalizationService.Get("UsbControlFailureRecoveryExhausted");
-                    control.ControlStatus.Failed(ControlStatusMode.Usb, device.Name,
-                        recoveryMessage, bridgeEvent.Message);
-                    control.Status = LocalizationService.Format("ReverseControlUsbFailedFormat", recoveryMessage);
-                    NotifyUsbControlStateChanged();
-                    if (!control.Starting)
-                    {
-                        _ = DisposeFailedUsbBridgeAsync(control, bridge);
-                        ShowDeviceControlError(control, LocalizationService.Get("ReverseControlTransportWired"),
-                            recoveryMessage, "ReverseControlRecoveryErrorTitle",
-                            $"{bridgeEvent.Code}: {bridgeEvent.Message}");
-                    }
+                    if (!control.Starting && !control.WiredRecoveryInProgress)
+                        _ = RetryExhaustedUsbControlAsync(control, bridge, device);
                     return;
                 }
                 if (bridgeEvent.EventName is not ("error" or "status") ||
@@ -3113,32 +3121,6 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             }));
         };
     }
-
-    private Task DisposeFailedUsbBridgeAsync(DeviceControlSession control,
-        UsbTouchBridgeHost bridge) => control.StopOperation.RunAsync(async _ =>
-    {
-        control.Stopping = true;
-        NotifyUsbControlStateChanged();
-        try
-        {
-            await bridge.DisposeAsync();
-            if (ReferenceEquals(control.WiredBridge, bridge))
-            {
-                control.WiredBridge = null;
-                control.WiredTarget = null;
-            }
-        }
-        catch (Exception error)
-        {
-            DiagnosticLogger.ReverseControlError("usb", "failed_bridge_cleanup_failed",
-                ("error", AppLog.Error(error)));
-        }
-        finally
-        {
-            control.Stopping = false;
-            NotifyUsbControlStateChanged();
-        }
-    });
 
     private static string GetUsbControlFailureMessage(Exception error,
         UsbTouchBridgeHost bridge, bool wireless = false)
@@ -3502,14 +3484,20 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     // TimeoutError, momentary USB stall, iOS HID scheduling hiccup). The
     // capture session is owned by the native core and is never touched
     // here, so reconnection does not affect mirroring. Up to 3 attempts
-    // with linear backoff; beyond that the user is asked to re-enable
-    // manually.
+    // with linear backoff, then one complete manual-Retry startup before
+    // presenting a terminal error.
     private Task RecoverUsbControlAsync(DeviceControlSession control) => control.WiredOperation.RunAsync(
-        token => RecoverUsbControlCoreAsync(control, token), _shutdownCancellation.Token);
+        async token =>
+        {
+            control.WiredRecoveryInProgress = true;
+            try { await RecoverUsbControlCoreAsync(control, token); }
+            finally { control.WiredRecoveryInProgress = false; }
+        }, _shutdownCancellation.Token);
 
     private async Task RecoverUsbControlCoreAsync(DeviceControlSession control, CancellationToken cancellationToken)
     {
         if (_disposed || !control.WiredEnabled || control.Stopping || control.Starting) return;
+        control.WiredRecovery.Disconnected(System.Diagnostics.Stopwatch.GetTimestamp());
         var deviceUdid = control.WiredTarget;
         if (string.IsNullOrWhiteSpace(deviceUdid))
             return;
@@ -3530,6 +3518,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             try { if (abandonedBridge is not null) await abandonedBridge.DisposeAsync(); }
             catch (Exception error)
             {
+                // A failed cleanup still owns resources; manual Retry must
+                // retire it before opening a replacement after rebinding.
+                control.WiredBridge = abandonedBridge;
                 AddDiagnosticLog(AppLog.Event("usb_control_stop_failed",
                     ("error", AppLog.Error(error))));
             }
@@ -3546,7 +3537,16 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         control.WiredConnected = false;
         control.Router.Stop();
         try { if (oldBridge is not null) await oldBridge.DisposeAsync(); }
-        catch { /* Old bridge cleanup failure does not block reconnection. */ }
+        catch (Exception error)
+        {
+            // Keep ownership if disposal failed. Full Retry must finish this
+            // cleanup before any replacement can claim the same interface.
+            control.WiredBridge = oldBridge;
+            DiagnosticLogger.ReverseControlError("usb", "recovery_cleanup_failed",
+                ("device", AppLog.Device(device.Udid)), ("error", AppLog.Error(error)));
+            await RetryUsbControlAsManualAsync(control, device, cancellationToken);
+            return;
+        }
 
         // One loop owns every retry and its resources. Disable cancels and
         // joins this operation before touching the surviving bridge.
@@ -3576,7 +3576,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             }
             var newBridge = new UsbTouchBridgeHost(
                 _sessions.TryGet(device.Udid, out var muxCapture) && muxCapture.HasSession && !device.IsWireless
-                    ? control.WiredMuxResume : null);
+                    ? control.WiredMuxResume : null) { NativeKeyboardVisible = ShowNativeKeyboard };
             control.WiredBridge = newBridge;
             var lockdownGateHeld = false;
             try
@@ -3591,7 +3591,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 if (!newBridge.IsReady || !ReferenceEquals(control.WiredBridge, newBridge) ||
                     control.Stopping || !control.WiredEnabled)
                     throw new InvalidOperationException(LocalizationService.Get("ReverseControlUsbDisconnected"));
+                CheckNativeKeyboardCapability(newBridge);
                 control.WiredConnected = true;
+                control.WiredRecovery.Ready(System.Diagnostics.Stopwatch.GetTimestamp());
                 control.Router.Begin(boundUsbUdid, ReverseControlMode.Usb);
                 control.ControlStatus.Ready(ControlStatusMode.Usb, device.Name);
                 control.Status = newBridge.AuthMode == "direct"
@@ -3610,12 +3612,21 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             }
             catch (Exception error)
             {
-                if (ReferenceEquals(control.WiredBridge, newBridge)) control.WiredBridge = null;
-                try { await newBridge.DisposeAsync(); }
-                catch { /* Best-effort cleanup. */ }
+                var cleanupFailed = false;
+                try
+                {
+                    await newBridge.DisposeAsync();
+                    if (ReferenceEquals(control.WiredBridge, newBridge)) control.WiredBridge = null;
+                }
+                catch (Exception cleanupError)
+                {
+                    cleanupFailed = true;
+                    DiagnosticLogger.ReverseControlError("usb", "recovery_cleanup_failed",
+                        ("device", AppLog.Device(device.Udid)), ("error", AppLog.Error(cleanupError)));
+                }
                 if (cancellationToken.IsCancellationRequested) return;
-                control.ControlStatus.Failed(ControlStatusMode.Usb, device.Name,
-                    LocalizationService.Get("ControlRecoveryFailed"), error.Message);
+                control.ControlStatus.Report(ControlStatusMode.Usb, ControlStage.Recovering, device.Name,
+                    LocalizationService.Get("ControlAutoReconnectingChannel"), technical: error.Message);
                 control.Status = LocalizationService.Format(
                     "ReverseControlUsbFailedFormat", error.Message);
                 AddDiagnosticLog(AppLog.Event("usb_control_recovery_failed",
@@ -3626,7 +3637,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                     ("device", AppLog.Device(device.Udid)),
                     ("error", AppLog.Error(error)),
                     ("attempt", attempts));
-                if (attempts == 3 || !IsControlBindingCurrent(control, device, ControlStatusMode.Usb))
+                if (!IsControlBindingCurrent(control, device, ControlStatusMode.Usb))
                 {
                     control.WiredEnabled = false;
                     control.Failed = true;
@@ -3638,6 +3649,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                         $"{newBridge.LastErrorCode}: {AppLog.Error(error)}");
                     return;
                 }
+                if (cleanupFailed) break;
             }
             finally
             {
@@ -3645,10 +3657,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 NotifyUsbControlStateChanged();
             }
         }
+        await RetryUsbControlAsManualAsync(control, device, cancellationToken);
     }
 
     private void NotifyUsbControlStateChanged()
     {
+        CheckExplorerMappingConnection();
+        NotifyNativeKeyboardStateChanged();
         OnPropertyChanged(nameof(IsUsbControlEnabled));
         OnPropertyChanged(nameof(UsbControlIsInputEnabled));
         OnPropertyChanged(nameof(UsbControlStatus));
@@ -4710,6 +4725,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         if (ReferenceEquals(_selectedDevice, value)) return;
         var previous = _selectedDevice;
         _selectedDevice = value;
+        CheckExplorerMappingConnection();
+        RestoreDeviceControlPreferences(previous?.Udid, value?.Udid);
         // Restore persisted controls before selection notifications can cause
         // two-way bindings to write the previous device's defaults back.
         if (value is { IsMediaCast: false })
@@ -5867,13 +5884,15 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     }
 
     internal void ReportMediaCastPlayback(ulong commandId,
-        double duration, double position, double rate)
+        double duration, double position, double rate,
+        MediaCastPlaybackStatus status = MediaCastPlaybackStatus.Unknown)
     {
-        var accepted = _core.SetMediaCastPlaybackState(commandId, duration, position, rate);
+        var accepted = _core.SetMediaCastPlaybackState(commandId, duration, position, rate, status);
         if (!accepted)
             AddDiagnosticLog(AppLog.Event("media_playback_state_rejected",
                 ("command", commandId), ("duration", duration.ToString("F3")),
-                ("position", position.ToString("F3")), ("rate", rate.ToString("F2"))));
+                ("position", position.ToString("F3")), ("rate", rate.ToString("F2")),
+                ("state", status)));
     }
 
     internal void RequestMediaCastStop(bool allowInactive = false)
@@ -6951,6 +6970,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        NotifyNativeKeyboardStateChanged();
         OnPropertyChanged(nameof(ApplicationModeVisibilityHint));
         OnPropertyChanged(nameof(MirroringAutoControlStatus));
         OnPropertyChanged(nameof(ApplicationSettingsStatus));
@@ -7676,6 +7696,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             if (!_mediaOutput.CanStart(request.Kind, handle) ||
                 (request.Kind == MediaOutputKind.Recording && PendingRecordingPath is not null))
                 return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
+            _mediaCastAudioStarting = mediaCast;
+            OnPropertyChanged(nameof(NeedsMediaCastAudioDecode));
             await _mediaOutput.StartAsync(handle, request, _mediaOutputCapabilities,
                 _shutdownCancellation.Token);
             if (_disposed || !DeviceViewModel.UdidEquals(SelectedDevice?.Udid,
@@ -7722,6 +7744,8 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         }
         finally
         {
+            _mediaCastAudioStarting = false;
+            OnPropertyChanged(nameof(NeedsMediaCastAudioDecode));
             SetMediaOutputTransitioning(false);
             _mediaOutputGate.Release();
         }
@@ -7767,6 +7791,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void NotifyMediaOutputStateChanged()
     {
+        OnPropertyChanged(nameof(NeedsMediaCastAudioDecode));
         OnPropertyChanged(nameof(IsMediaOutputRunning));
         OnPropertyChanged(nameof(IsMediaOutputTransitioning));
         OnPropertyChanged(nameof(CanStopMediaOutput));
@@ -8062,6 +8087,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         _disposed = true;
         _clipboardSyncState?.Stop();
         _shutdownCancellation.Cancel();
+        await AwaitShutdownStageAsync("unmap_explorer_drive", StopExplorerMappingAsync(), TimeSpan.FromSeconds(12));
         LocalizationService.LanguageChanged -= OnLanguageChanged;
         await AwaitShutdownStageAsync("disable_usb_control",
             Task.WhenAll(_deviceControls.Values.ToArray().Select(DisableUsbControlAsync)), controlShutdownTimeout);

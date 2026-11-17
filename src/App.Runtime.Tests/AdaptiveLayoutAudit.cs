@@ -141,9 +141,15 @@ internal static partial class Program
         foreach (var tabs in Visuals(window).OfType<TabControl>().ToArray())
         {
             var selected = tabs.SelectedIndex;
+            var viewportWidth = window.Width;
+            var viewportHeight = window.Height;
             for (var index = 0; index < tabs.Items.Count; index++)
             {
                 tabs.SelectedIndex = index;
+                // A page may suggest a different window size. Keep the audit's
+                // requested work-area budget for every tab.
+                window.Width = viewportWidth;
+                window.Height = viewportHeight;
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(25));
                 window.UpdateLayout();
                 foreach (var issue in FindSystemBlackContent(window)) findings.Add($"{name}/tab-{index}: {issue}");
@@ -153,6 +159,8 @@ internal static partial class Program
                 if (renderPath != null) SaveWindowRender(window, renderPath + $"-tab-{index}.png");
             }
             tabs.SelectedIndex = selected;
+            window.Width = viewportWidth;
+            window.Height = viewportHeight;
             AdvanceDispatcher(TimeSpan.FromMilliseconds(25));
             window.UpdateLayout();
         }

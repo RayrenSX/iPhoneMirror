@@ -160,6 +160,7 @@ internal static partial class Program
         await TestAutomationClipboardCorrelationAsync();
         await TestAutomationLeaseRecoveryAsync();
         await TestAutomationScreenshotSharingAsync();
+        await TestAutomationScreenshotQueueAsync();
         TestAutomationKeyPersistence();
         var owner = new AutomationOwnership();
         var backend = new AutomationTestBackend(owner);
@@ -489,6 +490,8 @@ internal static partial class Program
         internal bool Online = true, Supported = true, HumanBusy, FailUp;
         internal int Geometry = 1, Generation = 1;
         internal Func<string, CancellationToken, Task<VideoFrame?>>? CaptureFrame;
+        internal bool ScreenshotReady = true;
+        internal Action? Resolving;
         internal Func<string, object?, Func<bool>, CancellationToken, Task<JsonElement>>? Hub;
         internal Func<Task>? BeforeReserve;
         internal string ClipboardText = "initial";
@@ -520,7 +523,8 @@ internal static partial class Program
                 });
             var device = new AutomationDevice(id, "Test phone", "iPhone", "26", "usb", Online, true, null,
                 "WiredDirect", true, new(100, 200, geometry + ":" + generation), new(Supported, Supported, Supported, Supported,
-                    Supported, Supported, Supported, Supported, Supported, Supported, Supported));
+                    Supported, Supported, Supported, Supported, Supported, Supported, Supported && ScreenshotReady));
+            Resolving?.Invoke();
             return Task.FromResult(new AutomationTarget(device, id, physical, () => SessionCurrent() && geometry == Geometry, p => p,
                 guard => new(id, guard, Send, (x, y) => (x, y)), keyboard,
                 (kind, text, token) =>
@@ -530,7 +534,8 @@ internal static partial class Program
                     if (kind == "paste_text") Events.Enqueue("paste");
                     return Task.FromResult<string?>(ClipboardText);
                 }, token => CaptureFrame?.Invoke(id, token) ?? Task.FromResult<VideoFrame?>(new VideoFrame(2, 2, 8, 1, new byte[16])))
-                { SessionCurrent = SessionCurrent, DeviceHub = Hub });
+                { SessionCurrent = SessionCurrent, CaptureCurrent = () => SessionCurrent() && geometry == Geometry,
+                    CaptureActive = SessionCurrent, DeviceHub = Hub });
         }
         public Task<bool> IsHumanInputBusyAsync(string identity, CancellationToken cancellation) => Task.FromResult(HumanBusy);
         public async Task ReserveAsync(string identity, Action reserve, CancellationToken cancellation)

@@ -52,7 +52,7 @@ public partial class FirstRunSetupWindow
         content.Children.Add(action);
         var button = Action(driver ? "DriverManagerTitle" : "DeviceBindingTitle", open);
         Body.Children.Remove(button);
-        button.Content = content; button.Margin = new(0, 0, 12, 0);
+        button.Content = content; button.Margin = new(0);
         button.SetResourceReference(StyleProperty, "SetupToolCard");
         System.Windows.Automation.AutomationProperties.SetName(button, L(driver ? "DriverManagerTitle" : "DeviceBindingTitle"));
         return button;

@@ -1,5 +1,6 @@
 <chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.FirstRunSetupWindow"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
  xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls" xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
  Title="{DynamicResource SetupTitle}" Width="880" Height="820" MinWidth="600" MinHeight="540"
  WindowStartupLocation="CenterScreen" WindowStyle="None" AllowsTransparency="False" Background="{DynamicResource WindowBackgroundBrush}"
@@ -8,7 +9,7 @@
   <Style x:Key="SetupToolCard" TargetType="Button">
    <Setter Property="animations:SurfaceMotion.Lift" Value="True"/>
    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-   <Setter Property="Margin" Value="0,0,12,0"/>
+   <Setter Property="Margin" Value="0"/>
    <Setter Property="Padding" Value="24"/>
    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
    <Setter Property="Cursor" Value="Hand"/>
@@ -32,7 +33,7 @@
    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
    <Setter Property="VerticalContentAlignment" Value="Stretch"/>
    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-   <Setter Property="Margin" Value="0,0,12,12"/>
+   <Setter Property="Margin" Value="6,0,6,12"/>
    <Setter Property="Cursor" Value="Hand"/>
    <Setter Property="Template">
     <Setter.Value>
@@ -66,12 +67,13 @@
  <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="False">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid animations:WindowDragBehavior.IsEnabled="True" Margin="0,0,0,20">
-   <StackPanel Margin="0,0,38,0">
-    <TextBlock Text="iPhone Mirror  /  SETUP" FontSize="{DynamicResource BodyFontSize}" FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}" Margin="4,4,0,18"/>
-    <Grid x:Name="StepIndicator" MinHeight="60"/>
-   </StackPanel>
-   <Button Style="{StaticResource SubWindowCloseButton}" Content="×" Click="CloseClick"
-           AutomationProperties.Name="{DynamicResource Close}"/>
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+   <TextBlock Text="iPhone Mirror  /  SETUP" FontSize="{DynamicResource BodyFontSize}" FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}" Margin="4,4,48,18" MinHeight="22"/>
+   <Grid x:Name="StepIndicator" Grid.Row="1" MinHeight="60" MaxWidth="680" Margin="40,0"/>
+   <Button x:Name="SetupCloseButton" Style="{StaticResource SubWindowCloseButton}" Click="CloseClick"
+           AutomationProperties.Name="{DynamicResource Close}">
+    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
+   </Button>
   </Grid>
   <ScrollViewer x:Name="Scroller" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
    <StackPanel x:Name="Page" MaxWidth="680" Margin="16,6,16,12">
@@ -96,12 +98,14 @@
     </Expander>
    </StackPanel>
   </ScrollViewer>
-  <Grid Grid.Row="2" Margin="0,16,0,0">
-   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-   <Button x:Name="Previous" ContentTemplate="{StaticResource SetupFooterText}" HorizontalContentAlignment="Center" Content="{DynamicResource WizardPrevious}" Click="PreviousClick"/>
-   <Button x:Name="CancelOperation" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="1" Content="{DynamicResource SetupCancelOperation}" Click="CancelOperationClick" Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Margin="8,0" Visibility="Collapsed"/>
-   <Button x:Name="Skip" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="2" Content="{DynamicResource SetupSkip}" Click="SkipClick" Style="{StaticResource GhostButton}" Margin="8,0"/>
-   <Button x:Name="Next" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="3" Content="{DynamicResource WizardNext}" Click="NextClick" Style="{StaticResource PrimaryButton}" MinWidth="112"/>
+  <Grid x:Name="SetupFooter" Grid.Row="2" Width="{Binding ActualWidth, ElementName=Page}" MaxWidth="680" HorizontalAlignment="Center" Margin="0,16,0,0">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <Button x:Name="Previous" ContentTemplate="{StaticResource SetupFooterText}" HorizontalContentAlignment="Center" VerticalAlignment="Center" Content="{DynamicResource WizardPrevious}" Click="PreviousClick"/>
+   <StackPanel Grid.Column="2" VerticalAlignment="Center">
+    <Button x:Name="CancelOperation" ContentTemplate="{StaticResource SetupFooterText}" Content="{DynamicResource SetupCancelOperation}" Click="CancelOperationClick" Style="{StaticResource GhostButton}" Visibility="Collapsed"/>
+    <Button x:Name="Skip" ContentTemplate="{StaticResource SetupFooterText}" Content="{DynamicResource SetupSkip}" Click="SkipClick" Style="{StaticResource GhostButton}"/>
+   </StackPanel>
+   <Button x:Name="Next" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="4" Content="{DynamicResource WizardNext}" Click="NextClick" Style="{StaticResource PrimaryButton}" VerticalAlignment="Center" MinWidth="112"/>
   </Grid>
   <Border x:Name="ExitPanel" Grid.RowSpan="3" Background="{DynamicResource WindowBackgroundBrush}" Visibility="Collapsed" CornerRadius="16" Padding="32">
    <StackPanel VerticalAlignment="Center">

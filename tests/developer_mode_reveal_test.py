@@ -43,7 +43,8 @@ class DeveloperModeRevealTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(
             connect=AsyncMock(side_effect=bridge.BridgeUserActionRequired(
                 'developer_mode_revealed', 'Enable on the phone and retry.')),
-            _cleanup=AsyncMock(), _mux_checkpoint=None)
+            _cleanup=AsyncMock(), _mux_checkpoint=None,
+            device_hub=SimpleNamespace(close=AsyncMock()))
         with patch.object(bridge, 'BridgeChannel', return_value=ipc), \
              patch.object(bridge, 'TouchSession', return_value=session):
             await bridge.main_async(120, 'phone-a', 'usb')
@@ -51,6 +52,7 @@ class DeveloperModeRevealTests(unittest.IsolatedAsyncioTestCase):
             'code': 'developer_mode_revealed', 'message': 'Enable on the phone and retry.'})
         ipc.close.assert_awaited_once()
         session._cleanup.assert_awaited_once()
+        session.device_hub.close.assert_awaited_once()
 
     async def test_already_enabled_continues_without_reveal(self):
         self.lockdown.get_developer_mode_status.return_value = True

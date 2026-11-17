@@ -99,6 +99,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
             Interlocked.Exchange(ref _stopping, 0);
             Interlocked.Exchange(ref _terminalEventReceived, 0);
             AuthMode = null;
+            SupportsNativeKeyboardVisibility = false;
             IsReady = false;
             GateOpen = false;
             _lastStandardError = null;
@@ -168,6 +169,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
             if (!usePackagedBridge)
                 psi.ArgumentList.Add(bridgeScript);
             psi.ArgumentList.Add(wireless ? "--wireless" : "--usb");
+            if (!NativeKeyboardVisible) psi.ArgumentList.Add("--hide-native-keyboard");
             psi.ArgumentList.Add("--rate-hz");
             psi.ArgumentList.Add(rateHz.ToString(System.Globalization.CultureInfo.InvariantCulture));
             psi.ArgumentList.Add("--udid");
@@ -374,6 +376,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
         GateOpen = false;
         Interlocked.Increment(ref _readyGeneration);
         CancelDeviceHub();
+        CancelNativeKeyboard();
         // Closing stdin ends the bridge's input loop and lets its teardown run:
         // releasing all touch points, closing the CoreDevice tunnel, and
         // releasing the claimed usbmux interface. Killing the process instead
@@ -452,8 +455,11 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                     LocalizationService.Get("TouchBridgeOutputDisconnected")));
             }
             if (ReferenceEquals(_process, process) && !IsReady)
+            {
+                CancelNativeKeyboard();
                 _readySignal?.TrySetException(new InvalidOperationException(
                     LocalizationService.Get("TouchBridgeOutputClosed")));
+            }
         }
     }
 
@@ -470,6 +476,9 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
             {
                 case "hub_result":
                     CompleteDeviceHub(root);
+                    break;
+                case "native_keyboard_result":
+                    CompleteNativeKeyboard(root);
                     break;
                 case "clipboard_result":
                     CompleteAutomationClipboard(root);
@@ -491,12 +500,14 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                     {
                         IsReady = false;
                         GateOpen = false;
+                        CancelNativeKeyboard();
                     }
                     if (string.Equals(statusCode, "terminated", StringComparison.OrdinalIgnoreCase))
                     {
                         Interlocked.Exchange(ref _terminalEventReceived, 1);
                         IsReady = false;
                         GateOpen = false;
+                        CancelNativeKeyboard();
                     }
                     OnEvent?.Invoke(new BridgeEvent("status",
                         statusCode, root.TryGetProperty("message", out var sm) ? sm.GetString() : null));
@@ -543,6 +554,14 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                     SupportsDeviceHub = root.TryGetProperty("capabilities", out var hubCaps) &&
                         hubCaps.ValueKind == JsonValueKind.Array && hubCaps.EnumerateArray().Any(c =>
                             c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.hub.rpc.v1");
+                    SupportsNativeKeyboardVisibility = root.TryGetProperty("capabilities", out var keyboardCaps) &&
+                        keyboardCaps.ValueKind == JsonValueKind.Array && keyboardCaps.EnumerateArray().Any(c =>
+                            c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.native_keyboard.v1") &&
+                        root.TryGetProperty("nativeKeyboardSupported", out var keyboardSupported) &&
+                        keyboardSupported.ValueKind == JsonValueKind.True;
+                    if (root.TryGetProperty("nativeKeyboardVisible", out var keyboardVisible) &&
+                        keyboardVisible.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        NativeKeyboardVisible = keyboardVisible.GetBoolean();
                     RateHz = root.TryGetProperty("rateHz", out var r) ? r.GetInt32() : 0;
                     GateOpen = root.TryGetProperty("gateOpen", out var g) && g.GetBoolean();
                     AuthMode = root.TryGetProperty("authMode", out var am)
@@ -582,6 +601,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                     Interlocked.Exchange(ref _terminalEventReceived, 1);
                     IsReady = false;
                     GateOpen = false;
+                    CancelNativeKeyboard();
                     var actionCode = root.GetProperty("code").GetString()!;
                     var actionMessage = root.GetProperty("message").GetString()!;
                     OnEvent?.Invoke(new BridgeEvent(evt, actionCode, actionMessage));
@@ -592,6 +612,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                     Interlocked.Exchange(ref _terminalEventReceived, 1);
                     IsReady = false;
                     GateOpen = false;
+                    CancelNativeKeyboard();
                     _lastErrorCode = root.TryGetProperty("code", out var ec)
                         ? ec.GetString() : null;
                     var message = root.TryGetProperty("message", out var em)
@@ -614,6 +635,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
         _lastFailureDiagnostic = message;
         IsReady = false;
         GateOpen = false;
+        CancelNativeKeyboard();
         _lastErrorCode = code;
         Interlocked.Exchange(ref _terminalEventReceived, 1);
         _readySignal?.TrySetException(CreateStartupException(message));

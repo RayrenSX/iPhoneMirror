@@ -1729,6 +1729,8 @@ class TestMuxConnectionLifecycle(unittest.TestCase):
         self.device._conns[self.connection.sport] = self.connection
 
     def test_fin_payload_is_delivered_and_connection_is_forgotten(self):
+        # Model the next byte negotiated by the SYN/SYN-ACK handshake.
+        self.connection.tx_ack = 42
         segment = self.mux.TcpSegment(62078, 5000, 42, 0,
                                       self.mux.TH_FIN | self.mux.TH_ACK,
                                       65535, b'final response')

@@ -290,6 +290,48 @@ struct HttpRequest {
     std::string body;
 };
 
+enum class HttpReadFailure {
+    None, EmptyEof, IncompleteHeaders, HeaderLimit, InvalidRequestLine,
+    InvalidHeader, DuplicateHeader, InvalidContentLength, InvalidTransferEncoding,
+    AmbiguousFraming, BodyLimit, InvalidChunk, IncompleteBody, Timeout, Stopped,
+    SocketError, ContinueSendFailed
+};
+
+std::string_view http_read_failure_name(HttpReadFailure failure) noexcept {
+    switch (failure) {
+    case HttpReadFailure::None: return "none";
+    case HttpReadFailure::EmptyEof: return "empty_eof";
+    case HttpReadFailure::IncompleteHeaders: return "incomplete_headers";
+    case HttpReadFailure::HeaderLimit: return "header_limit";
+    case HttpReadFailure::InvalidRequestLine: return "invalid_request_line";
+    case HttpReadFailure::InvalidHeader: return "invalid_header";
+    case HttpReadFailure::DuplicateHeader: return "duplicate_header";
+    case HttpReadFailure::InvalidContentLength: return "invalid_content_length";
+    case HttpReadFailure::InvalidTransferEncoding: return "invalid_transfer_encoding";
+    case HttpReadFailure::AmbiguousFraming: return "ambiguous_framing";
+    case HttpReadFailure::BodyLimit: return "body_limit";
+    case HttpReadFailure::InvalidChunk: return "invalid_chunk";
+    case HttpReadFailure::IncompleteBody: return "incomplete_body";
+    case HttpReadFailure::Timeout: return "timeout";
+    case HttpReadFailure::Stopped: return "stopped";
+    case HttpReadFailure::SocketError: return "socket_error";
+    case HttpReadFailure::ContinueSendFailed: return "continue_send_failed";
+    }
+    return "unknown";
+}
+
+struct HttpReadResult {
+    std::optional<HttpRequest> request;
+    HttpReadFailure failure{HttpReadFailure::None};
+    std::size_t received_bytes{};
+};
+
+bool is_repeatable_list_header(std::string_view name) noexcept {
+    return name == "accept" || name == "accept-encoding" ||
+        name == "accept-language" || name == "cache-control" ||
+        name == "connection" || name == "pragma";
+}
+
 struct EventEndpoint {
     std::string host;
     std::uint16_t port{80};
@@ -405,40 +447,67 @@ bool send_all(SOCKET socket, std::string_view data,
     return data.empty();
 }
 
-std::optional<HttpRequest> read_request(SOCKET socket,
+HttpReadResult read_request(SOCKET socket,
     const std::atomic_bool& stopping) {
     std::string bytes;
     std::array<char, 4096> buffer{};
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    std::size_t received_bytes{};
+    HttpReadFailure receive_failure{HttpReadFailure::None};
+    const auto reject = [&](HttpReadFailure failure) {
+        return HttpReadResult{std::nullopt, failure, received_bytes};
+    };
+    const auto incomplete = [&](HttpReadFailure closed_failure) {
+        return reject(receive_failure == HttpReadFailure::None
+            ? closed_failure : receive_failure);
+    };
+    const auto complete = [&](HttpRequest request) {
+        return HttpReadResult{std::move(request), HttpReadFailure::None, received_bytes};
+    };
     const auto receive = [&](char* destination, int capacity) {
         while (!stopping.load(std::memory_order_acquire) &&
             std::chrono::steady_clock::now() < deadline) {
-            if (!wait_socket(socket, POLLRDNORM, stopping, deadline))
+            if (!wait_socket(socket, POLLRDNORM, stopping, deadline)) {
+                receive_failure = stopping.load(std::memory_order_acquire)
+                    ? HttpReadFailure::Stopped
+                    : std::chrono::steady_clock::now() >= deadline
+                        ? HttpReadFailure::Timeout : HttpReadFailure::SocketError;
                 return SOCKET_ERROR;
+            }
             const auto count = recv(socket, destination, capacity, 0);
-            if (count >= 0) return count;
+            if (count >= 0) {
+                received_bytes += static_cast<std::size_t>(count);
+                return count;
+            }
             const auto error = WSAGetLastError();
-            if (error != WSAEWOULDBLOCK) return SOCKET_ERROR;
+            if (error != WSAEWOULDBLOCK) {
+                receive_failure = HttpReadFailure::SocketError;
+                return SOCKET_ERROR;
+            }
         }
+        receive_failure = stopping.load(std::memory_order_acquire)
+            ? HttpReadFailure::Stopped : HttpReadFailure::Timeout;
         return SOCKET_ERROR;
     };
     while (bytes.find("\r\n\r\n") == std::string::npos && bytes.size() < 64U * 1024U) {
         const auto count = receive(buffer.data(), static_cast<int>(buffer.size()));
-        if (count <= 0) return std::nullopt;
+        if (count <= 0) return incomplete(bytes.empty()
+            ? HttpReadFailure::EmptyEof : HttpReadFailure::IncompleteHeaders);
         bytes.append(buffer.data(), static_cast<std::size_t>(count));
     }
     const auto header_end = bytes.find("\r\n\r\n");
-    if (header_end == std::string::npos) return std::nullopt;
+    if (header_end == std::string::npos || header_end + 4U > 64U * 1024U)
+        return reject(HttpReadFailure::HeaderLimit);
 
     HttpRequest request;
     const auto first_end = bytes.find("\r\n");
-    if (first_end == std::string::npos) return std::nullopt;
+    if (first_end == std::string::npos) return reject(HttpReadFailure::InvalidRequestLine);
     const auto first = std::string_view(bytes).substr(0, first_end);
     const auto method_end = first.find(' ');
     const auto path_end = method_end == std::string_view::npos ? method_end :
         first.find(' ', method_end + 1);
     if (method_end == std::string_view::npos || path_end == std::string_view::npos)
-        return std::nullopt;
+        return reject(HttpReadFailure::InvalidRequestLine);
     request.method = std::string(first.substr(0, method_end));
     request.path = std::string(first.substr(method_end + 1, path_end - method_end - 1));
 
@@ -451,20 +520,27 @@ std::optional<HttpRequest> read_request(SOCKET socket,
         if (separator != std::string_view::npos) {
             const auto name = lower(trim(line.substr(0, separator)));
             const auto value = trim(line.substr(separator + 1));
-            if (name.empty()) return std::nullopt;
+            if (name.empty()) return reject(HttpReadFailure::InvalidHeader);
             if (const auto existing = request.headers.find(name);
                 existing != request.headers.end()) {
                 // A request with conflicting framing headers is ambiguous and
                 // must never be interpreted differently by the parser and a
                 // controller or proxy. Identical Content-Length fields are
                 // safe and occur with a few older DLNA controllers; repeated
-                // Transfer-Encoding is rejected because list semantics would
-                // otherwise be lost by the single-value header map.
+                // Transfer-Encoding and single-value controller fields remain
+                // rejected; only these explicit non-framing list fields can
+                // safely be combined without losing their semantics.
                 if (name == "content-length" && existing->second == value) {
                     line_at = line_end + 2;
                     continue;
                 }
-                return std::nullopt;
+                if (is_repeatable_list_header(name)) {
+                    existing->second += ", ";
+                    existing->second += value;
+                    line_at = line_end + 2;
+                    continue;
+                }
+                return reject(HttpReadFailure::DuplicateHeader);
             }
             request.headers.emplace(name, value);
         }
@@ -477,15 +553,17 @@ std::optional<HttpRequest> read_request(SOCKET socket,
         const auto [end, error] = std::from_chars(length->second.data(),
             length->second.data() + length->second.size(), content_length);
         if (error != std::errc{} || end != length->second.data() + length->second.size() ||
-            content_length > 1024U * 1024U) return std::nullopt;
+            content_length > 1024U * 1024U)
+            return reject(HttpReadFailure::InvalidContentLength);
     }
     const auto transfer = request.headers.find("transfer-encoding");
     const auto transfer_value = transfer == request.headers.end()
         ? std::string{} : lower(transfer->second);
     const bool chunked = transfer_value == "chunked";
-    if (!transfer_value.empty() && !chunked) return std::nullopt;
+    if (!transfer_value.empty() && !chunked)
+        return reject(HttpReadFailure::InvalidTransferEncoding);
     if (chunked && request.headers.contains("content-length"))
-        return std::nullopt;
+        return reject(HttpReadFailure::AmbiguousFraming);
     const auto body_at = header_end + 4;
     const auto receive_more = [&] {
         const auto count = receive(buffer.data(), static_cast<int>(buffer.size()));
@@ -499,15 +577,17 @@ std::optional<HttpRequest> read_request(SOCKET socket,
     if (expect_continue && bytes.size() == body_at &&
         (chunked || content_length != 0) &&
         !send_all(socket, "HTTP/1.1 100 Continue\r\n\r\n", stopping))
-        return std::nullopt;
+        return reject(stopping.load(std::memory_order_acquire)
+            ? HttpReadFailure::Stopped : HttpReadFailure::ContinueSendFailed);
     if (chunked) {
         std::string body;
         std::size_t cursor = body_at;
         while (true) {
             std::size_t line_end{};
             while ((line_end = bytes.find("\r\n", cursor)) == std::string::npos) {
-                if (bytes.size() > body_at + 1024U * 1024U || !receive_more())
-                    return std::nullopt;
+                if (bytes.size() > body_at + 1024U * 1024U)
+                    return reject(HttpReadFailure::BodyLimit);
+                if (!receive_more()) return incomplete(HttpReadFailure::IncompleteBody);
             }
             auto size_text = trim(std::string_view(bytes).substr(cursor,
                 line_end - cursor));
@@ -520,10 +600,11 @@ std::optional<HttpRequest> read_request(SOCKET socket,
                 size_text.data(), size_text.data() + size_text.size(),
                 chunk_size, 16);
             if (size_error != std::errc{} ||
-                size_end != size_text.data() + size_text.size() ||
-                chunk_size > 1024U * 1024U ||
+                size_end != size_text.data() + size_text.size())
+                return reject(HttpReadFailure::InvalidChunk);
+            if (chunk_size > 1024U * 1024U ||
                 body.size() > 1024U * 1024U - static_cast<std::size_t>(chunk_size))
-                return std::nullopt;
+                return reject(HttpReadFailure::BodyLimit);
             cursor = line_end + 2;
             if (chunk_size == 0) {
                 // The last-chunk grammar ends after its size line. What
@@ -531,35 +612,37 @@ std::optional<HttpRequest> read_request(SOCKET socket,
                 // fields terminated by an empty line; there is no chunk-data
                 // CRLF before the first trailer.
                 while (bytes.size() - cursor < 2U) {
-                    if (!receive_more()) return std::nullopt;
+                    if (!receive_more()) return incomplete(HttpReadFailure::IncompleteBody);
                 }
                 if (bytes.compare(cursor, 2, "\r\n") == 0) {
                     request.body = std::move(body);
-                    return request;
+                    return complete(std::move(request));
                 }
                 while (bytes.find("\r\n\r\n", cursor) == std::string::npos) {
-                    if (bytes.size() > body_at + 1024U * 1024U || !receive_more())
-                        return std::nullopt;
+                    if (bytes.size() > body_at + 1024U * 1024U)
+                        return reject(HttpReadFailure::BodyLimit);
+                    if (!receive_more()) return incomplete(HttpReadFailure::IncompleteBody);
                 }
                 request.body = std::move(body);
-                return request;
+                return complete(std::move(request));
             }
             const auto required = static_cast<std::size_t>(chunk_size) + 2U;
             while (bytes.size() - cursor < required) {
-                if (!receive_more()) return std::nullopt;
+                if (!receive_more()) return incomplete(HttpReadFailure::IncompleteBody);
             }
             body.append(bytes.data() + cursor,
                 static_cast<std::size_t>(chunk_size));
             cursor += static_cast<std::size_t>(chunk_size);
-            if (bytes.compare(cursor, 2, "\r\n") != 0) return std::nullopt;
+            if (bytes.compare(cursor, 2, "\r\n") != 0)
+                return reject(HttpReadFailure::InvalidChunk);
             cursor += 2;
         }
     }
     while (bytes.size() - body_at < content_length) {
-        if (!receive_more()) return std::nullopt;
+        if (!receive_more()) return incomplete(HttpReadFailure::IncompleteBody);
     }
     request.body.assign(bytes.data() + body_at, content_length);
-    return request;
+    return complete(std::move(request));
 }
 
 std::string http_response(int status, std::string_view reason,
@@ -703,9 +786,11 @@ struct DlnaRenderer::Impl {
     std::vector<std::unique_ptr<ClientWorker>> client_threads;
     bool winsock_started{};
     std::mutex state_mutex;
+    std::mutex command_mutex;
     std::mutex http_listener_mutex;
     std::mutex client_mutex;
     std::mutex subscription_mutex;
+    std::mutex event_publication_mutex;
     std::vector<EventSubscription> subscriptions;
     std::atomic_uint64_t next_subscription{};
     std::string media_uri;
@@ -717,6 +802,7 @@ struct DlnaRenderer::Impl {
     float volume{1.0F};
     bool muted{};
     std::string transport_state{"STOPPED"};
+    std::uint64_t transport_generation{};
     std::atomic_uint64_t http_requests{};
     std::atomic_uint64_t http_parse_failures{};
     std::atomic_uint64_t http_responses{};
@@ -868,6 +954,10 @@ struct DlnaRenderer::Impl {
     }
 
     void notify_event(std::string_view service) {
+        // Take the publication lock before the state snapshot. In particular,
+        // an old EOF must never publish a newer SEQ with an older STOPPED body
+        // after the next Play has already published PLAYING.
+        std::scoped_lock publication(event_publication_mutex);
         const auto body = event_body(service);
         std::vector<EventSubscription> targets;
         const auto now = std::chrono::steady_clock::now();
@@ -1130,6 +1220,10 @@ struct DlnaRenderer::Impl {
     }
 
     std::pair<std::string_view, std::string> handle_soap(const HttpRequest& request) {
+        // Serialize a controller's state mutation and its Host callback. The
+        // state mutex is released before every callback, and publication below
+        // releases this command lock before doing any network work.
+        std::unique_lock command(command_mutex);
         const auto soap_header = request.headers.find("soapaction");
         std::string action;
         if (soap_header != request.headers.end()) {
@@ -1172,6 +1266,7 @@ struct DlnaRenderer::Impl {
             if (!uri || !iPhoneMirror::wireless::is_valid_http_url(*uri))
                 return {service, soap_error(714, "Illegal MIME-type")};
             bool stop_active_media{};
+            std::uint64_t generation{};
             {
                 std::scoped_lock lock(state_mutex);
                 stop_active_media = transport_state != "STOPPED";
@@ -1181,8 +1276,9 @@ struct DlnaRenderer::Impl {
                 next_media_metadata.clear();
                 media_start = 0;
                 transport_state = "STOPPED";
+                generation = ++transport_generation;
             }
-            if (stop_active_media && callbacks.stop) callbacks.stop();
+            if (stop_active_media && callbacks.stop) callbacks.stop(generation);
             changed_service = "avtransport";
             log(std::format("dlna SetAVTransportURI url_bytes={}", uri->size()));
         }
@@ -1206,6 +1302,7 @@ struct DlnaRenderer::Impl {
             double base_volume{1.0};
             bool play_muted{};
             bool resuming{};
+            std::uint64_t generation{};
             {
                 std::scoped_lock lock(state_mutex);
                 uri = media_uri;
@@ -1213,11 +1310,14 @@ struct DlnaRenderer::Impl {
                 base_volume = volume;
                 play_muted = muted;
                 resuming = transport_state == "PAUSED_PLAYBACK";
-                if (!uri.empty()) transport_state = "PLAYING";
+                if (!uri.empty()) {
+                    transport_state = "PLAYING";
+                    generation = ++transport_generation;
+                }
             }
             if (uri.empty()) return {service, soap_error(701, "Transition not available")};
             if (resuming) {
-                if (callbacks.resume) callbacks.resume();
+                if (callbacks.resume) callbacks.resume(generation);
                 log("dlna Resume");
             } else {
                 double duration{};
@@ -1226,17 +1326,20 @@ struct DlnaRenderer::Impl {
                     duration = reported_media_duration(uri, media_metadata, 0);
                 }
                 if (callbacks.play)
-                    callbacks.play(uri, duration, start, base_volume, play_muted);
+                    callbacks.play(uri, duration, start, base_volume, play_muted,
+                        generation);
                 log(std::format("dlna Play start={:.3f}", start));
             }
             changed_service = "avtransport";
         }
         else if (action == "Stop" && avtransport) {
+            std::uint64_t generation{};
             {
                 std::scoped_lock lock(state_mutex);
                 transport_state = "STOPPED";
+                generation = ++transport_generation;
             }
-            if (callbacks.stop) callbacks.stop();
+            if (callbacks.stop) callbacks.stop(generation);
             changed_service = "avtransport";
             log("dlna Stop");
         }
@@ -1244,6 +1347,7 @@ struct DlnaRenderer::Impl {
             std::string uri;
             double base_volume{1.0};
             bool play_muted{};
+            std::uint64_t generation{};
             {
                 std::scoped_lock lock(state_mutex);
                 if (!next_media_uri.empty()) {
@@ -1253,6 +1357,7 @@ struct DlnaRenderer::Impl {
                     next_media_metadata.clear();
                     media_start = 0;
                     transport_state = "PLAYING";
+                    generation = ++transport_generation;
                     uri = media_uri;
                     base_volume = volume;
                     play_muted = muted;
@@ -1265,7 +1370,8 @@ struct DlnaRenderer::Impl {
                     duration = reported_media_duration(uri, media_metadata, 0);
                 }
                 if (callbacks.play)
-                    callbacks.play(uri, duration, 0, base_volume, play_muted);
+                    callbacks.play(uri, duration, 0, base_volume, play_muted,
+                        generation);
                 changed_service = "avtransport";
             }
             log(std::format("dlna Next queued_uri={}", !uri.empty()));
@@ -1276,11 +1382,14 @@ struct DlnaRenderer::Impl {
             log("dlna Previous delegated_to_controller=true");
         }
         else if (action == "Pause" && avtransport) {
+            std::uint64_t generation{};
             {
                 std::scoped_lock lock(state_mutex);
-                transport_state = "PAUSED_PLAYBACK";
+                if (transport_state != "STOPPED")
+                    transport_state = "PAUSED_PLAYBACK";
+                generation = ++transport_generation;
             }
-            if (callbacks.pause) callbacks.pause();
+            if (callbacks.pause) callbacks.pause(generation);
             changed_service = "avtransport";
             log("dlna Pause");
         }
@@ -1296,11 +1405,13 @@ struct DlnaRenderer::Impl {
                     target ? log_token(*target) : "<missing>", trim(unit)));
                 return {service, soap_error(402, "Invalid Args")};
             }
+            std::uint64_t generation{};
             {
                 std::scoped_lock lock(state_mutex);
                 media_start = *position;
+                generation = ++transport_generation;
             }
-            if (callbacks.seek) callbacks.seek(*position);
+            if (callbacks.seek) callbacks.seek(*position, generation);
             changed_service = "avtransport";
             log(std::format("dlna Seek position={:.3f}", *position));
         }
@@ -1431,6 +1542,7 @@ struct DlnaRenderer::Impl {
         else {
             return {service, soap_error(401, "Invalid Action")};
         }
+        command.unlock();
         if (!changed_service.empty()) notify_event(changed_service);
         return {service, soap_envelope(service, action, "")};
     }
@@ -1438,11 +1550,18 @@ struct DlnaRenderer::Impl {
     void handle_http(SOCKET client) {
         const auto request_index = http_requests.fetch_add(1, std::memory_order_relaxed) + 1;
         const auto started = std::chrono::steady_clock::now();
-        const auto request = read_request(client, stopping);
+        const auto read = read_request(client, stopping);
+        const auto& request = read.request;
         if (!request) {
-            http_parse_failures.fetch_add(1, std::memory_order_relaxed);
-            log(std::format("dlna http request={} rejected stopping={} duration_ms={}",
-                request_index, stopping.load(std::memory_order_acquire),
+            const auto ignored = read.failure == HttpReadFailure::EmptyEof ||
+                read.failure == HttpReadFailure::Stopped;
+            if (!ignored) http_parse_failures.fetch_add(1, std::memory_order_relaxed);
+            // Report only bounded parser states and byte counts. Controller
+            // URLs, header values and SOAP content must not enter this log.
+            log(std::format("dlna http request={} {} reason={} received_bytes={} "
+                "stopping={} duration_ms={}", request_index,
+                ignored ? "ignored" : "rejected", http_read_failure_name(read.failure),
+                read.received_bytes, stopping.load(std::memory_order_acquire),
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - started).count()));
             return;
@@ -1488,6 +1607,7 @@ struct DlnaRenderer::Impl {
         }
         else if (request->method == "SUBSCRIBE" &&
             request->path.starts_with("/dlna/event/")) {
+            std::scoped_lock publication(event_publication_mutex);
             const auto renewal = request->headers.contains("sid");
             const auto subscription = subscribe(*request);
             if (!subscription) {
@@ -1766,6 +1886,7 @@ bool DlnaRenderer::start(std::string friendly_name, std::string uuid,
         impl_->volume = 1.0F;
         impl_->muted = false;
         impl_->transport_state = "STOPPED";
+        ++impl_->transport_generation;
     }
     impl_->stopping.store(false, std::memory_order_release);
     impl_->http_requests.store(0, std::memory_order_relaxed);
@@ -1932,13 +2053,24 @@ void DlnaRenderer::stop() noexcept {
     }
 }
 
-void DlnaRenderer::set_transport_stopped() noexcept {
-    if (!impl_) return;
+bool DlnaRenderer::update_transport_playback(std::uint64_t generation,
+    std::string_view state) noexcept {
+    if (!impl_ || generation == 0) return false;
     {
         std::scoped_lock lock(impl_->state_mutex);
-        impl_->transport_state = "STOPPED";
-        impl_->media_start = 0;
+        // The host commits this while it still owns the command lock. No
+        // network work is allowed here: a Seek/Resume must either precede the
+        // accepted report or follow the complete state change.
+        if (generation != impl_->transport_generation ||
+            impl_->transport_state == state) return false;
+        impl_->transport_state = state;
+        if (state == "STOPPED") impl_->media_start = 0;
     }
+    return true;
+}
+
+void DlnaRenderer::notify_transport_changed() {
+    if (!impl_) return;
     impl_->notify_event("avtransport");
 }
 

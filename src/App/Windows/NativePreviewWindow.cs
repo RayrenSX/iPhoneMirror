@@ -112,6 +112,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private Func<nint, bool> _attachPreview;
     private Action<nint> _detachPreview;
     private Func<nint, bool> _refreshPreview;
+    private readonly Func<ulong, nint, double, double, bool> _setCornerProfile;
     private readonly ContextMenu _contextMenu;
     private readonly MenuItem _fullScreenItem;
     private readonly MenuItem _windowMenuItem;
@@ -147,8 +148,8 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly Action<nint>? _requestWirelessControl;
     private readonly Action<string>? _logDiagnostic;
     private ulong _sessionHandle;
-    private readonly double _cornerRadius;
-    private readonly double _cornerExponent;
+    private double _cornerRadius;
+    private double _cornerExponent;
     private readonly Border? _managedContentRoot;
     private readonly FrameworkElement? _managedContent;
     private readonly Transform? _managedContentOriginalLayoutTransform;
@@ -163,6 +164,59 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool _isTopMost;
     private bool _isFixed;
     private bool _cornersEnabled = true;
+    private bool _phoneFrameEnabled;
+    private DeviceFrameHitTest? _phoneFrameHitTest;
+    internal string? DeviceProductType { get; private set; }
+    private DeviceAppearance _deviceAppearance = DeviceAppearance.Unknown;
+    private DeviceFrameSelection FrameSelection { get; set; } = new(null, "black", false);
+    private DeviceFrameProfile? DeviceFrame => FrameSelection.Profile;
+
+    internal bool UpdateDeviceAppearance(string? productType, DeviceAppearance appearance)
+    {
+        var previous = DeviceFrame;
+        var selection = DeviceFrameCatalog.Resolve(productType, appearance, _sourceWidth, _sourceHeight);
+        if (DeviceProductType == productType && _deviceAppearance == appearance && previous == selection.Profile)
+        {
+            UpdateDeviceCornerProfile();
+            return true;
+        }
+        var next = selection.Profile;
+        var hitTest = _phoneFrameHitTest;
+        if (_phoneFrameEnabled && previous != next)
+        {
+            if (next is null) return false;
+            hitTest = new DeviceFrameHitTest(next);
+            if (!NativeCore.SetDeviceWindowFrameArtwork(_sessionHandle, _handle, next)) return false;
+        }
+        DeviceProductType = productType;
+        _deviceAppearance = appearance;
+        FrameSelection = selection;
+        _phoneFrameHitTest = hitTest;
+        UpdateDeviceCornerProfile();
+        if (_phoneFrameEnabled && previous != next) ApplyRotatedDimensions();
+        if (_styleWindow is not null) _styleWindow.SetPhoneFrameDescription(PhoneFrameDescription);
+        return true;
+    }
+
+    private void UpdateDeviceCornerProfile()
+    {
+        if (_managedContent is not null) return;
+        var profile = DeviceCornerProfileResolver.Resolve(DeviceProductType, _sourceWidth, _sourceHeight);
+        var radius = profile.IsRounded ? profile.RadiusRatio : 0;
+        if (_cornerRadius == radius && _cornerExponent == profile.CurveExponent) return;
+        _cornerRadius = radius;
+        _cornerExponent = profile.CurveExponent;
+        // Refresh the model/panel fit without changing the user's per-window
+        // remove-corners choice. The native frame/full-screen flags remain
+        // responsible for whether this base outline is currently displayed.
+        _ = _setCornerProfile(_sessionHandle, _handle,
+            _cornersEnabled ? _cornerRadius : 0, _cornerExponent);
+    }
+
+    internal string PhoneFrameDescription => LocalizationService.Get("ProjectionPhoneFrameHelp") + " " + DeviceFrameCatalog.Describe(FrameSelection);
+    internal void RefreshPhoneFrameDescription() => _styleWindow?.SetPhoneFrameDescription(PhoneFrameDescription);
+    internal DeviceFrameProfile? ActiveDeviceFrame => _phoneFrameEnabled && !_isFullScreen && !IsZoomed(_handle) ? DeviceFrame : null;
+    internal int DeviceFrameRotation => (_rotation + (_sourceWidth > _sourceHeight ? 1 : 0)) % 4;
     private int _rotation;
     private byte _capturedMouseButtons;
     private nint _largeIcon;
@@ -207,11 +261,13 @@ internal sealed class NativePreviewWindow : IDisposable
            Action<nint>? requestUsbControl = null,
            Action<nint>? requestWirelessControl = null,
            FrameworkElement? managedContent = null, Action? managedContentDetached = null,
-         Action<string>? logDiagnostic = null)
+         Action<string>? logDiagnostic = null,
+         Func<ulong, nint, double, double, bool>? setCornerProfile = null)
     {
         _attachPreview = attachPreview;
         _detachPreview = detachPreview;
         _refreshPreview = refreshPreview;
+        _setCornerProfile = setCornerProfile ?? NativeCore.SetDeviceWindowCornerProfile;
         _sessionHandle = sessionHandle;
         _cornerRadius = cornerRadius;
         _cornerExponent = cornerExponent;
@@ -433,7 +489,10 @@ internal sealed class NativePreviewWindow : IDisposable
         }
 
         _attached = true;
-        _ = NativeCore.SetDeviceWindowCornerProfile(sessionHandle, _handle,
+        if (_phoneFrameEnabled && DeviceFrame is { } frame)
+            _ = NativeCore.SetDeviceWindowFrameArtwork(sessionHandle, _handle, frame);
+        _ = NativeCore.SetDeviceWindowPhoneFrame(sessionHandle, _handle, _phoneFrameEnabled);
+        _ = _setCornerProfile(sessionHandle, _handle,
             _cornersEnabled ? _cornerRadius : 0, _cornerExponent);
         if (_rotation != 0)
             _ = NativeCore.SetDeviceWindowRotation(sessionHandle, _handle, _rotation);
@@ -662,6 +721,8 @@ internal sealed class NativePreviewWindow : IDisposable
         if (changed) _pointerInput?.Invoke(new PreviewPointerEventArgs(PreviewPointerKind.Reset, 0, 0, 0, 0));
         _sourceWidth = width;
         _sourceHeight = height;
+        if (changed && _managedContent is null)
+            _ = UpdateDeviceAppearance(DeviceProductType, _deviceAppearance);
         ApplyRotatedDimensions();
         if (changed)
             Log("independent_window_dimensions",
@@ -732,7 +793,7 @@ internal sealed class NativePreviewWindow : IDisposable
                 Math.Max(1, touchRect.Right - touchRect.Left), Math.Max(1, touchRect.Bottom - touchRect.Top),
                 (_rotation & 1) == 0 ? _sourceWidth : _sourceHeight,
                 (_rotation & 1) == 0 ? _sourceHeight : _sourceWidth, _rotation,
-                input => _pointerInput?.Invoke(input));
+                ForwardPointerInput);
             handled = true;
             return 0;
         }
@@ -1070,9 +1131,12 @@ internal sealed class NativePreviewWindow : IDisposable
             _wirelessControlItem.IsEnabled = !_isFullScreen;
         }
         if (_cornerItem is not null)
+        {
             _cornerItem.Header = LocalizationService.Get(
                 _cornersEnabled ? "IndependentWindowRemoveCorners" :
                     "IndependentWindowKeepCorners");
+            _cornerItem.IsEnabled = !_phoneFrameEnabled;
+        }
         if (_imageSettingsItem is not null)
             _imageSettingsItem.Header = LocalizationService.Get(
                 "IndependentWindowImageSettings");
@@ -1130,11 +1194,51 @@ internal sealed class NativePreviewWindow : IDisposable
             return;
         }
         var window = new WindowStyleSettingsWindow(_windowOpacity, SetWindowOpacity,
-            _opaqueOnHover, SetOpaqueOnHover);
+            _opaqueOnHover, SetOpaqueOnHover, PhoneFramePreference?.Invoke() ?? _phoneFrameEnabled,
+            _managedContent is null && _sessionHandle != 0 ? enabled => PhoneFramePreferenceRequested?.Invoke(enabled) ?? SetPhoneFrame(enabled) : null,
+            PhoneFrameDescription, PhoneFramePreferenceRequested is not null || CanShowPhoneFrame);
         _ = new WindowInteropHelper(window) { Owner = _handle };
         _styleWindow = window;
         window.Closed += (_, _) => _styleWindow = null;
         window.Show();
+    }
+
+    internal Func<bool, bool>? PhoneFramePreferenceRequested { get; set; }
+    internal Func<bool>? PhoneFramePreference { get; set; }
+    internal void RefreshPhoneFramePreference() => _styleWindow?.SetPhoneFrameEnabled(PhoneFramePreference?.Invoke() ?? _phoneFrameEnabled);
+    internal bool CanShowPhoneFrame => _managedContent is null && _sessionHandle != 0 && DeviceFrame is not null;
+    internal bool PhoneFrameEnabled => _phoneFrameEnabled;
+    internal event Action? PhoneFrameChanged;
+
+    internal bool SetPhoneFrame(bool enabled)
+    {
+        if (_disposed || _handle == 0 || _sessionHandle == 0 || _managedContent is not null) return false;
+        DeviceFrameHitTest? hitTest = null;
+        if (enabled)
+        {
+            if (DeviceFrame is not { } frame) return false;
+            hitTest = new DeviceFrameHitTest(frame);
+            if (!NativeCore.SetDeviceWindowFrameArtwork(_sessionHandle, _handle, frame)) return false;
+        }
+        if (!NativeCore.SetDeviceWindowPhoneFrame(_sessionHandle, _handle, enabled)) return false;
+        ResetTouchControlInput();
+        _phoneFrameEnabled = enabled;
+        _phoneFrameHitTest = hitTest;
+        _styleWindow?.SetPhoneFrameEnabled(enabled);
+        PhoneFrameChanged?.Invoke();
+        ApplyRotatedDimensions();
+        return true;
+    }
+
+    private void ForwardPointerInput(PreviewPointerEventArgs input)
+    {
+        if (_phoneFrameEnabled && DeviceFrame is { } frame && !_isFullScreen && !IsZoomed(_handle) && input.Kind != PreviewPointerKind.Reset)
+        {
+            if (input.Kind is PreviewPointerKind.ButtonDown or PreviewPointerKind.TouchDown or PreviewPointerKind.Wheel &&
+                _phoneFrameHitTest?.Contains(DeviceFrameRotation, input) != true) return;
+            input = PhoneFrameGeometry.MapPointer(frame, DeviceFrameRotation, input);
+        }
+        _pointerInput?.Invoke(input);
     }
 
     private bool SetWindowOpacity(double opacity)
@@ -1390,7 +1494,7 @@ internal sealed class NativePreviewWindow : IDisposable
         var y = unchecked((short)((packed >> 16) & 0xFFFF));
         var sourceWidth = (_rotation & 1) == 0 ? _sourceWidth : _sourceHeight;
         var sourceHeight = (_rotation & 1) == 0 ? _sourceHeight : _sourceWidth;
-        _pointerInput(new PreviewPointerEventArgs(kind, x, y, button, wheel,
+        ForwardPointerInput(new PreviewPointerEventArgs(kind, x, y, button, wheel,
             Math.Max(1, rect.Right - rect.Left), Math.Max(1, rect.Bottom - rect.Top),
             sourceWidth, sourceHeight, _rotation)
         {
@@ -1412,7 +1516,7 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_managedContent is not null || _sessionHandle == 0 || _handle == 0) return;
         _cornersEnabled = !_cornersEnabled;
-        _ = NativeCore.SetDeviceWindowCornerProfile(_sessionHandle, _handle,
+        _ = _setCornerProfile(_sessionHandle, _handle,
             _cornersEnabled ? _cornerRadius : 0, _cornerExponent);
         UpdateContextMenuLabels();
         Log("independent_window_corners",
@@ -1436,6 +1540,13 @@ internal sealed class NativePreviewWindow : IDisposable
     private void ApplyRotatedDimensions()
     {
         if (_sourceWidth == 0 || _sourceHeight == 0) return;
+        if (_phoneFrameEnabled && DeviceFrame is { } frame)
+        {
+            _aspectController.SetSourceDimensions(
+                (uint)((DeviceFrameRotation & 1) == 0 ? frame.FrameWidth : frame.FrameHeight),
+                (uint)((DeviceFrameRotation & 1) == 0 ? frame.FrameHeight : frame.FrameWidth));
+            return;
+        }
         if ((_rotation & 1) != 0)
             _aspectController.SetSourceDimensions(_sourceHeight, _sourceWidth);
         else
@@ -1456,6 +1567,7 @@ internal sealed class NativePreviewWindow : IDisposable
             ("mode", WindowMode), ("attached", _attached),
             ("full_screen", _isFullScreen));
         _disposed = true;
+        _phoneFrameHitTest = null;
         _hoverOpacityTimer.Stop();
         OpenWindows.Remove(this);
         ThemeService.ThemeChanged -= OnThemeChanged;

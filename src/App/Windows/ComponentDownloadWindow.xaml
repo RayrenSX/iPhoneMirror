@@ -25,7 +25,7 @@
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel>
             <TextBlock Text="{DynamicResource UxPlayDownloadTitle}" Style="{StaticResource SubWindowTitle}"/>
-            <TextBlock Text="{DynamicResource UxPlayDownloadDescription}" TextWrapping="Wrap"
+            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource UxPlayDownloadDescription}" TextWrapping="Wrap"
                        Style="{StaticResource SubWindowSubtitle}"/>
           </StackPanel>
           <Button Grid.Column="1" Style="{StaticResource SubWindowCloseButton}" Click="OnCancel"

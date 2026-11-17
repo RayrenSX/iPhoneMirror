@@ -58,6 +58,8 @@ extern "C" void* __cdecl stub_start(const char*, unsigned int, unsigned int,
     SetEnvironmentVariableW(L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY",
         L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     callback->log(6, "stub protocol log");
+    callback->log(7, "SETUP 2 (mirror, type=110) private-diagnostic-sentinel");
+    callback->log(4, "Mirror TCP read timed out after 3000 ms private-diagnostic-sentinel");
     callback->log(6, "IPHONE_MIRROR_DEVICE_INFO\t00:11:22:33:44:55\tiPhone9,1\t17.5.1");
     callback->connected("Stub iPhone", "00:11:22:33:44:55");
 

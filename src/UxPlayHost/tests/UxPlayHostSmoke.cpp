@@ -124,7 +124,8 @@ int wmain(int argc, wchar_t** argv) {
     bool provisional_disconnected{};
     bool connected_device{};
     bool device_info{};
-    bool video{};
+    bool video{true};
+    unsigned int video_count{};
     bool audio{};
     std::uint64_t first_audio_sequence{};
     std::uint64_t first_video_sequence{};
@@ -135,7 +136,7 @@ int wmain(int argc, wchar_t** argv) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     while (std::chrono::steady_clock::now() < deadline &&
         (startup_only ? !ready : !(ready && provisional_connected &&
-            provisional_disconnected && connected_device && device_info && video && audio))) {
+            provisional_disconnected && connected_device && device_info && video && video_count == 3 && audio))) {
         iPhoneMirror::wireless::MessageHeader header;
         if (!read_exact(pipe, &header, sizeof(header))) break;
         if (header.magic != iPhoneMirror::wireless::IpcMagic ||
@@ -184,17 +185,23 @@ int wmain(int argc, wchar_t** argv) {
             break;
         case iPhoneMirror::wireless::MessageType::Video:
             if (first_video_sequence == 0) first_video_sequence = header.sequence;
-            video = header.width == 334 && header.height == 720 &&
-                header.stride[0] == 334 && header.stride[1] == 167 &&
-                header.stride[2] == 167 &&
-                payload.size() == static_cast<std::size_t>(334) * 720 * 3U / 2U;
-            if (video) {
-                for (unsigned int row = 0; row < 720; ++row)
-                    for (unsigned int column = 0; column < 334; ++column)
-                        video = video && payload[static_cast<std::size_t>(row) * 334 + column] ==
-                            static_cast<std::uint8_t>(row % 200U + 16U);
-                video = video && payload[334U * 720U] == 0x40 &&
-                    payload[334U * 720U * 5U / 4U] == 0xC0;
+            {
+                const unsigned int w = video_count == 1 ? 960 : 334;
+                const unsigned int h = video_count == 1 ? 540 : 720;
+                bool valid = header.width == w && header.height == h &&
+                    header.stride[0] == w && header.stride[1] == w / 2 &&
+                    header.stride[2] == w / 2 &&
+                    payload.size() == static_cast<std::size_t>(w) * h * 3U / 2U;
+                if (valid) {
+                    for (unsigned int row = 0; row < h; ++row)
+                        for (unsigned int column = 0; column < w; ++column)
+                            valid = valid && payload[static_cast<std::size_t>(row) * w + column] ==
+                                static_cast<std::uint8_t>(row % 200U + 16U);
+                    valid = valid && payload[w * h] == 0x40 &&
+                        payload[w * h * 5U / 4U] == 0xC0;
+                }
+                video = video && valid;
+                ++video_count;
             }
             break;
         case iPhoneMirror::wireless::MessageType::Audio:
@@ -215,7 +222,7 @@ int wmain(int argc, wchar_t** argv) {
     CloseHandle(pipe);
     if (!ready || (!startup_only &&
         (!provisional_connected || !provisional_disconnected || !connected_device ||
-            !device_info || !video || !audio ||
+            !device_info || !video || video_count != 3 || !audio ||
             !(provisional_connected_sequence < provisional_disconnected_sequence &&
                 provisional_disconnected_sequence < connected_sequence &&
                 connected_sequence < device_info_sequence &&

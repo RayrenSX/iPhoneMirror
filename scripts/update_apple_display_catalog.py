@@ -30,9 +30,15 @@ LEGACY = [
     ('iPhone3GS', 'iPhone 3GS', ['iPhone2,1'], 'https://support.apple.com/kb/SP565'),
     ('iPadOriginal', 'iPad', ['iPad1,1'], 'https://support.apple.com/kb/SP580'),
 ]
+# Recent products not yet present in DeviceKit. Their identifiers are checked
+# against IPSW below and their actual panel data still comes from Apple.
+SUPPLEMENTAL = [
+    ('iPadMiniA20Pro', 'iPad mini (A20 Pro)', ['iPad19,1', 'iPad19,2'], 'https://support.apple.com/en-us/149482'),
+]
 # DeviceKit currently links both M5 sizes to the 11-inch article. The 13-inch
 # title and dimensions are checked from Apple's separate official article.
-SPEC_URL_OVERRIDES = {'iPadPro13M5': 'https://support.apple.com/en-us/125407'}
+SPEC_URL_OVERRIDES = {'iPadPro13M5': 'https://support.apple.com/en-us/125407',
+                      'iPhoneDuo': 'https://support.apple.com/en-us/148588'}
 DIMENSIONS = re.compile(r'(\d[\d,]{2,})\s*[-\u2010-\u2015]?\s*(?:by|×|x)\s*[-\u2010-\u2015]?\s*(\d[\d,]{2,})\s*[-\u2010-\u2015]?\s*(?:pixel)?', re.I)
 
 
@@ -80,11 +86,12 @@ def products_from_devicekit(template):
             if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name) or call.func.id != 'Device':
                 raise ValueError('unexpected DeviceKit model entry')
             args = [ast.literal_eval(argument) for argument in call.args]
-            source = re.search(r'https://support\.apple\.com/[^)\s]+', args[1])
+            source = re.search(r'https://(?:support\.apple\.com|www\.apple\.com)/[^)\s]+', args[1])
             if source is None:
                 raise ValueError(f'no Apple specification link for {args[0]}')
             products.append((args[0], args[6], args[3], SPEC_URL_OVERRIDES.get(args[0], source.group())))
-    return products + LEGACY
+    covered = {identifier for product in products for identifier in product[2]}
+    return products + LEGACY + [product for product in SUPPLEMENTAL if not set(product[2]).intersection(covered)]
 
 
 def parse_spec(product, data):
@@ -100,8 +107,18 @@ def parse_spec(product, data):
     if 'M5' in key and ('13' if '13' in key else '11') not in title:
         raise ValueError(f'wrong M5 display size in Apple article: {name}: {title}')
     text = text_content(data)
+    # The single-table USB request uses Duo's closed/outer panel. Do not take
+    # the first resolution on its two-display spec page (the inner panel).
+    scope_start, scope_end = 0, len(text)
+    if key == 'iPhoneDuo':
+        scope_start = text.find('Outer display')
+        scope_end = text.find('Both displays', scope_start)
+        if scope_start < 0 or scope_end <= scope_start:
+            raise ValueError('iPhone Duo outer display specification is missing')
     candidates = []
     for match in DIMENSIONS.finditer(text):
+        if not scope_start <= match.start() < scope_end:
+            continue
         first, second = (int(value.replace(',', '')) for value in match.groups())
         if min(first, second) < 320 or max(first, second) > 8192:
             continue
@@ -166,6 +183,8 @@ def generated_documentation(catalog):
         '型号标识由 [DeviceKit](https://github.com/devicekit/DeviceKit) 提供，并与 '
         '[IPSW.me 型号索引](https://api.ipsw.me/v4/devices) 逐项对照；显示像素逐项来自下表的 Apple 官方规格页。'
         'iPad Pro M5 两种尺寸使用不同的官方规格页，修正了上游 13 英寸指向 11 英寸页面的问题。', '',
+        '新增型号若尚未进入 DeviceKit，则由更新脚本明确补录并与 IPSW 索引核对。'
+        'iPhone Duo 的单项规格采用合上时的外屏，型号识别不表示已支持折叠内外屏自动切换。', '',
         '统一数据位于 [apple-display-catalog.json](../config/apple-display-catalog.json)，'
         '其中保留每份规格页的标题、显示参数原文片段和 SHA256。完整下载的原始规格页保存在更新脚本的本地缓存，'
         '不下载固件、图片或整个网站。应用运行时使用随包内置数据，不联网查表。', '',

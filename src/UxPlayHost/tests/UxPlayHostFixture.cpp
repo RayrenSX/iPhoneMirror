@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <utility>
 
 namespace {
 
@@ -102,7 +103,7 @@ int wmain(int argc, wchar_t** argv) {
         decoder.find(L"automatic-request-sync-points=true") == std::wstring::npos ||
         converter.find(L"videoconvert") == std::wstring::npos ||
         converter.find(L"video/x-raw,format=I420") == std::wstring::npos ||
-        video_sink.find(L"y4menc") == std::wstring::npos ||
+        video_sink.find(L"y4menc name=iphone_mirror_y4m") == std::wstring::npos ||
         video_sink.find(L"filesink location=") == std::wstring::npos ||
         video_sink.find(L"videoscale") != std::wstring::npos) return 6;
 
@@ -160,6 +161,22 @@ int wmain(int argc, wchar_t** argv) {
     const std::string y4m_header = "YUV4MPEG2 W334 H720 F30:1 Ip A0:0 C420mpeg2\nFRAME\n";
     const auto video_written = write_all(video_pipe, y4m_header.data(), y4m_header.size()) &&
         write_all(video_pipe, frame.data(), frame.size());
+    // Continuous pipe: landscape with a different byte count, then portrait.
+    bool rotation_written = true;
+    for (const auto [w, h] : {std::pair{960U, 540U}, std::pair{334U, 720U}}) {
+        std::vector<std::uint8_t> rotated(static_cast<std::size_t>(w) * h * 3U / 2U, 0x40);
+        for (unsigned int row = 0; row < h; ++row)
+            std::fill_n(rotated.begin() + static_cast<std::size_t>(row) * w,
+                w, static_cast<std::uint8_t>(row % 200U + 16U));
+        std::fill(rotated.begin() + static_cast<std::size_t>(w) * h * 5U / 4U,
+            rotated.end(), static_cast<std::uint8_t>(0xC0));
+        const auto header = "YUV4MPEG2 W" + std::to_string(w) + " H" +
+            std::to_string(h) + " F30:1 Ip A0:0 C420\nFRAME\n";
+        // Deliberately fragment the replacement header across pipe writes.
+        rotation_written = rotation_written && write_all(video_pipe, header.data(), 7) &&
+            write_all(video_pipe, header.data() + 7, header.size() - 7) &&
+            write_all(video_pipe, rotated.data(), rotated.size());
+    }
     const auto audio_written = write_all(audio_pipe, pcm.data(), pcm.size());
     FlushFileBuffers(video_pipe);
     FlushFileBuffers(audio_pipe);
@@ -173,5 +190,5 @@ int wmain(int argc, wchar_t** argv) {
     Sleep(400);
     CloseHandle(video_pipe);
     CloseHandle(audio_pipe);
-    return video_written && audio_written ? 0 : 4;
+    return video_written && rotation_written && audio_written ? 0 : 4;
 }

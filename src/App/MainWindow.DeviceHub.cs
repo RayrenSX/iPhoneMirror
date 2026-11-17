@@ -8,6 +8,7 @@ public partial class MainWindow
 {
     private bool _isDeviceHubPanelVisible;
     private DeviceHubPanel? _deviceHubPanel;
+    internal MainViewModel DeviceHubViewModel => _viewModel;
     private bool IsRightWorkspacePanelVisible => _isSettingsPanelVisible || _isDeviceHubPanelVisible;
     private double WorkspaceRightWidth => _isDeviceHubPanelVisible
         ? 432 * (1 + .5 * (WorkspaceReadingScale - 1)) : WorkspaceSettingsWidth;

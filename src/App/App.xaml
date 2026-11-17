@@ -18,6 +18,22 @@
 
         <Visibility x:Key="InterfaceDescriptionsVisibility">Collapsed</Visibility>
 
+        <!-- Brand artwork uses a stable palette; keep it separate from window
+             layout so all donation surfaces share the same resources. -->
+        <SolidColorBrush x:Key="DonationActionBorderBrush" Color="#FFBC1748"/>
+        <SolidColorBrush x:Key="DonationActionHoverBrush" Color="#FFE01B50"/>
+        <SolidColorBrush x:Key="DonationActionPressedBrush" Color="#FFAD123D"/>
+        <LinearGradientBrush x:Key="DonationActionBrush" StartPoint="0,0" EndPoint="1,0">
+            <GradientStop Color="#FFD71E53" Offset="0"/>
+            <GradientStop Color="#FFBC1748" Offset="1"/>
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="DonationHeaderBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#18D71E53" Offset="0"/>
+            <GradientStop Color="#180F6CBD" Offset="1"/>
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="DonationWeChatBrush" Color="#FF07C160"/>
+        <SolidColorBrush x:Key="DonationAlipayBrush" Color="#FF1677FF"/>
+
         <Style TargetType="TextBlock">
             <Setter Property="FontSize" Value="{DynamicResource BodyFontSize}"/>
             <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>

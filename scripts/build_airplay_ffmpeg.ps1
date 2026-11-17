@@ -10,6 +10,14 @@ $root = Split-Path -Parent $PSScriptRoot
 $commit = '63b2b0f47df420007c53888ce0e8383d24b8fb06'
 $sourceHash = '2D6E9244BE21B32756C481F4653D7F17AE08608DD2DB1BA04E826CF0052DF860'
 $archive = (Resolve-Path -LiteralPath $SourceArchive).Path
+$sourcePrefix = "FFmpeg-$commit"
+$sourceUrl = "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/$commit"
+# GitHub's commit-pinned API archive uses a different top-level directory.
+if ((Get-FileHash -LiteralPath $archive).Hash -ieq '06F221FE8D4D7B2A3416F19641A472C0CCE836DF38110BB2C093B7528A7065FC') {
+    $sourceHash = '06F221FE8D4D7B2A3416F19641A472C0CCE836DF38110BB2C093B7528A7065FC'
+    $sourcePrefix = 'FFmpeg-FFmpeg-63b2b0f'
+    $sourceUrl = "https://api.github.com/repos/FFmpeg/FFmpeg/tarball/$commit"
+}
 if ((Get-FileHash -LiteralPath $archive).Hash -ine $sourceHash) {
     throw 'AirPlay FFmpeg source archive does not match the pinned upstream snapshot.'
 }
@@ -23,7 +31,7 @@ $runtime = Join-Path $stage 'runtime'
 New-Item -ItemType Directory -Force -Path $source,$build,$runtime | Out-Null
 $entries = @(& tar.exe -tf $archive)
 if ($LASTEXITCODE -ne 0 -or $entries.Count -eq 0 -or @($entries | Where-Object {
-    -not $_.StartsWith("FFmpeg-$commit/") -or $_.Contains('\') -or $_.Contains(':') -or
+    -not $_.StartsWith("$sourcePrefix/") -or $_.Contains('\') -or $_.Contains(':') -or
     $_.Split('/') -contains '..'
 }).Count) { throw 'Unexpected paths in AirPlay FFmpeg source archive.' }
 $details = @(& tar.exe -tvf $archive)
@@ -32,7 +40,7 @@ if ($LASTEXITCODE -ne 0 -or @($details | Where-Object { $_ -notmatch '^[d-]' }).
 }
 & tar.exe -xf $archive -C $source
 if ($LASTEXITCODE -ne 0) { throw 'Could not extract AirPlay FFmpeg source archive.' }
-$source = Join-Path $source "FFmpeg-$commit"
+$source = Join-Path $source $sourcePrefix
 # Apply only our reviewed two-line compiler fix to the newly extracted source.
 # Absolute --directory is intentional; the archive and patch paths are pinned.
 & git apply --unsafe-paths --directory=$($source.Replace('\','/')) `
@@ -58,6 +66,9 @@ Copy-Item -LiteralPath (Join-Path $source 'COPYING.LGPLv2.1') -Destination $runt
 $notices = [Text.StringBuilder]::new()
 foreach ($dependency in @('libgcc','winpthreads','headers','mingw-w64-libraries')) {
     $licenseRoot = Join-Path $msys "ucrt64\share\licenses\$dependency"
+    if ($dependency -eq 'mingw-w64-libraries' -and -not (Test-Path $licenseRoot)) {
+        $licenseRoot = Join-Path $msys 'ucrt64\share\licenses\crt'
+    }
     $texts = @(Get-ChildItem -LiteralPath $licenseRoot -File -Recurse)
     if (-not $texts.Count) { throw "Missing AirPlay FFmpeg build dependency license: $dependency" }
     foreach ($text in $texts) {
@@ -70,7 +81,7 @@ foreach ($dependency in @('libgcc','winpthreads','headers','mingw-w64-libraries'
 $compilerVersion = & (Join-Path $msys 'ucrt64\bin\gcc.exe') --version | Select-Object -First 1
 $record = [ordered]@{
     Commit = $commit
-    SourceUrl = "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/$commit"
+    SourceUrl = $sourceUrl
     SourceSha256 = $sourceHash
     RecipeSha256 = (Get-FileHash (Join-Path $PSScriptRoot 'ffmpeg-airplay-build.sh')).Hash
     PatchSha256 = (Get-FileHash (Join-Path $PSScriptRoot 'ffmpeg-airplay-mathops.patch')).Hash

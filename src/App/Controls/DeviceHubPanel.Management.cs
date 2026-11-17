@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using IPhoneMirror.App.Models;
+using IPhoneMirror.App.Windows;
 using Microsoft.Win32;
 
 namespace IPhoneMirror.App.Controls;
@@ -467,9 +468,16 @@ internal sealed partial class DeviceHubPanel
     private string _listedFilePath = "";
     private async void OnFileRootChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_initialized) return;
-        RenewContext(); FilePath.Text = "/"; _listedFilePath = ""; _fileNext = null; FilesList.ItemsSource = null;
+        if (!_initialized || _disposed || _loadingDocumentScopes) return;
+        RenewContext();
+        var generation = _generation;
+        FilePath.Text = "/"; _listedFilePath = ""; _fileNext = null; FilesList.ItemsSource = null;
         FilesEmpty.Visibility = Visibility.Collapsed;
+        _busy = true;
+        UpdateConnection();
+        await StopDocumentMappingAsync();
+        if (_disposed || generation != _generation) return;
+        _busy = false;
         UpdateConnection();
         if (_active && _ready) await RefreshAsync();
     }
@@ -526,6 +534,78 @@ internal sealed partial class DeviceHubPanel
         op.Check();
         await DownloadAsync(op, row.Id, root, dialog.FileName);
         StatusText.Text = F("PanelSaved", dialog.FileName);
+    }
+    internal Func<Window?, string, bool> ConfirmFileDeletion { private get; set; } =
+        (owner, body) => owner is not null && AppPromptWindow.ConfirmDestructive(L("PanelDeleteFile"), body, L("PanelDeleteFile"), owner);
+    private async Task DeleteFileAsync(Operation op, HubRow? row)
+    {
+        if (!_ready || Option(FileRoot) == "crashes" || row is null || Text(row.Data, "type") != "file" || !FilesList.Items.Contains(row)) return;
+        var directory = _listedFilePath;
+        var confirmed = ConfirmFileDeletion(Owner, L("PanelDeleteFileWarning") + "\n\n" + row.Title + "\n/" + row.Id);
+        op.Check();
+        if (!confirmed) { StatusText.Text = ""; return; }
+        await op.Call("delete_file", new { root = "media", path = row.Id, expected = row.Data });
+        try { await BrowseAsync(op, targetPath: directory); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error)
+        {
+            StatusText.Text = F("PanelFileDeleteRefreshFailed", row.Title);
+            StatusText.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+            _viewModel.AddDiagnosticLog("Device management delete refresh: " + error);
+            return;
+        }
+        StatusText.Text = F("PanelFileDeleted", row.Title);
+    }
+    internal Func<Window?, string[]?> PickImportFiles { private get; set; } = owner =>
+    {
+        var dialog = new OpenFileDialog { Title = L("PanelImportFiles"), Multiselect = true, CheckFileExists = true };
+        return dialog.ShowDialog(owner) == true ? dialog.FileNames : null;
+    };
+    private async Task ImportFilesAsync(Operation op)
+    {
+        if (!_ready || Option(FileRoot) == "crashes") return;
+        // The open folder is the destination, even if the address has an
+        // unfinished edit or a different row is selected.
+        var directory = _listedFilePath;
+        var sources = PickImportFiles(Owner);
+        op.Check();
+        if (sources is not { Length: > 0 }) { StatusText.Text = ""; return; }
+        var imported = 0;
+        Exception? failure = null;
+        foreach (var source in sources)
+        {
+            StatusText.Text = F("PanelImporting", imported + 1, sources.Length, Path.GetFileName(source));
+            try
+            {
+                await op.Call("upload_file", new { root = "media", path = directory, sourcePath = source });
+                imported++;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception error) { failure = error; break; }
+        }
+        var destination = directory.Length == 0 ? "/" : "/" + directory;
+        if (imported > 0)
+        {
+            try { await BrowseAsync(op, targetPath: directory); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception error)
+            {
+                if (failure is null)
+                {
+                    StatusText.Text = F("PanelImportRefreshFailed", imported, destination);
+                    StatusText.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+                    _viewModel.AddDiagnosticLog("Device management import refresh: " + error);
+                    return;
+                }
+            }
+        }
+        StatusText.Text = failure is null ? F("PanelImported", imported, destination) :
+            F("PanelImportFailed", imported, sources.Length, failure is IOException or UnauthorizedAccessException ? L("PanelFileImportFailed") : FriendlyError(failure));
+        if (failure is not null)
+        {
+            StatusText.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+            _viewModel.AddDiagnosticLog("Device management import: " + failure);
+        }
     }
     private async Task<long> DownloadAsync(Operation op, string path, string root, string destination, long maximum = 1024L * 1024 * 1024)
     {

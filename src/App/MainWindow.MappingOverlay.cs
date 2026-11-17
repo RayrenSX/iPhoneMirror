@@ -27,7 +27,11 @@ public partial class MainWindow
                 _viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight, 0));
         var independent = _secondaryMirrors.GetWindowHandle(device.Udid);
         if (independent != 0 && _secondaryMirrors.TryGetControlGeometry(device.Udid, out var width, out var height, out var rotation))
-            result.Add(Surface(independent, independent, width, height, rotation));
+        {
+            var frame = _secondaryMirrors.GetDeviceFrame(device.Udid);
+            result.Add(Surface(independent, independent, width, height, rotation) with
+                { Frame = frame.Frame, FrameRotation = frame.Rotation });
+        }
         return result;
     }
 

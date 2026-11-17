@@ -67,6 +67,7 @@ class MediaAuthRecoveryTests(unittest.IsolatedAsyncioTestCase):
         session.auth_mode = 'mediastream'
         session.gate_open = True
         session.keyboard_service_id = 512
+        session.hid._bridge_keyboard_attach_attempted = True
         session.rsd = self.rsd
         return session
 

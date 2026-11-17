@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1787" height="2519" viewBox="0 0 171.9 242.4">
+<title>iPad (6th generation) — gold, original vector frame</title>
+<desc>Official body and panel dimensions; visual estimates for sensors, buttons, radii and finish shading. Not physically calibrated.</desc>
+<defs>
+<linearGradient id="metal" x1="0" y1="0" x2="1" y2=".16" gradientUnits="objectBoundingBox"><stop stop-color="#877268"/><stop offset=".08" stop-color="#f0e3dc"/><stop offset=".17" stop-color="#d9b8a7"/><stop offset=".5" stop-color="#e2cabd"/><stop offset=".86" stop-color="#d9b8a7"/><stop offset=".97" stop-color="#ecdcd3"/><stop offset="1" stop-color="#826e64"/></linearGradient>
+<linearGradient id="glass" x2=".3" y2="1"><stop stop-color="#f3f2f0"/><stop offset=".55" stop-color="#f3f2f0"/><stop offset="1" stop-color="#eaeae8"/></linearGradient>
+<radialGradient id="lens"><stop stop-color="#172f43"/><stop offset=".42" stop-color="#0b1824"/><stop offset=".65" stop-color="#192b42"/><stop offset=".85" stop-color="#05090d"/><stop offset="1" stop-color="#30343a"/></radialGradient>
+<mask id="opening" maskUnits="userSpaceOnUse" x="0" y="0" width="171.9" height="242.4"><rect width="100%" height="100%" fill="white"/><rect x="12.059090909090909" y="22.678787878787883" width="147.78181818181818" height="197.04242424242423" rx="0" fill="black"/></mask>
+</defs>
+<g mask="url(#opening)">
+<rect x="144.70000" y="0.82000" width="10.00000" height="0.98000" rx="0.23000" fill="url(#metal)" stroke="#77655c" stroke-width="0.08"/>
+<rect x="170.10000" y="28.20000" width="0.92000" height="7.50000" rx="0.25000" fill="url(#metal)" stroke="#77655c" stroke-width="0.08"/>
+<rect x="170.10000" y="37.20000" width="0.92000" height="7.50000" rx="0.25000" fill="url(#metal)" stroke="#77655c" stroke-width="0.08"/>
+<rect x="1.20000" y="1.20000" width="169.50000" height="240.00000" rx="10.00000" fill="url(#metal)" stroke="#5b4d46" stroke-width="0.16"/>
+<rect x="1.43000" y="1.43000" width="169.04000" height="239.54000" rx="9.77000" fill="none" stroke="#f2e6e0" stroke-width="0.1"/>
+<rect x="1.68000" y="1.68000" width="168.54000" height="239.04000" rx="9.52000" fill="url(#glass)" stroke="#b8b8b7" stroke-width="0.09"/>
+<rect x="11.88909" y="22.50879" width="148.12182" height="197.38242" rx="0.12000" fill="#b4b6b7"/>
+<circle cx="85.95" cy="12.15418181818182" r="1.12" fill="#28292c"/>
+<circle cx="85.95" cy="12.15418181818182" r="0.77" fill="url(#lens)"/>
+<circle cx="85.72" cy="11.93418181818182" r="0.18" fill="#31465d"/>
+<circle cx="85.95" cy="230.89018181818182" r="5.25" fill="url(#metal)"/>
+<circle cx="85.95" cy="230.89018181818182" r="4.91" fill="#f3f2f0" stroke="#d4d3d0" stroke-width="0.09"/>
+</g>
+</svg>

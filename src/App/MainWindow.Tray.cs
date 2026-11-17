@@ -150,6 +150,7 @@ public partial class MainWindow
             ToggleActiveFullScreenAsync, OpenPreviewWindowAsync, CaptureScreenshotAsync,
             OnMediaOutputSettingsRequested)
         { WindowStartupLocation = WindowStartupLocation.CenterScreen };
+        _secondaryMirrors.ConfigurePhoneFrameSettings(window);
         _traySettingsWindow = window;
         window.Closed += (_, _) =>
         {

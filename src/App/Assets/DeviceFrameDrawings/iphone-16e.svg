@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1338" height="2700" viewBox="0 0 73.9 149.1">
+<title>iPhone 16e — black, original vector frame</title>
+<desc>Official body and panel dimensions; visual estimates for sensors, buttons, radii and finish shading. Not physically calibrated.</desc>
+<defs>
+<linearGradient id="metal" x1="0" y1="0" x2="1" y2=".16" gradientUnits="objectBoundingBox"><stop stop-color="#232426"/><stop offset=".08" stop-color="#afb0b2"/><stop offset=".17" stop-color="#383a3e"/><stop offset=".5" stop-color="#6a6b6e"/><stop offset=".86" stop-color="#383a3e"/><stop offset=".97" stop-color="#9c9c9e"/><stop offset="1" stop-color="#222325"/></linearGradient>
+<linearGradient id="glass" x2=".3" y2="1"><stop stop-color="#111214"/><stop offset=".55" stop-color="#0b0c0e"/><stop offset="1" stop-color="#0b0c0e"/></linearGradient>
+<radialGradient id="lens"><stop stop-color="#172f43"/><stop offset=".42" stop-color="#0b1824"/><stop offset=".65" stop-color="#192b42"/><stop offset=".85" stop-color="#05090d"/><stop offset="1" stop-color="#30343a"/></radialGradient>
+<mask id="opening" maskUnits="userSpaceOnUse" x="0" y="0" width="73.9" height="149.1"><rect width="100%" height="100%" fill="white"/><rect x="4.647826086956518" y="4.644782608695647" width="64.60434782608696" height="139.8104347826087" rx="8.5" fill="black"/><path d="M 22.550000000000004 4.144782608695647 H 51.35 V 4.644782608695647 Q 49.95 4.644782608695647 49.95 6.044782608695646 V 8.144782608695646 Q 49.95 9.944782608695647 48.150000000000006 9.944782608695647 H 25.750000000000004 Q 23.950000000000003 9.944782608695647 23.950000000000003 8.144782608695646 V 6.044782608695646 Q 23.950000000000003 4.644782608695647 22.550000000000004 4.644782608695647 Z" fill="white"/></mask>
+</defs>
+<g mask="url(#opening)">
+<rect x="0.82000" y="23.80000" width="0.98000" height="5.20000" rx="0.25000" fill="url(#metal)" stroke="#1f2022" stroke-width="0.08"/>
+<rect x="0.82000" y="36.20000" width="0.98000" height="10.30000" rx="0.25000" fill="url(#metal)" stroke="#1f2022" stroke-width="0.08"/>
+<rect x="0.82000" y="50.20000" width="0.98000" height="10.30000" rx="0.25000" fill="url(#metal)" stroke="#1f2022" stroke-width="0.08"/>
+<rect x="72.10000" y="40.20000" width="0.98000" height="17.50000" rx="0.25000" fill="url(#metal)" stroke="#1f2022" stroke-width="0.08"/>
+<rect x="1.20000" y="1.20000" width="71.50000" height="146.70000" rx="10.60000" fill="url(#metal)" stroke="#18181a" stroke-width="0.16"/>
+<rect x="1.43000" y="1.43000" width="71.04000" height="146.24000" rx="10.37000" fill="none" stroke="#b9babb" stroke-width="0.1"/>
+<rect x="1.95000" y="1.95000" width="70.00000" height="145.20000" rx="9.85000" fill="url(#glass)" stroke="#26282b" stroke-width="0.09"/>
+<rect x="4.39783" y="4.39478" width="65.10435" height="140.31043" rx="8.75000" fill="#020203"/>
+<path d="M 22.550000000000004 4.144782608695647 H 51.35 V 4.644782608695647 Q 49.95 4.644782608695647 49.95 6.044782608695646 V 8.144782608695646 Q 49.95 9.944782608695647 48.150000000000006 9.944782608695647 H 25.750000000000004 Q 23.950000000000003 9.944782608695647 23.950000000000003 8.144782608695646 V 6.044782608695646 Q 23.950000000000003 4.644782608695647 22.550000000000004 4.644782608695647 Z" fill="#08090b"/>
+<rect x="32.55000" y="2.02000" width="8.80000" height="0.45000" rx="0.22000" fill="#222429" stroke="#050507" stroke-width="0.08"/>
+<circle cx="32.85" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="33.24" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="33.63" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="34.02" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="34.410000000000004" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="34.800000000000004" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="35.19" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="35.58" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="35.97" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="36.36" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="36.75" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="37.14" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="37.53" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="37.92" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="38.31" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="38.7" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="39.09" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="39.480000000000004" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="39.870000000000005" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="40.260000000000005" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="40.650000000000006" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="41.04" cy="2.24" r="0.045" fill="#45474a"/>
+<circle cx="44.650000000000006" cy="7.194782608695647" r="1.12" fill="#030405"/>
+<circle cx="44.650000000000006" cy="7.194782608695647" r="0.82" fill="url(#lens)"/>
+<circle cx="44.410000000000004" cy="6.944782608695647" r="0.19" fill="#243d56"/>
+<circle cx="30.450000000000003" cy="7.294782608695646" r="0.75" fill="#101015"/>
+<rect x="34.35000" y="6.69478" width="3.70000" height="1.10000" rx="0.50000" fill="#101115"/>
+<rect x="1.20000" y="14.20000" width="0.75000" height="0.65000" rx="0.00000" fill="#9c9c9e"/>
+<rect x="71.95000" y="14.20000" width="0.75000" height="0.65000" rx="0.00000" fill="#9c9c9e"/>
+<rect x="1.20000" y="134.90000" width="0.75000" height="0.65000" rx="0.00000" fill="#9c9c9e"/>
+<rect x="71.95000" y="134.90000" width="0.75000" height="0.65000" rx="0.00000" fill="#9c9c9e"/>
+</g>
+</svg>

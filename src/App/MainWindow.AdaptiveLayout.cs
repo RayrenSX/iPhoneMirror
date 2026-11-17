@@ -8,6 +8,7 @@ public partial class MainWindow
     // Leave room for window controls; the video-derived limit below takes
     // precedence whenever preserving the current picture needs more space.
     private const double CompleteMinimumWindowWidth = 480;
+    private const double CompleteMinimumPreviewWidth = 320;
     private bool _workspaceLayoutQueued;
     private double _workspacePinnedLeftWidth, _workspacePinnedRightWidth;
     private bool _preparingWorkspaceReveal;
@@ -16,6 +17,28 @@ public partial class MainWindow
     private double WorkspaceReadingScale => TryFindResource("BodyFontSize") is double size ? size / 14 : 1;
     private double WorkspaceDeviceWidth => 300 * (1 + .5 * (WorkspaceReadingScale - 1));
     private double WorkspaceSettingsWidth => 362 * (1 + .5 * (WorkspaceReadingScale - 1));
+
+    private double GetCompleteWorkspaceMinimumWidth()
+    {
+        var chrome = ActualWidth > 0 && RootLayout.ActualWidth > 0
+            ? Math.Max(0, ActualWidth - RootLayout.ActualWidth) : 96;
+        var sidebars = (_leftWorkspacePanel != LeftWorkspacePanel.None ? WorkspaceDeviceWidth + 18 : 0) +
+            (IsRightWorkspacePanelVisible ? WorkspaceRightWidth + 18 : 0);
+        var preview = CompleteMinimumPreviewWidth * (1 + .35 * (WorkspaceReadingScale - 1));
+        var maximum = Math.Min(MaxWidth,
+            IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(this).Width);
+        // WPF rounds layout sizes to physical pixels. A fractional minimum
+        // can otherwise alternate the HWND width and schedule layout forever.
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX;
+        var minimum = Math.Max(CompleteMinimumWindowWidth, chrome + sidebars + preview);
+        return Math.Min(maximum, Math.Ceiling(minimum * scale - .001) / scale);
+    }
+
+    private void UpdateCompleteWorkspaceMinimumWidth()
+    {
+        if (_viewModel.IsLightweightApplicationMode || _isFullScreen) return;
+        MinWidth = GetCompleteWorkspaceMinimumWidth();
+    }
 
     private void OnIdleSurfaceSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -54,6 +77,8 @@ public partial class MainWindow
 
     private void OnWorkspacePanelVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
+        if (ReferenceEquals(sender, ControlPanel) && _deviceHubPanel is not null)
+            _deviceHubPanel.SetDevice(_viewModel.SelectedDevice, _isDeviceHubPanelVisible && ControlPanel.IsVisible && !_isFullScreen);
         if (sender is FrameworkElement element && !element.IsVisible && !_settlingWorkspace)
             QueueWorkspaceSettlementForTreeChange(element);
     }
@@ -106,6 +131,7 @@ public partial class MainWindow
         DetectionStatus.MaxWidth = compactStatus ? 0 : 360;
         DriverStatusGap.Width = new GridLength(compactStatus || _viewModel.HideInterfaceDescriptions ? 0 : 18);
         VersionBadge.Visibility = RootLayout.ActualWidth < 580 * readingFactor ? Visibility.Collapsed : Visibility.Visible;
+        UpdateCompleteWorkspaceMinimumWidth();
         RefreshLightweightPreviewViewport();
         UpdateWorkspaceViewportConstraints();
     }
@@ -143,11 +169,14 @@ public partial class MainWindow
         (_leftWorkspacePanel != LeftWorkspacePanel.None ? WorkspaceDeviceWidth + 18 : 0) +
         (IsRightWorkspacePanelVisible ? WorkspaceRightWidth + 18 : 0);
 
-    private bool CanConstrainCompletePreview => IsLoaded && IsVisible &&
+    private bool CanConstrainCompleteWorkspace => IsLoaded && IsVisible &&
         !_viewModel.IsLightweightApplicationMode && !_lightweightModeApplied && !_isFullScreen && !_isWindowMaximized &&
-        WindowState == WindowState.Normal && HasLightweightVideoPresentation && HasLightweightContentDimensions &&
-        PreviewPanel.IsVisible && PreviewPanel.ActualWidth > 0 && PreviewPanel.ActualHeight > 0 &&
+        WindowState == WindowState.Normal &&
         !_applyingWorkspaceWindowBounds && !_settlingWorkspace && _workspaceTransition?.IsRunning != true;
+
+    private bool CanConstrainCompletePreview => CanConstrainCompleteWorkspace &&
+        HasLightweightVideoPresentation && HasLightweightContentDimensions &&
+        PreviewPanel.IsVisible && PreviewPanel.ActualWidth > 0 && PreviewPanel.ActualHeight > 0;
 
     private double GetCompletePreviewMinimumWindowWidth(NativeRect current, int proposedHeight, double scale)
     {
@@ -165,7 +194,7 @@ public partial class MainWindow
         var chrome = (current.Right - current.Left) / scale - PreviewPanel.ActualWidth;
         var maximum = Math.Min(MaxWidth,
             IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(this).Width);
-        return Math.Min(maximum, Math.Max(CompleteMinimumWindowWidth, chrome + _completeResizePreviewWidth));
+        return Math.Min(maximum, Math.Max(GetCompleteWorkspaceMinimumWidth(), chrome + _completeResizePreviewWidth));
     }
 
     private void ScaleLightweightProjectionFromVerticalEdge(ref NativeRect proposed,
@@ -292,26 +321,22 @@ public partial class MainWindow
                 Math.Min(LightweightMinimumPreviewWidth * readingFactor, PreviewPanel.MaxWidth));
         var budget = Math.Max(0, availableWidth - reservePreview);
         double left, right;
-        if (_workspacePinnedRightWidth > 0 && _workspacePinnedLeftWidth == 0)
+        if (!_viewModel.IsLightweightApplicationMode)
+        {
+            // Complete mode grows its minimum HWND width to fit the open cards.
+            // Keep their content at its normal width, including during a reveal.
+            left = leftRequest;
+            right = rightRequest;
+        }
+        else if (_workspacePinnedRightWidth > 0 && _workspacePinnedLeftWidth == 0)
         {
             right = Math.Min(rightRequest, Math.Min(_workspacePinnedRightWidth, budget));
             left = Math.Min(leftRequest, Math.Max(0, budget - right));
         }
         else
         {
-            if (!_viewModel.IsLightweightApplicationMode && _workspacePinnedLeftWidth == 0 &&
-                leftRequest > 0 && rightRequest > 0 && leftRequest + rightRequest > budget)
-            {
-                // A user resize shares the available sidebar budget instead of
-                // letting the left card consume all of the settings viewport.
-                left = budget * leftRequest / (leftRequest + rightRequest);
-                right = budget - left;
-            }
-            else
-            {
-                left = Math.Min(leftRequest, Math.Min(_workspacePinnedLeftWidth > 0 ? _workspacePinnedLeftWidth : leftRequest, budget));
-                right = Math.Min(rightRequest, Math.Max(0, budget - left));
-            }
+            left = Math.Min(leftRequest, Math.Min(_workspacePinnedLeftWidth > 0 ? _workspacePinnedLeftWidth : leftRequest, budget));
+            right = Math.Min(rightRequest, Math.Max(0, budget - left));
         }
         left = Math.Max(1, left); right = Math.Max(1, right);
         if (centerGroup && double.IsFinite(PreviewPanel.MaxWidth))

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace iPhoneMirror::renderer {
 
@@ -33,8 +34,17 @@ struct PreviewTestHooks {
     std::function<bool()> before_upload;
     std::function<HRESULT()> before_present;
     std::function<void(HRESULT)> after_present;
+    // Runs after the initial swap chain is bound but before its worker starts.
+    std::function<void()> after_initialize;
 };
 #endif
+
+struct DeviceFrameArtwork {
+    std::uint32_t width{}, height{};
+    float screen_x{}, screen_y{}, screen_width{}, screen_height{};
+    std::vector<std::uint8_t> premultiplied_bgra;
+    std::vector<std::uint8_t> screen_mask;
+};
 
 class D3D11PreviewRenderer {
 public:
@@ -65,6 +75,8 @@ public:
     // normalized to the short edge; zero disables clipping. Child/main-window
     // previews remain rectangular because their WPF panel owns that shape.
     void set_corner_profile(float normalized_radius, float curve_exponent) noexcept;
+    void set_phone_frame(bool enabled) noexcept;
+    void set_device_frame(std::shared_ptr<const DeviceFrameArtwork> artwork) noexcept;
     void set_rotation(std::int32_t quarter_turns) noexcept;
     // Applies to this composition visual only, including its black background.
     void set_opacity(float opacity) noexcept;

@@ -21,6 +21,11 @@ internal static partial class Program
         app.InitializeComponent();
         SetApplicationDisplayMode(app, ApplicationDisplayMode.Complete);
         var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        // Run the wide-layout matrix on the primary work area rather than
+        // whichever small secondary monitor currently owns the pointer.
+        window.Left = SystemParameters.WorkArea.Left + 40;
+        window.Top = SystemParameters.WorkArea.Top + 40;
+        DrainDispatcher(); window.UpdateLayout();
         var panelType = typeof(MainWindow).GetNestedType("LeftWorkspacePanel", BindingFlags.NonPublic)!;
         var vm = (MainViewModel)KeyboardField(window, "_viewModel");
         try
@@ -28,8 +33,8 @@ internal static partial class Program
             vm.HideInterfaceDescriptions = false;
             SetKeyboardField(vm, "_driverState", "驱动叠加：已启用保守 USB 模式");
             KeyboardCall(vm, "OnPropertyChanged", nameof(MainViewModel.DriverState));
-            InteractionAssert(window.MinWidth <= 480 && window.MinWidth > 0 && window.ResizeMode == ResizeMode.CanResize,
-                "Complete mode still prevents useful horizontal resizing.");
+            InteractionAssert(window.MinWidth > 480 && window.ResizeMode == ResizeMode.CanResize,
+                "Complete mode does not reserve its initial open source card.");
             var hwnd = new WindowInteropHelper(window).Handle;
             var dpi = RepairGetDpiForWindow(hwnd) / 96d;
             var memory = Marshal.AllocHGlobal(40);
@@ -38,14 +43,23 @@ internal static partial class Program
                 Marshal.Copy(new byte[40], 0, memory, 40);
                 RepairSendMessage(hwnd, 0x0024, 0, memory);
                 var nativeMinimum = Marshal.ReadInt32(memory, 24);
-                InteractionAssert(nativeMinimum > 0 && nativeMinimum / dpi < 510,
-                    $"The native tracking limit still blocks narrowing: {nativeMinimum / dpi:F1} DIP.");
+                InteractionAssert(Math.Abs(nativeMinimum / dpi - window.MinWidth) < 2,
+                    $"The native tracking limit differs from the sidebar minimum: {nativeMinimum / dpi:F1}/{window.MinWidth:F1} DIP.");
             }
             finally { Marshal.FreeHGlobal(memory); }
             var left = (FrameworkElement)window.FindName("LeftPanelHost");
             var right = (FrameworkElement)window.FindName("ControlPanel");
             var center = (FrameworkElement)window.FindName("CenterPanel");
-            void Layout() { DrainDispatcher(); window.UpdateLayout(); }
+            void Layout()
+            {
+                var timeout = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Send)
+                    { Interval = TimeSpan.FromSeconds(5) };
+                timeout.Tick += (_, _) => throw new InvalidOperationException(
+                    $"Workspace layout did not settle: width={window.ActualWidth:F2}, minimum={window.MinWidth:F2}, mode={vm.SelectedApplicationDisplayMode}.");
+                timeout.Start();
+                try { DrainDispatcher(); window.UpdateLayout(); }
+                finally { timeout.Stop(); }
+            }
             Rect Bounds(FrameworkElement element) => element.TransformToAncestor(window).TransformBounds(new Rect(element.RenderSize));
             var header = (Grid)window.FindName("HeaderPanel");
             var heading = (FrameworkElement)window.FindName("WorkspaceHeading");
@@ -64,20 +78,20 @@ internal static partial class Program
                     InteractionAssert(PerfSetWindowPos(hwnd, 0, 0, 0, (int)Math.Round(width * dpi),
                         (int)Math.Round(window.ActualHeight * dpi), 0x0016), "Native horizontal resize failed.");
                     Layout(); AdvanceDispatcher(TimeSpan.FromMilliseconds(30)); Layout();
-                    InteractionAssert(Math.Abs(window.ActualWidth - width) < 2 && window.MinWidth <= 800 && center.ActualWidth >= 155,
-                        $"Native width bounced back or squeezed the preview: request={width}, actual={window.ActualWidth}, preview={center.ActualWidth}.");
+                    InteractionAssert(Math.Abs(window.ActualWidth - Math.Max(width, window.MinWidth)) < 2 && center.ActualWidth >= 319,
+                        $"Native width bounced back or squeezed the preview: request={width}, actual={window.ActualWidth}, minimum={window.MinWidth}, calculated={KeyboardCall(window, "GetCompleteWorkspaceMinimumWidth")}, preview={center.ActualWidth}, left={showLeft}, right={showRight}, constrained={KeyboardField(window, "_isWindowMaximized")}, available={IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(window).Width}.");
                     InteractionAssert(left.IsVisible == showLeft && right.IsVisible == showRight,
                         "Horizontal resizing unexpectedly hid an open workspace card.");
-                    if (showLeft && showRight && width <= 960)
-                        InteractionAssert(left.ActualWidth >= 190 && right.ActualWidth >= 230,
-                            $"The source card consumed the settings viewport: {left.ActualWidth:F1}/{right.ActualWidth:F1}.");
+                    InteractionAssert((!showLeft || Math.Abs(left.ActualWidth - 300) < 1) &&
+                        (!showRight || Math.Abs(right.ActualWidth - 362) < 1),
+                        $"Narrowing compressed the side cards: {left.ActualWidth:F1}/{right.ActualWidth:F1}.");
                     var actions = (FrameworkElement)window.FindName("WindowActions");
                     var capture = (FrameworkElement)window.FindName("CaptureActionButton");
                     var driver = (FrameworkElement)window.FindName("DetectionStatus");
                     InteractionAssert(Grid.GetRow(capture) == 0 && Grid.GetColumn(capture) == 3 && Grid.GetRow(driver) == 0 &&
                         Grid.GetColumn(driver) == 1 && Grid.GetColumnSpan(heading) == 1 && header.RowDefinitions.Count == 1 &&
-                        Math.Abs(Bounds(capture).Top + capture.ActualHeight / 2 - Bounds(actions).Top - actions.ActualHeight / 2) < 1,
-                        "Narrowing reparented the capture action or driver status into a second header row.");
+                        Math.Abs(Bounds(capture).Top + capture.ActualHeight / 2 - Bounds(actions).Top - actions.ActualHeight / 2) <= 1,
+                        $"Header layout changed at {window.ActualWidth:F1}: capture={Grid.GetRow(capture)}/{Grid.GetColumn(capture)} center={Bounds(capture).Top + capture.ActualHeight / 2:F2}, driver={Grid.GetRow(driver)}/{Grid.GetColumn(driver)}, headingSpan={Grid.GetColumnSpan(heading)}, rows={header.RowDefinitions.Count}, actionsCenter={Bounds(actions).Top + actions.ActualHeight / 2:F2}.");
                     referenceHeaderHeight ??= header.ActualHeight;
                     referenceContentTop ??= Bounds((FrameworkElement)window.FindName("MainContentGrid")).Top;
                     InteractionAssert(Math.Abs(header.ActualHeight - referenceHeaderHeight.Value) < 1 && subtitle.IsVisible &&
@@ -99,6 +113,19 @@ internal static partial class Program
                         SaveWindowRender(window, Path.Combine(output, "minimum-480.png"));
                 }
             }
+            // Opening cards from the narrow idle window must grow the HWND,
+            // rather than reflowing their content into the previous width.
+            KeyboardCall(window, "SetLeftWorkspacePanel", Enum.Parse(panelType, "None"));
+            KeyboardCall(window, "SetSettingsPanelVisible", false); FinishWorkspaceReveal(window);
+            window.Width = 480; Layout();
+            InteractionAssert(Math.Abs(window.ActualWidth - 480) < 2 && Math.Abs(window.MinWidth - 480) < 2,
+                "Closing both cards did not release the complete-mode sidebar minimum.");
+            KeyboardCall(window, "SetLeftWorkspacePanel", Enum.Parse(panelType, "Devices"));
+            KeyboardCall(window, "SetSettingsPanelVisible", true); FinishWorkspaceReveal(window); Layout();
+            InteractionAssert(window.ActualWidth >= window.MinWidth - 1 && Math.Abs(left.ActualWidth - 300) < 1 &&
+                Math.Abs(right.ActualWidth - 362) < 1 && center.ActualWidth >= 319,
+                "Opening both cards from 480 DIP squeezed a card or the preview instead of growing the window.");
+            SaveWindowRender(window, Path.Combine(output, "expanded-from-480.png"));
             // Reapplying the mode, full screen and a lightweight roundtrip must
             // retain the relaxed complete-mode limit and prior manual width.
             KeyboardCall(window, "SetLeftWorkspacePanel", Enum.Parse(panelType, "None"));
@@ -121,6 +148,9 @@ internal static partial class Program
                 IPhoneMirror.UI.Services.AccessibilityAppearance.Apply(app, scale, false);
                 window.Width = 800; Layout();
                 KeyboardCall(window, "SetSettingsPanelVisible", true); FinishWorkspaceReveal(window); Layout();
+                InteractionAssert(Math.Abs(right.ActualWidth - 362 * (1 + .5 * (scale - 1))) <= 1 &&
+                    center.ActualWidth >= 320 * (1 + .35 * (scale - 1)) - 1,
+                    $"Text scaling squeezed the settings card or preview: {language}/{scale}.");
                 foreach (var category in new[] { "Application", "Projection", "Control" })
                 {
                     ((RadioButton)window.FindName(category + "SettingsTab")).IsChecked = true; Layout();
@@ -128,11 +158,11 @@ internal static partial class Program
                     scroll.ScrollToTop(); Layout();
                     var tab = (FrameworkElement)window.FindName(category + "SettingsTab");
                     InteractionAssert(tab.IsVisible && scroll.ActualWidth > 240 && scroll.ScrollableWidth < 1 && Bounds(tab).Right <= Bounds(right).Right + 1,
-                        $"Settings lose usable width at 800 DIP: {language}/{scale}/{category}.");
+                        $"Settings lose usable width at the complete-mode minimum: {language}/{scale}/{category}.");
                 }
                 var actions = (FrameworkElement)window.FindName("WindowActions");
                 var capture = (FrameworkElement)window.FindName("CaptureActionButton");
-                InteractionAssert(Math.Abs(Bounds(capture).Top + capture.ActualHeight / 2 - Bounds(actions).Top - actions.ActualHeight / 2) < 1 &&
+                InteractionAssert(Math.Abs(Bounds(capture).Top + capture.ActualHeight / 2 - Bounds(actions).Top - actions.ActualHeight / 2) <= 1 &&
                     Bounds(capture).Left >= Bounds(heading).Right - 1 && Bounds(capture).Right <= Bounds(actions).Left + 1 &&
                     subtitle.IsVisible && header.ActualHeight < 100 * scale,
                     $"Header controls moved, overlapped or wrapped at {language}/{scale}.");
@@ -140,7 +170,7 @@ internal static partial class Program
                 var completeContentTop = Bounds((FrameworkElement)window.FindName("MainContentGrid")).Top;
                 vm.SelectedApplicationDisplayMode = ApplicationDisplayMode.Lightweight; Layout();
                 InteractionAssert(!subtitle.IsVisible && header.RowDefinitions.Count == 1 &&
-                    Math.Abs(Bounds(capture).Top + capture.ActualHeight / 2 - Bounds(actions).Top - actions.ActualHeight / 2) < 1,
+                    Math.Abs(Bounds(capture).Top + capture.ActualHeight / 2 - Bounds(actions).Top - actions.ActualHeight / 2) <= 1,
                     "Lightweight mode did not hide the subtitle or moved header actions into different rows.");
                 vm.SelectedApplicationDisplayMode = ApplicationDisplayMode.Complete; Layout();
                 InteractionAssert(subtitle.IsVisible && Math.Abs(header.ActualHeight - completeHeaderHeight) < 1 &&
@@ -149,7 +179,7 @@ internal static partial class Program
                 SaveWindowRender(window, Path.Combine(output, $"stable-header-{language}-{scale:0.0}.png"));
                 KeyboardCall(window, "SetSettingsPanelVisible", false); FinishWorkspaceReveal(window);
             }
-            Console.WriteLine("PASS complete resize: real HWND shrink to 480 DIP without sidebars, four sidebar combinations at 800 DIP, balanced narrow cards, usable preview, single-row bars, stable header/content positions, window controls, mode/fullscreen restore, five languages at 100/150% text.");
+            Console.WriteLine("PASS complete resize: fixed-width side cards, 320 DIP preview reserve, dynamic native minimums, header/status layout, mode/fullscreen restore and five languages at 100/150% text.");
             return 0;
         }
         finally { CloseWorkspaceTestWindow(window); app.Shutdown(); }

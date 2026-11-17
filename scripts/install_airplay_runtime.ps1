@@ -2,14 +2,15 @@
 param(
     [Parameter(Mandatory)][string]$ReceiverBinary,
     [Parameter(Mandatory)][string]$FfmpegBuildRecord,
-    [string]$DnsSdBinary
+    [string]$DnsSdBinary,
+    [string]$ControlBinary
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $vendored = Join-Path $root 'third_party\airplay-server'
 $record = Get-Content -LiteralPath $FfmpegBuildRecord -Raw | ConvertFrom-Json
 if ($record.Commit -ne '63b2b0f47df420007c53888ce0e8383d24b8fb06' -or
-    $record.SourceSha256 -ine '2d6e9244be21b32756c481f4653d7f17ae08608dd2db1ba04e826cf0052df860' -or
+    $record.SourceSha256 -inotmatch '^(2d6e9244be21b32756c481f4653d7f17ae08608dd2db1ba04e826cf0052df860|06f221fe8d4d7b2a3416f19641a472c0cce836df38110bb2c093b7528a7065fc)$' -or
     $record.RecipeSha256 -ine (Get-FileHash (Join-Path $PSScriptRoot 'ffmpeg-airplay-build.sh')).Hash -or
     $record.PatchSha256 -ine (Get-FileHash (Join-Path $PSScriptRoot 'ffmpeg-airplay-mathops.patch')).Hash) {
     throw 'FFmpeg build record does not match the AAC-enabled production recipe.'
@@ -21,10 +22,12 @@ $receiverText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($receiv
 foreach ($marker in @('IPHONE_MIRROR_FFMPEG_AAC_ELD','IPHONE_MIRROR_VIDEO_STATE',
         'IPHONE_MIRROR_VIDEO_GEOMETRY','IPHONE_MIRROR_AUDIO_CODEC_NEGOTIATION',
         'IPHONE_MIRROR_ORIENTATION_ACCESS_UNIT','IPHONE_MIRROR_MIRROR_CTR_SKIP',
-        'IPHONE_MIRROR_MIRROR_SETUP_RESTART')) {
+        'IPHONE_MIRROR_MIRROR_SETUP_RESTART','IPHONE_MIRROR_VIDEO_DIAG 32')) {
     if (-not $receiverText.Contains($marker)) { throw "Receiver capability is missing: $marker" }
 }
 $assets = @(@{ Name = 'airplay2dll.dll'; Source = $receiver })
+if (-not $ControlBinary) { $ControlBinary = Join-Path $vendored 'bin/x64/iPhoneMirror.AirPlayControl.dll' }
+$assets += @{ Name = 'iPhoneMirror.AirPlayControl.dll'; Source = (Resolve-Path -LiteralPath $ControlBinary).Path }
 if ($DnsSdBinary) {
     $assets += @{ Name = 'dnssd.dll'; Source = (Resolve-Path -LiteralPath $DnsSdBinary).Path }
 }
@@ -41,6 +44,14 @@ $buildPath = Join-Path $vendored 'BUILD.json'
 $build = Get-Content -LiteralPath $buildPath -Raw | ConvertFrom-Json
 $build.ReceiverPatchSha256 = (Get-FileHash -LiteralPath (
     Join-Path $vendored 'patches\airplay-upstream-125.patch')).Hash.ToLowerInvariant()
+$additionalPatches = @{}
+foreach ($name in @('airplay-hevc.patch', 'airplay-hevc-config.h',
+        'Apply-AirPlayRequestPolicyPatch.ps1', 'airplay-request-policy.h', 'airplay-play-request.h',
+        'Apply-AirPlayControlPatch.ps1', 'airplay-control.h', 'airplay-control-httpd.h', 'airplay-control-media.h',
+        'airplay-scrub-request.h')) {
+    $additionalPatches[$name] = (Get-FileHash (Join-Path $vendored "patches/$name")).Hash.ToLowerInvariant()
+}
+$build | Add-Member -NotePropertyName AdditionalPatches -NotePropertyValue $additionalPatches -Force
 $build.Ffmpeg = [ordered]@{
     Commit = $record.Commit
     SourceUrl = $record.SourceUrl

@@ -76,14 +76,121 @@ internal static partial class Program
             InteractionAssert(Find<RadioButton>("ProjectionSettingsTab").IsChecked == true,
                 "The picture shortcut did not open projection settings.");
 
+            var phoneFrameToggle = Find<CheckBox>("ProjectionPhoneFrameCheckBox");
+            InteractionAssert(FindVisualDescendants<CheckBox>(Find<ScrollViewer>("ProjectionSettingsScrollViewer"))
+                .Contains(phoneFrameToggle), "Phone frame switch must exist in the main projection settings category.");
+            phoneFrameToggle.BringIntoView();
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            SaveWindowRender(window, Path.Combine(output, "main-projection-phone-frame.png"));
+
             // Use a synthetic, offline source; no discovery, capture or reverse control starts.
             var vm = (MainViewModel)KeyboardField(window, "_viewModel");
+            // Synthetic devices exercise settings, not discovery onboarding.
+            vm.Devices.CollectionChanged -= (System.Collections.Specialized.NotifyCollectionChangedEventHandler)
+                Delegate.CreateDelegate(typeof(System.Collections.Specialized.NotifyCollectionChangedEventHandler), window,
+                    typeof(MainWindow).GetMethod("OnDevicesCollectionChanged", KeyboardTestMembers)!);
             var device = DeviceViewModel.FromNative(new NativeDeviceInfo
-            { Udid = "settings-layout-fixture", Name = "iPhone · Preview", State = ConnectionState.Ready });
+            { Udid = "settings-layout-fixture", Name = "iPhone · Preview", ProductType = "iPhone13,1", State = ConnectionState.Ready });
             SetKeyboardField(vm, "_selectedDevice", device);
+            vm.Devices.Add(device);
             Find<Border>("ControlPanelContent").DataContext = null;
             Find<Border>("ControlPanelContent").DataContext = vm;
             Console.WriteLine("Offline fixture ready.");
+            var frameManager = (MultiDevicePreviewManager)KeyboardField(window, "_secondaryMirrors");
+            app.IsUiPreviewMode = false;
+            try
+            {
+                SetKeyboardField(vm, "_selectedDevice", null);
+                KeyboardCall(window, "RefreshProjectionPhoneFrame");
+                InteractionAssert(frameManager.GetPhoneFrameState().Available && phoneFrameToggle.IsEnabled &&
+                    !Find<ComboBox>("ProjectionFrameColorComboBox").IsEnabled,
+                    "The global frame switch must remain usable without a device while per-device colors remain unavailable.");
+                InteractionAssert(frameManager.SetPhoneFrameAsync(true).GetAwaiter().GetResult(), "Frame preference save failed.");
+                InteractionAssert(!frameManager.HasAnyOpen && frameManager.GetPhoneFrameState().Enabled &&
+                    store.Load().PhoneFrameEnabled && phoneFrameToggle.IsChecked == true,
+                    "Changing the global preference without a device opened a window or failed to persist/synchronize.");
+                foreach (var selected in new[]
+                {
+                    device,
+                    DeviceViewModel.FromNative(new NativeDeviceInfo
+                    { Udid = "unsupported-frame-fixture", ProductType = "iPhone99,99", State = ConnectionState.Ready }, DeviceAppearance.Unknown),
+                    DeviceViewModel.CreateMediaCast(),
+                })
+                {
+                    SetKeyboardField(vm, "_selectedDevice", selected);
+                    KeyboardCall(window, "RefreshProjectionPhoneFrame");
+                    InteractionAssert(frameManager.GetPhoneFrameState() is { Enabled: true, Available: true } &&
+                        phoneFrameToggle.IsChecked == true && phoneFrameToggle.IsEnabled &&
+                        frameManager.CanSelectFrameColor == ReferenceEquals(selected, device),
+                        "Changing the selected device must preserve the global switch and only gate per-device colors.");
+                }
+                InteractionAssert(frameManager.SetPhoneFrameAsync(false).GetAwaiter().GetResult() &&
+                    !frameManager.HasAnyOpen && !store.Load().PhoneFrameEnabled && phoneFrameToggle.IsChecked == false,
+                    "Disabling the global preference from a media source opened a window or failed to persist/synchronize.");
+                var blockedFramePreferencePath = Path.Combine(Path.GetFullPath(output), "blocked-global-frame-parent");
+                File.WriteAllText(blockedFramePreferencePath, "A file cannot hold settings.");
+                SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(blockedFramePreferencePath, "settings.json")));
+                phoneFrameToggle.IsChecked = true;
+                phoneFrameToggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                InteractionAssert(!app.UpdateSettings.PhoneFrameEnabled && !frameManager.GetPhoneFrameState().Enabled &&
+                    phoneFrameToggle.IsChecked == false && Find<TextBlock>("ProjectionPhoneFrameFeedback").Visibility == Visibility.Visible &&
+                    !store.Load().PhoneFrameEnabled,
+                    "A failed global preference save must restore the saved state and checkbox with visible feedback.");
+            }
+            finally
+            {
+                SetKeyboardField(app, "_settingsStore", store);
+                SetKeyboardField(vm, "_selectedDevice", device);
+                KeyboardCall(window, "RefreshProjectionPhoneFrame");
+                app.IsUiPreviewMode = true;
+            }
+            Console.WriteLine("PASS global frame preferences persist/synchronize without a device, across sources, and roll back failed saves without starting capture.");
+
+            var frameSettings = new IPhoneMirror.App.Windows.ProjectionSettingsWindow(vm,
+                () => Task.CompletedTask, () => Task.CompletedTask,
+                () => Task.CompletedTask, () => Task.CompletedTask, () => { });
+            frameManager.ConfigurePhoneFrameSettings(frameSettings);
+            frameSettings.Show();
+            var colorPicker = (ComboBox)frameSettings.FindName("FrameColorComboBox");
+            var frameBlockedPath = Path.Combine(Path.GetFullPath(output), "blocked-frame-settings-parent");
+            File.WriteAllText(frameBlockedPath, "A file cannot hold settings.");
+            app.IsUiPreviewMode = false;
+            try
+            {
+                colorPicker.SelectedValue = "white";
+                InteractionAssert(frameManager.SelectedFrameColor == "white" &&
+                    store.Load().DeviceFrameColors[device.Udid] == "white" &&
+                    (string?)Find<ComboBox>("ProjectionFrameColorComboBox").SelectedValue == "white" && !frameManager.HasAnyOpen,
+                    "Floating color selection must persist and synchronize with main settings without opening a preview.");
+                colorPicker.BringIntoView();
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+                SaveWindowRender(frameSettings, Path.Combine(output, "floating-frame-color.png"));
+                SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(frameBlockedPath, "settings.json")));
+                colorPicker.SelectedValue = "blue";
+                InteractionAssert(frameManager.SelectedFrameColor == "white" && (string?)colorPicker.SelectedValue == "white" &&
+                    ((TextBlock)frameSettings.FindName("PhoneFrameFeedback")).Visibility == Visibility.Visible,
+                    "Failed color save must restore the displayed and active color with visible feedback.");
+                SetKeyboardField(app, "_settingsStore", store);
+                typeof(LocalizationService).GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!
+                    .Invoke(null, ["en-US", false, true]);
+                InteractionAssert(((DeviceFrameColorOption)colorPicker.SelectedItem).Label == "White" &&
+                    ((TextBlock)frameSettings.FindName("PhoneFrameDescription")).Text.Contains("Manually selected body color"),
+                    "Open floating settings must refresh color options and the description after a language change.");
+                colorPicker.SelectedValue = "";
+                InteractionAssert(frameManager.SelectedFrameColor == "" && !store.Load().DeviceFrameColors.ContainsKey(device.Udid) &&
+                    !frameManager.HasAnyOpen && ((TextBlock)frameSettings.FindName("PhoneFrameFeedback")).Visibility == Visibility.Collapsed,
+                    "Automatic color must remove the override and clear previous save feedback without opening a preview.");
+            }
+            finally
+            {
+                SetKeyboardField(app, "_settingsStore", store);
+                app.IsUiPreviewMode = true;
+                frameSettings.Close();
+                typeof(LocalizationService).GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!
+                    .Invoke(null, ["zh-CN", false, true]);
+            }
+            Console.WriteLine("PASS shared floating/main color selection, persistence, failure rollback and live language refresh.");
+
 
             Select("Control");
             var directionActions = Find<StackPanel>("MouseDirectionSettingsActions");
@@ -119,9 +226,9 @@ internal static partial class Program
             finally { app.IsUiPreviewMode = true; }
             InteractionAssert(!vm.HasPendingMouseDirectionSettings && vm.HasPendingBluetoothSensitivitySettings &&
                 vm.MouseDirectionSettingsStatus.Length == 0 && vm.SettingsStatus.Length == 0 &&
-                store.Load().BluetoothMouseSensitivity == baselineMouse &&
+                store.Load().DeviceControlPreferences[device.Udid].MouseSensitivity == baselineMouse &&
                 vm.AppliedBluetoothMouseSensitivity == baselineMouse &&
-                store.Load().BluetoothMouseReverseHorizontal == vm.AppliedBluetoothMouseReverseHorizontal &&
+                store.Load().DeviceControlPreferences[device.Udid].ReverseHorizontal == vm.AppliedBluetoothMouseReverseHorizontal &&
                 !applyButton.Command.CanExecute(null) && sensitivityButton.Command.CanExecute(null),
                 "Applying direction settings also applied sensitivity or left the wrong group enabled.");
             SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(blockedPath, "settings.json")));
@@ -131,7 +238,7 @@ internal static partial class Program
             InteractionAssert(vm.HasPendingBluetoothSensitivitySettings && !vm.HasPendingMouseDirectionSettings &&
                 vm.BluetoothSensitivitySettingsStatus.Length > 0 && vm.MouseDirectionSettingsStatus.Length == 0 &&
                 vm.AppliedBluetoothMouseSensitivity == baselineMouse &&
-                app.UpdateSettings.BluetoothMouseDirectionSchema == 1 &&
+                app.UpdateSettings.BluetoothMouseDirectionSchema == 0 &&
                 app.UpdateSettings.BluetoothMouseSensitivitySchema == 0,
                 "Failed sensitivity save changed direction settings or lost its own retry/error state.");
             SetKeyboardField(app, "_settingsStore", store);
@@ -140,7 +247,7 @@ internal static partial class Program
             finally { app.IsUiPreviewMode = true; }
             InteractionAssert(!vm.HasPendingBluetoothMouseSettings && vm.MouseSettingsStatus.Length == 0 &&
                 vm.BluetoothSensitivitySettingsStatus.Length == 0 &&
-                store.Load().BluetoothMouseSensitivity == vm.AppliedBluetoothMouseSensitivity,
+                store.Load().DeviceControlPreferences[device.Udid].MouseSensitivity == vm.AppliedBluetoothMouseSensitivity,
                 "Sensitivity retry did not apply its own settings or clear its error.");
             Console.WriteLine("PASS inline direction/sensitivity actions, independent saves and failed-save rollback/retry.");
             TestSettingsPersistence(window, app, vm, device, store, blockedPath);

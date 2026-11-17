@@ -3,7 +3,7 @@ project(AirPlayUpstreamTests LANGUAGES C CXX)
 add_executable(airplay_upstream_smoke ../airplay_upstream_smoke.c)
 target_compile_definitions(airplay_upstream_smoke PRIVATE WIN32 _CRT_SECURE_NO_WARNINGS)
 target_include_directories(airplay_upstream_smoke PRIVATE
-    "${RECEIVER}/AirPlayServerLib/include" "${RECEIVER}/AirPlayServerLib/lib"
+    "${RECEIVER}/AirPlayServerLib/include" "${RECEIVER}/AirPlayServerLib/lib" "${RECEIVER}/external"
     "${RECEIVER}/AirPlayServerLib/lib/ed25519" "${RECEIVER}/external/ffmpeg/include")
 target_link_libraries(airplay_upstream_smoke PRIVATE "${RECEIVER}/AirPlayLib.lib"
     "${RECEIVER}/external/ffmpeg/lib/x64/avcodec.lib"

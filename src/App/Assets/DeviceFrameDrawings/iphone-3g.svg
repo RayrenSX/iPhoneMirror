@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="828" height="1513" viewBox="0 0 64.5 117.9">
+<title>iPhone 3G — black, original vector frame</title>
+<desc>Official body and panel dimensions; visual estimates for sensors, buttons, radii and finish shading. Not physically calibrated.</desc>
+<defs>
+<linearGradient id="metal" x1="0" y1="0" x2="1" y2=".16" gradientUnits="objectBoundingBox"><stop stop-color="#6c6e71"/><stop offset=".08" stop-color="#dfe0e2"/><stop offset=".17" stop-color="#aeb2b7"/><stop offset=".5" stop-color="#c2c5c9"/><stop offset=".86" stop-color="#aeb2b7"/><stop offset=".97" stop-color="#d6d8db"/><stop offset="1" stop-color="#686b6e"/></linearGradient>
+<linearGradient id="glass" x2=".3" y2="1"><stop stop-color="#111214"/><stop offset=".55" stop-color="#0b0c0e"/><stop offset="1" stop-color="#0b0c0e"/></linearGradient>
+<radialGradient id="lens"><stop stop-color="#172f43"/><stop offset=".42" stop-color="#0b1824"/><stop offset=".65" stop-color="#192b42"/><stop offset=".85" stop-color="#05090d"/><stop offset="1" stop-color="#30343a"/></radialGradient>
+<mask id="opening" maskUnits="userSpaceOnUse" x="0" y="0" width="64.5" height="117.9"><rect width="100%" height="100%" fill="white"/><rect x="7.31748466257669" y="21.551226993865033" width="49.86503067484662" height="74.79754601226993" rx="0" fill="black"/></mask>
+</defs>
+<g mask="url(#opening)">
+<rect x="44.30000" y="0.75000" width="10.00000" height="1.05000" rx="0.23000" fill="url(#metal)" stroke="#606265" stroke-width="0.08"/>
+<rect x="0.80000" y="16.90000" width="1.00000" height="4.70000" rx="0.25000" fill="url(#metal)" stroke="#606265" stroke-width="0.08"/>
+<rect x="0.78000" y="29.60000" width="1.02000" height="17.00000" rx="0.25000" fill="url(#metal)" stroke="#606265" stroke-width="0.08"/>
+<rect x="1.20000" y="1.20000" width="62.10000" height="115.50000" rx="11.50000" fill="url(#metal)" stroke="#494b4d" stroke-width="0.16"/>
+<rect x="1.43000" y="1.43000" width="61.64000" height="115.04000" rx="11.27000" fill="none" stroke="#e3e4e6" stroke-width="0.1"/>
+<rect x="2.75000" y="2.75000" width="59.00000" height="112.40000" rx="9.95000" fill="url(#glass)" stroke="#26282b" stroke-width="0.09"/>
+<rect x="7.14748" y="21.38123" width="50.20503" height="75.13755" rx="0.12000" fill="#232629"/>
+<rect x="26.45000" y="10.20000" width="11.60000" height="1.40000" rx="0.65000" fill="#393b3c"/>
+<rect x="26.75000" y="10.42000" width="11.00000" height="1.00000" rx="0.45000" fill="#111315"/>
+<circle cx="27.15" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="27.15" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="27.549999999999997" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="27.549999999999997" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="27.95" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="27.95" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="28.349999999999998" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="28.349999999999998" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="28.75" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="28.75" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="29.15" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="29.15" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="29.549999999999997" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="29.549999999999997" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="29.95" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="29.95" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="30.349999999999998" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="30.349999999999998" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="30.75" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="30.75" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="31.15" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="31.15" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="31.549999999999997" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="31.549999999999997" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="31.95" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="31.95" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="32.35" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="32.35" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="32.75" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="32.75" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="33.15" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="33.15" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="33.55" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="33.55" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="33.95" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="33.95" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="34.35" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="34.35" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="34.75" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="34.75" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="35.15" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="35.15" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="35.55" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="35.55" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="35.95" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="35.95" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="36.35" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="36.35" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="36.75" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="36.75" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="37.15" cy="10.729999999999999" r="0.065" fill="#57595c"/>
+<circle cx="37.15" cy="11.11" r="0.065" fill="#454749"/>
+<circle cx="32.25" cy="106.93141104294479" r="5.4" fill="#050607"/>
+<circle cx="32.25" cy="106.93141104294479" r="5.24" fill="#0b0c0e" stroke="#25272a" stroke-width="0.09"/>
+<rect x="30.60000" y="105.28141" width="3.30000" height="3.30000" rx="0.65000" fill="none" stroke="#8f9294" stroke-width="0.22"/>
+</g>
+</svg>

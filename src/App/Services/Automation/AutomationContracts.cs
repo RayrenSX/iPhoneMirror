@@ -2,12 +2,6 @@ using IPhoneMirror.App.Interop;
 
 namespace IPhoneMirror.App.Services.Automation;
 
-internal sealed class AutomationException(string code, string message, int status = 409) : Exception(message)
-{
-    internal string Code { get; } = code;
-    internal int Status { get; } = status;
-}
-
 internal sealed record AutomationCapabilities(bool Tap, bool LongPress, bool TouchDown, bool TouchUp,
     bool Swipe, bool TouchPath, bool Keyboard, bool TextInput, bool ClipboardRead, bool ClipboardWrite,
     bool Screenshot);
@@ -24,6 +18,8 @@ internal sealed record AutomationTarget(AutomationDevice Device, string SourceId
 {
     internal Func<bool>? HardwareBusy { get; init; }
     internal Func<bool>? SessionCurrent { get; init; }
+    internal Func<bool>? CaptureCurrent { get; init; }
+    internal Func<bool>? CaptureActive { get; init; }
     internal Func<string, object?, Func<bool>, CancellationToken, Task<System.Text.Json.JsonElement>>? DeviceHub { get; init; }
 }
 

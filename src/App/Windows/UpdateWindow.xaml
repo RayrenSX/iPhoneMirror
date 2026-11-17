@@ -32,7 +32,7 @@
             <StackPanel>
                 <TextBlock TextWrapping="Wrap" Text="{DynamicResource UpdateWindowTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock TextWrapping="Wrap" Text="{DynamicResource UpdateWindowSubtitle}"
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" TextWrapping="Wrap" Text="{DynamicResource UpdateWindowSubtitle}"
                            Style="{StaticResource SubWindowSubtitle}"/>
             </StackPanel>
             <Border x:Name="VersionBadge" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"

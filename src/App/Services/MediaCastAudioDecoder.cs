@@ -61,9 +61,11 @@ internal sealed class MediaCastAudioDecoder : IDisposable
                 throw new InvalidOperationException(LocalizationService.Get("FfmpegAudioStartFailed"));
             process.ErrorDataReceived += (_, args) =>
             {
-                if (!string.IsNullOrWhiteSpace(args.Data) &&
-                    Interlocked.Exchange(ref _diagnosticOutputReported, 1) == 0)
-                    diagnostic?.Invoke("media_audio_ffmpeg_diagnostics_active");
+                if (string.IsNullOrWhiteSpace(args.Data)) return;
+                var detail = HlsMediaPlaybackBridge.DescribeFfmpegDiagnostic(args.Data);
+                if (detail is not null &&
+                    Interlocked.Increment(ref _diagnosticOutputReported) <= 24)
+                    diagnostic?.Invoke("media_audio_ffmpeg_detail " + detail);
             };
             process.BeginErrorReadLine();
             var cancellation = new CancellationTokenSource();
@@ -96,7 +98,7 @@ internal sealed class MediaCastAudioDecoder : IDisposable
             "-hide_banner", "-nostdin", "-loglevel", "warning",
             "-reconnect", "1", "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
-            "-protocol_whitelist", "http,https,tcp,tls,crypto",
+            "-protocol_whitelist", "http,https,tcp,tls,crypto,httpproxy",
         };
         if (double.IsFinite(startPosition) && startPosition > 0.05)
         {
@@ -113,6 +115,7 @@ internal sealed class MediaCastAudioDecoder : IDisposable
             "-i", source.AbsoluteUri,
             "-map", "0:a:0?", "-vn", "-sn", "-dn",
         ]);
+        HlsMediaPlaybackBridge.AddFcupInputOptions(args, source);
         if (Math.Abs(playbackRate - 1.0) > 0.001)
         {
             args.Add("-af");

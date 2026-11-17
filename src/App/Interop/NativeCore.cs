@@ -127,6 +127,17 @@ internal enum DecoderRuntimeMode : uint
     External,
 }
 
+internal enum MediaCastPlaybackStatus : uint
+{
+    Unknown = 0,
+    Playing = 1,
+    Paused = 2,
+    Loading = 3,
+    Stopped = 4,
+    Failed = 5,
+    Completed = 6,
+}
+
 internal enum MediaCastCommand : uint
 {
     None,
@@ -163,6 +174,15 @@ internal struct NativeDeviceInfo
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string OsVersion;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string ConnectionType;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 192)] public string Status;
+}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+internal struct NativeDeviceAppearance
+{
+    public uint StructSize;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceColor;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string EnclosureColor;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string HousingColor;
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -345,8 +365,9 @@ internal sealed partial class NativeCore : IDisposable
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_media_cast_get_request(ref NativeMediaCastRequest request);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int im_media_cast_set_playback_state(
-        ulong commandId, double duration, double position, double rate);
+    private static extern int im_media_cast_set_playback_state_ex(
+        ulong commandId, double duration, double position, double rate,
+        MediaCastPlaybackStatus status);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int im_media_cast_request_stop();
 
@@ -549,6 +570,21 @@ internal sealed partial class NativeCore : IDisposable
         if (handle != 0 && hwnd != 0) im_session_detach_preview(handle, hwnd);
     }
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_window_phone_frame(ulong handle, nint hwnd, int enabled);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_set_window_device_frame(ulong handle, nint hwnd, uint width, uint height,
+        byte[] bgra, byte[] mask, float x, float y, float w, float h);
+
+    internal static bool SetDeviceWindowFrameArtwork(ulong handle, nint hwnd, Services.DeviceFrameProfile frame) =>
+        im_session_set_window_device_frame(handle, hwnd, (uint)frame.FrameWidth, (uint)frame.FrameHeight,
+            frame.Pixels, frame.Mask, frame.ScreenX / (float)frame.FrameWidth, frame.ScreenY / (float)frame.FrameHeight,
+            frame.ScreenWidth / (float)frame.FrameWidth, frame.ScreenHeight / (float)frame.FrameHeight) == 0;
+
+    internal static bool SetDeviceWindowPhoneFrame(ulong handle, nint hwnd, bool enabled) =>
+        im_session_set_window_phone_frame(handle, hwnd, enabled ? 1 : 0) == 0;
+
     internal static bool SetDeviceWindowCornerProfile(NativeSessionHandle handle, nint hwnd,
         double radius, double exponent) => handle is not null && !handle.IsInvalid && hwnd != 0 &&
         im_session_set_window_corner_profile(handle.RawHandle, hwnd,
@@ -670,6 +706,24 @@ internal sealed partial class NativeCore : IDisposable
         return available != 0;
     }
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    private static extern int im_get_device_appearance(string udid, ref NativeDeviceAppearance appearance);
+
+    internal static Services.DeviceAppearance GetDeviceAppearance(string? udid)
+    {
+        // AirPlay's sender id is not a USB identity. Never match two devices by model/name.
+        if (string.IsNullOrWhiteSpace(udid) || Models.DeviceViewModel.IsWirelessUdid(udid) ||
+            Models.DeviceViewModel.IsMediaCastUdid(udid)) return Services.DeviceAppearance.Unknown;
+        var appearance = new NativeDeviceAppearance { StructSize = (uint)Marshal.SizeOf<NativeDeviceAppearance>() };
+        try
+        {
+            return im_get_device_appearance(udid, ref appearance) == 0
+                ? new(appearance.DeviceColor ?? "", appearance.EnclosureColor ?? "", appearance.HousingColor ?? "")
+                : Services.DeviceAppearance.Unknown;
+        }
+        catch (EntryPointNotFoundException) { return Services.DeviceAppearance.Unknown; }
+    }
+
     public IReadOnlyList<NativeDeviceInfo> GetDevices(bool refreshMetadata = false)
     {
         // usbmux is live state: another iPhone can appear or disappear between
@@ -763,8 +817,9 @@ internal sealed partial class NativeCore : IDisposable
     }
 
     public bool SetMediaCastPlaybackState(ulong commandId,
-        double duration, double position, double rate) =>
-        im_media_cast_set_playback_state(commandId, duration, position, rate) == 0;
+        double duration, double position, double rate,
+        MediaCastPlaybackStatus status = MediaCastPlaybackStatus.Unknown) =>
+        im_media_cast_set_playback_state_ex(commandId, duration, position, rate, status) == 0;
 
     public (bool Success, string Message) RequestMediaCastStop()
     {

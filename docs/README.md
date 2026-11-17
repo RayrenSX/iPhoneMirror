@@ -25,7 +25,7 @@
 |---|---|
 | USB 协议 | [PROTOCOL](PROTOCOL.md)：配置切换、QuickTime 包、CoreMedia 与协商 |
 | 显示与解码 | [D3D11_RENDERING](D3D11_RENDERING.md)：生产显示路径；[DECODER_GUI_ANALYSIS](DECODER_GUI_ANALYSIS.md)：设计依据与历史测量 |
-| 设备外形 | [DEVICE_CORNER_PROFILES](DEVICE_CORNER_PROFILES.md)：ProductType 匹配、圆角与拟合边界 |
+| 设备外形 | [DEVICE_CORNER_PROFILES](DEVICE_CORNER_PROFILES.md)：ProductType 匹配、圆角与拟合边界；[独立窗口边框](device-frames.md) · [覆盖目录](device-frame-coverage.md) · [机型与边框审查](device-frame-review.zh-CN.md) |
 | 面板目录 | [APPLE_DISPLAY_CATALOG](APPLE_DISPLAY_CATALOG.md)：型号、面板像素与实际编码尺寸的区别 |
 | 音频与输出 | [WASAPI_AUDIO](WASAPI_AUDIO.md)：播放与音频输出；[OBS_OUTPUT](OBS_OUTPUT.md)：OBS、录制、推流、虚拟摄像头 |
 | 驱动 | [DRIVER_DEPENDENCIES](DRIVER_DEPENDENCIES.md)：依赖及交付；[PARENT_DRIVER_MANAGEMENT](PARENT_DRIVER_MANAGEMENT.md)：父设备绑定、确认与恢复边界 |
@@ -40,6 +40,7 @@
 | 键位映射 | [KEYBOARD_MAPPING](KEYBOARD_MAPPING.md)：创建映射、启停和输入边界 |
 | 多设备控屏 | [MULTI_DEVICE_CONTROL](MULTI_DEVICE_CONTROL.md)：连接保留、选项卡与独立窗口焦点、验证范围 |
 | 自动化接口 | [api/README](api/README.md)：鉴权、设备准备、控制租约、坐标、剪贴板与截图 |
+| 捐赠资源 | [收款码与完整性保护](DONATION_INTEGRITY.zh-CN.md) |
 | 台湾本地化 | [LOCALIZATION-TAIWAN](LOCALIZATION-TAIWAN.md)：资源、术语及验证入口 |
 
 上述技术文档中引用的历史性能数据和真机结果仍只适用于各自记录的环境。
@@ -55,8 +56,14 @@
 | 项目文档核对 | [2026-11-12 复审](DOCUMENTATION_AUDIT_2026-11-12.md) · [2026-11-05 完善](DOCUMENTATION_AUDIT_2026-11-05.md) · [2026-10-01 核对](DOCUMENTATION_AUDIT_2026-10-01.md) |
 | GitHub 问题 | [2026-09-23 审计](GITHUB_ISSUE_AUDIT_2026-09-23.md) · [2026-10-01 审计](GITHUB_ISSUE_AUDIT_2026-10-01.md) · [2026-10-01 修复记录](GITHUB_ISSUE_FIXES_2026-10-01.md) |
 | 驱动错误 | [DRIVER_ERROR_AUDIT](DRIVER_ERROR_AUDIT.md) |
+| USB 蓝屏研究 | [软件内部的探测、配置切换与句柄释放调用链](diagnostics/confirmed-bsod-trigger-steps-20261116.zh-CN.md) |
 | USB 反控打包与签名错误 | [USB_BACKEND_PACKAGING_REPAIR](USB_BACKEND_PACKAGING_REPAIR.md) |
+| 外接键盘状态 | [连接注册、定时更新与取消清理审查](diagnostics/keyboard-attach-review-20261116.md) |
 | 有线恢复 | [WIRED_RECOVERY_FIX](WIRED_RECOVERY_FIX.md) · [WIRED_RECOVERY_REAUDIT](WIRED_RECOVERY_REAUDIT.md) · [WIRED_RECOVERY_LATENCY](WIRED_RECOVERY_LATENCY.md) · [WIRED_CONTROL_COUNTDOWN_FIX](WIRED_CONTROL_COUNTDOWN_FIX.md) |
+| 近期反控与预览排查 | [API 截图与反控稳定性](diagnostics/api-screenshot-stability-20261115.md) · [最后一次完整重试](diagnostics/wired-final-retry-20261115.md) · [预览黑屏](diagnostics/preview-black-screen-20261115.md) |
+| 启动与设置绑定 | [隐藏启动绑定](diagnostics/hidden-startup-binding-review-20261115.md) · [托盘启动设置页](diagnostics/tray-startup-settings-20261115.md) |
+| 启动布局闪退 | [v1.8.5-pre5 Grid 数组越界复现与修复](diagnostics/startup-grid-crash-20261116.md) |
+| 设备实验室调研 | [rPlayHub 调研记录](RPLAYHUB_RESEARCH_2026-11-15.zh-CN.md) |
 | 交互与性能 | [INTERACTION-STABILITY-AUDIT](INTERACTION-STABILITY-AUDIT.md) · [PERFORMANCE-AUDIT](PERFORMANCE-AUDIT.md) |
 | UI 标准与一致性 | [UI-STANDARDS-REVIEW](UI-STANDARDS-REVIEW.md) · [UI-CONSISTENCY-AUDIT](UI-CONSISTENCY-AUDIT.md) |
 | 布局与圆角 | [UI-ADAPTIVE-LAYOUT-AUDIT](UI-ADAPTIVE-LAYOUT-AUDIT.md) · [UI-ROUNDED-WINDOW-AUDIT](UI-ROUNDED-WINDOW-AUDIT.md) |

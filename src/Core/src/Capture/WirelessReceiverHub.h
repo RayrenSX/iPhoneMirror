@@ -155,7 +155,7 @@ public:
 
     void start(std::wstring receiver_name, std::wstring host_path,
         std::uint32_t width, std::uint32_t height, std::uint32_t frame_rate,
-        std::uint32_t raop_port = 5001);
+        std::uint32_t raop_port = 5001, bool media_only = false);
     void stop() noexcept;
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] bool ready() const noexcept;
@@ -165,7 +165,8 @@ public:
         std::wstring_view device_id, CapturePreferences preferences);
     [[nodiscard]] MediaCastCommand take_media_command();
     bool update_media_playback(std::uint64_t command_id, double duration,
-        double position, double rate) noexcept;
+        double position, double rate,
+        wireless::MediaPlaybackState state = wireless::MediaPlaybackState::Unknown) noexcept;
     bool request_media_stop() noexcept;
 
 private:
@@ -195,6 +196,7 @@ private:
         double duration{};
         double position{};
         double rate{};
+        wireless::MediaPlaybackState state{};
         bool pending{};
         bool stop_requested{};
         std::uint64_t stop_command_id{};

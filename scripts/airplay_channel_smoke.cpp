@@ -33,13 +33,13 @@ public:
     const SFgVideoFrame& scaled() const { return m_sVideoFrameScale; }
 };
 
-static std::vector<unsigned char> first_access_unit(const char* path) {
+static std::vector<unsigned char> first_access_unit(const char* path, AVCodecID codec = AV_CODEC_ID_H264) {
     std::ifstream file(path, std::ios::binary); CHECK(file);
     std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)), {});
     const auto size = bytes.size(); CHECK(size > 0 && size < 1024 * 1024);
     bytes.resize(size + AV_INPUT_BUFFER_PADDING_SIZE);
-    auto* parser = av_parser_init(AV_CODEC_ID_H264); CHECK(parser);
-    auto* context = avcodec_alloc_context3(avcodec_find_decoder(AV_CODEC_ID_H264)); CHECK(context);
+    auto* parser = av_parser_init(codec); CHECK(parser);
+    auto* context = avcodec_alloc_context3(avcodec_find_decoder(codec)); CHECK(context);
     unsigned char* packet{}; int packet_size{}; std::size_t offset{};
     while (!packet_size && offset < size) {
         const int used = av_parser_parse2(parser, context, &packet, &packet_size,
@@ -113,9 +113,24 @@ static void test_scale() {
 }
 
 int main(int argc, char** argv) {
-    CHECK(argc == 3 || argc == 4);
-    if (argc == 3 || !std::strcmp(argv[3], "scale")) test_scale();
-    if (argc == 3 || !std::strcmp(argv[3], "backpressure")) test_backpressure(argv[1], argv[2]);
-    if (argc == 3 || !std::strcmp(argv[3], "reopen")) test_reopen(argv[1]);
+    CHECK(argc == 3 || argc == 4 || argc == 6);
+    if (argc != 4 || !std::strcmp(argv[3], "scale")) test_scale();
+    if (argc != 4 || !std::strcmp(argv[3], "backpressure")) test_backpressure(argv[1], argv[2]);
+    if (argc != 4 || !std::strcmp(argv[3], "reopen")) test_reopen(argv[1]);
+    if (argc == 6) {
+        Callback callback; Channel channel(&callback);
+        for (int index : {1, 3, 4, 5, 2}) {
+            const auto codec = index >= 3 ? AV_CODEC_ID_HEVC : AV_CODEC_ID_H264;
+            auto bytes = first_access_unit(argv[index], codec);
+            SFgH264Data frame{}; frame.data = bytes.data(); frame.size = static_cast<int>(bytes.size());
+            frame.is_key = 1; frame.codec_id = codec;
+            const auto previous = callback.frames;
+            CHECK(channel.decodeH264Data(&frame, "local", "local") == 0);
+            CHECK(callback.frames == previous + 1);
+            CHECK(callback.width == (index == 2 || index == 4 ? 64 : 96));
+            CHECK(callback.height == (index == 2 || index == 4 ? 96 : 64));
+        }
+        std::puts("Video channel: H.264/HEVC switching, HEVC rotation and Main10 I420 conversion pass.");
+    }
     return 0;
 }

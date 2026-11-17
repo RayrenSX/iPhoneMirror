@@ -25,6 +25,16 @@ bool has_property(const iPhoneMirror::wireless::DnsSdProperties& properties,
 } // namespace
 
 int main() {
+    for (const auto service : {"_airplay._tcp", "_raop._tcp"}) {
+        iPhoneMirror::wireless::DnsSdProperties combined;
+        iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
+            service, true, L"00:11:22:33:44:55", L"", combined, false);
+        const auto key = std::string_view(service) == "_airplay._tcp" ? L"features" : L"ft";
+        if (!has_property(combined, key, iPhoneMirror::wireless::MirroringFeatures)) {
+            std::cerr << "Combined receiver advertised unsupported video handoff\n";
+            return 1;
+        }
+    }
     constexpr std::array cases{
         std::array{std::uint32_t{0}, std::uint32_t{7},
             iPhoneMirror::wireless::DnsSdAllInterfaces},
@@ -103,6 +113,14 @@ int main() {
     }
 
     constexpr std::wstring_view device_id = L"02:AA:BB:CC:DD:EE";
+    using iPhoneMirror::wireless::airplay_service_port;
+    if (airplay_service_port(L"combined", 7001, 5001) != 5001 ||
+        airplay_service_port(L"mirror", 7001, 5001) != 5001 ||
+        airplay_service_port(L"media", 7001, 5001) != 7001 ||
+        airplay_service_port(L"combined", 7001, 0) != 7001) {
+        std::cerr << "AirPlay service must route session negotiation to RTSP\n";
+        return 1;
+    }
     constexpr std::wstring_view public_key =
         L"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     iPhoneMirror::wireless::DnsSdProperties mirror_airplay{

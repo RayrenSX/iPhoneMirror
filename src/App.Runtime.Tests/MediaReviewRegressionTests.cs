@@ -150,8 +150,9 @@ internal static partial class Program
             start.ArgumentList.Add("--media-bridge-idle");
             var process = Process.Start(start)!;
             _observer = Process.GetProcessById(process.Id);
-            Bridge = MediaReviewType("Services.HlsMediaPlaybackBridge")
-                .GetConstructors(KeyboardTestMembers).Single().Invoke([process, _listener, playback]);
+            var constructor = MediaReviewType("Services.HlsMediaPlaybackBridge")
+                .GetConstructors(KeyboardTestMembers).Single();
+            Bridge = constructor.Invoke(new object?[] { process, _listener, playback, null });
             SetKeyboardField(Window, "_mediaHlsBridge", Bridge);
             SetKeyboardField(Window, "_mediaCastActive", true);
             SetKeyboardField(Window, "_mediaOpened", true);

@@ -5,7 +5,7 @@
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource IndependentWindowStyleTitle}"
-        Width="482" Height="462" MinWidth="422" MinHeight="422"
+        Width="482" Height="560" MinWidth="422" MinHeight="422"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         ShowInTaskbar="False" PreviewKeyDown="OnPreviewKeyDown"
         Foreground="{DynamicResource TextBrush}"
@@ -30,6 +30,14 @@
         <Border Grid.Row="2" Style="{StaticResource SettingsSection}" Padding="20,16">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
+                    <StackPanel x:Name="PhoneFrameSection">
+                        <CheckBox x:Name="PhoneFrameCheckBox" Checked="OnPhoneFrameChanged" Unchecked="OnPhoneFrameChanged"
+                                  AutomationProperties.AutomationId="IndependentWindowPhoneFrame"
+                                  Content="{DynamicResource IndependentWindowPhoneFrame}"/>
+                        <TextBlock x:Name="PhoneFrameHelp" Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource IndependentWindowPhoneFrameHelp}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                        <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,18"/>
+                    </StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <TextBlock Text="{DynamicResource IndependentWindowOpacity}" FontWeight="SemiBold" VerticalAlignment="Center"/>

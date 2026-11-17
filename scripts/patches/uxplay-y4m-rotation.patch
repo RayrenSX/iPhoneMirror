@@ -1,0 +1,18 @@
+--- a/renderers/video_renderer.c
++++ b/renderers/video_renderer.c
+@@ -23,6 +23,7 @@
+ #include <gst/gst.h>
+ #include <gst/app/gstappsrc.h>
+ #include "video_renderer.h"
++#include "UxPlayY4mRotation.h"
+ 
+ #define SECOND_IN_NSECS 1000000000UL
+ #define SECOND_IN_MICROSECS 1000000
+@@ -421,6 +422,7 @@
+                 g_clear_error (&error);
+             }
+             g_assert (renderer_type[i]->pipeline);
++            iphone_mirror_y4m_rotation_install(renderer_type[i]->pipeline);
+             GstClock *clock = gst_system_clock_obtain();
+             g_object_set(clock, "clock-type", GST_CLOCK_TYPE_REALTIME, NULL);
+             gst_pipeline_use_clock(GST_PIPELINE_CAST(renderer_type[i]->pipeline), clock);

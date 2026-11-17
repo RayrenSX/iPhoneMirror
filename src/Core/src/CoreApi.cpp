@@ -40,12 +40,14 @@ bool initialized{};
 thread_local std::wstring last_error;
 iPhoneMirror::device::DeviceManager device_manager;
 std::unordered_map<std::string, std::wstring> product_type_cache;
+std::unordered_map<std::string, iPhoneMirror::DeviceAppearanceInfo> device_appearance_cache;
 thread_local std::vector<iPhoneMirror::device::DeviceRecord> device_refresh_snapshot;
 thread_local bool device_refresh_snapshot_valid{};
 std::unique_ptr<iPhoneMirror::capture::ICaptureSession> capture_session;
 std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer> preview_renderer;
 HWND preview_renderer_window{};
 std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> wireless_receiver;
+std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> media_cast_receiver;
 iPhoneMirror::capture::CapturePreferences capture_preferences;
 float preview_corner_radius{0.1784F};
 float preview_corner_exponent{2.36F};
@@ -71,6 +73,8 @@ iPhoneMirror::SessionHandle next_session_handle{1};
 
 // Caller holds preview_window_mutex. A flip-model swap chain is exclusive to
 // its HWND across every capture mode, not merely within one session map.
+// All paths that remove an owner keep this mutex until its renderer is fully
+// destroyed, including session stop/destroy and core shutdown.
 void release_preview_window_owners(HWND window, const MultiSessionContext* keep = nullptr) {
     std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer> legacy;
     std::vector<std::shared_ptr<MultiSessionContext>> contexts;
@@ -554,46 +558,52 @@ void IM_CALL im_shutdown() {
     std::unique_ptr<iPhoneMirror::capture::ICaptureSession> legacy_capture;
     std::vector<std::shared_ptr<MultiSessionContext>> sessions;
     std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
+    std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> media_receiver;
     bool had_core_state{};
     {
-        std::scoped_lock lock(state_mutex);
-        had_core_state = initialized || preview_renderer || capture_session ||
-            !multi_sessions.empty() || wireless_receiver;
-        if (!had_core_state) {
-            // A failed initialization can still have opened the best-effort
-            // logger. Always close it without creating a new shutdown entry.
-            initialized = false;
-        } else {
-            // Publish shutdown before releasing the state lock. Session creation
-            // holds a shared initialization lock, so no in-flight creation can
-            // escape this snapshot or write after logging is shut down.
-            initialized = false;
-            renderer = std::move(preview_renderer);
-            preview_renderer_window = nullptr;
-            legacy_capture = std::move(capture_session);
-            for (auto& [_, session] : multi_sessions)
-                sessions.push_back(std::move(session));
-            multi_sessions.clear();
-            receiver = std::move(wireless_receiver);
+        std::scoped_lock owner_lock(preview_window_mutex);
+        {
+            std::scoped_lock lock(state_mutex);
+            had_core_state = initialized || preview_renderer || capture_session ||
+                !multi_sessions.empty() || wireless_receiver || media_cast_receiver;
+            if (!had_core_state) {
+                // A failed initialization can still have opened the best-effort
+                // logger. Always close it without creating a new shutdown entry.
+                initialized = false;
+            } else {
+                // Publish shutdown before releasing the state lock. Session creation
+                // holds a shared initialization lock, so no in-flight creation can
+                // escape this snapshot or write after logging is shut down.
+                initialized = false;
+                renderer = std::move(preview_renderer);
+                preview_renderer_window = nullptr;
+                legacy_capture = std::move(capture_session);
+                for (auto& [_, session] : multi_sessions)
+                    sessions.push_back(std::move(session));
+                multi_sessions.clear();
+                receiver = std::move(wireless_receiver);
+                media_receiver = std::move(media_cast_receiver);
+            }
+        }
+        // Keep HWND ownership serialized through destruction, but never join
+        // while holding the locks acquired by a renderer's frame provider.
+        renderer.reset();
+        for (auto& context : sessions) {
+            context->accepting_renderers.store(false, std::memory_order_release);
+            std::unordered_map<HWND,
+                std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer>> renderers;
+            {
+                std::scoped_lock lock(context->renderers_mutex);
+                renderers.swap(context->renderers);
+            }
+            renderers.clear();
         }
     }
     if (!had_core_state) {
         shutdown_logging_noexcept();
         return;
     }
-    // Join the render thread without holding state_mutex: its frame provider
-    // briefly takes that mutex to snapshot the active capture session.
-    renderer.reset();
     for (auto& context : sessions) {
-        context->accepting_renderers.store(false, std::memory_order_release);
-        std::vector<std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer>> session_renderers;
-        {
-            std::scoped_lock lock(context->renderers_mutex);
-            for (auto& [_, session_preview] : context->renderers)
-                session_renderers.push_back(std::move(session_preview));
-            context->renderers.clear();
-        }
-        session_renderers.clear();
         std::shared_ptr<iPhoneMirror::capture::ICaptureSession> session_capture;
         bool stopped{};
         {
@@ -611,6 +621,7 @@ void IM_CALL im_shutdown() {
     }
     if (legacy_capture) legacy_capture->stop();
     if (receiver) receiver->stop();
+    if (media_receiver) media_receiver->stop();
     try {
         iPhoneMirror::logging::write("im_shutdown");
     } catch (...) {
@@ -639,6 +650,20 @@ std::int32_t IM_CALL im_log_message(const wchar_t* message) {
         return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
     iPhoneMirror::logging::write("ui_event " + narrow(sanitized.c_str()));
     last_error.clear();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_get_device_appearance(const wchar_t* udid,
+    iPhoneMirror::DeviceAppearanceInfo* appearance) {
+    if (!appearance || appearance->struct_size != sizeof(*appearance))
+        return static_cast<std::int32_t>(iPhoneMirror::Result::InvalidArgument);
+    *appearance = {};
+    appearance->struct_size = sizeof(*appearance);
+    const auto identity = normalized_wired_device_identity(udid);
+    if (identity.empty()) return static_cast<std::int32_t>(iPhoneMirror::Result::InvalidArgument);
+    std::scoped_lock lock(device_metadata_mutex);
+    const auto found = device_appearance_cache.find(identity);
+    if (found != device_appearance_cache.end()) *appearance = found->second;
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
@@ -684,6 +709,14 @@ std::int32_t IM_CALL im_refresh_devices_ex(iPhoneMirror::DeviceInfo* devices,
                 if (!identity.empty() && !record.product_type.empty())
                     product_type_cache.insert_or_assign(
                         identity, record.product_type);
+                if (!identity.empty()) {
+                    iPhoneMirror::DeviceAppearanceInfo appearance{};
+                    appearance.struct_size = sizeof(appearance);
+                    copy_text(appearance.device_color, record.device_color);
+                    copy_text(appearance.enclosure_color, record.enclosure_color);
+                    copy_text(appearance.housing_color, record.housing_color);
+                    device_appearance_cache.insert_or_assign(identity, appearance);
+                }
             }
         }
         const auto& records = device_refresh_snapshot;
@@ -844,16 +877,28 @@ std::int32_t IM_CALL im_media_cast_receiver_start(const wchar_t* receiver_name,
         std::scoped_lock lock(state_mutex);
         if (!initialized)
             return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
-        receiver = wireless_receiver;
+        if (!media_cast_receiver)
+            media_cast_receiver = std::make_shared<iPhoneMirror::capture::WirelessReceiverHub>();
+        receiver = media_cast_receiver;
     }
-    if (!receiver || !receiver->running())
+    try {
+        receiver->start(receiver_name, host_path, 1920, 1080, 60, 5011, true);
+    } catch (const std::exception& error) {
         return fail(iPhoneMirror::Result::TransportUnavailable,
-            L"The shared AirPlay receiver is not running");
+            L"Could not start video receiver: " + widen(error.what()));
+    }
     last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
-void IM_CALL im_media_cast_receiver_stop() {}
+void IM_CALL im_media_cast_receiver_stop() {
+    std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
+    {
+        std::scoped_lock lock(state_mutex);
+        receiver = media_cast_receiver;
+    }
+    if (receiver) receiver->stop();
+}
 
 std::int32_t IM_CALL im_media_cast_receiver_get_status(
     std::int32_t* running, std::int32_t* ready) {
@@ -865,7 +910,7 @@ std::int32_t IM_CALL im_media_cast_receiver_get_status(
         std::scoped_lock lock(state_mutex);
         if (!initialized)
             return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
-        receiver = wireless_receiver;
+        receiver = media_cast_receiver;
     }
     *running = receiver && receiver->running() ? 1 : 0;
     // 2 means AirPlay is ready but DLNA is recovering independently.
@@ -882,7 +927,7 @@ std::int32_t IM_CALL im_media_cast_get_request(iPhoneMirror::MediaCastRequest* r
         std::scoped_lock lock(state_mutex);
         if (!initialized)
             return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
-        receiver = wireless_receiver;
+        receiver = media_cast_receiver;
     }
     const auto command = receiver ? receiver->take_media_command()
                                    : iPhoneMirror::capture::MediaCastCommand{};
@@ -913,20 +958,29 @@ std::int32_t IM_CALL im_media_cast_get_request(iPhoneMirror::MediaCastRequest* r
 
 std::int32_t IM_CALL im_media_cast_set_playback_state(std::uint64_t command_id,
     double duration, double position, double rate) {
+    return im_media_cast_set_playback_state_ex(command_id, duration, position,
+        rate, static_cast<std::uint32_t>(iPhoneMirror::MediaCastPlaybackState::Unknown));
+}
+
+std::int32_t IM_CALL im_media_cast_set_playback_state_ex(std::uint64_t command_id,
+    double duration, double position, double rate, std::uint32_t state) {
+    if (state > static_cast<std::uint32_t>(iPhoneMirror::MediaCastPlaybackState::Completed))
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid media playback state");
     std::shared_ptr<iPhoneMirror::capture::WirelessReceiverHub> receiver;
     {
         std::scoped_lock lock(state_mutex);
         if (!initialized)
             return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
-        receiver = wireless_receiver;
+        receiver = media_cast_receiver;
     }
-    if (!receiver || !receiver->update_media_playback(command_id, duration, position, rate))
+    if (!receiver || !receiver->update_media_playback(command_id, duration, position, rate,
+            static_cast<iPhoneMirror::wireless::MediaPlaybackState>(state)))
         return fail(iPhoneMirror::Result::TransportUnavailable,
             L"Media cast receiver is not connected");
     iPhoneMirror::logging::write_event(iPhoneMirror::logging::Level::Debug,
         "media", "playback_state", std::format(
-            "id={} duration={:.3f} position={:.3f} rate={:.3f}",
-            command_id, duration, position, rate));
+            "id={} duration={:.3f} position={:.3f} rate={:.3f} state={}",
+            command_id, duration, position, rate, state));
     last_error.clear();
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
@@ -937,7 +991,7 @@ std::int32_t IM_CALL im_media_cast_request_stop() {
         std::scoped_lock lock(state_mutex);
         if (!initialized)
             return fail(iPhoneMirror::Result::NotInitialized, L"Core is not initialized");
-        receiver = wireless_receiver;
+        receiver = media_cast_receiver;
     }
     if (!receiver || !receiver->request_media_stop())
         return fail(iPhoneMirror::Result::TransportUnavailable,
@@ -1260,9 +1314,9 @@ std::int32_t IM_CALL im_attach_preview_window(void* hwnd) {
         bool installed{};
         {
             std::scoped_lock lock(state_mutex);
-            // Another attach or shutdown can complete while D3D initializes.
-            // Never destroy/join that renderer while holding state_mutex: its
-            // frame provider briefly takes the same lock.
+            // Capture preferences can change while D3D initializes. Never
+            // destroy/join a displaced renderer while holding state_mutex:
+            // its frame provider briefly takes the same lock.
             if (initialized) {
                 renderer->set_max_fps(capture_session
                     ? capture_session->target_fps()
@@ -1611,14 +1665,17 @@ std::int32_t IM_CALL im_external_session_state(iPhoneMirror::SessionHandle handl
 std::int32_t IM_CALL im_session_stop(iPhoneMirror::SessionHandle handle) {
     auto context = find_multi_session(handle);
     if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
-    context->accepting_renderers.store(false, std::memory_order_release);
-    std::vector<std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer>> renderers;
     {
-        std::scoped_lock lock(context->renderers_mutex);
-        for (auto& [_, renderer] : context->renderers) renderers.push_back(std::move(renderer));
-        context->renderers.clear();
+        std::scoped_lock owner_lock(preview_window_mutex);
+        context->accepting_renderers.store(false, std::memory_order_release);
+        std::unordered_map<HWND,
+            std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer>> renderers;
+        {
+            std::scoped_lock lock(context->renderers_mutex);
+            renderers.swap(context->renderers);
+        }
+        renderers.clear();
     }
-    renderers.clear();
     {
         std::unique_lock lock(context->lifecycle_mutex);
         if (context->capture && !context->stopped) context->capture->stop();
@@ -1652,20 +1709,23 @@ std::int32_t IM_CALL im_session_stop(iPhoneMirror::SessionHandle handle) {
 void IM_CALL im_session_destroy(iPhoneMirror::SessionHandle handle) {
     std::shared_ptr<MultiSessionContext> context;
     {
-        std::scoped_lock lock(state_mutex);
-        const auto found = multi_sessions.find(handle);
-        if (found == multi_sessions.end()) return;
-        context = std::move(found->second);
-        multi_sessions.erase(found);
+        std::scoped_lock owner_lock(preview_window_mutex);
+        {
+            std::scoped_lock lock(state_mutex);
+            const auto found = multi_sessions.find(handle);
+            if (found == multi_sessions.end()) return;
+            context = std::move(found->second);
+            multi_sessions.erase(found);
+        }
+        context->accepting_renderers.store(false, std::memory_order_release);
+        std::unordered_map<HWND,
+            std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer>> renderers;
+        {
+            std::scoped_lock lock(context->renderers_mutex);
+            renderers.swap(context->renderers);
+        }
+        renderers.clear();
     }
-    context->accepting_renderers.store(false, std::memory_order_release);
-    std::vector<std::unique_ptr<iPhoneMirror::renderer::D3D11PreviewRenderer>> renderers;
-    {
-        std::scoped_lock lock(context->renderers_mutex);
-        for (auto& [_, renderer] : context->renderers) renderers.push_back(std::move(renderer));
-        context->renderers.clear();
-    }
-    renderers.clear();
     std::shared_ptr<iPhoneMirror::capture::ICaptureSession> capture;
     bool stopped{};
     {
@@ -1787,9 +1847,7 @@ std::int32_t IM_CALL im_session_attach_preview(iPhoneMirror::SessionHandle handl
     try {
         std::weak_ptr<MultiSessionContext> weak = context;
         {
-            // Serialize the existence check and swap-chain construction. DXGI
-            // rejects even a short-lived second flip-model chain for one HWND.
-            std::unique_lock lifecycle_lock(context->lifecycle_mutex);
+            std::shared_lock lifecycle_lock(context->lifecycle_mutex);
             std::scoped_lock renderers_lock(context->renderers_mutex);
             if (!context->accepting_renderers.load(std::memory_order_acquire) ||
                 !context->capture || context->stopped)
@@ -1804,16 +1862,23 @@ std::int32_t IM_CALL im_session_attach_preview(iPhoneMirror::SessionHandle handl
                 last_error.clear();
                 return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
             }
+        }
 
-            release_preview_window_owners(window, context.get());
-
-            auto renderer = std::make_unique<iPhoneMirror::renderer::D3D11PreviewRenderer>(window,
-                [weak]() -> std::shared_ptr<const iPhoneMirror::media::DecodedFrame> {
-                    const auto locked = weak.lock();
-                    if (!locked) return nullptr;
-                    std::shared_lock lock(locked->lifecycle_mutex);
-                    return locked->capture ? locked->capture->latest_frame() : nullptr;
-                });
+        release_preview_window_owners(window, context.get());
+        auto renderer = std::make_unique<iPhoneMirror::renderer::D3D11PreviewRenderer>(window,
+            [weak]() -> std::shared_ptr<const iPhoneMirror::media::DecodedFrame> {
+                const auto locked = weak.lock();
+                if (!locked) return nullptr;
+                std::shared_lock lock(locked->lifecycle_mutex);
+                return locked->capture ? locked->capture->latest_frame() : nullptr;
+            });
+        {
+            std::shared_lock lifecycle_lock(context->lifecycle_mutex);
+            std::scoped_lock renderers_lock(context->renderers_mutex);
+            // Allocate the map node before moving the running renderer. If
+            // allocation fails, both locks unwind before its destructor joins
+            // the frame provider (which also takes lifecycle_mutex).
+            const auto slot = context->renderers.try_emplace(window).first;
             renderer->set_render_size_limit(context->preferences.render_max_width,
                 context->preferences.render_max_height);
             renderer->set_max_fps(context->preferences.target_fps);
@@ -1823,11 +1888,11 @@ std::int32_t IM_CALL im_session_attach_preview(iPhoneMirror::SessionHandle handl
             renderer->set_image_adjustments(context->preferences.brightness,
                 context->preferences.contrast, context->preferences.saturation,
                 context->preferences.gamma);
-            context->renderers.emplace(window, std::move(renderer));
-            iPhoneMirror::logging::write(std::format(
-                "session_preview_attach complete handle={} hwnd=0x{:X}",
-                handle, reinterpret_cast<std::uintptr_t>(window)));
+            slot->second = std::move(renderer);
         }
+        iPhoneMirror::logging::write(std::format(
+            "session_preview_attach complete handle={} hwnd=0x{:X}",
+            handle, reinterpret_cast<std::uintptr_t>(window)));
         last_error.clear();
         return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
     } catch (const std::exception& error) {
@@ -2143,6 +2208,48 @@ std::int32_t IM_CALL im_session_force_preview_refresh(iPhoneMirror::SessionHandl
     if (context->renderers.empty())
         return fail(iPhoneMirror::Result::CaptureBackendUnavailable, L"Session preview is detached");
     for (auto& [_, renderer] : context->renderers) renderer->request_refresh();
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_session_set_window_device_frame(iPhoneMirror::SessionHandle handle,
+    void* hwnd, std::uint32_t width, std::uint32_t height, const std::uint8_t* bgra,
+    const std::uint8_t* mask, float x, float y, float w, float h) {
+    if (!bgra || !mask || width < 1 || height < 1 || width > 4096 || height > 4096 ||
+        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(w) || !std::isfinite(h) ||
+        x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 1.00001F || y + h > 1.00001F)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid device frame artwork");
+    auto context = find_multi_session(handle);
+    if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    try {
+        auto art = std::make_shared<iPhoneMirror::renderer::DeviceFrameArtwork>();
+        art->width = width; art->height = height;
+        art->screen_x = x; art->screen_y = y; art->screen_width = w; art->screen_height = h;
+        art->premultiplied_bgra.assign(bgra, bgra + static_cast<std::size_t>(width) * height * 4);
+        art->screen_mask.assign(mask, mask + static_cast<std::size_t>(width) * height);
+        std::scoped_lock lock(context->renderers_mutex);
+        const auto found = context->renderers.find(static_cast<HWND>(hwnd));
+        if (found == context->renderers.end())
+            return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown preview window");
+        found->second->set_device_frame(std::move(art));
+        return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+    } catch (const std::exception&) {
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Could not load device frame artwork");
+    }
+}
+
+std::int32_t IM_CALL im_session_set_window_phone_frame(iPhoneMirror::SessionHandle handle,
+    void* hwnd, std::int32_t enabled) {
+    auto context = find_multi_session(handle);
+    if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    std::scoped_lock lock(context->renderers_mutex);
+    const auto found = context->renderers.find(static_cast<HWND>(hwnd));
+    if (found == context->renderers.end())
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown preview window");
+    found->second->set_phone_frame(enabled != 0);
+    // The application supplies the selected artwork again when enabling.
+    // Drop both the pending CPU copy and uploaded textures after disabling,
+    // including when a paused source is redrawn without a new video frame.
+    if (enabled == 0) found->second->set_device_frame(nullptr);
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 

@@ -252,11 +252,33 @@ if ($head -ne $Commit -or
 $mdnsPatch = Join-Path $PSScriptRoot 'patches\uxplay-windows-mdns-interface.patch'
 & git -c "safe.directory=$safeSource" -C $SourceRoot apply --reverse --check $mdnsPatch 2>$null
 if ($LASTEXITCODE -ne 0) {
-    & git -c "safe.directory=$safeSource" -C $SourceRoot apply --check $mdnsPatch
-    if ($LASTEXITCODE -ne 0) { throw 'UxPlay Windows mDNS patch does not match the source.' }
-    & git -c "safe.directory=$safeSource" -C $SourceRoot apply $mdnsPatch
+    & git -c "safe.directory=$safeSource" -C $SourceRoot apply --check $mdnsPatch 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        & git -c "safe.directory=$safeSource" -C $SourceRoot apply $mdnsPatch
+    }
+    else {
+        # Upgrade an existing source tree carrying the earlier interface patch
+        # without resetting unrelated local source changes.
+        $selectionFix = Join-Path $PSScriptRoot 'patches\uxplay-windows-mdns-selection-fix.patch'
+        & git -c "safe.directory=$safeSource" -C $SourceRoot apply --check $selectionFix
+        if ($LASTEXITCODE -ne 0) { throw 'UxPlay Windows mDNS patch does not match the source.' }
+        & git -c "safe.directory=$safeSource" -C $SourceRoot apply $selectionFix
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Could not apply UxPlay Windows mDNS patch.' }
+    & git -c "safe.directory=$safeSource" -C $SourceRoot apply --reverse --check $mdnsPatch
+    if ($LASTEXITCODE -ne 0) { throw 'UxPlay Windows mDNS patch verification failed.' }
 }
+
+$rotationPatch = Join-Path $PSScriptRoot 'patches\uxplay-y4m-rotation.patch'
+& git -c "safe.directory=$safeSource" -C $SourceRoot apply --reverse --check $rotationPatch 2>$null
+if ($LASTEXITCODE -ne 0) {
+    & git -c "safe.directory=$safeSource" -C $SourceRoot apply --check $rotationPatch
+    if ($LASTEXITCODE -ne 0) { throw 'UxPlay Y4M rotation patch does not match the source.' }
+    & git -c "safe.directory=$safeSource" -C $SourceRoot apply $rotationPatch
+    if ($LASTEXITCODE -ne 0) { throw 'Could not apply UxPlay Y4M rotation patch.' }
+}
+Copy-Item -LiteralPath (Join-Path $Root 'src\UxPlayHost\UxPlayY4mRotation.h') `
+    -Destination (Join-Path $SourceRoot 'renderers\UxPlayY4mRotation.h') -Force
 
 $buildRoot = Join-Path $Root "work\dependencies\uxplay-build-$Commit"
 Assert-SafeWorkspaceDirectory $buildRoot
@@ -280,6 +302,11 @@ $GStreamerVersion = Get-MsysOutput $Msys 'pkg-config --modversion gstreamer-1.0'
 if ($GStreamerVersion -notmatch '^\d+(?:\.\d+){1,3}$') {
     throw "Unexpected GStreamer version: $GStreamerVersion"
 }
+$rotationTestUnix = Get-MsysPath $Msys (Join-Path $Root 'tests\uxplay_y4m_rotation_test.c')
+$rotationTestCommand = "gcc '$rotationTestUnix' -o '$buildUnix/y4m-rotation-test.exe' " +
+    '$(pkg-config --cflags --libs gstreamer-app-1.0 gstreamer-video-1.0)' +
+    " && '$buildUnix/y4m-rotation-test.exe'"
+Invoke-Msys $Msys $rotationTestCommand
 $decoderInspection = Get-MsysOutput $Msys 'gst-inspect-1.0 avdec_h264'
 foreach ($property in @('output-corrupt', 'discard-corrupted-frames',
         'automatic-request-sync-points')) {
@@ -356,6 +383,8 @@ Build environment: MSYS2 UCRT64
 GStreamer version: $GStreamerVersion
 Service discovery: UxPlay bundled mdnsd implementation
 Local patch: uxplay-windows-mdns-interface.patch (included beside this file)
+Local patch: uxplay-y4m-rotation.patch and UxPlayY4mRotation.h (included).
+The private Y4M pipe emits updated dimensions at each video size change.
 Windows mDNS prefers an active physical multicast-capable Ethernet or Wi-Fi
 adapter and avoids tunnel and virtual interfaces.
 GStreamer plugins: app, coreelements, playback, autodetect, audioconvert, audioresample,
@@ -365,6 +394,8 @@ corrupted output and waits for the next synchronization point.
 "@ | Set-Content -LiteralPath (Join-Path $Destination 'SOURCE.md') -Encoding utf8
 Copy-Item -LiteralPath $mdnsPatch -Destination (
     Join-Path $Destination 'uxplay-windows-mdns-interface.patch') -Force
+Copy-Item -LiteralPath $rotationPatch -Destination $Destination -Force
+Copy-Item -LiteralPath (Join-Path $Root 'src\UxPlayHost\UxPlayY4mRotation.h') -Destination $Destination -Force
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') -Destination (
     Join-Path $Destination 'LICENSE') -Force
 

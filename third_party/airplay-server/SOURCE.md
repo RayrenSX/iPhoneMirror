@@ -89,7 +89,7 @@ The receiver includes or derives from the following components:
   (`LICENSE-FFMPEG-LGPL-2.1.txt`). The original DLL identifies itself as
   `N-102062-g63b2b0f47d`, with avcodec 58.137.100; the previous 4.4.2 label was
   incorrect. The replacement preserves that source/ABI and enables H.264,
-  ALAC and AAC decoding, the H.264 parser, swscale and swresample. SIMD assembly
+  HEVC, ALAC and AAC decoding, the H.264/HEVC parsers, swscale and swresample. SIMD assembly
   and Windows threading remain enabled. GCC/winpthreads support is linked
   statically; the DLLs require no MSYS2 runtime or developer-installed libraries.
   Build dependency notices are in `NOTICE-FFMPEG-BUILD.txt`.
@@ -102,11 +102,13 @@ FFmpeg corresponding source:
 https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/63b2b0f47df420007c53888ce0e8383d24b8fb06
 
 Archive SHA-256: `2d6e9244be21b32756c481f4653d7f17ae08608dd2db1ba04e826cf0052df860`.
+The equivalent commit-pinned GitHub API tarball is also accepted, SHA-256
+`06f221fe8d4d7b2a3416f19641a472c0cce836df38110bb2c093b7528a7065fc`.
 Rebuild using `scripts/build_airplay_ffmpeg.ps1` and `scripts/ffmpeg-airplay-build.sh`
 with MSYS2 UCRT64 (the vendored build used GCC 16.2.0). The checked-in
 `scripts/ffmpeg-airplay-mathops.patch` preserves x86 five-bit shift semantics while
 making the operand acceptable to current binutils. This is the only source patch.
-`scripts/test_airplay_ffmpeg.ps1` verifies H.264 orientation changes, scaling and
+`scripts/test_airplay_ffmpeg.ps1` verifies H.264/HEVC orientation changes, scaling and
 ALAC/PCM output against reference decoded bytes. Runtime hashes are pinned in
 `SHA256SUMS.txt` and the application's `RuntimeBinaryIntegrity.cs`; update both
 after validating a rebuild. Distributors must provide corresponding FFmpeg
@@ -148,12 +150,68 @@ Build hashes/toolchain metadata in `BUILD.json` and dependency notices are
 updated in the same installation transaction. `test_install_airplay_runtime.ps1`
 verifies rollback after a late replacement failure and rejects mismatched inputs.
 
+The request-policy patch also accepts exact POST pairing routes over RTSP/1.0
+without CSeq, while retaining signature verification and CSeq requirements for
+session requests. Empty HTTP 200 responses carry an explicit zero content length.
+Numeric request/response diagnostics record route identifiers and lengths only.
+
+Combined mode provides screen mirroring and a separate DLNA service. Its AirPlay
+and RAOP advertisements and `/info` deliberately omit URL-video handoff bits:
+the shared RTSP endpoint does not implement the complete server-info/reverse/play
+handoff protocol. Advertising those bits caused YouTube to leave screen mirroring
+for an unsupported path. Dedicated media mode retains its existing feature policy.
+On 2026-11-16, the iPhone 17 Original/native-profile physical test confirmed YouTube
+picture, stereo sound and repeated portrait/landscape transitions without disconnect
+after this policy correction. HEVC support separately restored the native-profile
+home screen that was previously black.
+
+The application now launches separate mirror and media hosts, with independent
+identities, IPC queues and lifecycles. Mirror ports are 5001/7001; video ports are
+5011/7011 with DLNA HTTP on 8090. The media host excludes Screen, screen multicodec,
+and protected-video capability bits, omits displays from `/info`, and rejects
+screen SETUP streams. Physical testing confirmed its removal from the iOS Screen
+Mirroring list. Text, XML and binary direct Play requests and independent host
+stop/restart are covered by `scripts/test_receiver_isolation.py`.
+
+The earlier physical test (2026-11-16) stopped at YouTube's 120-byte `/fp-setup2`
+request, with no fallback after a 421 response. The dedicated video HTTP endpoint
+now integrates the pinned go-atv SAP/control implementation through
+`iPhoneMirror.AirPlayControl.dll`; see `../airplay-control/SOURCE.md` for source,
+license and rebuild instructions. RAOP keeps rejecting unsupported fp-setup2.
+Native integration tests cover ordinary and pair-secret-mixed negotiation,
+coalesced upgrade/first encrypted command, fragmented records, encrypted `/play`
+delivery into the media queue, and closure on authentication failure. Independent
+mirror startup/stop/restart tests still pass. Physical YouTube playback with this
+new implementation remains to be tested; protocol success is not playback success.
+
+Subsequent physical testing confirmed encrypted `/play` and continuing playback
+status requests after preserving X-Apple-PD from pair-verify. The host then rejected
+the supplied non-HTTP location before starting playback. The video HTTP endpoint
+now bridges `mlhls://` resources through encrypted FCUP `/event` requests and
+`/action` responses. A tokenized loopback HTTP service rewrites playlist references
+while leaving HTTP(S) segment URLs intact. Native integration covers both encrypted
+reverse acknowledgments and master/media playlist delivery to the media queue.
+Physical YouTube playback with the playlist bridge is pending validation.
+
+The URL-video scrub route now distinguishes progress reads from seeks. GET
+`/scrub` returns the current duration and position as `text/parameters`; only
+POST with a single valid, finite, nonnegative `position` query value may seek.
+`patches/airplay-scrub-request.h` contains the bounded, locale-independent query
+parser shared by the AirPlay and RAOP URL-control branches. The AirPlay branch
+checks the active media owner before either read or write. Diagnostic event 32
+records numeric method, parse outcome, target milliseconds, callback application,
+ownership and endpoint kind without logging request URLs or bodies. Invalid
+requests cannot be silently converted into a real seek to zero; valid zero
+remains supported. This fixes a reproduced parser defect, while the provenance
+of earlier physical zero seeks remains unconfirmed without the new diagnostics.
+
 Rebuild and stage the receiver with (replace each quoted placeholder with its actual path):
 
 ```powershell
 ./scripts/build_airplay_receiver.ps1 -SourceRoot '<v1.1.2-clone>' -OutputDirectory '<stage>'
+./scripts/build_airplay_control.ps1 -OutputDirectory '<control-stage>'
 ./scripts/test_airplay_upstream.ps1 -ReceiverRoot '<stage>' -FfmpegBuildRecord '<record.json>' -MsysRoot '<msys64>'
-./scripts/install_airplay_runtime.ps1 -ReceiverBinary '<stage>/airplay2dll.dll' -FfmpegBuildRecord '<record.json>'
+./scripts/install_airplay_runtime.ps1 -ReceiverBinary '<stage>/airplay2dll.dll' -FfmpegBuildRecord '<record.json>' -ControlBinary '<control-stage>/iPhoneMirror.AirPlayControl.dll'
 ```
 
 The receiver build's `-Install` option also requires `-FfmpegBuildRecord` and

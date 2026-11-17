@@ -51,7 +51,7 @@ internal sealed class MediaCastReceiverController(
                 return false;
             }
             var result = await Task.Run(() => core.StartMediaCastReceiver(
-                WirelessReceiverConfiguration.DefaultReceiverName, hostPath));
+                WirelessReceiverConfiguration.MediaReceiverName, hostPath));
             Running = result.Success;
             Ready = false;
             _startError = result.Success ? null : result.Message;

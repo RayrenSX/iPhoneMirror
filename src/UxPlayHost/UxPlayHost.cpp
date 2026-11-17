@@ -949,7 +949,7 @@ void read_uxplay_output(HANDLE output, StreamForwarder& forwarder,
     // Locking the sink to the negotiated canvas (for example 5120x2880)
     // hides rotation from the UI and forces an expensive full-frame scale.
     const auto video_sink =
-        std::wstring(L"videoconvert ! video/x-raw,format=I420 ! y4menc ! filesink location=") +
+        std::wstring(L"videoconvert ! video/x-raw,format=I420 ! y4menc name=iphone_mirror_y4m ! filesink location=") +
         gst_quote_location(video_pipe);
     const auto audio_sink = std::wstring(
         L"audioconvert ! audio/x-raw,format=S16LE,rate=44100,channels=2 ! filesink sync=false location=") +

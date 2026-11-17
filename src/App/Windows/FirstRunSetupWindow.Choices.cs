@@ -86,7 +86,7 @@ public partial class FirstRunSetupWindow
 
     private WrapPanel CardRow()
     {
-        var row = new WrapPanel { Margin = new(0, 4, -12, 0) };
+        var row = new WrapPanel { Margin = new(-6, 4, -6, 0) };
         row.SizeChanged += (_, _) =>
         {
             var scale = row.TryFindResource("BodyFontSize") is double size ? 1 + .5 * (size / 14 - 1) : 1;

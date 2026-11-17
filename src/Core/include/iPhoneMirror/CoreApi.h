@@ -71,6 +71,13 @@ struct DeviceInfo {
     wchar_t status[MaxStatus];
 };
 
+struct DeviceAppearanceInfo {
+    std::uint32_t struct_size;
+    wchar_t device_color[32];
+    wchar_t enclosure_color[32];
+    wchar_t housing_color[32];
+};
+
 struct EnvironmentInfo {
     std::uint32_t struct_size;
     std::uint32_t api_version;
@@ -237,6 +244,18 @@ enum class MediaCastFlags : std::uint32_t {
     Muted = 2,
 };
 
+// Playback rate describes clock advancement. State describes user intent and
+// decoder readiness, which cannot be inferred from a zero clock rate.
+enum class MediaCastPlaybackState : std::uint32_t {
+    Unknown = 0,
+    Playing = 1,
+    Paused = 2,
+    Loading = 3,
+    Stopped = 4,
+    Failed = 5,
+    Completed = 6,
+};
+
 struct MediaCastRequest {
     std::uint32_t struct_size;
     std::uint32_t api_version;
@@ -268,6 +287,9 @@ IM_API std::int32_t IM_CALL im_log_message(const wchar_t* message);
 
 // On input, *count is the number of entries available in devices. On output it
 // is the number of devices discovered. Passing devices == nullptr is a count query.
+// Cached read only. Missing/unknown colors are empty; no USB transaction occurs.
+IM_API std::int32_t IM_CALL im_get_device_appearance(
+    const wchar_t* udid, iPhoneMirror::DeviceAppearanceInfo* appearance);
 IM_API std::int32_t IM_CALL im_refresh_devices(
     iPhoneMirror::DeviceInfo* devices,
     std::uint32_t* count);
@@ -310,6 +332,9 @@ IM_API std::int32_t IM_CALL im_media_cast_get_request(
     iPhoneMirror::MediaCastRequest* request);
 IM_API std::int32_t IM_CALL im_media_cast_set_playback_state(
     std::uint64_t command_id, double duration, double position, double rate);
+IM_API std::int32_t IM_CALL im_media_cast_set_playback_state_ex(
+    std::uint64_t command_id, double duration, double position, double rate,
+    std::uint32_t state);
 // Requests that the active receiver-side URL-video transport transition to
 // stopped. The UI should still release its local decoder after this succeeds.
 IM_API std::int32_t IM_CALL im_media_cast_request_stop();
@@ -459,6 +484,13 @@ IM_API std::int32_t IM_CALL im_session_copy_next_audio_packet(
     std::uint32_t* buffer_size);
 IM_API std::int32_t IM_CALL im_session_force_preview_refresh(
     iPhoneMirror::SessionHandle handle);
+IM_API std::int32_t IM_CALL im_session_set_window_device_frame(
+    iPhoneMirror::SessionHandle handle, void* hwnd, std::uint32_t width, std::uint32_t height,
+    const std::uint8_t* bgra, const std::uint8_t* mask,
+    float screen_x, float screen_y, float screen_width, float screen_height);
+// Disabling also releases the window's artwork. Supply it again before enabling.
+IM_API std::int32_t IM_CALL im_session_set_window_phone_frame(
+    iPhoneMirror::SessionHandle handle, void* hwnd, std::int32_t enabled);
 IM_API std::int32_t IM_CALL im_session_set_window_corner_profile(
     iPhoneMirror::SessionHandle handle, void* hwnd, float normalized_radius,
     float curve_exponent);

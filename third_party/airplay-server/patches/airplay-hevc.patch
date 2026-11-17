@@ -1,0 +1,179 @@
+--- a/AirPlayServerLib/lib/raop_rtp_mirror.c
++++ b/AirPlayServerLib/lib/raop_rtp_mirror.c
+@@ -394,6 +394,8 @@
+ 
+ /* Convert an AVC configuration record into Annex B without assuming signed
+  * 16-bit lengths or a single parameter set. Each length is checked before use. */
++#include "airplay-hevc-config.h"
++
+ static unsigned char *mirror_parameter_sets(const unsigned char *data,
+     size_t size, int *length) {
+     size_t cursor = 6, used = 0;
+@@ -437,7 +439,7 @@
+     unsigned char *pending_sps_pps = NULL;
+     int pending_sps_pps_len = 0, sender_paused = 0, exceptionExit = 0;
+     uint64_t pending_timestamp = 0, pts_base = 0, reconnect_deadline = 0;
+-    int have_pts = 0, invalid_frames = 0;
++    int have_pts = 0, invalid_frames = 0, hevc = 0;
+     for (;;) {
+         fd_set rfds;
+         struct timeval window = {0, 100000};
+@@ -500,8 +502,12 @@
+                 float sw = byteutils_get_float(header, 40), sh = byteutils_get_float(header, 44);
+                 float ow = byteutils_get_float(header, 56), oh = byteutils_get_float(header, 60);
+                 int config_len;
+-                unsigned char *config = mirror_parameter_sets(payload, payloadsize, &config_len);
++                int next_hevc = payloadsize >= 8 && !memcmp(payload + 4, "hvc1", 4);
++                unsigned char *config = next_hevc ?
++                    iphone_mirror_hevc_parameter_sets(payload, payloadsize, &config_len) :
++                    mirror_parameter_sets(payload, payloadsize, &config_len);
+                 if (config) {
++                    hevc = next_hevc;
+                     logger_log(mirror->logger, LOGGER_INFO,
+                         "IPHONE_MIRROR_VIDEO_DIAG 0 %d %d %d %d %d %d",
+                         payloadsize, config_len, header[6],
+@@ -572,7 +578,8 @@
+             }
+             if (!have_pts || absolute_pts < pts_base) { pts_base = absolute_pts; have_pts = 1; }
+             frame.data = decoded; frame.data_len = payloadsize;
+-            frame.frame_type = has_new_parameter_sets ? 0 : 1;
++            /* Internal frame types 2/3 carry HEVC without changing the public DLL ABI. */
++            frame.frame_type = (hevc ? 2 : 0) + (has_new_parameter_sets ? 0 : 1);
+             frame.pts = absolute_pts - pts_base;
+             if (sender_paused) { sender_paused = 0; mirror_report_state(mirror, 0); }
+             if (mirror->callbacks.video_process)
+--- a/AirPlayServerLib/lib/global.h
++++ b/AirPlayServerLib/lib/global.h
+@@ -4,7 +4,7 @@
+ /* Mirror/audio receiver capabilities. Direct AirPlay video and HLS are not
+  * advertised because this project does not implement URL-based playback. */
+ #define GLOBAL_FEATURES_1 0x5A7FFEE6U
+-#define GLOBAL_FEATURES_2 0x00000000U
++#define GLOBAL_FEATURES_2 0x00000400U
+ #define GLOBAL_MODEL    "AppleTV3,2"
+ #define GLOBAL_VERSION  "220.68"
+ 
+--- a/AirPlayServerLib/lib/raop_handlers.h
++++ b/AirPlayServerLib/lib/raop_handlers.h
+@@ -112,7 +112,7 @@
+ 		(!strcmp(iphone_mirror_mode, "media") ||
+ 		 !strcmp(iphone_mirror_mode, "combined"));
+ 	unsigned long long iphone_mirror_features = iphone_mirror_media_cast ?
+-		0x5A7FFEF7ULL : 0x5A7FFEE6ULL;
++		0x4005A7FFEF7ULL : 0x4005A7FFEE6ULL;
+ 	if (iphone_mirror_media_cast) {
+ 		const unsigned char mirror_features[] =
+ 			{ 0x00, 0x00, 0x00, 0x00, 0x5a, 0x7f, 0xfe, 0xe6 };
+--- a/airplay2dll/FgAirplayChannel.h
++++ b/airplay2dll/FgAirplayChannel.h
+@@ -19,6 +19,7 @@
+ 	int pts;
+ 	int size;
+ 	int is_key;
++	int codec_id;
+ 	int width;
+ 	int height;
+ 	unsigned char* data;
+@@ -37,7 +38,7 @@
+ 	long addRef();
+ 	long release();
+ 
+-	int initFFmpeg(const void* privatedata, int privatedatalen);
++	int initFFmpeg(const void* privatedata, int privatedatalen, AVCodecID codec = AV_CODEC_ID_H264);
+ 	void unInitFFmpeg();
+ 	float setScale(float fRatio);
+ 	int decodeH264Data(SFgH264Data* data, const char* remoteName, const char* remoteDeviceId);
+@@ -52,6 +53,7 @@
+ 	AVCodec*				m_pCodec;
+ 	AVCodecContext*			m_pCodecCtx;
+ 	SwsContext*				m_pSwsCtx;
++	SwsContext* m_decodeConvert = NULL;
+ 	bool					m_bCodecOpened;
+ 
+ 	void*					m_mutexAudio;
+--- a/airplay2dll/src/FgAirplayServer.cpp
++++ b/airplay2dll/src/FgAirplayServer.cpp
+@@ -437,14 +437,15 @@
+ 	SFgH264Data* pData = new SFgH264Data();
+ 	memset(pData, 0, sizeof(SFgH264Data));
+ 
+-	if (h264data->frame_type == 0)
++	pData->codec_id = h264data->frame_type >= 2 ? AV_CODEC_ID_HEVC : AV_CODEC_ID_H264;
++	if ((h264data->frame_type & 1) == 0)
+ 	{
+ 		pData->size = h264data->data_len;
+ 		pData->data = new uint8_t[pData->size];
+ 		pData->is_key = 1;
+ 		memcpy(pData->data, h264data->data, h264data->data_len);
+ 	}
+-	else if (h264data->frame_type == 1)
++	else
+ 	{
+ 		pData->size = h264data->data_len;
+ 		pData->data = new uint8_t[pData->size];
+--- a/airplay2dll/FgAirplayChannel.cpp
++++ b/airplay2dll/FgAirplayChannel.cpp
+@@ -56,13 +56,13 @@
+ 	return (m_nRef > 1 ? m_nRef : 1);
+ }
+ 
+-int FgAirplayChannel::initFFmpeg(const void* privatedata, int privatedatalen) {
++int FgAirplayChannel::initFFmpeg(const void* privatedata, int privatedatalen, AVCodecID codec) {
+ 	/* IPHONE_MIRROR_H264_DECODER_RECOVERY: SPS/PPS is Annex-B input, not
+ 	 * avcC extradata. Let the H.264 parser consume it as a regular packet. */
+ 	(void)privatedata;
+ 	(void)privatedatalen;
+ 	if (m_bCodecOpened) return 0;
+-	m_pCodec = avcodec_find_decoder(AV_CODEC_ID_H264);
++	m_pCodec = avcodec_find_decoder(codec);
+ 	if (m_pCodec == NULL) {
+ 		printf("IPHONE_MIRROR_H264_DECODER_RECOVERY decoder_missing\n");
+ 		return -1;
+@@ -98,6 +98,7 @@
+ 		avcodec_free_context(&m_pCodecCtx);
+ 		m_pCodecCtx = NULL;
+ 	}
++    sws_freeContext(m_decodeConvert); m_decodeConvert = NULL;
+     m_bCodecOpened = false;
+     m_pCodec = NULL;
+ 	if (m_pSwsCtx)
+@@ -120,8 +121,10 @@
+ 	if (data == NULL || data->data == NULL || data->size <= 0) return -1;
+ 	CAutoLock oLock(m_mutexVideo, "decodeH264Data");
+ 	int ret = 0;
++    const auto codec = data->codec_id == AV_CODEC_ID_HEVC ? AV_CODEC_ID_HEVC : AV_CODEC_ID_H264;
++    if (m_bCodecOpened && m_pCodecCtx->codec_id != codec) unInitFFmpeg();
+ 	if (!m_bCodecOpened) {
+-		ret = initFFmpeg(NULL, 0);
++		ret = initFFmpeg(NULL, 0, codec);
+ 		if (ret < 0) return ret;
+ 	}
+ 	AVPacket packet;
+@@ -183,6 +186,27 @@
+ 			av_frame_free(&pFrame);
+ 			break;
+ 		}
++        // HEVC Main10 can be sent by HDR-capable phones. Convert decoded
++        // pixels to the existing I420 IPC contract before copying any planes.
++        if (pFrame->width > 0 && pFrame->height > 0 &&
++            pFrame->width <= 16384 && pFrame->height <= 16384 &&
++            pFrame->format != AV_PIX_FMT_YUV420P && pFrame->format != AV_PIX_FMT_YUVJ420P) {
++            AVFrame* converted = av_frame_alloc();
++            if (!converted) { av_frame_free(&pFrame); return AVERROR(ENOMEM); }
++            converted->format = AV_PIX_FMT_YUV420P;
++            converted->width = pFrame->width; converted->height = pFrame->height;
++            m_decodeConvert = sws_getCachedContext(m_decodeConvert,
++                pFrame->width, pFrame->height, (AVPixelFormat)pFrame->format,
++                pFrame->width, pFrame->height, AV_PIX_FMT_YUV420P,
++                SWS_BILINEAR, NULL, NULL, NULL);
++            if (!m_decodeConvert || av_frame_get_buffer(converted, 32) < 0 ||
++                sws_scale(m_decodeConvert, pFrame->data, pFrame->linesize, 0,
++                    pFrame->height, converted->data, converted->linesize) != pFrame->height) {
++                av_frame_free(&converted); av_frame_free(&pFrame); return AVERROR(EINVAL);
++            }
++            converted->pts = pFrame->pts;
++            av_frame_free(&pFrame); pFrame = converted;
++        }
+ 		if (pFrame->width <= 0 || pFrame->height <= 0 ||
+             pFrame->width > 16384 || pFrame->height > 16384 ||
+             (pFrame->format != AV_PIX_FMT_YUV420P && pFrame->format != AV_PIX_FMT_YUVJ420P) ||

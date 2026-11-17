@@ -19,6 +19,9 @@ foreach ($entry in @(@('landscape','96x64'),@('portrait','64x96'))) {
     Invoke-Media @('-f','lavfi','-i',"testsrc2=size=$($entry[1]):rate=6",'-frames:v','6',
         '-c:v','libx264','-pix_fmt','yuv420p','-f','h264',"$test\$name.h264")
     Invoke-Media @('-i',"$test\$name.h264",'-f','rawvideo',"$test\$name.expected")
+    Invoke-Media @('-f','lavfi','-i',"testsrc2=size=$($entry[1]):rate=6",'-frames:v','6',
+        '-c:v','libx265','-x265-params','log-level=error','-pix_fmt','yuv420p','-f','hevc',"$test\$name.hevc")
+    Invoke-Media @('-i',"$test\$name.hevc",'-f','rawvideo',"$test\$name.hevc.expected")
 }
 Invoke-Media @('-f','lavfi','-i','sine=frequency=997:sample_rate=44100','-ac','2',
     '-c:a','alac','-sample_fmt','s16p','-frames:a','1',"$test\audio.m4a")
@@ -52,11 +55,12 @@ try {
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
     & "$test\smoke.exe" "$test\landscape.h264" "$test\portrait.h264" `
         "$test\audio.extra" "$test\audio.packet" "$test\landscape.actual" `
-        "$test\portrait.actual" "$test\audio.actual"
+        "$test\portrait.actual" "$test\audio.actual" "$test\landscape.hevc" "$test\portrait.hevc" `
+        "$test\landscape.hevc.actual" "$test\portrait.hevc.actual"
     if ($LASTEXITCODE) { throw 'AirPlay codec smoke failed.' }
 }
 finally { $env:PATH = $previousPath }
-foreach ($name in @('landscape','portrait','audio')) {
+foreach ($name in @('landscape','portrait','audio','landscape.hevc','portrait.hevc')) {
     if ((Get-FileHash "$test\$name.expected").Hash -ne (Get-FileHash "$test\$name.actual").Hash) {
         throw "AirPlay $name decoded bytes differ from the reference FFmpeg."
     }

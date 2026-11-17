@@ -7,6 +7,20 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 No unreleased changes recorded yet.
 
+## [1.8.5-pre6] - 2026-11-17
+
+### Added
+
+- Add integrated device management and opt-in read/write Windows Explorer mappings for media and file-sharing app Documents, persistent proxy settings, and a default-on phone keyboard visibility control.
+- Add device frame assets and calibrated corner profiles for recent iPhones.
+
+### Fixed
+
+- Fix AirPlay item completion, ad handoff, HLS discontinuities, scrub/seek parsing, retry state and iQIYI next-episode continuation (#88).
+- Fix UxPlay frame geometry and rotation transitions (#90), recovered wireless preview binding, control-window focus restoration and USB/keyboard recovery.
+- Fix Windows mapped uploads with PROPPATCH/file-time handling; improve setup, Driver Manager, description visibility and disabled controls.
+- See [pre6 release notes](docs/releases/v1.8.5-pre6.md) for validation boundaries. Full Files → On My iPhone mapping remains unavailable and is not part of this release.
+
 ## [1.8.5-pre5] - 2026-11-12
 
 ### Added

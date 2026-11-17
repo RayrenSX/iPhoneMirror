@@ -121,9 +121,9 @@ internal sealed partial class DeviceHubPanel
                 Action(process ? "Terminate" : "PanelUninstall", "app-remove", true);
                 AddMenuSeparator(menu);
             }
-            if (!process) Action("PanelInstallApp", "app-install", true);
+            if (_developerMode && !process) Action("PanelInstallApp", "app-install", true);
         }
-        else if (list == ProfilesList)
+        else if (list == ProfilesList && _developerMode)
         {
             if (row is not null)
             {
@@ -140,8 +140,10 @@ internal sealed partial class DeviceHubPanel
                 var kind = Text(row.Data, "type");
                 Action(kind == "directory" ? "PanelOpenFolder" : "PanelSaveFile", "file-download", kind is "directory" or "file");
                 Copy("PanelCopyPath");
+                if (Option(FileRoot) != "crashes" && kind == "file") Action("PanelDeleteFile", "file-delete", true);
                 AddMenuSeparator(menu);
             }
+            if (Option(FileRoot) != "crashes") Action("PanelImportFiles", "file-import", true);
             if (Option(FileRoot) == "crashes") Action("ExportCrashes", "file-export", true);
         }
         Action("Refresh", "refresh", true);
@@ -164,14 +166,14 @@ internal sealed partial class DeviceHubPanel
                 await InvokeActionAsync(action);
             });
         }
-        if (_page == 1 && Option(AppFilter) != "processes") Action("PanelInstallApp", "app-install", available);
-        if (_page == 2) Action("PanelInstallProfile", "profile-install", available);
+        if (_developerMode && _page == 1 && Option(AppFilter) != "processes") Action("PanelInstallApp", "app-install", available);
+        if (_developerMode && _page == 2) Action("PanelInstallProfile", "profile-install", available);
         if (_page == 3 && Option(FileRoot) == "crashes") Action("ExportCrashes", "file-export", available);
-        if (_page == 4) Action("SaveLog", "log-save", available && LogText.Text.Length > 0);
-        if (!_ready && _device is { IsMediaCast: false })
+        if (_developerMode && _page == 4) Action("SaveLog", "log-save", available && LogText.Text.Length > 0);
+        if (!_ready && _connectionFailed && _canConnect)
         {
             if (menu.Items.Count > 0) AddMenuSeparator(menu);
-            Action("Prepare", "prepare", !_busy && (_device.Ready || _device.IsWireless));
+            Action("PanelRetryConnection", "prepare", !_busy);
         }
         if (menu.Items.Count == 0) return;
         HeaderMore.ContextMenu = menu;

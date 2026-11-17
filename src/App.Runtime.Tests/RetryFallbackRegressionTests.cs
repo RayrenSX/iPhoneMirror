@@ -126,7 +126,7 @@ internal static partial class Program
             using var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
             using var hls = (HlsMediaPlaybackBridge)typeof(HlsMediaPlaybackBridge)
-                .GetConstructors(KeyboardTestMembers).Single().Invoke([process, listener, new Uri("http://127.0.0.1/test.ts")]);
+                .GetConstructors(KeyboardTestMembers).Single().Invoke([process, listener, new Uri("http://127.0.0.1/test.ts"), null]);
             InteractionAssert(!hls.IsRunning && hls.ExitedSuccessfully == (exitCode == 0),
                 "HLS bridge treated a nonzero exit as normal EOF.");
             var window = new MainWindow { ShowInTaskbar = false };

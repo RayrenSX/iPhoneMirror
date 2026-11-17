@@ -28,7 +28,37 @@ internal static class DeviceCornerProfileResolver
     internal static readonly DeviceCornerProfile IPhone12Max = new(
         "iphone-12-max", true, 0.1320, 2.22, 0.1200);
     internal static readonly DeviceCornerProfile IPhoneDynamicIsland = new(
-        "iphone-dynamic-island", true, 0.1784, 2.36, 0.1583);
+        // The main compact preview is an opaque child HWND. Its region must
+        // follow the shader's curve; a smaller region radius exposes a black
+        // strip between the child silhouette and the anti-aliased picture.
+        "iphone-dynamic-island", true, 0.1784, 2.36, 0.1784);
+    // Model-specific visual fits against the checked-in screen masks. These
+    // are measured artwork fits, not Apple-published mechanical dimensions.
+    // See docs/diagnostics/recent-iphone-corners-20261117.md for provenance.
+    internal static readonly DeviceCornerProfile IPhone16 = new(
+        "iphone-16", true, 0.17700, 2.6358, 0.17700);
+    internal static readonly DeviceCornerProfile IPhone16Plus = new(
+        "iphone-16-plus", true, 0.17090, 2.8106, 0.17090);
+    internal static readonly DeviceCornerProfile IPhone16Pro = new(
+        "iphone-16-pro", true, 0.19272, 2.5886, 0.19272);
+    internal static readonly DeviceCornerProfile IPhone16ProMax = new(
+        "iphone-16-pro-max", true, 0.17100, 2.5040, 0.17100);
+    internal static readonly DeviceCornerProfile IPhone17 = new(
+        "iphone-17", true, 0.19590, 2.6304, 0.19590);
+    internal static readonly DeviceCornerProfile IPhone17Pro = new(
+        "iphone-17-pro", true, 0.19452, 2.6086, 0.19452);
+    internal static readonly DeviceCornerProfile IPhone17ProMax = new(
+        "iphone-17-pro-max", true, 0.17832, 2.5876, 0.17832);
+    internal static readonly DeviceCornerProfile IPhoneAir = new(
+        "iphone-air", true, 0.18298, 2.4729, 0.18298);
+    internal static readonly DeviceCornerProfile IPhone18Pro = new(
+        "iphone-18-pro", true, 0.19058, 2.5518, 0.19058);
+    internal static readonly DeviceCornerProfile IPhone18ProMax = new(
+        "iphone-18-pro-max", true, 0.17698, 2.5706, 0.17698);
+    internal static readonly DeviceCornerProfile IPhoneDuoInner = new(
+        "iphone-duo-inner", true, 0.09698, 2.5022, 0.09698);
+    internal static readonly DeviceCornerProfile IPhoneModernNotch = new(
+        "iphone-modern-notch", true, 0.1580, 2.25, 0.1580);
     internal static readonly DeviceCornerProfile IPadPro = new(
         "ipad-pro-rounded", true, 0.0430, 2.12, 0.0390);
     internal static readonly DeviceCornerProfile IPadAir = new(
@@ -48,9 +78,10 @@ internal static class DeviceCornerProfileResolver
 
     private static readonly HashSet<(int Major, int Minor)> NotchedModernIPhones =
     [
-        // iPhone 16e retains a notch while the other iPhone17,* devices use
-        // Dynamic Island.
-        (17, 5),
+        // e models retain a notch while their generation's other models use
+        // Dynamic Island. Their project-drawn bezels do not establish a new
+        // physical radius, so retain the conservative notch curve.
+        (17, 5), (18, 5),
     ];
 
     internal static DeviceCornerProfile Resolve(
@@ -59,7 +90,7 @@ internal static class DeviceCornerProfileResolver
         uint frameHeight = 0)
     {
         if (TryParseProductType(productType, "iPhone", out var phoneMajor, out var phoneMinor))
-            return ResolveIPhone(phoneMajor, phoneMinor);
+            return ResolveIPhone(phoneMajor, phoneMinor, frameWidth, frameHeight);
 
         if (TryParseProductType(productType, "iPad", out var padMajor, out var padMinor))
             return ResolveIPad(padMajor, padMinor);
@@ -70,7 +101,7 @@ internal static class DeviceCornerProfileResolver
         return ResolveByGeometry(frameWidth, frameHeight);
     }
 
-    private static DeviceCornerProfile ResolveIPhone(int major, int minor)
+    private static DeviceCornerProfile ResolveIPhone(int major, int minor, uint width, uint height)
     {
         if (major < 10 || RectangularIPhones.Contains((major, minor)))
             return DeviceCornerProfile.Rectangular;
@@ -98,9 +129,49 @@ internal static class DeviceCornerProfileResolver
 
         // ProductType iPhone15,* starts with iPhone 14 Pro and is the first
         // all-Dynamic-Island generation. Later identifiers inherit that fit.
-        if (NotchedModernIPhones.Contains((major, minor))) return IPhoneNotch;
+        if (NotchedModernIPhones.Contains((major, minor))) return IPhoneModernNotch;
+        if (major == 17) return minor switch
+        {
+            1 => IPhone16Pro,
+            2 => IPhone16ProMax,
+            3 => IPhone16,
+            4 => IPhone16Plus,
+            _ => IPhoneDynamicIsland,
+        };
+        if (major == 18) return minor switch
+        {
+            1 => IPhone17Pro,
+            2 => IPhone17ProMax,
+            3 => IPhone17,
+            4 => IPhoneAir,
+            _ => IPhoneDynamicIsland,
+        };
+        if (major == 19) return minor switch
+        {
+            2 => IPhone18Pro,
+            3 or 7 => IPhone18ProMax,
+            4 => ResolveDuo(width, height),
+            _ => IPhoneDynamicIsland,
+        };
         if (major >= 15) return IPhoneDynamicIsland;
         return IPhoneNotch;
+    }
+
+    private static DeviceCornerProfile ResolveDuo(uint width, uint height)
+    {
+        if (width == 0 || height == 0) return DeviceCornerProfile.Rectangular;
+        // The two panels share ProductType. Use the same midpoint between
+        // catalog panel aspects as DeviceFrameCatalog; reject other shapes.
+        const double outerAspect = 1398d / 2034;
+        const double innerAspect = 2007d / 2853;
+        var aspect = Math.Min(width, height) / (double)Math.Max(width, height);
+        var midpoint = (outerAspect + innerAspect) * .5;
+        if (aspect >= midpoint && Math.Abs(aspect - innerAspect) < (innerAspect - outerAspect) * .5)
+            return IPhoneDuoInner;
+        // The official outer-panel mask has asymmetric left/right corners.
+        // A single symmetric radius would discard valid pixels. Until that
+        // shape is supported, retain the source instead of over-clipping it.
+        return DeviceCornerProfile.Rectangular;
     }
 
     private static DeviceCornerProfile ResolveIPad(int major, int minor)
@@ -139,6 +210,7 @@ internal static class DeviceCornerProfileResolver
         // iPad17,* begins with the M5 Pro family. Future unknown all-screen
         // iPads use a moderate generic fit rather than clipping like a phone.
         if (major == 17) return IPadPro;
+        if (major == 19 && minor is 1 or 2) return IPadMini;
         if (major > 17) return IPadBase;
         return IPadPro;
     }

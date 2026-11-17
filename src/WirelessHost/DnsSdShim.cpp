@@ -933,20 +933,24 @@ static DNSServiceErrorType dns_service_register_impl(
     const auto service_type = std::string_view(regtype);
 
     if (service_type == "_raop._tcp") {
+        screen_mirroring_network_port.store(network_port, std::memory_order_release);
         // Legacy mirror-only mode exposes RAOP through its redirected AirPlay
         // record. Combined mode follows AirPlay receivers such as UxPlay and
         // publishes the matching RAOP and AirPlay records as one device.
         if (!media_mode) {
-            screen_mirroring_network_port.store(network_port, std::memory_order_release);
             *output = registration.release();
             return 0;
         }
     }
 
-    if (service_type == "_airplay._tcp" && !media_mode) {
+    // Combined receivers must expose the same RTSP-capable endpoint under
+    // both service types. The legacy HTTP-only port cannot answer /info or
+    // SETUP when a video app renegotiates its audio session through AirPlay.
+    if (service_type == "_airplay._tcp") {
         const auto mirroring_port = screen_mirroring_network_port.load(
             std::memory_order_acquire);
-        if (mirroring_port != 0) network_port = mirroring_port;
+        network_port = iPhoneMirror::wireless::airplay_service_port(
+            mode, network_port, mirroring_port);
     }
 
     auto instance_name = widen(name);
@@ -1007,7 +1011,7 @@ static DNSServiceErrorType dns_service_register_impl(
         L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY", 65);
     iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
         service_type, media_mode, media_device_id_text(false), public_key,
-        properties);
+        properties, mode == L"media");
     std::vector<PCWSTR> keys;
     std::vector<PCWSTR> values;
     keys.reserve(properties.size());

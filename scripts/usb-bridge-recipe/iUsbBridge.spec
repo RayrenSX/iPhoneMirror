@@ -83,9 +83,10 @@ a = Analysis(
     hookspath=[str(Path(SPECPATH) / 'hooks')],
     hooksconfig={},
     runtime_hooks=[],
-    # The optional Pygments image formatter is the only Pillow consumer in
-    # this graph. The bridge uses text diagnostics, never image formatting.
-    excludes=['pytest', 'IPython', 'jedi', 'frida', 'py_spy', 'pygments.formatters.img'],
+    # Artwork test dependencies may be installed in the build environment.
+    # Keep those and optional image formatting out of the HID runtime.
+    excludes=['pytest', 'IPython', 'jedi', 'frida', 'py_spy', 'pygments.formatters.img',
+              'PIL', 'numpy', 'scipy'],
     noarchive=False,
 )
 

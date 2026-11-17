@@ -52,6 +52,18 @@ install(TARGETS iPhoneMirror.WirelessHost iPhoneMirror.DnsSdShim
     RUNTIME DESTINATION Wireless)
 
 if(IPHONEMIRROR_BUILD_TESTS)
+    add_executable(iPhoneMirror.DlnaHttpRequest.Tests tests/DlnaHttpRequestTests.cpp)
+    target_compile_definitions(iPhoneMirror.DlnaHttpRequest.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.DlnaHttpRequest.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.DlnaHttpRequest.Tests PRIVATE ws2_32 winhttp)
+    add_test(NAME DlnaHttpRequestTests COMMAND iPhoneMirror.DlnaHttpRequest.Tests)
+    set_tests_properties(DlnaHttpRequestTests PROPERTIES TIMEOUT 15)
+
+    add_executable(iPhoneMirror.AirPlayProtocol.Tests tests/AirPlayProtocolTests.c)
+    set_source_files_properties(tests/AirPlayProtocolTests.c PROPERTIES LANGUAGE CXX)
+    add_test(NAME AirPlayProtocolTests COMMAND iPhoneMirror.AirPlayProtocol.Tests)
     add_executable(iPhoneMirror.DlnaStartupRecovery.Tests tests/DlnaStartupRecoveryTests.cpp)
     target_include_directories(iPhoneMirror.DlnaStartupRecovery.Tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(iPhoneMirror.DlnaStartupRecovery.Tests PRIVATE
@@ -72,6 +84,14 @@ if(IPHONEMIRROR_BUILD_TESTS)
     target_link_libraries(iPhoneMirror.IpcWriter.Tests PRIVATE bcrypt ws2_32 winhttp)
     add_test(NAME IpcWriterTests COMMAND iPhoneMirror.IpcWriter.Tests)
     set_tests_properties(IpcWriterTests PROPERTIES TIMEOUT 15)
+
+    add_executable(iPhoneMirror.DlnaPlaybackLifecycle.Tests tests/DlnaPlaybackLifecycleTests.cpp)
+    target_compile_definitions(iPhoneMirror.DlnaPlaybackLifecycle.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.DlnaPlaybackLifecycle.Tests PRIVATE /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.DlnaPlaybackLifecycle.Tests PRIVATE ws2_32 winhttp)
+    add_test(NAME DlnaPlaybackLifecycleTests COMMAND iPhoneMirror.DlnaPlaybackLifecycle.Tests)
+    set_tests_properties(DlnaPlaybackLifecycleTests PROPERTIES TIMEOUT 15)
 
     add_executable(iPhoneMirror.DnsSdRegistrationPolicy.Tests
         tests/DnsSdRegistrationPolicyTests.cpp)

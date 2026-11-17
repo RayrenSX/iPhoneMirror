@@ -912,7 +912,7 @@ void test_usb_projection_modes() {
     const auto phone = native_display_size(L"iPhone13,1");
     check(phone.model_known && phone.width == 1080 && phone.height == 2340,
         "verified iPhone request is unchanged");
-    check(std::size(iPhoneMirror::devices::AppleDisplays) == 171,
+    check(std::size(iPhoneMirror::devices::AppleDisplays) == 174,
         "native display catalog covers the downloaded complete iPhone and iPad identifier index");
     for (const auto& display : iPhoneMirror::devices::AppleDisplays) {
         const auto found = native_display_size(display.product_type);
@@ -1099,6 +1099,18 @@ void test_device_metadata_recovery() {
     cached.mux_port = 27015;
     cached.name = L"Saved iPhone";
     cached.product_type = L"iPhone13,1";
+    cached.device_color = L"1";
+    cached.enclosure_color = L"9";
+    cached.housing_color = L"9";
+    const auto numeric_color = plist::Value::Integer(9);
+    const auto named_color = plist::Value::String("Blue");
+    const auto hex_color = plist::Value::String("#302f34");
+    const auto wrong_type = plist::Value::Bool(true);
+    check(detail::device_color_token(&numeric_color) == L"9" &&
+        detail::device_color_token(&named_color) == L"Blue" &&
+        detail::device_color_token(&hex_color) == L"#302f34" &&
+        detail::device_color_token(&wrong_type).empty() && detail::device_color_token(nullptr).empty(),
+        "Lockdown appearance preserves integer/name/hex tokens without treating front glass as enclosure");
     cached.os_version = L"18.7.8";
     cached.state = ConnectionState::Ready;
     cached.pair_record_present = true;
@@ -1122,7 +1134,8 @@ void test_device_metadata_recovery() {
     failed.status = L"Unlock the iPhone";
     detail::preserve_cached_device_display_metadata(failed, cached);
     check(failed.name == cached.name && failed.product_type == cached.product_type &&
-        failed.os_version == cached.os_version && !failed.lockdown_accessible &&
+        failed.os_version == cached.os_version && failed.device_color == L"1" &&
+        failed.enclosure_color == L"9" && failed.housing_color == L"9" && !failed.lockdown_accessible &&
         !failed.pair_record_present && failed.state == ConnectionState::Paired &&
         failed.status == L"Unlock the iPhone",
         "failed fresh read preserves display fields without reviving trust or Ready");
@@ -2816,6 +2829,8 @@ int run_preview_opacity_smoke();
 void test_sdr_bgra_converter(bool benchmark = false);
 int run_wasapi_underrun_smoke();
 int run_preview_static_frame_smoke(bool retry_only = false);
+int run_preview_handoff_smoke();
+int run_preview_ownership_smoke();
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--sdr-bgra-only") {
@@ -2924,6 +2939,18 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    if (argc == 2 && std::string_view(argv[1]) == "--device-appearance-only") {
+        test_device_metadata_recovery();
+        iPhoneMirror::DeviceAppearanceInfo appearance{};
+        check(im_get_device_appearance(L"fixture-missing", &appearance) != 0,
+            "appearance getter validates caller buffer size");
+        appearance.struct_size = sizeof(appearance);
+        check(im_get_device_appearance(L"fixture-missing", &appearance) == 0 &&
+            appearance.enclosure_color[0] == 0 && appearance.housing_color[0] == 0,
+            "missing cached identity never inherits another device's appearance");
+        std::cout << "Device appearance metadata tests complete\n";
+        return failures == 0 ? 0 : 1;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--preview-opacity-only")
         return run_preview_opacity_smoke();
     if (argc == 2 && std::string_view(argv[1]) == "--wasapi-underrun-only")
@@ -2932,6 +2959,10 @@ int main(int argc, char** argv) {
         return run_preview_static_frame_smoke();
     if (argc == 2 && std::string_view(argv[1]) == "--preview-static-frame-retry-only")
         return run_preview_static_frame_smoke(true);
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-handoff-only")
+        return run_preview_handoff_smoke();
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-ownership-only")
+        return run_preview_ownership_smoke();
     if (argc == 2 && std::string_view(argv[1]) == "--usb-runtime-probe-only") {
         try {
             test_libusb_runtime();
