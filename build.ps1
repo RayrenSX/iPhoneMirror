@@ -629,6 +629,7 @@ try {
         & $UsbControlPython -m unittest discover -s tests -p '*test.py'
         if ($LASTEXITCODE -ne 0) { throw "USB touch bridge tests failed: $LASTEXITCODE" }
         & (Join-Path $Root 'scripts\test_usb_bridge_build_source.ps1') | Out-Host
+        & (Join-Path $Root 'scripts\test_ffmpeg_download_fallback.ps1') | Out-Host
         & (Join-Path $Root 'tests\driver_elevation_bootstrap_test.ps1') | Out-Host
         & (Join-Path $Root 'tests\virtual_camera_elevation_bootstrap_test.ps1') | Out-Host
         & (Join-Path $Root 'tests\updater_elevation_bootstrap_test.ps1') | Out-Host

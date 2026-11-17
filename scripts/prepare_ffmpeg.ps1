@@ -16,6 +16,7 @@ $Manifest = Import-PowerShellDataFile -LiteralPath $ManifestPath
 $Version = [string]$Manifest.Version
 $ArchiveName = [string]$Manifest.ArchiveName
 $DownloadUrl = [string]$Manifest.DownloadUrl
+$DownloadUrls = @($DownloadUrl) + @($Manifest.FallbackDownloadUrls | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $ExpectedSha256 = [string]$Manifest.ArchiveSha256
 $ExpectedFiles = [Collections.IDictionary]$Manifest.Files
 if ([string]::IsNullOrWhiteSpace($Version) -or
@@ -74,8 +75,9 @@ if (-not $ArchiveValid) {
         }
 
         try {
-            Write-Host "Downloading FFmpeg runtime (attempt $Attempt of $MaximumAttempts)..."
-            Invoke-WebRequest -Uri $DownloadUrl -OutFile $DownloadPath `
+            $AttemptUrl = $DownloadUrls[($Attempt - 1) % $DownloadUrls.Count]
+            Write-Host "Downloading FFmpeg runtime (attempt $Attempt of $MaximumAttempts, source $(([Uri]$AttemptUrl).Host))..."
+            Invoke-WebRequest -Uri $AttemptUrl -OutFile $DownloadPath `
                 -UseBasicParsing -TimeoutSec 300
             break
         }
@@ -94,7 +96,7 @@ if (-not $ArchiveValid) {
                 $StatusCode -eq 429 -or
                 $StatusCode -ge 500
 
-            if (-not $IsTransientFailure -or $Attempt -eq $MaximumAttempts) {
+            if ($Attempt -eq $MaximumAttempts -or -not $IsTransientFailure -and $DownloadUrls.Count -eq 1) {
                 throw
             }
 
